@@ -34,37 +34,114 @@ export default function App() {
   const [error, setError] = useState<string>('')
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null)
 
+  const [tradeIdInput, setTradeIdInput] = useState('')
+  const [commodityInput, setCommodityInput] = useState('crude')
+  const [priceInput, setPriceInput] = useState('80.00')
+  const [volumeInput, setVolumeInput] = useState('1000')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function loadData() {
+    const [healthRes, tradesRes, eventsRes] = await Promise.all([
+      fetch(`${API_BASE}/health`),
+      fetch(`${API_BASE}/trades`),
+      fetch(`${API_BASE}/events?limit=50`),
+    ])
+
+    if (!healthRes.ok || !tradesRes.ok || !eventsRes.ok) {
+      throw new Error('API request failed')
+    }
+
+    const healthJson = await healthRes.json()
+    const tradesJson = await tradesRes.json()
+    const eventsJson = await eventsRes.json()
+
+    setHealth(healthJson.status ?? 'unknown')
+    setTrades(tradesJson)
+    setEvents(eventsJson)
+
+    if (tradesJson.length > 0) {
+      setSelectedTradeId((current) => current ?? tradesJson[0].trade_id)
+    }
+  }
+
   useEffect(() => {
-    async function load() {
+    async function init() {
       try {
-        const [healthRes, tradesRes, eventsRes] = await Promise.all([
-          fetch(`${API_BASE}/health`),
-          fetch(`${API_BASE}/trades`),
-          fetch(`${API_BASE}/events?limit=50`),
-        ])
-
-        if (!healthRes.ok || !tradesRes.ok || !eventsRes.ok) {
-          throw new Error('API request failed')
-        }
-
-        const healthJson = await healthRes.json()
-        const tradesJson = await tradesRes.json()
-        const eventsJson = await eventsRes.json()
-
-        setHealth(healthJson.status ?? 'unknown')
-        setTrades(tradesJson)
-        setEvents(eventsJson)
-
-        if (tradesJson.length > 0) {
-          setSelectedTradeId((current) => current ?? tradesJson[0].trade_id)
-        }
+        await loadData()
       } catch {
         setError('Could not reach API. Make sure backend is running on localhost:8000 and CORS is enabled.')
       }
     }
 
-    load()
+    init()
   }, [])
+
+  async function handleCreateTrade(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+
+    const tradeId = tradeIdInput.trim()
+    const commodity = commodityInput.trim()
+    const price = Number(priceInput)
+    const volume = Number(volumeInput)
+
+    if (!tradeId) {
+      setError('Trade ID is required.')
+      return
+    }
+
+    if (!commodity) {
+      setError('Commodity is required.')
+      return
+    }
+
+    if (Number.isNaN(price) || Number.isNaN(volume)) {
+      setError('Price and volume must be valid numbers.')
+      return
+    }
+
+    setSubmitting(true)
+
+    try {
+      const response = await fetch(`${API_BASE}/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-correlation-id': crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          aggregate_type: 'trade',
+          aggregate_id: tradeId,
+          event_type: 'TradeCreated',
+          occurred_at: new Date().toISOString(),
+          actor_id: 'anthony',
+          payload: {
+            commodity,
+            price,
+            volume,
+          },
+          schema_version: 1,
+        }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || 'Create trade failed')
+      }
+
+      await loadData()
+      setSelectedTradeId(tradeId)
+
+      setTradeIdInput('')
+      setCommodityInput('crude')
+      setPriceInput('80.00')
+      setVolumeInput('1000')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Create trade failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const selectedTrade = useMemo(
     () => trades.find((t) => t.trade_id === selectedTradeId) ?? null,
@@ -125,6 +202,76 @@ export default function App() {
               {error}
             </div>
           ) : null}
+
+          <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20, marginBottom: 24 }}>
+            <h2 style={{ marginTop: 0 }}>Create Trade</h2>
+            <p style={{ color: '#64748b', marginTop: 4 }}>Emit a TradeCreated event from the UI</p>
+
+            <form
+              onSubmit={handleCreateTrade}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, minmax(0, 1fr)) auto',
+                gap: 12,
+                marginTop: 16,
+                alignItems: 'end',
+              }}
+            >
+              <Field label="Trade ID">
+                <input
+                  value={tradeIdInput}
+                  onChange={(e) => setTradeIdInput(e.target.value)}
+                  placeholder="T-0003"
+                  style={inputStyle}
+                />
+              </Field>
+
+              <Field label="Commodity">
+                <input
+                  value={commodityInput}
+                  onChange={(e) => setCommodityInput(e.target.value)}
+                  placeholder="crude"
+                  style={inputStyle}
+                />
+              </Field>
+
+              <Field label="Price">
+                <input
+                  value={priceInput}
+                  onChange={(e) => setPriceInput(e.target.value)}
+                  placeholder="80.00"
+                  style={inputStyle}
+                />
+              </Field>
+
+              <Field label="Volume">
+                <input
+                  value={volumeInput}
+                  onChange={(e) => setVolumeInput(e.target.value)}
+                  placeholder="1000"
+                  style={inputStyle}
+                />
+              </Field>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                style={{
+                  height: 42,
+                  borderRadius: 14,
+                  border: 'none',
+                  background: '#0f172a',
+                  color: '#fff',
+                  padding: '0 18px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  opacity: submitting ? 0.7 : 1,
+                }}
+              >
+                {submitting ? 'Creating...' : 'Create Trade'}
+              </button>
+            </form>
+          </section>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, marginBottom: 24 }}>
             {[
@@ -250,6 +397,15 @@ export default function App() {
   )
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'grid', gap: 6 }}>
+      <span style={{ fontSize: 14, color: '#475569', fontWeight: 500 }}>{label}</span>
+      {children}
+    </label>
+  )
+}
+
 function DetailRow({ label, value }: { label: string; value: string | number }) {
   return (
     <div
@@ -265,4 +421,14 @@ function DetailRow({ label, value }: { label: string; value: string | number }) 
       <div style={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{String(value)}</div>
     </div>
   )
+}
+
+const inputStyle: React.CSSProperties = {
+  height: 42,
+  borderRadius: 14,
+  border: '1px solid #cbd5e1',
+  padding: '0 12px',
+  fontSize: 14,
+  outline: 'none',
+  background: '#fff',
 }
