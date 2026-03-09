@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.event import Event
+from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.event import EventCreate, EventOut
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -35,6 +36,38 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
     db.add(e)
     db.commit()
     db.refresh(e)
+
+    if e.aggregate_type == "trade" and e.event_type == "TradeCreated":
+        commodity = (e.payload or {}).get("commodity") or "UNKNOWN"
+        price = (e.payload or {}).get("price")
+        volume = (e.payload or {}).get("volume")
+        now = datetime.now(timezone.utc)
+
+        existing = db.execute(
+            select(Trade).where(Trade.trade_id == e.aggregate_id)
+        ).scalars().first()
+
+        if existing is None:
+            db.add(
+                Trade(
+                    trade_id=e.aggregate_id,
+                    created_at=now,
+                    updated_at=now,
+                    commodity=commodity,
+                    price=price,
+                    volume=volume,
+                    status="ACTIVE",
+                    last_event_id=e.event_id,
+                )
+            )
+        else:
+            existing.updated_at = now
+            existing.commodity = commodity
+            existing.price = price
+            existing.volume = volume
+            existing.last_event_id = e.event_id
+
+        db.commit()
 
     return EventOut(
         event_id=e.event_id,
