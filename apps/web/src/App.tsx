@@ -44,6 +44,7 @@ export default function App() {
   const [amendPriceInput, setAmendPriceInput] = useState('')
   const [amendVolumeInput, setAmendVolumeInput] = useState('')
   const [amending, setAmending] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
 
   async function loadData() {
     const [healthRes, tradesRes, eventsRes] = await Promise.all([
@@ -65,7 +66,10 @@ export default function App() {
     setEvents(eventsJson)
 
     if (tradesJson.length > 0) {
-      setSelectedTradeId((current) => current ?? tradesJson[0].trade_id)
+      setSelectedTradeId((current) => {
+        const stillExists = tradesJson.some((t: Trade) => t.trade_id === current)
+        return stillExists ? current : tradesJson[0].trade_id
+      })
     }
   }
 
@@ -230,6 +234,50 @@ export default function App() {
     }
   }
 
+  async function handleCancelTrade() {
+    setError('')
+
+    if (!selectedTradeId) {
+      setError('Select a trade first.')
+      return
+    }
+
+    setCancelling(true)
+
+    try {
+      const response = await fetch(`${API_BASE}/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-correlation-id': crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          aggregate_type: 'trade',
+          aggregate_id: selectedTradeId,
+          event_type: 'TradeCancelled',
+          occurred_at: new Date().toISOString(),
+          actor_id: 'anthony',
+          payload: {
+            status: 'CANCELLED',
+          },
+          schema_version: 1,
+        }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || 'Cancel trade failed')
+      }
+
+      await loadData()
+      setSelectedTradeId(selectedTradeId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cancel trade failed.')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -327,11 +375,7 @@ export default function App() {
                 />
               </Field>
 
-              <button
-                type="submit"
-                disabled={submitting}
-                style={buttonStyle}
-              >
+              <button type="submit" disabled={submitting} style={buttonStyle}>
                 {submitting ? 'Creating...' : 'Create Trade'}
               </button>
             </form>
@@ -368,6 +412,7 @@ export default function App() {
                   <tbody>
                     {trades.map((trade) => {
                       const selected = trade.trade_id === selectedTradeId
+                      const cancelled = trade.status === 'CANCELLED'
                       return (
                         <tr
                           key={trade.trade_id}
@@ -376,6 +421,7 @@ export default function App() {
                             borderTop: '1px solid #e2e8f0',
                             cursor: 'pointer',
                             background: selected ? '#eff6ff' : '#fff',
+                            opacity: cancelled ? 0.65 : 1,
                           }}
                         >
                           <td style={{ padding: 14, fontWeight: 600 }}>{trade.trade_id}</td>
@@ -383,7 +429,16 @@ export default function App() {
                           <td style={{ padding: 14 }}>{trade.price ?? ''}</td>
                           <td style={{ padding: 14 }}>{trade.volume ?? ''}</td>
                           <td style={{ padding: 14 }}>
-                            <span style={{ background: '#ecfdf5', color: '#047857', padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
+                            <span
+                              style={{
+                                background: cancelled ? '#fef2f2' : '#ecfdf5',
+                                color: cancelled ? '#b91c1c' : '#047857',
+                                padding: '4px 10px',
+                                borderRadius: 999,
+                                fontSize: 12,
+                                fontWeight: 700,
+                              }}
+                            >
                               {trade.status}
                             </span>
                           </td>
@@ -423,46 +478,45 @@ export default function App() {
                 <h2 style={{ marginTop: 0 }}>Amend Trade</h2>
                 <p style={{ color: '#64748b', marginTop: 4 }}>Emit a TradeAmended event for the selected trade</p>
 
-                <form
-                  onSubmit={handleAmendTrade}
-                  style={{
-                    display: 'grid',
-                    gap: 12,
-                    marginTop: 16,
-                  }}
-                >
+                <form onSubmit={handleAmendTrade} style={{ display: 'grid', gap: 12, marginTop: 16 }}>
                   <Field label="Commodity">
-                    <input
-                      value={amendCommodityInput}
-                      onChange={(e) => setAmendCommodityInput(e.target.value)}
-                      style={inputStyle}
-                    />
+                    <input value={amendCommodityInput} onChange={(e) => setAmendCommodityInput(e.target.value)} style={inputStyle} />
                   </Field>
 
                   <Field label="Price">
-                    <input
-                      value={amendPriceInput}
-                      onChange={(e) => setAmendPriceInput(e.target.value)}
-                      style={inputStyle}
-                    />
+                    <input value={amendPriceInput} onChange={(e) => setAmendPriceInput(e.target.value)} style={inputStyle} />
                   </Field>
 
                   <Field label="Volume">
-                    <input
-                      value={amendVolumeInput}
-                      onChange={(e) => setAmendVolumeInput(e.target.value)}
-                      style={inputStyle}
-                    />
+                    <input value={amendVolumeInput} onChange={(e) => setAmendVolumeInput(e.target.value)} style={inputStyle} />
                   </Field>
 
-                  <button
-                    type="submit"
-                    disabled={amending || !selectedTradeId}
-                    style={buttonStyle}
-                  >
+                  <button type="submit" disabled={amending || !selectedTradeId} style={buttonStyle}>
                     {amending ? 'Amending...' : 'Amend Trade'}
                   </button>
                 </form>
+              </div>
+
+              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
+                <h2 style={{ marginTop: 0 }}>Cancel Trade</h2>
+                <p style={{ color: '#64748b', marginTop: 4 }}>Emit a TradeCancelled event for the selected trade</p>
+
+                <button
+                  type="button"
+                  onClick={handleCancelTrade}
+                  disabled={cancelling || !selectedTradeId || selectedTrade?.status === 'CANCELLED'}
+                  style={{
+                    ...buttonStyle,
+                    background: selectedTrade?.status === 'CANCELLED' ? '#94a3b8' : '#991b1b',
+                    width: '100%',
+                  }}
+                >
+                  {selectedTrade?.status === 'CANCELLED'
+                    ? 'Trade Already Cancelled'
+                    : cancelling
+                    ? 'Cancelling...'
+                    : 'Cancel Trade'}
+                </button>
               </div>
 
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>

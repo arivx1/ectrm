@@ -65,6 +65,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
             existing.commodity = commodity
             existing.price = price
             existing.volume = volume
+            existing.status = "ACTIVE"
             existing.last_event_id = e.event_id
 
         db.commit()
@@ -87,6 +88,17 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
             if "status" in payload_data and payload_data["status"] is not None:
                 existing.status = payload_data["status"]
 
+            existing.last_event_id = e.event_id
+            db.commit()
+
+    if e.aggregate_type == "trade" and e.event_type == "TradeCancelled":
+        existing = db.execute(
+            select(Trade).where(Trade.trade_id == e.aggregate_id)
+        ).scalars().first()
+
+        if existing is not None:
+            existing.updated_at = datetime.now(timezone.utc)
+            existing.status = "CANCELLED"
             existing.last_event_id = e.event_id
             db.commit()
 
