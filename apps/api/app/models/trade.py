@@ -17,6 +17,7 @@ class Trade(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     book: Mapped[str] = mapped_column(String(50), nullable=False)
+    commodity_class: Mapped[str] = mapped_column(String(50), nullable=False)
     commodity: Mapped[str] = mapped_column(String(50), nullable=False)
     price: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
     volume: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)

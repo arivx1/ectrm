@@ -6,6 +6,7 @@ type Trade = {
   created_at: string
   updated_at: string
   book: string
+  commodity_class: string
   commodity: string
   price: number | null
   volume: number | null
@@ -33,8 +34,28 @@ type PositionRow = {
   updated_at: string
 }
 
+type ReferenceOption = {
+  code: string
+  commodity_class: string
+  name: string
+  is_active: boolean
+}
+
 const API_BASE = 'http://localhost:8000'
-const BOOK_OPTIONS = ['CRUDE_PHYS', 'CRUDE_PAPER', 'GAS_PHYS', 'GAS_PAPER']
+const COMMODITY_CLASS_ORDER = [
+  'POWER',
+  'CRUDE_OIL',
+  'NATURAL_GAS',
+  'LNG',
+  'NGL',
+  'REFINED_PRODUCTS',
+  'CHEMICAL',
+  'BASE_METAL',
+  'PRECIOUS_METAL',
+  'METAL_ORE',
+  'AGRICULTURE',
+  'OTHER',
+]
 
 function parseRequiredNumber(value: string): number | null {
   if (value.trim() === '') {
@@ -90,34 +111,69 @@ function statusTone(status: string): 'active' | 'cancelled' {
   return status === 'CANCELLED' ? 'cancelled' : 'active'
 }
 
+function formatCommodityClass(value: string): string {
+  return value.replaceAll('_', ' ')
+}
+
+function ensureCurrentOption(
+  options: ReferenceOption[],
+  currentValue: string,
+  currentClass: string,
+  fallbackLabel: string,
+): ReferenceOption[] {
+  if (!currentValue || options.some((option) => option.code === currentValue)) {
+    return options
+  }
+
+  return [
+    {
+      code: currentValue,
+      commodity_class: currentClass,
+      name: fallbackLabel,
+      is_active: false,
+    },
+    ...options,
+  ]
+}
+
 export default function App() {
   const [health, setHealth] = useState<string>('checking...')
   const [trades, setTrades] = useState<Trade[]>([])
   const [events, setEvents] = useState<EventRow[]>([])
   const [positions, setPositions] = useState<PositionRow[]>([])
+  const [books, setBooks] = useState<ReferenceOption[]>([])
+  const [commodities, setCommodities] = useState<ReferenceOption[]>([])
   const [error, setError] = useState<string>('')
+  const [referenceDataError, setReferenceDataError] = useState<string>('')
+  const [referenceDataLoading, setReferenceDataLoading] = useState(true)
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null)
 
   const [tradeIdInput, setTradeIdInput] = useState('')
-  const [bookInput, setBookInput] = useState('CRUDE_PHYS')
-  const [commodityInput, setCommodityInput] = useState('crude')
+  const [bookInput, setBookInput] = useState('')
+  const [commodityClassInput, setCommodityClassInput] = useState('')
+  const [commodityInput, setCommodityInput] = useState('')
   const [priceInput, setPriceInput] = useState('80.00')
   const [volumeInput, setVolumeInput] = useState('1000')
   const [submitting, setSubmitting] = useState(false)
 
-  const [amendBookInput, setAmendBookInput] = useState('CRUDE_PHYS')
+  const [amendBookInput, setAmendBookInput] = useState('')
+  const [amendCommodityClassInput, setAmendCommodityClassInput] = useState('')
   const [amendCommodityInput, setAmendCommodityInput] = useState('')
   const [amendPriceInput, setAmendPriceInput] = useState('')
   const [amendVolumeInput, setAmendVolumeInput] = useState('')
   const [amending, setAmending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
 
+  const hasReferenceOptions = books.length > 0 && commodities.length > 0
+
   async function loadData() {
-    const [healthRes, tradesRes, eventsRes, positionsRes] = await Promise.all([
+    const [healthRes, tradesRes, eventsRes, positionsRes, booksRes, commoditiesRes] = await Promise.all([
       fetch(`${API_BASE}/health`),
       fetch(`${API_BASE}/trades`),
       fetch(`${API_BASE}/events?limit=50`),
       fetch(`${API_BASE}/positions`),
+      fetch(`${API_BASE}/reference/books?is_active=true&limit=500`),
+      fetch(`${API_BASE}/reference/commodities?is_active=true&limit=500`),
     ])
 
     if (!healthRes.ok || !tradesRes.ok || !eventsRes.ok || !positionsRes.ok) {
@@ -128,11 +184,22 @@ export default function App() {
     const tradesJson = await tradesRes.json()
     const eventsJson = await eventsRes.json()
     const positionsJson = await positionsRes.json()
+    const booksJson = booksRes.ok ? await booksRes.json() : []
+    const commoditiesJson = commoditiesRes.ok ? await commoditiesRes.json() : []
 
     setHealth(healthJson.status ?? 'unknown')
     setTrades(tradesJson)
     setEvents(eventsJson)
     setPositions(positionsJson)
+    setBooks(booksJson)
+    setCommodities(commoditiesJson)
+    setReferenceDataLoading(false)
+
+    if (booksRes.ok && commoditiesRes.ok) {
+      setReferenceDataError('')
+    } else {
+      setReferenceDataError('Reference data is unavailable. Trade entry requires active books and commodities.')
+    }
 
     if (tradesJson.length > 0) {
       setSelectedTradeId((current) => {
@@ -149,6 +216,7 @@ export default function App() {
       try {
         await loadData()
       } catch {
+        setReferenceDataLoading(false)
         setError('Could not reach API. Make sure backend is running on localhost:8000 and CORS is enabled.')
       }
     }
@@ -160,15 +228,6 @@ export default function App() {
     () => trades.find((t) => t.trade_id === selectedTradeId) ?? null,
     [trades, selectedTradeId],
   )
-
-  useEffect(() => {
-    if (selectedTrade) {
-      setAmendBookInput(selectedTrade.book ?? 'CRUDE_PHYS')
-      setAmendCommodityInput(selectedTrade.commodity ?? '')
-      setAmendPriceInput(selectedTrade.price?.toString() ?? '')
-      setAmendVolumeInput(selectedTrade.volume?.toString() ?? '')
-    }
-  }, [selectedTrade])
 
   const selectedTradeEvents = useMemo(
     () =>
@@ -196,18 +255,101 @@ export default function App() {
     [activeTrades],
   )
 
+  const commodityClassOptions = useMemo(
+    () =>
+      COMMODITY_CLASS_ORDER.filter((commodityClass) =>
+        commodities.some((commodity) => commodity.commodity_class === commodityClass),
+      ),
+    [commodities],
+  )
+
+  const createCommodityOptions = useMemo(
+    () =>
+      commodities.filter((commodity) => commodity.commodity_class === commodityClassInput),
+    [commodities, commodityClassInput],
+  )
+
+  const amendCommodityOptions = useMemo(
+    () =>
+      ensureCurrentOption(
+        commodities.filter((commodity) => commodity.commodity_class === amendCommodityClassInput),
+        amendCommodityInput,
+        amendCommodityClassInput,
+        'Current inactive or missing commodity',
+      ),
+    [amendCommodityClassInput, amendCommodityInput, commodities],
+  )
+
+  const amendBookOptions = useMemo(
+    () => ensureCurrentOption(books, amendBookInput, '', 'Current inactive or missing book'),
+    [amendBookInput, books],
+  )
+
+  useEffect(() => {
+    if (selectedTrade) {
+      setAmendBookInput(selectedTrade.book ?? '')
+      setAmendCommodityClassInput(selectedTrade.commodity_class ?? '')
+      setAmendCommodityInput(selectedTrade.commodity ?? '')
+      setAmendPriceInput(selectedTrade.price?.toString() ?? '')
+      setAmendVolumeInput(selectedTrade.volume?.toString() ?? '')
+    }
+  }, [selectedTrade])
+
+  useEffect(() => {
+    if (!bookInput && books.length > 0) {
+      setBookInput(books[0].code)
+    }
+  }, [bookInput, books])
+
+  useEffect(() => {
+    if (!commodityClassInput && commodityClassOptions.length > 0) {
+      setCommodityClassInput(commodityClassOptions[0])
+    }
+  }, [commodityClassInput, commodityClassOptions])
+
+  useEffect(() => {
+    if (!selectedTrade && !amendBookInput && books.length > 0) {
+      setAmendBookInput(books[0].code)
+    }
+  }, [amendBookInput, books, selectedTrade])
+
+  useEffect(() => {
+    if (!selectedTrade && !amendCommodityClassInput && commodityClassOptions.length > 0) {
+      setAmendCommodityClassInput(commodityClassOptions[0])
+    }
+  }, [amendCommodityClassInput, commodityClassOptions, selectedTrade])
+
+  useEffect(() => {
+    if (!commodityClassInput) {
+      return
+    }
+    if (!createCommodityOptions.some((commodity) => commodity.code === commodityInput)) {
+      setCommodityInput(createCommodityOptions[0]?.code ?? '')
+    }
+  }, [commodityClassInput, commodityInput, createCommodityOptions])
+
+  useEffect(() => {
+    if (!amendCommodityClassInput) {
+      return
+    }
+    if (!amendCommodityOptions.some((commodity) => commodity.code === amendCommodityInput)) {
+      setAmendCommodityInput(amendCommodityOptions[0]?.code ?? '')
+    }
+  }, [amendCommodityClassInput, amendCommodityInput, amendCommodityOptions])
+
   async function handleCreateTrade(e: React.FormEvent) {
     e.preventDefault()
     setError('')
 
     const tradeId = tradeIdInput.trim()
     const book = bookInput
+    const commodityClass = commodityClassInput
     const commodity = commodityInput.trim()
     const price = parseRequiredNumber(priceInput)
     const volume = parseRequiredNumber(volumeInput)
 
-    if (!tradeId || !book || !commodity || price === null || volume === null) {
-      setError('Trade ID, book, commodity, price, and volume are required.')
+    if (!tradeId || !book || !commodityClass || !commodity || price === null || volume === null) {
+      setError('Trade ID, book, commodity class, commodity, price, and volume are required.')
       return
     }
 
@@ -226,7 +368,7 @@ export default function App() {
           event_type: 'TradeCreated',
           occurred_at: new Date().toISOString(),
           actor_id: 'anthony',
-          payload: { book, commodity, price, volume },
+          payload: { book, commodity_class: commodityClass, commodity, price, volume },
           schema_version: 1,
         }),
       })
@@ -239,8 +381,9 @@ export default function App() {
       await loadData()
       setSelectedTradeId(tradeId)
       setTradeIdInput('')
-      setBookInput('CRUDE_PHYS')
-      setCommodityInput('crude')
+      setBookInput(books[0]?.code ?? '')
+      setCommodityClassInput(commodityClassOptions[0] ?? '')
+      setCommodityInput('')
       setPriceInput('80.00')
       setVolumeInput('1000')
     } catch (err) {
@@ -260,12 +403,13 @@ export default function App() {
     }
 
     const book = amendBookInput
+    const commodityClass = amendCommodityClassInput
     const commodity = amendCommodityInput.trim()
     const price = parseRequiredNumber(amendPriceInput)
     const volume = parseRequiredNumber(amendVolumeInput)
 
-    if (!book || !commodity || price === null || volume === null) {
-      setError('Book, commodity, price, and volume are required.')
+    if (!book || !commodityClass || !commodity || price === null || volume === null) {
+      setError('Book, commodity class, commodity, price, and volume are required.')
       return
     }
 
@@ -284,7 +428,7 @@ export default function App() {
           event_type: 'TradeAmended',
           occurred_at: new Date().toISOString(),
           actor_id: 'anthony',
-          payload: { book, commodity, price, volume },
+          payload: { book, commodity_class: commodityClass, commodity, price, volume },
           schema_version: 1,
         }),
       })
@@ -364,7 +508,7 @@ export default function App() {
             <>
               <strong className="side-card-title">{selectedTrade.trade_id}</strong>
               <p>
-                {selectedTrade.book} • {selectedTrade.commodity}
+                {selectedTrade.book} • {formatCommodityClass(selectedTrade.commodity_class)} • {selectedTrade.commodity}
               </p>
               <div className={`status-pill status-pill-${statusTone(selectedTrade.status)}`}>
                 {selectedTrade.status}
@@ -443,7 +587,7 @@ export default function App() {
               <span className="eyebrow">Capture</span>
               <h3>Create trade</h3>
             </div>
-            <p>Seed a trade into the event stream with an initial book, price, and volume.</p>
+            <p>Seed a trade into the event stream with a book, commodity class, commodity, price, and volume.</p>
           </div>
 
           <form className="trade-form" onSubmit={handleCreateTrade}>
@@ -460,20 +604,42 @@ export default function App() {
                 value={bookInput}
                 onChange={(e) => setBookInput(e.target.value)}
                 className="control"
+                disabled={referenceDataLoading || books.length === 0}
               >
-                {BOOK_OPTIONS.map((book) => (
-                  <option key={book} value={book}>
-                    {book}
+                {books.map((book) => (
+                  <option key={book.code} value={book.code}>
+                    {book.code} · {book.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Commodity Class">
+              <select
+                value={commodityClassInput}
+                onChange={(e) => setCommodityClassInput(e.target.value)}
+                className="control"
+                disabled={referenceDataLoading || commodityClassOptions.length === 0}
+              >
+                {commodityClassOptions.map((commodityClass) => (
+                  <option key={commodityClass} value={commodityClass}>
+                    {formatCommodityClass(commodityClass)}
                   </option>
                 ))}
               </select>
             </Field>
             <Field label="Commodity">
-              <input
+              <select
                 value={commodityInput}
                 onChange={(e) => setCommodityInput(e.target.value)}
                 className="control"
-              />
+                disabled={referenceDataLoading || createCommodityOptions.length === 0}
+              >
+                {createCommodityOptions.map((commodity) => (
+                  <option key={commodity.code} value={commodity.code}>
+                    {commodity.code} · {commodity.name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Price">
               <input
@@ -489,10 +655,18 @@ export default function App() {
                 className="control"
               />
             </Field>
-            <button type="submit" disabled={submitting} className="button button-primary">
+            <button
+              type="submit"
+              disabled={submitting || referenceDataLoading || !hasReferenceOptions}
+              className="button button-primary"
+            >
               {submitting ? 'Creating…' : 'Create Trade'}
             </button>
           </form>
+          {referenceDataLoading ? (
+            <p className="form-note">Loading active books and commodity hierarchy…</p>
+          ) : null}
+          {referenceDataError ? <p className="form-note form-note-error">{referenceDataError}</p> : null}
         </section>
 
         <section className="workspace-grid">
@@ -515,7 +689,7 @@ export default function App() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      {['Trade ID', 'Book', 'Commodity', 'Price', 'Volume', 'Status', 'Updated'].map((heading) => (
+                      {['Trade ID', 'Book', 'Commodity Class', 'Commodity', 'Price', 'Volume', 'Status', 'Updated'].map((heading) => (
                         <th key={heading}>{heading}</th>
                       ))}
                     </tr>
@@ -533,6 +707,7 @@ export default function App() {
                             <strong>{trade.trade_id}</strong>
                           </td>
                           <td>{trade.book}</td>
+                          <td>{formatCommodityClass(trade.commodity_class)}</td>
                           <td>{trade.commodity}</td>
                           <td>{formatMoney(trade.price)}</td>
                           <td>{formatNumber(trade.volume, 0)}</td>
@@ -594,6 +769,7 @@ export default function App() {
                 <div className="detail-list">
                   <DetailRow label="Trade ID" value={selectedTrade.trade_id} />
                   <DetailRow label="Book" value={selectedTrade.book} />
+                  <DetailRow label="Commodity Class" value={formatCommodityClass(selectedTrade.commodity_class)} />
                   <DetailRow label="Commodity" value={selectedTrade.commodity} />
                   <DetailRow label="Price" value={formatMoney(selectedTrade.price)} />
                   <DetailRow label="Volume" value={formatNumber(selectedTrade.volume, 0)} />
@@ -614,7 +790,7 @@ export default function App() {
                   <span className="eyebrow">Action</span>
                   <h3>Amend trade</h3>
                 </div>
-                <p>Apply a new book, commodity, price, or volume to the selected trade.</p>
+                <p>Apply a new book, commodity class, commodity, price, or volume to the selected trade.</p>
               </div>
 
               <form className="stack-form" onSubmit={handleAmendTrade}>
@@ -623,20 +799,42 @@ export default function App() {
                     value={amendBookInput}
                     onChange={(e) => setAmendBookInput(e.target.value)}
                     className="control"
+                    disabled={referenceDataLoading || books.length === 0}
                   >
-                    {BOOK_OPTIONS.map((book) => (
-                      <option key={book} value={book}>
-                        {book}
+                    {amendBookOptions.map((book) => (
+                      <option key={book.code} value={book.code}>
+                        {book.code} · {book.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Commodity Class">
+                  <select
+                    value={amendCommodityClassInput}
+                    onChange={(e) => setAmendCommodityClassInput(e.target.value)}
+                    className="control"
+                    disabled={referenceDataLoading || commodityClassOptions.length === 0}
+                  >
+                    {commodityClassOptions.map((commodityClass) => (
+                      <option key={commodityClass} value={commodityClass}>
+                        {formatCommodityClass(commodityClass)}
                       </option>
                     ))}
                   </select>
                 </Field>
                 <Field label="Commodity">
-                  <input
+                  <select
                     value={amendCommodityInput}
                     onChange={(e) => setAmendCommodityInput(e.target.value)}
                     className="control"
-                  />
+                    disabled={referenceDataLoading || amendCommodityOptions.length === 0}
+                  >
+                    {amendCommodityOptions.map((commodity) => (
+                      <option key={commodity.code} value={commodity.code}>
+                        {commodity.code} · {commodity.name}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
                 <div className="mini-grid">
                   <Field label="Price">
@@ -656,12 +854,13 @@ export default function App() {
                 </div>
                 <button
                   type="submit"
-                  disabled={amending || !selectedTradeId}
+                  disabled={amending || !selectedTradeId || referenceDataLoading || !hasReferenceOptions}
                   className="button button-primary"
                 >
                   {amending ? 'Amending…' : 'Amend Trade'}
                 </button>
               </form>
+              {referenceDataError ? <p className="form-note form-note-error">{referenceDataError}</p> : null}
             </section>
 
             <section className="surface">

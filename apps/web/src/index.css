@@ -2,10 +2,11 @@
   font-family: "Avenir Next", "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #1a2533;
+  color: #173154;
   background:
-    radial-gradient(circle at top left, rgba(250, 200, 132, 0.22), transparent 30%),
-    linear-gradient(180deg, #f3ede2 0%, #efe7da 48%, #e9dfd1 100%);
+    radial-gradient(circle at top left, rgba(0, 157, 114, 0.09), transparent 26%),
+    radial-gradient(circle at top right, rgba(23, 49, 84, 0.08), transparent 30%),
+    linear-gradient(180deg, #eef2f3 0%, #edf0f2 45%, #e9edef 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

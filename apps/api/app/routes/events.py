@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
+from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.event import EventCreate, EventOut
 
@@ -25,6 +26,7 @@ def trade_snapshot(trade: Trade | None) -> dict[str, object] | None:
         return None
 
     return {
+        "commodity_class": trade.commodity_class,
         "commodity": trade.commodity,
         "volume": Decimal(str(trade.volume or 0)),
         "status": trade.status,
@@ -77,6 +79,47 @@ def sync_positions_for_trade_change(
         apply_position_delta(db, commodity, delta, updated_at)
 
 
+def normalize_commodity_code(value: object | None) -> str:
+    return str(value or "").strip().upper()
+
+
+def require_active_commodity(
+    db: Session,
+    commodity_class: object | None,
+    commodity_code: object | None,
+) -> tuple[str, str]:
+    normalized_class = normalize_commodity_code(commodity_class)
+    normalized_code = normalize_commodity_code(commodity_code)
+    if not normalized_class:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Commodity class is required and must be selected from reference data",
+        )
+    if not normalized_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Commodity is required and must be selected from reference data",
+        )
+
+    reference_commodity = db.execute(
+        select(ReferenceCommodity).where(
+            ReferenceCommodity.commodity_class == normalized_class,
+            ReferenceCommodity.code == normalized_code,
+            ReferenceCommodity.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_commodity is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Commodity '{normalized_code}' is not active in commodity class "
+                f"'{normalized_class}'"
+            ),
+        )
+
+    return normalized_class, normalized_code
+
+
 @router.post("", response_model=EventOut, status_code=201)
 def append_event(payload: EventCreate, request: Request, db: Session = Depends(get_db)) -> EventOut:
     correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
@@ -108,7 +151,11 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 
             if e.event_type == "TradeCreated":
                 book = payload_data.get("book") or "CRUDE_PHYS"
-                commodity = payload_data.get("commodity") or "UNKNOWN"
+                commodity_class, commodity = require_active_commodity(
+                    db,
+                    payload_data.get("commodity_class"),
+                    payload_data.get("commodity"),
+                )
                 price = payload_data.get("price")
                 volume = payload_data.get("volume")
 
@@ -118,6 +165,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                         created_at=recorded_at,
                         updated_at=recorded_at,
                         book=book,
+                        commodity_class=commodity_class,
                         commodity=commodity,
                         price=price,
                         volume=volume,
@@ -128,6 +176,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 else:
                     existing.updated_at = recorded_at
                     existing.book = book
+                    existing.commodity_class = commodity_class
                     existing.commodity = commodity
                     existing.price = price
                     existing.volume = volume
@@ -139,8 +188,18 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 
                 if "book" in payload_data and payload_data["book"] is not None:
                     existing.book = payload_data["book"]
-                if "commodity" in payload_data and payload_data["commodity"] is not None:
-                    existing.commodity = payload_data["commodity"]
+                if (
+                    "commodity" in payload_data and payload_data["commodity"] is not None
+                ) or (
+                    "commodity_class" in payload_data and payload_data["commodity_class"] is not None
+                ):
+                    commodity_class, commodity = require_active_commodity(
+                        db,
+                        payload_data.get("commodity_class", existing.commodity_class),
+                        payload_data.get("commodity", existing.commodity),
+                    )
+                    existing.commodity_class = commodity_class
+                    existing.commodity = commodity
                 if "price" in payload_data and payload_data["price"] is not None:
                     existing.price = payload_data["price"]
                 if "volume" in payload_data and payload_data["volume"] is not None:

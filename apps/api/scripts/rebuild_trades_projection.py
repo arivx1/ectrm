@@ -10,6 +10,54 @@ from apps.api.app.models.trade import Trade
 
 
 DEFAULT_BOOK = "CRUDE_PHYS"
+COMMODITY_CLASS_BY_CODE = {
+    "POWER": "POWER",
+    "NATURAL_GAS": "NATURAL_GAS",
+    "LNG": "LNG",
+    "PROPANE": "NGL",
+    "BUTANE": "NGL",
+    "ISOBUTANE": "NGL",
+    "ETHANE": "NGL",
+    "NATURAL_GASOLINE": "NGL",
+    "NGL": "NGL",
+    "WTI": "CRUDE_OIL",
+    "BRENT": "CRUDE_OIL",
+    "LLS": "CRUDE_OIL",
+    "ANS": "CRUDE_OIL",
+    "DUBAI": "CRUDE_OIL",
+    "CRUDE_OIL": "CRUDE_OIL",
+    "METHANOL": "CHEMICAL",
+    "AMMONIA": "CHEMICAL",
+    "UREA": "CHEMICAL",
+    "COPPER": "BASE_METAL",
+    "ALUMINUM": "BASE_METAL",
+    "NICKEL": "BASE_METAL",
+    "ZINC": "BASE_METAL",
+    "GOLD": "PRECIOUS_METAL",
+    "SILVER": "PRECIOUS_METAL",
+    "PLATINUM": "PRECIOUS_METAL",
+    "PALLADIUM": "PRECIOUS_METAL",
+    "IRON_ORE": "METAL_ORE",
+    "BAUXITE": "METAL_ORE",
+    "SPODUMENE": "METAL_ORE",
+    "WHEAT": "AGRICULTURE",
+    "CORN": "AGRICULTURE",
+    "SOYBEANS": "AGRICULTURE",
+    "SUGAR": "AGRICULTURE",
+    "COFFEE": "AGRICULTURE",
+    "COTTON": "AGRICULTURE",
+    "COAL": "OTHER",
+    "CARBON": "OTHER",
+    "GASOLINE": "REFINED_PRODUCTS",
+    "DIESEL": "REFINED_PRODUCTS",
+    "JET_FUEL": "REFINED_PRODUCTS",
+    "FUEL_OIL": "REFINED_PRODUCTS",
+    "NAPHTHA": "REFINED_PRODUCTS",
+}
+
+LEGACY_COMMODITY_CODE_BY_VALUE = {
+    "CRUDE": "WTI",
+}
 
 
 def to_decimal_or_none(value):
@@ -23,6 +71,17 @@ def normalize_book(value):
         return DEFAULT_BOOK
     value_str = str(value).strip()
     return value_str or DEFAULT_BOOK
+
+
+def normalize_commodity_class(value, commodity):
+    if value is not None and str(value).strip():
+        return str(value).strip().upper()
+    return COMMODITY_CLASS_BY_CODE.get(str(commodity or "").strip().upper(), "OTHER")
+
+
+def normalize_commodity_code(value):
+    normalized = str(value or "").strip().upper()
+    return LEGACY_COMMODITY_CODE_BY_VALUE.get(normalized, normalized or "UNKNOWN")
 
 
 def main() -> None:
@@ -58,7 +117,11 @@ def main() -> None:
                         "created_at": now,
                         "updated_at": now,
                         "book": normalize_book(payload.get("book")),
-                        "commodity": payload.get("commodity") or "UNKNOWN",
+                        "commodity_class": normalize_commodity_class(
+                            payload.get("commodity_class"),
+                            payload.get("commodity"),
+                        ),
+                        "commodity": normalize_commodity_code(payload.get("commodity")),
                         "price": to_decimal_or_none(payload.get("price")),
                         "volume": to_decimal_or_none(payload.get("volume")),
                         "status": payload.get("status") or "ACTIVE",
@@ -67,8 +130,13 @@ def main() -> None:
                 else:
                     existing["updated_at"] = now
                     existing["book"] = normalize_book(payload.get("book", existing.get("book")))
+                    if payload.get("commodity_class") is not None or payload.get("commodity") is not None:
+                        existing["commodity_class"] = normalize_commodity_class(
+                            payload.get("commodity_class", existing.get("commodity_class")),
+                            payload.get("commodity", existing.get("commodity")),
+                        )
                     if payload.get("commodity") is not None:
-                        existing["commodity"] = payload.get("commodity")
+                        existing["commodity"] = normalize_commodity_code(payload.get("commodity"))
                     if payload.get("price") is not None:
                         existing["price"] = to_decimal_or_none(payload.get("price"))
                     if payload.get("volume") is not None:
@@ -89,8 +157,13 @@ def main() -> None:
                     existing["book"] = normalize_book(payload.get("book"))
                 else:
                     existing["book"] = normalize_book(existing.get("book"))
+                if "commodity_class" in payload or "commodity" in payload:
+                    existing["commodity_class"] = normalize_commodity_class(
+                        payload.get("commodity_class", existing.get("commodity_class")),
+                        payload.get("commodity", existing.get("commodity")),
+                    )
                 if payload.get("commodity") is not None:
-                    existing["commodity"] = payload.get("commodity")
+                    existing["commodity"] = normalize_commodity_code(payload.get("commodity"))
                 if payload.get("price") is not None:
                     existing["price"] = to_decimal_or_none(payload.get("price"))
                 if payload.get("volume") is not None:
@@ -119,6 +192,7 @@ def main() -> None:
                     created_at=trade["created_at"],
                     updated_at=trade["updated_at"],
                     book=normalize_book(trade.get("book")),
+                    commodity_class=trade["commodity_class"],
                     commodity=trade["commodity"],
                     price=trade["price"],
                     volume=trade["volume"],

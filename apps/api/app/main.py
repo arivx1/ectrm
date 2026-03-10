@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.app.routes.events import router as events_router
+from apps.api.app.routes.reference_data import router as reference_data_router
 from apps.api.app.routes.trades import router as trades_router
 from apps.api.app.routes.positions import router as positions_router
 
@@ -22,6 +23,7 @@ app.add_middleware(
 )
 
 app.include_router(events_router)
+app.include_router(reference_data_router)
 app.include_router(trades_router)
 app.include_router(positions_router)
 
