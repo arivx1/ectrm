@@ -1,9 +1,11 @@
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #0f172a;
-  background: #f8fafc;
+  color: #1a2533;
+  background:
+    radial-gradient(circle at top left, rgba(250, 200, 132, 0.22), transparent 30%),
+    linear-gradient(180deg, #f3ede2 0%, #efe7da 48%, #e9dfd1 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -14,13 +16,21 @@
   box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #f8fafc;
 }
 
 body {
   margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }

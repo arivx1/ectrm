@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import './App.css'
 
 type Trade = {
   trade_id: string
@@ -34,6 +35,60 @@ type PositionRow = {
 
 const API_BASE = 'http://localhost:8000'
 const BOOK_OPTIONS = ['CRUDE_PHYS', 'CRUDE_PAPER', 'GAS_PHYS', 'GAS_PAPER']
+
+function parseRequiredNumber(value: string): number | null {
+  if (value.trim() === '') {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formatNumber(value: number | null, digits = 2): string {
+  if (value === null) {
+    return '—'
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits,
+  }).format(value)
+}
+
+function formatMoney(value: number | null): string {
+  if (value === null) {
+    return '—'
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+function formatDate(value: string | null): string {
+  if (!value) {
+    return '—'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function statusTone(status: string): 'active' | 'cancelled' {
+  return status === 'CANCELLED' ? 'cancelled' : 'active'
+}
 
 export default function App() {
   const [health, setHealth] = useState<string>('checking...')
@@ -84,6 +139,8 @@ export default function App() {
         const stillExists = tradesJson.some((t: Trade) => t.trade_id === current)
         return stillExists ? current : tradesJson[0].trade_id
       })
+    } else {
+      setSelectedTradeId(null)
     }
   }
 
@@ -121,6 +178,24 @@ export default function App() {
     [events, selectedTradeId],
   )
 
+  const activeTrades = useMemo(
+    () => trades.filter((trade) => trade.status !== 'CANCELLED'),
+    [trades],
+  )
+
+  const totalActiveVolume = useMemo(
+    () =>
+      activeTrades.reduce((sum, trade) => {
+        return sum + (trade.volume ?? 0)
+      }, 0),
+    [activeTrades],
+  )
+
+  const trackedBooks = useMemo(
+    () => new Set(activeTrades.map((trade) => trade.book)).size,
+    [activeTrades],
+  )
+
   async function handleCreateTrade(e: React.FormEvent) {
     e.preventDefault()
     setError('')
@@ -128,10 +203,10 @@ export default function App() {
     const tradeId = tradeIdInput.trim()
     const book = bookInput
     const commodity = commodityInput.trim()
-    const price = Number(priceInput)
-    const volume = Number(volumeInput)
+    const price = parseRequiredNumber(priceInput)
+    const volume = parseRequiredNumber(volumeInput)
 
-    if (!tradeId || !book || !commodity || Number.isNaN(price) || Number.isNaN(volume)) {
+    if (!tradeId || !book || !commodity || price === null || volume === null) {
       setError('Trade ID, book, commodity, price, and volume are required.')
       return
     }
@@ -186,10 +261,10 @@ export default function App() {
 
     const book = amendBookInput
     const commodity = amendCommodityInput.trim()
-    const price = Number(amendPriceInput)
-    const volume = Number(amendVolumeInput)
+    const price = parseRequiredNumber(amendPriceInput)
+    const volume = parseRequiredNumber(amendVolumeInput)
 
-    if (!book || !commodity || Number.isNaN(price) || Number.isNaN(volume)) {
+    if (!book || !commodity || price === null || volume === null) {
       setError('Book, commodity, price, and volume are required.')
       return
     }
@@ -269,274 +344,428 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <aside style={{ width: 260, background: '#fff', borderRight: '1px solid #e2e8f0', padding: 24 }}>
-          <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.18em', color: '#64748b', fontWeight: 700 }}>
-            E/CTRM
-          </div>
-          <div style={{ marginTop: 10, fontSize: 28, fontWeight: 700 }}>Control Center</div>
-          <p style={{ marginTop: 10, color: '#475569', lineHeight: 1.5 }}>
-            Event-sourced trading system with live backend connectivity.
+    <div className="app-shell">
+      <div className="app-orb app-orb-left" />
+      <div className="app-orb app-orb-right" />
+
+      <aside className="side-rail">
+        <div className="brand-lockup">
+          <span className="brand-mark">E/CTRM</span>
+          <h1>Market Control</h1>
+          <p>
+            Event-led trade capture with a live projection view for operations,
+            amendments, and cancels.
           </p>
-        </aside>
+        </div>
 
-        <main style={{ flex: 1, padding: 32 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <div>
-              <div style={{ color: '#64748b', fontSize: 14 }}>Live local environment</div>
-              <h1 style={{ margin: '6px 0 0 0', fontSize: 34 }}>Trading Overview</h1>
-            </div>
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '10px 14px' }}>
-              API health: <strong>{health}</strong>
-            </div>
+        <div className="side-card side-card-contrast">
+          <span className="eyebrow">Selected Trade</span>
+          {selectedTrade ? (
+            <>
+              <strong className="side-card-title">{selectedTrade.trade_id}</strong>
+              <p>
+                {selectedTrade.book} • {selectedTrade.commodity}
+              </p>
+              <div className={`status-pill status-pill-${statusTone(selectedTrade.status)}`}>
+                {selectedTrade.status}
+              </div>
+            </>
+          ) : (
+            <>
+              <strong className="side-card-title">No trade selected</strong>
+              <p>Create a trade or pick one from the board to inspect its event trail.</p>
+            </>
+          )}
+        </div>
+
+        <div className="side-card">
+          <span className="eyebrow">Session</span>
+          <div className="health-line">
+            <span>API</span>
+            <strong>{health}</strong>
+          </div>
+          <div className="health-line">
+            <span>Events loaded</span>
+            <strong>{events.length}</strong>
+          </div>
+          <div className="health-line">
+            <span>Positions tracked</span>
+            <strong>{positions.length}</strong>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main-stage">
+        <header className="hero">
+          <div>
+            <span className="eyebrow">Live local environment</span>
+            <h2>Trading overview</h2>
+            <p>
+              Create, amend, and cancel trades while the read models update in
+              place.
+            </p>
           </div>
 
-          {error ? (
-            <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', color: '#9f1239', padding: 16, borderRadius: 16, marginBottom: 24 }}>
-              {error}
+          <div className="hero-badge">
+            <span>System health</span>
+            <strong>{health}</strong>
+          </div>
+        </header>
+
+        {error ? <div className="error-banner">{error}</div> : null}
+
+        <section className="metric-grid">
+          <MetricCard
+            label="Active trades"
+            value={String(activeTrades.length)}
+            note={`${trades.length - activeTrades.length} cancelled`}
+          />
+          <MetricCard
+            label="Active volume"
+            value={formatNumber(totalActiveVolume, 0)}
+            note="Across open trades"
+          />
+          <MetricCard
+            label="Books online"
+            value={String(trackedBooks)}
+            note="Distinct active books"
+          />
+          <MetricCard
+            label="Latest event"
+            value={selectedTradeEvents[0]?.event_type ?? 'No selection'}
+            note={selectedTradeEvents[0] ? formatDate(selectedTradeEvents[0].recorded_at) : 'Pick a trade'}
+          />
+        </section>
+
+        <section className="surface surface-form">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Capture</span>
+              <h3>Create trade</h3>
             </div>
-          ) : null}
+            <p>Seed a trade into the event stream with an initial book, price, and volume.</p>
+          </div>
 
-          <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20, marginBottom: 24 }}>
-            <h2 style={{ marginTop: 0 }}>Create Trade</h2>
-            <form onSubmit={handleCreateTrade} style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr)) auto', gap: 12, marginTop: 16, alignItems: 'end' }}>
-              <Field label="Trade ID">
-                <input value={tradeIdInput} onChange={(e) => setTradeIdInput(e.target.value)} placeholder="T-0004" style={inputStyle} />
-              </Field>
-              <Field label="Book">
-                <select value={bookInput} onChange={(e) => setBookInput(e.target.value)} style={inputStyle}>
-                  {BOOK_OPTIONS.map((book) => (
-                    <option key={book} value={book}>{book}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Commodity">
-                <input value={commodityInput} onChange={(e) => setCommodityInput(e.target.value)} style={inputStyle} />
-              </Field>
-              <Field label="Price">
-                <input value={priceInput} onChange={(e) => setPriceInput(e.target.value)} style={inputStyle} />
-              </Field>
-              <Field label="Volume">
-                <input value={volumeInput} onChange={(e) => setVolumeInput(e.target.value)} style={inputStyle} />
-              </Field>
-              <button type="submit" disabled={submitting} style={buttonStyle}>
-                {submitting ? 'Creating...' : 'Create Trade'}
-              </button>
-            </form>
-          </section>
+          <form className="trade-form" onSubmit={handleCreateTrade}>
+            <Field label="Trade ID">
+              <input
+                value={tradeIdInput}
+                onChange={(e) => setTradeIdInput(e.target.value)}
+                placeholder="T-0004"
+                className="control"
+              />
+            </Field>
+            <Field label="Book">
+              <select
+                value={bookInput}
+                onChange={(e) => setBookInput(e.target.value)}
+                className="control"
+              >
+                {BOOK_OPTIONS.map((book) => (
+                  <option key={book} value={book}>
+                    {book}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Commodity">
+              <input
+                value={commodityInput}
+                onChange={(e) => setCommodityInput(e.target.value)}
+                className="control"
+              />
+            </Field>
+            <Field label="Price">
+              <input
+                value={priceInput}
+                onChange={(e) => setPriceInput(e.target.value)}
+                className="control"
+              />
+            </Field>
+            <Field label="Volume">
+              <input
+                value={volumeInput}
+                onChange={(e) => setVolumeInput(e.target.value)}
+                className="control"
+              />
+            </Field>
+            <button type="submit" disabled={submitting} className="button button-primary">
+              {submitting ? 'Creating…' : 'Create Trade'}
+            </button>
+          </form>
+        </section>
 
-          <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20, marginBottom: 24 }}>
-            <h2 style={{ marginTop: 0 }}>Positions</h2>
-            <p style={{ color: '#64748b', marginTop: 4 }}>Active net volume by commodity</p>
-
-            <div style={{ overflow: 'hidden', borderRadius: 18, border: '1px solid #e2e8f0', marginTop: 16 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f8fafc' }}>
-                  <tr>
-                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Commodity</th>
-                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Net Volume</th>
-                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {positions.map((p) => (
-                    <tr key={p.commodity} style={{ borderTop: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: 14, fontWeight: 600 }}>{p.commodity}</td>
-                      <td style={{ padding: 14 }}>{p.net_volume}</td>
-                      <td style={{ padding: 14 }}>{p.updated_at}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <section className="workspace-grid">
+          <section className="surface">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Board</span>
+                <h3>Trade ledger</h3>
+              </div>
+              <p>{trades.length === 0 ? 'No trades yet.' : 'Select a row to load its detail and timeline.'}</p>
             </div>
-          </section>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 }}>
-            <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-              <h2 style={{ marginTop: 0 }}>Trades</h2>
-              <div style={{ overflow: 'hidden', borderRadius: 18, border: '1px solid #e2e8f0', marginTop: 16 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead style={{ background: '#f8fafc' }}>
+            <div className="table-shell">
+              {trades.length === 0 ? (
+                <EmptyState
+                  title="No trades loaded"
+                  body="Create the first trade to populate the board."
+                />
+              ) : (
+                <table className="data-table">
+                  <thead>
                     <tr>
-                      {['Trade ID', 'Book', 'Commodity', 'Price', 'Volume', 'Status'].map((h) => (
-                        <th key={h} style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>{h}</th>
+                      {['Trade ID', 'Book', 'Commodity', 'Price', 'Volume', 'Status', 'Updated'].map((heading) => (
+                        <th key={heading}>{heading}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {trades.map((trade) => {
                       const selected = trade.trade_id === selectedTradeId
-                      const cancelled = trade.status === 'CANCELLED'
                       return (
                         <tr
                           key={trade.trade_id}
+                          className={selected ? 'is-selected' : undefined}
                           onClick={() => setSelectedTradeId(trade.trade_id)}
-                          style={{
-                            borderTop: '1px solid #e2e8f0',
-                            cursor: 'pointer',
-                            background: selected ? '#eff6ff' : '#fff',
-                            opacity: cancelled ? 0.65 : 1,
-                          }}
                         >
-                          <td style={{ padding: 14, fontWeight: 600 }}>{trade.trade_id}</td>
-                          <td style={{ padding: 14 }}>{trade.book}</td>
-                          <td style={{ padding: 14 }}>{trade.commodity}</td>
-                          <td style={{ padding: 14 }}>{trade.price ?? ''}</td>
-                          <td style={{ padding: 14 }}>{trade.volume ?? ''}</td>
-                          <td style={{ padding: 14 }}>
-                            <span
-                              style={{
-                                background: cancelled ? '#fef2f2' : '#ecfdf5',
-                                color: cancelled ? '#b91c1c' : '#047857',
-                                padding: '4px 10px',
-                                borderRadius: 999,
-                                fontSize: 12,
-                                fontWeight: 700,
-                              }}
-                            >
+                          <td>
+                            <strong>{trade.trade_id}</strong>
+                          </td>
+                          <td>{trade.book}</td>
+                          <td>{trade.commodity}</td>
+                          <td>{formatMoney(trade.price)}</td>
+                          <td>{formatNumber(trade.volume, 0)}</td>
+                          <td>
+                            <span className={`status-pill status-pill-${statusTone(trade.status)}`}>
                               {trade.status}
                             </span>
                           </td>
+                          <td>{formatDate(trade.updated_at)}</td>
                         </tr>
                       )
                     })}
                   </tbody>
                 </table>
-              </div>
-            </section>
+              )}
+            </div>
+          </section>
 
-            <section style={{ display: 'grid', gap: 24 }}>
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Trade Details</h2>
-                {selectedTrade ? (
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    <DetailRow label="Trade ID" value={selectedTrade.trade_id} />
-                    <DetailRow label="Book" value={selectedTrade.book} />
-                    <DetailRow label="Commodity" value={selectedTrade.commodity} />
-                    <DetailRow label="Price" value={selectedTrade.price ?? ''} />
-                    <DetailRow label="Volume" value={selectedTrade.volume ?? ''} />
-                    <DetailRow label="Status" value={selectedTrade.status} />
-                  </div>
+          <section className="stack">
+            <section className="surface">
+              <div className="section-head">
+                <div>
+                  <span className="eyebrow">Exposure</span>
+                  <h3>Positions</h3>
+                </div>
+                <p>Net active volume by commodity.</p>
+              </div>
+
+              <div className="position-list">
+                {positions.length === 0 ? (
+                  <EmptyState
+                    title="No position exposure"
+                    body="Open trades will appear here once they carry active volume."
+                  />
                 ) : (
-                  <div style={{ color: '#64748b' }}>Select a trade.</div>
+                  positions.map((position) => (
+                    <div key={position.commodity} className="position-card">
+                      <div>
+                        <strong>{position.commodity}</strong>
+                        <span>{formatDate(position.updated_at)}</span>
+                      </div>
+                      <b>{formatNumber(position.net_volume, 0)}</b>
+                    </div>
+                  ))
                 )}
               </div>
+            </section>
 
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Amend Trade</h2>
-                <form onSubmit={handleAmendTrade} style={{ display: 'grid', gap: 12, marginTop: 16 }}>
-                  <Field label="Book">
-                    <select value={amendBookInput} onChange={(e) => setAmendBookInput(e.target.value)} style={inputStyle}>
-                      {BOOK_OPTIONS.map((book) => (
-                        <option key={book} value={book}>{book}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Commodity">
-                    <input value={amendCommodityInput} onChange={(e) => setAmendCommodityInput(e.target.value)} style={inputStyle} />
-                  </Field>
+            <section className="surface">
+              <div className="section-head">
+                <div>
+                  <span className="eyebrow">Detail</span>
+                  <h3>Trade profile</h3>
+                </div>
+                <p>{selectedTrade ? 'Snapshot of the currently selected trade.' : 'Select a trade to inspect it.'}</p>
+              </div>
+
+              {selectedTrade ? (
+                <div className="detail-list">
+                  <DetailRow label="Trade ID" value={selectedTrade.trade_id} />
+                  <DetailRow label="Book" value={selectedTrade.book} />
+                  <DetailRow label="Commodity" value={selectedTrade.commodity} />
+                  <DetailRow label="Price" value={formatMoney(selectedTrade.price)} />
+                  <DetailRow label="Volume" value={formatNumber(selectedTrade.volume, 0)} />
+                  <DetailRow label="Status" value={selectedTrade.status} />
+                  <DetailRow label="Updated" value={formatDate(selectedTrade.updated_at)} />
+                </div>
+              ) : (
+                <EmptyState
+                  title="No trade selected"
+                  body="The detail panel activates when you click a trade in the ledger."
+                />
+              )}
+            </section>
+
+            <section className="surface">
+              <div className="section-head">
+                <div>
+                  <span className="eyebrow">Action</span>
+                  <h3>Amend trade</h3>
+                </div>
+                <p>Apply a new book, commodity, price, or volume to the selected trade.</p>
+              </div>
+
+              <form className="stack-form" onSubmit={handleAmendTrade}>
+                <Field label="Book">
+                  <select
+                    value={amendBookInput}
+                    onChange={(e) => setAmendBookInput(e.target.value)}
+                    className="control"
+                  >
+                    {BOOK_OPTIONS.map((book) => (
+                      <option key={book} value={book}>
+                        {book}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Commodity">
+                  <input
+                    value={amendCommodityInput}
+                    onChange={(e) => setAmendCommodityInput(e.target.value)}
+                    className="control"
+                  />
+                </Field>
+                <div className="mini-grid">
                   <Field label="Price">
-                    <input value={amendPriceInput} onChange={(e) => setAmendPriceInput(e.target.value)} style={inputStyle} />
+                    <input
+                      value={amendPriceInput}
+                      onChange={(e) => setAmendPriceInput(e.target.value)}
+                      className="control"
+                    />
                   </Field>
                   <Field label="Volume">
-                    <input value={amendVolumeInput} onChange={(e) => setAmendVolumeInput(e.target.value)} style={inputStyle} />
+                    <input
+                      value={amendVolumeInput}
+                      onChange={(e) => setAmendVolumeInput(e.target.value)}
+                      className="control"
+                    />
                   </Field>
-                  <button type="submit" disabled={amending || !selectedTradeId} style={buttonStyle}>
-                    {amending ? 'Amending...' : 'Amend Trade'}
-                  </button>
-                </form>
-              </div>
-
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Cancel Trade</h2>
-                <button
-                  type="button"
-                  onClick={handleCancelTrade}
-                  disabled={cancelling || !selectedTradeId || selectedTrade?.status === 'CANCELLED'}
-                  style={{
-                    ...buttonStyle,
-                    background: selectedTrade?.status === 'CANCELLED' ? '#94a3b8' : '#991b1b',
-                    width: '100%',
-                  }}
-                >
-                  {selectedTrade?.status === 'CANCELLED'
-                    ? 'Trade Already Cancelled'
-                    : cancelling
-                    ? 'Cancelling...'
-                    : 'Cancel Trade'}
-                </button>
-              </div>
-
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Event Timeline</h2>
-                <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
-                  {selectedTradeEvents.map((event) => (
-                    <div key={event.event_id} style={{ border: '1px solid #e2e8f0', borderRadius: 18, padding: 14 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <strong>{event.event_type}</strong>
-                        <span style={{ color: '#64748b', fontSize: 12 }}>{event.recorded_at}</span>
-                      </div>
-                      <pre
-                        style={{
-                          marginTop: 10,
-                          background: '#f8fafc',
-                          padding: 12,
-                          borderRadius: 12,
-                          overflowX: 'auto',
-                          fontSize: 12,
-                          color: '#334155',
-                        }}
-                      >
-                        {JSON.stringify(event.payload, null, 2)}
-                      </pre>
-                    </div>
-                  ))}
                 </div>
+                <button
+                  type="submit"
+                  disabled={amending || !selectedTradeId}
+                  className="button button-primary"
+                >
+                  {amending ? 'Amending…' : 'Amend Trade'}
+                </button>
+              </form>
+            </section>
+
+            <section className="surface">
+              <div className="section-head">
+                <div>
+                  <span className="eyebrow">Action</span>
+                  <h3>Cancel trade</h3>
+                </div>
+                <p>Mark the selected trade as cancelled in the event stream.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCancelTrade}
+                disabled={cancelling || !selectedTradeId || selectedTrade?.status === 'CANCELLED'}
+                className="button button-danger"
+              >
+                {selectedTrade?.status === 'CANCELLED'
+                  ? 'Trade Already Cancelled'
+                  : cancelling
+                    ? 'Cancelling…'
+                    : 'Cancel Trade'}
+              </button>
+            </section>
+
+            <section className="surface">
+              <div className="section-head">
+                <div>
+                  <span className="eyebrow">History</span>
+                  <h3>Event timeline</h3>
+                </div>
+                <p>Recent events for the selected trade.</p>
+              </div>
+
+              <div className="event-stack">
+                {selectedTradeEvents.length === 0 ? (
+                  <EmptyState
+                    title="No events for this trade"
+                    body="Once selected, trade history appears here in reverse chronological order."
+                  />
+                ) : (
+                  selectedTradeEvents.map((event) => (
+                    <article key={event.event_id} className="event-card">
+                      <div className="event-card-header">
+                        <div>
+                          <strong>{event.event_type}</strong>
+                          <span>{formatDate(event.recorded_at)}</span>
+                        </div>
+                        <span className="event-schema">v{event.schema_version}</span>
+                      </div>
+                      <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                    </article>
+                  ))
+                )}
               </div>
             </section>
-          </div>
-        </main>
-      </div>
+          </section>
+        </section>
+      </main>
     </div>
+  )
+}
+
+function MetricCard({
+  label,
+  value,
+  note,
+}: {
+  label: string
+  value: string
+  note: string
+}) {
+  return (
+    <article className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <p>{note}</p>
+    </article>
   )
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'grid', gap: 6 }}>
-      <span style={{ fontSize: 14, color: '#475569', fontWeight: 500 }}>{label}</span>
+    <label className="field">
+      <span>{label}</span>
       {children}
     </label>
   )
 }
 
-function DetailRow({ label, value }: { label: string; value: string | number }) {
+function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 12, paddingBottom: 10, borderBottom: '1px solid #e2e8f0' }}>
-      <div style={{ color: '#64748b', fontSize: 14 }}>{label}</div>
-      <div style={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{String(value)}</div>
+    <div className="detail-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   )
 }
 
-const inputStyle: React.CSSProperties = {
-  height: 42,
-  borderRadius: 14,
-  border: '1px solid #cbd5e1',
-  padding: '0 12px',
-  fontSize: 14,
-  outline: 'none',
-  background: '#fff',
-}
-
-const buttonStyle: React.CSSProperties = {
-  height: 42,
-  borderRadius: 14,
-  border: 'none',
-  background: '#0f172a',
-  color: '#fff',
-  padding: '0 18px',
-  fontWeight: 600,
-  cursor: 'pointer',
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="empty-state">
+      <strong>{title}</strong>
+      <p>{body}</p>
+    </div>
+  )
 }
