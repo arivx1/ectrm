@@ -32,7 +32,6 @@ def main() -> None:
 
         print(f"Found {len(events)} trade events")
 
-        # In-memory projection state keyed by trade_id
         trade_state: dict[str, dict] = {}
 
         for e in events:
@@ -55,7 +54,6 @@ def main() -> None:
                         "last_event_id": e.event_id,
                     }
                 else:
-                    # Treat duplicate TradeCreated as latest overwrite for mutable fields
                     existing["updated_at"] = now
                     if payload.get("commodity") is not None:
                         existing["commodity"] = payload.get("commodity")
