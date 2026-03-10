@@ -9,10 +9,20 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
 
 
+DEFAULT_BOOK = "CRUDE_PHYS"
+
+
 def to_decimal_or_none(value):
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def normalize_book(value):
+    if value is None:
+        return DEFAULT_BOOK
+    value_str = str(value).strip()
+    return value_str or DEFAULT_BOOK
 
 
 def main() -> None:
@@ -47,6 +57,7 @@ def main() -> None:
                         "trade_id": trade_id,
                         "created_at": now,
                         "updated_at": now,
+                        "book": normalize_book(payload.get("book")),
                         "commodity": payload.get("commodity") or "UNKNOWN",
                         "price": to_decimal_or_none(payload.get("price")),
                         "volume": to_decimal_or_none(payload.get("volume")),
@@ -55,6 +66,7 @@ def main() -> None:
                     }
                 else:
                     existing["updated_at"] = now
+                    existing["book"] = normalize_book(payload.get("book", existing.get("book")))
                     if payload.get("commodity") is not None:
                         existing["commodity"] = payload.get("commodity")
                     if payload.get("price") is not None:
@@ -73,6 +85,10 @@ def main() -> None:
                     continue
 
                 existing["updated_at"] = now
+                if "book" in payload:
+                    existing["book"] = normalize_book(payload.get("book"))
+                else:
+                    existing["book"] = normalize_book(existing.get("book"))
                 if payload.get("commodity") is not None:
                     existing["commodity"] = payload.get("commodity")
                 if payload.get("price") is not None:
@@ -91,6 +107,7 @@ def main() -> None:
                     continue
 
                 existing["updated_at"] = now
+                existing["book"] = normalize_book(existing.get("book"))
                 existing["status"] = "CANCELLED"
                 existing["last_event_id"] = e.event_id
 
@@ -101,6 +118,7 @@ def main() -> None:
                     trade_id=trade["trade_id"],
                     created_at=trade["created_at"],
                     updated_at=trade["updated_at"],
+                    book=normalize_book(trade.get("book")),
                     commodity=trade["commodity"],
                     price=trade["price"],
                     volume=trade["volume"],
