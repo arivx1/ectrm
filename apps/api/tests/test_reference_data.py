@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import enum
 import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+if not hasattr(enum, "StrEnum"):
+    class _CompatStrEnum(str, enum.Enum):
+        pass
+
+    enum.StrEnum = _CompatStrEnum  # type: ignore[attr-defined]
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -9,25 +18,35 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.models.event import Base
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_leg import TradeLeg
+from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.routes.events import append_event
 from apps.api.app.routes.reference_data import (
     CommodityCreate,
     CommodityStatusUpdate,
+    CounterpartyCreate,
     CurrencyCreate,
     CurrencyStatusUpdate,
     LocationCreate,
     LocationStatusUpdate,
     PriceIndexCreate,
     PriceIndexUpdate,
+    PortfolioCreate,
+    PortfolioUpdate,
     UnitCreate,
     UnitStatusUpdate,
     create_commodity,
+    create_counterparty,
     create_currency,
     create_location,
+    create_portfolio,
     create_price_index,
     create_unit,
     deactivate_currency,
@@ -37,6 +56,7 @@ from apps.api.app.routes.reference_data import (
     list_price_indices,
     update_price_index,
 )
+from apps.api.app.schemas.event import EventCreate
 
 
 class ReferenceDataApiTests(unittest.TestCase):
@@ -58,9 +78,13 @@ class ReferenceDataApiTests(unittest.TestCase):
     def setUp(self) -> None:
         with self.SessionLocal() as session:
             session.query(ReferencePriceIndex).delete()
+            session.query(ReferencePortfolio).delete()
             session.query(ReferenceLocation).delete()
             session.query(ReferenceUnit).delete()
             session.query(ReferenceCurrency).delete()
+            session.query(ReferenceCounterparty).delete()
+            session.query(TradePriceTerm).delete()
+            session.query(TradeLeg).delete()
             session.query(ReferenceCommodity).delete()
             session.query(ReferenceBook).delete()
             session.query(Trade).delete()
@@ -84,6 +108,28 @@ class ReferenceDataApiTests(unittest.TestCase):
                     CommodityStatusUpdate(updated_by="test-user"),
                     db=session,
                 )
+
+    def _create_book(self, code: str, is_active: bool = True) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                ReferenceBook(
+                    code=code,
+                    name=f"{code} Book",
+                    description="test book",
+                    is_active=is_active,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=datetime.now(timezone.utc),
+                    created_by="test-user",
+                    updated_at=datetime.now(timezone.utc),
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _request(self):
+        return SimpleNamespace(state=SimpleNamespace(correlation_id="test-correlation"), headers={})
 
     def _create_currency(self, code: str, symbol: str | None = None) -> None:
         with self.SessionLocal() as session:
@@ -331,6 +377,182 @@ class ReferenceDataApiTests(unittest.TestCase):
         with self.SessionLocal() as session:
             with self.assertRaisesRegex(Exception, "Location cannot be deactivated while active price indices reference it"):
                 deactivate_location("CUSHING", LocationStatusUpdate(updated_by="test-user"), db=session)
+
+    def test_trade_create_requires_active_book(self) -> None:
+        self._create_commodity("WTI")
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Book is required and must be selected from reference data"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-BOOK-1",
+                        event_type="TradeCreated",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 80,
+                            "volume": 1000,
+                        },
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        self._create_book("CRUDE_PHYS", is_active=False)
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Book 'CRUDE_PHYS' is not active in reference data"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-BOOK-2",
+                        event_type="TradeCreated",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 80,
+                            "volume": 1000,
+                        },
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            session.query(ReferenceBook).delete()
+            session.commit()
+
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            event = append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-BOOK-3",
+                    event_type="TradeCreated",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_id="test-user",
+                    payload={
+                        "book": "crude_phys",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "price": 80,
+                        "volume": 1000,
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            trade = session.query(Trade).filter(Trade.trade_id == "T-BOOK-3").first()
+
+        self.assertEqual(event.aggregate_id, "T-BOOK-3")
+        self.assertIsNotNone(trade)
+        self.assertEqual(trade.book, "CRUDE_PHYS")
+
+    def test_create_counterparty_normalizes_type_and_country(self) -> None:
+        with self.SessionLocal() as session:
+            payload = create_counterparty(
+                CounterpartyCreate(
+                    code="shell_trading",
+                    name="Shell Trading",
+                    short_name="Shell",
+                    legal_entity_name="Shell Trading US Company",
+                    counterparty_type="supplier",
+                    country_code="us",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(payload.code, "SHELL_TRADING")
+        self.assertEqual(payload.counterparty_type, "SUPPLIER")
+        self.assertEqual(payload.country_code, "US")
+
+    def test_portfolio_requires_active_book(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Book 'CRUDE_PHYS' is not active"):
+                create_portfolio(
+                    PortfolioCreate(
+                        code="OIL_DISCRETIONARY",
+                        name="Oil Discretionary",
+                        book_code="CRUDE_PHYS",
+                        owner="ops",
+                        strategy="Directional",
+                        trader_persona="Speculator",
+                        risk_archetype="directional",
+                        description="test portfolio",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            payload = create_portfolio(
+                PortfolioCreate(
+                    code="OIL_DISCRETIONARY",
+                    name="Oil Discretionary",
+                    book_code="crude_phys",
+                    owner="ops",
+                    strategy="Directional",
+                    trader_persona="Speculator",
+                    risk_archetype="directional",
+                    description="test portfolio",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(payload.code, "OIL_DISCRETIONARY")
+        self.assertEqual(payload.book_code, "CRUDE_PHYS")
+        self.assertEqual(payload.trader_persona, "Speculator")
+        self.assertEqual(payload.risk_archetype, "DIRECTIONAL")
+
+        with self.SessionLocal() as session:
+            portfolio = session.query(ReferencePortfolio).filter_by(code="OIL_DISCRETIONARY").first()
+            self.assertIsNotNone(portfolio)
+            self.assertEqual(portfolio.trader_persona, "Speculator")
+            self.assertEqual(portfolio.risk_archetype, "DIRECTIONAL")
+
+        self._create_book("POWER_BOOK", is_active=False)
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Book 'POWER_BOOK' is not active"):
+                update_payload = PortfolioUpdate(book_code="POWER_BOOK", updated_by="test-user")
+                from apps.api.app.routes.reference_data import update_portfolio
+
+                update_portfolio("OIL_DISCRETIONARY", update_payload, db=session)
+
+        with self.SessionLocal() as session:
+            from apps.api.app.routes.reference_data import update_portfolio
+
+            updated = update_portfolio(
+                "OIL_DISCRETIONARY",
+                PortfolioUpdate(
+                    trader_persona="Risk Manager",
+                    risk_archetype="risk_reduction",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(updated.trader_persona, "Risk Manager")
+        self.assertEqual(updated.risk_archetype, "RISK_REDUCTION")
 
 
 if __name__ == "__main__":

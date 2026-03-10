@@ -1,6 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-
-type ReferenceTab = 'books' | 'commodities' | 'price-indices' | 'currencies' | 'units' | 'locations'
+import type { ReferenceTab } from '../../shared/models'
 
 type ReferenceRecord = {
   code: string
@@ -40,6 +39,19 @@ type LocationRecord = ReferenceRecord & {
   country_code?: string | null
   region?: string | null
   timezone?: string | null
+}
+
+type CounterpartyRecord = ReferenceRecord & {
+  short_name?: string | null
+  legal_entity_name?: string | null
+  counterparty_type: string
+  country_code?: string | null
+}
+
+type PortfolioRecord = ReferenceRecord & {
+  book_code: string
+  owner?: string | null
+  strategy?: string | null
 }
 
 type BookForm = {
@@ -97,6 +109,25 @@ type LocationForm = {
   description: string
 }
 
+type CounterpartyForm = {
+  code: string
+  name: string
+  short_name: string
+  legal_entity_name: string
+  counterparty_type: string
+  country_code: string
+  description: string
+}
+
+type PortfolioForm = {
+  code: string
+  name: string
+  book_code: string
+  owner: string
+  strategy: string
+  description: string
+}
+
 type ReferenceDataWorkspaceProps = {
   referenceTab: ReferenceTab
   setReferenceTab: (tab: ReferenceTab) => void
@@ -120,6 +151,12 @@ type ReferenceDataWorkspaceProps = {
   filteredLocations: LocationRecord[]
   selectedLocationCode: string | null
   startEditLocation: (code: string) => void
+  filteredCounterparties: CounterpartyRecord[]
+  selectedCounterpartyCode: string | null
+  startEditCounterparty: (code: string) => void
+  filteredPortfolios: PortfolioRecord[]
+  selectedPortfolioCode: string | null
+  startEditPortfolio: (code: string) => void
   referenceActionError: string
   referenceActionSuccess: string
   savingReference: boolean
@@ -169,6 +206,41 @@ type ReferenceDataWorkspaceProps = {
   startCreateLocation: () => void
   handleSaveLocation: (event: React.FormEvent) => void
   handleToggleLocation: (record: LocationRecord) => void
+  selectedCounterparty: CounterpartyRecord | null
+  counterpartyFormMode: 'create' | 'edit'
+  counterpartyForm: CounterpartyForm
+  setCounterpartyForm: Dispatch<SetStateAction<CounterpartyForm>>
+  startCreateCounterparty: () => void
+  handleSaveCounterparty: (event: React.FormEvent) => void
+  handleToggleCounterparty: (record: CounterpartyRecord) => void
+  selectedPortfolio: PortfolioRecord | null
+  portfolioFormMode: 'create' | 'edit'
+  portfolioForm: PortfolioForm
+  setPortfolioForm: Dispatch<SetStateAction<PortfolioForm>>
+  startCreatePortfolio: () => void
+  handleSavePortfolio: (event: React.FormEvent) => void
+  handleTogglePortfolio: (record: PortfolioRecord) => void
+  activeBooks: ReferenceRecord[]
+  selectedBookUsage: { activeTrades: number; totalTrades: number } | null
+  selectedCommodityUsage: { activeTrades: number; totalTrades: number } | null
+  selectedPriceIndexUsage: { activeTrades: number; totalTrades: number } | null
+  selectedCurrencyUsage: { activeTrades: number; totalTrades: number } | null
+  selectedUnitUsage: { activeTrades: number; totalTrades: number } | null
+  selectedLocationUsage: { activeTrades: number; totalTrades: number } | null
+  bookFieldErrors: Partial<Record<'code' | 'name', string>>
+  commodityFieldErrors: Partial<Record<'code' | 'name' | 'commodity_class', string>>
+  priceIndexFieldErrors: Partial<
+    Record<'code' | 'name' | 'commodity_code' | 'provider' | 'currency_code' | 'unit_code', string>
+  >
+  currencyFieldErrors: Partial<Record<'code' | 'name', string>>
+  unitFieldErrors: Partial<Record<'code' | 'name' | 'commodity_class' | 'dimension' | 'precision', string>>
+  locationFieldErrors: Partial<Record<'code' | 'name' | 'location_type', string>>
+  bookFormDirty: boolean
+  commodityFormDirty: boolean
+  priceIndexFormDirty: boolean
+  currencyFormDirty: boolean
+  unitFormDirty: boolean
+  locationFormDirty: boolean
   commodityClassOrder: readonly string[]
   formatCommodityClass: (value: string) => string
   formatDate: (value: string | null | undefined) => string
@@ -198,6 +270,12 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     filteredLocations,
     selectedLocationCode,
     startEditLocation,
+    filteredCounterparties,
+    selectedCounterpartyCode,
+    startEditCounterparty,
+    filteredPortfolios,
+    selectedPortfolioCode,
+    startEditPortfolio,
     referenceActionError,
     referenceActionSuccess,
     savingReference,
@@ -247,6 +325,39 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     startCreateLocation,
     handleSaveLocation,
     handleToggleLocation,
+    selectedCounterparty,
+    counterpartyFormMode,
+    counterpartyForm,
+    setCounterpartyForm,
+    startCreateCounterparty,
+    handleSaveCounterparty,
+    handleToggleCounterparty,
+    selectedPortfolio,
+    portfolioFormMode,
+    portfolioForm,
+    setPortfolioForm,
+    startCreatePortfolio,
+    handleSavePortfolio,
+    handleTogglePortfolio,
+    activeBooks,
+    selectedBookUsage,
+    selectedCommodityUsage,
+    selectedPriceIndexUsage,
+    selectedCurrencyUsage,
+    selectedUnitUsage,
+    selectedLocationUsage,
+    bookFieldErrors,
+    commodityFieldErrors,
+    priceIndexFieldErrors,
+    currencyFieldErrors,
+    unitFieldErrors,
+    locationFieldErrors,
+    bookFormDirty,
+    commodityFormDirty,
+    priceIndexFormDirty,
+    currencyFormDirty,
+    unitFormDirty,
+    locationFormDirty,
     commodityClassOrder,
     formatCommodityClass,
     formatDate,
@@ -288,6 +399,12 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
           </button>
           <button type="button" className={`tab-pill ${referenceTab === 'locations' ? 'is-active' : ''}`} onClick={() => setReferenceTab('locations')}>
             Locations
+          </button>
+          <button type="button" className={`tab-pill ${referenceTab === 'counterparties' ? 'is-active' : ''}`} onClick={() => setReferenceTab('counterparties')}>
+            Counterparties
+          </button>
+          <button type="button" className={`tab-pill ${referenceTab === 'portfolios' ? 'is-active' : ''}`} onClick={() => setReferenceTab('portfolios')}>
+            Portfolios
           </button>
         </div>
 
@@ -438,6 +555,56 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
             ))}
           </div>
         )}
+
+        {referenceTab === 'counterparties' && (
+          <div className="reference-stack">
+            {filteredCounterparties.map((counterparty) => (
+              <button
+                key={counterparty.code}
+                type="button"
+                className={`reference-row ${selectedCounterpartyCode === counterparty.code ? 'is-selected' : ''}`}
+                onClick={() => startEditCounterparty(counterparty.code)}
+              >
+                <div>
+                  <strong>{counterparty.code}</strong>
+                  <p>{counterparty.name}</p>
+                  <p>
+                    {counterparty.counterparty_type}
+                    {counterparty.country_code ? ` • ${counterparty.country_code}` : ''}
+                  </p>
+                </div>
+                <span className={`reference-status ${counterparty.is_active ? 'is-active' : 'is-inactive'}`}>
+                  {counterparty.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {referenceTab === 'portfolios' && (
+          <div className="reference-stack">
+            {filteredPortfolios.map((portfolio) => (
+              <button
+                key={portfolio.code}
+                type="button"
+                className={`reference-row ${selectedPortfolioCode === portfolio.code ? 'is-selected' : ''}`}
+                onClick={() => startEditPortfolio(portfolio.code)}
+              >
+                <div>
+                  <strong>{portfolio.code}</strong>
+                  <p>{portfolio.name}</p>
+                  <p>
+                    {portfolio.book_code}
+                    {portfolio.strategy ? ` • ${portfolio.strategy}` : ''}
+                  </p>
+                </div>
+                <span className={`reference-status ${portfolio.is_active ? 'is-active' : 'is-inactive'}`}>
+                  {portfolio.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <aside className="surface reference-editor">
@@ -455,7 +622,11 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                       ? 'Currency Editor'
                       : referenceTab === 'units'
                         ? 'Unit Editor'
-                        : 'Location Editor'}
+                        : referenceTab === 'locations'
+                          ? 'Location Editor'
+                          : referenceTab === 'counterparties'
+                            ? 'Counterparty Editor'
+                            : 'Portfolio Editor'}
             </h3>
           </div>
           <p>Maintain master data directly in the app, including activation controls and basic audit context.</p>
@@ -477,6 +648,24 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               )}
             </div>
 
+            {selectedBook && (
+              <div className="reference-usage-card">
+                <div className="reference-usage-head">
+                  <strong>Usage</strong>
+                  <span className={`editor-state-pill ${bookFormDirty ? 'is-dirty' : 'is-clean'}`}>
+                    {bookFormDirty ? 'Unsaved changes' : 'Saved'}
+                  </span>
+                </div>
+                <p>
+                  Used by {selectedBookUsage?.activeTrades ?? 0} active trade{selectedBookUsage?.activeTrades === 1 ? '' : 's'}
+                  {' '}and {selectedBookUsage?.totalTrades ?? 0} total trade{selectedBookUsage?.totalTrades === 1 ? '' : 's'}.
+                </p>
+                {selectedBook.is_active && (selectedBookUsage?.activeTrades ?? 0) > 0 && (
+                  <p className="field-error">Deactivate is blocked while active trades still reference this book.</p>
+                )}
+              </div>
+            )}
+
             <form className="stack-form" onSubmit={handleSaveBook}>
               <div className="mini-grid">
                 <label className="field">
@@ -487,6 +676,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     onChange={(event) => setBookForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))}
                     disabled={bookFormMode === 'edit' || savingReference}
                   />
+                  {bookFieldErrors.code && <small className="field-error">{bookFieldErrors.code}</small>}
                 </label>
                 <label className="field">
                   <span>Name</span>
@@ -496,6 +686,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     onChange={(event) => setBookForm((current) => ({ ...current, name: event.target.value }))}
                     disabled={savingReference}
                   />
+                  {bookFieldErrors.name && <small className="field-error">{bookFieldErrors.name}</small>}
                 </label>
               </div>
 
@@ -509,7 +700,11 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 />
               </label>
 
-              <button type="submit" className="button button-primary" disabled={savingReference}>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={savingReference || Boolean(bookFieldErrors.code || bookFieldErrors.name) || !bookFormDirty}
+              >
                 {savingReference ? 'Saving...' : bookFormMode === 'create' ? 'Create Book' : 'Save Changes'}
               </button>
             </form>
@@ -546,6 +741,24 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               )}
             </div>
 
+            {selectedCommodity && (
+              <div className="reference-usage-card">
+                <div className="reference-usage-head">
+                  <strong>Usage</strong>
+                  <span className={`editor-state-pill ${commodityFormDirty ? 'is-dirty' : 'is-clean'}`}>
+                    {commodityFormDirty ? 'Unsaved changes' : 'Saved'}
+                  </span>
+                </div>
+                <p>
+                  Used by {selectedCommodityUsage?.activeTrades ?? 0} active trade{selectedCommodityUsage?.activeTrades === 1 ? '' : 's'}
+                  {' '}and {selectedCommodityUsage?.totalTrades ?? 0} total trade{selectedCommodityUsage?.totalTrades === 1 ? '' : 's'}.
+                </p>
+                {selectedCommodity.is_active && (selectedCommodityUsage?.activeTrades ?? 0) > 0 && (
+                  <p className="field-error">Deactivate is blocked while active trades still reference this commodity.</p>
+                )}
+              </div>
+            )}
+
             <form className="stack-form" onSubmit={handleSaveCommodity}>
               <div className="mini-grid">
                 <label className="field">
@@ -556,6 +769,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     onChange={(event) => setCommodityForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))}
                     disabled={commodityFormMode === 'edit' || savingReference}
                   />
+                  {commodityFieldErrors.code && <small className="field-error">{commodityFieldErrors.code}</small>}
                 </label>
                 <label className="field">
                   <span>Name</span>
@@ -565,6 +779,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     onChange={(event) => setCommodityForm((current) => ({ ...current, name: event.target.value }))}
                     disabled={savingReference}
                   />
+                  {commodityFieldErrors.name && <small className="field-error">{commodityFieldErrors.name}</small>}
                 </label>
               </div>
 
@@ -582,6 +797,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     </option>
                   ))}
                 </select>
+                {commodityFieldErrors.commodity_class && <small className="field-error">{commodityFieldErrors.commodity_class}</small>}
               </label>
 
               <label className="field">
@@ -594,7 +810,15 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 />
               </label>
 
-              <button type="submit" className="button button-primary" disabled={savingReference}>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={
+                  savingReference ||
+                  Boolean(commodityFieldErrors.code || commodityFieldErrors.name || commodityFieldErrors.commodity_class) ||
+                  !commodityFormDirty
+                }
+              >
                 {savingReference ? 'Saving...' : commodityFormMode === 'create' ? 'Create Commodity' : 'Save Changes'}
               </button>
             </form>
@@ -631,6 +855,24 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               )}
             </div>
 
+            {selectedPriceIndex && (
+              <div className="reference-usage-card">
+                <div className="reference-usage-head">
+                  <strong>Usage</strong>
+                  <span className={`editor-state-pill ${priceIndexFormDirty ? 'is-dirty' : 'is-clean'}`}>
+                    {priceIndexFormDirty ? 'Unsaved changes' : 'Saved'}
+                  </span>
+                </div>
+                <p>
+                  Used by {selectedPriceIndexUsage?.activeTrades ?? 0} active trade{selectedPriceIndexUsage?.activeTrades === 1 ? '' : 's'}
+                  {' '}and {selectedPriceIndexUsage?.totalTrades ?? 0} total trade{selectedPriceIndexUsage?.totalTrades === 1 ? '' : 's'}.
+                </p>
+                {selectedPriceIndex.is_active && (selectedPriceIndexUsage?.activeTrades ?? 0) > 0 && (
+                  <p className="field-error">Deactivate is blocked while active trades still price off this index.</p>
+                )}
+              </div>
+            )}
+
             <form className="stack-form" onSubmit={handleSavePriceIndex}>
               <div className="mini-grid">
                 <label className="field">
@@ -641,6 +883,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     onChange={(event) => setPriceIndexForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))}
                     disabled={priceIndexFormMode === 'edit' || savingReference}
                   />
+                  {priceIndexFieldErrors.code && <small className="field-error">{priceIndexFieldErrors.code}</small>}
                 </label>
                 <label className="field">
                   <span>Name</span>
@@ -650,6 +893,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     onChange={(event) => setPriceIndexForm((current) => ({ ...current, name: event.target.value }))}
                     disabled={savingReference}
                   />
+                  {priceIndexFieldErrors.name && <small className="field-error">{priceIndexFieldErrors.name}</small>}
                 </label>
               </div>
 
@@ -668,6 +912,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                       </option>
                     ))}
                   </select>
+                  {priceIndexFieldErrors.commodity_code && <small className="field-error">{priceIndexFieldErrors.commodity_code}</small>}
                 </label>
                 <label className="field">
                   <span>Provider</span>
@@ -677,6 +922,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     onChange={(event) => setPriceIndexForm((current) => ({ ...current, provider: event.target.value }))}
                     disabled={savingReference}
                   />
+                  {priceIndexFieldErrors.provider && <small className="field-error">{priceIndexFieldErrors.provider}</small>}
                 </label>
               </div>
 
@@ -695,6 +941,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                       </option>
                     ))}
                   </select>
+                  {priceIndexFieldErrors.currency_code && <small className="field-error">{priceIndexFieldErrors.currency_code}</small>}
                 </label>
                 <label className="field">
                   <span>Unit</span>
@@ -710,6 +957,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                       </option>
                     ))}
                   </select>
+                  {priceIndexFieldErrors.unit_code && <small className="field-error">{priceIndexFieldErrors.unit_code}</small>}
                 </label>
               </div>
 
@@ -764,7 +1012,21 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <button
                 type="submit"
                 className="button button-primary"
-                disabled={savingReference || activeCommodities.length === 0 || activeCurrencies.length === 0 || selectablePriceIndexUnits.length === 0}
+                disabled={
+                  savingReference ||
+                  activeCommodities.length === 0 ||
+                  activeCurrencies.length === 0 ||
+                  selectablePriceIndexUnits.length === 0 ||
+                  Boolean(
+                    priceIndexFieldErrors.code ||
+                    priceIndexFieldErrors.name ||
+                    priceIndexFieldErrors.commodity_code ||
+                    priceIndexFieldErrors.provider ||
+                    priceIndexFieldErrors.currency_code ||
+                    priceIndexFieldErrors.unit_code
+                  ) ||
+                  !priceIndexFormDirty
+                }
               >
                 {savingReference ? 'Saving...' : priceIndexFormMode === 'create' ? 'Create Price Index' : 'Save Changes'}
               </button>
@@ -818,15 +1080,35 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               )}
             </div>
 
+            {selectedCurrency && (
+              <div className="reference-usage-card">
+                <div className="reference-usage-head">
+                  <strong>Usage</strong>
+                  <span className={`editor-state-pill ${currencyFormDirty ? 'is-dirty' : 'is-clean'}`}>
+                    {currencyFormDirty ? 'Unsaved changes' : 'Saved'}
+                  </span>
+                </div>
+                <p>
+                  Referenced by {selectedCurrencyUsage?.activeTrades ?? 0} active price {selectedCurrencyUsage?.activeTrades === 1 ? 'index' : 'indices'}
+                  {' '}and {selectedCurrencyUsage?.totalTrades ?? 0} total price {selectedCurrencyUsage?.totalTrades === 1 ? 'index' : 'indices'}.
+                </p>
+                {selectedCurrency.is_active && (selectedCurrencyUsage?.activeTrades ?? 0) > 0 && (
+                  <p className="field-error">Deactivate is blocked while active price indices still reference this currency.</p>
+                )}
+              </div>
+            )}
+
             <form className="stack-form" onSubmit={handleSaveCurrency}>
               <div className="mini-grid">
                 <label className="field">
                   <span>Code</span>
                   <input className="control" value={currencyForm.code} onChange={(event) => setCurrencyForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))} disabled={currencyFormMode === 'edit' || savingReference} />
+                  {currencyFieldErrors.code && <small className="field-error">{currencyFieldErrors.code}</small>}
                 </label>
                 <label className="field">
                   <span>Name</span>
                   <input className="control" value={currencyForm.name} onChange={(event) => setCurrencyForm((current) => ({ ...current, name: event.target.value }))} disabled={savingReference} />
+                  {currencyFieldErrors.name && <small className="field-error">{currencyFieldErrors.name}</small>}
                 </label>
               </div>
 
@@ -840,7 +1122,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 <textarea className="control control-textarea" value={currencyForm.description} onChange={(event) => setCurrencyForm((current) => ({ ...current, description: event.target.value }))} disabled={savingReference} />
               </label>
 
-              <button type="submit" className="button button-primary" disabled={savingReference}>
+              <button type="submit" className="button button-primary" disabled={savingReference || Boolean(currencyFieldErrors.code || currencyFieldErrors.name) || !currencyFormDirty}>
                 {savingReference ? 'Saving...' : currencyFormMode === 'create' ? 'Create Currency' : 'Save Changes'}
               </button>
             </form>
@@ -877,15 +1159,35 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               )}
             </div>
 
+            {selectedUnit && (
+              <div className="reference-usage-card">
+                <div className="reference-usage-head">
+                  <strong>Usage</strong>
+                  <span className={`editor-state-pill ${unitFormDirty ? 'is-dirty' : 'is-clean'}`}>
+                    {unitFormDirty ? 'Unsaved changes' : 'Saved'}
+                  </span>
+                </div>
+                <p>
+                  Referenced by {selectedUnitUsage?.activeTrades ?? 0} active price {selectedUnitUsage?.activeTrades === 1 ? 'index' : 'indices'}
+                  {' '}and {selectedUnitUsage?.totalTrades ?? 0} total price {selectedUnitUsage?.totalTrades === 1 ? 'index' : 'indices'}.
+                </p>
+                {selectedUnit.is_active && (selectedUnitUsage?.activeTrades ?? 0) > 0 && (
+                  <p className="field-error">Deactivate is blocked while active price indices still reference this unit.</p>
+                )}
+              </div>
+            )}
+
             <form className="stack-form" onSubmit={handleSaveUnit}>
               <div className="mini-grid">
                 <label className="field">
                   <span>Code</span>
                   <input className="control" value={unitForm.code} onChange={(event) => setUnitForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))} disabled={unitFormMode === 'edit' || savingReference} />
+                  {unitFieldErrors.code && <small className="field-error">{unitFieldErrors.code}</small>}
                 </label>
                 <label className="field">
                   <span>Name</span>
                   <input className="control" value={unitForm.name} onChange={(event) => setUnitForm((current) => ({ ...current, name: event.target.value }))} disabled={savingReference} />
+                  {unitFieldErrors.name && <small className="field-error">{unitFieldErrors.name}</small>}
                 </label>
               </div>
 
@@ -893,22 +1195,24 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 <label className="field">
                   <span>Commodity Class</span>
                   <select className="control" value={unitForm.commodity_class} onChange={(event) => setUnitForm((current) => ({ ...current, commodity_class: event.target.value }))} disabled={savingReference}>
-                    {commodityClassOrder.map((commodityClass) => (
-                      <option key={commodityClass} value={commodityClass}>
-                        {formatCommodityClass(commodityClass)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Dimension</span>
-                  <select className="control" value={unitForm.dimension} onChange={(event) => setUnitForm((current) => ({ ...current, dimension: event.target.value }))} disabled={savingReference}>
+                  {commodityClassOrder.map((commodityClass) => (
+                    <option key={commodityClass} value={commodityClass}>
+                      {formatCommodityClass(commodityClass)}
+                    </option>
+                  ))}
+                </select>
+                {unitFieldErrors.commodity_class && <small className="field-error">{unitFieldErrors.commodity_class}</small>}
+              </label>
+              <label className="field">
+                <span>Dimension</span>
+                <select className="control" value={unitForm.dimension} onChange={(event) => setUnitForm((current) => ({ ...current, dimension: event.target.value }))} disabled={savingReference}>
                     {['VOLUME', 'MASS', 'ENERGY', 'POWER'].map((dimension) => (
                       <option key={dimension} value={dimension}>
                         {dimension}
                       </option>
                     ))}
                   </select>
+                  {unitFieldErrors.dimension && <small className="field-error">{unitFieldErrors.dimension}</small>}
                 </label>
               </div>
 
@@ -926,6 +1230,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <label className="field">
                 <span>Precision</span>
                 <input className="control" inputMode="numeric" value={unitForm.precision} onChange={(event) => setUnitForm((current) => ({ ...current, precision: event.target.value }))} disabled={savingReference} />
+                {unitFieldErrors.precision && <small className="field-error">{unitFieldErrors.precision}</small>}
               </label>
 
               <label className="field">
@@ -933,7 +1238,21 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 <textarea className="control control-textarea" value={unitForm.description} onChange={(event) => setUnitForm((current) => ({ ...current, description: event.target.value }))} disabled={savingReference} />
               </label>
 
-              <button type="submit" className="button button-primary" disabled={savingReference}>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={
+                  savingReference ||
+                  Boolean(
+                    unitFieldErrors.code ||
+                    unitFieldErrors.name ||
+                    unitFieldErrors.commodity_class ||
+                    unitFieldErrors.dimension ||
+                    unitFieldErrors.precision
+                  ) ||
+                  !unitFormDirty
+                }
+              >
                 {savingReference ? 'Saving...' : unitFormMode === 'create' ? 'Create Unit' : 'Save Changes'}
               </button>
             </form>
@@ -974,15 +1293,35 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               )}
             </div>
 
+            {selectedLocation && (
+              <div className="reference-usage-card">
+                <div className="reference-usage-head">
+                  <strong>Usage</strong>
+                  <span className={`editor-state-pill ${locationFormDirty ? 'is-dirty' : 'is-clean'}`}>
+                    {locationFormDirty ? 'Unsaved changes' : 'Saved'}
+                  </span>
+                </div>
+                <p>
+                  Referenced by {selectedLocationUsage?.activeTrades ?? 0} active price {selectedLocationUsage?.activeTrades === 1 ? 'index' : 'indices'}
+                  {' '}and {selectedLocationUsage?.totalTrades ?? 0} total price {selectedLocationUsage?.totalTrades === 1 ? 'index' : 'indices'}.
+                </p>
+                {selectedLocation.is_active && (selectedLocationUsage?.activeTrades ?? 0) > 0 && (
+                  <p className="field-error">Deactivate is blocked while active price indices still reference this location.</p>
+                )}
+              </div>
+            )}
+
             <form className="stack-form" onSubmit={handleSaveLocation}>
               <div className="mini-grid">
                 <label className="field">
                   <span>Code</span>
                   <input className="control" value={locationForm.code} onChange={(event) => setLocationForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))} disabled={locationFormMode === 'edit' || savingReference} />
+                  {locationFieldErrors.code && <small className="field-error">{locationFieldErrors.code}</small>}
                 </label>
                 <label className="field">
                   <span>Name</span>
                   <input className="control" value={locationForm.name} onChange={(event) => setLocationForm((current) => ({ ...current, name: event.target.value }))} disabled={savingReference} />
+                  {locationFieldErrors.name && <small className="field-error">{locationFieldErrors.name}</small>}
                 </label>
               </div>
 
@@ -990,6 +1329,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 <label className="field">
                   <span>Location Type</span>
                   <input className="control" value={locationForm.location_type} onChange={(event) => setLocationForm((current) => ({ ...current, location_type: event.target.value.toUpperCase() }))} disabled={savingReference} />
+                  {locationFieldErrors.location_type && <small className="field-error">{locationFieldErrors.location_type}</small>}
                 </label>
                 <label className="field">
                   <span>Market</span>
@@ -1018,7 +1358,11 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 <textarea className="control control-textarea" value={locationForm.description} onChange={(event) => setLocationForm((current) => ({ ...current, description: event.target.value }))} disabled={savingReference} />
               </label>
 
-              <button type="submit" className="button button-primary" disabled={savingReference}>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={savingReference || Boolean(locationFieldErrors.code || locationFieldErrors.name || locationFieldErrors.location_type) || !locationFormDirty}
+              >
                 {savingReference ? 'Saving...' : locationFormMode === 'create' ? 'Create Location' : 'Save Changes'}
               </button>
             </form>
@@ -1040,6 +1384,165 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 <div className="detail-row">
                   <span>Updated</span>
                   <strong>{formatDate(selectedLocation.updated_at)}</strong>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {referenceTab === 'counterparties' && (
+          <div className="stack">
+            <div className="toolbar">
+              <button type="button" className="button button-secondary" onClick={startCreateCounterparty}>
+                New Counterparty
+              </button>
+              {selectedCounterparty && (
+                <button type="button" className="button button-ghost" onClick={() => handleToggleCounterparty(selectedCounterparty)} disabled={savingReference}>
+                  {selectedCounterparty.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+              )}
+            </div>
+
+            <form className="stack-form" onSubmit={handleSaveCounterparty}>
+              <div className="mini-grid">
+                <label className="field">
+                  <span>Code</span>
+                  <input className="control" value={counterpartyForm.code} onChange={(event) => setCounterpartyForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))} disabled={counterpartyFormMode === 'edit' || savingReference} />
+                </label>
+                <label className="field">
+                  <span>Name</span>
+                  <input className="control" value={counterpartyForm.name} onChange={(event) => setCounterpartyForm((current) => ({ ...current, name: event.target.value }))} disabled={savingReference} />
+                </label>
+              </div>
+
+              <div className="mini-grid">
+                <label className="field">
+                  <span>Short Name</span>
+                  <input className="control" value={counterpartyForm.short_name} onChange={(event) => setCounterpartyForm((current) => ({ ...current, short_name: event.target.value }))} disabled={savingReference} />
+                </label>
+                <label className="field">
+                  <span>Type</span>
+                  <input className="control" value={counterpartyForm.counterparty_type} onChange={(event) => setCounterpartyForm((current) => ({ ...current, counterparty_type: event.target.value.toUpperCase() }))} disabled={savingReference} />
+                </label>
+              </div>
+
+              <label className="field">
+                <span>Legal Entity Name</span>
+                <input className="control" value={counterpartyForm.legal_entity_name} onChange={(event) => setCounterpartyForm((current) => ({ ...current, legal_entity_name: event.target.value }))} disabled={savingReference} />
+              </label>
+
+              <label className="field">
+                <span>Country</span>
+                <input className="control" value={counterpartyForm.country_code} onChange={(event) => setCounterpartyForm((current) => ({ ...current, country_code: event.target.value.toUpperCase() }))} disabled={savingReference} />
+              </label>
+
+              <label className="field">
+                <span>Description</span>
+                <textarea className="control control-textarea" value={counterpartyForm.description} onChange={(event) => setCounterpartyForm((current) => ({ ...current, description: event.target.value }))} disabled={savingReference} />
+              </label>
+
+              <button type="submit" className="button button-primary" disabled={savingReference}>
+                {savingReference ? 'Saving...' : counterpartyFormMode === 'create' ? 'Create Counterparty' : 'Save Changes'}
+              </button>
+            </form>
+
+            {selectedCounterparty && counterpartyFormMode === 'edit' && (
+              <div className="detail-list">
+                <div className="detail-row">
+                  <span>Status</span>
+                  <strong>{selectedCounterparty.is_active ? 'Active' : 'Inactive'}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Type</span>
+                  <strong>{selectedCounterparty.counterparty_type}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Country</span>
+                  <strong>{selectedCounterparty.country_code ?? '—'}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Updated</span>
+                  <strong>{formatDate(selectedCounterparty.updated_at)}</strong>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {referenceTab === 'portfolios' && (
+          <div className="stack">
+            <div className="toolbar">
+              <button type="button" className="button button-secondary" onClick={startCreatePortfolio}>
+                New Portfolio
+              </button>
+              {selectedPortfolio && (
+                <button type="button" className="button button-ghost" onClick={() => handleTogglePortfolio(selectedPortfolio)} disabled={savingReference}>
+                  {selectedPortfolio.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+              )}
+            </div>
+
+            <form className="stack-form" onSubmit={handleSavePortfolio}>
+              <div className="mini-grid">
+                <label className="field">
+                  <span>Code</span>
+                  <input className="control" value={portfolioForm.code} onChange={(event) => setPortfolioForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))} disabled={portfolioFormMode === 'edit' || savingReference} />
+                </label>
+                <label className="field">
+                  <span>Name</span>
+                  <input className="control" value={portfolioForm.name} onChange={(event) => setPortfolioForm((current) => ({ ...current, name: event.target.value }))} disabled={savingReference} />
+                </label>
+              </div>
+
+              <label className="field">
+                <span>Book</span>
+                <select className="control" value={portfolioForm.book_code} onChange={(event) => setPortfolioForm((current) => ({ ...current, book_code: event.target.value }))} disabled={savingReference || activeBooks.length === 0}>
+                  {activeBooks.map((book) => (
+                    <option key={book.code} value={book.code}>
+                      {book.code} • {book.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="mini-grid">
+                <label className="field">
+                  <span>Owner</span>
+                  <input className="control" value={portfolioForm.owner} onChange={(event) => setPortfolioForm((current) => ({ ...current, owner: event.target.value }))} disabled={savingReference} />
+                </label>
+                <label className="field">
+                  <span>Strategy</span>
+                  <input className="control" value={portfolioForm.strategy} onChange={(event) => setPortfolioForm((current) => ({ ...current, strategy: event.target.value }))} disabled={savingReference} />
+                </label>
+              </div>
+
+              <label className="field">
+                <span>Description</span>
+                <textarea className="control control-textarea" value={portfolioForm.description} onChange={(event) => setPortfolioForm((current) => ({ ...current, description: event.target.value }))} disabled={savingReference} />
+              </label>
+
+              <button type="submit" className="button button-primary" disabled={savingReference || activeBooks.length === 0}>
+                {savingReference ? 'Saving...' : portfolioFormMode === 'create' ? 'Create Portfolio' : 'Save Changes'}
+              </button>
+            </form>
+
+            {selectedPortfolio && portfolioFormMode === 'edit' && (
+              <div className="detail-list">
+                <div className="detail-row">
+                  <span>Status</span>
+                  <strong>{selectedPortfolio.is_active ? 'Active' : 'Inactive'}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Book</span>
+                  <strong>{selectedPortfolio.book_code}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Owner</span>
+                  <strong>{selectedPortfolio.owner ?? '—'}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Updated</span>
+                  <strong>{formatDate(selectedPortfolio.updated_at)}</strong>
                 </div>
               </div>
             )}

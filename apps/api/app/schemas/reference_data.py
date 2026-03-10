@@ -143,6 +143,59 @@ class LocationOut(ReferenceDataOut):
     timezone: Optional[str]
 
 
+class CounterpartyCreate(ReferenceDataCreate):
+    short_name: Optional[str] = Field(None, min_length=1, max_length=80)
+    legal_entity_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    counterparty_type: str = Field(..., min_length=1, max_length=50)
+    country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+
+
+class CounterpartyUpdate(ReferenceDataUpdate):
+    short_name: Optional[str] = Field(None, min_length=1, max_length=80)
+    legal_entity_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    counterparty_type: Optional[str] = Field(None, min_length=1, max_length=50)
+    country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+
+
+class CounterpartyStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class CounterpartyOut(ReferenceDataOut):
+    short_name: Optional[str]
+    legal_entity_name: Optional[str]
+    counterparty_type: str
+    country_code: Optional[str]
+
+
+class PortfolioCreate(ReferenceDataCreate):
+    book_code: str = Field(..., min_length=1, max_length=50)
+    owner: Optional[str] = Field(None, min_length=1, max_length=120)
+    strategy: Optional[str] = Field(None, min_length=1, max_length=120)
+    trader_persona: Optional[str] = Field(None, min_length=1, max_length=120)
+    risk_archetype: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class PortfolioUpdate(ReferenceDataUpdate):
+    book_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    owner: Optional[str] = Field(None, min_length=1, max_length=120)
+    strategy: Optional[str] = Field(None, min_length=1, max_length=120)
+    trader_persona: Optional[str] = Field(None, min_length=1, max_length=120)
+    risk_archetype: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class PortfolioStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class PortfolioOut(ReferenceDataOut):
+    book_code: str
+    owner: Optional[str]
+    strategy: Optional[str]
+    trader_persona: Optional[str]
+    risk_archetype: Optional[str]
+
+
 class PriceIndexCreate(ReferenceDataCreate):
     commodity_code: str = Field(..., min_length=1, max_length=50)
     currency_code: str = Field(..., min_length=1, max_length=20)

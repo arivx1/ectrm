@@ -1,0 +1,41 @@
+\set ON_ERROR_STOP on
+
+DROP TABLE IF EXISTS trading_source_register;
+
+CREATE TABLE trading_source_register (
+  source_id TEXT PRIMARY KEY,
+  source_name TEXT NOT NULL,
+  source_category TEXT NOT NULL,
+  dataset_name TEXT NOT NULL,
+  business_purpose TEXT NOT NULL,
+  asset_classes TEXT NOT NULL,
+  products_or_regions TEXT NOT NULL,
+  system_owner TEXT NOT NULL,
+  business_owner TEXT NOT NULL,
+  vendor_or_origin TEXT NOT NULL,
+  golden_source TEXT NOT NULL,
+  fallback_source TEXT NOT NULL,
+  update_frequency TEXT NOT NULL,
+  delivery_pattern TEXT NOT NULL,
+  latency_requirement TEXT NOT NULL,
+  retention_requirement TEXT NOT NULL,
+  storage_pattern TEXT NOT NULL,
+  schema_owner TEXT NOT NULL,
+  quality_checks TEXT NOT NULL,
+  reconciliation_method TEXT NOT NULL,
+  usage_scope TEXT NOT NULL,
+  criticality TEXT NOT NULL,
+  license_type TEXT NOT NULL,
+  license_restrictions TEXT NOT NULL,
+  entitlements_required TEXT NOT NULL,
+  cost_model TEXT NOT NULL,
+  sensitivity_class TEXT NOT NULL,
+  availability_slo TEXT NOT NULL,
+  incident_runbook TEXT NOT NULL,
+  monitoring_metrics TEXT NOT NULL,
+  lineage_notes TEXT NOT NULL,
+  last_reviewed_at DATE NOT NULL,
+  status TEXT NOT NULL
+);
+
+\copy trading_source_register FROM '/Users/anthonyrivich/Documents/GitHub/ectrm/docs/engineering/trading-source-register.csv' WITH (FORMAT csv, HEADER true)

@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reference_data.services.external_data import sync_eia_series
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.price_index_observation import PriceIndexObservation
-from apps.api.app.schemas.external_data import ExternalDataRunOut, PriceIndexObservationOut
+from apps.api.app.schemas.external_data import EIASyncRequest, ExternalDataRunOut, PriceIndexObservationOut
 
 router = APIRouter(tags=["external-data"])
 
@@ -38,6 +39,18 @@ def get_external_data_run(run_id: int, db: Session = Depends(get_db)) -> Externa
     if row is None:
         raise HTTPException(status_code=404, detail="External data run not found")
     return _to_run_out(row)
+
+
+@admin_router.post("/eia/sync", response_model=ExternalDataRunOut)
+def trigger_eia_sync(payload: EIASyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    run = sync_eia_series(
+        db,
+        series_id=payload.series_id,
+        price_index_code=payload.price_index_code,
+        lookback_days=payload.lookback_days,
+        requested_by=payload.requested_by,
+    )
+    return _to_run_out(run)
 
 
 @router.get(

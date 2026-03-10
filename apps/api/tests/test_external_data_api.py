@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,7 +17,9 @@ from apps.api.app.routes.external_data import (
     get_external_data_run,
     get_latest_price_index_observation,
     list_external_data_runs,
+    trigger_eia_sync,
 )
+from apps.api.app.schemas.external_data import EIASyncRequest
 
 
 class ExternalDataApiTests(unittest.TestCase):
@@ -155,6 +158,24 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.price_index_code, "WTI_CUSHING_D")
         self.assertEqual(payload.observation_date, date(2026, 3, 10))
         self.assertEqual(payload.value, 67.2)
+
+    def test_trigger_eia_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_eia_series", return_value=expected_run) as sync_mock:
+                payload = trigger_eia_sync(
+                    EIASyncRequest(
+                        price_index_code="WTI_CUSHING_D",
+                        lookback_days=30,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
 
 
 if __name__ == "__main__":

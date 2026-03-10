@@ -17,8 +17,10 @@ from apps.api.app.domains.reference_data.services.records import (
 )
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
@@ -31,6 +33,10 @@ from apps.api.app.schemas.reference_data import (
     CommodityOut,
     CommodityStatusUpdate,
     CommodityUpdate,
+    CounterpartyCreate,
+    CounterpartyOut,
+    CounterpartyStatusUpdate,
+    CounterpartyUpdate,
     CurrencyCreate,
     CurrencyOut,
     CurrencyStatusUpdate,
@@ -43,6 +49,10 @@ from apps.api.app.schemas.reference_data import (
     PriceIndexOut,
     PriceIndexStatusUpdate,
     PriceIndexUpdate,
+    PortfolioCreate,
+    PortfolioOut,
+    PortfolioStatusUpdate,
+    PortfolioUpdate,
     UnitCreate,
     UnitOut,
     UnitStatusUpdate,
@@ -55,9 +65,11 @@ ModelT = TypeVar(
     "ModelT",
     ReferenceBook,
     ReferenceCommodity,
+    ReferenceCounterparty,
     ReferenceCurrency,
     ReferenceUnit,
     ReferenceLocation,
+    ReferencePortfolio,
     ReferencePriceIndex,
 )
 
@@ -78,6 +90,11 @@ def to_out(record: ModelT, schema_cls):
     )
     if isinstance(record, ReferenceCommodity):
         payload["commodity_class"] = record.commodity_class
+    if isinstance(record, ReferenceCounterparty):
+        payload["short_name"] = record.short_name
+        payload["legal_entity_name"] = record.legal_entity_name
+        payload["counterparty_type"] = record.counterparty_type
+        payload["country_code"] = record.country_code
     if isinstance(record, ReferenceCurrency):
         payload["symbol"] = record.symbol
     if isinstance(record, ReferenceUnit):
@@ -92,6 +109,12 @@ def to_out(record: ModelT, schema_cls):
         payload["country_code"] = record.country_code
         payload["region"] = record.region
         payload["timezone"] = record.timezone
+    if isinstance(record, ReferencePortfolio):
+        payload["book_code"] = record.book_code
+        payload["owner"] = record.owner
+        payload["strategy"] = record.strategy
+        payload["trader_persona"] = record.trader_persona
+        payload["risk_archetype"] = record.risk_archetype
     if isinstance(record, ReferencePriceIndex):
         payload["commodity_code"] = record.commodity_code
         payload["currency_code"] = record.currency_code
@@ -144,6 +167,22 @@ def ensure_active_commodity_exists(db: Session, code: str) -> str:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Commodity '{normalized_code}' is not active in reference data",
+        )
+    return normalized_code
+
+
+def ensure_active_book_exists(db: Session, code: str) -> str:
+    normalized_code = normalize_code(code)
+    reference_book = db.execute(
+        select(ReferenceBook).where(
+            ReferenceBook.code == normalized_code,
+            ReferenceBook.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_book is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Book '{normalized_code}' is not active in reference data",
         )
     return normalized_code
 
@@ -380,6 +419,96 @@ def activate_commodity(
     db.commit()
     db.refresh(record)
     return to_out(record, CommodityOut)
+
+
+def _update_counterparty_fields(record, payload, provided_fields: set[str]) -> None:
+    if "short_name" in provided_fields:
+        record.short_name = payload.short_name.strip() if payload.short_name is not None else None
+    if "legal_entity_name" in provided_fields:
+        record.legal_entity_name = payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None
+    if "counterparty_type" in provided_fields and payload.counterparty_type is not None:
+        record.counterparty_type = normalize_code(payload.counterparty_type)
+    if "country_code" in provided_fields:
+        record.country_code = normalize_code(payload.country_code) if payload.country_code else None
+
+
+@router.get("/counterparties", response_model=List[CounterpartyOut])
+def list_counterparties(
+    q: Optional[str] = None,
+    counterparty_type: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> List[CounterpartyOut]:
+    extra_filters = []
+    if counterparty_type:
+        extra_filters.append(ReferenceCounterparty.counterparty_type == normalize_code(counterparty_type))
+    rows = list_reference_records(db, ReferenceCounterparty, q, is_active, limit, offset, extra_filters=extra_filters)
+    return [to_out(row, CounterpartyOut) for row in rows]
+
+
+@router.post("/counterparties", response_model=CounterpartyOut, status_code=201)
+def create_counterparty(payload: CounterpartyCreate, db: Session = Depends(get_db)) -> CounterpartyOut:
+    existing = db.execute(
+        select(ReferenceCounterparty).where(ReferenceCounterparty.code == normalize_code(payload.code))
+    ).scalars().first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Counterparty already exists")
+
+    record = create_reference_record(
+        db,
+        ReferenceCounterparty,
+        payload,
+        extra_values={
+            "short_name": payload.short_name.strip() if payload.short_name is not None else None,
+            "legal_entity_name": payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None,
+            "counterparty_type": normalize_code(payload.counterparty_type),
+            "country_code": normalize_code(payload.country_code) if payload.country_code else None,
+        },
+    )
+    return to_out(record, CounterpartyOut)
+
+
+@router.get("/counterparties/{code}", response_model=CounterpartyOut)
+def get_counterparty(code: str, db: Session = Depends(get_db)) -> CounterpartyOut:
+    record = get_reference_record(db, ReferenceCounterparty, code.strip().upper())
+    return to_out(record, CounterpartyOut)
+
+
+@router.put("/counterparties/{code}", response_model=CounterpartyOut)
+def update_counterparty(code: str, payload: CounterpartyUpdate, db: Session = Depends(get_db)) -> CounterpartyOut:
+    record = get_reference_record(db, ReferenceCounterparty, code.strip().upper())
+    update_reference_record(record, payload, extra_updates=_update_counterparty_fields)
+    db.commit()
+    db.refresh(record)
+    return to_out(record, CounterpartyOut)
+
+
+@router.post("/counterparties/{code}/deactivate", response_model=CounterpartyOut)
+def deactivate_counterparty(
+    code: str,
+    payload: CounterpartyStatusUpdate,
+    db: Session = Depends(get_db),
+) -> CounterpartyOut:
+    record = get_reference_record(db, ReferenceCounterparty, code.strip().upper())
+    set_reference_active_state(record, False, payload.updated_by)
+    db.commit()
+    db.refresh(record)
+    return to_out(record, CounterpartyOut)
+
+
+@router.post("/counterparties/{code}/activate", response_model=CounterpartyOut)
+def activate_counterparty(
+    code: str,
+    payload: CounterpartyStatusUpdate,
+    db: Session = Depends(get_db),
+) -> CounterpartyOut:
+    record = get_reference_record(db, ReferenceCounterparty, code.strip().upper())
+    set_reference_active_state(record, True, payload.updated_by)
+    db.commit()
+    db.refresh(record)
+    return to_out(record, CounterpartyOut)
 
 
 def _update_currency_fields(record, payload, provided_fields: set[str]) -> None:
@@ -650,6 +779,102 @@ def activate_location(
     db.commit()
     db.refresh(record)
     return to_out(record, LocationOut)
+
+
+def _update_portfolio_fields(record, payload, provided_fields: set[str]) -> None:
+    if "book_code" in provided_fields and payload.book_code is not None:
+        record.book_code = normalize_code(payload.book_code)
+    if "owner" in provided_fields:
+        record.owner = payload.owner.strip() if payload.owner is not None else None
+    if "strategy" in provided_fields:
+        record.strategy = payload.strategy.strip() if payload.strategy is not None else None
+    if "trader_persona" in provided_fields:
+        record.trader_persona = payload.trader_persona.strip() if payload.trader_persona is not None else None
+    if "risk_archetype" in provided_fields:
+        record.risk_archetype = normalize_code(payload.risk_archetype) if payload.risk_archetype is not None else None
+
+
+@router.get("/portfolios", response_model=List[PortfolioOut])
+def list_portfolios(
+    q: Optional[str] = None,
+    book_code: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> List[PortfolioOut]:
+    extra_filters = []
+    if book_code:
+        extra_filters.append(ReferencePortfolio.book_code == normalize_code(book_code))
+    rows = list_reference_records(db, ReferencePortfolio, q, is_active, limit, offset, extra_filters=extra_filters)
+    return [to_out(row, PortfolioOut) for row in rows]
+
+
+@router.post("/portfolios", response_model=PortfolioOut, status_code=201)
+def create_portfolio(payload: PortfolioCreate, db: Session = Depends(get_db)) -> PortfolioOut:
+    existing = db.execute(
+        select(ReferencePortfolio).where(ReferencePortfolio.code == normalize_code(payload.code))
+    ).scalars().first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Portfolio already exists")
+
+    book_code = ensure_active_book_exists(db, payload.book_code)
+    record = create_reference_record(
+        db,
+        ReferencePortfolio,
+        payload,
+        extra_values={
+            "book_code": book_code,
+            "owner": payload.owner.strip() if payload.owner is not None else None,
+            "strategy": payload.strategy.strip() if payload.strategy is not None else None,
+            "trader_persona": payload.trader_persona.strip() if payload.trader_persona is not None else None,
+            "risk_archetype": normalize_code(payload.risk_archetype) if payload.risk_archetype is not None else None,
+        },
+    )
+    return to_out(record, PortfolioOut)
+
+
+@router.get("/portfolios/{code}", response_model=PortfolioOut)
+def get_portfolio(code: str, db: Session = Depends(get_db)) -> PortfolioOut:
+    record = get_reference_record(db, ReferencePortfolio, code.strip().upper())
+    return to_out(record, PortfolioOut)
+
+
+@router.put("/portfolios/{code}", response_model=PortfolioOut)
+def update_portfolio(code: str, payload: PortfolioUpdate, db: Session = Depends(get_db)) -> PortfolioOut:
+    record = get_reference_record(db, ReferencePortfolio, code.strip().upper())
+    if "book_code" in payload.model_fields_set and payload.book_code is not None:
+        ensure_active_book_exists(db, payload.book_code)
+    update_reference_record(record, payload, extra_updates=_update_portfolio_fields)
+    db.commit()
+    db.refresh(record)
+    return to_out(record, PortfolioOut)
+
+
+@router.post("/portfolios/{code}/deactivate", response_model=PortfolioOut)
+def deactivate_portfolio(
+    code: str,
+    payload: PortfolioStatusUpdate,
+    db: Session = Depends(get_db),
+) -> PortfolioOut:
+    record = get_reference_record(db, ReferencePortfolio, code.strip().upper())
+    set_reference_active_state(record, False, payload.updated_by)
+    db.commit()
+    db.refresh(record)
+    return to_out(record, PortfolioOut)
+
+
+@router.post("/portfolios/{code}/activate", response_model=PortfolioOut)
+def activate_portfolio(
+    code: str,
+    payload: PortfolioStatusUpdate,
+    db: Session = Depends(get_db),
+) -> PortfolioOut:
+    record = get_reference_record(db, ReferencePortfolio, code.strip().upper())
+    set_reference_active_state(record, True, payload.updated_by)
+    db.commit()
+    db.refresh(record)
+    return to_out(record, PortfolioOut)
 
 
 def _update_commodity_fields(record, payload, provided_fields: set[str]) -> None:

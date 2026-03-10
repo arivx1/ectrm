@@ -4,6 +4,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel
+from pydantic import Field
 
 
 class ExternalDataRunOut(BaseModel):
@@ -18,6 +19,13 @@ class ExternalDataRunOut(BaseModel):
     observation_count: int
     error_summary: Optional[str]
     created_at: datetime
+
+
+class EIASyncRequest(BaseModel):
+    series_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    price_index_code: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    lookback_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    requested_by: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class PriceIndexObservationOut(BaseModel):

@@ -23,3 +23,19 @@ export async function postJson<T>(
     body: JSON.stringify(body),
   })
 }
+
+export async function putJson<T>(
+  url: string,
+  body: Record<string, unknown>,
+  init?: Omit<RequestInit, 'body' | 'method'>,
+): Promise<T> {
+  return fetchJson<T>(url, {
+    ...init,
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+    body: JSON.stringify(body),
+  })
+}

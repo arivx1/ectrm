@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
+from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
@@ -146,6 +147,29 @@ def normalize_pricing_type(value: object | None) -> str:
 def normalize_price_index_code(value: object | None) -> str | None:
     normalized = str(value or "").strip().upper()
     return normalized or None
+
+
+def require_active_book(db: Session, book_code: object | None) -> str:
+    normalized_book_code = str(book_code or "").strip().upper()
+    if not normalized_book_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Book is required and must be selected from reference data",
+        )
+
+    reference_book = db.execute(
+        select(ReferenceBook).where(
+            ReferenceBook.code == normalized_book_code,
+            ReferenceBook.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_book is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Book '{normalized_book_code}' is not active in reference data",
+        )
+
+    return normalized_book_code
 
 
 def require_active_commodity(
@@ -406,7 +430,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     payload_data.get("trade_side"),
                     payload_data.get("legs"),
                 )
-                book = payload_data.get("book") or "CRUDE_PHYS"
+                book = require_active_book(db, payload_data.get("book"))
                 commodity_class, commodity = require_active_commodity(
                     db,
                     payload_data.get("commodity_class"),
@@ -495,7 +519,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     existing.trade_side = normalized_trade_side
                     should_sync_legs = True
                 if "book" in payload_data and payload_data["book"] is not None:
-                    existing.book = payload_data["book"]
+                    existing.book = require_active_book(db, payload_data["book"])
                 if (
                     "commodity" in payload_data and payload_data["commodity"] is not None
                 ) or (

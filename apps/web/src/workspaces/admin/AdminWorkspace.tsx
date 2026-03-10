@@ -32,6 +32,19 @@ type ReferenceRecord = {
 
 type PriceIndexRecord = ReferenceRecord
 
+type ExternalDataRunRecord = {
+  id: number
+  provider: string
+  job_name: string
+  status: string
+  started_at: string
+  finished_at?: string | null
+  requested_by?: string | null
+  series_count: number
+  observation_count: number
+  error_summary?: string | null
+}
+
 type SchemaEntityKey =
   | 'events'
   | 'trades'
@@ -49,6 +62,11 @@ type AdminWorkspaceProps = {
   activeBooks: ReferenceRecord[]
   activeCommodities: ReferenceRecord[]
   priceIndices: PriceIndexRecord[]
+  externalDataRuns: ExternalDataRunRecord[]
+  externalDataSyncing: boolean
+  externalDataError: string
+  externalDataSuccess: string
+  onRunEiaSync: () => Promise<void>
   formatDate: (value: string | null | undefined) => string
   formatMoney: (value: number | null) => string
   formatNumber: (value: number | null, digits?: number) => string
@@ -168,6 +186,11 @@ export function AdminWorkspace({
   activeBooks,
   activeCommodities,
   priceIndices,
+  externalDataRuns,
+  externalDataSyncing,
+  externalDataError,
+  externalDataSuccess,
+  onRunEiaSync,
   formatDate,
   formatMoney,
   formatNumber,
@@ -330,6 +353,11 @@ export function AdminWorkspace({
     ],
   )
 
+  const latestEiaRun = useMemo(
+    () => externalDataRuns.find((run) => run.provider === 'EIA') ?? null,
+    [externalDataRuns],
+  )
+
   return (
     <div className="stack">
       <section className="surface feature-panel admin-hero-surface">
@@ -349,6 +377,63 @@ export function AdminWorkspace({
               <p>{card.note}</p>
             </article>
           ))}
+        </div>
+
+        <div className="admin-sync-panel">
+          <div className="admin-sync-head">
+            <div>
+              <span className="eyebrow">External Data</span>
+              <h3>EIA Sync Control</h3>
+            </div>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => void onRunEiaSync()}
+              disabled={externalDataSyncing}
+            >
+              {externalDataSyncing ? 'Running Sync...' : 'Run EIA Sync'}
+            </button>
+          </div>
+          <p>Trigger the seeded EIA benchmark refresh and inspect recent ingestion runs directly from the admin workspace.</p>
+
+          <div className="admin-sync-status-grid">
+            <article className="admin-card">
+              <strong>Latest Run</strong>
+              <p>{latestEiaRun ? `${latestEiaRun.status} across ${latestEiaRun.series_count} series` : 'No EIA sync has been recorded yet.'}</p>
+              <span>{latestEiaRun ? formatDate(latestEiaRun.finished_at ?? latestEiaRun.started_at) : 'Awaiting first sync'}</span>
+            </article>
+            <article className="admin-card">
+              <strong>Rows Written</strong>
+              <p>{latestEiaRun ? `${latestEiaRun.observation_count} observations written in the latest run.` : 'No observations loaded yet.'}</p>
+              <span>{latestEiaRun ? `Requested by ${latestEiaRun.requested_by ?? 'system'}` : 'No operator recorded'}</span>
+            </article>
+          </div>
+
+          {externalDataError ? <div className="feedback-banner feedback-banner-error">{externalDataError}</div> : null}
+          {externalDataSuccess ? <div className="feedback-banner feedback-banner-success">{externalDataSuccess}</div> : null}
+
+          <div className="admin-run-list">
+            {externalDataRuns.length === 0 ? (
+              <div className="detail-row">
+                <span>No sync history loaded.</span>
+              </div>
+            ) : (
+              externalDataRuns.map((run) => (
+                <article key={run.id} className="admin-run-row">
+                  <div>
+                    <strong>{run.provider} run #{run.id}</strong>
+                    <p>
+                      {run.status} · {run.series_count} series · {run.observation_count} observations
+                    </p>
+                  </div>
+                  <div className="admin-run-meta">
+                    <span>{formatDate(run.finished_at ?? run.started_at)}</span>
+                    <span>{run.requested_by ?? 'system'}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
         </div>
       </section>
 

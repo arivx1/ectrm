@@ -341,12 +341,60 @@
   gap: 1rem;
 }
 
+.admin-sync-status-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .admin-explainability-grid {
   grid-template-columns: minmax(0, 1.15fr) minmax(22rem, 0.85fr);
 }
 
 .admin-summary-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-sync-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.admin-sync-head {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.admin-run-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-run-row {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 1rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.9rem 1rem;
+}
+
+.admin-run-row p {
+  color: rgba(15, 23, 42, 0.72);
+  margin: 0.25rem 0 0;
+}
+
+.admin-run-meta {
+  color: rgba(15, 23, 42, 0.72);
+  display: grid;
+  gap: 0.2rem;
+  justify-items: end;
+  text-align: right;
 }
 
 .domain-map-grid {
@@ -456,6 +504,13 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #6c7782;
+}
+
+.field-error {
+  margin-top: 0.15rem;
+  color: #9a4338;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .control {
@@ -811,6 +866,48 @@
 .reference-stack {
   display: grid;
   gap: 0.7rem;
+}
+
+.reference-usage-card {
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background: rgba(248, 250, 249, 0.9);
+}
+
+.reference-usage-card p {
+  margin: 0.45rem 0 0;
+  color: #66717c;
+  line-height: 1.5;
+}
+
+.reference-usage-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.editor-state-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.34rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.editor-state-pill.is-clean {
+  color: #0d7c5f;
+  background: rgba(18, 124, 108, 0.12);
+}
+
+.editor-state-pill.is-dirty {
+  color: #8b5a14;
+  background: rgba(205, 160, 59, 0.16);
 }
 
 .reference-row {
@@ -1169,6 +1266,7 @@
   .trade-form,
   .trade-form-feature,
   .admin-summary-grid,
+  .admin-sync-status-grid,
   .domain-map-grid,
   .schema-explorer-grid,
   .admin-provenance-grid {
@@ -1182,7 +1280,18 @@
     align-items: start;
   }
 
+  .admin-sync-head,
+  .admin-run-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .section-head p {
+    text-align: left;
+  }
+
+  .admin-run-meta {
+    justify-items: start;
     text-align: left;
   }
 }
