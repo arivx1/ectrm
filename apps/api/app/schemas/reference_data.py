@@ -69,3 +69,109 @@ class CommodityStatusUpdate(ReferenceDataStatusUpdate):
 
 class CommodityOut(ReferenceDataOut):
     commodity_class: str
+
+
+class CurrencyCreate(ReferenceDataCreate):
+    symbol: Optional[str] = Field(None, min_length=1, max_length=10)
+
+
+class CurrencyUpdate(ReferenceDataUpdate):
+    symbol: Optional[str] = Field(None, min_length=1, max_length=10)
+
+
+class CurrencyStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class CurrencyOut(ReferenceDataOut):
+    symbol: Optional[str]
+
+
+class UnitCreate(ReferenceDataCreate):
+    commodity_class: Optional[str] = Field(None, min_length=1, max_length=50)
+    dimension: str = Field(..., min_length=1, max_length=30)
+    base_unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    conversion_factor: Optional[float] = None
+    precision: int = Field(default=3, ge=0, le=12)
+
+
+class UnitUpdate(ReferenceDataUpdate):
+    commodity_class: Optional[str] = Field(None, min_length=1, max_length=50)
+    dimension: Optional[str] = Field(None, min_length=1, max_length=30)
+    base_unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    conversion_factor: Optional[float] = None
+    precision: Optional[int] = Field(None, ge=0, le=12)
+
+
+class UnitStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class UnitOut(ReferenceDataOut):
+    commodity_class: Optional[str]
+    dimension: str
+    base_unit_code: Optional[str]
+    conversion_factor: Optional[float]
+    precision: int
+
+
+class LocationCreate(ReferenceDataCreate):
+    location_type: str = Field(..., min_length=1, max_length=50)
+    market: Optional[str] = Field(None, min_length=1, max_length=80)
+    country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    region: Optional[str] = Field(None, min_length=1, max_length=80)
+    timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class LocationUpdate(ReferenceDataUpdate):
+    location_type: Optional[str] = Field(None, min_length=1, max_length=50)
+    market: Optional[str] = Field(None, min_length=1, max_length=80)
+    country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    region: Optional[str] = Field(None, min_length=1, max_length=80)
+    timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class LocationStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class LocationOut(ReferenceDataOut):
+    location_type: str
+    market: Optional[str]
+    country_code: Optional[str]
+    region: Optional[str]
+    timezone: Optional[str]
+
+
+class PriceIndexCreate(ReferenceDataCreate):
+    commodity_code: str = Field(..., min_length=1, max_length=50)
+    currency_code: str = Field(..., min_length=1, max_length=20)
+    unit_code: str = Field(..., min_length=1, max_length=20)
+    provider: str = Field(..., min_length=1, max_length=120)
+    market: Optional[str] = Field(None, min_length=1, max_length=120)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    calendar_code: Optional[str] = Field(None, min_length=1, max_length=50)
+
+
+class PriceIndexUpdate(ReferenceDataUpdate):
+    commodity_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    currency_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    provider: Optional[str] = Field(None, min_length=1, max_length=120)
+    market: Optional[str] = Field(None, min_length=1, max_length=120)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    calendar_code: Optional[str] = Field(None, min_length=1, max_length=50)
+
+
+class PriceIndexStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class PriceIndexOut(ReferenceDataOut):
+    commodity_code: str
+    currency_code: str
+    unit_code: str
+    provider: str
+    market: Optional[str]
+    location_code: Optional[str]
+    calendar_code: Optional[str]

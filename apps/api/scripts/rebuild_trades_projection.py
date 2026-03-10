@@ -7,6 +7,9 @@ from sqlalchemy import text, select
 from apps.api.app.db.engine import SessionLocal
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_leg import TradeLeg
+from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.shared.enums import PricingType, TradeNature, TradeSide, TradeStructure
 
 
 DEFAULT_BOOK = "CRUDE_PHYS"
@@ -84,11 +87,48 @@ def normalize_commodity_code(value):
     return LEGACY_COMMODITY_CODE_BY_VALUE.get(normalized, normalized or "UNKNOWN")
 
 
+def normalize_pricing_type(value):
+    normalized = str(value or PricingType.FIXED.value).strip().upper()
+    valid_values = {pricing_type.value for pricing_type in PricingType}
+    return normalized if normalized in valid_values else PricingType.FIXED.value
+
+
+def normalize_trade_nature(value):
+    normalized = str(value or TradeNature.PHYSICAL.value).strip().upper()
+    valid_values = {trade_nature.value for trade_nature in TradeNature}
+    return normalized if normalized in valid_values else TradeNature.PHYSICAL.value
+
+
+def normalize_trade_structure(value):
+    normalized = str(value or TradeStructure.SINGLE.value).strip().upper()
+    valid_values = {trade_structure.value for trade_structure in TradeStructure}
+    return normalized if normalized in valid_values else TradeStructure.SINGLE.value
+
+
+def normalize_trade_side(value):
+    normalized = str(value or TradeSide.BUY.value).strip().upper()
+    valid_values = {trade_side.value for trade_side in TradeSide}
+    return normalized if normalized in valid_values else TradeSide.BUY.value
+
+
+def normalize_price_index_code(value):
+    normalized = str(value or "").strip().upper()
+    return normalized or None
+
+
+def normalize_legs(value):
+    if not isinstance(value, list):
+        return []
+    return [leg for leg in value if isinstance(leg, dict)]
+
+
 def main() -> None:
     db = SessionLocal()
 
     try:
         print("Clearing trades projection...")
+        db.execute(text("DELETE FROM trade_legs"))
+        db.execute(text("DELETE FROM trade_price_terms"))
         db.execute(text("DELETE FROM trades"))
         db.commit()
 
@@ -116,12 +156,18 @@ def main() -> None:
                         "trade_id": trade_id,
                         "created_at": now,
                         "updated_at": now,
+                        "trade_nature": normalize_trade_nature(payload.get("trade_nature")),
+                        "trade_structure": normalize_trade_structure(payload.get("trade_structure")),
+                        "trade_side": normalize_trade_side(payload.get("trade_side")),
+                        "legs": normalize_legs(payload.get("legs")),
                         "book": normalize_book(payload.get("book")),
                         "commodity_class": normalize_commodity_class(
                             payload.get("commodity_class"),
                             payload.get("commodity"),
                         ),
                         "commodity": normalize_commodity_code(payload.get("commodity")),
+                        "pricing_type": normalize_pricing_type(payload.get("pricing_type")),
+                        "price_index_code": normalize_price_index_code(payload.get("price_index_code")),
                         "price": to_decimal_or_none(payload.get("price")),
                         "volume": to_decimal_or_none(payload.get("volume")),
                         "status": payload.get("status") or "ACTIVE",
@@ -129,6 +175,16 @@ def main() -> None:
                     }
                 else:
                     existing["updated_at"] = now
+                    if "trade_nature" in payload:
+                        existing["trade_nature"] = normalize_trade_nature(payload.get("trade_nature"))
+                    if "trade_structure" in payload:
+                        existing["trade_structure"] = normalize_trade_structure(
+                            payload.get("trade_structure")
+                        )
+                    if "trade_side" in payload:
+                        existing["trade_side"] = normalize_trade_side(payload.get("trade_side"))
+                    if "legs" in payload:
+                        existing["legs"] = normalize_legs(payload.get("legs"))
                     existing["book"] = normalize_book(payload.get("book", existing.get("book")))
                     if payload.get("commodity_class") is not None or payload.get("commodity") is not None:
                         existing["commodity_class"] = normalize_commodity_class(
@@ -137,6 +193,12 @@ def main() -> None:
                         )
                     if payload.get("commodity") is not None:
                         existing["commodity"] = normalize_commodity_code(payload.get("commodity"))
+                    if "pricing_type" in payload:
+                        existing["pricing_type"] = normalize_pricing_type(payload.get("pricing_type"))
+                    if "price_index_code" in payload:
+                        existing["price_index_code"] = normalize_price_index_code(
+                            payload.get("price_index_code")
+                        )
                     if payload.get("price") is not None:
                         existing["price"] = to_decimal_or_none(payload.get("price"))
                     if payload.get("volume") is not None:
@@ -153,6 +215,14 @@ def main() -> None:
                     continue
 
                 existing["updated_at"] = now
+                if "trade_nature" in payload:
+                    existing["trade_nature"] = normalize_trade_nature(payload.get("trade_nature"))
+                if "trade_structure" in payload:
+                    existing["trade_structure"] = normalize_trade_structure(payload.get("trade_structure"))
+                if "trade_side" in payload:
+                    existing["trade_side"] = normalize_trade_side(payload.get("trade_side"))
+                if "legs" in payload:
+                    existing["legs"] = normalize_legs(payload.get("legs"))
                 if "book" in payload:
                     existing["book"] = normalize_book(payload.get("book"))
                 else:
@@ -164,6 +234,12 @@ def main() -> None:
                     )
                 if payload.get("commodity") is not None:
                     existing["commodity"] = normalize_commodity_code(payload.get("commodity"))
+                if "pricing_type" in payload:
+                    existing["pricing_type"] = normalize_pricing_type(payload.get("pricing_type"))
+                if "price_index_code" in payload:
+                    existing["price_index_code"] = normalize_price_index_code(
+                        payload.get("price_index_code")
+                    )
                 if payload.get("price") is not None:
                     existing["price"] = to_decimal_or_none(payload.get("price"))
                 if payload.get("volume") is not None:
@@ -191,13 +267,68 @@ def main() -> None:
                     trade_id=trade["trade_id"],
                     created_at=trade["created_at"],
                     updated_at=trade["updated_at"],
+                    trade_nature=trade.get("trade_nature", TradeNature.PHYSICAL.value),
+                    trade_structure=trade.get("trade_structure", TradeStructure.SINGLE.value),
+                    trade_side=(
+                        trade.get("trade_side")
+                        if trade.get("trade_structure", TradeStructure.SINGLE.value) == TradeStructure.SWAP.value
+                        else trade.get("trade_side", TradeSide.BUY.value)
+                    ),
                     book=normalize_book(trade.get("book")),
                     commodity_class=trade["commodity_class"],
                     commodity=trade["commodity"],
+                    pricing_type=trade.get("pricing_type", PricingType.FIXED.value),
+                    price_index_code=trade.get("price_index_code"),
                     price=trade["price"],
                     volume=trade["volume"],
                     status=trade["status"],
                     last_event_id=trade["last_event_id"],
+                )
+            )
+            if trade.get("trade_structure", TradeStructure.SINGLE.value) == TradeStructure.SINGLE.value:
+                db.add(
+                    TradeLeg(
+                        trade_leg_id=f"{trade['trade_id']}-leg-1",
+                        trade_id=trade["trade_id"],
+                        leg_no=1,
+                        side=trade.get("trade_side", TradeSide.BUY.value),
+                        commodity_class=trade["commodity_class"],
+                        commodity_code=trade["commodity"],
+                        quantity=trade["volume"],
+                        created_at=trade["created_at"],
+                        updated_at=trade["updated_at"],
+                    )
+                )
+            else:
+                for index, leg in enumerate(trade.get("legs", []), start=1):
+                    db.add(
+                        TradeLeg(
+                            trade_leg_id=f"{trade['trade_id']}-leg-{index}",
+                            trade_id=trade["trade_id"],
+                            leg_no=int(leg.get("leg_no", index)),
+                            side=normalize_trade_side(leg.get("side")),
+                            commodity_class=normalize_commodity_class(
+                                leg.get("commodity_class"),
+                                leg.get("commodity", trade["commodity"]),
+                            ),
+                            commodity_code=normalize_commodity_code(
+                                leg.get("commodity", trade["commodity"])
+                            ),
+                            quantity=to_decimal_or_none(leg.get("volume", trade["volume"])),
+                            created_at=trade["created_at"],
+                            updated_at=trade["updated_at"],
+                        )
+                    )
+            db.add(
+                TradePriceTerm(
+                    trade_price_term_id=f"{trade['trade_id']}-1",
+                    trade_id=trade["trade_id"],
+                    term_no=1,
+                    pricing_type=trade.get("pricing_type", PricingType.FIXED.value),
+                    fixed_price=trade["price"],
+                    price_index_code=trade.get("price_index_code"),
+                    created_at=trade["created_at"],
+                    updated_at=trade["updated_at"],
                 )
             )
 

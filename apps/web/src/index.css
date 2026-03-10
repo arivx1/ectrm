@@ -2,11 +2,11 @@
   font-family: "Avenir Next", "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #173154;
+  color: #13293d;
   background:
-    radial-gradient(circle at top left, rgba(0, 157, 114, 0.09), transparent 26%),
-    radial-gradient(circle at top right, rgba(23, 49, 84, 0.08), transparent 30%),
-    linear-gradient(180deg, #eef2f3 0%, #edf0f2 45%, #e9edef 100%);
+    radial-gradient(circle at top left, rgba(18, 124, 108, 0.09), transparent 28%),
+    radial-gradient(circle at top right, rgba(19, 41, 61, 0.08), transparent 32%),
+    linear-gradient(180deg, #f4f1ea 0%, #f2efe8 42%, #ece9e1 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -27,6 +27,7 @@ body,
 
 body {
   margin: 0;
+  background: transparent;
 }
 
 button,
