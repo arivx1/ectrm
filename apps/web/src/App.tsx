@@ -4,6 +4,7 @@ type Trade = {
   trade_id: string
   created_at: string
   updated_at: string
+  book: string
   commodity: string
   price: number | null
   volume: number | null
@@ -25,21 +26,31 @@ type EventRow = {
   payload: Record<string, unknown>
 }
 
+type PositionRow = {
+  commodity: string
+  net_volume: number
+  updated_at: string
+}
+
 const API_BASE = 'http://localhost:8000'
+const BOOK_OPTIONS = ['CRUDE_PHYS', 'CRUDE_PAPER', 'GAS_PHYS', 'GAS_PAPER']
 
 export default function App() {
   const [health, setHealth] = useState<string>('checking...')
   const [trades, setTrades] = useState<Trade[]>([])
   const [events, setEvents] = useState<EventRow[]>([])
+  const [positions, setPositions] = useState<PositionRow[]>([])
   const [error, setError] = useState<string>('')
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null)
 
   const [tradeIdInput, setTradeIdInput] = useState('')
+  const [bookInput, setBookInput] = useState('CRUDE_PHYS')
   const [commodityInput, setCommodityInput] = useState('crude')
   const [priceInput, setPriceInput] = useState('80.00')
   const [volumeInput, setVolumeInput] = useState('1000')
   const [submitting, setSubmitting] = useState(false)
 
+  const [amendBookInput, setAmendBookInput] = useState('CRUDE_PHYS')
   const [amendCommodityInput, setAmendCommodityInput] = useState('')
   const [amendPriceInput, setAmendPriceInput] = useState('')
   const [amendVolumeInput, setAmendVolumeInput] = useState('')
@@ -47,23 +58,26 @@ export default function App() {
   const [cancelling, setCancelling] = useState(false)
 
   async function loadData() {
-    const [healthRes, tradesRes, eventsRes] = await Promise.all([
+    const [healthRes, tradesRes, eventsRes, positionsRes] = await Promise.all([
       fetch(`${API_BASE}/health`),
       fetch(`${API_BASE}/trades`),
       fetch(`${API_BASE}/events?limit=50`),
+      fetch(`${API_BASE}/positions`),
     ])
 
-    if (!healthRes.ok || !tradesRes.ok || !eventsRes.ok) {
+    if (!healthRes.ok || !tradesRes.ok || !eventsRes.ok || !positionsRes.ok) {
       throw new Error('API request failed')
     }
 
     const healthJson = await healthRes.json()
     const tradesJson = await tradesRes.json()
     const eventsJson = await eventsRes.json()
+    const positionsJson = await positionsRes.json()
 
     setHealth(healthJson.status ?? 'unknown')
     setTrades(tradesJson)
     setEvents(eventsJson)
+    setPositions(positionsJson)
 
     if (tradesJson.length > 0) {
       setSelectedTradeId((current) => {
@@ -92,6 +106,7 @@ export default function App() {
 
   useEffect(() => {
     if (selectedTrade) {
+      setAmendBookInput(selectedTrade.book ?? 'CRUDE_PHYS')
       setAmendCommodityInput(selectedTrade.commodity ?? '')
       setAmendPriceInput(selectedTrade.price?.toString() ?? '')
       setAmendVolumeInput(selectedTrade.volume?.toString() ?? '')
@@ -111,22 +126,13 @@ export default function App() {
     setError('')
 
     const tradeId = tradeIdInput.trim()
+    const book = bookInput
     const commodity = commodityInput.trim()
     const price = Number(priceInput)
     const volume = Number(volumeInput)
 
-    if (!tradeId) {
-      setError('Trade ID is required.')
-      return
-    }
-
-    if (!commodity) {
-      setError('Commodity is required.')
-      return
-    }
-
-    if (Number.isNaN(price) || Number.isNaN(volume)) {
-      setError('Price and volume must be valid numbers.')
+    if (!tradeId || !book || !commodity || Number.isNaN(price) || Number.isNaN(volume)) {
+      setError('Trade ID, book, commodity, price, and volume are required.')
       return
     }
 
@@ -145,11 +151,7 @@ export default function App() {
           event_type: 'TradeCreated',
           occurred_at: new Date().toISOString(),
           actor_id: 'anthony',
-          payload: {
-            commodity,
-            price,
-            volume,
-          },
+          payload: { book, commodity, price, volume },
           schema_version: 1,
         }),
       })
@@ -161,8 +163,8 @@ export default function App() {
 
       await loadData()
       setSelectedTradeId(tradeId)
-
       setTradeIdInput('')
+      setBookInput('CRUDE_PHYS')
       setCommodityInput('crude')
       setPriceInput('80.00')
       setVolumeInput('1000')
@@ -182,17 +184,13 @@ export default function App() {
       return
     }
 
+    const book = amendBookInput
     const commodity = amendCommodityInput.trim()
     const price = Number(amendPriceInput)
     const volume = Number(amendVolumeInput)
 
-    if (!commodity) {
-      setError('Commodity is required.')
-      return
-    }
-
-    if (Number.isNaN(price) || Number.isNaN(volume)) {
-      setError('Price and volume must be valid numbers.')
+    if (!book || !commodity || Number.isNaN(price) || Number.isNaN(volume)) {
+      setError('Book, commodity, price, and volume are required.')
       return
     }
 
@@ -211,11 +209,7 @@ export default function App() {
           event_type: 'TradeAmended',
           occurred_at: new Date().toISOString(),
           actor_id: 'anthony',
-          payload: {
-            commodity,
-            price,
-            volume,
-          },
+          payload: { book, commodity, price, volume },
           schema_version: 1,
         }),
       })
@@ -226,7 +220,6 @@ export default function App() {
       }
 
       await loadData()
-      setSelectedTradeId(selectedTradeId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Amend trade failed.')
     } finally {
@@ -257,9 +250,7 @@ export default function App() {
           event_type: 'TradeCancelled',
           occurred_at: new Date().toISOString(),
           actor_id: 'anthony',
-          payload: {
-            status: 'CANCELLED',
-          },
+          payload: { status: 'CANCELLED' },
           schema_version: 1,
         }),
       })
@@ -270,7 +261,6 @@ export default function App() {
       }
 
       await loadData()
-      setSelectedTradeId(selectedTradeId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Cancel trade failed.')
     } finally {
@@ -289,23 +279,6 @@ export default function App() {
           <p style={{ marginTop: 10, color: '#475569', lineHeight: 1.5 }}>
             Event-sourced trading system with live backend connectivity.
           </p>
-
-          <div style={{ marginTop: 28, display: 'grid', gap: 10 }}>
-            {['Dashboard', 'Trades', 'Events', 'Positions', 'Risk', 'Settlements'].map((item, idx) => (
-              <div
-                key={item}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 16,
-                  background: idx === 0 ? '#0f172a' : 'transparent',
-                  color: idx === 0 ? '#fff' : '#334155',
-                  fontWeight: 500,
-                }}
-              >
-                {item}
-              </div>
-            ))}
-          </div>
         </aside>
 
         <main style={{ flex: 1, padding: 32 }}>
@@ -327,84 +300,66 @@ export default function App() {
 
           <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20, marginBottom: 24 }}>
             <h2 style={{ marginTop: 0 }}>Create Trade</h2>
-            <p style={{ color: '#64748b', marginTop: 4 }}>Emit a TradeCreated event from the UI</p>
-
-            <form
-              onSubmit={handleCreateTrade}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4, minmax(0, 1fr)) auto',
-                gap: 12,
-                marginTop: 16,
-                alignItems: 'end',
-              }}
-            >
+            <form onSubmit={handleCreateTrade} style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr)) auto', gap: 12, marginTop: 16, alignItems: 'end' }}>
               <Field label="Trade ID">
-                <input
-                  value={tradeIdInput}
-                  onChange={(e) => setTradeIdInput(e.target.value)}
-                  placeholder="T-0003"
-                  style={inputStyle}
-                />
+                <input value={tradeIdInput} onChange={(e) => setTradeIdInput(e.target.value)} placeholder="T-0004" style={inputStyle} />
               </Field>
-
+              <Field label="Book">
+                <select value={bookInput} onChange={(e) => setBookInput(e.target.value)} style={inputStyle}>
+                  {BOOK_OPTIONS.map((book) => (
+                    <option key={book} value={book}>{book}</option>
+                  ))}
+                </select>
+              </Field>
               <Field label="Commodity">
-                <input
-                  value={commodityInput}
-                  onChange={(e) => setCommodityInput(e.target.value)}
-                  placeholder="crude"
-                  style={inputStyle}
-                />
+                <input value={commodityInput} onChange={(e) => setCommodityInput(e.target.value)} style={inputStyle} />
               </Field>
-
               <Field label="Price">
-                <input
-                  value={priceInput}
-                  onChange={(e) => setPriceInput(e.target.value)}
-                  placeholder="80.00"
-                  style={inputStyle}
-                />
+                <input value={priceInput} onChange={(e) => setPriceInput(e.target.value)} style={inputStyle} />
               </Field>
-
               <Field label="Volume">
-                <input
-                  value={volumeInput}
-                  onChange={(e) => setVolumeInput(e.target.value)}
-                  placeholder="1000"
-                  style={inputStyle}
-                />
+                <input value={volumeInput} onChange={(e) => setVolumeInput(e.target.value)} style={inputStyle} />
               </Field>
-
               <button type="submit" disabled={submitting} style={buttonStyle}>
                 {submitting ? 'Creating...' : 'Create Trade'}
               </button>
             </form>
           </section>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, marginBottom: 24 }}>
-            {[
-              ['Trades', String(trades.length)],
-              ['Events loaded', String(events.length)],
-              ['Selected trade', selectedTradeId ?? 'none'],
-              ['Status', health],
-            ].map(([label, value]) => (
-              <div key={label} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <div style={{ color: '#64748b', fontSize: 14 }}>{label}</div>
-                <div style={{ marginTop: 8, fontSize: 32, fontWeight: 700 }}>{value}</div>
-              </div>
-            ))}
-          </div>
+          <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20, marginBottom: 24 }}>
+            <h2 style={{ marginTop: 0 }}>Positions</h2>
+            <p style={{ color: '#64748b', marginTop: 4 }}>Active net volume by commodity</p>
+
+            <div style={{ overflow: 'hidden', borderRadius: 18, border: '1px solid #e2e8f0', marginTop: 16 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead style={{ background: '#f8fafc' }}>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Commodity</th>
+                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Net Volume</th>
+                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {positions.map((p) => (
+                    <tr key={p.commodity} style={{ borderTop: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: 14, fontWeight: 600 }}>{p.commodity}</td>
+                      <td style={{ padding: 14 }}>{p.net_volume}</td>
+                      <td style={{ padding: 14 }}>{p.updated_at}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 }}>
             <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
               <h2 style={{ marginTop: 0 }}>Trades</h2>
-              <p style={{ color: '#64748b', marginTop: 4 }}>Click a row to inspect the trade</p>
-
               <div style={{ overflow: 'hidden', borderRadius: 18, border: '1px solid #e2e8f0', marginTop: 16 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ background: '#f8fafc' }}>
                     <tr>
-                      {['Trade ID', 'Commodity', 'Price', 'Volume', 'Status'].map((h) => (
+                      {['Trade ID', 'Book', 'Commodity', 'Price', 'Volume', 'Status'].map((h) => (
                         <th key={h} style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>{h}</th>
                       ))}
                     </tr>
@@ -425,6 +380,7 @@ export default function App() {
                           }}
                         >
                           <td style={{ padding: 14, fontWeight: 600 }}>{trade.trade_id}</td>
+                          <td style={{ padding: 14 }}>{trade.book}</td>
                           <td style={{ padding: 14 }}>{trade.commodity}</td>
                           <td style={{ padding: 14 }}>{trade.price ?? ''}</td>
                           <td style={{ padding: 14 }}>{trade.volume ?? ''}</td>
@@ -445,11 +401,6 @@ export default function App() {
                         </tr>
                       )
                     })}
-                    {trades.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} style={{ padding: 18, color: '#64748b' }}>No trades yet.</td>
-                      </tr>
-                    ) : null}
                   </tbody>
                 </table>
               </div>
@@ -461,13 +412,11 @@ export default function App() {
                 {selectedTrade ? (
                   <div style={{ display: 'grid', gap: 12 }}>
                     <DetailRow label="Trade ID" value={selectedTrade.trade_id} />
+                    <DetailRow label="Book" value={selectedTrade.book} />
                     <DetailRow label="Commodity" value={selectedTrade.commodity} />
                     <DetailRow label="Price" value={selectedTrade.price ?? ''} />
                     <DetailRow label="Volume" value={selectedTrade.volume ?? ''} />
                     <DetailRow label="Status" value={selectedTrade.status} />
-                    <DetailRow label="Created" value={selectedTrade.created_at} />
-                    <DetailRow label="Updated" value={selectedTrade.updated_at} />
-                    <DetailRow label="Last Event ID" value={selectedTrade.last_event_id} />
                   </div>
                 ) : (
                   <div style={{ color: '#64748b' }}>Select a trade.</div>
@@ -476,21 +425,23 @@ export default function App() {
 
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
                 <h2 style={{ marginTop: 0 }}>Amend Trade</h2>
-                <p style={{ color: '#64748b', marginTop: 4 }}>Emit a TradeAmended event for the selected trade</p>
-
                 <form onSubmit={handleAmendTrade} style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+                  <Field label="Book">
+                    <select value={amendBookInput} onChange={(e) => setAmendBookInput(e.target.value)} style={inputStyle}>
+                      {BOOK_OPTIONS.map((book) => (
+                        <option key={book} value={book}>{book}</option>
+                      ))}
+                    </select>
+                  </Field>
                   <Field label="Commodity">
                     <input value={amendCommodityInput} onChange={(e) => setAmendCommodityInput(e.target.value)} style={inputStyle} />
                   </Field>
-
                   <Field label="Price">
                     <input value={amendPriceInput} onChange={(e) => setAmendPriceInput(e.target.value)} style={inputStyle} />
                   </Field>
-
                   <Field label="Volume">
                     <input value={amendVolumeInput} onChange={(e) => setAmendVolumeInput(e.target.value)} style={inputStyle} />
                   </Field>
-
                   <button type="submit" disabled={amending || !selectedTradeId} style={buttonStyle}>
                     {amending ? 'Amending...' : 'Amend Trade'}
                   </button>
@@ -499,8 +450,6 @@ export default function App() {
 
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
                 <h2 style={{ marginTop: 0 }}>Cancel Trade</h2>
-                <p style={{ color: '#64748b', marginTop: 4 }}>Emit a TradeCancelled event for the selected trade</p>
-
                 <button
                   type="button"
                   onClick={handleCancelTrade}
@@ -521,17 +470,12 @@ export default function App() {
 
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
                 <h2 style={{ marginTop: 0 }}>Event Timeline</h2>
-                <p style={{ color: '#64748b', marginTop: 4 }}>Events for the selected trade</p>
-
                 <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
                   {selectedTradeEvents.map((event) => (
                     <div key={event.event_id} style={{ border: '1px solid #e2e8f0', borderRadius: 18, padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                         <strong>{event.event_type}</strong>
                         <span style={{ color: '#64748b', fontSize: 12 }}>{event.recorded_at}</span>
-                      </div>
-                      <div style={{ marginTop: 6, color: '#475569', fontSize: 14 }}>
-                        {event.aggregate_type} / {event.aggregate_id}
                       </div>
                       <pre
                         style={{
@@ -548,9 +492,6 @@ export default function App() {
                       </pre>
                     </div>
                   ))}
-                  {selectedTradeEvents.length === 0 ? (
-                    <div style={{ color: '#64748b' }}>No events for selected trade.</div>
-                  ) : null}
                 </div>
               </div>
             </section>
@@ -572,15 +513,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function DetailRow({ label, value }: { label: string; value: string | number }) {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '120px 1fr',
-        gap: 12,
-        paddingBottom: 10,
-        borderBottom: '1px solid #e2e8f0',
-      }}
-    >
+    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 12, paddingBottom: 10, borderBottom: '1px solid #e2e8f0' }}>
       <div style={{ color: '#64748b', fontSize: 14 }}>{label}</div>
       <div style={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{String(value)}</div>
     </div>

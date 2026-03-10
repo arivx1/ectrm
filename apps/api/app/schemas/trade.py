@@ -10,6 +10,7 @@ class TradeOut(BaseModel):
     trade_id: str
     created_at: datetime
     updated_at: datetime
+    book: str
     commodity: str
     price: Optional[float]
     volume: Optional[float]

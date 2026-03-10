@@ -38,9 +38,11 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
     db.refresh(e)
 
     if e.aggregate_type == "trade" and e.event_type == "TradeCreated":
-        commodity = (e.payload or {}).get("commodity") or "UNKNOWN"
-        price = (e.payload or {}).get("price")
-        volume = (e.payload or {}).get("volume")
+        payload_data = e.payload or {}
+        book = payload_data.get("book") or "CRUDE_PHYS"
+        commodity = payload_data.get("commodity") or "UNKNOWN"
+        price = payload_data.get("price")
+        volume = payload_data.get("volume")
         now = datetime.now(timezone.utc)
 
         existing = db.execute(
@@ -53,6 +55,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     trade_id=e.aggregate_id,
                     created_at=now,
                     updated_at=now,
+                    book=book,
                     commodity=commodity,
                     price=price,
                     volume=volume,
@@ -62,6 +65,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
             )
         else:
             existing.updated_at = now
+            existing.book = book
             existing.commodity = commodity
             existing.price = price
             existing.volume = volume
@@ -79,6 +83,8 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
             payload_data = e.payload or {}
             existing.updated_at = datetime.now(timezone.utc)
 
+            if "book" in payload_data and payload_data["book"] is not None:
+                existing.book = payload_data["book"]
             if "commodity" in payload_data and payload_data["commodity"] is not None:
                 existing.commodity = payload_data["commodity"]
             if "price" in payload_data and payload_data["price"] is not None:
