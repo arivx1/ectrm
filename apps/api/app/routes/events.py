@@ -69,6 +69,27 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 
         db.commit()
 
+    if e.aggregate_type == "trade" and e.event_type == "TradeAmended":
+        existing = db.execute(
+            select(Trade).where(Trade.trade_id == e.aggregate_id)
+        ).scalars().first()
+
+        if existing is not None:
+            payload_data = e.payload or {}
+            existing.updated_at = datetime.now(timezone.utc)
+
+            if "commodity" in payload_data and payload_data["commodity"] is not None:
+                existing.commodity = payload_data["commodity"]
+            if "price" in payload_data and payload_data["price"] is not None:
+                existing.price = payload_data["price"]
+            if "volume" in payload_data and payload_data["volume"] is not None:
+                existing.volume = payload_data["volume"]
+            if "status" in payload_data and payload_data["status"] is not None:
+                existing.status = payload_data["status"]
+
+            existing.last_event_id = e.event_id
+            db.commit()
+
     return EventOut(
         event_id=e.event_id,
         aggregate_type=e.aggregate_type,

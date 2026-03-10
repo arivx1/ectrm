@@ -40,6 +40,11 @@ export default function App() {
   const [volumeInput, setVolumeInput] = useState('1000')
   const [submitting, setSubmitting] = useState(false)
 
+  const [amendCommodityInput, setAmendCommodityInput] = useState('')
+  const [amendPriceInput, setAmendPriceInput] = useState('')
+  const [amendVolumeInput, setAmendVolumeInput] = useState('')
+  const [amending, setAmending] = useState(false)
+
   async function loadData() {
     const [healthRes, tradesRes, eventsRes] = await Promise.all([
       fetch(`${API_BASE}/health`),
@@ -75,6 +80,27 @@ export default function App() {
 
     init()
   }, [])
+
+  const selectedTrade = useMemo(
+    () => trades.find((t) => t.trade_id === selectedTradeId) ?? null,
+    [trades, selectedTradeId],
+  )
+
+  useEffect(() => {
+    if (selectedTrade) {
+      setAmendCommodityInput(selectedTrade.commodity ?? '')
+      setAmendPriceInput(selectedTrade.price?.toString() ?? '')
+      setAmendVolumeInput(selectedTrade.volume?.toString() ?? '')
+    }
+  }, [selectedTrade])
+
+  const selectedTradeEvents = useMemo(
+    () =>
+      events.filter(
+        (e) => e.aggregate_type === 'trade' && e.aggregate_id === selectedTradeId,
+      ),
+    [events, selectedTradeId],
+  )
 
   async function handleCreateTrade(e: React.FormEvent) {
     e.preventDefault()
@@ -143,18 +169,66 @@ export default function App() {
     }
   }
 
-  const selectedTrade = useMemo(
-    () => trades.find((t) => t.trade_id === selectedTradeId) ?? null,
-    [trades, selectedTradeId],
-  )
+  async function handleAmendTrade(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
 
-  const selectedTradeEvents = useMemo(
-    () =>
-      events.filter(
-        (e) => e.aggregate_type === 'trade' && e.aggregate_id === selectedTradeId,
-      ),
-    [events, selectedTradeId],
-  )
+    if (!selectedTradeId) {
+      setError('Select a trade first.')
+      return
+    }
+
+    const commodity = amendCommodityInput.trim()
+    const price = Number(amendPriceInput)
+    const volume = Number(amendVolumeInput)
+
+    if (!commodity) {
+      setError('Commodity is required.')
+      return
+    }
+
+    if (Number.isNaN(price) || Number.isNaN(volume)) {
+      setError('Price and volume must be valid numbers.')
+      return
+    }
+
+    setAmending(true)
+
+    try {
+      const response = await fetch(`${API_BASE}/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-correlation-id': crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          aggregate_type: 'trade',
+          aggregate_id: selectedTradeId,
+          event_type: 'TradeAmended',
+          occurred_at: new Date().toISOString(),
+          actor_id: 'anthony',
+          payload: {
+            commodity,
+            price,
+            volume,
+          },
+          schema_version: 1,
+        }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || 'Amend trade failed')
+      }
+
+      await loadData()
+      setSelectedTradeId(selectedTradeId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Amend trade failed.')
+    } finally {
+      setAmending(false)
+    }
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -256,17 +330,7 @@ export default function App() {
               <button
                 type="submit"
                 disabled={submitting}
-                style={{
-                  height: 42,
-                  borderRadius: 14,
-                  border: 'none',
-                  background: '#0f172a',
-                  color: '#fff',
-                  padding: '0 18px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  opacity: submitting ? 0.7 : 1,
-                }}
+                style={buttonStyle}
               >
                 {submitting ? 'Creating...' : 'Create Trade'}
               </button>
@@ -356,6 +420,52 @@ export default function App() {
               </div>
 
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
+                <h2 style={{ marginTop: 0 }}>Amend Trade</h2>
+                <p style={{ color: '#64748b', marginTop: 4 }}>Emit a TradeAmended event for the selected trade</p>
+
+                <form
+                  onSubmit={handleAmendTrade}
+                  style={{
+                    display: 'grid',
+                    gap: 12,
+                    marginTop: 16,
+                  }}
+                >
+                  <Field label="Commodity">
+                    <input
+                      value={amendCommodityInput}
+                      onChange={(e) => setAmendCommodityInput(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </Field>
+
+                  <Field label="Price">
+                    <input
+                      value={amendPriceInput}
+                      onChange={(e) => setAmendPriceInput(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </Field>
+
+                  <Field label="Volume">
+                    <input
+                      value={amendVolumeInput}
+                      onChange={(e) => setAmendVolumeInput(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </Field>
+
+                  <button
+                    type="submit"
+                    disabled={amending || !selectedTradeId}
+                    style={buttonStyle}
+                  >
+                    {amending ? 'Amending...' : 'Amend Trade'}
+                  </button>
+                </form>
+              </div>
+
+              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
                 <h2 style={{ marginTop: 0 }}>Event Timeline</h2>
                 <p style={{ color: '#64748b', marginTop: 4 }}>Events for the selected trade</p>
 
@@ -431,4 +541,15 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
   outline: 'none',
   background: '#fff',
+}
+
+const buttonStyle: React.CSSProperties = {
+  height: 42,
+  borderRadius: 14,
+  border: 'none',
+  background: '#0f172a',
+  color: '#fff',
+  padding: '0 18px',
+  fontWeight: 600,
+  cursor: 'pointer',
 }
