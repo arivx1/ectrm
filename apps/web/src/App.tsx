@@ -9,6 +9,7 @@ import { TradingWorkspace } from './workspaces/trading/TradingWorkspace'
 import { loadWorkspaceBootstrap } from './entities/app/api'
 import { submitTradeEvent } from './entities/trade/api'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
+import { postJson } from './shared/api'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import {
@@ -24,6 +25,7 @@ import {
   type ReferenceRecord,
   type Trade,
   type TradeLegDraft,
+  type TradingSourceRecord,
   type UnitRecord,
   type ViewKey,
 } from './shared/models'
@@ -76,17 +78,21 @@ export default function App() {
   const [counterparties, setCounterparties] = useState<CounterpartyRecord[]>([])
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
+  const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
   const [error, setError] = useState<string>('')
   const [createError, setCreateError] = useState<string>('')
   const [amendError, setAmendError] = useState<string>('')
   const [referenceDataError, setReferenceDataError] = useState<string>('')
   const [externalDataError, setExternalDataError] = useState<string>('')
   const [externalDataSuccess, setExternalDataSuccess] = useState<string>('')
+  const [tradingSourcesError, setTradingSourcesError] = useState<string>('')
+  const [tradingSourcesSuccess, setTradingSourcesSuccess] = useState<string>('')
   const [referenceDataLoading, setReferenceDataLoading] = useState(true)
   const [appLoading, setAppLoading] = useState(true)
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null)
   const [eventFilter, setEventFilter] = useState('ALL')
   const [externalDataSyncing, setExternalDataSyncing] = useState(false)
+  const [tradingSourcesSyncing, setTradingSourcesSyncing] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
 
@@ -108,6 +114,7 @@ export default function App() {
       counterparties: counterpartiesJson,
       portfolios: portfoliosJson,
       externalDataRuns: externalDataRunsJson,
+      tradingSources: tradingSourcesJson,
     } = await loadWorkspaceBootstrap(API_BASE)
     const nextTrades = tradesJson as Trade[]
     const nextEvents = eventsJson as EventRow[]
@@ -121,6 +128,7 @@ export default function App() {
     const nextCounterparties = counterpartiesJson as CounterpartyRecord[]
     const nextPortfolios = portfoliosJson as PortfolioRecord[]
     const nextExternalDataRuns = externalDataRunsJson as ExternalDataRunRecord[]
+    const nextTradingSources = tradingSourcesJson as TradingSourceRecord[]
 
     setHealth(healthJson.status ?? 'unknown')
     setTrades(nextTrades)
@@ -135,6 +143,7 @@ export default function App() {
     setCounterparties(nextCounterparties)
     setPortfolios(nextPortfolios)
     setExternalDataRuns(nextExternalDataRuns)
+    setTradingSources(nextTradingSources)
     setReferenceDataLoading(false)
     setAppLoading(false)
     setReferenceDataError('')
@@ -335,115 +344,6 @@ export default function App() {
     commodityClassOrder: COMMODITY_CLASS_ORDER,
   })
 
-  const {
-    referenceTab,
-    setReferenceTab,
-    referenceSearch,
-    setReferenceSearch,
-    selectedBookCode,
-    selectedCommodityCode,
-    selectedPriceIndexCode,
-    selectedCurrencyCode,
-    selectedUnitCode,
-    selectedLocationCode,
-    selectedCounterpartyCode,
-    selectedPortfolioCode,
-    bookForm,
-    setBookForm,
-    commodityForm,
-    setCommodityForm,
-    priceIndexForm,
-    setPriceIndexForm,
-    currencyForm,
-    setCurrencyForm,
-    unitForm,
-    setUnitForm,
-    locationForm,
-    setLocationForm,
-    counterpartyForm,
-    setCounterpartyForm,
-    portfolioForm,
-    setPortfolioForm,
-    bookFormMode,
-    commodityFormMode,
-    priceIndexFormMode,
-    currencyFormMode,
-    unitFormMode,
-    locationFormMode,
-    counterpartyFormMode,
-    portfolioFormMode,
-    selectedBook,
-    selectedCommodity,
-    selectedPriceIndex,
-    selectedCurrency,
-    selectedUnit,
-    selectedLocation,
-    selectedCounterparty,
-    selectedPortfolio,
-    filteredBooks,
-    referenceCommodityGroups,
-    filteredPriceIndices,
-    filteredCurrencies,
-    filteredUnits,
-    filteredLocations,
-    filteredCounterparties,
-    filteredPortfolios,
-    selectablePriceIndexUnits,
-    startCreateBook,
-    startEditBook,
-    startCreateCommodity,
-    startEditCommodity,
-    startCreatePriceIndex,
-    startEditPriceIndex,
-    startCreateCurrency,
-    startEditCurrency,
-    startCreateUnit,
-    startEditUnit,
-    startCreateLocation,
-    startEditLocation,
-    startCreateCounterparty,
-    startEditCounterparty,
-    startCreatePortfolio,
-    startEditPortfolio,
-    referenceActionError,
-    referenceActionSuccess,
-    savingReference,
-    handleSaveBook,
-    handleToggleBook,
-    handleSaveCommodity,
-    handleToggleCommodity,
-    handleSavePriceIndex,
-    handleTogglePriceIndex,
-    handleSaveCurrency,
-    handleToggleCurrency,
-    handleSaveUnit,
-    handleToggleUnit,
-    handleSaveLocation,
-    handleToggleLocation,
-    handleSaveCounterparty,
-    handleToggleCounterparty,
-    handleSavePortfolio,
-    handleTogglePortfolio,
-    selectedBookUsage,
-    selectedCommodityUsage,
-    selectedPriceIndexUsage,
-    selectedCurrencyUsage,
-    selectedUnitUsage,
-    selectedLocationUsage,
-    bookFieldErrors,
-    commodityFieldErrors,
-    priceIndexFieldErrors,
-    currencyFieldErrors,
-    unitFieldErrors,
-    locationFieldErrors,
-    bookFormDirty,
-    commodityFormDirty,
-    priceIndexFormDirty,
-    currencyFormDirty,
-    unitFormDirty,
-    locationFormDirty,
-  } = referenceState
-
   async function handleRunEiaSync() {
     setExternalDataSyncing(true)
     setExternalDataError('')
@@ -469,6 +369,26 @@ export default function App() {
       setExternalDataError(err instanceof Error ? err.message : 'Failed to run EIA sync.')
     } finally {
       setExternalDataSyncing(false)
+    }
+  }
+
+  async function handleSeedTradingSources() {
+    setTradingSourcesSyncing(true)
+    setTradingSourcesError('')
+    setTradingSourcesSuccess('')
+    try {
+      const payload = await postJson<{ total_rows: number; created_count: number; updated_count: number }>(
+        `${API_BASE}/admin/trading-sources/seed`,
+        { requested_by: USER_ID, replace_existing: true },
+      )
+      await loadData()
+      setTradingSourcesSuccess(
+        `Trading source register loaded: ${payload.created_count} created, ${payload.updated_count} updated, ${payload.total_rows} total rows.`,
+      )
+    } catch (err) {
+      setTradingSourcesError(err instanceof Error ? err.message : 'Failed to seed trading sources.')
+    } finally {
+      setTradingSourcesSyncing(false)
     }
   }
 
@@ -996,117 +916,7 @@ export default function App() {
 
         {currentView === 'reference' && (
           <ReferenceDataWorkspace
-            referenceTab={referenceTab}
-            setReferenceTab={setReferenceTab}
-            referenceSearch={referenceSearch}
-            setReferenceSearch={setReferenceSearch}
-            filteredBooks={filteredBooks}
-            selectedBookCode={selectedBookCode}
-            startEditBook={startEditBook}
-            referenceCommodityGroups={referenceCommodityGroups}
-            selectedCommodityCode={selectedCommodityCode}
-            startEditCommodity={startEditCommodity}
-            filteredPriceIndices={filteredPriceIndices}
-            selectedPriceIndexCode={selectedPriceIndexCode}
-            startEditPriceIndex={startEditPriceIndex}
-            filteredCurrencies={filteredCurrencies}
-            selectedCurrencyCode={selectedCurrencyCode}
-            startEditCurrency={startEditCurrency}
-            filteredUnits={filteredUnits}
-            selectedUnitCode={selectedUnitCode}
-            startEditUnit={startEditUnit}
-            filteredLocations={filteredLocations}
-            selectedLocationCode={selectedLocationCode}
-            startEditLocation={startEditLocation}
-            filteredCounterparties={filteredCounterparties}
-            selectedCounterpartyCode={selectedCounterpartyCode}
-            startEditCounterparty={startEditCounterparty}
-            filteredPortfolios={filteredPortfolios}
-            selectedPortfolioCode={selectedPortfolioCode}
-            startEditPortfolio={startEditPortfolio}
-            referenceActionError={referenceActionError}
-            referenceActionSuccess={referenceActionSuccess}
-            savingReference={savingReference}
-            selectedBook={selectedBook}
-            bookFormMode={bookFormMode}
-            bookForm={bookForm}
-            setBookForm={setBookForm}
-            startCreateBook={startCreateBook}
-            handleSaveBook={handleSaveBook}
-            handleToggleBook={handleToggleBook}
-            selectedCommodity={selectedCommodity}
-            commodityFormMode={commodityFormMode}
-            commodityForm={commodityForm}
-            setCommodityForm={setCommodityForm}
-            startCreateCommodity={startCreateCommodity}
-            handleSaveCommodity={handleSaveCommodity}
-            handleToggleCommodity={handleToggleCommodity}
-            selectedPriceIndex={selectedPriceIndex}
-            priceIndexFormMode={priceIndexFormMode}
-            priceIndexForm={priceIndexForm}
-            setPriceIndexForm={setPriceIndexForm}
-            startCreatePriceIndex={startCreatePriceIndex}
-            handleSavePriceIndex={handleSavePriceIndex}
-            handleTogglePriceIndex={handleTogglePriceIndex}
-            activeCommodities={activeCommodities}
-            activeCurrencies={activeCurrencies}
-            selectablePriceIndexUnits={selectablePriceIndexUnits}
-            activeLocations={activeLocations}
-            selectedCurrency={selectedCurrency}
-            currencyFormMode={currencyFormMode}
-            currencyForm={currencyForm}
-            setCurrencyForm={setCurrencyForm}
-            startCreateCurrency={startCreateCurrency}
-            handleSaveCurrency={handleSaveCurrency}
-            handleToggleCurrency={handleToggleCurrency}
-            selectedUnit={selectedUnit}
-            unitFormMode={unitFormMode}
-            unitForm={unitForm}
-            setUnitForm={setUnitForm}
-            startCreateUnit={startCreateUnit}
-            handleSaveUnit={handleSaveUnit}
-            handleToggleUnit={handleToggleUnit}
-            selectedLocation={selectedLocation}
-            locationFormMode={locationFormMode}
-            locationForm={locationForm}
-            setLocationForm={setLocationForm}
-            startCreateLocation={startCreateLocation}
-            handleSaveLocation={handleSaveLocation}
-            handleToggleLocation={handleToggleLocation}
-            selectedCounterparty={selectedCounterparty}
-            counterpartyFormMode={counterpartyFormMode}
-            counterpartyForm={counterpartyForm}
-            setCounterpartyForm={setCounterpartyForm}
-            startCreateCounterparty={startCreateCounterparty}
-            handleSaveCounterparty={handleSaveCounterparty}
-            handleToggleCounterparty={handleToggleCounterparty}
-            selectedPortfolio={selectedPortfolio}
-            portfolioFormMode={portfolioFormMode}
-            portfolioForm={portfolioForm}
-            setPortfolioForm={setPortfolioForm}
-            startCreatePortfolio={startCreatePortfolio}
-            handleSavePortfolio={handleSavePortfolio}
-            handleTogglePortfolio={handleTogglePortfolio}
-            activeBooks={activeBooks}
-            selectedBookUsage={selectedBookUsage}
-            selectedCommodityUsage={selectedCommodityUsage}
-            selectedPriceIndexUsage={selectedPriceIndexUsage}
-            selectedCurrencyUsage={selectedCurrencyUsage}
-            selectedUnitUsage={selectedUnitUsage}
-            selectedLocationUsage={selectedLocationUsage}
-            bookFieldErrors={bookFieldErrors}
-            commodityFieldErrors={commodityFieldErrors}
-            priceIndexFieldErrors={priceIndexFieldErrors}
-            currencyFieldErrors={currencyFieldErrors}
-            unitFieldErrors={unitFieldErrors}
-            locationFieldErrors={locationFieldErrors}
-            bookFormDirty={bookFormDirty}
-            commodityFormDirty={commodityFormDirty}
-            priceIndexFormDirty={priceIndexFormDirty}
-            currencyFormDirty={currencyFormDirty}
-            unitFormDirty={unitFormDirty}
-            locationFormDirty={locationFormDirty}
-            commodityClassOrder={COMMODITY_CLASS_ORDER}
+            controller={referenceState}
             formatCommodityClass={formatCommodityClass}
             formatDate={formatDate}
           />
@@ -1123,10 +933,15 @@ export default function App() {
             activeCommodities={activeCommodities}
             priceIndices={priceIndices}
             externalDataRuns={externalDataRuns}
+            tradingSources={tradingSources}
             externalDataSyncing={externalDataSyncing}
             externalDataError={externalDataError}
             externalDataSuccess={externalDataSuccess}
+            tradingSourcesSyncing={tradingSourcesSyncing}
+            tradingSourcesError={tradingSourcesError}
+            tradingSourcesSuccess={tradingSourcesSuccess}
             onRunEiaSync={handleRunEiaSync}
+            onSeedTradingSources={handleSeedTradingSources}
             formatDate={formatDate}
             formatMoney={formatMoney}
             formatNumber={formatNumber}

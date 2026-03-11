@@ -5,12 +5,16 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from apps.api.app.routes.admin_data import admin_router as admin_data_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
 from apps.api.app.routes.external_data import router as external_data_router
 from apps.api.app.routes.events import router as events_router
 from apps.api.app.routes.reference_data import router as reference_data_router
+from apps.api.app.routes.reports import router as reports_router
+from apps.api.app.routes.trading_sources import admin_router as trading_sources_admin_router
 from apps.api.app.routes.trades import router as trades_router
 from apps.api.app.routes.positions import router as positions_router
+from apps.api.app.routes.users import router as users_router
 
 APP_VERSION = "0.0.0-dev"
 
@@ -26,10 +30,14 @@ app.add_middleware(
 
 app.include_router(events_router)
 app.include_router(reference_data_router)
+app.include_router(admin_data_router)
+app.include_router(trading_sources_admin_router)
 app.include_router(external_data_router)
 app.include_router(external_data_admin_router)
 app.include_router(trades_router)
 app.include_router(positions_router)
+app.include_router(reports_router)
+app.include_router(users_router)
 
 
 @app.middleware("http")

@@ -45,6 +45,18 @@ type ExternalDataRunRecord = {
   error_summary?: string | null
 }
 
+type TradingSourceRecord = {
+  source_id: string
+  source_name: string
+  source_category: string
+  business_owner: string
+  system_owner: string
+  criticality: string
+  status: string
+  update_frequency: string
+  last_reviewed_at: string
+}
+
 type SchemaEntityKey =
   | 'events'
   | 'trades'
@@ -63,10 +75,15 @@ type AdminWorkspaceProps = {
   activeCommodities: ReferenceRecord[]
   priceIndices: PriceIndexRecord[]
   externalDataRuns: ExternalDataRunRecord[]
+  tradingSources: TradingSourceRecord[]
   externalDataSyncing: boolean
   externalDataError: string
   externalDataSuccess: string
+  tradingSourcesSyncing: boolean
+  tradingSourcesError: string
+  tradingSourcesSuccess: string
   onRunEiaSync: () => Promise<void>
+  onSeedTradingSources: () => Promise<void>
   formatDate: (value: string | null | undefined) => string
   formatMoney: (value: number | null) => string
   formatNumber: (value: number | null, digits?: number) => string
@@ -187,10 +204,15 @@ export function AdminWorkspace({
   activeCommodities,
   priceIndices,
   externalDataRuns,
+  tradingSources,
   externalDataSyncing,
   externalDataError,
   externalDataSuccess,
+  tradingSourcesSyncing,
+  tradingSourcesError,
+  tradingSourcesSuccess,
   onRunEiaSync,
+  onSeedTradingSources,
   formatDate,
   formatMoney,
   formatNumber,
@@ -358,6 +380,16 @@ export function AdminWorkspace({
     [externalDataRuns],
   )
 
+  const tradingSourcesByCriticality = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of tradingSources) {
+      counts.set(row.criticality, (counts.get(row.criticality) ?? 0) + 1)
+    }
+    return ['tier_0', 'tier_1', 'tier_2', 'tier_3']
+      .map((key) => ({ key, count: counts.get(key) ?? 0 }))
+      .filter((row) => row.count > 0)
+  }, [tradingSources])
+
   return (
     <div className="stack">
       <section className="surface feature-panel admin-hero-surface">
@@ -429,6 +461,67 @@ export function AdminWorkspace({
                   <div className="admin-run-meta">
                     <span>{formatDate(run.finished_at ?? run.started_at)}</span>
                     <span>{run.requested_by ?? 'system'}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="admin-sync-panel">
+          <div className="admin-sync-head">
+            <div>
+              <span className="eyebrow">Platform Metadata</span>
+              <h3>Trading Source Register</h3>
+            </div>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => void onSeedTradingSources()}
+              disabled={tradingSourcesSyncing}
+            >
+              {tradingSourcesSyncing ? 'Seeding Register...' : 'Seed Source Register'}
+            </button>
+          </div>
+          <p>Load the canonical source register from the repo into the API database and inspect the live metadata used for governance.</p>
+
+          <div className="admin-sync-status-grid">
+            <article className="admin-card">
+              <strong>Loaded Sources</strong>
+              <p>{tradingSources.length === 0 ? 'No trading-source metadata has been seeded yet.' : `${tradingSources.length} sources are available in the live register.`}</p>
+              <span>{tradingSources.length === 0 ? 'Seed the register to activate this surface' : `${tradingSources.filter((row) => row.status === 'active').length} active records`}</span>
+            </article>
+            <article className="admin-card">
+              <strong>Criticality Mix</strong>
+              <p>
+                {tradingSourcesByCriticality.length === 0
+                  ? 'Criticality will populate after the first seed.'
+                  : tradingSourcesByCriticality.map((row) => `${row.key}: ${row.count}`).join(' · ')}
+              </p>
+              <span>{tradingSources.length === 0 ? 'Awaiting seed' : 'Derived from live table rows'}</span>
+            </article>
+          </div>
+
+          {tradingSourcesError ? <div className="feedback-banner feedback-banner-error">{tradingSourcesError}</div> : null}
+          {tradingSourcesSuccess ? <div className="feedback-banner feedback-banner-success">{tradingSourcesSuccess}</div> : null}
+
+          <div className="admin-run-list">
+            {tradingSources.length === 0 ? (
+              <div className="detail-row">
+                <span>No trading sources loaded.</span>
+              </div>
+            ) : (
+              tradingSources.slice(0, 10).map((row) => (
+                <article key={row.source_id} className="admin-run-row">
+                  <div>
+                    <strong>{row.source_name}</strong>
+                    <p>
+                      {row.source_category} · {row.criticality} · {row.business_owner}
+                    </p>
+                  </div>
+                  <div className="admin-run-meta">
+                    <span>{row.status}</span>
+                    <span>{formatDate(row.last_reviewed_at)}</span>
                   </div>
                 </article>
               ))

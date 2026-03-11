@@ -12,6 +12,8 @@ from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trading_source import TradingSource
+from apps.api.app.models.user_account import UserAccount
 
 __all__ = [
     "Base",
@@ -29,4 +31,6 @@ __all__ = [
     "ReferencePriceIndexSource",
     "ReferenceUnit",
     "Trade",
+    "TradingSource",
+    "UserAccount",
 ]

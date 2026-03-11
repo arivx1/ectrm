@@ -114,6 +114,42 @@ export type ExternalDataRunRecord = {
   created_at: string
 }
 
+export type TradingSourceRecord = {
+  source_id: string
+  source_name: string
+  source_category: string
+  dataset_name: string
+  business_purpose: string
+  asset_classes: string
+  products_or_regions: string
+  system_owner: string
+  business_owner: string
+  vendor_or_origin: string
+  golden_source: string
+  fallback_source: string
+  update_frequency: string
+  delivery_pattern: string
+  latency_requirement: string
+  retention_requirement: string
+  storage_pattern: string
+  schema_owner: string
+  quality_checks: string
+  reconciliation_method: string
+  usage_scope: string
+  criticality: string
+  license_type: string
+  license_restrictions: string
+  entitlements_required: string
+  cost_model: string
+  sensitivity_class: string
+  availability_slo: string
+  incident_runbook: string
+  monitoring_metrics: string
+  lineage_notes: string
+  last_reviewed_at: string
+  status: string
+}
+
 export type ViewKey = 'dashboard' | 'trades' | 'events' | 'positions' | 'reference' | 'admin'
 export type InspectorTab = 'overview' | 'events' | 'amend' | 'risk'
 export type ReferenceTab =

@@ -23,7 +23,7 @@ PORTFOLIO_ROWS = [
     {
         "code": "REFINERY_FEEDSTOCK",
         "name": "Refinery Feedstock",
-        "book_code": "CRUDE_PHYS",
+        "book_code": "DEMO_CRUDE",
         "owner": "Refinery Supply Desk",
         "strategy": "Physical feedstock coverage",
         "trader_persona": "Feedstock Procurer",
@@ -33,7 +33,7 @@ PORTFOLIO_ROWS = [
     {
         "code": "GAS_HEDGE",
         "name": "Gas Hedge",
-        "book_code": "GAS_OPT",
+        "book_code": "DEMO_GAS",
         "owner": "Gas Supply and Origination",
         "strategy": "Indexed supply hedge",
         "trader_persona": "Hedger",
@@ -43,7 +43,7 @@ PORTFOLIO_ROWS = [
     {
         "code": "RISK_OVERLAY",
         "name": "Risk Overlay",
-        "book_code": "GAS_OPT",
+        "book_code": "DEMO_GAS",
         "owner": "Enterprise Risk Control",
         "strategy": "Exposure reduction overlay",
         "trader_persona": "Risk Manager",
@@ -53,7 +53,7 @@ PORTFOLIO_ROWS = [
     {
         "code": "PRODUCTS_SPREAD_ARB",
         "name": "Products Spread Arbitrage",
-        "book_code": "PRODUCTS_ARB",
+        "book_code": "DEMO_PRODUCTS",
         "owner": "Refined Products Desk",
         "strategy": "Location and crack spread capture",
         "trader_persona": "Arbitrager",
@@ -63,7 +63,7 @@ PORTFOLIO_ROWS = [
     {
         "code": "PROMPT_CRUDE_SPEC",
         "name": "Prompt Crude Spec",
-        "book_code": "CRUDE_PHYS",
+        "book_code": "DEMO_CRUDE",
         "owner": "Discretionary Oil Trader",
         "strategy": "Prompt directional risk",
         "trader_persona": "Speculator",
@@ -73,7 +73,7 @@ PORTFOLIO_ROWS = [
     {
         "code": "REFINERY_PRODUCT_MARKETING",
         "name": "Refinery Product Marketing",
-        "book_code": "PRODUCTS_ARB",
+        "book_code": "DEMO_PRODUCTS",
         "owner": "Refinery Marketing Desk",
         "strategy": "Asset-backed product sales",
         "trader_persona": "Product Marketer",

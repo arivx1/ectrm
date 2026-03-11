@@ -159,12 +159,12 @@ export function useReferenceDataController({
   }, [trades])
 
   const currencyUsageByCode = useMemo(() => {
-    const usage = new Map<string, { activeTrades: number; totalTrades: number }>()
+    const usage = new Map<string, { activeChildren: number; totalChildren: number }>()
     for (const priceIndex of priceIndices) {
-      const current = usage.get(priceIndex.currency_code) ?? { activeTrades: 0, totalTrades: 0 }
-      current.totalTrades += 1
+      const current = usage.get(priceIndex.currency_code) ?? { activeChildren: 0, totalChildren: 0 }
+      current.totalChildren += 1
       if (priceIndex.is_active) {
-        current.activeTrades += 1
+        current.activeChildren += 1
       }
       usage.set(priceIndex.currency_code, current)
     }
@@ -172,12 +172,12 @@ export function useReferenceDataController({
   }, [priceIndices])
 
   const unitUsageByCode = useMemo(() => {
-    const usage = new Map<string, { activeTrades: number; totalTrades: number }>()
+    const usage = new Map<string, { activeChildren: number; totalChildren: number }>()
     for (const priceIndex of priceIndices) {
-      const current = usage.get(priceIndex.unit_code) ?? { activeTrades: 0, totalTrades: 0 }
-      current.totalTrades += 1
+      const current = usage.get(priceIndex.unit_code) ?? { activeChildren: 0, totalChildren: 0 }
+      current.totalChildren += 1
       if (priceIndex.is_active) {
-        current.activeTrades += 1
+        current.activeChildren += 1
       }
       usage.set(priceIndex.unit_code, current)
     }
@@ -185,13 +185,13 @@ export function useReferenceDataController({
   }, [priceIndices])
 
   const locationUsageByCode = useMemo(() => {
-    const usage = new Map<string, { activeTrades: number; totalTrades: number }>()
+    const usage = new Map<string, { activeChildren: number; totalChildren: number }>()
     for (const priceIndex of priceIndices) {
       if (!priceIndex.location_code) continue
-      const current = usage.get(priceIndex.location_code) ?? { activeTrades: 0, totalTrades: 0 }
-      current.totalTrades += 1
+      const current = usage.get(priceIndex.location_code) ?? { activeChildren: 0, totalChildren: 0 }
+      current.totalChildren += 1
       if (priceIndex.is_active) {
-        current.activeTrades += 1
+        current.activeChildren += 1
       }
       usage.set(priceIndex.location_code, current)
     }
@@ -211,15 +211,15 @@ export function useReferenceDataController({
     : null
 
   const selectedCurrencyUsage = selectedCurrency
-    ? currencyUsageByCode.get(selectedCurrency.code) ?? { activeTrades: 0, totalTrades: 0 }
+    ? currencyUsageByCode.get(selectedCurrency.code) ?? { activeChildren: 0, totalChildren: 0 }
     : null
 
   const selectedUnitUsage = selectedUnit
-    ? unitUsageByCode.get(selectedUnit.code) ?? { activeTrades: 0, totalTrades: 0 }
+    ? unitUsageByCode.get(selectedUnit.code) ?? { activeChildren: 0, totalChildren: 0 }
     : null
 
   const selectedLocationUsage = selectedLocation
-    ? locationUsageByCode.get(selectedLocation.code) ?? { activeTrades: 0, totalTrades: 0 }
+    ? locationUsageByCode.get(selectedLocation.code) ?? { activeChildren: 0, totalChildren: 0 }
     : null
 
   const bookFieldErrors = useMemo(() => {
@@ -751,10 +751,10 @@ export function useReferenceDataController({
   }
 
   async function handleToggleCurrency(record: CurrencyRecord) {
-    const usage = currencyUsageByCode.get(record.code) ?? { activeTrades: 0, totalTrades: 0 }
-    if (record.is_active && usage.activeTrades > 0) {
+    const usage = currencyUsageByCode.get(record.code) ?? { activeChildren: 0, totalChildren: 0 }
+    if (record.is_active && usage.activeChildren > 0) {
       setReferenceActionError(
-        `Currency ${record.code} is referenced by ${usage.activeTrades} active price ${usage.activeTrades === 1 ? 'index' : 'indices'}. Reassign them before deactivating.`,
+        `Currency ${record.code} is referenced by ${usage.activeChildren} active price ${usage.activeChildren === 1 ? 'index' : 'indices'}. Reassign them before deactivating.`,
       )
       setReferenceActionSuccess('')
       return
@@ -804,10 +804,10 @@ export function useReferenceDataController({
   }
 
   async function handleToggleUnit(record: UnitRecord) {
-    const usage = unitUsageByCode.get(record.code) ?? { activeTrades: 0, totalTrades: 0 }
-    if (record.is_active && usage.activeTrades > 0) {
+    const usage = unitUsageByCode.get(record.code) ?? { activeChildren: 0, totalChildren: 0 }
+    if (record.is_active && usage.activeChildren > 0) {
       setReferenceActionError(
-        `Unit ${record.code} is referenced by ${usage.activeTrades} active price ${usage.activeTrades === 1 ? 'index' : 'indices'}. Reassign them before deactivating.`,
+        `Unit ${record.code} is referenced by ${usage.activeChildren} active price ${usage.activeChildren === 1 ? 'index' : 'indices'}. Reassign them before deactivating.`,
       )
       setReferenceActionSuccess('')
       return
@@ -852,10 +852,10 @@ export function useReferenceDataController({
   }
 
   async function handleToggleLocation(record: LocationRecord) {
-    const usage = locationUsageByCode.get(record.code) ?? { activeTrades: 0, totalTrades: 0 }
-    if (record.is_active && usage.activeTrades > 0) {
+    const usage = locationUsageByCode.get(record.code) ?? { activeChildren: 0, totalChildren: 0 }
+    if (record.is_active && usage.activeChildren > 0) {
       setReferenceActionError(
-        `Location ${record.code} is referenced by ${usage.activeTrades} active price ${usage.activeTrades === 1 ? 'index' : 'indices'}. Reassign them before deactivating.`,
+        `Location ${record.code} is referenced by ${usage.activeChildren} active price ${usage.activeChildren === 1 ? 'index' : 'indices'}. Reassign them before deactivating.`,
       )
       setReferenceActionSuccess('')
       return
@@ -947,6 +947,11 @@ export function useReferenceDataController({
 
   return {
     ...workspace,
+    activeBooks,
+    activeCommodities,
+    activeCurrencies,
+    activeLocations,
+    commodityClassOrder,
     referenceActionError,
     referenceActionSuccess,
     savingReference,

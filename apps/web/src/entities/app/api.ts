@@ -14,6 +14,7 @@ export type WorkspaceBootstrap = {
   counterparties: unknown[]
   portfolios: unknown[]
   externalDataRuns: unknown[]
+  tradingSources: unknown[]
 }
 
 export async function loadWorkspaceBootstrap(apiBase: string): Promise<WorkspaceBootstrap> {
@@ -31,6 +32,7 @@ export async function loadWorkspaceBootstrap(apiBase: string): Promise<Workspace
     counterparties,
     portfolios,
     externalDataRuns,
+    tradingSources,
   ] = await Promise.all([
     fetchJson<{ status?: string }>(`${apiBase}/health`),
     fetchJson<unknown[]>(`${apiBase}/trades`),
@@ -45,6 +47,7 @@ export async function loadWorkspaceBootstrap(apiBase: string): Promise<Workspace
     fetchJson<unknown[]>(`${apiBase}/reference/counterparties?limit=500`),
     fetchJson<unknown[]>(`${apiBase}/reference/portfolios?limit=500`),
     fetchJson<unknown[]>(`${apiBase}/admin/external-data/runs?limit=10`),
+    fetchJson<unknown[]>(`${apiBase}/admin/trading-sources?limit=500`),
   ])
 
   return {
@@ -61,5 +64,6 @@ export async function loadWorkspaceBootstrap(apiBase: string): Promise<Workspace
     counterparties,
     portfolios,
     externalDataRuns,
+    tradingSources,
   }
 }

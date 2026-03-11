@@ -1,252 +1,13 @@
-import type { Dispatch, SetStateAction } from 'react'
-import type { ReferenceTab } from '../../shared/models'
-
-type ReferenceRecord = {
-  code: string
-  name: string
-  description?: string | null
-  is_active: boolean
-  updated_at?: string
-  version?: number
-  commodity_class?: string
-}
-
-type PriceIndexRecord = ReferenceRecord & {
-  commodity_code: string
-  currency_code: string
-  unit_code: string
-  provider: string
-  market?: string | null
-  location_code?: string | null
-  calendar_code?: string | null
-}
-
-type CurrencyRecord = ReferenceRecord & {
-  symbol?: string | null
-}
-
-type UnitRecord = ReferenceRecord & {
-  commodity_class?: string | null
-  dimension: string
-  base_unit_code?: string | null
-  conversion_factor?: number | null
-  precision: number
-}
-
-type LocationRecord = ReferenceRecord & {
-  location_type: string
-  market?: string | null
-  country_code?: string | null
-  region?: string | null
-  timezone?: string | null
-}
-
-type CounterpartyRecord = ReferenceRecord & {
-  short_name?: string | null
-  legal_entity_name?: string | null
-  counterparty_type: string
-  country_code?: string | null
-}
-
-type PortfolioRecord = ReferenceRecord & {
-  book_code: string
-  owner?: string | null
-  strategy?: string | null
-}
-
-type BookForm = {
-  code: string
-  name: string
-  description: string
-}
-
-type CommodityForm = {
-  code: string
-  name: string
-  description: string
-  commodity_class: string
-}
-
-type PriceIndexForm = {
-  code: string
-  name: string
-  description: string
-  commodity_code: string
-  currency_code: string
-  unit_code: string
-  provider: string
-  market: string
-  location_code: string
-  calendar_code: string
-}
-
-type CurrencyForm = {
-  code: string
-  name: string
-  symbol: string
-  description: string
-}
-
-type UnitForm = {
-  code: string
-  name: string
-  commodity_class: string
-  dimension: string
-  base_unit_code: string
-  conversion_factor: string
-  precision: string
-  description: string
-}
-
-type LocationForm = {
-  code: string
-  name: string
-  location_type: string
-  market: string
-  country_code: string
-  region: string
-  timezone: string
-  description: string
-}
-
-type CounterpartyForm = {
-  code: string
-  name: string
-  short_name: string
-  legal_entity_name: string
-  counterparty_type: string
-  country_code: string
-  description: string
-}
-
-type PortfolioForm = {
-  code: string
-  name: string
-  book_code: string
-  owner: string
-  strategy: string
-  description: string
-}
+import type { useReferenceDataController } from '../../features/reference-data/useReferenceDataController'
 
 type ReferenceDataWorkspaceProps = {
-  referenceTab: ReferenceTab
-  setReferenceTab: (tab: ReferenceTab) => void
-  referenceSearch: string
-  setReferenceSearch: (value: string) => void
-  filteredBooks: ReferenceRecord[]
-  selectedBookCode: string | null
-  startEditBook: (code: string) => void
-  referenceCommodityGroups: Array<{ commodityClass: string; items: ReferenceRecord[] }>
-  selectedCommodityCode: string | null
-  startEditCommodity: (code: string) => void
-  filteredPriceIndices: PriceIndexRecord[]
-  selectedPriceIndexCode: string | null
-  startEditPriceIndex: (code: string) => void
-  filteredCurrencies: CurrencyRecord[]
-  selectedCurrencyCode: string | null
-  startEditCurrency: (code: string) => void
-  filteredUnits: UnitRecord[]
-  selectedUnitCode: string | null
-  startEditUnit: (code: string) => void
-  filteredLocations: LocationRecord[]
-  selectedLocationCode: string | null
-  startEditLocation: (code: string) => void
-  filteredCounterparties: CounterpartyRecord[]
-  selectedCounterpartyCode: string | null
-  startEditCounterparty: (code: string) => void
-  filteredPortfolios: PortfolioRecord[]
-  selectedPortfolioCode: string | null
-  startEditPortfolio: (code: string) => void
-  referenceActionError: string
-  referenceActionSuccess: string
-  savingReference: boolean
-  selectedBook: ReferenceRecord | null
-  bookFormMode: 'create' | 'edit'
-  bookForm: BookForm
-  setBookForm: Dispatch<SetStateAction<BookForm>>
-  startCreateBook: () => void
-  handleSaveBook: (event: React.FormEvent) => void
-  handleToggleBook: (record: ReferenceRecord) => void
-  selectedCommodity: ReferenceRecord | null
-  commodityFormMode: 'create' | 'edit'
-  commodityForm: CommodityForm
-  setCommodityForm: Dispatch<SetStateAction<CommodityForm>>
-  startCreateCommodity: () => void
-  handleSaveCommodity: (event: React.FormEvent) => void
-  handleToggleCommodity: (record: ReferenceRecord) => void
-  selectedPriceIndex: PriceIndexRecord | null
-  priceIndexFormMode: 'create' | 'edit'
-  priceIndexForm: PriceIndexForm
-  setPriceIndexForm: Dispatch<SetStateAction<PriceIndexForm>>
-  startCreatePriceIndex: () => void
-  handleSavePriceIndex: (event: React.FormEvent) => void
-  handleTogglePriceIndex: (record: PriceIndexRecord) => void
-  activeCommodities: ReferenceRecord[]
-  activeCurrencies: CurrencyRecord[]
-  selectablePriceIndexUnits: UnitRecord[]
-  activeLocations: LocationRecord[]
-  selectedCurrency: CurrencyRecord | null
-  currencyFormMode: 'create' | 'edit'
-  currencyForm: CurrencyForm
-  setCurrencyForm: Dispatch<SetStateAction<CurrencyForm>>
-  startCreateCurrency: () => void
-  handleSaveCurrency: (event: React.FormEvent) => void
-  handleToggleCurrency: (record: CurrencyRecord) => void
-  selectedUnit: UnitRecord | null
-  unitFormMode: 'create' | 'edit'
-  unitForm: UnitForm
-  setUnitForm: Dispatch<SetStateAction<UnitForm>>
-  startCreateUnit: () => void
-  handleSaveUnit: (event: React.FormEvent) => void
-  handleToggleUnit: (record: UnitRecord) => void
-  selectedLocation: LocationRecord | null
-  locationFormMode: 'create' | 'edit'
-  locationForm: LocationForm
-  setLocationForm: Dispatch<SetStateAction<LocationForm>>
-  startCreateLocation: () => void
-  handleSaveLocation: (event: React.FormEvent) => void
-  handleToggleLocation: (record: LocationRecord) => void
-  selectedCounterparty: CounterpartyRecord | null
-  counterpartyFormMode: 'create' | 'edit'
-  counterpartyForm: CounterpartyForm
-  setCounterpartyForm: Dispatch<SetStateAction<CounterpartyForm>>
-  startCreateCounterparty: () => void
-  handleSaveCounterparty: (event: React.FormEvent) => void
-  handleToggleCounterparty: (record: CounterpartyRecord) => void
-  selectedPortfolio: PortfolioRecord | null
-  portfolioFormMode: 'create' | 'edit'
-  portfolioForm: PortfolioForm
-  setPortfolioForm: Dispatch<SetStateAction<PortfolioForm>>
-  startCreatePortfolio: () => void
-  handleSavePortfolio: (event: React.FormEvent) => void
-  handleTogglePortfolio: (record: PortfolioRecord) => void
-  activeBooks: ReferenceRecord[]
-  selectedBookUsage: { activeTrades: number; totalTrades: number } | null
-  selectedCommodityUsage: { activeTrades: number; totalTrades: number } | null
-  selectedPriceIndexUsage: { activeTrades: number; totalTrades: number } | null
-  selectedCurrencyUsage: { activeTrades: number; totalTrades: number } | null
-  selectedUnitUsage: { activeTrades: number; totalTrades: number } | null
-  selectedLocationUsage: { activeTrades: number; totalTrades: number } | null
-  bookFieldErrors: Partial<Record<'code' | 'name', string>>
-  commodityFieldErrors: Partial<Record<'code' | 'name' | 'commodity_class', string>>
-  priceIndexFieldErrors: Partial<
-    Record<'code' | 'name' | 'commodity_code' | 'provider' | 'currency_code' | 'unit_code', string>
-  >
-  currencyFieldErrors: Partial<Record<'code' | 'name', string>>
-  unitFieldErrors: Partial<Record<'code' | 'name' | 'commodity_class' | 'dimension' | 'precision', string>>
-  locationFieldErrors: Partial<Record<'code' | 'name' | 'location_type', string>>
-  bookFormDirty: boolean
-  commodityFormDirty: boolean
-  priceIndexFormDirty: boolean
-  currencyFormDirty: boolean
-  unitFormDirty: boolean
-  locationFormDirty: boolean
-  commodityClassOrder: readonly string[]
+  controller: ReturnType<typeof useReferenceDataController>
   formatCommodityClass: (value: string) => string
   formatDate: (value: string | null | undefined) => string
 }
 
 export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
+  const { controller, formatCommodityClass, formatDate } = props
   const {
     referenceTab,
     setReferenceTab,
@@ -359,9 +120,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     unitFormDirty,
     locationFormDirty,
     commodityClassOrder,
-    formatCommodityClass,
-    formatDate,
-  } = props
+  } = controller
 
   return (
     <div className="reference-workspace">
@@ -1089,10 +848,10 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   </span>
                 </div>
                 <p>
-                  Referenced by {selectedCurrencyUsage?.activeTrades ?? 0} active price {selectedCurrencyUsage?.activeTrades === 1 ? 'index' : 'indices'}
-                  {' '}and {selectedCurrencyUsage?.totalTrades ?? 0} total price {selectedCurrencyUsage?.totalTrades === 1 ? 'index' : 'indices'}.
+                  Referenced by {selectedCurrencyUsage?.activeChildren ?? 0} active price {selectedCurrencyUsage?.activeChildren === 1 ? 'index' : 'indices'}
+                  {' '}and {selectedCurrencyUsage?.totalChildren ?? 0} total price {selectedCurrencyUsage?.totalChildren === 1 ? 'index' : 'indices'}.
                 </p>
-                {selectedCurrency.is_active && (selectedCurrencyUsage?.activeTrades ?? 0) > 0 && (
+                {selectedCurrency.is_active && (selectedCurrencyUsage?.activeChildren ?? 0) > 0 && (
                   <p className="field-error">Deactivate is blocked while active price indices still reference this currency.</p>
                 )}
               </div>
@@ -1168,10 +927,10 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   </span>
                 </div>
                 <p>
-                  Referenced by {selectedUnitUsage?.activeTrades ?? 0} active price {selectedUnitUsage?.activeTrades === 1 ? 'index' : 'indices'}
-                  {' '}and {selectedUnitUsage?.totalTrades ?? 0} total price {selectedUnitUsage?.totalTrades === 1 ? 'index' : 'indices'}.
+                  Referenced by {selectedUnitUsage?.activeChildren ?? 0} active price {selectedUnitUsage?.activeChildren === 1 ? 'index' : 'indices'}
+                  {' '}and {selectedUnitUsage?.totalChildren ?? 0} total price {selectedUnitUsage?.totalChildren === 1 ? 'index' : 'indices'}.
                 </p>
-                {selectedUnit.is_active && (selectedUnitUsage?.activeTrades ?? 0) > 0 && (
+                {selectedUnit.is_active && (selectedUnitUsage?.activeChildren ?? 0) > 0 && (
                   <p className="field-error">Deactivate is blocked while active price indices still reference this unit.</p>
                 )}
               </div>
@@ -1302,10 +1061,10 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   </span>
                 </div>
                 <p>
-                  Referenced by {selectedLocationUsage?.activeTrades ?? 0} active price {selectedLocationUsage?.activeTrades === 1 ? 'index' : 'indices'}
-                  {' '}and {selectedLocationUsage?.totalTrades ?? 0} total price {selectedLocationUsage?.totalTrades === 1 ? 'index' : 'indices'}.
+                  Referenced by {selectedLocationUsage?.activeChildren ?? 0} active price {selectedLocationUsage?.activeChildren === 1 ? 'index' : 'indices'}
+                  {' '}and {selectedLocationUsage?.totalChildren ?? 0} total price {selectedLocationUsage?.totalChildren === 1 ? 'index' : 'indices'}.
                 </p>
-                {selectedLocation.is_active && (selectedLocationUsage?.activeTrades ?? 0) > 0 && (
+                {selectedLocation.is_active && (selectedLocationUsage?.activeChildren ?? 0) > 0 && (
                   <p className="field-error">Deactivate is blocked while active price indices still reference this location.</p>
                 )}
               </div>
