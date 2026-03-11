@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -33,6 +33,7 @@ def sync_eia_series(
     price_index_code: Optional[str] = None,
     lookback_days: Optional[int] = None,
     requested_by: Optional[str] = None,
+    today: Optional[date] = None,
 ) -> ExternalDataRun:
     eia_client = client or EIAClient()
     run = _create_run(db, requested_by=requested_by)
@@ -45,7 +46,7 @@ def sync_eia_series(
         downloaded_at = datetime.now(timezone.utc)
         total_observations = 0
         for mapping in mappings:
-            start = build_start_argument(mapping.frequency, lookback_days)
+            start = build_start_argument(mapping.frequency, lookback_days, today=today)
             payload = eia_client.fetch_series(
                 series_id=mapping.series_id,
                 frequency=mapping.frequency.lower(),

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import List, Optional, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.records import (
     create_reference_record,
@@ -277,12 +278,26 @@ def ensure_location_not_in_active_use(db: Session, code: str) -> None:
         )
 
 
+def ensure_price_index_not_in_active_use(db: Session, code: str) -> None:
+    active_trade_count = db.execute(
+        select(func.count()).select_from(Trade).where(
+            Trade.price_index_code == code,
+            Trade.status != "CANCELLED",
+        )
+    ).scalar_one()
+    if active_trade_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Price index cannot be deactivated while active trades reference it",
+        )
+
+
 @router.get("/books", response_model=List[BookOut])
 def list_books(
     q: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[BookOut]:
     rows = list_reference_records(db, ReferenceBook, q, is_active, limit, offset)
@@ -348,8 +363,8 @@ def list_commodities(
     q: Optional[str] = None,
     commodity_class: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[CommodityOut]:
     rows = list_reference_records(db, ReferenceCommodity, q, is_active, limit, offset)
@@ -437,8 +452,8 @@ def list_counterparties(
     q: Optional[str] = None,
     counterparty_type: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[CounterpartyOut]:
     extra_filters = []
@@ -520,8 +535,8 @@ def _update_currency_fields(record, payload, provided_fields: set[str]) -> None:
 def list_currencies(
     q: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[CurrencyOut]:
     rows = list_reference_records(db, ReferenceCurrency, q, is_active, limit, offset)
@@ -606,8 +621,8 @@ def list_units(
     commodity_class: Optional[str] = None,
     dimension: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[UnitOut]:
     extra_filters = []
@@ -703,8 +718,8 @@ def list_locations(
     market: Optional[str] = None,
     location_type: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[LocationOut]:
     extra_filters = []
@@ -799,8 +814,8 @@ def list_portfolios(
     q: Optional[str] = None,
     book_code: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[PortfolioOut]:
     extra_filters = []
@@ -904,8 +919,8 @@ def list_price_indices(
     q: Optional[str] = None,
     commodity_code: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[PriceIndexOut]:
     extra_filters = []
@@ -987,6 +1002,7 @@ def deactivate_price_index(
     db: Session = Depends(get_db),
 ) -> PriceIndexOut:
     record = get_reference_record(db, ReferencePriceIndex, code.strip().upper())
+    ensure_price_index_not_in_active_use(db, record.code)
     set_reference_active_state(record, False, payload.updated_by)
     db.commit()
     db.refresh(record)

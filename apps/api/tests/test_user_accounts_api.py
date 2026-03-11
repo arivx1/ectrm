@@ -52,11 +52,13 @@ class UserAccountsApiTests(unittest.TestCase):
                     email="ops@example.com",
                     display_name="Ops Lead",
                     role="ops_admin",
+                    password="supersecret1",
                     created_by="system",
                 ),
                 db=session,
             )
             self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertTrue(created.password_set)
 
             updated = update_user(
                 "ops_lead",

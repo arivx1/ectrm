@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -122,6 +122,7 @@ class EiaSyncTests(unittest.TestCase):
                 client=client,
                 requested_by="spec-test",
                 lookback_days=14,
+                today=date(2026, 3, 10),
             )
             observations = (
                 session.query(PriceIndexObservation)

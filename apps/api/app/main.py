@@ -2,9 +2,20 @@ from __future__ import annotations
 
 import uuid
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from apps.api.app.core.auth import AuthError, is_admin_role, resolve_session_principal
+from apps.api.app.core.request_context import reset_request_identity, set_request_identity
+from apps.api.app.config import settings
+from apps.api.app.core.query_params import (
+    ADMIN_LIST_LIMIT_DEFAULT,
+    ADMIN_LIST_LIMIT_MAX,
+    STANDARD_LIST_LIMIT_DEFAULT,
+    STANDARD_LIST_LIMIT_MAX,
+)
+from apps.api.app.db.engine import SessionLocal
+from apps.api.app.routes.auth import router as auth_router
 from apps.api.app.routes.admin_data import admin_router as admin_data_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
 from apps.api.app.routes.external_data import router as external_data_router
@@ -15,19 +26,21 @@ from apps.api.app.routes.trading_sources import admin_router as trading_sources_
 from apps.api.app.routes.trades import router as trades_router
 from apps.api.app.routes.positions import router as positions_router
 from apps.api.app.routes.users import router as users_router
+from apps.api.app.schemas.runtime_settings import PaginationSettingsOut, PublicRuntimeSettingsOut
 
-APP_VERSION = "0.0.0-dev"
-
-app = FastAPI(title="E/CTRM API", version=APP_VERSION)
+app = FastAPI(title="E/CTRM API", version=settings.APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.state.session_factory = SessionLocal
+
+app.include_router(auth_router)
 app.include_router(events_router)
 app.include_router(reference_data_router)
 app.include_router(admin_data_router)
@@ -39,14 +52,84 @@ app.include_router(positions_router)
 app.include_router(reports_router)
 app.include_router(users_router)
 
+PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+PUBLIC_WRITE_PATHS = frozenset({"/auth/session", "/auth/bootstrap-admin"})
+ADMIN_PATH_PREFIXES = ("/admin", "/users")
+
+
+def _auth_error(status_code: int, message: str, correlation_id: str) -> JSONResponse:
+    response = JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": "AUTHENTICATION_REQUIRED",
+                "message": message,
+                "correlation_id": correlation_id,
+            }
+        },
+    )
+    response.headers["x-correlation-id"] = correlation_id
+    return response
+
 
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     request.state.correlation_id = correlation_id
-    response = await call_next(request)
-    response.headers["x-correlation-id"] = correlation_id
-    return response
+    session_factory = request.app.state.session_factory
+    principal = None
+
+    with session_factory() as db:
+        try:
+            principal = resolve_session_principal(db, request.headers.get("authorization"))
+        except AuthError as exc:
+            request_path = request.url.path
+            protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
+            admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
+            if protected_write or admin_path:
+                return _auth_error(exc.status_code, exc.message, correlation_id)
+
+    request.state.actor_id = principal.user_id if principal is not None else None
+    request.state.actor_role = principal.role if principal is not None else None
+    request.state.session_id = principal.session_id if principal is not None else None
+    request.state.session_expires_at = principal.expires_at if principal is not None else None
+
+    identity_token = set_request_identity(
+        actor_id=request.state.actor_id,
+        role=request.state.actor_role,
+        session_id=request.state.session_id,
+    )
+
+    try:
+        request_path = request.url.path
+        protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
+        admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
+
+        if admin_path:
+            if principal is None:
+                return _auth_error(
+                    401,
+                    "Authentication is required for admin operations.",
+                    correlation_id,
+                )
+            if not is_admin_role(principal.role):
+                return _auth_error(
+                    403,
+                    "An administrative session is required for this operation.",
+                    correlation_id,
+                )
+        elif protected_write and principal is None:
+            return _auth_error(
+                401,
+                "Authentication is required for write operations.",
+                correlation_id,
+            )
+
+        response = await call_next(request)
+        response.headers["x-correlation-id"] = correlation_id
+        return response
+    finally:
+        reset_request_identity(identity_token)
 
 
 @app.get("/health")
@@ -56,7 +139,26 @@ def health():
 
 @app.get("/version")
 def version():
-    return {"version": APP_VERSION}
+    return {"version": settings.APP_VERSION}
+
+
+@app.get("/settings/public", response_model=PublicRuntimeSettingsOut)
+def public_runtime_settings() -> PublicRuntimeSettingsOut:
+    return PublicRuntimeSettingsOut(
+        app_version=settings.APP_VERSION,
+        cors_allow_origins=settings.cors_allow_origins,
+        mutation_protection_enabled=True,
+        bootstrap_admin_enabled=bool(settings.BOOTSTRAP_ADMIN_TOKEN.strip() or settings.MUTATION_API_TOKEN.strip()),
+        session_ttl_hours=settings.SESSION_TTL_HOURS,
+        eia_base_url=settings.EIA_BASE_URL,
+        eia_timeout_seconds=settings.EIA_TIMEOUT_SECONDS,
+        pagination=PaginationSettingsOut(
+            standard_default=STANDARD_LIST_LIMIT_DEFAULT,
+            standard_max=STANDARD_LIST_LIMIT_MAX,
+            admin_default=ADMIN_LIST_LIMIT_DEFAULT,
+            admin_max=ADMIN_LIST_LIMIT_MAX,
+        ),
+    )
 
 
 @app.exception_handler(Exception)

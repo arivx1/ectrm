@@ -1,4 +1,5 @@
 import { fetchJson } from '../../shared/api'
+import { bootstrapQueryLimits } from '../../shared/config'
 
 export type WorkspaceBootstrap = {
   health: { status?: string }
@@ -17,7 +18,30 @@ export type WorkspaceBootstrap = {
   tradingSources: unknown[]
 }
 
-export async function loadWorkspaceBootstrap(apiBase: string): Promise<WorkspaceBootstrap> {
+export type PublicRuntimeSettings = {
+  app_version: string
+  cors_allow_origins: string[]
+  mutation_protection_enabled: boolean
+  bootstrap_admin_enabled: boolean
+  session_ttl_hours: number
+  eia_base_url: string
+  eia_timeout_seconds: number
+  pagination: {
+    standard_default: number
+    standard_max: number
+    admin_default: number
+    admin_max: number
+  }
+}
+
+function withLimit(path: string, limit: number): string {
+  return `${path}?limit=${limit}`
+}
+
+export async function loadWorkspaceBootstrap(
+  apiBase: string,
+  options?: { adminHeaders?: HeadersInit | null },
+): Promise<WorkspaceBootstrap> {
   const [
     health,
     trades,
@@ -31,24 +55,41 @@ export async function loadWorkspaceBootstrap(apiBase: string): Promise<Workspace
     locations,
     counterparties,
     portfolios,
-    externalDataRuns,
-    tradingSources,
   ] = await Promise.all([
     fetchJson<{ status?: string }>(`${apiBase}/health`),
     fetchJson<unknown[]>(`${apiBase}/trades`),
-    fetchJson<unknown[]>(`${apiBase}/events?limit=100`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`),
     fetchJson<unknown[]>(`${apiBase}/positions`),
-    fetchJson<unknown[]>(`${apiBase}/reference/books?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/reference/commodities?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/reference/price-indices?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/reference/currencies?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/reference/units?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/reference/locations?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/reference/counterparties?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/reference/portfolios?limit=500`),
-    fetchJson<unknown[]>(`${apiBase}/admin/external-data/runs?limit=10`),
-    fetchJson<unknown[]>(`${apiBase}/admin/trading-sources?limit=500`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/commodities', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/price-indices', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/currencies', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/units', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`),
   ])
+
+  let externalDataRuns: unknown[] = []
+  let tradingSources: unknown[] = []
+
+  if (options?.adminHeaders) {
+    try {
+      ;[externalDataRuns, tradingSources] = await Promise.all([
+        fetchJson<unknown[]>(
+          `${apiBase}${withLimit('/admin/external-data/runs', bootstrapQueryLimits.externalDataRuns)}`,
+          { headers: options.adminHeaders },
+        ),
+        fetchJson<unknown[]>(
+          `${apiBase}${withLimit('/admin/trading-sources', bootstrapQueryLimits.tradingSources)}`,
+          { headers: options.adminHeaders },
+        ),
+      ])
+    } catch {
+      externalDataRuns = []
+      tradingSources = []
+    }
+  }
 
   return {
     health,
@@ -66,4 +107,8 @@ export async function loadWorkspaceBootstrap(apiBase: string): Promise<Workspace
     externalDataRuns,
     tradingSources,
   }
+}
+
+export async function loadPublicRuntimeSettings(apiBase: string): Promise<PublicRuntimeSettings> {
+  return fetchJson<PublicRuntimeSettings>(`${apiBase}/settings/public`)
 }

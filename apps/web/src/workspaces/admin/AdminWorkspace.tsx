@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 
 type Trade = {
   trade_id: string
@@ -194,6 +195,31 @@ const SCHEMA_ENTITIES: Array<{
   },
 ]
 
+function projectionFreshnessTooltip(label: string) {
+  switch (label) {
+    case 'Fresh':
+      return 'Trade and position projections are within roughly 15 minutes of the latest loaded event.'
+    case 'Monitoring':
+      return 'Projections are lagging slightly and should be watched, but they are not materially stale yet.'
+    case 'Lagging':
+      return 'Projection updates are meaningfully behind the latest loaded event stream and need investigation.'
+    case 'Awaiting flow':
+      return 'Not enough event or projection data is loaded yet to assess freshness.'
+    default:
+      return 'Projection freshness could not be confidently determined from the currently loaded timestamps.'
+  }
+}
+
+function AdminCardTitle({ label, tooltip }: { label: string; tooltip: string }) {
+  return (
+    <strong>
+      <InlineTooltipLabel tooltip={tooltip} tooltipLabel={`More information about ${label}`} align="start">
+        {label}
+      </InlineTooltipLabel>
+    </strong>
+  )
+}
+
 export function AdminWorkspace({
   selectedTrade,
   selectedTradeEvents,
@@ -351,16 +377,20 @@ export function AdminWorkspace({
         label: 'Events Recorded',
         value: `${events.length}`,
         note: latestEvent ? `Latest ${formatDate(latestEvent.recorded_at)}` : 'No events loaded yet',
+        tooltip: 'Count of event rows currently loaded into the admin workspace session.',
       },
       {
         label: 'Projection State',
         value: projectionFreshnessLabel,
         note: latestTradeProjectionUpdate ? `Trades updated ${formatDate(latestTradeProjectionUpdate.updated_at)}` : 'No trade projection yet',
+        tooltip: 'Compares loaded event timing with trade and position projection timestamps.',
+        valueTooltip: projectionFreshnessTooltip(projectionFreshnessLabel),
       },
       {
         label: 'Reference Records',
         value: `${activeBooks.length + activeCommodities.length + priceIndices.filter((row) => row.is_active).length}`,
         note: `${activeBooks.length} books, ${activeCommodities.length} commodities, ${priceIndices.filter((row) => row.is_active).length} price indices`,
+        tooltip: 'Total active master-data records currently supporting trading and pricing workflows.',
       },
     ],
     [
@@ -404,8 +434,18 @@ export function AdminWorkspace({
         <div className="admin-summary-grid">
           {adminSummaryCards.map((card) => (
             <article key={card.label} className="admin-summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
+              <span>
+                <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
+                  {card.label}
+                </InlineTooltipLabel>
+              </span>
+              {card.valueTooltip ? (
+                <Tooltip content={card.valueTooltip} focusable>
+                  <strong className="tooltip-trigger-hint">{card.value}</strong>
+                </Tooltip>
+              ) : (
+                <strong>{card.value}</strong>
+              )}
               <p>{card.note}</p>
             </article>
           ))}
@@ -430,12 +470,18 @@ export function AdminWorkspace({
 
           <div className="admin-sync-status-grid">
             <article className="admin-card">
-              <strong>Latest Run</strong>
+              <AdminCardTitle
+                label="Latest Run"
+                tooltip="Shows the most recent EIA ingestion attempt and whether it completed successfully."
+              />
               <p>{latestEiaRun ? `${latestEiaRun.status} across ${latestEiaRun.series_count} series` : 'No EIA sync has been recorded yet.'}</p>
               <span>{latestEiaRun ? formatDate(latestEiaRun.finished_at ?? latestEiaRun.started_at) : 'Awaiting first sync'}</span>
             </article>
             <article className="admin-card">
-              <strong>Rows Written</strong>
+              <AdminCardTitle
+                label="Rows Written"
+                tooltip="Observation count written by the most recent EIA ingestion run."
+              />
               <p>{latestEiaRun ? `${latestEiaRun.observation_count} observations written in the latest run.` : 'No observations loaded yet.'}</p>
               <span>{latestEiaRun ? `Requested by ${latestEiaRun.requested_by ?? 'system'}` : 'No operator recorded'}</span>
             </article>
@@ -487,12 +533,18 @@ export function AdminWorkspace({
 
           <div className="admin-sync-status-grid">
             <article className="admin-card">
-              <strong>Loaded Sources</strong>
+              <AdminCardTitle
+                label="Loaded Sources"
+                tooltip="Current number of source-governance records seeded into the live database."
+              />
               <p>{tradingSources.length === 0 ? 'No trading-source metadata has been seeded yet.' : `${tradingSources.length} sources are available in the live register.`}</p>
               <span>{tradingSources.length === 0 ? 'Seed the register to activate this surface' : `${tradingSources.filter((row) => row.status === 'active').length} active records`}</span>
             </article>
             <article className="admin-card">
-              <strong>Criticality Mix</strong>
+              <AdminCardTitle
+                label="Criticality Mix"
+                tooltip="Distribution of trading sources by operational criticality tier."
+              />
               <p>
                 {tradingSourcesByCriticality.length === 0
                   ? 'Criticality will populate after the first seed.'
@@ -621,7 +673,16 @@ export function AdminWorkspace({
                   <span className="eyebrow">Entity</span>
                   <h4>{selectedSchemaDetail.label}</h4>
                 </div>
-                <span className="schema-status">{selectedSchemaDetail.status}</span>
+                <Tooltip
+                  content={
+                    selectedSchemaDetail.status === 'Current'
+                      ? 'This entity already exists in the current product model and runtime.'
+                      : 'This entity is planned for a future iteration and is not live yet.'
+                  }
+                  focusable
+                >
+                  <span className="schema-status tooltip-trigger-hint">{selectedSchemaDetail.status}</span>
+                </Tooltip>
               </div>
 
               <p>{selectedSchemaDetail.purpose}</p>
@@ -675,22 +736,34 @@ export function AdminWorkspace({
 
           <div className="admin-provenance-grid">
             <article className="admin-card">
-              <strong>Latest Event</strong>
+              <AdminCardTitle
+                label="Latest Event"
+                tooltip="Most recent event row currently loaded into the admin explainability surface."
+              />
               <p>{latestEvent ? `${latestEvent.event_type} on ${latestEvent.aggregate_id}` : 'No event has been loaded yet.'}</p>
               <span>{latestEvent ? formatDate(latestEvent.recorded_at) : 'Awaiting activity'}</span>
             </article>
             <article className="admin-card">
-              <strong>Trade Projection</strong>
+              <AdminCardTitle
+                label="Trade Projection"
+                tooltip="Most recent trade read-model row loaded into the admin view."
+              />
               <p>{latestTradeProjectionUpdate ? `Most recent trade row is ${latestTradeProjectionUpdate.trade_id}.` : 'No trade projection loaded yet.'}</p>
               <span>{latestTradeProjectionUpdate ? formatDate(latestTradeProjectionUpdate.updated_at) : 'Awaiting trade state'}</span>
             </article>
             <article className="admin-card">
-              <strong>Positions Projection</strong>
+              <AdminCardTitle
+                label="Positions Projection"
+                tooltip="Most recent positions projection row currently loaded for explainability."
+              />
               <p>{latestPositionProjectionUpdate ? `Latest exposure update is for ${latestPositionProjectionUpdate.commodity}.` : 'No position projection loaded yet.'}</p>
               <span>{latestPositionProjectionUpdate ? formatDate(latestPositionProjectionUpdate.updated_at) : 'Awaiting exposure state'}</span>
             </article>
             <article className="admin-card">
-              <strong>Schema Version</strong>
+              <AdminCardTitle
+                label="Schema Version"
+                tooltip="Event schema version observed on the latest loaded write event."
+              />
               <p>{latestEvent ? `Current loaded writes are emitting schema version ${latestEvent.schema_version}.` : 'Schema version will appear once events are present.'}</p>
               <span>Derived from event feed</span>
             </article>

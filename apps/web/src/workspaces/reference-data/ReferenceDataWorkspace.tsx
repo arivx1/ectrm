@@ -1,4 +1,79 @@
 import type { useReferenceDataController } from '../../features/reference-data/useReferenceDataController'
+import { Tooltip } from '../../shared/ui/Tooltip'
+
+type ReferenceTabKey =
+  | 'books'
+  | 'commodities'
+  | 'price-indices'
+  | 'currencies'
+  | 'units'
+  | 'locations'
+  | 'counterparties'
+  | 'portfolios'
+
+const REFERENCE_TAB_TOOLTIPS: Record<ReferenceTabKey, string> = {
+  books: 'Books are the trading containers used to validate and allocate captured trades.',
+  commodities: 'Commodity masters define the tradable products and their class-level grouping.',
+  'price-indices': 'Price indices support market-linked pricing and settlement references.',
+  currencies: 'Currencies back monetary price index metadata and trade pricing outputs.',
+  units: 'Units define the quantity systems used across commodities and price indices.',
+  locations: 'Locations store market or delivery points used by pricing and logistics models.',
+  counterparties: 'Counterparties identify external firms available for commercial activity.',
+  portfolios: 'Portfolios group trades for reporting, operations, and downstream risk views.',
+}
+
+function ReferenceTabButton({
+  label,
+  active,
+  tooltip,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  tooltip: string
+  onClick: () => void
+}) {
+  return (
+    <Tooltip content={tooltip} placement="bottom">
+      <button type="button" className={`tab-pill ${active ? 'is-active' : ''}`} onClick={onClick}>
+        {label}
+      </button>
+    </Tooltip>
+  )
+}
+
+function ReferenceStatusBadge({ isActive }: { isActive: boolean }) {
+  return (
+    <Tooltip
+      content={
+        isActive
+          ? 'Active records are available to operators and validation rules throughout the product.'
+          : 'Inactive records remain in history but should not be available for new operational choices.'
+      }
+    >
+      <span className={`reference-status ${isActive ? 'is-active' : 'is-inactive'} tooltip-trigger-hint`}>
+        {isActive ? 'Active' : 'Inactive'}
+      </span>
+    </Tooltip>
+  )
+}
+
+function EditorStateBadge({ isDirty }: { isDirty: boolean }) {
+  return (
+    <Tooltip
+      content={
+        isDirty
+          ? 'You have local edits that differ from the saved reference record.'
+          : 'The form currently matches the saved reference record.'
+      }
+      focusable
+    >
+      <span className={`editor-state-pill ${isDirty ? 'is-dirty' : 'is-clean'} tooltip-trigger-hint`}>
+        {isDirty ? 'Unsaved changes' : 'Saved'}
+      </span>
+    </Tooltip>
+  )
+}
 
 type ReferenceDataWorkspaceProps = {
   controller: ReturnType<typeof useReferenceDataController>
@@ -141,30 +216,14 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
         </div>
 
         <div className="tab-row">
-          <button type="button" className={`tab-pill ${referenceTab === 'books' ? 'is-active' : ''}`} onClick={() => setReferenceTab('books')}>
-            Books
-          </button>
-          <button type="button" className={`tab-pill ${referenceTab === 'commodities' ? 'is-active' : ''}`} onClick={() => setReferenceTab('commodities')}>
-            Commodities
-          </button>
-          <button type="button" className={`tab-pill ${referenceTab === 'price-indices' ? 'is-active' : ''}`} onClick={() => setReferenceTab('price-indices')}>
-            Price Indices
-          </button>
-          <button type="button" className={`tab-pill ${referenceTab === 'currencies' ? 'is-active' : ''}`} onClick={() => setReferenceTab('currencies')}>
-            Currencies
-          </button>
-          <button type="button" className={`tab-pill ${referenceTab === 'units' ? 'is-active' : ''}`} onClick={() => setReferenceTab('units')}>
-            Units
-          </button>
-          <button type="button" className={`tab-pill ${referenceTab === 'locations' ? 'is-active' : ''}`} onClick={() => setReferenceTab('locations')}>
-            Locations
-          </button>
-          <button type="button" className={`tab-pill ${referenceTab === 'counterparties' ? 'is-active' : ''}`} onClick={() => setReferenceTab('counterparties')}>
-            Counterparties
-          </button>
-          <button type="button" className={`tab-pill ${referenceTab === 'portfolios' ? 'is-active' : ''}`} onClick={() => setReferenceTab('portfolios')}>
-            Portfolios
-          </button>
+          <ReferenceTabButton label="Books" active={referenceTab === 'books'} tooltip={REFERENCE_TAB_TOOLTIPS.books} onClick={() => setReferenceTab('books')} />
+          <ReferenceTabButton label="Commodities" active={referenceTab === 'commodities'} tooltip={REFERENCE_TAB_TOOLTIPS.commodities} onClick={() => setReferenceTab('commodities')} />
+          <ReferenceTabButton label="Price Indices" active={referenceTab === 'price-indices'} tooltip={REFERENCE_TAB_TOOLTIPS['price-indices']} onClick={() => setReferenceTab('price-indices')} />
+          <ReferenceTabButton label="Currencies" active={referenceTab === 'currencies'} tooltip={REFERENCE_TAB_TOOLTIPS.currencies} onClick={() => setReferenceTab('currencies')} />
+          <ReferenceTabButton label="Units" active={referenceTab === 'units'} tooltip={REFERENCE_TAB_TOOLTIPS.units} onClick={() => setReferenceTab('units')} />
+          <ReferenceTabButton label="Locations" active={referenceTab === 'locations'} tooltip={REFERENCE_TAB_TOOLTIPS.locations} onClick={() => setReferenceTab('locations')} />
+          <ReferenceTabButton label="Counterparties" active={referenceTab === 'counterparties'} tooltip={REFERENCE_TAB_TOOLTIPS.counterparties} onClick={() => setReferenceTab('counterparties')} />
+          <ReferenceTabButton label="Portfolios" active={referenceTab === 'portfolios'} tooltip={REFERENCE_TAB_TOOLTIPS.portfolios} onClick={() => setReferenceTab('portfolios')} />
         </div>
 
         {referenceTab === 'books' && (
@@ -180,9 +239,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   <strong>{book.code}</strong>
                   <p>{book.name}</p>
                 </div>
-                <span className={`reference-status ${book.is_active ? 'is-active' : 'is-inactive'}`}>
-                  {book.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <ReferenceStatusBadge isActive={book.is_active} />
               </button>
             ))}
           </div>
@@ -208,9 +265,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                         <strong>{commodity.code}</strong>
                         <p>{commodity.name}</p>
                       </div>
-                      <span className={`reference-status ${commodity.is_active ? 'is-active' : 'is-inactive'}`}>
-                        {commodity.is_active ? 'Active' : 'Inactive'}
-                      </span>
+                      <ReferenceStatusBadge isActive={commodity.is_active} />
                     </button>
                   ))}
                 </div>
@@ -236,9 +291,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     {priceIndex.market ? ` • ${priceIndex.market}` : ''}
                   </p>
                 </div>
-                <span className={`reference-status ${priceIndex.is_active ? 'is-active' : 'is-inactive'}`}>
-                  {priceIndex.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <ReferenceStatusBadge isActive={priceIndex.is_active} />
               </button>
             ))}
           </div>
@@ -257,9 +310,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   <strong>{currency.code}</strong>
                   <p>{currency.name}</p>
                 </div>
-                <span className={`reference-status ${currency.is_active ? 'is-active' : 'is-inactive'}`}>
-                  {currency.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <ReferenceStatusBadge isActive={currency.is_active} />
               </button>
             ))}
           </div>
@@ -282,9 +333,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     {unit.commodity_class ? ` • ${formatCommodityClass(unit.commodity_class)}` : ''}
                   </p>
                 </div>
-                <span className={`reference-status ${unit.is_active ? 'is-active' : 'is-inactive'}`}>
-                  {unit.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <ReferenceStatusBadge isActive={unit.is_active} />
               </button>
             ))}
           </div>
@@ -307,9 +356,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     {location.market ? ` • ${location.market}` : ''}
                   </p>
                 </div>
-                <span className={`reference-status ${location.is_active ? 'is-active' : 'is-inactive'}`}>
-                  {location.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <ReferenceStatusBadge isActive={location.is_active} />
               </button>
             ))}
           </div>
@@ -332,9 +379,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     {counterparty.country_code ? ` • ${counterparty.country_code}` : ''}
                   </p>
                 </div>
-                <span className={`reference-status ${counterparty.is_active ? 'is-active' : 'is-inactive'}`}>
-                  {counterparty.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <ReferenceStatusBadge isActive={counterparty.is_active} />
               </button>
             ))}
           </div>
@@ -357,9 +402,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                     {portfolio.strategy ? ` • ${portfolio.strategy}` : ''}
                   </p>
                 </div>
-                <span className={`reference-status ${portfolio.is_active ? 'is-active' : 'is-inactive'}`}>
-                  {portfolio.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <ReferenceStatusBadge isActive={portfolio.is_active} />
               </button>
             ))}
           </div>
@@ -411,9 +454,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <div className="reference-usage-card">
                 <div className="reference-usage-head">
                   <strong>Usage</strong>
-                  <span className={`editor-state-pill ${bookFormDirty ? 'is-dirty' : 'is-clean'}`}>
-                    {bookFormDirty ? 'Unsaved changes' : 'Saved'}
-                  </span>
+                  <EditorStateBadge isDirty={bookFormDirty} />
                 </div>
                 <p>
                   Used by {selectedBookUsage?.activeTrades ?? 0} active trade{selectedBookUsage?.activeTrades === 1 ? '' : 's'}
@@ -504,9 +545,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <div className="reference-usage-card">
                 <div className="reference-usage-head">
                   <strong>Usage</strong>
-                  <span className={`editor-state-pill ${commodityFormDirty ? 'is-dirty' : 'is-clean'}`}>
-                    {commodityFormDirty ? 'Unsaved changes' : 'Saved'}
-                  </span>
+                  <EditorStateBadge isDirty={commodityFormDirty} />
                 </div>
                 <p>
                   Used by {selectedCommodityUsage?.activeTrades ?? 0} active trade{selectedCommodityUsage?.activeTrades === 1 ? '' : 's'}
@@ -618,9 +657,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <div className="reference-usage-card">
                 <div className="reference-usage-head">
                   <strong>Usage</strong>
-                  <span className={`editor-state-pill ${priceIndexFormDirty ? 'is-dirty' : 'is-clean'}`}>
-                    {priceIndexFormDirty ? 'Unsaved changes' : 'Saved'}
-                  </span>
+                  <EditorStateBadge isDirty={priceIndexFormDirty} />
                 </div>
                 <p>
                   Used by {selectedPriceIndexUsage?.activeTrades ?? 0} active trade{selectedPriceIndexUsage?.activeTrades === 1 ? '' : 's'}
@@ -843,9 +880,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <div className="reference-usage-card">
                 <div className="reference-usage-head">
                   <strong>Usage</strong>
-                  <span className={`editor-state-pill ${currencyFormDirty ? 'is-dirty' : 'is-clean'}`}>
-                    {currencyFormDirty ? 'Unsaved changes' : 'Saved'}
-                  </span>
+                  <EditorStateBadge isDirty={currencyFormDirty} />
                 </div>
                 <p>
                   Referenced by {selectedCurrencyUsage?.activeChildren ?? 0} active price {selectedCurrencyUsage?.activeChildren === 1 ? 'index' : 'indices'}
@@ -922,9 +957,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <div className="reference-usage-card">
                 <div className="reference-usage-head">
                   <strong>Usage</strong>
-                  <span className={`editor-state-pill ${unitFormDirty ? 'is-dirty' : 'is-clean'}`}>
-                    {unitFormDirty ? 'Unsaved changes' : 'Saved'}
-                  </span>
+                  <EditorStateBadge isDirty={unitFormDirty} />
                 </div>
                 <p>
                   Referenced by {selectedUnitUsage?.activeChildren ?? 0} active price {selectedUnitUsage?.activeChildren === 1 ? 'index' : 'indices'}
@@ -1056,9 +1089,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <div className="reference-usage-card">
                 <div className="reference-usage-head">
                   <strong>Usage</strong>
-                  <span className={`editor-state-pill ${locationFormDirty ? 'is-dirty' : 'is-clean'}`}>
-                    {locationFormDirty ? 'Unsaved changes' : 'Saved'}
-                  </span>
+                  <EditorStateBadge isDirty={locationFormDirty} />
                 </div>
                 <p>
                   Referenced by {selectedLocationUsage?.activeChildren ?? 0} active price {selectedLocationUsage?.activeChildren === 1 ? 'index' : 'indices'}

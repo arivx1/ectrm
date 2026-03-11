@@ -1,4 +1,7 @@
 import { TradeLegEditor } from './TradeLegEditor'
+import { tradeTooltipCopy } from './tooltipCopy'
+import { FieldLabel } from '../../shared/ui/Tooltip'
+import { pricingTypeRequiresPriceIndex, tradeStructureSupportsLegs } from '../../shared/trading'
 
 type ReferenceRecord = {
   code: string
@@ -127,7 +130,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>Structure</span>
+          <FieldLabel label="Structure" tooltip={tradeTooltipCopy.structure} />
           <select className="control" value={tradeStructureInput} onChange={(event) => setTradeStructureInput(event.target.value)}>
             {tradeStructureOptions.map((option) => (
               <option key={option} value={option}>
@@ -137,8 +140,13 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>Side</span>
-          <select className="control" value={tradeSideInput} onChange={(event) => setTradeSideInput(event.target.value)} disabled={tradeStructureInput === 'SWAP'}>
+          <FieldLabel label="Side" tooltip={tradeTooltipCopy.side} />
+          <select
+            className="control"
+            value={tradeSideInput}
+            onChange={(event) => setTradeSideInput(event.target.value)}
+            disabled={tradeStructureSupportsLegs(tradeStructureInput)}
+          >
             {tradeSideOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -200,7 +208,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           <input className="control" inputMode="decimal" value={volumeInput} onChange={(event) => setVolumeInput(event.target.value)} />
         </label>
         <label className="field">
-          <span>Pricing</span>
+          <FieldLabel label="Pricing" tooltip={tradeTooltipCopy.pricing} />
           <select className="control" value={pricingTypeInput} onChange={(event) => setPricingTypeInput(event.target.value)}>
             {pricingTypeOptions.map((option) => (
               <option key={option} value={option}>
@@ -210,12 +218,12 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           </select>
         </label>
         <label className="field field-wide">
-          <span>Price Index</span>
+          <FieldLabel label="Price Index" tooltip={tradeTooltipCopy.priceIndex} />
           <select
             className="control"
             value={priceIndexInput}
             onChange={(event) => setPriceIndexInput(event.target.value)}
-            disabled={pricingTypeInput === 'FIXED' || pricingTypeInput === 'FORMULA' || createPriceIndexOptions.length === 0}
+            disabled={!pricingTypeRequiresPriceIndex(pricingTypeInput) || createPriceIndexOptions.length === 0}
           >
             <option value="">No price index</option>
             {createPriceIndexOptions.map((priceIndex) => (
@@ -230,7 +238,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
         </button>
       </form>
 
-      {tradeStructureInput === 'SWAP' && (
+      {tradeStructureSupportsLegs(tradeStructureInput) && (
         <TradeLegEditor
           title="Swap Legs"
           legs={createLegs}

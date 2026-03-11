@@ -1,4 +1,6 @@
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
+import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
+import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 
 type Trade = {
   trade_id: string
@@ -37,6 +39,37 @@ type TradeLegDraft = {
 }
 
 type InspectorTab = 'overview' | 'events' | 'amend' | 'risk'
+
+const TRADE_TABLE_HEADERS: Array<{
+  label: string
+  tooltip: string
+  align?: 'center' | 'start' | 'end'
+}> = [
+  { label: 'Trade', tooltip: 'Internal trade identifier used to tie the read model back to the originating lifecycle events.', align: 'start' },
+  { label: 'Nature', tooltip: 'Commercial intent of the trade, typically physical delivery or financial settlement only.' },
+  { label: 'Structure', tooltip: 'Whether the trade is a single position or a swap made up of multiple legs.' },
+  { label: 'Book', tooltip: 'Commercial book currently carrying the trade in the live projection.' },
+  { label: 'Class', tooltip: 'Commodity family used for grouping, validation, and downstream position rollups.' },
+  { label: 'Commodity', tooltip: 'Specific commodity master record linked to the trade.' },
+  { label: 'Price', tooltip: 'Current stored trade price on the read model. Index-linked deals may still settle off a market series.' },
+  { label: 'Volume', tooltip: 'Projected top-level quantity for the trade. Swap legs can break this out in more detail.' },
+  { label: 'Status', tooltip: 'Lifecycle state from the projection, used to decide whether the trade contributes to active exposure.' },
+  { label: 'Updated', tooltip: 'Most recent time the trade projection row changed after a capture, amendment, or cancellation.', align: 'end' },
+]
+
+const INSPECTOR_TABS: Array<{ key: InspectorTab; label: string; tooltip: string }> = [
+  { key: 'overview', label: 'Overview', tooltip: 'Read the current projected state for the selected trade.' },
+  { key: 'events', label: 'Events', tooltip: 'Trace the lifecycle records that were loaded for the selected trade.' },
+  { key: 'amend', label: 'Amend', tooltip: 'Apply an amendment or cancel the active trade from the current selection context.' },
+  { key: 'risk', label: 'Risk', tooltip: 'Show quick risk-oriented calculations derived from the current trade projection.' },
+]
+
+const RISK_TOOLTIPS = {
+  notional: 'Simple price-times-volume estimate using the currently loaded trade row.',
+  lifecycle: 'Count of loaded event records tied to the selected trade in this session.',
+  exposureSide: 'Quick directional interpretation based on the sign of the projected volume.',
+  projectionState: 'Current lifecycle status on the trade read model, not the raw event stream.',
+} as const
 
 type TradingWorkspaceProps = {
   trades: Trade[]
@@ -160,16 +193,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Trade</th>
-                  <th>Nature</th>
-                  <th>Structure</th>
-                  <th>Book</th>
-                  <th>Class</th>
-                  <th>Commodity</th>
-                  <th>Price</th>
-                  <th>Volume</th>
-                  <th>Status</th>
-                  <th>Updated</th>
+                  {TRADE_TABLE_HEADERS.map((column) => (
+                    <th key={column.label}>
+                      <InlineTooltipLabel
+                        tooltip={column.tooltip}
+                        tooltipLabel={`More information about the ${column.label} column`}
+                        placement="top"
+                        align={column.align ?? 'center'}
+                      >
+                        {column.label}
+                      </InlineTooltipLabel>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -191,7 +226,13 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <td>{formatMoney(trade.price)}</td>
                     <td>{formatNumber(trade.volume, 0)}</td>
                     <td>
-                      <span className={`status-pill status-pill-${statusTone(trade.status)}`}>{trade.status}</span>
+                      <Tooltip
+                        content={trade.status === 'CANCELLED' ? tradeTooltipCopy.cancelledTrade : tradeTooltipCopy.activeTrade}
+                      >
+                        <span className={`status-pill status-pill-${statusTone(trade.status)} tooltip-trigger-hint`}>
+                          {trade.status}
+                        </span>
+                      </Tooltip>
                     </td>
                     <td>{formatDate(trade.updated_at)}</td>
                   </tr>
@@ -216,16 +257,17 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
         </div>
 
         <div className="tab-row">
-          {(['overview', 'events', 'amend', 'risk'] as InspectorTab[]).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={`tab-pill ${inspectorTab === tab ? 'is-active' : ''}`}
-              onClick={() => setInspectorTab(tab)}
-              disabled={!selectedTrade}
-            >
-              {tab === 'risk' ? 'Risk' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
+          {INSPECTOR_TABS.map((tab) => (
+            <Tooltip key={tab.key} content={tab.tooltip} placement="bottom">
+              <button
+                type="button"
+                className={`tab-pill ${inspectorTab === tab.key ? 'is-active' : ''}`}
+                onClick={() => setInspectorTab(tab.key)}
+                disabled={!selectedTrade}
+              >
+                {tab.label}
+              </button>
+            </Tooltip>
           ))}
         </div>
 
@@ -349,7 +391,9 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
         {selectedTrade && inspectorTab === 'risk' && (
           <div className="detail-list">
             <div className="detail-row">
-              <span>Notional</span>
+              <InlineTooltipLabel tooltip={RISK_TOOLTIPS.notional} tooltipLabel="More information about notional">
+                Notional
+              </InlineTooltipLabel>
               <strong>
                 {selectedTrade.price !== null && selectedTrade.volume !== null
                   ? formatMoney(selectedTrade.price * selectedTrade.volume)
@@ -357,15 +401,21 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
               </strong>
             </div>
             <div className="detail-row">
-              <span>Lifecycle</span>
+              <InlineTooltipLabel tooltip={RISK_TOOLTIPS.lifecycle} tooltipLabel="More information about lifecycle">
+                Lifecycle
+              </InlineTooltipLabel>
               <strong>{selectedTradeEvents.length} events</strong>
             </div>
             <div className="detail-row">
-              <span>Exposure Side</span>
+              <InlineTooltipLabel tooltip={RISK_TOOLTIPS.exposureSide} tooltipLabel="More information about exposure side">
+                Exposure Side
+              </InlineTooltipLabel>
               <strong>{(selectedTrade.volume ?? 0) >= 0 ? 'Long' : 'Short'}</strong>
             </div>
             <div className="detail-row">
-              <span>Projection State</span>
+              <InlineTooltipLabel tooltip={RISK_TOOLTIPS.projectionState} tooltipLabel="More information about projection state">
+                Projection State
+              </InlineTooltipLabel>
               <strong>{selectedTrade.status}</strong>
             </div>
           </div>

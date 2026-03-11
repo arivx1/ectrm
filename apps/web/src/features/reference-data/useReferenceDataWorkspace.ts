@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { classForCommodity } from '../../shared/reference'
 import type {
@@ -96,6 +96,14 @@ export function emptyPortfolioForm(defaultBookCode = ''): PortfolioForm {
   }
 }
 
+function resolveSelectedCode<T extends { code: string }>(selectedCode: string | null, records: T[]): string | null {
+  if (selectedCode && records.some((record) => record.code === selectedCode)) {
+    return selectedCode
+  }
+
+  return records[0]?.code ?? null
+}
+
 type UseReferenceDataWorkspaceArgs = {
   books: ReferenceRecord[]
   commodities: ReferenceRecord[]
@@ -158,37 +166,46 @@ export function useReferenceDataWorkspace({
   const [counterpartyFormMode, setCounterpartyFormMode] = useState<'create' | 'edit'>('create')
   const [portfolioFormMode, setPortfolioFormMode] = useState<'create' | 'edit'>('create')
 
+  const resolvedSelectedBookCode = resolveSelectedCode(selectedBookCode, books)
+  const resolvedSelectedCommodityCode = resolveSelectedCode(selectedCommodityCode, commodities)
+  const resolvedSelectedPriceIndexCode = resolveSelectedCode(selectedPriceIndexCode, priceIndices)
+  const resolvedSelectedCurrencyCode = resolveSelectedCode(selectedCurrencyCode, currencies)
+  const resolvedSelectedUnitCode = resolveSelectedCode(selectedUnitCode, units)
+  const resolvedSelectedLocationCode = resolveSelectedCode(selectedLocationCode, locations)
+  const resolvedSelectedCounterpartyCode = resolveSelectedCode(selectedCounterpartyCode, counterparties)
+  const resolvedSelectedPortfolioCode = resolveSelectedCode(selectedPortfolioCode, portfolios)
+
   const selectedBook = useMemo(
-    () => books.find((book) => book.code === selectedBookCode) ?? null,
-    [books, selectedBookCode],
+    () => books.find((book) => book.code === resolvedSelectedBookCode) ?? null,
+    [books, resolvedSelectedBookCode],
   )
   const selectedCommodity = useMemo(
-    () => commodities.find((commodity) => commodity.code === selectedCommodityCode) ?? null,
-    [commodities, selectedCommodityCode],
+    () => commodities.find((commodity) => commodity.code === resolvedSelectedCommodityCode) ?? null,
+    [commodities, resolvedSelectedCommodityCode],
   )
   const selectedPriceIndex = useMemo(
-    () => priceIndices.find((priceIndex) => priceIndex.code === selectedPriceIndexCode) ?? null,
-    [priceIndices, selectedPriceIndexCode],
+    () => priceIndices.find((priceIndex) => priceIndex.code === resolvedSelectedPriceIndexCode) ?? null,
+    [priceIndices, resolvedSelectedPriceIndexCode],
   )
   const selectedCurrency = useMemo(
-    () => currencies.find((currency) => currency.code === selectedCurrencyCode) ?? null,
-    [currencies, selectedCurrencyCode],
+    () => currencies.find((currency) => currency.code === resolvedSelectedCurrencyCode) ?? null,
+    [currencies, resolvedSelectedCurrencyCode],
   )
   const selectedUnit = useMemo(
-    () => units.find((unit) => unit.code === selectedUnitCode) ?? null,
-    [units, selectedUnitCode],
+    () => units.find((unit) => unit.code === resolvedSelectedUnitCode) ?? null,
+    [units, resolvedSelectedUnitCode],
   )
   const selectedLocation = useMemo(
-    () => locations.find((location) => location.code === selectedLocationCode) ?? null,
-    [locations, selectedLocationCode],
+    () => locations.find((location) => location.code === resolvedSelectedLocationCode) ?? null,
+    [locations, resolvedSelectedLocationCode],
   )
   const selectedCounterparty = useMemo(
-    () => counterparties.find((counterparty) => counterparty.code === selectedCounterpartyCode) ?? null,
-    [counterparties, selectedCounterpartyCode],
+    () => counterparties.find((counterparty) => counterparty.code === resolvedSelectedCounterpartyCode) ?? null,
+    [counterparties, resolvedSelectedCounterpartyCode],
   )
   const selectedPortfolio = useMemo(
-    () => portfolios.find((portfolio) => portfolio.code === selectedPortfolioCode) ?? null,
-    [portfolios, selectedPortfolioCode],
+    () => portfolios.find((portfolio) => portfolio.code === resolvedSelectedPortfolioCode) ?? null,
+    [portfolios, resolvedSelectedPortfolioCode],
   )
 
   const filteredBooks = useMemo(() => {
@@ -311,179 +328,44 @@ export function useReferenceDataWorkspace({
     })
   }, [portfolios, referenceSearch])
 
+  const resolvedPriceIndexCommodityCode = priceIndexForm.commodity_code || activeCommodities[0]?.code || ''
   const selectablePriceIndexUnits = useMemo(() => {
-    if (!priceIndexForm.commodity_code) {
+    if (!resolvedPriceIndexCommodityCode) {
       return activeUnits
     }
 
-    const commodityClass = classForCommodity(commodities, priceIndexForm.commodity_code)
+    const commodityClass = classForCommodity(commodities, resolvedPriceIndexCommodityCode)
     const matchingUnits = activeUnits.filter((unit) => !unit.commodity_class || unit.commodity_class === commodityClass)
     return matchingUnits.length > 0 ? matchingUnits : activeUnits
-  }, [activeUnits, commodities, priceIndexForm.commodity_code])
+  }, [activeUnits, commodities, resolvedPriceIndexCommodityCode])
 
-  useEffect(() => {
-    if (!selectedBookCode && books.length > 0) setSelectedBookCode(books[0].code)
-  }, [books, selectedBookCode])
+  const resolvedPriceIndexForm = useMemo(
+    () => ({
+      ...priceIndexForm,
+      commodity_code: resolvedPriceIndexCommodityCode,
+      currency_code: activeCurrencies.some((currency) => currency.code === priceIndexForm.currency_code)
+        ? priceIndexForm.currency_code
+        : activeCurrencies[0]?.code ?? '',
+      unit_code: selectablePriceIndexUnits.some((unit) => unit.code === priceIndexForm.unit_code)
+        ? priceIndexForm.unit_code
+        : selectablePriceIndexUnits[0]?.code ?? '',
+      location_code:
+        priceIndexForm.location_code && !activeLocations.some((location) => location.code === priceIndexForm.location_code)
+          ? ''
+          : priceIndexForm.location_code,
+    }),
+    [activeCurrencies, activeLocations, priceIndexForm, resolvedPriceIndexCommodityCode, selectablePriceIndexUnits],
+  )
 
-  useEffect(() => {
-    if (!selectedCommodityCode && commodities.length > 0) setSelectedCommodityCode(commodities[0].code)
-  }, [commodities, selectedCommodityCode])
-
-  useEffect(() => {
-    if (!selectedPriceIndexCode && priceIndices.length > 0) setSelectedPriceIndexCode(priceIndices[0].code)
-  }, [priceIndices, selectedPriceIndexCode])
-
-  useEffect(() => {
-    if (!selectedCurrencyCode && currencies.length > 0) setSelectedCurrencyCode(currencies[0].code)
-  }, [currencies, selectedCurrencyCode])
-
-  useEffect(() => {
-    if (!selectedUnitCode && units.length > 0) setSelectedUnitCode(units[0].code)
-  }, [selectedUnitCode, units])
-
-  useEffect(() => {
-    if (!selectedLocationCode && locations.length > 0) setSelectedLocationCode(locations[0].code)
-  }, [locations, selectedLocationCode])
-
-  useEffect(() => {
-    if (!selectedCounterpartyCode && counterparties.length > 0) setSelectedCounterpartyCode(counterparties[0].code)
-  }, [counterparties, selectedCounterpartyCode])
-
-  useEffect(() => {
-    if (!selectedPortfolioCode && portfolios.length > 0) setSelectedPortfolioCode(portfolios[0].code)
-  }, [portfolios, selectedPortfolioCode])
-
-  useEffect(() => {
-    if (!priceIndexForm.commodity_code && activeCommodities.length > 0) {
-      setPriceIndexForm((current) => ({ ...current, commodity_code: activeCommodities[0].code }))
-    }
-  }, [activeCommodities, priceIndexForm.commodity_code])
-
-  useEffect(() => {
-    if (!activeCurrencies.some((currency) => currency.code === priceIndexForm.currency_code)) {
-      setPriceIndexForm((current) => ({ ...current, currency_code: activeCurrencies[0]?.code ?? '' }))
-    }
-  }, [activeCurrencies, priceIndexForm.currency_code])
-
-  useEffect(() => {
-    if (!selectablePriceIndexUnits.some((unit) => unit.code === priceIndexForm.unit_code)) {
-      setPriceIndexForm((current) => ({ ...current, unit_code: selectablePriceIndexUnits[0]?.code ?? '' }))
-    }
-  }, [priceIndexForm.unit_code, selectablePriceIndexUnits])
-
-  useEffect(() => {
-    if (priceIndexForm.location_code && !activeLocations.some((location) => location.code === priceIndexForm.location_code)) {
-      setPriceIndexForm((current) => ({ ...current, location_code: '' }))
-    }
-  }, [activeLocations, priceIndexForm.location_code])
-
-  useEffect(() => {
-    if (!activeBooks.some((book) => book.code === portfolioForm.book_code)) {
-      setPortfolioForm((current) => ({ ...current, book_code: activeBooks[0]?.code ?? '' }))
-    }
-  }, [activeBooks, portfolioForm.book_code])
-
-  useEffect(() => {
-    if (bookFormMode === 'edit' && selectedBook) {
-      setBookForm({ code: selectedBook.code, name: selectedBook.name, description: selectedBook.description ?? '' })
-    }
-  }, [bookFormMode, selectedBook])
-
-  useEffect(() => {
-    if (commodityFormMode === 'edit' && selectedCommodity) {
-      setCommodityForm({
-        code: selectedCommodity.code,
-        name: selectedCommodity.name,
-        description: selectedCommodity.description ?? '',
-        commodity_class: selectedCommodity.commodity_class ?? commodityClassOrder[0],
-      })
-    }
-  }, [commodityClassOrder, commodityFormMode, selectedCommodity])
-
-  useEffect(() => {
-    if (priceIndexFormMode === 'edit' && selectedPriceIndex) {
-      setPriceIndexForm({
-        code: selectedPriceIndex.code,
-        name: selectedPriceIndex.name,
-        description: selectedPriceIndex.description ?? '',
-        commodity_code: selectedPriceIndex.commodity_code,
-        currency_code: selectedPriceIndex.currency_code,
-        unit_code: selectedPriceIndex.unit_code,
-        provider: selectedPriceIndex.provider,
-        market: selectedPriceIndex.market ?? '',
-        location_code: selectedPriceIndex.location_code ?? '',
-        calendar_code: selectedPriceIndex.calendar_code ?? '',
-      })
-    }
-  }, [priceIndexFormMode, selectedPriceIndex])
-
-  useEffect(() => {
-    if (currencyFormMode === 'edit' && selectedCurrency) {
-      setCurrencyForm({
-        code: selectedCurrency.code,
-        name: selectedCurrency.name,
-        symbol: selectedCurrency.symbol ?? '',
-        description: selectedCurrency.description ?? '',
-      })
-    }
-  }, [currencyFormMode, selectedCurrency])
-
-  useEffect(() => {
-    if (unitFormMode === 'edit' && selectedUnit) {
-      setUnitForm({
-        code: selectedUnit.code,
-        name: selectedUnit.name,
-        commodity_class: selectedUnit.commodity_class ?? commodityClassOrder[0],
-        dimension: selectedUnit.dimension,
-        base_unit_code: selectedUnit.base_unit_code ?? '',
-        conversion_factor: selectedUnit.conversion_factor?.toString() ?? '',
-        precision: selectedUnit.precision.toString(),
-        description: selectedUnit.description ?? '',
-      })
-    }
-  }, [commodityClassOrder, selectedUnit, unitFormMode])
-
-  useEffect(() => {
-    if (locationFormMode === 'edit' && selectedLocation) {
-      setLocationForm({
-        code: selectedLocation.code,
-        name: selectedLocation.name,
-        location_type: selectedLocation.location_type,
-        market: selectedLocation.market ?? '',
-        country_code: selectedLocation.country_code ?? '',
-        region: selectedLocation.region ?? '',
-        timezone: selectedLocation.timezone ?? '',
-        description: selectedLocation.description ?? '',
-      })
-    }
-  }, [locationFormMode, selectedLocation])
-
-  useEffect(() => {
-    if (counterpartyFormMode === 'edit' && selectedCounterparty) {
-      setCounterpartyForm({
-        code: selectedCounterparty.code,
-        name: selectedCounterparty.name,
-        short_name: selectedCounterparty.short_name ?? '',
-        legal_entity_name: selectedCounterparty.legal_entity_name ?? '',
-        counterparty_type: selectedCounterparty.counterparty_type,
-        country_code: selectedCounterparty.country_code ?? '',
-        description: selectedCounterparty.description ?? '',
-      })
-    }
-  }, [counterpartyFormMode, selectedCounterparty])
-
-  useEffect(() => {
-    if (portfolioFormMode === 'edit' && selectedPortfolio) {
-      setPortfolioForm({
-        code: selectedPortfolio.code,
-        name: selectedPortfolio.name,
-        book_code: selectedPortfolio.book_code,
-        owner: selectedPortfolio.owner ?? '',
-        strategy: selectedPortfolio.strategy ?? '',
-        description: selectedPortfolio.description ?? '',
-      })
-    }
-  }, [portfolioFormMode, selectedPortfolio])
+  const resolvedPortfolioForm = useMemo(
+    () => ({
+      ...portfolioForm,
+      book_code: activeBooks.some((book) => book.code === portfolioForm.book_code)
+        ? portfolioForm.book_code
+        : activeBooks[0]?.code ?? '',
+    }),
+    [activeBooks, portfolioForm],
+  )
 
   function startCreateBook() {
     setBookFormMode('create')
@@ -491,8 +373,13 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditBook(code: string) {
+    const record = books.find((book) => book.code === code)
+    if (!record) {
+      return
+    }
     setSelectedBookCode(code)
     setBookFormMode('edit')
+    setBookForm({ code: record.code, name: record.name, description: record.description ?? '' })
   }
 
   function startCreateCommodity() {
@@ -501,8 +388,18 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditCommodity(code: string) {
+    const record = commodities.find((commodity) => commodity.code === code)
+    if (!record) {
+      return
+    }
     setSelectedCommodityCode(code)
     setCommodityFormMode('edit')
+    setCommodityForm({
+      code: record.code,
+      name: record.name,
+      description: record.description ?? '',
+      commodity_class: record.commodity_class ?? commodityClassOrder[0],
+    })
   }
 
   function startCreatePriceIndex() {
@@ -511,8 +408,24 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditPriceIndex(code: string) {
+    const record = priceIndices.find((priceIndex) => priceIndex.code === code)
+    if (!record) {
+      return
+    }
     setSelectedPriceIndexCode(code)
     setPriceIndexFormMode('edit')
+    setPriceIndexForm({
+      code: record.code,
+      name: record.name,
+      description: record.description ?? '',
+      commodity_code: record.commodity_code,
+      currency_code: record.currency_code,
+      unit_code: record.unit_code,
+      provider: record.provider,
+      market: record.market ?? '',
+      location_code: record.location_code ?? '',
+      calendar_code: record.calendar_code ?? '',
+    })
   }
 
   function startCreateCurrency() {
@@ -521,8 +434,18 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditCurrency(code: string) {
+    const record = currencies.find((currency) => currency.code === code)
+    if (!record) {
+      return
+    }
     setSelectedCurrencyCode(code)
     setCurrencyFormMode('edit')
+    setCurrencyForm({
+      code: record.code,
+      name: record.name,
+      symbol: record.symbol ?? '',
+      description: record.description ?? '',
+    })
   }
 
   function startCreateUnit() {
@@ -531,8 +454,22 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditUnit(code: string) {
+    const record = units.find((unit) => unit.code === code)
+    if (!record) {
+      return
+    }
     setSelectedUnitCode(code)
     setUnitFormMode('edit')
+    setUnitForm({
+      code: record.code,
+      name: record.name,
+      commodity_class: record.commodity_class ?? commodityClassOrder[0],
+      dimension: record.dimension,
+      base_unit_code: record.base_unit_code ?? '',
+      conversion_factor: record.conversion_factor?.toString() ?? '',
+      precision: record.precision.toString(),
+      description: record.description ?? '',
+    })
   }
 
   function startCreateLocation() {
@@ -541,8 +478,22 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditLocation(code: string) {
+    const record = locations.find((location) => location.code === code)
+    if (!record) {
+      return
+    }
     setSelectedLocationCode(code)
     setLocationFormMode('edit')
+    setLocationForm({
+      code: record.code,
+      name: record.name,
+      location_type: record.location_type,
+      market: record.market ?? '',
+      country_code: record.country_code ?? '',
+      region: record.region ?? '',
+      timezone: record.timezone ?? '',
+      description: record.description ?? '',
+    })
   }
 
   function startCreateCounterparty() {
@@ -551,8 +502,21 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditCounterparty(code: string) {
+    const record = counterparties.find((counterparty) => counterparty.code === code)
+    if (!record) {
+      return
+    }
     setSelectedCounterpartyCode(code)
     setCounterpartyFormMode('edit')
+    setCounterpartyForm({
+      code: record.code,
+      name: record.name,
+      short_name: record.short_name ?? '',
+      legal_entity_name: record.legal_entity_name ?? '',
+      counterparty_type: record.counterparty_type,
+      country_code: record.country_code ?? '',
+      description: record.description ?? '',
+    })
   }
 
   function startCreatePortfolio() {
@@ -561,8 +525,20 @@ export function useReferenceDataWorkspace({
   }
 
   function startEditPortfolio(code: string) {
+    const record = portfolios.find((portfolio) => portfolio.code === code)
+    if (!record) {
+      return
+    }
     setSelectedPortfolioCode(code)
     setPortfolioFormMode('edit')
+    setPortfolioForm({
+      code: record.code,
+      name: record.name,
+      book_code: record.book_code,
+      owner: record.owner ?? '',
+      strategy: record.strategy ?? '',
+      description: record.description ?? '',
+    })
   }
 
   return {
@@ -570,27 +546,27 @@ export function useReferenceDataWorkspace({
     setReferenceTab,
     referenceSearch,
     setReferenceSearch,
-    selectedBookCode,
+    selectedBookCode: resolvedSelectedBookCode,
     setSelectedBookCode,
-    selectedCommodityCode,
+    selectedCommodityCode: resolvedSelectedCommodityCode,
     setSelectedCommodityCode,
-    selectedPriceIndexCode,
+    selectedPriceIndexCode: resolvedSelectedPriceIndexCode,
     setSelectedPriceIndexCode,
-    selectedCurrencyCode,
+    selectedCurrencyCode: resolvedSelectedCurrencyCode,
     setSelectedCurrencyCode,
-    selectedUnitCode,
+    selectedUnitCode: resolvedSelectedUnitCode,
     setSelectedUnitCode,
-    selectedLocationCode,
+    selectedLocationCode: resolvedSelectedLocationCode,
     setSelectedLocationCode,
-    selectedCounterpartyCode,
+    selectedCounterpartyCode: resolvedSelectedCounterpartyCode,
     setSelectedCounterpartyCode,
-    selectedPortfolioCode,
+    selectedPortfolioCode: resolvedSelectedPortfolioCode,
     setSelectedPortfolioCode,
     bookForm,
     setBookForm,
     commodityForm,
     setCommodityForm,
-    priceIndexForm,
+    priceIndexForm: resolvedPriceIndexForm,
     setPriceIndexForm,
     currencyForm,
     setCurrencyForm,
@@ -600,7 +576,7 @@ export function useReferenceDataWorkspace({
     setLocationForm,
     counterpartyForm,
     setCounterpartyForm,
-    portfolioForm,
+    portfolioForm: resolvedPortfolioForm,
     setPortfolioForm,
     bookFormMode,
     setBookFormMode,

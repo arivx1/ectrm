@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { PriceIndexRecord, ReferenceRecord, TradeLegDraft } from '../../shared/models'
+import {
+  buildDefaultTradeLegs,
+  pricingTypeRequiresPriceIndex,
+  tradeFormDefaults,
+  tradeSideOptions,
+} from '../../shared/trading'
 
 export function makeLegDraft(overrides: Partial<TradeLegDraft> = {}): TradeLegDraft {
   return {
     leg_no: overrides.leg_no ?? 1,
-    side: overrides.side ?? 'BUY',
+    side: overrides.side ?? tradeFormDefaults.side,
     commodity_class: overrides.commodity_class ?? '',
     commodity: overrides.commodity ?? '',
     volume: overrides.volume ?? '',
@@ -22,7 +28,7 @@ export function parseLegsFromPayload(payload: Record<string, unknown> | null | u
     .map((row, index) =>
       makeLegDraft({
         leg_no: typeof row.leg_no === 'number' ? row.leg_no : index + 1,
-        side: typeof row.side === 'string' ? row.side : 'BUY',
+        side: typeof row.side === 'string' ? row.side : tradeFormDefaults.side,
         commodity_class: typeof row.commodity_class === 'string' ? row.commodity_class : '',
         commodity: typeof row.commodity === 'string' ? row.commodity : '',
         volume:
@@ -42,64 +48,44 @@ export function useTradeCaptureForm(
   priceIndices: PriceIndexRecord[],
 ) {
   const [tradeIdInput, setTradeIdInput] = useState('')
-  const [tradeNatureInput, setTradeNatureInput] = useState('PHYSICAL')
-  const [tradeStructureInput, setTradeStructureInput] = useState('SINGLE')
-  const [tradeSideInput, setTradeSideInput] = useState('BUY')
-  const [bookInput, setBookInput] = useState('')
-  const [commodityClassInput, setCommodityClassInput] = useState('')
-  const [commodityInput, setCommodityInput] = useState('')
-  const [pricingTypeInput, setPricingTypeInput] = useState('FIXED')
-  const [priceIndexInput, setPriceIndexInput] = useState('')
-  const [priceInput, setPriceInput] = useState('80.00')
-  const [volumeInput, setVolumeInput] = useState('1000')
-  const [createLegs, setCreateLegs] = useState<TradeLegDraft[]>([
-    makeLegDraft({ leg_no: 1 }),
-    makeLegDraft({ leg_no: 2, side: 'SELL' }),
-  ])
+  const [tradeNatureInput, setTradeNatureInput] = useState<string>(tradeFormDefaults.nature)
+  const [tradeStructureInput, setTradeStructureInput] = useState<string>(tradeFormDefaults.structure)
+  const [tradeSideInput, setTradeSideInput] = useState<string>(tradeFormDefaults.side)
+  const [bookInput, setBookInput] = useState<string>('')
+  const [commodityClassInput, setCommodityClassInput] = useState<string>('')
+  const [commodityInput, setCommodityInput] = useState<string>('')
+  const [pricingTypeInput, setPricingTypeInput] = useState<string>(tradeFormDefaults.pricingType)
+  const [priceIndexInput, setPriceIndexInput] = useState<string>('')
+  const [priceInput, setPriceInput] = useState<string>(tradeFormDefaults.price)
+  const [volumeInput, setVolumeInput] = useState<string>(tradeFormDefaults.volume)
+  const [createLegs, setCreateLegs] = useState<TradeLegDraft[]>(() => buildDefaultTradeLegs(makeLegDraft))
+
+  const resolvedBookInput = bookInput || activeBooks[0]?.code || ''
+  const resolvedCommodityClassInput = commodityClassInput || commodityClassOptions[0] || ''
 
   const createCommodityOptions = useMemo(
-    () => activeCommodities.filter((commodity) => commodity.commodity_class === commodityClassInput),
-    [activeCommodities, commodityClassInput],
+    () => activeCommodities.filter((commodity) => commodity.commodity_class === resolvedCommodityClassInput),
+    [activeCommodities, resolvedCommodityClassInput],
   )
+
+  const resolvedCommodityInput = createCommodityOptions.some((commodity) => commodity.code === commodityInput)
+    ? commodityInput
+    : createCommodityOptions[0]?.code || ''
 
   const createPriceIndexOptions = useMemo(
     () =>
       priceIndices.filter(
-        (priceIndex) => priceIndex.is_active && (!commodityInput || priceIndex.commodity_code === commodityInput),
+        (priceIndex) => priceIndex.is_active && (!resolvedCommodityInput || priceIndex.commodity_code === resolvedCommodityInput),
       ),
-    [commodityInput, priceIndices],
+    [priceIndices, resolvedCommodityInput],
   )
 
-  useEffect(() => {
-    if (!bookInput && activeBooks.length > 0) {
-      setBookInput(activeBooks[0].code)
-    }
-  }, [activeBooks, bookInput])
-
-  useEffect(() => {
-    if (!commodityClassInput && commodityClassOptions.length > 0) {
-      setCommodityClassInput(commodityClassOptions[0])
-    }
-  }, [commodityClassInput, commodityClassOptions])
-
-  useEffect(() => {
-    if (!commodityClassInput) {
-      return
-    }
-    if (!createCommodityOptions.some((commodity) => commodity.code === commodityInput)) {
-      setCommodityInput(createCommodityOptions[0]?.code ?? '')
-    }
-  }, [commodityClassInput, commodityInput, createCommodityOptions])
-
-  useEffect(() => {
-    if (pricingTypeInput === 'FIXED' || pricingTypeInput === 'FORMULA') {
-      setPriceIndexInput('')
-      return
-    }
-    if (!createPriceIndexOptions.some((priceIndex) => priceIndex.code === priceIndexInput)) {
-      setPriceIndexInput(createPriceIndexOptions[0]?.code ?? '')
-    }
-  }, [createPriceIndexOptions, priceIndexInput, pricingTypeInput])
+  const resolvedPriceIndexInput =
+    !pricingTypeRequiresPriceIndex(pricingTypeInput)
+      ? ''
+      : createPriceIndexOptions.some((priceIndex) => priceIndex.code === priceIndexInput)
+        ? priceIndexInput
+        : createPriceIndexOptions[0]?.code || ''
 
   function updateDraftLeg(index: number, field: keyof TradeLegDraft, value: string) {
     setCreateLegs((current) =>
@@ -117,7 +103,10 @@ export function useTradeCaptureForm(
   function addDraftLeg() {
     setCreateLegs((current) => [
       ...current,
-      makeLegDraft({ leg_no: current.length + 1, side: current.length % 2 === 0 ? 'BUY' : 'SELL' }),
+      makeLegDraft({
+        leg_no: current.length + 1,
+        side: current.length % 2 === 0 ? tradeSideOptions[0] : tradeSideOptions[1],
+      }),
     ])
   }
 
@@ -131,17 +120,17 @@ export function useTradeCaptureForm(
 
   function reset() {
     setTradeIdInput('')
-    setTradeNatureInput('PHYSICAL')
-    setTradeStructureInput('SINGLE')
-    setTradeSideInput('BUY')
+    setTradeNatureInput(tradeFormDefaults.nature)
+    setTradeStructureInput(tradeFormDefaults.structure)
+    setTradeSideInput(tradeFormDefaults.side)
     setBookInput(activeBooks[0]?.code ?? '')
     setCommodityClassInput(commodityClassOptions[0] ?? '')
     setCommodityInput('')
-    setPricingTypeInput('FIXED')
+    setPricingTypeInput(tradeFormDefaults.pricingType)
     setPriceIndexInput('')
-    setPriceInput('80.00')
-    setVolumeInput('1000')
-    setCreateLegs([makeLegDraft({ leg_no: 1 }), makeLegDraft({ leg_no: 2, side: 'SELL' })])
+    setPriceInput(tradeFormDefaults.price)
+    setVolumeInput(tradeFormDefaults.volume)
+    setCreateLegs(buildDefaultTradeLegs(makeLegDraft))
   }
 
   return {
@@ -153,15 +142,15 @@ export function useTradeCaptureForm(
     setTradeStructureInput,
     tradeSideInput,
     setTradeSideInput,
-    bookInput,
+    bookInput: resolvedBookInput,
     setBookInput,
-    commodityClassInput,
+    commodityClassInput: resolvedCommodityClassInput,
     setCommodityClassInput,
-    commodityInput,
+    commodityInput: resolvedCommodityInput,
     setCommodityInput,
     pricingTypeInput,
     setPricingTypeInput,
-    priceIndexInput,
+    priceIndexInput: resolvedPriceIndexInput,
     setPriceIndexInput,
     priceInput,
     setPriceInput,

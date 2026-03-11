@@ -24,6 +24,7 @@ from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
+from apps.api.app.models.position import Position
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
@@ -52,10 +53,12 @@ from apps.api.app.routes.reference_data import (
     deactivate_currency,
     deactivate_commodity,
     deactivate_location,
+    deactivate_price_index,
     deactivate_unit,
     list_price_indices,
     update_price_index,
 )
+from apps.api.app.schemas.reference_data import PriceIndexStatusUpdate
 from apps.api.app.schemas.event import EventCreate
 
 
@@ -85,6 +88,7 @@ class ReferenceDataApiTests(unittest.TestCase):
             session.query(ReferenceCounterparty).delete()
             session.query(TradePriceTerm).delete()
             session.query(TradeLeg).delete()
+            session.query(Position).delete()
             session.query(ReferenceCommodity).delete()
             session.query(ReferenceBook).delete()
             session.query(Trade).delete()
@@ -461,6 +465,157 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertEqual(event.aggregate_id, "T-BOOK-3")
         self.assertIsNotNone(trade)
         self.assertEqual(trade.book, "CRUDE_PHYS")
+
+    def test_trade_sell_updates_positions_as_negative_volume(self) -> None:
+        self._create_commodity("WTI")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-SELL-1",
+                    event_type="TradeCreated",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "SELL",
+                        "price": 80,
+                        "volume": 1000,
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            position = session.query(Position).filter(Position.commodity == "WTI").one()
+
+        self.assertEqual(float(position.net_volume), -1000.0)
+
+    def test_swap_positions_use_trade_legs(self) -> None:
+        self._create_commodity("WTI")
+        self._create_commodity("BRENT")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-SWAP-1",
+                    event_type="TradeCreated",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_structure": "SWAP",
+                        "price": 0,
+                        "volume": 0,
+                        "legs": [
+                            {
+                                "leg_no": 1,
+                                "side": "BUY",
+                                "commodity_class": "CRUDE_OIL",
+                                "commodity": "WTI",
+                                "volume": 1000,
+                            },
+                            {
+                                "leg_no": 2,
+                                "side": "SELL",
+                                "commodity_class": "CRUDE_OIL",
+                                "commodity": "BRENT",
+                                "volume": 950,
+                            },
+                        ],
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            positions = {
+                row.commodity: float(row.net_volume)
+                for row in session.query(Position).all()
+            }
+
+        self.assertEqual(positions["WTI"], 1000.0)
+        self.assertEqual(positions["BRENT"], -950.0)
+
+    def test_trade_amend_requires_existing_trade(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Trade not found"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-MISSING-1",
+                        event_type="TradeAmended",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={"price": 92},
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+    def test_deactivate_price_index_rejected_while_active_trade_references_it(self) -> None:
+        self._create_commodity("WTI")
+        self._create_currency("USD", "$")
+        self._create_unit("BBL")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            create_price_index(
+                PriceIndexCreate(
+                    code="WTI_M1",
+                    name="WTI Front Month",
+                    commodity_code="WTI",
+                    currency_code="USD",
+                    unit_code="BBL",
+                    provider="ICE",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-INDEX-1",
+                    event_type="TradeCreated",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "INDEX",
+                        "price_index_code": "WTI_M1",
+                        "price": None,
+                        "volume": 1000,
+                        "trade_side": "BUY",
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Price index cannot be deactivated while active trades reference it"):
+                deactivate_price_index(
+                    "WTI_M1",
+                    PriceIndexStatusUpdate(updated_by="test-user"),
+                    db=session,
+                )
 
     def test_create_counterparty_normalizes_type_and_country(self) -> None:
         with self.SessionLocal() as session:

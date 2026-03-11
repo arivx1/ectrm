@@ -1,17 +1,29 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { AdminWorkspace } from './workspaces/admin/AdminWorkspace'
 import { DashboardWorkspace } from './workspaces/dashboard/DashboardWorkspace'
 import { EventsWorkspace } from './workspaces/events/EventsWorkspace'
 import { PositionsWorkspace } from './workspaces/positions/PositionsWorkspace'
 import { ReferenceDataWorkspace } from './workspaces/reference-data/ReferenceDataWorkspace'
+import { SettingsWorkspace } from './workspaces/settings/SettingsWorkspace'
 import { TradingWorkspace } from './workspaces/trading/TradingWorkspace'
 import { loadWorkspaceBootstrap } from './entities/app/api'
+import { loadCurrentSession } from './entities/auth/api'
 import { submitTradeEvent } from './entities/trade/api'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
-import { postJson } from './shared/api'
+import { fetchJson, postJson } from './shared/api'
+import { appConfig, bootstrapQueryLimits } from './shared/config'
+import {
+  buildMutationHeaders,
+  clearStoredAuthSession,
+  getMutationContext,
+  getStoredAuthSession,
+  saveStoredAuthSession,
+  type StoredAuthSession,
+} from './shared/mutation'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
+import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import {
   type CounterpartyRecord,
   type CurrencyRecord,
@@ -31,9 +43,19 @@ import {
 } from './shared/models'
 import { formatCommodityClass, formatDate, formatMoney, formatNumber, parseRequiredNumber, statusTone } from './shared/format'
 import { classForCommodity } from './shared/reference'
+import {
+  commodityClassOrder,
+  pricingTypeOptions,
+  pricingTypeRequiresPriceIndex,
+  tradeAggregateType,
+  tradeNatureOptions,
+  tradeSideOptions,
+  tradeStatusValues,
+  tradeStructureOptions,
+  tradeStructureSupportsLegs,
+} from './shared/trading'
+import { Tooltip } from './shared/ui/Tooltip'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? `${window.location.protocol}//${window.location.hostname}:8000`
-const USER_ID = 'anthony'
 const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
   { key: 'dashboard', label: 'Dashboard', kicker: 'Today' },
   { key: 'trades', label: 'Trades', kicker: 'Capture' },
@@ -41,25 +63,17 @@ const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
   { key: 'positions', label: 'Positions', kicker: 'Exposure' },
   { key: 'reference', label: 'Reference Data', kicker: 'Master' },
   { key: 'admin', label: 'Admin', kicker: 'Controls' },
+  { key: 'settings', label: 'Settings', kicker: 'Runtime' },
 ]
-const COMMODITY_CLASS_ORDER = [
-  'POWER',
-  'CRUDE_OIL',
-  'NATURAL_GAS',
-  'LNG',
-  'NGL',
-  'REFINED_PRODUCTS',
-  'CHEMICAL',
-  'BASE_METAL',
-  'PRECIOUS_METAL',
-  'METAL_ORE',
-  'AGRICULTURE',
-  'OTHER',
-]
-const TRADE_NATURE_OPTIONS = ['PHYSICAL', 'FINANCIAL'] as const
-const TRADE_STRUCTURE_OPTIONS = ['SINGLE', 'SWAP'] as const
-const TRADE_SIDE_OPTIONS = ['BUY', 'SELL'] as const
-const PRICING_TYPE_OPTIONS = ['FIXED', 'INDEX', 'FORMULA', 'HYBRID'] as const
+
+function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {
+  const role = session?.user.role.trim().toUpperCase() ?? ''
+  return role === 'OPS_ADMIN' || role === 'ADMIN'
+}
+
+function sessionHeaders(session: StoredAuthSession): Headers {
+  return new Headers({ Authorization: `Bearer ${session.accessToken}` })
+}
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewKey>('dashboard')
@@ -90,16 +104,19 @@ export default function App() {
   const [referenceDataLoading, setReferenceDataLoading] = useState(true)
   const [appLoading, setAppLoading] = useState(true)
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null)
+  const [selectedTradeEvents, setSelectedTradeEvents] = useState<EventRow[]>([])
   const [eventFilter, setEventFilter] = useState('ALL')
   const [externalDataSyncing, setExternalDataSyncing] = useState(false)
   const [tradingSourcesSyncing, setTradingSourcesSyncing] = useState(false)
+  const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => getStoredAuthSession())
 
   const [submitting, setSubmitting] = useState(false)
 
   const [amending, setAmending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
 
-  async function loadData() {
+  async function loadData(sessionOverride?: StoredAuthSession | null) {
+    const currentSession = sessionOverride ?? authSession
     const {
       health: healthJson,
       trades: tradesJson,
@@ -115,7 +132,12 @@ export default function App() {
       portfolios: portfoliosJson,
       externalDataRuns: externalDataRunsJson,
       tradingSources: tradingSourcesJson,
-    } = await loadWorkspaceBootstrap(API_BASE)
+    } = await loadWorkspaceBootstrap(appConfig.apiBase, {
+      adminHeaders:
+        currentSession && hasAdministrativeAccess(currentSession)
+          ? sessionHeaders(currentSession)
+          : null,
+    })
     const nextTrades = tradesJson as Trade[]
     const nextEvents = eventsJson as EventRow[]
     const nextPositions = positionsJson as PositionRow[]
@@ -158,14 +180,53 @@ export default function App() {
     }
   }
 
+  const loadDataRef = useRef(loadData)
+  loadDataRef.current = loadData
+
+  async function refreshAuthSession(): Promise<StoredAuthSession | null> {
+    const storedSession = getStoredAuthSession()
+    if (!storedSession) {
+      setAuthSession(null)
+      return null
+    }
+
+    try {
+      const current = await loadCurrentSession(appConfig.apiBase)
+      const nextSession: StoredAuthSession = {
+        sessionId: current.session_id,
+        accessToken: storedSession.accessToken,
+        expiresAt: current.expires_at,
+        user: current.user,
+      }
+      saveStoredAuthSession(nextSession)
+      setAuthSession(nextSession)
+      return nextSession
+    } catch {
+      clearStoredAuthSession()
+      setAuthSession(null)
+      return null
+    }
+  }
+
+  async function handleSessionChange(nextSession: StoredAuthSession | null) {
+    if (nextSession) {
+      saveStoredAuthSession(nextSession)
+    } else {
+      clearStoredAuthSession()
+    }
+    setAuthSession(nextSession)
+    await loadData(nextSession)
+  }
+
   useEffect(() => {
     async function init() {
       try {
-        await loadData()
+        const session = await refreshAuthSession()
+        await loadDataRef.current(session)
       } catch {
         setReferenceDataLoading(false)
         setAppLoading(false)
-        setError('Could not reach API. Make sure backend is running on localhost:8000 and CORS is enabled.')
+        setError(`Could not reach API. Make sure backend is running on ${appConfig.apiDisplayHost} and CORS is enabled.`)
       }
     }
 
@@ -175,6 +236,37 @@ export default function App() {
   useEffect(() => {
     setMobileNavOpen(false)
   }, [currentView])
+
+  useEffect(() => {
+    if (!selectedTradeId) {
+      setSelectedTradeEvents([])
+      return
+    }
+
+    const tradeId = selectedTradeId
+    let cancelled = false
+
+    async function loadSelectedTradeEvents() {
+      try {
+        const rows = await fetchJson<EventRow[]>(
+          `${appConfig.apiBase}/events?aggregate_type=${tradeAggregateType}&aggregate_id=${encodeURIComponent(tradeId)}&limit=${bootstrapQueryLimits.selectedTradeEvents}`,
+        )
+        if (!cancelled) {
+          setSelectedTradeEvents(rows)
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedTradeEvents([])
+        }
+      }
+    }
+
+    loadSelectedTradeEvents()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedTradeId])
 
   const activeBooks = useMemo(() => books.filter((book) => book.is_active), [books])
   const activeCommodities = useMemo(() => commodities.filter((commodity) => commodity.is_active), [commodities])
@@ -188,13 +280,8 @@ export default function App() {
     [trades, selectedTradeId],
   )
 
-  const selectedTradeEvents = useMemo(
-    () => events.filter((event) => event.aggregate_type === 'trade' && event.aggregate_id === selectedTradeId),
-    [events, selectedTradeId],
-  )
-
   const activeTrades = useMemo(
-    () => trades.filter((trade) => trade.status !== 'CANCELLED'),
+    () => trades.filter((trade) => trade.status !== tradeStatusValues.cancelled),
     [trades],
   )
 
@@ -210,7 +297,7 @@ export default function App() {
 
   const commodityClassOptions = useMemo(
     () =>
-      COMMODITY_CLASS_ORDER.filter((commodityClass) =>
+      commodityClassOrder.filter((commodityClass) =>
         activeCommodities.some((commodity) => commodity.commodity_class === commodityClass),
       ),
     [activeCommodities],
@@ -233,7 +320,7 @@ export default function App() {
       totals.set(position.commodity_class, current + position.net_volume)
     }
 
-    return COMMODITY_CLASS_ORDER.map((commodityClass) => ({
+    return commodityClassOrder.map((commodityClass) => ({
       commodityClass,
       netVolume: totals.get(commodityClass) ?? 0,
     })).filter((row) => row.netVolume !== 0)
@@ -324,8 +411,7 @@ export default function App() {
   } = amendForm
 
   const referenceState = useReferenceDataController({
-    apiBase: API_BASE,
-    userId: USER_ID,
+    apiBase: appConfig.apiBase,
     reloadData: loadData,
     trades,
     books,
@@ -341,7 +427,7 @@ export default function App() {
     activeCurrencies,
     activeUnits,
     activeLocations,
-    commodityClassOrder: COMMODITY_CLASS_ORDER,
+    commodityClassOrder,
   })
 
   async function handleRunEiaSync() {
@@ -349,10 +435,11 @@ export default function App() {
     setExternalDataError('')
     setExternalDataSuccess('')
     try {
-      const response = await fetch(`${API_BASE}/admin/external-data/eia/sync`, {
+      const { actorId } = getMutationContext()
+      const response = await fetch(`${appConfig.apiBase}/admin/external-data/eia/sync`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requested_by: USER_ID }),
+        headers: buildMutationHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ requested_by: actorId }),
       })
 
       if (!response.ok) {
@@ -377,9 +464,11 @@ export default function App() {
     setTradingSourcesError('')
     setTradingSourcesSuccess('')
     try {
+      const { actorId } = getMutationContext()
       const payload = await postJson<{ total_rows: number; created_count: number; updated_count: number }>(
-        `${API_BASE}/admin/trading-sources/seed`,
-        { requested_by: USER_ID, replace_existing: true },
+        `${appConfig.apiBase}/admin/trading-sources/seed`,
+        { requested_by: actorId, replace_existing: true },
+        { headers: buildMutationHeaders() },
       )
       await loadData()
       setTradingSourcesSuccess(
@@ -416,9 +505,7 @@ export default function App() {
       volume: input.volume,
     }
 
-    if (input.tradeStructure === 'SINGLE') {
-      payload.trade_side = input.tradeSide
-    } else {
+    if (tradeStructureSupportsLegs(input.tradeStructure)) {
       payload.legs = input.legs.map((leg, index) => ({
         leg_no: index + 1,
         side: leg.side,
@@ -426,9 +513,11 @@ export default function App() {
         commodity: leg.commodity,
         volume: parseRequiredNumber(leg.volume),
       }))
+    } else {
+      payload.trade_side = input.tradeSide
     }
 
-    if (input.pricingType === 'INDEX' || input.pricingType === 'HYBRID') {
+    if (pricingTypeRequiresPriceIndex(input.pricingType)) {
       payload.price_index_code = input.priceIndexCode
     }
 
@@ -456,11 +545,11 @@ export default function App() {
       setCreateError('Trade ID, book, commodity class, commodity, price, and volume are required.')
       return
     }
-    if ((pricingType === 'INDEX' || pricingType === 'HYBRID') && !priceIndexCode) {
+    if (pricingTypeRequiresPriceIndex(pricingType) && !priceIndexCode) {
       setCreateError('Price index is required when pricing type is INDEX or HYBRID.')
       return
     }
-    if (tradeStructure === 'SWAP') {
+    if (tradeStructureSupportsLegs(tradeStructure)) {
       const validLegs = createLegs.filter(
         (leg) =>
           leg.commodity_class &&
@@ -477,10 +566,9 @@ export default function App() {
     setSubmitting(true)
 
     try {
-      await submitTradeEvent(API_BASE, {
+      await submitTradeEvent(appConfig.apiBase, {
         aggregate_id: tradeId,
         event_type: 'TradeCreated',
-        actor_id: USER_ID,
         payload: buildTradePayload({
           tradeNature,
           tradeStructure,
@@ -534,11 +622,11 @@ export default function App() {
       setAmendError('Book, commodity class, commodity, price, and volume are required.')
       return
     }
-    if ((pricingType === 'INDEX' || pricingType === 'HYBRID') && !priceIndexCode) {
+    if (pricingTypeRequiresPriceIndex(pricingType) && !priceIndexCode) {
       setAmendError('Price index is required when pricing type is INDEX or HYBRID.')
       return
     }
-    if (tradeStructure === 'SWAP') {
+    if (tradeStructureSupportsLegs(tradeStructure)) {
       const validLegs = amendLegs.filter(
         (leg) =>
           leg.commodity_class &&
@@ -555,10 +643,9 @@ export default function App() {
     setAmending(true)
 
     try {
-      await submitTradeEvent(API_BASE, {
+      await submitTradeEvent(appConfig.apiBase, {
         aggregate_id: selectedTradeId,
         event_type: 'TradeAmended',
-        actor_id: USER_ID,
         payload: buildTradePayload({
           tradeNature,
           tradeStructure,
@@ -596,11 +683,10 @@ export default function App() {
     setCancelling(true)
 
     try {
-      await submitTradeEvent(API_BASE, {
+      await submitTradeEvent(appConfig.apiBase, {
         aggregate_id: selectedTradeId,
         event_type: 'TradeCancelled',
-        actor_id: USER_ID,
-        payload: { status: 'CANCELLED' },
+        payload: { status: tradeStatusValues.cancelled },
       })
 
       await loadData()
@@ -619,6 +705,7 @@ export default function App() {
     positions: 'Exposure by commodity',
     reference: 'Reference data maintenance',
     admin: 'Operational controls',
+    settings: 'Runtime and access settings',
   }[currentView]
 
   const heroBody = {
@@ -628,6 +715,7 @@ export default function App() {
     positions: 'Scan live net exposure first, then drop to commodity-level rows when you need exact numbers.',
     reference: 'Maintain books, commodities, and pricing reference data directly in the application, with activation controls and inline editing.',
     admin: 'Use Admin as both a governance surface and a live window into the event, projection, and schema model behind the product.',
+    settings: 'Review safe server runtime settings, manage browser-stored write credentials, and adjust local client overrides in one place.',
   }[currentView]
 
   const systemStateLabel = error
@@ -684,9 +772,14 @@ export default function App() {
 
         <div className="side-card side-card-contrast">
           <span className="eyebrow">System</span>
-          <div className={`status-pill status-pill-${systemStateTone} system-pill`}>
-            {systemStateLabel}
-          </div>
+          <Tooltip
+            content={systemStateTone === 'active' ? tradeTooltipCopy.systemReady : tradeTooltipCopy.systemAttention}
+            focusable
+          >
+            <span className={`status-pill status-pill-${systemStateTone} system-pill tooltip-trigger-hint`}>
+              {systemStateLabel}
+            </span>
+          </Tooltip>
           <div className="health-line">
             <span>API</span>
             <strong>{health}</strong>
@@ -737,9 +830,14 @@ export default function App() {
               <p>
                 {selectedTrade.trade_nature} • {selectedTrade.trade_structure} • {selectedTrade.book}
               </p>
-              <div className={`status-pill status-pill-${statusTone(selectedTrade.status)}`}>
-                {selectedTrade.status}
-              </div>
+              <Tooltip
+                content={selectedTrade.status === tradeStatusValues.cancelled ? tradeTooltipCopy.cancelledTrade : tradeTooltipCopy.activeTrade}
+                focusable
+              >
+                <span className={`status-pill status-pill-${statusTone(selectedTrade.status)} tooltip-trigger-hint`}>
+                  {selectedTrade.status}
+                </span>
+              </Tooltip>
             </>
           ) : (
             <>
@@ -827,10 +925,10 @@ export default function App() {
             referenceDataLoading={referenceDataLoading}
             hasReferenceOptions={hasReferenceOptions}
             createError={createError}
-            tradeNatureOptions={TRADE_NATURE_OPTIONS}
-            tradeStructureOptions={TRADE_STRUCTURE_OPTIONS}
-            tradeSideOptions={TRADE_SIDE_OPTIONS}
-            pricingTypeOptions={PRICING_TYPE_OPTIONS}
+            tradeNatureOptions={tradeNatureOptions}
+            tradeStructureOptions={tradeStructureOptions}
+            tradeSideOptions={tradeSideOptions}
+            pricingTypeOptions={pricingTypeOptions}
             appLoading={appLoading}
             positionsByClass={positionsByClass}
             events={events}
@@ -883,10 +981,10 @@ export default function App() {
             amending={amending}
             cancelling={cancelling}
             amendError={amendError}
-            tradeNatureOptions={TRADE_NATURE_OPTIONS}
-            tradeStructureOptions={TRADE_STRUCTURE_OPTIONS}
-            tradeSideOptions={TRADE_SIDE_OPTIONS}
-            pricingTypeOptions={PRICING_TYPE_OPTIONS}
+            tradeNatureOptions={tradeNatureOptions}
+            tradeStructureOptions={tradeStructureOptions}
+            tradeSideOptions={tradeSideOptions}
+            pricingTypeOptions={pricingTypeOptions}
             formatCommodityClass={formatCommodityClass}
             formatMoney={formatMoney}
             formatNumber={formatNumber}
@@ -946,6 +1044,14 @@ export default function App() {
             formatMoney={formatMoney}
             formatNumber={formatNumber}
             formatCommodityClass={formatCommodityClass}
+          />
+        )}
+
+        {currentView === 'settings' && (
+          <SettingsWorkspace
+            health={health}
+            authSession={authSession}
+            onSessionChange={handleSessionChange}
           />
         )}
       </main>

@@ -1,3 +1,6 @@
+import { InfoTooltip } from '../../shared/ui/Tooltip'
+import { tradeTooltipCopy } from './tooltipCopy'
+
 type CommodityOption = {
   code: string
   name: string
@@ -40,7 +43,9 @@ export function TradeLegEditor({
       <div className="section-head section-head-control">
         <div>
           <span className="eyebrow">Legs</span>
-          <h3>{title}</h3>
+          <h3>
+            {title} <InfoTooltip content={tradeTooltipCopy.legs} label={`More information about ${title}`} />
+          </h3>
         </div>
         <div className="toolbar">
           <button type="button" className="button button-ghost" onClick={onAdd}>

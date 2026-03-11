@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional
 from typing import List
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.auth import resolve_audit_actor_id
+from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import sync_eia_series
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -21,8 +23,8 @@ admin_router = APIRouter(prefix="/admin/external-data", tags=["external-data-adm
 @admin_router.get("/runs", response_model=List[ExternalDataRunOut])
 def list_external_data_runs(
     provider: Optional[str] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[ExternalDataRunOut]:
     stmt = select(ExternalDataRun).order_by(ExternalDataRun.started_at.desc()).limit(limit).offset(offset)
@@ -43,12 +45,13 @@ def get_external_data_run(run_id: int, db: Session = Depends(get_db)) -> Externa
 
 @admin_router.post("/eia/sync", response_model=ExternalDataRunOut)
 def trigger_eia_sync(payload: EIASyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
     run = sync_eia_series(
         db,
         series_id=payload.series_id,
         price_index_code=payload.price_index_code,
         lookback_days=payload.lookback_days,
-        requested_by=payload.requested_by,
+        requested_by=actor_id,
     )
     return _to_run_out(run)
 

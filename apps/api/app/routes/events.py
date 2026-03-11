@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.query_params import STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
@@ -26,24 +27,68 @@ router = APIRouter(prefix="/events", tags=["events"])
 ZERO = Decimal("0")
 
 
-def trade_snapshot(trade: Trade | None) -> dict[str, object] | None:
+def trade_snapshot(db: Session, trade: Trade | None) -> dict[str, object] | None:
     if trade is None:
         return None
 
+    db.flush()
+    legs = db.execute(
+        select(TradeLeg)
+        .where(TradeLeg.trade_id == trade.trade_id)
+        .order_by(TradeLeg.leg_no.asc())
+    ).scalars().all()
+
     return {
+        "trade_id": trade.trade_id,
         "commodity_class": trade.commodity_class,
         "commodity": trade.commodity,
+        "trade_structure": trade.trade_structure,
+        "trade_side": trade.trade_side,
         "volume": Decimal(str(trade.volume or 0)),
         "status": trade.status,
+        "legs": [
+            {
+                "commodity": leg.commodity_code,
+                "side": leg.side,
+                "volume": Decimal(str(leg.quantity or 0)),
+            }
+            for leg in legs
+        ],
     }
+
+
+def signed_volume(side: object | None, quantity: object | None) -> Decimal:
+    volume = Decimal(str(quantity or 0))
+    normalized_side = str(side or TradeSide.BUY.value).strip().upper()
+    if normalized_side == TradeSide.SELL.value:
+        return volume * Decimal("-1")
+    return volume
 
 
 def active_volume_by_commodity(trade: dict[str, object] | None) -> dict[str, Decimal]:
     if trade is None or trade.get("status") == "CANCELLED":
         return {}
 
+    if trade.get("trade_structure") == TradeStructure.SWAP.value:
+        totals: dict[str, Decimal] = {}
+        for leg in trade.get("legs", []):
+            if not isinstance(leg, dict):
+                continue
+            commodity = str(leg.get("commodity") or "UNKNOWN")
+            totals[commodity] = totals.get(commodity, ZERO) + signed_volume(
+                leg.get("side"),
+                leg.get("volume"),
+            )
+        return {
+            commodity: quantity
+            for commodity, quantity in totals.items()
+            if quantity != ZERO
+        }
+
     commodity = str(trade.get("commodity") or "UNKNOWN")
-    volume = Decimal(str(trade.get("volume") or 0))
+    volume = signed_volume(trade.get("trade_side"), trade.get("volume"))
+    if volume == ZERO:
+        return {}
     return {commodity: volume}
 
 
@@ -405,7 +450,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
         event_type=payload.event_type,
         occurred_at=payload.occurred_at,
         recorded_at=recorded_at,
-        actor_id=payload.actor_id,
+        actor_id=getattr(request.state, "actor_id", None) or payload.actor_id,
         correlation_id=correlation_id,
         causation_id=payload.causation_id,
         schema_version=payload.schema_version,
@@ -420,7 +465,12 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
             existing = db.execute(
                 select(Trade).where(Trade.trade_id == e.aggregate_id)
             ).scalars().first()
-            before = trade_snapshot(existing)
+            before = trade_snapshot(db, existing)
+
+            if e.event_type == "TradeCreated" and existing is not None:
+                raise HTTPException(status_code=409, detail="Trade already exists")
+            if e.event_type in {"TradeAmended", "TradeCancelled"} and existing is None:
+                raise HTTPException(status_code=404, detail="Trade not found")
 
             if e.event_type == "TradeCreated":
                 trade_nature = normalize_trade_nature(payload_data.get("trade_nature"))
@@ -444,39 +494,24 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     payload_data.get("price_index_code"),
                 )
 
-                if existing is None:
-                    existing = Trade(
-                        trade_id=e.aggregate_id,
-                        created_at=recorded_at,
-                        updated_at=recorded_at,
-                        trade_nature=trade_nature,
-                        trade_structure=trade_structure,
-                        trade_side=trade_side,
-                        book=book,
-                        commodity_class=commodity_class,
-                        commodity=commodity,
-                        pricing_type=pricing_type,
-                        price_index_code=price_index_code,
-                        price=price,
-                        volume=volume,
-                        status="ACTIVE",
-                        last_event_id=e.event_id,
-                    )
-                    db.add(existing)
-                else:
-                    existing.updated_at = recorded_at
-                    existing.trade_nature = trade_nature
-                    existing.trade_structure = trade_structure
-                    existing.trade_side = trade_side
-                    existing.book = book
-                    existing.commodity_class = commodity_class
-                    existing.commodity = commodity
-                    existing.pricing_type = pricing_type
-                    existing.price_index_code = price_index_code
-                    existing.price = price
-                    existing.volume = volume
-                    existing.status = "ACTIVE"
-                    existing.last_event_id = e.event_id
+                existing = Trade(
+                    trade_id=e.aggregate_id,
+                    created_at=recorded_at,
+                    updated_at=recorded_at,
+                    trade_nature=trade_nature,
+                    trade_structure=trade_structure,
+                    trade_side=trade_side,
+                    book=book,
+                    commodity_class=commodity_class,
+                    commodity=commodity,
+                    pricing_type=pricing_type,
+                    price_index_code=price_index_code,
+                    price=price,
+                    volume=volume,
+                    status="ACTIVE",
+                    last_event_id=e.event_id,
+                )
+                db.add(existing)
                 sync_primary_price_term(
                     db,
                     e.aggregate_id,
@@ -580,7 +615,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 existing.status = "CANCELLED"
                 existing.last_event_id = e.event_id
 
-            after = trade_snapshot(existing)
+            after = trade_snapshot(db, existing)
             sync_positions_for_trade_change(db, before, after, recorded_at)
 
         db.commit()
@@ -608,11 +643,9 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 def list_events(
     aggregate_type: Optional[str] = None,
     aggregate_id: Optional[str] = None,
-    limit: int = 50,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
     db: Session = Depends(get_db),
 ) -> List[EventOut]:
-    limit = max(1, min(limit, 500))
-
     stmt = select(Event).order_by(Event.recorded_at.desc()).limit(limit)
 
     if aggregate_type:

@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.auth import hash_password, resolve_audit_actor_id
+from apps.api.app.core.query_params import ADMIN_LIST_LIMIT_QUERY, LIST_OFFSET_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.user_account import (
@@ -23,8 +25,8 @@ router = APIRouter(prefix="/users", tags=["users"])
 def list_users(
     q: Optional[str] = None,
     is_active: Optional[bool] = None,
-    limit: int = Query(default=100, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
+    limit: int = ADMIN_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[UserAccountOut]:
     stmt = select(UserAccount).order_by(UserAccount.display_name.asc()).limit(limit).offset(offset)
@@ -54,17 +56,19 @@ def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> Us
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
 
     now = datetime.now(timezone.utc)
+    actor_id = resolve_audit_actor_id(payload.created_by)
     record = UserAccount(
         user_id=payload.user_id.strip(),
         email=payload.email.strip().lower(),
         display_name=payload.display_name.strip(),
         role=payload.role.strip().upper(),
+        password_hash=hash_password(payload.password),
         is_active=True,
         last_login_at=payload.last_login_at,
         created_at=now,
-        created_by=payload.created_by.strip(),
+        created_by=actor_id,
         updated_at=now,
-        updated_by=payload.created_by.strip(),
+        updated_by=actor_id,
         version=1,
     )
     db.add(record)
@@ -103,11 +107,13 @@ def update_user(user_id: str, payload: UserAccountUpdate, db: Session = Depends(
         record.display_name = payload.display_name.strip()
     if payload.role is not None:
         record.role = payload.role.strip().upper()
+    if payload.password is not None:
+        record.password_hash = hash_password(payload.password)
     if payload.last_login_at is not None:
         record.last_login_at = payload.last_login_at
 
     record.updated_at = datetime.now(timezone.utc)
-    record.updated_by = payload.updated_by.strip()
+    record.updated_by = resolve_audit_actor_id(payload.updated_by)
     record.version += 1
     db.commit()
     db.refresh(record)
@@ -125,7 +131,7 @@ def deactivate_user(
         raise HTTPException(status_code=404, detail="User not found")
     record.is_active = False
     record.updated_at = datetime.now(timezone.utc)
-    record.updated_by = payload.updated_by.strip()
+    record.updated_by = resolve_audit_actor_id(payload.updated_by)
     record.version += 1
     db.commit()
     db.refresh(record)
@@ -143,7 +149,7 @@ def reactivate_user(
         raise HTTPException(status_code=404, detail="User not found")
     record.is_active = True
     record.updated_at = datetime.now(timezone.utc)
-    record.updated_by = payload.updated_by.strip()
+    record.updated_by = resolve_audit_actor_id(payload.updated_by)
     record.version += 1
     db.commit()
     db.refresh(record)
@@ -157,6 +163,7 @@ def _to_out(record: UserAccount) -> UserAccountOut:
         display_name=record.display_name,
         role=record.role,
         is_active=record.is_active,
+        password_set=bool(record.password_hash),
         last_login_at=record.last_login_at,
         created_at=record.created_at,
         created_by=record.created_by,

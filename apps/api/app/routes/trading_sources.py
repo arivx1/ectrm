@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.auth import resolve_audit_actor_id
+from apps.api.app.core.query_params import ADMIN_LIST_LIMIT_QUERY, LIST_OFFSET_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.admin.services.trading_sources import (
     list_trading_sources,
@@ -26,8 +28,8 @@ def list_admin_trading_sources(
     source_category: Optional[str] = None,
     criticality: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = Query(default=100, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
+    limit: int = ADMIN_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> List[TradingSourceOut]:
     rows = list_trading_sources(
@@ -47,6 +49,7 @@ def seed_admin_trading_sources(
     payload: TradingSourceSeedRequest,
     db: Session = Depends(get_db),
 ) -> TradingSourceSeedResult:
+    actor_id = resolve_audit_actor_id(payload.requested_by)
     summary = seed_trading_sources_from_csv(
         db,
         replace_existing=payload.replace_existing,
@@ -55,7 +58,7 @@ def seed_admin_trading_sources(
         total_rows=summary.total_rows,
         created_count=summary.created_count,
         updated_count=summary.updated_count,
-        requested_by=payload.requested_by,
+        requested_by=actor_id,
     )
 
 

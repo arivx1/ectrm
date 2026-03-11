@@ -52,7 +52,7 @@ def build_start_argument(frequency: str, lookback_days: Optional[int], today: Op
     if lookback_days is None:
         return None
 
-    anchor = today or datetime.now(timezone.utc).date()
+    anchor = today or date.today()
     start_date = anchor - timedelta(days=lookback_days)
     normalized_frequency = frequency.strip().lower()
 

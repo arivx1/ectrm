@@ -10,4 +10,5 @@ Top-level product areas should live here:
 - reports
 - reference-data
 - admin
+- settings
 - assistant

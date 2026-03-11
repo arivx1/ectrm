@@ -11,6 +11,7 @@ import type {
   Trade,
   UnitRecord,
 } from '../../shared/models'
+import { getMutationContext } from '../../shared/mutation'
 import { useReferenceDataWorkspace } from './useReferenceDataWorkspace'
 
 function sameText(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -19,7 +20,6 @@ function sameText(left: string | null | undefined, right: string | null | undefi
 
 type UseReferenceDataControllerArgs = {
   apiBase: string
-  userId: string
   reloadData: () => Promise<void>
   trades: Trade[]
   books: ReferenceRecord[]
@@ -40,7 +40,6 @@ type UseReferenceDataControllerArgs = {
 
 export function useReferenceDataController({
   apiBase,
-  userId,
   reloadData,
   trades,
   books,
@@ -483,6 +482,10 @@ export function useReferenceDataController({
     action()
   }
 
+  function currentActorId(): string {
+    return getMutationContext().actorId
+  }
+
   async function submitReference(
     path: string,
     method: 'POST' | 'PUT',
@@ -579,7 +582,7 @@ export function useReferenceDataController({
       await submitReference(
         '/reference/books',
         'POST',
-        { code, name: bookForm.name.trim(), description: bookForm.description.trim() || null, created_by: userId },
+        { code, name: bookForm.name.trim(), description: bookForm.description.trim() || null, created_by: currentActorId() },
         `Book ${code} created.`,
       )
       startEditBookBase(code)
@@ -587,7 +590,7 @@ export function useReferenceDataController({
       await submitReference(
         `/reference/books/${selectedBook.code}`,
         'PUT',
-        { name: bookForm.name.trim(), description: bookForm.description.trim() || null, updated_by: userId },
+        { name: bookForm.name.trim(), description: bookForm.description.trim() || null, updated_by: currentActorId() },
         `Book ${selectedBook.code} updated.`,
       )
     }
@@ -610,7 +613,7 @@ export function useReferenceDataController({
           name: commodityForm.name.trim(),
           description: commodityForm.description.trim() || null,
           commodity_class: commodityForm.commodity_class,
-          created_by: userId,
+          created_by: currentActorId(),
         },
         `Commodity ${code} created.`,
       )
@@ -623,7 +626,7 @@ export function useReferenceDataController({
           name: commodityForm.name.trim(),
           description: commodityForm.description.trim() || null,
           commodity_class: commodityForm.commodity_class,
-          updated_by: userId,
+          updated_by: currentActorId(),
         },
         `Commodity ${selectedCommodity.code} updated.`,
       )
@@ -643,7 +646,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/books/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Book ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }
@@ -661,7 +664,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/commodities/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Commodity ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }
@@ -694,13 +697,13 @@ export function useReferenceDataController({
     }
 
     if (priceIndexFormMode === 'create') {
-      await submitReference('/reference/price-indices', 'POST', { ...payload, created_by: userId }, `Price index ${payload.code} created.`)
+      await submitReference('/reference/price-indices', 'POST', { ...payload, created_by: currentActorId() }, `Price index ${payload.code} created.`)
       startEditPriceIndexBase(payload.code)
     } else if (selectedPriceIndex) {
       await submitReference(
         `/reference/price-indices/${selectedPriceIndex.code}`,
         'PUT',
-        { ...payload, updated_by: userId },
+        { ...payload, updated_by: currentActorId() },
         `Price index ${selectedPriceIndex.code} updated.`,
       )
     }
@@ -718,7 +721,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/price-indices/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Price index ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }
@@ -738,13 +741,13 @@ export function useReferenceDataController({
     }
 
     if (currencyFormMode === 'create') {
-      await submitReference('/reference/currencies', 'POST', { ...payload, created_by: userId }, `Currency ${payload.code} created.`)
+      await submitReference('/reference/currencies', 'POST', { ...payload, created_by: currentActorId() }, `Currency ${payload.code} created.`)
       startEditCurrencyBase(payload.code)
     } else if (selectedCurrency) {
       await submitReference(
         `/reference/currencies/${selectedCurrency.code}`,
         'PUT',
-        { ...payload, updated_by: userId },
+        { ...payload, updated_by: currentActorId() },
         `Currency ${selectedCurrency.code} updated.`,
       )
     }
@@ -762,7 +765,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/currencies/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Currency ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }
@@ -791,13 +794,13 @@ export function useReferenceDataController({
     }
 
     if (unitFormMode === 'create') {
-      await submitReference('/reference/units', 'POST', { ...payload, created_by: userId }, `Unit ${payload.code} created.`)
+      await submitReference('/reference/units', 'POST', { ...payload, created_by: currentActorId() }, `Unit ${payload.code} created.`)
       startEditUnitBase(payload.code)
     } else if (selectedUnit) {
       await submitReference(
         `/reference/units/${selectedUnit.code}`,
         'PUT',
-        { ...payload, updated_by: userId },
+        { ...payload, updated_by: currentActorId() },
         `Unit ${selectedUnit.code} updated.`,
       )
     }
@@ -815,7 +818,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/units/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Unit ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }
@@ -839,13 +842,13 @@ export function useReferenceDataController({
     }
 
     if (locationFormMode === 'create') {
-      await submitReference('/reference/locations', 'POST', { ...payload, created_by: userId }, `Location ${payload.code} created.`)
+      await submitReference('/reference/locations', 'POST', { ...payload, created_by: currentActorId() }, `Location ${payload.code} created.`)
       startEditLocationBase(payload.code)
     } else if (selectedLocation) {
       await submitReference(
         `/reference/locations/${selectedLocation.code}`,
         'PUT',
-        { ...payload, updated_by: userId },
+        { ...payload, updated_by: currentActorId() },
         `Location ${selectedLocation.code} updated.`,
       )
     }
@@ -863,7 +866,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/locations/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Location ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }
@@ -886,13 +889,13 @@ export function useReferenceDataController({
     }
 
     if (workspace.counterpartyFormMode === 'create') {
-      await submitReference('/reference/counterparties', 'POST', { ...payload, created_by: userId }, `Counterparty ${payload.code} created.`)
+      await submitReference('/reference/counterparties', 'POST', { ...payload, created_by: currentActorId() }, `Counterparty ${payload.code} created.`)
       startEditCounterpartyBase(payload.code)
     } else if (selectedCounterparty) {
       await submitReference(
         `/reference/counterparties/${selectedCounterparty.code}`,
         'PUT',
-        { ...payload, updated_by: userId },
+        { ...payload, updated_by: currentActorId() },
         `Counterparty ${selectedCounterparty.code} updated.`,
       )
     }
@@ -902,7 +905,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/counterparties/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Counterparty ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }
@@ -924,13 +927,13 @@ export function useReferenceDataController({
     }
 
     if (workspace.portfolioFormMode === 'create') {
-      await submitReference('/reference/portfolios', 'POST', { ...payload, created_by: userId }, `Portfolio ${payload.code} created.`)
+      await submitReference('/reference/portfolios', 'POST', { ...payload, created_by: currentActorId() }, `Portfolio ${payload.code} created.`)
       startEditPortfolioBase(payload.code)
     } else if (selectedPortfolio) {
       await submitReference(
         `/reference/portfolios/${selectedPortfolio.code}`,
         'PUT',
-        { ...payload, updated_by: userId },
+        { ...payload, updated_by: currentActorId() },
         `Portfolio ${selectedPortfolio.code} updated.`,
       )
     }
@@ -940,7 +943,7 @@ export function useReferenceDataController({
     await submitReference(
       `/reference/portfolios/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
       'POST',
-      { updated_by: userId },
+      { updated_by: currentActorId() },
       `Portfolio ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
     )
   }

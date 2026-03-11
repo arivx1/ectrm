@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.auth import resolve_audit_actor_id
+
 ModelT = TypeVar("ModelT")
 
 
@@ -64,9 +66,9 @@ def create_reference_record(
         effective_from=payload.effective_from,
         effective_to=payload.effective_to,
         created_at=now,
-        created_by=payload.created_by,
+        created_by=resolve_audit_actor_id(payload.created_by),
         updated_at=now,
-        updated_by=payload.created_by,
+        updated_by=resolve_audit_actor_id(payload.created_by),
         version=1,
     )
     if extra_values:
@@ -102,12 +104,12 @@ def update_reference_record(
         extra_updates(record, payload, provided_fields)
 
     record.updated_at = datetime.now(timezone.utc)
-    record.updated_by = payload.updated_by
+    record.updated_by = resolve_audit_actor_id(payload.updated_by)
     record.version += 1
 
 
 def set_reference_active_state(record: Any, is_active: bool, updated_by: str) -> None:
     record.is_active = is_active
     record.updated_at = datetime.now(timezone.utc)
-    record.updated_by = updated_by
+    record.updated_by = resolve_audit_actor_id(updated_by)
     record.version += 1

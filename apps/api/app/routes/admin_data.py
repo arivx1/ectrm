@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.auth import resolve_audit_actor_id
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.admin.services.seed_reference_data import seed_reference_master_data
 from apps.api.app.domains.admin.services.seed_transactions import (
@@ -39,15 +40,16 @@ def seed_admin_transactions(
     payload: TransactionSeedRequest,
     db: Session = Depends(get_db),
 ) -> TransactionSeedResult:
+    actor_id = resolve_audit_actor_id(payload.requested_by)
     summary = seed_transaction_data(
         db,
         action=payload.action,
         scenario_codes=payload.scenario_codes,
-        requested_by=payload.requested_by,
+        requested_by=actor_id,
     )
     return TransactionSeedResult(
         action=summary.action,
-        requested_by=payload.requested_by,
+        requested_by=actor_id,
         scenario_codes=summary.scenario_codes,
         books_seeded=summary.books_seeded,
         events_seeded=summary.events_seeded,
@@ -63,13 +65,14 @@ def seed_admin_reference_data(
     payload: ReferenceSeedRequest,
     db: Session = Depends(get_db),
 ) -> ReferenceSeedResult:
+    actor_id = resolve_audit_actor_id(payload.requested_by)
     summary = seed_reference_master_data(
         db,
-        requested_by=payload.requested_by,
+        requested_by=actor_id,
         replace_existing=payload.replace_existing,
     )
     return ReferenceSeedResult(
-        requested_by=payload.requested_by,
+        requested_by=actor_id,
         replace_existing=summary.replace_existing,
         entity_counts=summary.entity_counts,
         total_records=summary.total_records,

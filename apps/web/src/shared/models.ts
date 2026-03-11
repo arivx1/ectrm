@@ -150,7 +150,7 @@ export type TradingSourceRecord = {
   status: string
 }
 
-export type ViewKey = 'dashboard' | 'trades' | 'events' | 'positions' | 'reference' | 'admin'
+export type ViewKey = 'dashboard' | 'trades' | 'events' | 'positions' | 'reference' | 'admin' | 'settings'
 export type InspectorTab = 'overview' | 'events' | 'amend' | 'risk'
 export type ReferenceTab =
   | 'books'

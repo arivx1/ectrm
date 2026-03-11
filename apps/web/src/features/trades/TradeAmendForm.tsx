@@ -1,4 +1,7 @@
 import { TradeLegEditor } from './TradeLegEditor'
+import { tradeTooltipCopy } from './tooltipCopy'
+import { FieldLabel } from '../../shared/ui/Tooltip'
+import { pricingTypeRequiresPriceIndex, tradeStructureSupportsLegs } from '../../shared/trading'
 
 type ReferenceRecord = {
   code: string
@@ -113,7 +116,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>Structure</span>
+          <FieldLabel label="Structure" tooltip={tradeTooltipCopy.structure} />
           <select className="control" value={amendTradeStructureInput} onChange={(event) => setAmendTradeStructureInput(event.target.value)} disabled={amending || cancelling}>
             {tradeStructureOptions.map((option) => (
               <option key={option} value={option}>
@@ -123,8 +126,13 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>Side</span>
-          <select className="control" value={amendTradeSideInput} onChange={(event) => setAmendTradeSideInput(event.target.value)} disabled={amending || cancelling || amendTradeStructureInput === 'SWAP'}>
+          <FieldLabel label="Side" tooltip={tradeTooltipCopy.side} />
+          <select
+            className="control"
+            value={amendTradeSideInput}
+            onChange={(event) => setAmendTradeSideInput(event.target.value)}
+            disabled={amending || cancelling || tradeStructureSupportsLegs(amendTradeStructureInput)}
+          >
             {tradeSideOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -171,7 +179,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
 
       <div className="mini-grid">
         <label className="field">
-          <span>Pricing</span>
+          <FieldLabel label="Pricing" tooltip={tradeTooltipCopy.pricing} />
           <select className="control" value={amendPricingTypeInput} onChange={(event) => setAmendPricingTypeInput(event.target.value)} disabled={amending || cancelling}>
             {pricingTypeOptions.map((option) => (
               <option key={option} value={option}>
@@ -181,8 +189,13 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>Price Index</span>
-          <select className="control" value={amendPriceIndexInput} onChange={(event) => setAmendPriceIndexInput(event.target.value)} disabled={amending || cancelling || amendPricingTypeInput === 'FIXED' || amendPricingTypeInput === 'FORMULA' || amendPriceIndexOptions.length === 0}>
+          <FieldLabel label="Price Index" tooltip={tradeTooltipCopy.priceIndex} />
+          <select
+            className="control"
+            value={amendPriceIndexInput}
+            onChange={(event) => setAmendPriceIndexInput(event.target.value)}
+            disabled={amending || cancelling || !pricingTypeRequiresPriceIndex(amendPricingTypeInput) || amendPriceIndexOptions.length === 0}
+          >
             <option value="">No price index</option>
             {amendPriceIndexOptions.map((priceIndex) => (
               <option key={priceIndex.code} value={priceIndex.code}>
@@ -201,7 +214,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
         </label>
       </div>
 
-      {amendTradeStructureInput === 'SWAP' && (
+      {tradeStructureSupportsLegs(amendTradeStructureInput) && (
         <TradeLegEditor
           title="Swap Legs"
           legs={amendLegs}
