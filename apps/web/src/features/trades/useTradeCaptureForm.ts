@@ -1,51 +1,27 @@
 import { useMemo, useState } from 'react'
-import type { PriceIndexRecord, ReferenceRecord, TradeLegDraft } from '../../shared/models'
+import type {
+  CounterpartyRecord,
+  PortfolioRecord,
+  PriceIndexRecord,
+  ReferenceRecord,
+  TradeLegDraft,
+} from '../../shared/models'
 import {
   buildDefaultTradeLegs,
   pricingTypeRequiresPriceIndex,
+  tradeHeaderDefaults,
   tradeFormDefaults,
   tradeSideOptions,
 } from '../../shared/trading'
-
-export function makeLegDraft(overrides: Partial<TradeLegDraft> = {}): TradeLegDraft {
-  return {
-    leg_no: overrides.leg_no ?? 1,
-    side: overrides.side ?? tradeFormDefaults.side,
-    commodity_class: overrides.commodity_class ?? '',
-    commodity: overrides.commodity ?? '',
-    volume: overrides.volume ?? '',
-  }
-}
-
-export function parseLegsFromPayload(payload: Record<string, unknown> | null | undefined): TradeLegDraft[] {
-  const rawLegs = payload?.legs
-  if (!Array.isArray(rawLegs)) {
-    return []
-  }
-
-  return rawLegs
-    .filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null)
-    .map((row, index) =>
-      makeLegDraft({
-        leg_no: typeof row.leg_no === 'number' ? row.leg_no : index + 1,
-        side: typeof row.side === 'string' ? row.side : tradeFormDefaults.side,
-        commodity_class: typeof row.commodity_class === 'string' ? row.commodity_class : '',
-        commodity: typeof row.commodity === 'string' ? row.commodity : '',
-        volume:
-          typeof row.volume === 'number'
-            ? String(row.volume)
-            : typeof row.volume === 'string'
-              ? row.volume
-              : '',
-      }),
-    )
-}
+import { makeLegDraft } from './tradeDraftUtils'
 
 export function useTradeCaptureForm(
   activeBooks: ReferenceRecord[],
   commodityClassOptions: string[],
   activeCommodities: ReferenceRecord[],
   priceIndices: PriceIndexRecord[],
+  activeCounterparties: CounterpartyRecord[],
+  activePortfolios: PortfolioRecord[],
 ) {
   const [tradeIdInput, setTradeIdInput] = useState('')
   const [tradeNatureInput, setTradeNatureInput] = useState<string>(tradeFormDefaults.nature)
@@ -58,6 +34,14 @@ export function useTradeCaptureForm(
   const [priceIndexInput, setPriceIndexInput] = useState<string>('')
   const [priceInput, setPriceInput] = useState<string>(tradeFormDefaults.price)
   const [volumeInput, setVolumeInput] = useState<string>(tradeFormDefaults.volume)
+  const [externalTradeIdInput, setExternalTradeIdInput] = useState<string>(tradeHeaderDefaults.external_trade_id)
+  const [sourceSystemInput, setSourceSystemInput] = useState<string>(tradeHeaderDefaults.source_system)
+  const [executionTimestampInput, setExecutionTimestampInput] = useState<string>(tradeHeaderDefaults.execution_timestamp)
+  const [portfolioInput, setPortfolioInput] = useState<string>(tradeHeaderDefaults.portfolio)
+  const [counterpartyInput, setCounterpartyInput] = useState<string>(tradeHeaderDefaults.counterparty)
+  const [pricingStatusInput, setPricingStatusInput] = useState<string>(tradeHeaderDefaults.pricing_status)
+  const [settlementStatusInput, setSettlementStatusInput] = useState<string>(tradeHeaderDefaults.settlement_status)
+  const [traderUserInput, setTraderUserInput] = useState<string>(tradeHeaderDefaults.trader_user)
   const [createLegs, setCreateLegs] = useState<TradeLegDraft[]>(() => buildDefaultTradeLegs(makeLegDraft))
 
   const resolvedBookInput = bookInput || activeBooks[0]?.code || ''
@@ -79,6 +63,19 @@ export function useTradeCaptureForm(
       ),
     [priceIndices, resolvedCommodityInput],
   )
+
+  const createPortfolioOptions = useMemo(
+    () => activePortfolios.filter((portfolio) => portfolio.book_code === resolvedBookInput),
+    [activePortfolios, resolvedBookInput],
+  )
+
+  const resolvedPortfolioInput = createPortfolioOptions.some((portfolio) => portfolio.code === portfolioInput)
+    ? portfolioInput
+    : ''
+
+  const resolvedCounterpartyInput = activeCounterparties.some((counterparty) => counterparty.code === counterpartyInput)
+    ? counterpartyInput
+    : ''
 
   const resolvedPriceIndexInput =
     !pricingTypeRequiresPriceIndex(pricingTypeInput)
@@ -130,6 +127,14 @@ export function useTradeCaptureForm(
     setPriceIndexInput('')
     setPriceInput(tradeFormDefaults.price)
     setVolumeInput(tradeFormDefaults.volume)
+    setExternalTradeIdInput(tradeHeaderDefaults.external_trade_id)
+    setSourceSystemInput(tradeHeaderDefaults.source_system)
+    setExecutionTimestampInput(tradeHeaderDefaults.execution_timestamp)
+    setPortfolioInput(tradeHeaderDefaults.portfolio)
+    setCounterpartyInput(tradeHeaderDefaults.counterparty)
+    setPricingStatusInput(tradeHeaderDefaults.pricing_status)
+    setSettlementStatusInput(tradeHeaderDefaults.settlement_status)
+    setTraderUserInput(tradeHeaderDefaults.trader_user)
     setCreateLegs(buildDefaultTradeLegs(makeLegDraft))
   }
 
@@ -156,9 +161,27 @@ export function useTradeCaptureForm(
     setPriceInput,
     volumeInput,
     setVolumeInput,
+    externalTradeIdInput,
+    setExternalTradeIdInput,
+    sourceSystemInput,
+    setSourceSystemInput,
+    executionTimestampInput,
+    setExecutionTimestampInput,
+    portfolioInput: resolvedPortfolioInput,
+    setPortfolioInput,
+    counterpartyInput: resolvedCounterpartyInput,
+    setCounterpartyInput,
+    pricingStatusInput,
+    setPricingStatusInput,
+    settlementStatusInput,
+    setSettlementStatusInput,
+    traderUserInput,
+    setTraderUserInput,
     createLegs,
     createCommodityOptions,
     createPriceIndexOptions,
+    createPortfolioOptions,
+    createCounterpartyOptions: activeCounterparties,
     updateDraftLeg,
     addDraftLeg,
     removeDraftLeg,

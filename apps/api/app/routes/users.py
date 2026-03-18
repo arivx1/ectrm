@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import hash_password, resolve_audit_actor_id
@@ -49,7 +50,7 @@ def list_users(
 def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> UserAccountOut:
     existing = db.execute(
         select(UserAccount).where(
-            (UserAccount.user_id == payload.user_id) | (UserAccount.email == payload.email.lower())
+            (UserAccount.user_id == payload.user_id) | (UserAccount.email == payload.email)
         )
     ).scalars().first()
     if existing is not None:
@@ -58,10 +59,10 @@ def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> Us
     now = datetime.now(timezone.utc)
     actor_id = resolve_audit_actor_id(payload.created_by)
     record = UserAccount(
-        user_id=payload.user_id.strip(),
-        email=payload.email.strip().lower(),
-        display_name=payload.display_name.strip(),
-        role=payload.role.strip().upper(),
+        user_id=payload.user_id,
+        email=payload.email,
+        display_name=payload.display_name,
+        role=payload.role,
         password_hash=hash_password(payload.password),
         is_active=True,
         last_login_at=payload.last_login_at,
@@ -72,7 +73,11 @@ def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> Us
         version=1,
     )
     db.add(record)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
     db.refresh(record)
     return _to_out(record)
 
@@ -92,21 +97,20 @@ def update_user(user_id: str, payload: UserAccountUpdate, db: Session = Depends(
         raise HTTPException(status_code=404, detail="User not found")
 
     if payload.email is not None:
-        normalized_email = payload.email.strip().lower()
         existing = db.execute(
             select(UserAccount).where(
-                UserAccount.email == normalized_email,
+                UserAccount.email == payload.email,
                 UserAccount.user_id != user_id,
             )
         ).scalars().first()
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
-        record.email = normalized_email
+        record.email = payload.email
 
     if payload.display_name is not None:
-        record.display_name = payload.display_name.strip()
+        record.display_name = payload.display_name
     if payload.role is not None:
-        record.role = payload.role.strip().upper()
+        record.role = payload.role
     if payload.password is not None:
         record.password_hash = hash_password(payload.password)
     if payload.last_login_at is not None:
@@ -115,7 +119,11 @@ def update_user(user_id: str, payload: UserAccountUpdate, db: Session = Depends(
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = resolve_audit_actor_id(payload.updated_by)
     record.version += 1
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use") from exc
     db.refresh(record)
     return _to_out(record)
 

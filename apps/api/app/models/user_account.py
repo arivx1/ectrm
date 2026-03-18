@@ -14,6 +14,7 @@ class UserAccount(Base):
 
     user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    google_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

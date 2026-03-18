@@ -1,0 +1,308 @@
+from __future__ import annotations
+
+import enum
+import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import patch
+
+if not hasattr(enum, "StrEnum"):
+    class _CompatStrEnum(str, enum.Enum):
+        pass
+
+    enum.StrEnum = _CompatStrEnum  # type: ignore[attr-defined]
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from apps.api.app.models.event import Base
+from apps.api.app.models.event import Event
+from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_portfolio import ReferencePortfolio
+from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_leg import TradeLeg
+from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.routes.events import append_event
+from apps.api.app.schemas.event import EventCreate
+from apps.api.scripts import rebuild_trades_projection
+
+
+def coerce_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+class TradesRebuildScriptTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        cls.SessionLocal = sessionmaker(bind=cls.engine, autoflush=False, autocommit=False)
+        Base.metadata.create_all(bind=cls.engine)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        Base.metadata.drop_all(bind=cls.engine)
+        cls.engine.dispose()
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 3, 11, 12, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.query(TradePriceTerm).delete()
+            session.query(TradeLeg).delete()
+            session.query(Trade).delete()
+            session.query(Event).delete()
+            session.query(ReferencePortfolio).delete()
+            session.query(ReferenceCounterparty).delete()
+            session.query(ReferenceCommodity).delete()
+            session.query(ReferenceBook).delete()
+            session.commit()
+            self._seed_reference_data(session)
+
+    def _seed_reference_data(self, session) -> None:
+        session.add(
+            ReferenceBook(
+                code="CRUDE_PHYS",
+                name="Crude Physical",
+                description="Test book",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceCommodity(
+                code="WTI",
+                commodity_class="CRUDE_OIL",
+                name="WTI",
+                description="Test commodity",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceCounterparty(
+                code="SHELL_TRADING",
+                name="Shell Trading",
+                short_name=None,
+                legal_entity_name=None,
+                counterparty_type="SUPPLIER",
+                country_code=None,
+                description="Test counterparty",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
+            ReferencePortfolio(
+                code="OIL_DISCRETIONARY",
+                name="Oil Discretionary",
+                book_code="CRUDE_PHYS",
+                owner=None,
+                strategy="Directional",
+                trader_persona=None,
+                risk_archetype=None,
+                description="Test portfolio",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.commit()
+
+    def _request(self):
+        return SimpleNamespace(
+            state=SimpleNamespace(correlation_id="test-correlation", actor_id=None),
+            headers={},
+        )
+
+    def test_rebuild_preserves_extended_trade_header_fields(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-REBUILD-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "external_trade_id": "EXT-9001",
+                        "source_system": "ETRM",
+                        "execution_timestamp": "2026-03-11T06:15:00-06:00",
+                        "book": "CRUDE_PHYS",
+                        "portfolio": "OIL_DISCRETIONARY",
+                        "counterparty": "SHELL_TRADING",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "pricing_status": "PRICED",
+                        "settlement_status": "PENDING",
+                        "trader_user": "trader.alpha",
+                        "trade_side": "BUY",
+                        "price": 81,
+                        "volume": 500,
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            trade_before = session.query(Trade).filter(Trade.trade_id == "T-REBUILD-1").one()
+            self.assertEqual(trade_before.external_trade_id, "EXT-9001")
+
+            session.query(TradePriceTerm).delete()
+            session.query(TradeLeg).delete()
+            session.query(Trade).delete()
+            session.commit()
+
+        with patch.object(rebuild_trades_projection, "SessionLocal", self.SessionLocal):
+            rebuild_trades_projection.main()
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-REBUILD-1").one()
+
+        self.assertEqual(trade.external_trade_id, "EXT-9001")
+        self.assertEqual(trade.source_system, "ETRM")
+        self.assertEqual(
+            coerce_utc(trade.execution_timestamp),
+            datetime(2026, 3, 11, 12, 15, tzinfo=timezone.utc),
+        )
+        self.assertEqual(trade.book, "CRUDE_PHYS")
+        self.assertEqual(trade.portfolio, "OIL_DISCRETIONARY")
+        self.assertEqual(trade.counterparty, "SHELL_TRADING")
+        self.assertEqual(trade.pricing_status, "PRICED")
+        self.assertEqual(trade.settlement_status, "PENDING")
+        self.assertEqual(trade.trader_user, "trader.alpha")
+
+    def test_rebuild_clears_carried_portfolio_when_book_changes_without_replacement(self) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                ReferenceBook(
+                    code="POWER_BOOK",
+                    name="Power Book",
+                    description="Test book",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test-user",
+                    updated_at=self.now,
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.add_all(
+                [
+                    Event(
+                        event_id="event-1",
+                        aggregate_type="trade",
+                        aggregate_id="T-REBUILD-BOOK-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        recorded_at=self.now,
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "portfolio": "OIL_DISCRETIONARY",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "trade_side": "BUY",
+                            "price": 81,
+                            "volume": 500,
+                        },
+                    ),
+                    Event(
+                        event_id="event-2",
+                        aggregate_type="trade",
+                        aggregate_id="T-REBUILD-BOOK-1",
+                        event_type="TradeAmended",
+                        occurred_at=datetime(2026, 3, 11, 12, 5, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 11, 12, 5, tzinfo=timezone.utc),
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={"book": "POWER_BOOK"},
+                    ),
+                ]
+            )
+            session.commit()
+
+        with patch.object(rebuild_trades_projection, "SessionLocal", self.SessionLocal):
+            rebuild_trades_projection.main()
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-REBUILD-BOOK-1").one()
+
+        self.assertEqual(trade.book, "POWER_BOOK")
+        self.assertIsNone(trade.portfolio)
+
+    def test_rebuild_rejects_invalid_trade_header_status_values(self) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                Event(
+                    event_id="event-invalid-status",
+                    aggregate_type="trade",
+                    aggregate_id="T-REBUILD-INVALID-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    recorded_at=self.now,
+                    actor_id="test-user",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "pricing_status": "UNKNOWN",
+                        "trade_side": "BUY",
+                        "price": 81,
+                        "volume": 500,
+                    },
+                )
+            )
+            session.commit()
+
+        with patch.object(rebuild_trades_projection, "SessionLocal", self.SessionLocal):
+            with self.assertRaisesRegex(ValueError, "Pricing status 'UNKNOWN' is invalid"):
+                rebuild_trades_projection.main()
+
+
+if __name__ == "__main__":
+    unittest.main()

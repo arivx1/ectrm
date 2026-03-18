@@ -62,6 +62,12 @@ from apps.api.app.schemas.reference_data import PriceIndexStatusUpdate
 from apps.api.app.schemas.event import EventCreate
 
 
+def coerce_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class ReferenceDataApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -496,6 +502,242 @@ class ReferenceDataApiTests(unittest.TestCase):
             position = session.query(Position).filter(Position.commodity == "WTI").one()
 
         self.assertEqual(float(position.net_volume), -1000.0)
+
+    def test_trade_header_fields_validate_active_counterparty_and_matching_portfolio(self) -> None:
+        self._create_commodity("WTI")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Counterparty 'SHELL_TRADING' is not active"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-HEADER-1",
+                        event_type="TradeCreated",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "counterparty": "SHELL_TRADING",
+                            "pricing_type": "FIXED",
+                            "trade_side": "BUY",
+                            "price": 80,
+                            "volume": 1000,
+                        },
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            create_counterparty(
+                CounterpartyCreate(
+                    code="SHELL_TRADING",
+                    name="Shell Trading",
+                    counterparty_type="supplier",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+            create_portfolio(
+                PortfolioCreate(
+                    code="POWER_DISCRETIONARY",
+                    name="Power Discretionary",
+                    book_code="CRUDE_PHYS",
+                    description="test portfolio",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+            portfolio = session.query(ReferencePortfolio).filter_by(code="POWER_DISCRETIONARY").one()
+            portfolio.book_code = "POWER_BOOK"
+            session.commit()
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Portfolio 'POWER_DISCRETIONARY' belongs to book 'POWER_BOOK'"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-HEADER-2",
+                        event_type="TradeCreated",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "portfolio": "POWER_DISCRETIONARY",
+                            "counterparty": "SHELL_TRADING",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "trade_side": "BUY",
+                            "price": 80,
+                            "volume": 1000,
+                        },
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+    def test_trade_amend_persists_extended_header_fields(self) -> None:
+        self._create_commodity("WTI")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            create_counterparty(
+                CounterpartyCreate(
+                    code="SHELL_TRADING",
+                    name="Shell Trading",
+                    counterparty_type="supplier",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+            create_counterparty(
+                CounterpartyCreate(
+                    code="BP_TRADING",
+                    name="BP Trading",
+                    counterparty_type="supplier",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+            create_portfolio(
+                PortfolioCreate(
+                    code="OIL_DISCRETIONARY",
+                    name="Oil Discretionary",
+                    book_code="CRUDE_PHYS",
+                    description="test portfolio",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-HEADER-3",
+                    event_type="TradeCreated",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_id="test-user",
+                    payload={
+                        "external_trade_id": " ext-001 ",
+                        "source_system": "etrm",
+                        "execution_timestamp": "2026-03-11T08:30:00-05:00",
+                        "book": "CRUDE_PHYS",
+                        "portfolio": "oil_discretionary",
+                        "counterparty": "shell_trading",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "pricing_status": "priced",
+                        "settlement_status": "pending",
+                        "trader_user": "trader.alpha",
+                        "trade_side": "BUY",
+                        "price": 80,
+                        "volume": 1000,
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-HEADER-3",
+                    event_type="TradeAmended",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_id="test-user",
+                    payload={
+                        "external_trade_id": None,
+                        "source_system": "ice_csv",
+                        "execution_timestamp": "2026-03-11T14:45:00Z",
+                        "counterparty": "BP_TRADING",
+                        "portfolio": None,
+                        "pricing_status": "pending",
+                        "settlement_status": "settled",
+                        "trader_user": "trader.beta",
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            trade = session.query(Trade).filter(Trade.trade_id == "T-HEADER-3").one()
+
+        self.assertIsNone(trade.external_trade_id)
+        self.assertEqual(trade.source_system, "ICE_CSV")
+        self.assertEqual(
+            coerce_utc(trade.execution_timestamp),
+            datetime(2026, 3, 11, 14, 45, tzinfo=timezone.utc),
+        )
+        self.assertEqual(trade.counterparty, "BP_TRADING")
+        self.assertIsNone(trade.portfolio)
+        self.assertEqual(trade.pricing_status, "PENDING")
+        self.assertEqual(trade.settlement_status, "SETTLED")
+        self.assertEqual(trade.trader_user, "trader.beta")
+
+    def test_trade_header_fields_reject_invalid_status_values(self) -> None:
+        self._create_commodity("WTI")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Pricing status 'UNKNOWN' is invalid"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-HEADER-INVALID-1",
+                        event_type="TradeCreated",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "pricing_status": "unknown",
+                            "trade_side": "BUY",
+                            "price": 80,
+                            "volume": 1000,
+                        },
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+            with self.assertRaisesRegex(Exception, "Settlement status 'COMPLETE' is invalid"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-HEADER-INVALID-2",
+                        event_type="TradeCreated",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "settlement_status": "complete",
+                            "trade_side": "BUY",
+                            "price": 80,
+                            "volume": 1000,
+                        },
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
 
     def test_swap_positions_use_trade_legs(self) -> None:
         self._create_commodity("WTI")

@@ -2,6 +2,7 @@
 
 Top-level product areas should live here:
 
+- guide
 - dashboard
 - trading
 - risk

@@ -9,7 +9,14 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
-from apps.api.app.shared.enums import PricingType, TradeNature, TradeSide, TradeStructure
+from apps.api.app.shared.enums import (
+    PricingStatus,
+    PricingType,
+    SettlementStatus,
+    TradeNature,
+    TradeSide,
+    TradeStructure,
+)
 
 
 DEFAULT_BOOK = "CRUDE_PHYS"
@@ -116,6 +123,54 @@ def normalize_price_index_code(value):
     return normalized or None
 
 
+def normalize_optional_text(value, *, uppercase=False):
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    return normalized.upper() if uppercase else normalized
+
+
+def normalize_trade_header_status(value, default, *, field_name, valid_values):
+    normalized = str(value or default).strip().upper()
+    if not normalized:
+        return default
+    if normalized not in valid_values:
+        raise ValueError(
+            f"{field_name} '{normalized}' is invalid. Expected one of: "
+            f"{', '.join(sorted(valid_values))}"
+        )
+    return normalized
+
+
+def normalize_execution_timestamp(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def apply_portfolio_payload(trade_state, payload, *, book_changed=False):
+    if "portfolio" in payload:
+        portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
+        trade_state["portfolio"] = portfolio
+        trade_state["portfolio_book"] = trade_state.get("book") if portfolio else None
+        return
+
+    if book_changed and trade_state.get("portfolio") is not None:
+        if trade_state.get("portfolio_book") != trade_state.get("book"):
+            trade_state["portfolio"] = None
+            trade_state["portfolio_book"] = None
+
+
 def normalize_legs(value):
     if not isinstance(value, list):
         return []
@@ -152,29 +207,61 @@ def main() -> None:
                 existing = trade_state.get(trade_id)
 
                 if existing is None:
+                    normalized_book = normalize_book(payload.get("book"))
+                    normalized_portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
                     trade_state[trade_id] = {
                         "trade_id": trade_id,
+                        "external_trade_id": normalize_optional_text(payload.get("external_trade_id")),
+                        "source_system": normalize_optional_text(payload.get("source_system"), uppercase=True),
                         "created_at": now,
                         "updated_at": now,
+                        "execution_timestamp": normalize_execution_timestamp(payload.get("execution_timestamp")),
                         "trade_nature": normalize_trade_nature(payload.get("trade_nature")),
                         "trade_structure": normalize_trade_structure(payload.get("trade_structure")),
                         "trade_side": normalize_trade_side(payload.get("trade_side")),
                         "legs": normalize_legs(payload.get("legs")),
-                        "book": normalize_book(payload.get("book")),
+                        "book": normalized_book,
+                        "portfolio": normalized_portfolio,
+                        "portfolio_book": normalized_book if normalized_portfolio else None,
+                        "counterparty": normalize_optional_text(payload.get("counterparty"), uppercase=True),
                         "commodity_class": normalize_commodity_class(
                             payload.get("commodity_class"),
                             payload.get("commodity"),
                         ),
                         "commodity": normalize_commodity_code(payload.get("commodity")),
                         "pricing_type": normalize_pricing_type(payload.get("pricing_type")),
+                        "pricing_status": normalize_trade_header_status(
+                            payload.get("pricing_status"),
+                            "PENDING",
+                            field_name="Pricing status",
+                            valid_values={pricing_status.value for pricing_status in PricingStatus},
+                        ),
                         "price_index_code": normalize_price_index_code(payload.get("price_index_code")),
                         "price": to_decimal_or_none(payload.get("price")),
                         "volume": to_decimal_or_none(payload.get("volume")),
+                        "settlement_status": normalize_trade_header_status(
+                            payload.get("settlement_status"),
+                            "PENDING",
+                            field_name="Settlement status",
+                            valid_values={settlement_status.value for settlement_status in SettlementStatus},
+                        ),
+                        "trader_user": normalize_optional_text(payload.get("trader_user")),
                         "status": payload.get("status") or "ACTIVE",
                         "last_event_id": e.event_id,
                     }
                 else:
                     existing["updated_at"] = now
+                    if "external_trade_id" in payload:
+                        existing["external_trade_id"] = normalize_optional_text(payload.get("external_trade_id"))
+                    if "source_system" in payload:
+                        existing["source_system"] = normalize_optional_text(
+                            payload.get("source_system"),
+                            uppercase=True,
+                        )
+                    if "execution_timestamp" in payload:
+                        existing["execution_timestamp"] = normalize_execution_timestamp(
+                            payload.get("execution_timestamp")
+                        )
                     if "trade_nature" in payload:
                         existing["trade_nature"] = normalize_trade_nature(payload.get("trade_nature"))
                     if "trade_structure" in payload:
@@ -185,7 +272,18 @@ def main() -> None:
                         existing["trade_side"] = normalize_trade_side(payload.get("trade_side"))
                     if "legs" in payload:
                         existing["legs"] = normalize_legs(payload.get("legs"))
+                    previous_book = normalize_book(existing.get("book"))
                     existing["book"] = normalize_book(payload.get("book", existing.get("book")))
+                    apply_portfolio_payload(
+                        existing,
+                        payload,
+                        book_changed=existing["book"] != previous_book,
+                    )
+                    if "counterparty" in payload:
+                        existing["counterparty"] = normalize_optional_text(
+                            payload.get("counterparty"),
+                            uppercase=True,
+                        )
                     if payload.get("commodity_class") is not None or payload.get("commodity") is not None:
                         existing["commodity_class"] = normalize_commodity_class(
                             payload.get("commodity_class", existing.get("commodity_class")),
@@ -195,6 +293,13 @@ def main() -> None:
                         existing["commodity"] = normalize_commodity_code(payload.get("commodity"))
                     if "pricing_type" in payload:
                         existing["pricing_type"] = normalize_pricing_type(payload.get("pricing_type"))
+                    if "pricing_status" in payload:
+                        existing["pricing_status"] = normalize_trade_header_status(
+                            payload.get("pricing_status"),
+                            existing.get("pricing_status", "PENDING"),
+                            field_name="Pricing status",
+                            valid_values={pricing_status.value for pricing_status in PricingStatus},
+                        )
                     if "price_index_code" in payload:
                         existing["price_index_code"] = normalize_price_index_code(
                             payload.get("price_index_code")
@@ -203,6 +308,15 @@ def main() -> None:
                         existing["price"] = to_decimal_or_none(payload.get("price"))
                     if payload.get("volume") is not None:
                         existing["volume"] = to_decimal_or_none(payload.get("volume"))
+                    if "settlement_status" in payload:
+                        existing["settlement_status"] = normalize_trade_header_status(
+                            payload.get("settlement_status"),
+                            existing.get("settlement_status", "PENDING"),
+                            field_name="Settlement status",
+                            valid_values={settlement_status.value for settlement_status in SettlementStatus},
+                        )
+                    if "trader_user" in payload:
+                        existing["trader_user"] = normalize_optional_text(payload.get("trader_user"))
                     if payload.get("status") is not None:
                         existing["status"] = payload.get("status")
                     existing["last_event_id"] = e.event_id
@@ -215,6 +329,17 @@ def main() -> None:
                     continue
 
                 existing["updated_at"] = now
+                if "external_trade_id" in payload:
+                    existing["external_trade_id"] = normalize_optional_text(payload.get("external_trade_id"))
+                if "source_system" in payload:
+                    existing["source_system"] = normalize_optional_text(
+                        payload.get("source_system"),
+                        uppercase=True,
+                    )
+                if "execution_timestamp" in payload:
+                    existing["execution_timestamp"] = normalize_execution_timestamp(
+                        payload.get("execution_timestamp")
+                    )
                 if "trade_nature" in payload:
                     existing["trade_nature"] = normalize_trade_nature(payload.get("trade_nature"))
                 if "trade_structure" in payload:
@@ -223,10 +348,21 @@ def main() -> None:
                     existing["trade_side"] = normalize_trade_side(payload.get("trade_side"))
                 if "legs" in payload:
                     existing["legs"] = normalize_legs(payload.get("legs"))
+                previous_book = normalize_book(existing.get("book"))
                 if "book" in payload:
                     existing["book"] = normalize_book(payload.get("book"))
                 else:
                     existing["book"] = normalize_book(existing.get("book"))
+                apply_portfolio_payload(
+                    existing,
+                    payload,
+                    book_changed=existing["book"] != previous_book,
+                )
+                if "counterparty" in payload:
+                    existing["counterparty"] = normalize_optional_text(
+                        payload.get("counterparty"),
+                        uppercase=True,
+                    )
                 if "commodity_class" in payload or "commodity" in payload:
                     existing["commodity_class"] = normalize_commodity_class(
                         payload.get("commodity_class", existing.get("commodity_class")),
@@ -236,6 +372,13 @@ def main() -> None:
                     existing["commodity"] = normalize_commodity_code(payload.get("commodity"))
                 if "pricing_type" in payload:
                     existing["pricing_type"] = normalize_pricing_type(payload.get("pricing_type"))
+                if "pricing_status" in payload:
+                    existing["pricing_status"] = normalize_trade_header_status(
+                        payload.get("pricing_status"),
+                        existing.get("pricing_status", "PENDING"),
+                        field_name="Pricing status",
+                        valid_values={pricing_status.value for pricing_status in PricingStatus},
+                    )
                 if "price_index_code" in payload:
                     existing["price_index_code"] = normalize_price_index_code(
                         payload.get("price_index_code")
@@ -244,6 +387,15 @@ def main() -> None:
                     existing["price"] = to_decimal_or_none(payload.get("price"))
                 if payload.get("volume") is not None:
                     existing["volume"] = to_decimal_or_none(payload.get("volume"))
+                if "settlement_status" in payload:
+                    existing["settlement_status"] = normalize_trade_header_status(
+                        payload.get("settlement_status"),
+                        existing.get("settlement_status", "PENDING"),
+                        field_name="Settlement status",
+                        valid_values={settlement_status.value for settlement_status in SettlementStatus},
+                    )
+                if "trader_user" in payload:
+                    existing["trader_user"] = normalize_optional_text(payload.get("trader_user"))
                 if payload.get("status") is not None:
                     existing["status"] = payload.get("status")
                 existing["last_event_id"] = e.event_id
@@ -265,8 +417,11 @@ def main() -> None:
             db.add(
                 Trade(
                     trade_id=trade["trade_id"],
+                    external_trade_id=trade.get("external_trade_id"),
+                    source_system=trade.get("source_system"),
                     created_at=trade["created_at"],
                     updated_at=trade["updated_at"],
+                    execution_timestamp=trade.get("execution_timestamp"),
                     trade_nature=trade.get("trade_nature", TradeNature.PHYSICAL.value),
                     trade_structure=trade.get("trade_structure", TradeStructure.SINGLE.value),
                     trade_side=(
@@ -275,12 +430,17 @@ def main() -> None:
                         else trade.get("trade_side", TradeSide.BUY.value)
                     ),
                     book=normalize_book(trade.get("book")),
+                    portfolio=trade.get("portfolio"),
+                    counterparty=trade.get("counterparty"),
                     commodity_class=trade["commodity_class"],
                     commodity=trade["commodity"],
                     pricing_type=trade.get("pricing_type", PricingType.FIXED.value),
+                    pricing_status=trade.get("pricing_status", "PENDING"),
                     price_index_code=trade.get("price_index_code"),
                     price=trade["price"],
                     volume=trade["volume"],
+                    settlement_status=trade.get("settlement_status", "PENDING"),
+                    trader_user=trade.get("trader_user"),
                     status=trade["status"],
                     last_event_id=trade["last_event_id"],
                 )

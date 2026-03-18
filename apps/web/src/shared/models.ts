@@ -1,17 +1,25 @@
 export type Trade = {
   trade_id: string
+  external_trade_id: string | null
+  source_system: string | null
   created_at: string
   updated_at: string
+  execution_timestamp: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
   book: string
+  portfolio: string | null
+  counterparty: string | null
   commodity_class: string
   commodity: string
   pricing_type: string
+  pricing_status: string
   price_index_code: string | null
   price: number | null
   volume: number | null
+  settlement_status: string
+  trader_user: string | null
   status: string
   last_event_id: string
 }
@@ -22,6 +30,17 @@ export type TradeLegDraft = {
   commodity_class: string
   commodity: string
   volume: string
+}
+
+export type TradeHeaderDraft = {
+  external_trade_id: string
+  source_system: string
+  execution_timestamp: string
+  portfolio: string
+  counterparty: string
+  pricing_status: string
+  settlement_status: string
+  trader_user: string
 }
 
 export type EventRow = {
@@ -150,7 +169,143 @@ export type TradingSourceRecord = {
   status: string
 }
 
-export type ViewKey = 'dashboard' | 'trades' | 'events' | 'positions' | 'reference' | 'admin' | 'settings'
+export type AssistantProvider = 'openai' | 'anthropic' | 'google'
+export type AssistantMessageRole = 'user' | 'assistant'
+export type AssistantAgentStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'RETIRED'
+export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
+export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
+
+export type AssistantProviderStatus = {
+  provider: AssistantProvider
+  label: string
+  enabled: boolean
+  configured: boolean
+  is_default: boolean
+  default_model: string
+  base_url: string
+  setup_env_var: string
+}
+
+export type AssistantToolDefinition = {
+  name: string
+  description: string
+}
+
+export type AssistantRuntimeSettings = {
+  enabled: boolean
+  default_provider: AssistantProvider
+  effective_default_provider: AssistantProvider | null
+  configured_provider_count: number
+  providers: AssistantProviderStatus[]
+  available_tools: AssistantToolDefinition[]
+}
+
+export type AssistantMessage = {
+  role: AssistantMessageRole
+  content: string
+}
+
+export type AssistantAgent = {
+  agent_id: string
+  name: string
+  description: string
+  status: AssistantAgentStatus
+  scope: AssistantAgentScope
+  provider: AssistantProvider | null
+  model: string | null
+  allowed_workspaces: ViewKey[]
+  capabilities: AssistantAgentCapability[]
+}
+
+export type AssistantAdminAgent = AssistantAgent & {
+  system_prompt: string
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type AssistantPromptRequest = {
+  agent_id?: string
+  provider?: AssistantProvider
+  workspace?: ViewKey
+  context?: string
+  use_live_tools?: boolean
+  messages: AssistantMessage[]
+}
+
+export type AssistantToolCall = {
+  tool_name: string
+  summary: string
+  arguments: Record<string, unknown>
+  record_count: number | null
+}
+
+export type AssistantPromptResponse = {
+  agent_id?: string | null
+  agent_name?: string | null
+  provider: AssistantProvider
+  model: string
+  message: {
+    role: 'assistant'
+    content: string
+  }
+  usage: {
+    input_tokens: number | null
+    output_tokens: number | null
+  }
+  warnings: string[]
+  tool_calls: AssistantToolCall[]
+}
+
+export type AssistantPromptContextRequest = {
+  agent_id?: string
+  provider?: AssistantProvider
+  workspace?: ViewKey
+  context?: string
+  use_live_tools?: boolean
+}
+
+export type AssistantPromptSectionSource =
+  | 'system'
+  | 'organization'
+  | 'user'
+  | 'business'
+  | 'data'
+  | 'world'
+  | 'workspace'
+  | 'application'
+  | 'agent'
+
+export type AssistantPromptSection = {
+  key: string
+  title: string
+  source: AssistantPromptSectionSource
+  content: string
+}
+
+export type AssistantPromptContext = {
+  agent_id?: string | null
+  agent_name?: string | null
+  provider: AssistantProvider
+  model: string
+  generated_at: string
+  warnings: string[]
+  sections: AssistantPromptSection[]
+  rendered_system_prompt: string
+}
+
+export type ViewKey =
+  | 'dashboard'
+  | 'guide'
+  | 'trades'
+  | 'events'
+  | 'positions'
+  | 'reference'
+  | 'admin'
+  | 'settings'
+  | 'assistant'
 export type InspectorTab = 'overview' | 'events' | 'amend' | 'risk'
 export type ReferenceTab =
   | 'books'

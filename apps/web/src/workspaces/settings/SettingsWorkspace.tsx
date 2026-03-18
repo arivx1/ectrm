@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
 import {
   bootstrapAdminSession,
   createAuthSession,
+  createGoogleAuthSession,
+  createSingleUserAuthSession,
   logoutCurrentSession,
   type SessionResponse,
 } from '../../entities/auth/api'
+import { loadGoogleIdentityScript } from '../../entities/auth/googleIdentity'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../entities/app/api'
 import {
   appConfig,
@@ -26,6 +29,17 @@ type SettingsWorkspaceProps = {
 type FlashMessage = {
   tone: 'success' | 'error'
   message: string
+}
+
+type AuthAction = 'login' | 'single-user' | 'bootstrap' | 'logout' | 'google' | null
+
+function mapSession(session: SessionResponse): StoredAuthSession {
+  return {
+    sessionId: session.session_id,
+    accessToken: session.access_token,
+    expiresAt: session.expires_at,
+    user: session.user,
+  }
 }
 
 function SettingsValueRow({
@@ -75,11 +89,13 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
     getClientRuntimeOverrideSnapshot(),
   )
   const [authFlash, setAuthFlash] = useState<FlashMessage | null>(null)
-  const [authLoading, setAuthLoading] = useState(false)
+  const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [runtimeFlash, setRuntimeFlash] = useState<FlashMessage | null>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
+  const [googleSignInReady, setGoogleSignInReady] = useState(false)
+  const googleSignInContainerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -110,18 +126,38 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
     }
   }, [])
 
-  function mapSession(session: SessionResponse): StoredAuthSession {
-    return {
-      sessionId: session.session_id,
-      accessToken: session.access_token,
-      expiresAt: session.expires_at,
-      user: session.user,
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
     }
-  }
+
+    const targetId = window.location.hash.replace(/^#/, '').trim()
+    if (!targetId) {
+      return
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const target = document.getElementById(targetId)
+      if (!target) {
+        return
+      }
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      if (target.matches('input, button, textarea, select')) {
+        target.focus()
+        return
+      }
+
+      const firstControl = target.querySelector<HTMLElement>('input, button, textarea, select')
+      firstControl?.focus()
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [])
 
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault()
-    setAuthLoading(true)
+    setAuthAction('login')
     setAuthFlash(null)
 
     try {
@@ -138,13 +174,55 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
         message: error instanceof Error ? error.message : 'Could not sign in.',
       })
     } finally {
-      setAuthLoading(false)
+      setAuthAction(null)
     }
   }
 
+  async function handleSingleUserLogin() {
+    setAuthAction('single-user')
+    setAuthFlash(null)
+
+    try {
+      const session = await createSingleUserAuthSession(appConfig.apiBase)
+      await onSessionChange(mapSession(session))
+      setAuthFlash({
+        tone: 'success',
+        message: `Signed in as ${session.user.display_name} through single-user access.`,
+      })
+    } catch (error) {
+      setAuthFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not sign in with single-user access.',
+      })
+    } finally {
+      setAuthAction(null)
+    }
+  }
+
+  const handleGoogleCredential = useEffectEvent(async (idToken: string) => {
+    setAuthAction('google')
+    setAuthFlash(null)
+
+    try {
+      const session = await createGoogleAuthSession(appConfig.apiBase, { id_token: idToken })
+      await onSessionChange(mapSession(session))
+      setAuthFlash({
+        tone: 'success',
+        message: `Signed in as ${session.user.display_name} through Google.`,
+      })
+    } catch (error) {
+      setAuthFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not sign in with Google.',
+      })
+    } finally {
+      setAuthAction(null)
+    }
+  })
+
   async function handleBootstrapAdmin(event: React.FormEvent) {
     event.preventDefault()
-    setAuthLoading(true)
+    setAuthAction('bootstrap')
     setAuthFlash(null)
 
     try {
@@ -165,12 +243,12 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
         message: error instanceof Error ? error.message : 'Could not bootstrap the initial admin account.',
       })
     } finally {
-      setAuthLoading(false)
+      setAuthAction(null)
     }
   }
 
   async function handleLogout() {
-    setAuthLoading(true)
+    setAuthAction('logout')
     setAuthFlash(null)
 
     try {
@@ -192,7 +270,7 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
           message: error instanceof Error ? error.message : 'Signed out locally, but the workspace could not be refreshed.',
         })
       } finally {
-        setAuthLoading(false)
+        setAuthAction(null)
       }
     }
   }
@@ -253,9 +331,91 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
     window.location.reload()
   }
 
+  const googleClientId = serverSettings?.google_auth.client_id?.trim() ?? ''
   const healthTone = health === 'ok' ? 'active' : 'cancelled'
   const authTone = authSession ? 'active' : 'cancelled'
+  const authLoading = authAction !== null
   const runtimeOverrideCount = Object.values(runtimeOverrideForm).filter((value) => value.trim() !== '').length
+  const singleUserAuthEnabled = Boolean(serverSettings?.single_user_auth_enabled)
+  const googleAuthEnabled = Boolean(serverSettings?.google_auth.enabled && googleClientId)
+  const googleAutoCreateUsers = Boolean(serverSettings?.google_auth.auto_create_users)
+
+  useEffect(() => {
+    const container = googleSignInContainerRef.current
+    if (!container) {
+      return
+    }
+    const containerElement: HTMLDivElement = container
+
+    if (authSession || !googleAuthEnabled) {
+      containerElement.innerHTML = ''
+      setGoogleSignInReady(false)
+      return
+    }
+
+    let cancelled = false
+    containerElement.innerHTML = ''
+    setGoogleSignInReady(false)
+
+    async function initializeGoogleSignIn() {
+      try {
+        await loadGoogleIdentityScript()
+        if (cancelled) {
+          return
+        }
+
+        const googleIdentityApi = window.google?.accounts?.id
+        if (!googleIdentityApi) {
+          throw new Error('Google sign-in is unavailable in this browser.')
+        }
+
+        googleIdentityApi.initialize({
+          client_id: googleClientId,
+          callback: (response) => {
+            if (cancelled) {
+              return
+            }
+            if (!response.credential) {
+              setAuthFlash({
+                tone: 'error',
+                message: 'Google did not return a sign-in token.',
+              })
+              return
+            }
+            void handleGoogleCredential(response.credential)
+          },
+          cancel_on_tap_outside: true,
+        })
+
+        googleIdentityApi.renderButton(containerElement, {
+          theme: 'outline',
+          size: 'large',
+          shape: 'pill',
+          text: 'continue_with',
+          width: Math.max(240, Math.min(containerElement.clientWidth || 320, 360)),
+        })
+        setGoogleSignInReady(true)
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+
+        setAuthFlash((current) =>
+          current ?? {
+            tone: 'error',
+            message: error instanceof Error ? error.message : 'Could not initialize Google sign-in.',
+          },
+        )
+      }
+    }
+
+    void initializeGoogleSignIn()
+
+    return () => {
+      cancelled = true
+      container.innerHTML = ''
+    }
+  }, [authSession, googleAuthEnabled, googleClientId])
 
   return (
     <div className="workspace-grid settings-grid">
@@ -304,7 +464,7 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
                   onClick={handleLogout}
                   disabled={authLoading}
                 >
-                  {authLoading ? 'Signing Out...' : 'Sign Out'}
+                  {authAction === 'logout' ? 'Signing Out...' : 'Sign Out'}
                 </button>
               </div>
 
@@ -314,13 +474,16 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
             </div>
           ) : (
             <div className="stack-form settings-form">
-              <form className="stack-form" onSubmit={handleLogin}>
+              <form id="session-login" className="stack-form" onSubmit={handleLogin}>
                 <div className="section-head">
                   <div>
                     <span className="eyebrow">Sign In</span>
                     <h3>Session Login</h3>
                   </div>
-                  <p>Use a user ID or email plus password. The API derives the audit actor from the authenticated session.</p>
+                  <p>
+                    Use a user ID or email plus password. Google sign-in appears below when the server is
+                    configured for it, and the local OPS_ADMIN shortcut remains available for development.
+                  </p>
                 </div>
 
                 <div className="mini-grid">
@@ -353,13 +516,53 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
 
                 <div className="toolbar settings-actions">
                   <button type="submit" className="button button-primary" disabled={authLoading}>
-                    {authLoading ? 'Signing In...' : 'Sign In'}
+                    {authAction === 'login' ? 'Signing In...' : 'Sign In'}
                   </button>
+                  {singleUserAuthEnabled ? (
+                    <button
+                      id="single-user-sign-in"
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleSingleUserLogin()}
+                      disabled={authLoading}
+                    >
+                      {authAction === 'single-user' ? 'Signing In...' : 'Single-User Sign In'}
+                    </button>
+                  ) : null}
                 </div>
               </form>
 
+              {googleAuthEnabled ? (
+                <div className="stack-form">
+                  <div className="section-head">
+                    <div>
+                      <span className="eyebrow">Federated Sign-In</span>
+                      <h3>Google Login</h3>
+                    </div>
+                    <p>
+                      Continue with Google using the configured client ID.
+                      {googleAutoCreateUsers
+                        ? ' New Google identities can create a local account automatically with the server default role.'
+                        : ' Your Google email must already map to a local user account.'}
+                    </p>
+                  </div>
+
+                  <div className="toolbar settings-actions">
+                    <div ref={googleSignInContainerRef} className="google-sign-in-button" />
+                  </div>
+
+                  <p className="form-note">
+                    {authAction === 'google'
+                      ? 'Completing Google sign-in...'
+                      : googleSignInReady
+                        ? 'Google issues the identity token in the browser, then the API exchanges it for the same local session token used by password sign-in.'
+                        : 'Loading Google sign-in...'}
+                  </p>
+                </div>
+              ) : null}
+
               {serverSettings?.bootstrap_admin_enabled ? (
-                <form className="stack-form" onSubmit={handleBootstrapAdmin}>
+                <form id="bootstrap-admin" className="stack-form" onSubmit={handleBootstrapAdmin}>
                   <div className="section-head">
                     <div>
                       <span className="eyebrow">First Run</span>
@@ -436,7 +639,7 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
 
                   <div className="toolbar settings-actions">
                     <button type="submit" className="button button-primary" disabled={authLoading}>
-                      {authLoading ? 'Creating Admin...' : 'Create Initial Admin'}
+                      {authAction === 'bootstrap' ? 'Creating Admin...' : 'Create Initial Admin'}
                     </button>
                   </div>
                 </form>
@@ -645,6 +848,35 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
                   <strong>{serverSettings.bootstrap_admin_enabled ? 'Configured' : 'Unavailable'}</strong>
                   <p>{serverSettings.bootstrap_admin_enabled ? 'Initial admin bootstrap token is configured on the server.' : 'No bootstrap token is configured on the server.'}</p>
                 </article>
+                <article className="settings-summary-card">
+                  <span>Single-user auth</span>
+                  <strong>{serverSettings.single_user_auth_enabled ? 'Enabled' : 'Disabled'}</strong>
+                  <p>
+                    {serverSettings.single_user_auth_enabled
+                      ? 'One-click local OPS_ADMIN sign-in is available in the session login section.'
+                      : 'One-click single-user sign-in is not enabled on the server.'}
+                  </p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>Google auth</span>
+                  <strong>{serverSettings.google_auth.enabled ? 'Enabled' : 'Disabled'}</strong>
+                  <p>
+                    {serverSettings.google_auth.enabled
+                      ? serverSettings.google_auth.auto_create_users
+                        ? 'Google sign-in is enabled and can auto-provision local users.'
+                        : 'Google sign-in is enabled for linked local users.'
+                      : 'Google sign-in is not enabled on the server.'}
+                  </p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>Assistant default</span>
+                  <strong>{serverSettings.assistant.effective_default_provider ?? 'Not ready'}</strong>
+                  <p>
+                    {serverSettings.assistant.enabled
+                      ? `${serverSettings.assistant.configured_provider_count} provider(s) can answer prompts.`
+                      : 'No configured assistant provider is ready on the API.'}
+                  </p>
+                </article>
               </div>
 
               <div className="settings-kv">
@@ -673,6 +905,14 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
                   label="Admin list max"
                   value={String(serverSettings.pagination.admin_max)}
                 />
+                <SettingsValueRow
+                  label="Requested assistant default"
+                  value={serverSettings.assistant.default_provider}
+                />
+                <SettingsValueRow
+                  label="Effective assistant default"
+                  value={serverSettings.assistant.effective_default_provider ?? 'None configured'}
+                />
               </div>
 
               <div className="settings-chip-block">
@@ -681,6 +921,17 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
                   {serverSettings.cors_allow_origins.map((origin) => (
                     <span key={origin} className="entity-chip entity-chip-soft">
                       {origin}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-chip-block">
+                <span className="field-label">Assistant Providers</span>
+                <div className="chip-row">
+                  {serverSettings.assistant.providers.map((provider) => (
+                    <span key={provider.provider} className="entity-chip entity-chip-soft">
+                      {provider.label} · {provider.enabled ? 'ready' : provider.configured ? 'disabled' : 'needs key'}
                     </span>
                   ))}
                 </div>

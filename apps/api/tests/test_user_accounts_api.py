@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import unittest
 
+from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.core.auth import hash_password, verify_password
 from apps.api.app.models.event import Base
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.routes.users import (
@@ -86,6 +89,63 @@ class UserAccountsApiTests(unittest.TestCase):
 
             rows = list_users(q="operations", is_active=True, limit=50, offset=0, db=session)
             self.assertEqual([row.user_id for row in rows], ["ops_lead"])
+
+    def test_duplicate_lookup_uses_normalized_identifier_and_email(self) -> None:
+        with self.SessionLocal() as session:
+            create_user(
+                UserAccountCreate(
+                    user_id="ops_lead",
+                    email="ops@example.com",
+                    display_name="Ops Lead",
+                    role="ops_admin",
+                    password="supersecret1",
+                    created_by="system",
+                ),
+                db=session,
+            )
+
+            with self.assertRaises(HTTPException) as error:
+                create_user(
+                    UserAccountCreate(
+                        user_id=" ops_lead ",
+                        email=" ops@example.com ",
+                        display_name="Ops Lead Two",
+                        role="admin",
+                        password="supersecret2",
+                        created_by="system",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(error.exception.detail, "User already exists")
+
+    def test_schema_rejects_blank_normalized_fields(self) -> None:
+        with self.assertRaises(ValidationError):
+            UserAccountCreate(
+                user_id="ops_lead",
+                email="ops@example.com",
+                display_name="   ",
+                role="ops_admin",
+                password="supersecret1",
+                created_by="system",
+            )
+
+        with self.assertRaises(ValidationError):
+            UserAccountUpdate(display_name="   ", updated_by="admin")
+
+        with self.assertRaises(ValidationError):
+            UserAccountUpdate(role="   ", updated_by="admin")
+
+    def test_password_hash_requires_exact_non_blank_input(self) -> None:
+        encoded = hash_password("supersecret1 ")
+
+        self.assertTrue(verify_password("supersecret1 ", encoded))
+        self.assertFalse(verify_password("supersecret1", encoded))
+        self.assertFalse(verify_password("        ", encoded))
+
+        with self.assertRaises(ValueError):
+            hash_password("        ")
 
 
 if __name__ == "__main__":

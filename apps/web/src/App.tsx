@@ -2,13 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { AdminWorkspace } from './workspaces/admin/AdminWorkspace'
 import { DashboardWorkspace } from './workspaces/dashboard/DashboardWorkspace'
+import {
+  DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
+  DocumentationWorkspace,
+  type DocumentationDocumentKey,
+} from './workspaces/docs/DocumentationWorkspace'
 import { EventsWorkspace } from './workspaces/events/EventsWorkspace'
 import { PositionsWorkspace } from './workspaces/positions/PositionsWorkspace'
 import { ReferenceDataWorkspace } from './workspaces/reference-data/ReferenceDataWorkspace'
+import { AssistantWorkspace } from './workspaces/assistant/AssistantWorkspace'
 import { SettingsWorkspace } from './workspaces/settings/SettingsWorkspace'
 import { TradingWorkspace } from './workspaces/trading/TradingWorkspace'
 import { loadWorkspaceBootstrap } from './entities/app/api'
-import { loadCurrentSession } from './entities/auth/api'
+import { loadCurrentSession, sendSessionHeartbeat } from './entities/auth/api'
 import { submitTradeEvent } from './entities/trade/api'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
 import { fetchJson, postJson } from './shared/api'
@@ -46,7 +52,9 @@ import { classForCommodity } from './shared/reference'
 import {
   commodityClassOrder,
   pricingTypeOptions,
+  pricingStatusOptions,
   pricingTypeRequiresPriceIndex,
+  settlementStatusOptions,
   tradeAggregateType,
   tradeNatureOptions,
   tradeSideOptions,
@@ -58,12 +66,14 @@ import { Tooltip } from './shared/ui/Tooltip'
 
 const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
   { key: 'dashboard', label: 'Dashboard', kicker: 'Today' },
+  { key: 'guide', label: 'Guide', kicker: 'Learn' },
   { key: 'trades', label: 'Trades', kicker: 'Capture' },
   { key: 'events', label: 'Events', kicker: 'Timeline' },
   { key: 'positions', label: 'Positions', kicker: 'Exposure' },
   { key: 'reference', label: 'Reference Data', kicker: 'Master' },
   { key: 'admin', label: 'Admin', kicker: 'Controls' },
   { key: 'settings', label: 'Settings', kicker: 'Runtime' },
+  { key: 'assistant', label: 'Assistant', kicker: 'AI' },
 ]
 
 function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {
@@ -75,8 +85,80 @@ function sessionHeaders(session: StoredAuthSession): Headers {
   return new Headers({ Authorization: `Bearer ${session.accessToken}` })
 }
 
+type AppRouteState = {
+  view: ViewKey
+  docsDocumentKey: DocumentationDocumentKey
+  tradeId: string | null
+}
+
+const VIEW_KEYS = new Set<ViewKey>(VIEWS.map((view) => view.key))
+
+function isViewKey(value: string | null): value is ViewKey {
+  return value !== null && VIEW_KEYS.has(value as ViewKey)
+}
+
+function isDocumentationDocumentKey(value: string | null): value is DocumentationDocumentKey {
+  return value === 'guide' || value === 'roadmap'
+}
+
+function readAppRouteState(): AppRouteState {
+  if (typeof window === 'undefined') {
+    return {
+      view: 'dashboard',
+      docsDocumentKey: DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
+      tradeId: null,
+    }
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const viewParam = params.get('view')
+  const docsParam = params.get('doc')
+  const view: ViewKey = isViewKey(viewParam) ? viewParam : 'dashboard'
+
+  return {
+    view,
+    docsDocumentKey:
+      view === 'guide' && isDocumentationDocumentKey(docsParam)
+        ? docsParam
+        : DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
+    tradeId: view === 'trades' ? params.get('trade')?.trim() || null : null,
+  }
+}
+
+function currentAppUrl(): string {
+  if (typeof window === 'undefined') {
+    return '/'
+  }
+
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`
+}
+
+function buildAppRouteUrl(route: AppRouteState, hash: string): string {
+  if (typeof window === 'undefined') {
+    return '/'
+  }
+
+  const params = new URLSearchParams()
+  params.set('view', route.view)
+
+  if (route.view === 'guide') {
+    params.set('doc', route.docsDocumentKey)
+  }
+
+  if (route.view === 'trades' && route.tradeId) {
+    params.set('trade', route.tradeId)
+  }
+
+  const search = params.toString()
+  return `${window.location.pathname}${search ? `?${search}` : ''}${hash}`
+}
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<ViewKey>('dashboard')
+  const initialRoute = useMemo(() => readAppRouteState(), [])
+  const [currentView, setCurrentView] = useState<ViewKey>(initialRoute.view)
+  const [activeDocumentationDocumentKey, setActiveDocumentationDocumentKey] =
+    useState<DocumentationDocumentKey>(initialRoute.docsDocumentKey)
+  const [roadmapRefreshVersion, setRoadmapRefreshVersion] = useState(0)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [health, setHealth] = useState<string>('checking...')
@@ -103,7 +185,7 @@ export default function App() {
   const [tradingSourcesSuccess, setTradingSourcesSuccess] = useState<string>('')
   const [referenceDataLoading, setReferenceDataLoading] = useState(true)
   const [appLoading, setAppLoading] = useState(true)
-  const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null)
+  const [selectedTradeId, setSelectedTradeId] = useState<string | null>(initialRoute.tradeId)
   const [selectedTradeEvents, setSelectedTradeEvents] = useState<EventRow[]>([])
   const [eventFilter, setEventFilter] = useState('ALL')
   const [externalDataSyncing, setExternalDataSyncing] = useState(false)
@@ -114,6 +196,10 @@ export default function App() {
 
   const [amending, setAmending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+
+  function handleRoadmapPublished() {
+    setRoadmapRefreshVersion((current) => current + 1)
+  }
 
   async function loadData(sessionOverride?: StoredAuthSession | null) {
     const currentSession = sessionOverride ?? authSession
@@ -234,8 +320,67 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    function handlePopState() {
+      const nextRoute = readAppRouteState()
+      setCurrentView(nextRoute.view)
+      if (nextRoute.view === 'guide') {
+        setActiveDocumentationDocumentKey(nextRoute.docsDocumentKey)
+      }
+      if (nextRoute.view === 'trades') {
+        setSelectedTradeId(nextRoute.tradeId)
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
     setMobileNavOpen(false)
   }, [currentView])
+
+  useEffect(() => {
+    if (!authSession) {
+      return
+    }
+
+    let cancelled = false
+
+    async function heartbeat() {
+      try {
+        await sendSessionHeartbeat(appConfig.apiBase)
+      } catch {
+        if (!cancelled) {
+          // Presence refresh should stay quiet; the authenticated workspace already surfaces session failures elsewhere.
+        }
+      }
+    }
+
+    function handleFocus() {
+      void heartbeat()
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        void heartbeat()
+      }
+    }
+
+    void heartbeat()
+    const intervalId = window.setInterval(() => {
+      void heartbeat()
+    }, 45000)
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [authSession])
 
   useEffect(() => {
     if (!selectedTradeId) {
@@ -270,9 +415,11 @@ export default function App() {
 
   const activeBooks = useMemo(() => books.filter((book) => book.is_active), [books])
   const activeCommodities = useMemo(() => commodities.filter((commodity) => commodity.is_active), [commodities])
+  const activeCounterparties = useMemo(() => counterparties.filter((counterparty) => counterparty.is_active), [counterparties])
   const activeCurrencies = useMemo(() => currencies.filter((currency) => currency.is_active), [currencies])
   const activeUnits = useMemo(() => units.filter((unit) => unit.is_active), [units])
   const activeLocations = useMemo(() => locations.filter((location) => location.is_active), [locations])
+  const activePortfolios = useMemo(() => portfolios.filter((portfolio) => portfolio.is_active), [portfolios])
   const hasReferenceOptions = activeBooks.length > 0 && activeCommodities.length > 0
 
   const selectedTrade = useMemo(
@@ -280,10 +427,91 @@ export default function App() {
     [trades, selectedTradeId],
   )
 
+  useEffect(() => {
+    if (currentView !== 'trades' || trades.length === 0) {
+      return
+    }
+
+    if (selectedTradeId && trades.some((trade) => trade.trade_id === selectedTradeId)) {
+      return
+    }
+
+    setSelectedTradeId(trades[0].trade_id)
+  }, [currentView, selectedTradeId, trades])
+
   const activeTrades = useMemo(
     () => trades.filter((trade) => trade.status !== tradeStatusValues.cancelled),
     [trades],
   )
+
+  function syncRouteState(route: AppRouteState, historyMode: 'push' | 'replace', preserveHash = false) {
+    const nextHash = preserveHash ? window.location.hash : ''
+    const nextUrl = buildAppRouteUrl(route, nextHash)
+    if (nextUrl === currentAppUrl()) {
+      return
+    }
+
+    const historyMethod = historyMode === 'push' ? 'pushState' : 'replaceState'
+    window.history[historyMethod](null, '', nextUrl)
+  }
+
+  function navigateToView(view: ViewKey) {
+    syncRouteState(
+      {
+        view,
+        docsDocumentKey: activeDocumentationDocumentKey,
+        tradeId: selectedTradeId,
+      },
+      'push',
+      view === 'settings',
+    )
+    setCurrentView(view)
+  }
+
+  function navigateToTrade(tradeId: string) {
+    syncRouteState(
+      {
+        view: 'trades',
+        docsDocumentKey: activeDocumentationDocumentKey,
+        tradeId,
+      },
+      'push',
+    )
+    setSelectedTradeId(tradeId)
+    setCurrentView('trades')
+    setInspectorTab('overview')
+  }
+
+  function handleDocumentationDocumentChange(nextDocumentKey: DocumentationDocumentKey) {
+    if (currentView === 'guide' && activeDocumentationDocumentKey === nextDocumentKey) {
+      return
+    }
+
+    syncRouteState(
+      {
+        view: 'guide',
+        docsDocumentKey: nextDocumentKey,
+        tradeId: selectedTradeId,
+      },
+      'push',
+      currentView === 'guide' && nextDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
+    )
+    setActiveDocumentationDocumentKey(nextDocumentKey)
+    setCurrentView('guide')
+  }
+
+  useEffect(() => {
+    syncRouteState(
+      {
+        view: currentView,
+        docsDocumentKey: activeDocumentationDocumentKey,
+        tradeId: selectedTradeId,
+      },
+      'replace',
+      currentView === 'settings' ||
+        (currentView === 'guide' && activeDocumentationDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY),
+    )
+  }, [currentView, activeDocumentationDocumentKey, selectedTradeId])
 
   const totalActiveVolume = useMemo(
     () => activeTrades.reduce((sum, trade) => sum + (trade.volume ?? 0), 0),
@@ -338,7 +566,14 @@ export default function App() {
     return events.filter((event) => event.event_type === eventFilter)
   }, [eventFilter, events, selectedTradeEvents])
 
-  const captureForm = useTradeCaptureForm(activeBooks, commodityClassOptions, activeCommodities, priceIndices)
+  const captureForm = useTradeCaptureForm(
+    activeBooks,
+    commodityClassOptions,
+    activeCommodities,
+    priceIndices,
+    activeCounterparties,
+    activePortfolios,
+  )
   const amendForm = useTradeAmendForm(
     selectedTrade,
     selectedTradeEvents,
@@ -346,6 +581,8 @@ export default function App() {
     commodityClassOptions,
     activeCommodities,
     priceIndices,
+    activeCounterparties,
+    activePortfolios,
   )
 
   const {
@@ -371,9 +608,27 @@ export default function App() {
     setPriceInput,
     volumeInput,
     setVolumeInput,
+    externalTradeIdInput,
+    setExternalTradeIdInput,
+    sourceSystemInput,
+    setSourceSystemInput,
+    executionTimestampInput,
+    setExecutionTimestampInput,
+    portfolioInput,
+    setPortfolioInput,
+    counterpartyInput,
+    setCounterpartyInput,
+    pricingStatusInput,
+    setPricingStatusInput,
+    settlementStatusInput,
+    setSettlementStatusInput,
+    traderUserInput,
+    setTraderUserInput,
     createLegs,
     createCommodityOptions,
     createPriceIndexOptions,
+    createPortfolioOptions,
+    createCounterpartyOptions,
     updateDraftLeg: updateCreateDraftLeg,
     addDraftLeg: addCreateDraftLeg,
     removeDraftLeg: removeCreateDraftLeg,
@@ -381,6 +636,12 @@ export default function App() {
   } = captureForm
 
   const {
+    amendExternalTradeIdInput,
+    setAmendExternalTradeIdInput,
+    amendSourceSystemInput,
+    setAmendSourceSystemInput,
+    amendExecutionTimestampInput,
+    setAmendExecutionTimestampInput,
     amendTradeNatureInput,
     setAmendTradeNatureInput,
     amendTradeStructureInput,
@@ -389,20 +650,32 @@ export default function App() {
     setAmendTradeSideInput,
     amendBookInput,
     setAmendBookInput,
+    amendPortfolioInput,
+    setAmendPortfolioInput,
+    amendCounterpartyInput,
+    setAmendCounterpartyInput,
     amendCommodityClassInput,
     setAmendCommodityClassInput,
     amendCommodityInput,
     setAmendCommodityInput,
     amendPricingTypeInput,
     setAmendPricingTypeInput,
+    amendPricingStatusInput,
+    setAmendPricingStatusInput,
     amendPriceIndexInput,
     setAmendPriceIndexInput,
     amendPriceInput,
     setAmendPriceInput,
     amendVolumeInput,
     setAmendVolumeInput,
+    amendSettlementStatusInput,
+    setAmendSettlementStatusInput,
+    amendTraderUserInput,
+    setAmendTraderUserInput,
     amendLegs,
     amendBookOptions,
+    amendPortfolioOptions,
+    amendCounterpartyOptions,
     amendCommodityOptions,
     amendPriceIndexOptions,
     updateDraftLeg: updateAmendDraftLeg,
@@ -481,28 +754,58 @@ export default function App() {
     }
   }
 
+  function normalizeOptionalDateTimeInput(value: string): string | null {
+    const trimmedValue = value.trim()
+    if (!trimmedValue) {
+      return null
+    }
+
+    const parsedValue = new Date(trimmedValue)
+    if (Number.isNaN(parsedValue.getTime())) {
+      throw new Error('Execution timestamp must be a valid date and time.')
+    }
+
+    return parsedValue.toISOString()
+  }
+
   function buildTradePayload(input: {
+    externalTradeId: string
+    sourceSystem: string
+    executionTimestamp: string
     tradeNature: string
     tradeStructure: string
     tradeSide: string
     book: string
+    portfolio: string
+    counterparty: string
     commodityClass: string
     commodity: string
     pricingType: string
+    pricingStatus: string
     priceIndexCode: string
     price: number | null
     volume: number | null
+    settlementStatus: string
+    traderUser: string
     legs: TradeLegDraft[]
   }) {
     const payload: Record<string, unknown> = {
+      external_trade_id: input.externalTradeId.trim() || null,
+      source_system: input.sourceSystem.trim() || null,
+      execution_timestamp: normalizeOptionalDateTimeInput(input.executionTimestamp),
       trade_nature: input.tradeNature,
       trade_structure: input.tradeStructure,
       book: input.book,
+      portfolio: input.portfolio || null,
+      counterparty: input.counterparty || null,
       commodity_class: input.commodityClass,
       commodity: input.commodity,
       pricing_type: input.pricingType,
+      pricing_status: input.pricingStatus,
       price: input.price,
       volume: input.volume,
+      settlement_status: input.settlementStatus,
+      trader_user: input.traderUser.trim() || null,
     }
 
     if (tradeStructureSupportsLegs(input.tradeStructure)) {
@@ -530,16 +833,24 @@ export default function App() {
     setCreateError('')
 
     const tradeId = tradeIdInput.trim()
+    const externalTradeId = externalTradeIdInput
+    const sourceSystem = sourceSystemInput
+    const executionTimestamp = executionTimestampInput
     const tradeNature = tradeNatureInput
     const tradeStructure = tradeStructureInput
     const tradeSide = tradeSideInput
     const book = bookInput
+    const portfolio = portfolioInput
+    const counterparty = counterpartyInput
     const commodityClass = commodityClassInput
     const commodity = commodityInput.trim()
     const pricingType = pricingTypeInput
+    const pricingStatus = pricingStatusInput
     const priceIndexCode = priceIndexInput
     const price = parseRequiredNumber(priceInput)
     const volume = parseRequiredNumber(volumeInput)
+    const settlementStatus = settlementStatusInput
+    const traderUser = traderUserInput
 
     if (!tradeId || !book || !commodityClass || !commodity || price === null || volume === null) {
       setCreateError('Trade ID, book, commodity class, commodity, price, and volume are required.')
@@ -570,24 +881,30 @@ export default function App() {
         aggregate_id: tradeId,
         event_type: 'TradeCreated',
         payload: buildTradePayload({
+          externalTradeId,
+          sourceSystem,
+          executionTimestamp,
           tradeNature,
           tradeStructure,
           tradeSide,
           book,
+          portfolio,
+          counterparty,
           commodityClass,
           commodity,
           pricingType,
+          pricingStatus,
           priceIndexCode,
           price,
           volume,
+          settlementStatus,
+          traderUser,
           legs: createLegs,
         }),
       })
 
       await loadData()
-      setSelectedTradeId(tradeId)
-      setCurrentView('trades')
-      setInspectorTab('overview')
+      navigateToTrade(tradeId)
       resetCreateForm()
       setCreateError('')
     } catch (err) {
@@ -607,16 +924,24 @@ export default function App() {
       return
     }
 
+    const externalTradeId = amendExternalTradeIdInput
+    const sourceSystem = amendSourceSystemInput
+    const executionTimestamp = amendExecutionTimestampInput
     const tradeNature = amendTradeNatureInput
     const tradeStructure = amendTradeStructureInput
     const tradeSide = amendTradeSideInput
     const book = amendBookInput
+    const portfolio = amendPortfolioInput
+    const counterparty = amendCounterpartyInput
     const commodityClass = amendCommodityClassInput
     const commodity = amendCommodityInput.trim()
     const pricingType = amendPricingTypeInput
+    const pricingStatus = amendPricingStatusInput
     const priceIndexCode = amendPriceIndexInput
     const price = parseRequiredNumber(amendPriceInput)
     const volume = parseRequiredNumber(amendVolumeInput)
+    const settlementStatus = amendSettlementStatusInput
+    const traderUser = amendTraderUserInput
 
     if (!book || !commodityClass || !commodity || price === null || volume === null) {
       setAmendError('Book, commodity class, commodity, price, and volume are required.')
@@ -647,16 +972,24 @@ export default function App() {
         aggregate_id: selectedTradeId,
         event_type: 'TradeAmended',
         payload: buildTradePayload({
+          externalTradeId,
+          sourceSystem,
+          executionTimestamp,
           tradeNature,
           tradeStructure,
           tradeSide,
           book,
+          portfolio,
+          counterparty,
           commodityClass,
           commodity,
           pricingType,
+          pricingStatus,
           priceIndexCode,
           price,
           volume,
+          settlementStatus,
+          traderUser,
           legs: amendLegs,
         }),
       })
@@ -700,22 +1033,26 @@ export default function App() {
 
   const heroTitle = {
     dashboard: 'Commodity desk at a glance',
+    guide: 'Documentation in the operator console',
     trades: 'Trade capture and lifecycle',
     events: 'Event stream and chronology',
     positions: 'Exposure by commodity',
     reference: 'Reference data maintenance',
     admin: 'Operational controls',
     settings: 'Runtime and access settings',
+    assistant: 'Provider-routed operator assistant',
   }[currentView]
 
   const heroBody = {
     dashboard: 'Monitor capture quality, open exposure, and recent activity from a calmer operating surface.',
+    guide: 'Read the semi-technical operator guide directly in the app, then jump into the workspace you need.',
     trades: 'Select a trade to inspect its state, review event history, and amend or cancel it without leaving the workspace.',
     events: 'Read the system as a timeline instead of a log table. Filter it down to the selected trade when you need detail.',
     positions: 'Scan live net exposure first, then drop to commodity-level rows when you need exact numbers.',
     reference: 'Maintain books, commodities, and pricing reference data directly in the application, with activation controls and inline editing.',
     admin: 'Use Admin as both a governance surface and a live window into the event, projection, and schema model behind the product.',
     settings: 'Review safe server runtime settings, manage browser-stored write credentials, and adjust local client overrides in one place.',
+    assistant: 'Route prompts through GPT, Claude, or Gemini while grounding responses in the application state already loaded into the console.',
   }[currentView]
 
   const systemStateLabel = error
@@ -760,7 +1097,7 @@ export default function App() {
               type="button"
               className={`nav-item ${currentView === view.key ? 'is-active' : ''}`}
               onClick={() => {
-                setCurrentView(view.key)
+                navigateToView(view.key)
                 setMobileNavOpen(false)
               }}
             >
@@ -822,30 +1159,32 @@ export default function App() {
           </div>
         </div>
 
-        <div className="side-card">
-          <span className="eyebrow">Selected Trade</span>
-          {selectedTrade ? (
-            <>
-              <strong className="side-card-title">{selectedTrade.trade_id}</strong>
-              <p>
-                {selectedTrade.trade_nature} • {selectedTrade.trade_structure} • {selectedTrade.book}
-              </p>
-              <Tooltip
-                content={selectedTrade.status === tradeStatusValues.cancelled ? tradeTooltipCopy.cancelledTrade : tradeTooltipCopy.activeTrade}
-                focusable
-              >
-                <span className={`status-pill status-pill-${statusTone(selectedTrade.status)} tooltip-trigger-hint`}>
-                  {selectedTrade.status}
-                </span>
-              </Tooltip>
-            </>
-          ) : (
-            <>
-              <strong className="side-card-title">No trade selected</strong>
-              <p>Pick a trade from the workspace to unlock its inspector and event trail.</p>
-            </>
-          )}
-        </div>
+        {currentView !== 'guide' && (
+          <div className="side-card">
+            <span className="eyebrow">Selected Trade</span>
+            {selectedTrade ? (
+              <>
+                <strong className="side-card-title">{selectedTrade.trade_id}</strong>
+                <p>
+                  {selectedTrade.trade_nature} • {selectedTrade.trade_structure} • {selectedTrade.book}
+                </p>
+                <Tooltip
+                  content={selectedTrade.status === tradeStatusValues.cancelled ? tradeTooltipCopy.cancelledTrade : tradeTooltipCopy.activeTrade}
+                  focusable
+                >
+                  <span className={`status-pill status-pill-${statusTone(selectedTrade.status)} tooltip-trigger-hint`}>
+                    {selectedTrade.status}
+                  </span>
+                </Tooltip>
+              </>
+            ) : (
+              <>
+                <strong className="side-card-title">No trade selected</strong>
+                <p>Pick a trade from the workspace to unlock its inspector and event trail.</p>
+              </>
+            )}
+          </div>
+        )}
       </aside>
 
       <main className="main-stage">
@@ -864,28 +1203,39 @@ export default function App() {
 
         {(error || referenceDataError) && <div className="error-banner">{error || referenceDataError}</div>}
 
-        <section className="metric-grid">
-          <article className="metric-card">
-            <span>Open Trades</span>
-            <strong>{activeTrades.length}</strong>
-            <p>Trades currently carrying exposure.</p>
-          </article>
-          <article className="metric-card">
-            <span>Gross Volume</span>
-            <strong>{formatNumber(totalActiveVolume, 0)}</strong>
-            <p>Total active volume across uncancelled trades.</p>
-          </article>
-          <article className="metric-card">
-            <span>Tracked Books</span>
-            <strong>{trackedBooks}</strong>
-            <p>Distinct books represented in the live book.</p>
-          </article>
-          <article className="metric-card">
-            <span>Events Loaded</span>
-            <strong>{events.length}</strong>
-            <p>Recent event records available for review.</p>
-          </article>
-        </section>
+        {currentView !== 'guide' && (
+          <section className="metric-grid">
+            <article className="metric-card">
+              <span>Open Trades</span>
+              <strong>{activeTrades.length}</strong>
+              <p>Trades currently carrying exposure.</p>
+            </article>
+            <article className="metric-card">
+              <span>Gross Volume</span>
+              <strong>{formatNumber(totalActiveVolume, 0)}</strong>
+              <p>Total active volume across uncancelled trades.</p>
+            </article>
+            <article className="metric-card">
+              <span>Tracked Books</span>
+              <strong>{trackedBooks}</strong>
+              <p>Distinct books represented in the live book.</p>
+            </article>
+            <article className="metric-card">
+              <span>Events Loaded</span>
+              <strong>{events.length}</strong>
+              <p>Recent event records available for review.</p>
+            </article>
+          </section>
+        )}
+
+        {currentView === 'guide' && (
+          <DocumentationWorkspace
+            activeDocumentKey={activeDocumentationDocumentKey}
+            onDocumentKeyChange={handleDocumentationDocumentChange}
+            onOpenView={navigateToView}
+            roadmapRefreshVersion={roadmapRefreshVersion}
+          />
+        )}
 
         {currentView === 'dashboard' && (
           <DashboardWorkspace
@@ -907,16 +1257,34 @@ export default function App() {
             commodityInput={commodityInput}
             setCommodityInput={setCommodityInput}
             createCommodityOptions={createCommodityOptions}
-            pricingTypeInput={pricingTypeInput}
-            setPricingTypeInput={setPricingTypeInput}
-            priceIndexInput={priceIndexInput}
-            setPriceIndexInput={setPriceIndexInput}
-            createPriceIndexOptions={createPriceIndexOptions}
-            priceInput={priceInput}
-            setPriceInput={setPriceInput}
-            volumeInput={volumeInput}
-            setVolumeInput={setVolumeInput}
-            createLegs={createLegs}
+          pricingTypeInput={pricingTypeInput}
+          setPricingTypeInput={setPricingTypeInput}
+          pricingStatusInput={pricingStatusInput}
+          setPricingStatusInput={setPricingStatusInput}
+          priceIndexInput={priceIndexInput}
+          setPriceIndexInput={setPriceIndexInput}
+          createPriceIndexOptions={createPriceIndexOptions}
+          priceInput={priceInput}
+          setPriceInput={setPriceInput}
+          volumeInput={volumeInput}
+          setVolumeInput={setVolumeInput}
+          externalTradeIdInput={externalTradeIdInput}
+          setExternalTradeIdInput={setExternalTradeIdInput}
+          sourceSystemInput={sourceSystemInput}
+          setSourceSystemInput={setSourceSystemInput}
+          executionTimestampInput={executionTimestampInput}
+          setExecutionTimestampInput={setExecutionTimestampInput}
+          portfolioInput={portfolioInput}
+          setPortfolioInput={setPortfolioInput}
+          createPortfolioOptions={createPortfolioOptions}
+          counterpartyInput={counterpartyInput}
+          setCounterpartyInput={setCounterpartyInput}
+          createCounterpartyOptions={createCounterpartyOptions}
+          settlementStatusInput={settlementStatusInput}
+          setSettlementStatusInput={setSettlementStatusInput}
+          traderUserInput={traderUserInput}
+          setTraderUserInput={setTraderUserInput}
+          createLegs={createLegs}
             activeCommodities={activeCommodities}
             addDraftLeg={addCreateDraftLeg}
             removeDraftLeg={removeCreateDraftLeg}
@@ -926,10 +1294,12 @@ export default function App() {
             hasReferenceOptions={hasReferenceOptions}
             createError={createError}
             tradeNatureOptions={tradeNatureOptions}
-            tradeStructureOptions={tradeStructureOptions}
-            tradeSideOptions={tradeSideOptions}
-            pricingTypeOptions={pricingTypeOptions}
-            appLoading={appLoading}
+          tradeStructureOptions={tradeStructureOptions}
+          tradeSideOptions={tradeSideOptions}
+          pricingTypeOptions={pricingTypeOptions}
+          pricingStatusOptions={pricingStatusOptions}
+          settlementStatusOptions={settlementStatusOptions}
+          appLoading={appLoading}
             positionsByClass={positionsByClass}
             events={events}
             formatCommodityClass={formatCommodityClass}
@@ -949,9 +1319,21 @@ export default function App() {
             setInspectorTab={setInspectorTab}
             handleAmendTrade={handleAmendTrade}
             handleCancelTrade={handleCancelTrade}
+            amendExternalTradeIdInput={amendExternalTradeIdInput}
+            setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
+            amendSourceSystemInput={amendSourceSystemInput}
+            setAmendSourceSystemInput={setAmendSourceSystemInput}
+            amendExecutionTimestampInput={amendExecutionTimestampInput}
+            setAmendExecutionTimestampInput={setAmendExecutionTimestampInput}
             amendBookInput={amendBookInput}
             setAmendBookInput={setAmendBookInput}
             amendBookOptions={amendBookOptions}
+            amendPortfolioInput={amendPortfolioInput}
+            setAmendPortfolioInput={setAmendPortfolioInput}
+            amendPortfolioOptions={amendPortfolioOptions}
+            amendCounterpartyInput={amendCounterpartyInput}
+            setAmendCounterpartyInput={setAmendCounterpartyInput}
+            amendCounterpartyOptions={amendCounterpartyOptions}
             amendCommodityClassInput={amendCommodityClassInput}
             setAmendCommodityClassInput={setAmendCommodityClassInput}
             commodityClassOptions={commodityClassOptions}
@@ -966,6 +1348,8 @@ export default function App() {
             setAmendTradeSideInput={setAmendTradeSideInput}
             amendPricingTypeInput={amendPricingTypeInput}
             setAmendPricingTypeInput={setAmendPricingTypeInput}
+            amendPricingStatusInput={amendPricingStatusInput}
+            setAmendPricingStatusInput={setAmendPricingStatusInput}
             amendPriceIndexInput={amendPriceIndexInput}
             setAmendPriceIndexInput={setAmendPriceIndexInput}
             amendPriceIndexOptions={amendPriceIndexOptions}
@@ -973,6 +1357,10 @@ export default function App() {
             setAmendPriceInput={setAmendPriceInput}
             amendVolumeInput={amendVolumeInput}
             setAmendVolumeInput={setAmendVolumeInput}
+            amendSettlementStatusInput={amendSettlementStatusInput}
+            setAmendSettlementStatusInput={setAmendSettlementStatusInput}
+            amendTraderUserInput={amendTraderUserInput}
+            setAmendTraderUserInput={setAmendTraderUserInput}
             amendLegs={amendLegs}
             activeCommodities={activeCommodities}
             addDraftLeg={addAmendDraftLeg}
@@ -985,6 +1373,8 @@ export default function App() {
             tradeStructureOptions={tradeStructureOptions}
             tradeSideOptions={tradeSideOptions}
             pricingTypeOptions={pricingTypeOptions}
+            pricingStatusOptions={pricingStatusOptions}
+            settlementStatusOptions={settlementStatusOptions}
             formatCommodityClass={formatCommodityClass}
             formatMoney={formatMoney}
             formatNumber={formatNumber}
@@ -1022,6 +1412,9 @@ export default function App() {
 
         {currentView === 'admin' && (
           <AdminWorkspace
+            authSession={authSession}
+            onOpenSettings={() => navigateToView('settings')}
+            onRoadmapPublished={handleRoadmapPublished}
             selectedTrade={selectedTrade}
             selectedTradeEvents={selectedTradeEvents}
             events={events}
@@ -1052,6 +1445,19 @@ export default function App() {
             health={health}
             authSession={authSession}
             onSessionChange={handleSessionChange}
+          />
+        )}
+
+        {currentView === 'assistant' && (
+          <AssistantWorkspace
+            authSession={authSession}
+            health={health}
+            trades={trades}
+            events={events}
+            positions={positions}
+            selectedTrade={selectedTrade}
+            selectedTradeEvents={selectedTradeEvents}
+            onOpenSettings={() => navigateToView('settings')}
           />
         )}
       </main>

@@ -1,84 +1,23 @@
 import { useMemo, useState } from 'react'
 
-import type { EventRow, PriceIndexRecord, ReferenceRecord, Trade, TradeLegDraft } from '../../shared/models'
+import type {
+  CounterpartyRecord,
+  EventRow,
+  PortfolioRecord,
+  PriceIndexRecord,
+  ReferenceRecord,
+  Trade,
+  TradeLegDraft,
+} from '../../shared/models'
 import { ensureCurrentOption } from '../../shared/reference'
 import {
-  buildDefaultTradeLegs,
   pricingTypeRequiresPriceIndex,
-  tradeFormDefaults,
   tradeSideOptions,
 } from '../../shared/trading'
-import { makeLegDraft, parseLegsFromPayload } from './useTradeCaptureForm'
-
-type AmendDraft = {
-  tradeNatureInput: string
-  tradeStructureInput: string
-  tradeSideInput: string
-  bookInput: string
-  commodityClassInput: string
-  commodityInput: string
-  pricingTypeInput: string
-  priceIndexInput: string
-  priceInput: string
-  volumeInput: string
-  legs: TradeLegDraft[]
-}
+import { type AmendDraft, buildAmendDraft } from './amendDraft.ts'
+import { makeLegDraft } from './tradeDraftUtils'
 
 const EMPTY_TRADE_KEY = '__none__'
-
-function buildAmendDraft(
-  selectedTrade: Trade | null,
-  selectedTradeEvents: EventRow[],
-  activeBooks: ReferenceRecord[],
-  commodityClassOptions: string[],
-): AmendDraft {
-  if (selectedTrade) {
-    const latestLegs =
-      selectedTradeEvents.find((event) => event.event_type === 'TradeAmended' || event.event_type === 'TradeCreated')?.payload ?? null
-    const parsedLegs = parseLegsFromPayload(latestLegs)
-
-    return {
-      tradeNatureInput: selectedTrade.trade_nature ?? tradeFormDefaults.nature,
-      tradeStructureInput: selectedTrade.trade_structure ?? tradeFormDefaults.structure,
-      tradeSideInput: selectedTrade.trade_side ?? tradeFormDefaults.side,
-      bookInput: selectedTrade.book ?? '',
-      commodityClassInput: selectedTrade.commodity_class ?? '',
-      commodityInput: selectedTrade.commodity ?? '',
-      pricingTypeInput: selectedTrade.pricing_type ?? tradeFormDefaults.pricingType,
-      priceIndexInput: selectedTrade.price_index_code ?? '',
-      priceInput: selectedTrade.price?.toString() ?? '',
-      volumeInput: selectedTrade.volume?.toString() ?? '',
-      legs:
-        parsedLegs.length > 0
-          ? parsedLegs
-          : buildDefaultTradeLegs(makeLegDraft, {
-              firstLeg: {
-                side: selectedTrade.trade_side ?? tradeFormDefaults.side,
-                commodity_class: selectedTrade.commodity_class,
-                commodity: selectedTrade.commodity,
-                volume: selectedTrade.volume?.toString() ?? '',
-              },
-              secondLeg: {
-                commodity_class: selectedTrade.commodity_class,
-              },
-            }),
-    }
-  }
-
-  return {
-    tradeNatureInput: tradeFormDefaults.nature,
-    tradeStructureInput: tradeFormDefaults.structure,
-    tradeSideInput: tradeFormDefaults.side,
-    bookInput: activeBooks[0]?.code ?? '',
-    commodityClassInput: commodityClassOptions[0] ?? '',
-    commodityInput: '',
-    pricingTypeInput: tradeFormDefaults.pricingType,
-    priceIndexInput: '',
-    priceInput: '',
-    volumeInput: '',
-    legs: buildDefaultTradeLegs(makeLegDraft),
-  }
-}
 
 export function useTradeAmendForm(
   selectedTrade: Trade | null,
@@ -87,6 +26,8 @@ export function useTradeAmendForm(
   commodityClassOptions: string[],
   activeCommodities: ReferenceRecord[],
   priceIndices: PriceIndexRecord[],
+  activeCounterparties: CounterpartyRecord[],
+  activePortfolios: PortfolioRecord[],
 ) {
   const selectedTradeKey = selectedTrade?.trade_id ?? EMPTY_TRADE_KEY
   const baseDraft = useMemo(
@@ -131,6 +72,38 @@ export function useTradeAmendForm(
     () => ensureCurrentOption(activeBooks, resolvedBookInput, '', 'Current inactive or missing book'),
     [activeBooks, resolvedBookInput],
   )
+
+  const amendPortfolioOptions = useMemo(
+    () =>
+      ensureCurrentOption(
+        activePortfolios.filter((portfolio) => portfolio.book_code === resolvedBookInput),
+        draft.portfolioInput,
+        '',
+        'Current inactive or missing portfolio',
+      ),
+    [activePortfolios, draft.portfolioInput, resolvedBookInput],
+  )
+
+  const resolvedPortfolioInput = amendPortfolioOptions.some((portfolio) => portfolio.code === draft.portfolioInput)
+    ? draft.portfolioInput
+    : ''
+
+  const amendCounterpartyOptions = useMemo(
+    () =>
+      ensureCurrentOption(
+        activeCounterparties,
+        draft.counterpartyInput,
+        '',
+        'Current inactive or missing counterparty',
+      ),
+    [activeCounterparties, draft.counterpartyInput],
+  )
+
+  const resolvedCounterpartyInput = amendCounterpartyOptions.some(
+    (counterparty) => counterparty.code === draft.counterpartyInput,
+  )
+    ? draft.counterpartyInput
+    : ''
 
   const resolvedPriceIndexInput =
     !pricingTypeRequiresPriceIndex(draft.pricingTypeInput)
@@ -187,6 +160,12 @@ export function useTradeAmendForm(
   }
 
   return {
+    amendExternalTradeIdInput: draft.externalTradeIdInput,
+    setAmendExternalTradeIdInput: (value: string) => setDraftField('externalTradeIdInput', value),
+    amendSourceSystemInput: draft.sourceSystemInput,
+    setAmendSourceSystemInput: (value: string) => setDraftField('sourceSystemInput', value),
+    amendExecutionTimestampInput: draft.executionTimestampInput,
+    setAmendExecutionTimestampInput: (value: string) => setDraftField('executionTimestampInput', value),
     amendTradeNatureInput: draft.tradeNatureInput,
     setAmendTradeNatureInput: (value: string) => setDraftField('tradeNatureInput', value),
     amendTradeStructureInput: draft.tradeStructureInput,
@@ -195,20 +174,32 @@ export function useTradeAmendForm(
     setAmendTradeSideInput: (value: string) => setDraftField('tradeSideInput', value),
     amendBookInput: resolvedBookInput,
     setAmendBookInput: (value: string) => setDraftField('bookInput', value),
+    amendPortfolioInput: resolvedPortfolioInput,
+    setAmendPortfolioInput: (value: string) => setDraftField('portfolioInput', value),
+    amendCounterpartyInput: resolvedCounterpartyInput,
+    setAmendCounterpartyInput: (value: string) => setDraftField('counterpartyInput', value),
     amendCommodityClassInput: resolvedCommodityClassInput,
     setAmendCommodityClassInput: (value: string) => setDraftField('commodityClassInput', value),
     amendCommodityInput: resolvedCommodityInput,
     setAmendCommodityInput: (value: string) => setDraftField('commodityInput', value),
     amendPricingTypeInput: draft.pricingTypeInput,
     setAmendPricingTypeInput: (value: string) => setDraftField('pricingTypeInput', value),
+    amendPricingStatusInput: draft.pricingStatusInput,
+    setAmendPricingStatusInput: (value: string) => setDraftField('pricingStatusInput', value),
     amendPriceIndexInput: resolvedPriceIndexInput,
     setAmendPriceIndexInput: (value: string) => setDraftField('priceIndexInput', value),
     amendPriceInput: draft.priceInput,
     setAmendPriceInput: (value: string) => setDraftField('priceInput', value),
     amendVolumeInput: draft.volumeInput,
     setAmendVolumeInput: (value: string) => setDraftField('volumeInput', value),
+    amendSettlementStatusInput: draft.settlementStatusInput,
+    setAmendSettlementStatusInput: (value: string) => setDraftField('settlementStatusInput', value),
+    amendTraderUserInput: draft.traderUserInput,
+    setAmendTraderUserInput: (value: string) => setDraftField('traderUserInput', value),
     amendLegs: draft.legs,
     amendBookOptions,
+    amendPortfolioOptions,
+    amendCounterpartyOptions,
     amendCommodityOptions,
     amendPriceIndexOptions,
     updateDraftLeg,

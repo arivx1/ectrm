@@ -8,11 +8,14 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import (
     authenticate_user,
+    authenticate_google_user,
     bootstrap_admin_token,
     create_user_session,
     hash_password,
     resolve_session_principal,
     revoke_user_session,
+    single_user_auth_config,
+    touch_user_session,
 )
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.user_account import UserAccount
@@ -20,6 +23,7 @@ from apps.api.app.schemas.auth import (
     AuthenticatedUserOut,
     BootstrapAdminRequest,
     CurrentSessionOut,
+    GoogleSessionRequest,
     SessionLoginRequest,
     SessionOut,
 )
@@ -47,9 +51,9 @@ def bootstrap_admin_account(
 
     now = datetime.now(timezone.utc)
     user = UserAccount(
-        user_id=payload.user_id.strip(),
-        email=payload.email.strip().lower(),
-        display_name=payload.display_name.strip(),
+        user_id=payload.user_id,
+        email=payload.email,
+        display_name=payload.display_name,
         role="OPS_ADMIN",
         password_hash=hash_password(payload.password),
         is_active=True,
@@ -99,6 +103,81 @@ def create_session(
     )
 
 
+@router.post("/single-user-session", response_model=SessionOut)
+def create_single_user_session(db: Session = Depends(get_db)) -> SessionOut:
+    config = single_user_auth_config()
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Single-user authentication is not configured on this API.",
+        )
+
+    now = datetime.now(timezone.utc)
+    user = db.get(UserAccount, config.user_id)
+
+    if user is None:
+        email_owner = db.execute(select(UserAccount).where(UserAccount.email == config.email)).scalars().first()
+        if email_owner is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Single-user authentication email is already assigned to another account.",
+            )
+
+        user = UserAccount(
+            user_id=config.user_id,
+            email=config.email,
+            display_name=config.display_name,
+            role=config.role,
+            password_hash=None,
+            is_active=True,
+            last_login_at=now,
+            created_at=now,
+            created_by="single-user-auth",
+            updated_at=now,
+            updated_by="single-user-auth",
+            version=1,
+        )
+        db.add(user)
+    else:
+        user.email = config.email
+        user.display_name = config.display_name
+        user.role = config.role
+        user.is_active = True
+        user.last_login_at = now
+        user.updated_at = now
+        user.updated_by = config.user_id
+        user.version += 1
+
+    db.commit()
+    db.refresh(user)
+
+    session_record, access_token = create_user_session(db, user)
+    return SessionOut(
+        session_id=session_record.session_id,
+        access_token=access_token,
+        expires_at=session_record.expires_at,
+        user=_to_authenticated_user(user),
+    )
+
+
+@router.post("/google-session", response_model=SessionOut)
+def create_google_session(
+    payload: GoogleSessionRequest,
+    db: Session = Depends(get_db),
+) -> SessionOut:
+    user = authenticate_google_user(
+        db,
+        id_token=payload.id_token,
+    )
+    session_record, access_token = create_user_session(db, user)
+    return SessionOut(
+        session_id=session_record.session_id,
+        access_token=access_token,
+        expires_at=session_record.expires_at,
+        user=_to_authenticated_user(user),
+    )
+
+
 @router.get("/me", response_model=CurrentSessionOut)
 def get_current_session(request: Request, db: Session = Depends(get_db)) -> CurrentSessionOut:
     principal = resolve_session_principal(db, request.headers.get("authorization"))
@@ -109,6 +188,7 @@ def get_current_session(request: Request, db: Session = Depends(get_db)) -> Curr
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
 
+    touch_user_session(db, principal.session_id)
     return CurrentSessionOut(
         session_id=principal.session_id,
         expires_at=principal.expires_at,
@@ -122,6 +202,18 @@ def logout_current_session(request: Request, db: Session = Depends(get_db)) -> R
     if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
     revoke_user_session(db, principal.session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/heartbeat", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+def heartbeat_current_session(request: Request, db: Session = Depends(get_db)) -> Response:
+    principal = resolve_session_principal(db, request.headers.get("authorization"))
+    if principal is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
+
+    touched = touch_user_session(db, principal.session_id)
+    if touched is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

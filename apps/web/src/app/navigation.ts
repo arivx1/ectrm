@@ -1,5 +1,6 @@
 export const WORKSPACE_NAV_ITEMS = [
   'Dashboard',
+  'Guide',
   'Trading',
   'Risk',
   'Operations',

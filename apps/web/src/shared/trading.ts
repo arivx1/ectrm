@@ -1,7 +1,7 @@
-import type { TradeLegDraft } from './models'
+import type { TradeHeaderDraft, TradeLegDraft } from './models'
 
 export const tradeAggregateType = 'trade'
-export const currentTradeEventSchemaVersion = 1
+export const currentTradeEventSchemaVersion = 2
 
 export const commodityClassOrder = [
   'POWER',
@@ -22,6 +22,8 @@ export const tradeNatureOptions = ['PHYSICAL', 'FINANCIAL'] as const
 export const tradeStructureOptions = ['SINGLE', 'SWAP'] as const
 export const tradeSideOptions = ['BUY', 'SELL'] as const
 export const pricingTypeOptions = ['FIXED', 'INDEX', 'FORMULA', 'HYBRID'] as const
+export const pricingStatusOptions = ['PENDING', 'PRICED'] as const
+export const settlementStatusOptions = ['PENDING', 'SETTLED'] as const
 
 export const tradeStatusValues = {
   active: 'ACTIVE',
@@ -33,9 +35,22 @@ export const tradeFormDefaults = {
   structure: tradeStructureOptions[0],
   side: tradeSideOptions[0],
   pricingType: pricingTypeOptions[0],
+  pricingStatus: pricingStatusOptions[0],
+  settlementStatus: settlementStatusOptions[0],
   price: '',
   volume: '',
 } as const
+
+export const tradeHeaderDefaults: TradeHeaderDraft = {
+  external_trade_id: '',
+  source_system: '',
+  execution_timestamp: '',
+  portfolio: '',
+  counterparty: '',
+  pricing_status: tradeFormDefaults.pricingStatus,
+  settlement_status: tradeFormDefaults.settlementStatus,
+  trader_user: '',
+}
 
 type TradeLegFactory = (overrides?: Partial<TradeLegDraft>) => TradeLegDraft
 

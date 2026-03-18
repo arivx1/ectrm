@@ -1,5 +1,9 @@
 import { useMemo, useState } from 'react'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
+import { type StoredAuthSession } from '../../shared/mutation'
+import { AgentManagementPanel } from './AgentManagementPanel'
+import { RoadmapAdminPanel } from './RoadmapAdminPanel'
+import { UserManagementPanel } from './UserManagementPanel'
 
 type Trade = {
   trade_id: string
@@ -67,6 +71,9 @@ type SchemaEntityKey =
   | 'reference_price_indices'
 
 type AdminWorkspaceProps = {
+  authSession: StoredAuthSession | null
+  onOpenSettings: () => void
+  onRoadmapPublished: () => void
   selectedTrade: Trade | null
   selectedTradeEvents: EventRow[]
   events: EventRow[]
@@ -221,6 +228,9 @@ function AdminCardTitle({ label, tooltip }: { label: string; tooltip: string }) 
 }
 
 export function AdminWorkspace({
+  authSession,
+  onOpenSettings,
+  onRoadmapPublished,
   selectedTrade,
   selectedTradeEvents,
   events,
@@ -770,6 +780,25 @@ export function AdminWorkspace({
           </div>
         </article>
       </section>
+
+      <RoadmapAdminPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+        onRoadmapPublished={onRoadmapPublished}
+      />
+
+      <AgentManagementPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+      />
+
+      <UserManagementPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+      />
 
       <section className="surface">
         <div className="section-head">

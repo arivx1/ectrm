@@ -44,6 +44,19 @@ export async function createAuthSession(
   return postJson<SessionResponse>(`${apiBase}/auth/session`, payload)
 }
 
+export async function createGoogleAuthSession(
+  apiBase: string,
+  payload: {
+    id_token: string
+  },
+): Promise<SessionResponse> {
+  return postJson<SessionResponse>(`${apiBase}/auth/google-session`, payload)
+}
+
+export async function createSingleUserAuthSession(apiBase: string): Promise<SessionResponse> {
+  return postJson<SessionResponse>(`${apiBase}/auth/single-user-session`, {})
+}
+
 export async function loadCurrentSession(apiBase: string): Promise<CurrentSessionResponse> {
   return fetchJson<CurrentSessionResponse>(`${apiBase}/auth/me`, {
     headers: buildMutationHeaders(),
@@ -52,4 +65,16 @@ export async function loadCurrentSession(apiBase: string): Promise<CurrentSessio
 
 export async function logoutCurrentSession(apiBase: string): Promise<void> {
   await postJson<void>(`${apiBase}/auth/logout`, {}, { headers: buildMutationHeaders() })
+}
+
+export async function sendSessionHeartbeat(apiBase: string): Promise<void> {
+  const response = await fetch(`${apiBase}/auth/heartbeat`, {
+    method: 'POST',
+    headers: buildMutationHeaders(),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || `Request failed: ${response.status}`)
+  }
 }

@@ -15,12 +15,21 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.schemas.event import EventCreate, EventOut
-from apps.api.app.shared.enums import PricingType, TradeNature, TradeSide, TradeStructure
+from apps.api.app.shared.enums import (
+    PricingStatus,
+    PricingType,
+    SettlementStatus,
+    TradeNature,
+    TradeSide,
+    TradeStructure,
+)
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -194,6 +203,61 @@ def normalize_price_index_code(value: object | None) -> str | None:
     return normalized or None
 
 
+def normalize_optional_text(value: object | None, *, uppercase: bool = False) -> str | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    return normalized.upper() if uppercase else normalized
+
+
+def normalize_trade_header_status(
+    value: object | None,
+    *,
+    default: str,
+    field_name: str,
+    valid_values: set[str],
+) -> str:
+    normalized = str(value or default).strip().upper()
+    if not normalized:
+        return default
+    if normalized not in valid_values:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{field_name} '{normalized}' is invalid. Expected one of: "
+                f"{', '.join(sorted(valid_values))}"
+            ),
+        )
+    return normalized
+
+
+def parse_execution_timestamp(value: object | None) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="execution_timestamp must be a valid ISO-8601 datetime",
+            ) from exc
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="execution_timestamp must be a datetime or ISO-8601 string",
+    )
+
+
 def require_active_book(db: Session, book_code: object | None) -> str:
     normalized_book_code = str(book_code or "").strip().upper()
     if not normalized_book_code:
@@ -252,6 +316,59 @@ def require_active_commodity(
         )
 
     return normalized_class, normalized_code
+
+
+def require_active_counterparty(db: Session, counterparty_code: object | None) -> str | None:
+    normalized_counterparty_code = normalize_optional_text(counterparty_code, uppercase=True)
+    if normalized_counterparty_code is None:
+        return None
+
+    reference_counterparty = db.execute(
+        select(ReferenceCounterparty).where(
+            ReferenceCounterparty.code == normalized_counterparty_code,
+            ReferenceCounterparty.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_counterparty is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Counterparty '{normalized_counterparty_code}' is not active in reference data",
+        )
+
+    return normalized_counterparty_code
+
+
+def require_active_portfolio(
+    db: Session,
+    portfolio_code: object | None,
+    *,
+    book_code: str,
+) -> str | None:
+    normalized_portfolio_code = normalize_optional_text(portfolio_code, uppercase=True)
+    if normalized_portfolio_code is None:
+        return None
+
+    reference_portfolio = db.execute(
+        select(ReferencePortfolio).where(
+            ReferencePortfolio.code == normalized_portfolio_code,
+            ReferencePortfolio.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_portfolio is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Portfolio '{normalized_portfolio_code}' is not active in reference data",
+        )
+    if reference_portfolio.book_code != book_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Portfolio '{normalized_portfolio_code}' belongs to book "
+                f"'{reference_portfolio.book_code}', not '{book_code}'"
+            ),
+        )
+
+    return normalized_portfolio_code
 
 
 def require_active_price_index(
@@ -488,6 +605,28 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 )
                 price = payload_data.get("price")
                 volume = payload_data.get("volume")
+                external_trade_id = normalize_optional_text(payload_data.get("external_trade_id"))
+                source_system = normalize_optional_text(payload_data.get("source_system"), uppercase=True)
+                execution_timestamp = parse_execution_timestamp(payload_data.get("execution_timestamp"))
+                counterparty = require_active_counterparty(db, payload_data.get("counterparty"))
+                portfolio = require_active_portfolio(
+                    db,
+                    payload_data.get("portfolio"),
+                    book_code=book,
+                )
+                pricing_status = normalize_trade_header_status(
+                    payload_data.get("pricing_status"),
+                    default="PENDING",
+                    field_name="Pricing status",
+                    valid_values={pricing_status.value for pricing_status in PricingStatus},
+                )
+                settlement_status = normalize_trade_header_status(
+                    payload_data.get("settlement_status"),
+                    default="PENDING",
+                    field_name="Settlement status",
+                    valid_values={settlement_status.value for settlement_status in SettlementStatus},
+                )
+                trader_user = normalize_optional_text(payload_data.get("trader_user"))
                 pricing_type, price_index_code = require_active_price_index(
                     db,
                     payload_data.get("pricing_type"),
@@ -496,18 +635,26 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 
                 existing = Trade(
                     trade_id=e.aggregate_id,
+                    external_trade_id=external_trade_id,
+                    source_system=source_system,
                     created_at=recorded_at,
                     updated_at=recorded_at,
+                    execution_timestamp=execution_timestamp,
                     trade_nature=trade_nature,
                     trade_structure=trade_structure,
                     trade_side=trade_side,
                     book=book,
+                    portfolio=portfolio,
+                    counterparty=counterparty,
                     commodity_class=commodity_class,
                     commodity=commodity,
                     pricing_type=pricing_type,
+                    pricing_status=pricing_status,
                     price_index_code=price_index_code,
                     price=price,
                     volume=volume,
+                    settlement_status=settlement_status,
+                    trader_user=trader_user,
                     status="ACTIVE",
                     last_event_id=e.event_id,
                 )
@@ -555,6 +702,17 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     should_sync_legs = True
                 if "book" in payload_data and payload_data["book"] is not None:
                     existing.book = require_active_book(db, payload_data["book"])
+                if "external_trade_id" in payload_data:
+                    existing.external_trade_id = normalize_optional_text(payload_data.get("external_trade_id"))
+                if "source_system" in payload_data:
+                    existing.source_system = normalize_optional_text(
+                        payload_data.get("source_system"),
+                        uppercase=True,
+                    )
+                if "execution_timestamp" in payload_data:
+                    existing.execution_timestamp = parse_execution_timestamp(
+                        payload_data.get("execution_timestamp")
+                    )
                 if (
                     "commodity" in payload_data and payload_data["commodity"] is not None
                 ) or (
@@ -585,6 +743,33 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 if "volume" in payload_data and payload_data["volume"] is not None:
                     existing.volume = payload_data["volume"]
                     should_sync_legs = True
+                if "counterparty" in payload_data:
+                    existing.counterparty = require_active_counterparty(
+                        db,
+                        payload_data.get("counterparty"),
+                    )
+                if "portfolio" in payload_data or "book" in payload_data:
+                    existing.portfolio = require_active_portfolio(
+                        db,
+                        payload_data.get("portfolio", existing.portfolio),
+                        book_code=existing.book,
+                    )
+                if "pricing_status" in payload_data:
+                    existing.pricing_status = normalize_trade_header_status(
+                        payload_data.get("pricing_status"),
+                        default=existing.pricing_status,
+                        field_name="Pricing status",
+                        valid_values={pricing_status.value for pricing_status in PricingStatus},
+                    )
+                if "settlement_status" in payload_data:
+                    existing.settlement_status = normalize_trade_header_status(
+                        payload_data.get("settlement_status"),
+                        default=existing.settlement_status,
+                        field_name="Settlement status",
+                        valid_values={settlement_status.value for settlement_status in SettlementStatus},
+                    )
+                if "trader_user" in payload_data:
+                    existing.trader_user = normalize_optional_text(payload_data.get("trader_user"))
                 if "status" in payload_data and payload_data["status"] is not None:
                     existing.status = payload_data["status"]
 

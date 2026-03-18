@@ -1,0 +1,139 @@
+# API
+
+The API is the system of record for ECTRM. It accepts trade lifecycle events,
+serves current-state projections, exposes reference data, and protects admin
+operations with session-based access control.
+
+## What It Owns
+
+- trade lifecycle writes through the `/events` endpoint
+- current-state trade reads through `/trades`
+- position reads through `/positions`
+- reference data maintenance through `/reference/*`
+- admin workflows such as user management, seeding, trading sources, and
+  external market-data sync
+- public runtime metadata through `/health`, `/version`, and `/settings/public`
+- assistant routing, prompt preview, and managed prompt profiles through
+  `/assistant/*`
+
+## Route Groups
+
+- `/health`, `/version`, `/settings/public`: safe service and runtime metadata
+- `/assistant/*`: assistant provider status, prompt-context preview, protected
+  prompt routing, and public managed-agent listing
+- `/auth`: bootstrap the first admin, sign in with password or Google, inspect
+  the current session, and log out
+- `/events`: append and list event rows
+- `/trades`: current trade projection
+- `/positions`: current position projection
+- `/reference/*`: books, commodities, price indices, currencies, units,
+  locations, counterparties, and portfolios
+- `/reports/*`: exposure and activity summaries
+- `/admin/*`: seed data, external-data runs, EIA sync, trading source admin,
+  and assistant-agent administration
+- `/users`: user account administration
+
+## Access Model
+
+- Most read endpoints are available without authentication.
+- `POST`, `PUT`, `PATCH`, and `DELETE` calls require a valid session, except
+  for `/auth/session`, `/auth/google-session`, and `/auth/bootstrap-admin`.
+- `/admin/*` and `/users/*` require an `ADMIN` or `OPS_ADMIN` session.
+
+This makes it easy to inspect the platform while still protecting writes and
+governance actions.
+
+## Local Setup
+
+From the repo root:
+
+### 1. Create the virtual environment and install dependencies
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r apps/api/requirements.txt
+```
+
+### 2. Start PostgreSQL
+
+```bash
+docker compose up -d
+```
+
+### 3. Apply migrations
+
+```bash
+alembic -c apps/api/alembic.ini upgrade head
+```
+
+### 4. Run the API
+
+```bash
+uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The default API base URL is `http://localhost:8000`.
+
+## Helpful Local Scripts
+
+Seed reference data and sample transactions:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/seed_demo_data.py --target all --action replace --requested-by local-demo
+```
+
+Seed the trading source register:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/seed_trading_sources.py
+```
+
+Rebuild the trade projection:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/rebuild_trades_projection.py
+```
+
+Rebuild the position projection:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/rebuild_positions_projection.py
+```
+
+## Configuration
+
+Example settings live in `apps/api/.env.example`.
+
+The most important settings are:
+
+- `DATABASE_URL`: PostgreSQL connection string
+- `CORS_ALLOW_ORIGINS`: allowed web origins
+- `BOOTSTRAP_ADMIN_TOKEN`: enables first-admin creation through the API
+- `GOOGLE_AUTH_ENABLED`, `GOOGLE_AUTH_CLIENT_ID`: expose Google sign-in in the
+  web app and validate Google identity tokens on the API
+- `GOOGLE_AUTH_AUTO_CREATE_USERS`: optionally create a local account the first
+  time a valid Google user signs in
+- `GOOGLE_AUTH_DEFAULT_ROLE`: role assigned to auto-created Google users
+- `SESSION_TTL_HOURS`: how long sessions stay valid
+- `ASSISTANT_ENABLED`: global switch for assistant routing
+- `ASSISTANT_DEFAULT_PROVIDER`: which provider the API prefers by default
+- `ASSISTANT_COMPANY_NAME`: organization name included in the prompt
+  foundation
+- `ASSISTANT_COMPANY_CONTEXT`: reusable company context added to assistant
+  prompts
+- `ASSISTANT_BUSINESS_CONTEXT`: reusable operating-model context added to
+  assistant prompts
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`: enable GPT, Claude,
+  and Gemini respectively
+- `EIA_API_KEY`: unlocks external EIA sync
+
+## Implementation Shape
+
+- `app/main.py`: app startup, middleware, router wiring, and public settings
+- `app/routes`: API route handlers
+- `app/models`: SQLAlchemy models
+- `app/schemas`: Pydantic request and response models
+- `alembic`: database migrations
+- `scripts`: rebuild and seed helpers
+- `tests`: API and domain-level tests

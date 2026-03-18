@@ -4,16 +4,24 @@ import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 
 type Trade = {
   trade_id: string
+  external_trade_id: string | null
+  source_system: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
   book: string
+  portfolio: string | null
+  counterparty: string | null
   commodity_class: string
   commodity: string
   pricing_type: string
+  pricing_status: string
   price_index_code: string | null
   price: number | null
   volume: number | null
+  execution_timestamp: string | null
+  settlement_status: string
+  trader_user: string | null
   status: string
   updated_at: string
 }
@@ -28,6 +36,10 @@ type ReferenceRecord = {
   code: string
   name: string
   commodity_class?: string
+}
+
+type PortfolioRecord = ReferenceRecord & {
+  book_code: string
 }
 
 type TradeLegDraft = {
@@ -81,9 +93,21 @@ type TradingWorkspaceProps = {
   setInspectorTab: (tab: InspectorTab) => void
   handleAmendTrade: (event: React.FormEvent) => void
   handleCancelTrade: () => void
+  amendExternalTradeIdInput: string
+  setAmendExternalTradeIdInput: (value: string) => void
+  amendSourceSystemInput: string
+  setAmendSourceSystemInput: (value: string) => void
+  amendExecutionTimestampInput: string
+  setAmendExecutionTimestampInput: (value: string) => void
   amendBookInput: string
   setAmendBookInput: (value: string) => void
   amendBookOptions: ReferenceRecord[]
+  amendPortfolioInput: string
+  setAmendPortfolioInput: (value: string) => void
+  amendPortfolioOptions: PortfolioRecord[]
+  amendCounterpartyInput: string
+  setAmendCounterpartyInput: (value: string) => void
+  amendCounterpartyOptions: ReferenceRecord[]
   amendCommodityClassInput: string
   setAmendCommodityClassInput: (value: string) => void
   commodityClassOptions: string[]
@@ -98,6 +122,8 @@ type TradingWorkspaceProps = {
   setAmendTradeSideInput: (value: string) => void
   amendPricingTypeInput: string
   setAmendPricingTypeInput: (value: string) => void
+  amendPricingStatusInput: string
+  setAmendPricingStatusInput: (value: string) => void
   amendPriceIndexInput: string
   setAmendPriceIndexInput: (value: string) => void
   amendPriceIndexOptions: ReferenceRecord[]
@@ -105,6 +131,10 @@ type TradingWorkspaceProps = {
   setAmendPriceInput: (value: string) => void
   amendVolumeInput: string
   setAmendVolumeInput: (value: string) => void
+  amendSettlementStatusInput: string
+  setAmendSettlementStatusInput: (value: string) => void
+  amendTraderUserInput: string
+  setAmendTraderUserInput: (value: string) => void
   amendLegs: TradeLegDraft[]
   activeCommodities: ReferenceRecord[]
   addDraftLeg: () => void
@@ -117,6 +147,8 @@ type TradingWorkspaceProps = {
   tradeStructureOptions: readonly string[]
   tradeSideOptions: readonly string[]
   pricingTypeOptions: readonly string[]
+  pricingStatusOptions: readonly string[]
+  settlementStatusOptions: readonly string[]
   formatCommodityClass: (value: string) => string
   formatMoney: (value: number | null) => string
   formatNumber: (value: number | null, digits?: number) => string
@@ -135,9 +167,21 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     setInspectorTab,
     handleAmendTrade,
     handleCancelTrade,
+    amendExternalTradeIdInput,
+    setAmendExternalTradeIdInput,
+    amendSourceSystemInput,
+    setAmendSourceSystemInput,
+    amendExecutionTimestampInput,
+    setAmendExecutionTimestampInput,
     amendBookInput,
     setAmendBookInput,
     amendBookOptions,
+    amendPortfolioInput,
+    setAmendPortfolioInput,
+    amendPortfolioOptions,
+    amendCounterpartyInput,
+    setAmendCounterpartyInput,
+    amendCounterpartyOptions,
     amendCommodityClassInput,
     setAmendCommodityClassInput,
     commodityClassOptions,
@@ -152,6 +196,8 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     setAmendTradeSideInput,
     amendPricingTypeInput,
     setAmendPricingTypeInput,
+    amendPricingStatusInput,
+    setAmendPricingStatusInput,
     amendPriceIndexInput,
     setAmendPriceIndexInput,
     amendPriceIndexOptions,
@@ -159,6 +205,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     setAmendPriceInput,
     amendVolumeInput,
     setAmendVolumeInput,
+    amendSettlementStatusInput,
+    setAmendSettlementStatusInput,
+    amendTraderUserInput,
+    setAmendTraderUserInput,
     amendLegs,
     activeCommodities,
     addDraftLeg,
@@ -171,6 +221,8 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     tradeStructureOptions,
     tradeSideOptions,
     pricingTypeOptions,
+    pricingStatusOptions,
+    settlementStatusOptions,
     formatCommodityClass,
     formatMoney,
     formatNumber,
@@ -281,6 +333,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
         {selectedTrade && inspectorTab === 'overview' && (
           <div className="detail-list">
             <div className="detail-row">
+              <span>External Trade ID</span>
+              <strong>{selectedTrade.external_trade_id ?? '—'}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Source System</span>
+              <strong>{selectedTrade.source_system ?? '—'}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Execution Time</span>
+              <strong>{formatDate(selectedTrade.execution_timestamp)}</strong>
+            </div>
+            <div className="detail-row">
               <span>Trade Nature</span>
               <strong>{selectedTrade.trade_nature}</strong>
             </div>
@@ -305,8 +369,20 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
               <strong>{selectedTrade.book}</strong>
             </div>
             <div className="detail-row">
+              <span>Portfolio</span>
+              <strong>{selectedTrade.portfolio ?? '—'}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Counterparty</span>
+              <strong>{selectedTrade.counterparty ?? '—'}</strong>
+            </div>
+            <div className="detail-row">
               <span>Pricing Type</span>
               <strong>{selectedTrade.pricing_type}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Pricing Status</span>
+              <strong>{selectedTrade.pricing_status}</strong>
             </div>
             <div className="detail-row">
               <span>Price Index</span>
@@ -319,6 +395,14 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
             <div className="detail-row">
               <span>Volume</span>
               <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Settlement Status</span>
+              <strong>{selectedTrade.settlement_status}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Trader User</span>
+              <strong>{selectedTrade.trader_user ?? '—'}</strong>
             </div>
             <div className="detail-row">
               <span>Updated</span>
@@ -348,6 +432,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           <TradeAmendForm
             onSubmit={handleAmendTrade}
             handleCancelTrade={handleCancelTrade}
+            amendExternalTradeIdInput={amendExternalTradeIdInput}
+            setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
+            amendSourceSystemInput={amendSourceSystemInput}
+            setAmendSourceSystemInput={setAmendSourceSystemInput}
+            amendExecutionTimestampInput={amendExecutionTimestampInput}
+            setAmendExecutionTimestampInput={setAmendExecutionTimestampInput}
             amendTradeNatureInput={amendTradeNatureInput}
             setAmendTradeNatureInput={setAmendTradeNatureInput}
             amendTradeStructureInput={amendTradeStructureInput}
@@ -357,6 +447,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
             amendBookInput={amendBookInput}
             setAmendBookInput={setAmendBookInput}
             amendBookOptions={amendBookOptions}
+            amendPortfolioInput={amendPortfolioInput}
+            setAmendPortfolioInput={setAmendPortfolioInput}
+            amendPortfolioOptions={amendPortfolioOptions}
+            amendCounterpartyInput={amendCounterpartyInput}
+            setAmendCounterpartyInput={setAmendCounterpartyInput}
+            amendCounterpartyOptions={amendCounterpartyOptions}
             amendCommodityClassInput={amendCommodityClassInput}
             setAmendCommodityClassInput={setAmendCommodityClassInput}
             commodityClassOptions={commodityClassOptions}
@@ -365,6 +461,8 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
             amendCommodityOptions={amendCommodityOptions}
             amendPricingTypeInput={amendPricingTypeInput}
             setAmendPricingTypeInput={setAmendPricingTypeInput}
+            amendPricingStatusInput={amendPricingStatusInput}
+            setAmendPricingStatusInput={setAmendPricingStatusInput}
             amendPriceIndexInput={amendPriceIndexInput}
             setAmendPriceIndexInput={setAmendPriceIndexInput}
             amendPriceIndexOptions={amendPriceIndexOptions}
@@ -372,6 +470,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
             setAmendPriceInput={setAmendPriceInput}
             amendVolumeInput={amendVolumeInput}
             setAmendVolumeInput={setAmendVolumeInput}
+            amendSettlementStatusInput={amendSettlementStatusInput}
+            setAmendSettlementStatusInput={setAmendSettlementStatusInput}
+            amendTraderUserInput={amendTraderUserInput}
+            setAmendTraderUserInput={setAmendTraderUserInput}
             amendLegs={amendLegs}
             activeCommodities={activeCommodities}
             addDraftLeg={addDraftLeg}
@@ -384,6 +486,8 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
             tradeStructureOptions={tradeStructureOptions}
             tradeSideOptions={tradeSideOptions}
             pricingTypeOptions={pricingTypeOptions}
+            pricingStatusOptions={pricingStatusOptions}
+            settlementStatusOptions={settlementStatusOptions}
             formatCommodityClass={formatCommodityClass}
           />
         )}

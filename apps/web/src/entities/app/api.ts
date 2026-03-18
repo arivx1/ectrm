@@ -1,5 +1,6 @@
 import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
+import type { AssistantRuntimeSettings } from '../../shared/models'
 
 export type WorkspaceBootstrap = {
   health: { status?: string }
@@ -18,14 +19,49 @@ export type WorkspaceBootstrap = {
   tradingSources: unknown[]
 }
 
+export type SystemOverview = {
+  generated_at: string
+  server_status: string
+  database_status: string
+  uptime_seconds: number
+  presence_window_seconds: number
+  active_session_count: number
+  active_user_count: number
+  registered_user_count: number
+  active_account_count: number
+  open_trade_count: number
+  events_last_hour: number
+  last_event_recorded_at: string | null
+  dependency_count: number
+  healthy_dependency_count: number
+  dependencies: Array<{
+    key: string
+    label: string
+    provider: string
+    run_status: string
+    health_status: string
+    success_sla_hours: number
+    last_run_at: string | null
+    last_success_at: string | null
+    error_summary: string | null
+  }>
+}
+
 export type PublicRuntimeSettings = {
   app_version: string
   cors_allow_origins: string[]
   mutation_protection_enabled: boolean
   bootstrap_admin_enabled: boolean
+  single_user_auth_enabled: boolean
+  google_auth: {
+    enabled: boolean
+    client_id: string | null
+    auto_create_users: boolean
+  }
   session_ttl_hours: number
   eia_base_url: string
   eia_timeout_seconds: number
+  assistant: AssistantRuntimeSettings
   pagination: {
     standard_default: number
     standard_max: number
@@ -111,4 +147,10 @@ export async function loadWorkspaceBootstrap(
 
 export async function loadPublicRuntimeSettings(apiBase: string): Promise<PublicRuntimeSettings> {
   return fetchJson<PublicRuntimeSettings>(`${apiBase}/settings/public`)
+}
+
+export async function loadSystemOverview(apiBase: string): Promise<SystemOverview> {
+  return fetchJson<SystemOverview>(`${apiBase}/operations/system-overview`, {
+    cache: 'no-store',
+  })
 }

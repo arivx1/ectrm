@@ -23,3 +23,13 @@ class PricingType(StrEnum):
     INDEX = "INDEX"
     FORMULA = "FORMULA"
     HYBRID = "HYBRID"
+
+
+class PricingStatus(StrEnum):
+    PENDING = "PENDING"
+    PRICED = "PRICED"
+
+
+class SettlementStatus(StrEnum):
+    PENDING = "PENDING"
+    SETTLED = "SETTLED"

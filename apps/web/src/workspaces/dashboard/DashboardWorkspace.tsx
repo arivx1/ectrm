@@ -1,9 +1,14 @@
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
+import { SystemStatusPanel } from './SystemStatusPanel'
 
 type ReferenceRecord = {
   code: string
   name: string
   commodity_class?: string
+}
+
+type PortfolioRecord = ReferenceRecord & {
+  book_code: string
 }
 
 type TradeLegDraft = {
@@ -43,6 +48,8 @@ type DashboardWorkspaceProps = {
   createCommodityOptions: ReferenceRecord[]
   pricingTypeInput: string
   setPricingTypeInput: (value: string) => void
+  pricingStatusInput: string
+  setPricingStatusInput: (value: string) => void
   priceIndexInput: string
   setPriceIndexInput: (value: string) => void
   createPriceIndexOptions: ReferenceRecord[]
@@ -50,6 +57,22 @@ type DashboardWorkspaceProps = {
   setPriceInput: (value: string) => void
   volumeInput: string
   setVolumeInput: (value: string) => void
+  externalTradeIdInput: string
+  setExternalTradeIdInput: (value: string) => void
+  sourceSystemInput: string
+  setSourceSystemInput: (value: string) => void
+  executionTimestampInput: string
+  setExecutionTimestampInput: (value: string) => void
+  portfolioInput: string
+  setPortfolioInput: (value: string) => void
+  createPortfolioOptions: PortfolioRecord[]
+  counterpartyInput: string
+  setCounterpartyInput: (value: string) => void
+  createCounterpartyOptions: ReferenceRecord[]
+  settlementStatusInput: string
+  setSettlementStatusInput: (value: string) => void
+  traderUserInput: string
+  setTraderUserInput: (value: string) => void
   createLegs: TradeLegDraft[]
   activeCommodities: ReferenceRecord[]
   addDraftLeg: () => void
@@ -63,6 +86,8 @@ type DashboardWorkspaceProps = {
   tradeStructureOptions: readonly string[]
   tradeSideOptions: readonly string[]
   pricingTypeOptions: readonly string[]
+  pricingStatusOptions: readonly string[]
+  settlementStatusOptions: readonly string[]
   appLoading: boolean
   positionsByClass: Array<{ commodityClass: string; netVolume: number }>
   events: EventRow[]
@@ -93,6 +118,8 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     createCommodityOptions,
     pricingTypeInput,
     setPricingTypeInput,
+    pricingStatusInput,
+    setPricingStatusInput,
     priceIndexInput,
     setPriceIndexInput,
     createPriceIndexOptions,
@@ -100,6 +127,22 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     setPriceInput,
     volumeInput,
     setVolumeInput,
+    externalTradeIdInput,
+    setExternalTradeIdInput,
+    sourceSystemInput,
+    setSourceSystemInput,
+    executionTimestampInput,
+    setExecutionTimestampInput,
+    portfolioInput,
+    setPortfolioInput,
+    createPortfolioOptions,
+    counterpartyInput,
+    setCounterpartyInput,
+    createCounterpartyOptions,
+    settlementStatusInput,
+    setSettlementStatusInput,
+    traderUserInput,
+    setTraderUserInput,
     createLegs,
     activeCommodities,
     addDraftLeg,
@@ -113,6 +156,8 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     tradeStructureOptions,
     tradeSideOptions,
     pricingTypeOptions,
+    pricingStatusOptions,
+    settlementStatusOptions,
     appLoading,
     positionsByClass,
     events,
@@ -153,6 +198,8 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           createCommodityOptions={createCommodityOptions}
           pricingTypeInput={pricingTypeInput}
           setPricingTypeInput={setPricingTypeInput}
+          pricingStatusInput={pricingStatusInput}
+          setPricingStatusInput={setPricingStatusInput}
           priceIndexInput={priceIndexInput}
           setPriceIndexInput={setPriceIndexInput}
           createPriceIndexOptions={createPriceIndexOptions}
@@ -160,6 +207,22 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           setPriceInput={setPriceInput}
           volumeInput={volumeInput}
           setVolumeInput={setVolumeInput}
+          externalTradeIdInput={externalTradeIdInput}
+          setExternalTradeIdInput={setExternalTradeIdInput}
+          sourceSystemInput={sourceSystemInput}
+          setSourceSystemInput={setSourceSystemInput}
+          executionTimestampInput={executionTimestampInput}
+          setExecutionTimestampInput={setExecutionTimestampInput}
+          portfolioInput={portfolioInput}
+          setPortfolioInput={setPortfolioInput}
+          createPortfolioOptions={createPortfolioOptions}
+          counterpartyInput={counterpartyInput}
+          setCounterpartyInput={setCounterpartyInput}
+          createCounterpartyOptions={createCounterpartyOptions}
+          settlementStatusInput={settlementStatusInput}
+          setSettlementStatusInput={setSettlementStatusInput}
+          traderUserInput={traderUserInput}
+          setTraderUserInput={setTraderUserInput}
           createLegs={createLegs}
           activeCommodities={activeCommodities}
           addDraftLeg={addDraftLeg}
@@ -173,11 +236,15 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           tradeStructureOptions={tradeStructureOptions}
           tradeSideOptions={tradeSideOptions}
           pricingTypeOptions={pricingTypeOptions}
+          pricingStatusOptions={pricingStatusOptions}
+          settlementStatusOptions={settlementStatusOptions}
           formatCommodityClass={formatCommodityClass}
         />
       </section>
 
       <section className="stack">
+        <SystemStatusPanel />
+
         <article className="surface">
           <div className="section-head">
             <div>

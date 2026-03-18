@@ -9,6 +9,10 @@ type ReferenceRecord = {
   commodity_class?: string
 }
 
+type PortfolioRecord = ReferenceRecord & {
+  book_code: string
+}
+
 type TradeLegDraft = {
   leg_no: number
   side: string
@@ -37,6 +41,8 @@ type TradeAmendFormProps = {
   amendCommodityOptions: ReferenceRecord[]
   amendPricingTypeInput: string
   setAmendPricingTypeInput: (value: string) => void
+  amendPricingStatusInput: string
+  setAmendPricingStatusInput: (value: string) => void
   amendPriceIndexInput: string
   setAmendPriceIndexInput: (value: string) => void
   amendPriceIndexOptions: ReferenceRecord[]
@@ -44,6 +50,22 @@ type TradeAmendFormProps = {
   setAmendPriceInput: (value: string) => void
   amendVolumeInput: string
   setAmendVolumeInput: (value: string) => void
+  amendExternalTradeIdInput: string
+  setAmendExternalTradeIdInput: (value: string) => void
+  amendSourceSystemInput: string
+  setAmendSourceSystemInput: (value: string) => void
+  amendExecutionTimestampInput: string
+  setAmendExecutionTimestampInput: (value: string) => void
+  amendPortfolioInput: string
+  setAmendPortfolioInput: (value: string) => void
+  amendPortfolioOptions: PortfolioRecord[]
+  amendCounterpartyInput: string
+  setAmendCounterpartyInput: (value: string) => void
+  amendCounterpartyOptions: ReferenceRecord[]
+  amendSettlementStatusInput: string
+  setAmendSettlementStatusInput: (value: string) => void
+  amendTraderUserInput: string
+  setAmendTraderUserInput: (value: string) => void
   amendLegs: TradeLegDraft[]
   activeCommodities: ReferenceRecord[]
   addDraftLeg: () => void
@@ -56,6 +78,8 @@ type TradeAmendFormProps = {
   tradeStructureOptions: readonly string[]
   tradeSideOptions: readonly string[]
   pricingTypeOptions: readonly string[]
+  pricingStatusOptions: readonly string[]
+  settlementStatusOptions: readonly string[]
   formatCommodityClass: (value: string) => string
 }
 
@@ -80,6 +104,8 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     amendCommodityOptions,
     amendPricingTypeInput,
     setAmendPricingTypeInput,
+    amendPricingStatusInput,
+    setAmendPricingStatusInput,
     amendPriceIndexInput,
     setAmendPriceIndexInput,
     amendPriceIndexOptions,
@@ -87,6 +113,22 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     setAmendPriceInput,
     amendVolumeInput,
     setAmendVolumeInput,
+    amendExternalTradeIdInput,
+    setAmendExternalTradeIdInput,
+    amendSourceSystemInput,
+    setAmendSourceSystemInput,
+    amendExecutionTimestampInput,
+    setAmendExecutionTimestampInput,
+    amendPortfolioInput,
+    setAmendPortfolioInput,
+    amendPortfolioOptions,
+    amendCounterpartyInput,
+    setAmendCounterpartyInput,
+    amendCounterpartyOptions,
+    amendSettlementStatusInput,
+    setAmendSettlementStatusInput,
+    amendTraderUserInput,
+    setAmendTraderUserInput,
     amendLegs,
     activeCommodities,
     addDraftLeg,
@@ -99,11 +141,28 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     tradeStructureOptions,
     tradeSideOptions,
     pricingTypeOptions,
+    pricingStatusOptions,
+    settlementStatusOptions,
     formatCommodityClass,
   } = props
 
   return (
     <form className="stack-form" onSubmit={onSubmit}>
+      <div className="mini-grid">
+        <label className="field">
+          <span>External Trade ID</span>
+          <input className="control" value={amendExternalTradeIdInput} onChange={(event) => setAmendExternalTradeIdInput(event.target.value)} disabled={amending || cancelling} />
+        </label>
+        <label className="field">
+          <span>Source System</span>
+          <input className="control" value={amendSourceSystemInput} onChange={(event) => setAmendSourceSystemInput(event.target.value.toUpperCase())} disabled={amending || cancelling} />
+        </label>
+        <label className="field">
+          <span>Execution Time</span>
+          <input className="control" type="datetime-local" value={amendExecutionTimestampInput} onChange={(event) => setAmendExecutionTimestampInput(event.target.value)} disabled={amending || cancelling} />
+        </label>
+      </div>
+
       <div className="mini-grid">
         <label className="field">
           <span>Nature</span>
@@ -140,18 +199,42 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             ))}
           </select>
         </label>
+        <label className="field">
+          <span>Counterparty</span>
+          <select className="control" value={amendCounterpartyInput} onChange={(event) => setAmendCounterpartyInput(event.target.value)} disabled={amending || cancelling}>
+            <option value="">No counterparty</option>
+            {amendCounterpartyOptions.map((counterparty) => (
+              <option key={counterparty.code} value={counterparty.code}>
+                {counterparty.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      <label className="field">
-        <span>Book</span>
-        <select className="control" value={amendBookInput} onChange={(event) => setAmendBookInput(event.target.value)} disabled={amending || cancelling || amendBookOptions.length === 0}>
-          {amendBookOptions.map((book) => (
-            <option key={book.code} value={book.code}>
-              {book.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="mini-grid">
+        <label className="field">
+          <span>Book</span>
+          <select className="control" value={amendBookInput} onChange={(event) => setAmendBookInput(event.target.value)} disabled={amending || cancelling || amendBookOptions.length === 0}>
+            {amendBookOptions.map((book) => (
+              <option key={book.code} value={book.code}>
+                {book.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Portfolio</span>
+          <select className="control" value={amendPortfolioInput} onChange={(event) => setAmendPortfolioInput(event.target.value)} disabled={amending || cancelling}>
+            <option value="">No portfolio</option>
+            {amendPortfolioOptions.map((portfolio) => (
+              <option key={portfolio.code} value={portfolio.code}>
+                {portfolio.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       <div className="mini-grid">
         <label className="field">
@@ -189,6 +272,16 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </select>
         </label>
         <label className="field">
+          <span>Pricing Status</span>
+          <select className="control" value={amendPricingStatusInput} onChange={(event) => setAmendPricingStatusInput(event.target.value)} disabled={amending || cancelling}>
+            {pricingStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <FieldLabel label="Price Index" tooltip={tradeTooltipCopy.priceIndex} />
           <select
             className="control"
@@ -211,6 +304,23 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
         <label className="field">
           <span>Volume</span>
           <input className="control" inputMode="decimal" value={amendVolumeInput} onChange={(event) => setAmendVolumeInput(event.target.value)} />
+        </label>
+      </div>
+
+      <div className="mini-grid">
+        <label className="field">
+          <span>Settlement Status</span>
+          <select className="control" value={amendSettlementStatusInput} onChange={(event) => setAmendSettlementStatusInput(event.target.value)} disabled={amending || cancelling}>
+            {settlementStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Trader User</span>
+          <input className="control" value={amendTraderUserInput} onChange={(event) => setAmendTraderUserInput(event.target.value)} disabled={amending || cancelling} />
         </label>
       </div>
 
