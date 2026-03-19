@@ -6,6 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from apps.api.app.schemas.external_data import ExternalDataRunOut
 from apps.api.app.schemas._validation import normalize_optional_text, normalize_required_text
 
 
@@ -228,3 +229,39 @@ class WeatherIntelligenceOverviewOut(BaseModel):
     exposures: list[WeatherCommodityExposureOut]
     regional_signals: list[WeatherRegionalSignalOut]
     tracked_sources: list[WeatherTrackedSourceOut]
+
+
+class WeatherSyncLocationStatusOut(BaseModel):
+    code: str
+    name: str
+    reference_location_code: Optional[str]
+    station_id: Optional[str]
+    is_active: bool
+    health_status: str
+    last_forecast_downloaded_at: Optional[datetime]
+    last_observation_at: Optional[datetime]
+    last_observation_downloaded_at: Optional[datetime]
+    forecast_age_hours: Optional[float]
+    observation_age_hours: Optional[float]
+
+
+class WeatherSyncStatusOut(BaseModel):
+    provider: str
+    label: str
+    health_status: str
+    latest_run_status: str
+    success_sla_hours: int
+    scheduler_interval_minutes: int
+    forecast_freshness_hours: int
+    observation_freshness_hours: int
+    last_run_at: Optional[datetime]
+    last_success_at: Optional[datetime]
+    latest_data_at: Optional[datetime]
+    error_summary: Optional[str]
+    active_location_count: int
+    healthy_location_count: int
+    stale_location_count: int
+    missing_location_count: int
+    latest_run: Optional[ExternalDataRunOut]
+    latest_success: Optional[ExternalDataRunOut]
+    locations: list[WeatherSyncLocationStatusOut]

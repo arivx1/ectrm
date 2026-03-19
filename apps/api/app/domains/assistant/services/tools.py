@@ -272,6 +272,10 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
     ]
 
 
+def list_tool_names() -> tuple[str, ...]:
+    return tuple(tool.name for tool in build_tool_definitions())
+
+
 def json_dumps(value: Any) -> str:
     return json.dumps(value, default=_json_default, separators=(",", ":"))
 

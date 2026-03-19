@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    NWS_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=1, le=1440)
+    NWS_SYNC_OBSERVATION_LIMIT: int = Field(default=24, ge=1, le=168)
+    NWS_SYNC_SUCCESS_SLA_HOURS: int = Field(default=6, ge=1, le=168)
+    NWS_FORECAST_FRESHNESS_HOURS: int = Field(default=8, ge=1, le=168)
+    NWS_OBSERVATION_FRESHNESS_HOURS: int = Field(default=4, ge=1, le=168)
 
     @property
     def cors_allow_origins(self) -> list[str]:

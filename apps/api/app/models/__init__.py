@@ -1,4 +1,5 @@
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.event import Base, Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.position import Position
@@ -24,6 +25,7 @@ from apps.api.app.models.weather_observation import WeatherObservation
 
 __all__ = [
     "AssistantAgent",
+    "AssistantRun",
     "Base",
     "Event",
     "ExternalDataRun",

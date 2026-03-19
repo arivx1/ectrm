@@ -32,6 +32,11 @@ envelope with these sections:
 
 The rendered system prompt is then passed to the configured model provider.
 
+When `use_live_tools` is enabled on `/assistant/respond`, the API can expose
+read-only data tools to the model runtime. If the provider requests those
+tools, the API executes them server-side and returns a tool-call trace so the
+UI can show which live data lookups were actually used.
+
 ## Managed Prompt Profiles
 
 Assistant agents are the first prompt-management surface.
@@ -46,10 +51,15 @@ Each agent carries:
 - identity and description
 - scope and allowed workspaces
 - capability tags
+- explicit `allowed_tools` governance for live read-only tool access
 - optional provider and model defaults
 - an agent-specific `system_prompt`
 
 Agents layer on top of the global prompt foundation instead of replacing it.
+
+When an agent is tagged with `READ`, the admin surface can now pin that agent
+to a subset of the published live tools. This prevents newly added or
+unreviewed tools from becoming available to every managed agent by default.
 
 ## Prompt Preview
 
@@ -62,6 +72,24 @@ message to a model. The response includes:
 
 This is the main debugging and prompt-review surface for now.
 
+Note that prompt preview shows the stable server-built foundation. Tool calls
+only happen during `/assistant/respond`, because they depend on the user's
+latest message and the model's runtime decisions.
+
+## Run Tracing
+
+Each `/assistant/respond` call now records an `assistant_run` audit row with:
+
+- authenticated user and session metadata
+- resolved agent, provider, model, and workspace
+- prompt sections and the final rendered system prompt
+- warnings, tool-call traces, and token usage
+- the latest user message, assistant response, and any provider error detail
+
+The API returns `run_id` on successful responses, exposes current-user run
+lookup on `/assistant/runs/*`, and exposes recent admin run listings on
+`/admin/assistant/runs`.
+
 ## Configuration
 
 The assistant foundation can be tuned through backend settings:
@@ -70,6 +98,7 @@ The assistant foundation can be tuned through backend settings:
 - `ASSISTANT_COMPANY_NAME`
 - `ASSISTANT_COMPANY_CONTEXT`
 - `ASSISTANT_BUSINESS_CONTEXT`
+- `ASSISTANT_MAX_TOOL_ROUNDS`
 
 These settings define the stable business framing. Managed agents refine that
 for specific workflows without duplicating the whole platform description.

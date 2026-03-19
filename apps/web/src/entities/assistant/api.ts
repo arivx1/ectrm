@@ -20,6 +20,7 @@ export type CreateAssistantAgentInput = {
   model: AssistantAdminAgent['model']
   allowed_workspaces: AssistantAdminAgent['allowed_workspaces']
   capabilities: AssistantAdminAgent['capabilities']
+  allowed_tools: AssistantAdminAgent['allowed_tools']
   system_prompt: string
 }
 

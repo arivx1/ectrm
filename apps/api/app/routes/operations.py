@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -21,7 +22,12 @@ router = APIRouter(prefix="/operations", tags=["operations"])
 PRESENCE_WINDOW_SECONDS = 120
 DEPENDENCY_DEFINITIONS = (
     {"key": "eia", "label": "EIA Price Sync", "provider": "EIA", "success_sla_hours": 48},
-    {"key": "nws", "label": "NWS Weather Sync", "provider": "NWS", "success_sla_hours": 6},
+    {
+        "key": "nws",
+        "label": "NWS Weather Sync",
+        "provider": "NWS",
+        "success_sla_hours": settings.NWS_SYNC_SUCCESS_SLA_HOURS,
+    },
 )
 
 

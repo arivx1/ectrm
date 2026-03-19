@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   createAssistantAgent,
   listAdminAssistantAgents,
+  loadAssistantRuntimeSettings,
   updateAssistantAgent,
   type CreateAssistantAgentInput,
   type UpdateAssistantAgentInput,
@@ -39,6 +40,7 @@ type AgentForm = {
   model: string
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  allowed_tools: string[]
   system_prompt: string
 }
 
@@ -68,6 +70,7 @@ const EMPTY_AGENT_FORM: AgentForm = {
   model: '',
   allowed_workspaces: ['assistant'],
   capabilities: ['READ', 'EXPLAIN'],
+  allowed_tools: [],
   system_prompt: '',
 }
 
@@ -87,6 +90,7 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
     model: agent.model ?? '',
     allowed_workspaces: [...agent.allowed_workspaces],
     capabilities: [...agent.capabilities],
+    allowed_tools: [...agent.allowed_tools],
     system_prompt: agent.system_prompt,
   }
 }
@@ -105,6 +109,7 @@ function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
     model: normalizedModel,
     allowed_workspaces: form.allowed_workspaces,
     capabilities: form.capabilities,
+    allowed_tools: form.allowed_tools,
     system_prompt: form.system_prompt.trim(),
   }
 }
@@ -135,6 +140,7 @@ export function AgentManagementPanel({
   const adminEnabled = hasAdministrativeAccess(authSession)
 
   const [agentRecords, setAgentRecords] = useState<AssistantAdminAgent[]>([])
+  const [availableTools, setAvailableTools] = useState<string[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
   const [agentsError, setAgentsError] = useState('')
   const [agentFlash, setAgentFlash] = useState<FlashMessage | null>(null)
@@ -165,6 +171,8 @@ export function AgentManagementPanel({
       ),
     [agentRecords],
   )
+  const createCanUseLiveTools = createForm.capabilities.includes('READ')
+  const editCanUseLiveTools = editForm.capabilities.includes('READ')
 
   async function refreshAgents(preferredAgentId: string | null = null) {
     if (!adminEnabled) {
@@ -177,11 +185,15 @@ export function AgentManagementPanel({
     setAgentsError('')
 
     try {
-      const nextAgents = await listAdminAssistantAgents(appConfig.apiBase)
+      const [nextAgents, runtimeSettings] = await Promise.all([
+        listAdminAssistantAgents(appConfig.apiBase),
+        loadAssistantRuntimeSettings(appConfig.apiBase),
+      ])
       if (requestSequenceRef.current !== requestId) {
         return
       }
       setAgentRecords(nextAgents)
+      setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
       setSelectedAgentId((current) => {
         if (preferredAgentId && nextAgents.some((agent) => agent.agent_id === preferredAgentId)) {
           return preferredAgentId
@@ -196,6 +208,7 @@ export function AgentManagementPanel({
         return
       }
       setAgentRecords([])
+      setAvailableTools([])
       setSelectedAgentId(null)
       setAgentsError(error instanceof Error ? error.message : 'Could not load assistant agents.')
     } finally {
@@ -211,6 +224,7 @@ export function AgentManagementPanel({
 
     if (!adminEnabled) {
       setAgentRecords([])
+      setAvailableTools([])
       setAgentsError('')
       setAgentsLoading(false)
       setSelectedAgentId(null)
@@ -277,6 +291,7 @@ export function AgentManagementPanel({
           model: payload.model,
           allowed_workspaces: payload.allowed_workspaces,
           capabilities: payload.capabilities,
+          allowed_tools: payload.allowed_tools,
           system_prompt: payload.system_prompt,
         } satisfies UpdateAssistantAgentInput,
       )
@@ -381,6 +396,7 @@ export function AgentManagementPanel({
                         {agent.scope}
                         {agent.provider ? ` · ${agent.provider}` : ' · inherited provider'}
                         {agent.model ? ` · ${agent.model}` : ''}
+                        {agent.allowed_tools.length > 0 ? ` · ${agent.allowed_tools.length} live tools` : ''}
                       </small>
                     </button>
                   ))
@@ -532,6 +548,34 @@ export function AgentManagementPanel({
                       ))}
                     </div>
                   </div>
+
+                  <div className="assistant-admin-option-group">
+                    <strong>Allowed live tools</strong>
+                    <p>
+                      {createCanUseLiveTools
+                        ? 'Choose a subset or leave blank to allow the full published read-only tool catalog.'
+                        : 'Enable READ capability to allow live tools for this agent.'}
+                    </p>
+                    <div className="chip-row">
+                      {availableTools.map((toolName) => (
+                        <button
+                          key={toolName}
+                          type="button"
+                          className={`entity-chip ${createForm.allowed_tools.includes(toolName) ? '' : 'entity-chip-soft'}`}
+                          disabled={!createCanUseLiveTools}
+                          onClick={() =>
+                            setCreateForm((current) => ({
+                              ...current,
+                              allowed_tools: toggleSelection(current.allowed_tools, toolName),
+                            }))
+                          }
+                        >
+                          {toolName}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                 </div>
 
                 <label className="field">
@@ -696,6 +740,33 @@ export function AgentManagementPanel({
                           }
                         >
                           {capability}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="assistant-admin-option-group">
+                    <strong>Allowed live tools</strong>
+                    <p>
+                      {editCanUseLiveTools
+                        ? 'Choose a subset or leave blank to allow the full published read-only tool catalog.'
+                        : 'Enable READ capability to allow live tools for this agent.'}
+                    </p>
+                    <div className="chip-row">
+                      {availableTools.map((toolName) => (
+                        <button
+                          key={toolName}
+                          type="button"
+                          className={`entity-chip ${editForm.allowed_tools.includes(toolName) ? '' : 'entity-chip-soft'}`}
+                          disabled={!editCanUseLiveTools}
+                          onClick={() =>
+                            setEditForm((current) => ({
+                              ...current,
+                              allowed_tools: toggleSelection(current.allowed_tools, toolName),
+                            }))
+                          }
+                        >
+                          {toolName}
                         </button>
                       ))}
                     </div>

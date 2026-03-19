@@ -133,6 +133,42 @@ export type ExternalDataRunRecord = {
   created_at: string
 }
 
+export type WeatherSyncLocationStatusRecord = {
+  code: string
+  name: string
+  reference_location_code: string | null
+  station_id: string | null
+  is_active: boolean
+  health_status: string
+  last_forecast_downloaded_at: string | null
+  last_observation_at: string | null
+  last_observation_downloaded_at: string | null
+  forecast_age_hours: number | null
+  observation_age_hours: number | null
+}
+
+export type WeatherSyncStatusRecord = {
+  provider: string
+  label: string
+  health_status: string
+  latest_run_status: string
+  success_sla_hours: number
+  scheduler_interval_minutes: number
+  forecast_freshness_hours: number
+  observation_freshness_hours: number
+  last_run_at: string | null
+  last_success_at: string | null
+  latest_data_at: string | null
+  error_summary: string | null
+  active_location_count: number
+  healthy_location_count: number
+  stale_location_count: number
+  missing_location_count: number
+  latest_run: ExternalDataRunRecord | null
+  latest_success: ExternalDataRunRecord | null
+  locations: WeatherSyncLocationStatusRecord[]
+}
+
 export type TradingSourceRecord = {
   source_id: string
   source_name: string
@@ -215,6 +251,7 @@ export type AssistantAgent = {
   model: string | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  allowed_tools: string[]
 }
 
 export type AssistantAdminAgent = AssistantAgent & {
@@ -243,6 +280,8 @@ export type AssistantToolCall = {
 }
 
 export type AssistantPromptResponse = {
+  run_id?: number | null
+  run_recorded_at?: string | null
   agent_id?: string | null
   agent_name?: string | null
   provider: AssistantProvider
@@ -273,6 +312,7 @@ export type AssistantPromptSectionSource =
   | 'user'
   | 'business'
   | 'data'
+  | 'tool'
   | 'world'
   | 'workspace'
   | 'application'

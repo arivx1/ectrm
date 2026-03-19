@@ -15,6 +15,7 @@ from apps.api.app.core.auth import resolve_audit_actor_id
 from apps.api.app.core.query_params import ADMIN_LIST_LIMIT_QUERY, LIST_OFFSET_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.weather.services import build_weather_intelligence_overview
+from apps.api.app.domains.weather.services import build_nws_sync_status
 from apps.api.app.domains.weather.services.external_data import sync_nws_weather_locations
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.reference_location import ReferenceLocation
@@ -26,6 +27,7 @@ from apps.api.app.schemas.weather import (
     NWSSyncRequest,
     StoredWeatherForecastPeriodOut,
     StoredWeatherObservationOut,
+    WeatherSyncStatusOut,
     WeatherIntelligenceOverviewOut,
     WeatherLocationCreate,
     WeatherLocationOut,
@@ -115,6 +117,21 @@ def list_weather_locations(
     if is_active is not None:
         stmt = stmt.where(WeatherLocation.is_active.is_(is_active))
     return [_to_weather_location_out(row) for row in db.execute(stmt).scalars().all()]
+
+
+@admin_router.get("/sync/status", response_model=WeatherSyncStatusOut)
+def get_nws_sync_status(
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> WeatherSyncStatusOut:
+    payload = build_nws_sync_status(db, include_inactive=include_inactive)
+    latest_run = payload.pop("latest_run")
+    latest_success = payload.pop("latest_success")
+    return WeatherSyncStatusOut(
+        **payload,
+        latest_run=_to_run_out(latest_run) if latest_run is not None else None,
+        latest_success=_to_run_out(latest_success) if latest_success is not None else None,
+    )
 
 
 @admin_router.post("/locations", response_model=WeatherLocationOut, status_code=status.HTTP_201_CREATED)

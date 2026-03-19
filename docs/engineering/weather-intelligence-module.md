@@ -46,6 +46,14 @@ There is now also a schedulable ingest entrypoint:
 - requires a valid `NWS_USER_AGENT` in the environment or app config before
   calling `api.weather.gov`
 
+For continuous scheduled operation inside a single worker process, the repo now
+also includes:
+
+- `apps/api/scripts/run_nws_weather_scheduler.py`
+- default interval and freshness thresholds are driven by the `NWS_SYNC_*`
+  settings in `apps/api/.env`
+- `--max-runs` is available for smoke tests and controlled one-shot validation
+
 ## API
 
 - `GET /weather/intelligence/overview`
@@ -53,6 +61,7 @@ There is now also a schedulable ingest entrypoint:
 - `GET /weather/locations/{location_code}/observations`
 - `GET /admin/weather/locations`
 - `POST /admin/weather/locations`
+- `GET /admin/weather/sync/status`
 - `POST /admin/weather/sync/nws`
 
 Supported query params:
@@ -65,17 +74,28 @@ The response is intentionally labeled `SEASONAL_BASELINE` so downstream users
 do not mistake historical queries for live meteorological intelligence. Current
 day queries switch to `LIVE_NWS_BLEND` when stored NWS data is available.
 
+The weather admin surface also exposes sync health from persisted `NWS` run and
+location data, including:
+
+- latest run and latest successful run
+- top-level health (`healthy`, `degraded`, `stale`, `failed`, etc.)
+- per-location forecast/observation freshness
+- scheduler interval and freshness/SLA thresholds
+
+The web admin workspace now surfaces that operational view directly, including:
+
+- a dedicated `NWS Sync Health` panel
+- an on-demand `Run NWS Sync` control
+- location-by-location freshness rows for tracked weather points
+
 ## Next Steps
 
-1. Ingest `weather_forecast_obs`, `power_iso_load`, and `gas_pipeline_storage`
-   into normalized warehouse or operational tables.
-2. Persist NWS point forecasts and observations into weather-specific tables so
-   the current connector scaffold becomes a scheduled ingest path.
-3. Add scheduled orchestration for `sync_nws_weather_data` so the seeded
-   tracked weather points update automatically.
-4. Add book, portfolio, and location mapping so weather signals can roll up to
+1. Add book, portfolio, and location mapping so weather signals can roll up to
    actual desks and risk views.
-5. Add NOAA alert ingestion plus ISO load and pipeline/storage joins so live
+2. Add NOAA alert ingestion plus ISO load and pipeline/storage joins so live
    regional weather signals include asset stress and operational context.
-6. Surface the overview in the web workspace once the frontend contract is
-   ready.
+3. Move from single-process scheduling to platform-native orchestration
+   (cron/job runner/container scheduler) in deployment environments.
+4. Expand beyond `NWS` with the additional weather and market-data feeds in the
+   trading-source register as the platform moves from baseline weather
+   intelligence to full operational weather analytics.

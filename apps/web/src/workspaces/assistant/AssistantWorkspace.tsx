@@ -36,6 +36,8 @@ type ChatMessage = {
   content: string
   provider?: AssistantProvider
   model?: string
+  runId?: number | null
+  runRecordedAt?: string | null
   usage?: {
     input_tokens: number | null
     output_tokens: number | null
@@ -44,6 +46,7 @@ type ChatMessage = {
   toolCalls?: {
     tool_name: string
     summary: string
+    arguments: Record<string, unknown>
     record_count: number | null
   }[]
 }
@@ -315,6 +318,8 @@ export function AssistantWorkspace({
           content: response.message.content,
           provider: response.provider,
           model: response.model,
+          runId: response.run_id,
+          runRecordedAt: response.run_recorded_at,
           usage: response.usage,
           warnings: response.warnings,
           toolCalls: response.tool_calls,
@@ -440,7 +445,8 @@ export function AssistantWorkspace({
                     </div>
                     <p>{agent.description}</p>
                     <small>
-                      {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}
+                      {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
+                      {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
                     </small>
                   </button>
                 ))}
@@ -492,14 +498,34 @@ export function AssistantWorkspace({
                     <div className="assistant-message-meta">
                       <span>Input tokens: {message.usage.input_tokens ?? 'n/a'}</span>
                       <span>Output tokens: {message.usage.output_tokens ?? 'n/a'}</span>
+                      {message.runId ? <span>Run #{message.runId}</span> : null}
+                    </div>
+                  ) : null}
+                  {!message.usage && message.runId ? (
+                    <div className="assistant-message-meta">
+                      <span>Run #{message.runId}</span>
                     </div>
                   ) : null}
                   {message.toolCalls && message.toolCalls.length > 0 ? (
-                    <div className="assistant-message-meta">
-                      {message.toolCalls.map((toolCall) => (
-                        <span key={`${message.id}-${toolCall.tool_name}`}>
-                          {toolCall.tool_name}: {toolCall.summary}
-                        </span>
+                    <div className="assistant-tool-list">
+                      {message.toolCalls.map((toolCall, index) => (
+                        <article
+                          key={`${message.id}-${toolCall.tool_name}-${index}`}
+                          className="assistant-tool-card"
+                        >
+                          <div className="assistant-tool-head">
+                            <strong>{toolCall.tool_name}</strong>
+                            <span>
+                              {toolCall.record_count === null
+                                ? 'Record count: n/a'
+                                : `Record count: ${toolCall.record_count}`}
+                            </span>
+                          </div>
+                          <p>{toolCall.summary}</p>
+                          {Object.keys(toolCall.arguments).length > 0 ? (
+                            <code>{JSON.stringify(toolCall.arguments)}</code>
+                          ) : null}
+                        </article>
                       ))}
                     </div>
                   ) : null}

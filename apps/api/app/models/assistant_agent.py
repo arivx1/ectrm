@@ -21,6 +21,7 @@ class AssistantAgent(Base):
     model: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     allowed_workspaces: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    allowed_tools: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)

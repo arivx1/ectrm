@@ -224,6 +224,7 @@ def _build_world_section(generated_at: datetime) -> AssistantPromptSection:
 def _build_agent_section(agent_definition: ManagedAssistantAgent) -> AssistantPromptSection:
     capabilities = ", ".join(agent_definition.capabilities)
     workspaces = ", ".join(agent_definition.allowed_workspaces)
+    allowed_tools = ", ".join(agent_definition.allowed_tools) if agent_definition.allowed_tools else "all published read-only tools"
     return AssistantPromptSection(
         key="managed-agent",
         title="Managed Agent Profile",
@@ -234,6 +235,7 @@ def _build_agent_section(agent_definition: ManagedAssistantAgent) -> AssistantPr
             f"scope: {agent_definition.scope}\n"
             f"capabilities: {capabilities}\n"
             f"allowed_workspaces: {workspaces}\n"
+            f"allowed_tools: {allowed_tools}\n"
             f"instructions:\n{agent_definition.system_prompt}"
         ),
     )

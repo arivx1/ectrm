@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import type { WeatherSyncStatusRecord } from '../../shared/models'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
@@ -84,13 +85,18 @@ type AdminWorkspaceProps = {
   priceIndices: PriceIndexRecord[]
   externalDataRuns: ExternalDataRunRecord[]
   tradingSources: TradingSourceRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
   externalDataSyncing: boolean
   externalDataError: string
   externalDataSuccess: string
   tradingSourcesSyncing: boolean
   tradingSourcesError: string
   tradingSourcesSuccess: string
+  weatherSyncing: boolean
+  weatherSyncError: string
+  weatherSyncSuccess: string
   onRunEiaSync: () => Promise<void>
+  onRunNwsWeatherSync: () => Promise<void>
   onSeedTradingSources: () => Promise<void>
   formatDate: (value: string | null | undefined) => string
   formatMoney: (value: number | null) => string
@@ -227,6 +233,64 @@ function AdminCardTitle({ label, tooltip }: { label: string; tooltip: string }) 
   )
 }
 
+function cadenceLabel(intervalMinutes: number): string {
+  if (intervalMinutes % 60 === 0) {
+    const hours = intervalMinutes / 60
+    return hours === 1 ? 'Hourly' : `Every ${hours}h`
+  }
+
+  return `Every ${intervalMinutes}m`
+}
+
+function weatherHealthTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
+  switch (status) {
+    case 'healthy':
+      return 'active'
+    case 'running':
+      return 'in-progress'
+    case 'failed':
+      return 'cancelled'
+    default:
+      return 'blocked'
+  }
+}
+
+function weatherHealthLabel(status: string): string {
+  switch (status) {
+    case 'healthy':
+      return 'Healthy'
+    case 'running':
+      return 'Running'
+    case 'failed':
+      return 'Failed'
+    case 'stale':
+      return 'Stale'
+    case 'missing':
+      return 'Missing'
+    case 'degraded':
+      return 'Degraded'
+    default:
+      return 'Unknown'
+  }
+}
+
+function formatAgeHours(value: number | null | undefined): string {
+  if (typeof value !== 'number') {
+    return 'No data'
+  }
+
+  if (value < 1) {
+    return `${Math.max(1, Math.round(value * 60))}m old`
+  }
+
+  if (value < 24) {
+    return `${value.toFixed(value >= 10 ? 0 : 1)}h old`
+  }
+
+  const days = value / 24
+  return `${days.toFixed(days >= 10 ? 0 : 1)}d old`
+}
+
 export function AdminWorkspace({
   authSession,
   onOpenSettings,
@@ -241,13 +305,18 @@ export function AdminWorkspace({
   priceIndices,
   externalDataRuns,
   tradingSources,
+  weatherSyncStatus,
   externalDataSyncing,
   externalDataError,
   externalDataSuccess,
   tradingSourcesSyncing,
   tradingSourcesError,
   tradingSourcesSuccess,
+  weatherSyncing,
+  weatherSyncError,
+  weatherSyncSuccess,
   onRunEiaSync,
+  onRunNwsWeatherSync,
   onSeedTradingSources,
   formatDate,
   formatMoney,
@@ -415,10 +484,13 @@ export function AdminWorkspace({
     ],
   )
 
-  const latestEiaRun = useMemo(
-    () => externalDataRuns.find((run) => run.provider === 'EIA') ?? null,
-    [externalDataRuns],
-  )
+  const eiaRuns = useMemo(() => externalDataRuns.filter((run) => run.provider === 'EIA'), [externalDataRuns])
+
+  const latestEiaRun = useMemo(() => eiaRuns[0] ?? null, [eiaRuns])
+
+  const weatherLocations = weatherSyncStatus?.locations ?? []
+  const latestNwsRun = weatherSyncStatus?.latest_run ?? null
+  const latestNwsSuccess = weatherSyncStatus?.latest_success ?? null
 
   const tradingSourcesByCriticality = useMemo(() => {
     const counts = new Map<string, number>()
@@ -464,6 +536,129 @@ export function AdminWorkspace({
         <div className="admin-sync-panel">
           <div className="admin-sync-head">
             <div>
+              <span className="eyebrow">Weather Operations</span>
+              <h3>NWS Sync Health</h3>
+            </div>
+            <div className="admin-sync-head-actions">
+              {weatherSyncStatus ? (
+                <span className={`status-pill status-pill-${weatherHealthTone(weatherSyncStatus.health_status)}`}>
+                  {weatherHealthLabel(weatherSyncStatus.health_status)}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void onRunNwsWeatherSync()}
+                disabled={weatherSyncing}
+              >
+                {weatherSyncing ? 'Running Weather Sync...' : 'Run NWS Sync'}
+              </button>
+            </div>
+          </div>
+          <p>Monitor the live NOAA ingest loop, inspect freshness by location, and trigger an on-demand sync when desk coverage needs a manual refresh.</p>
+
+          <div className="admin-sync-status-grid">
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Coverage"
+                tooltip="How many active weather points are currently fresh enough to support the live intelligence blend."
+              />
+              <p>
+                {weatherSyncStatus
+                  ? `${weatherSyncStatus.healthy_location_count} of ${weatherSyncStatus.active_location_count} active locations are currently healthy.`
+                  : 'Weather sync status has not been loaded yet.'}
+              </p>
+              <span>
+                {weatherSyncStatus
+                  ? `${weatherSyncStatus.stale_location_count} stale · ${weatherSyncStatus.missing_location_count} missing`
+                  : 'Awaiting first status snapshot'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Scheduler"
+                tooltip="Expected sync cadence and freshness targets for forecasts and observations."
+              />
+              <p>
+                {weatherSyncStatus
+                  ? `${cadenceLabel(weatherSyncStatus.scheduler_interval_minutes)} cadence with ${weatherSyncStatus.success_sla_hours}h run SLA.`
+                  : 'Scheduler cadence is not available yet.'}
+              </p>
+              <span>
+                {weatherSyncStatus
+                  ? `Forecast target ${weatherSyncStatus.forecast_freshness_hours}h · observations ${weatherSyncStatus.observation_freshness_hours}h`
+                  : 'No freshness target loaded'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Latest Run"
+                tooltip="Most recent NWS sync attempt recorded in the platform."
+              />
+              <p>
+                {latestNwsRun
+                  ? `Run #${latestNwsRun.id} ${latestNwsRun.status} with ${latestNwsRun.series_count} series and ${latestNwsRun.observation_count} observations.`
+                  : 'No NWS sync has been recorded yet.'}
+              </p>
+              <span>{latestNwsRun ? formatDate(latestNwsRun.finished_at ?? latestNwsRun.started_at) : 'Awaiting first sync'}</span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Latest Healthy Data"
+                tooltip="Newest successfully ingested weather data currently available to the intelligence layer."
+              />
+              <p>
+                {weatherSyncStatus?.latest_data_at
+                  ? `Latest weather payload landed ${formatDate(weatherSyncStatus.latest_data_at)}.`
+                  : 'No forecast or observation data is stored yet.'}
+              </p>
+              <span>{latestNwsSuccess ? `Last success run #${latestNwsSuccess.id}` : 'No successful run recorded yet'}</span>
+            </article>
+          </div>
+
+          {weatherSyncError ? <div className="feedback-banner feedback-banner-error">{weatherSyncError}</div> : null}
+          {weatherSyncSuccess ? <div className="feedback-banner feedback-banner-success">{weatherSyncSuccess}</div> : null}
+          {weatherSyncStatus?.error_summary ? (
+            <div className="feedback-banner feedback-banner-error">{weatherSyncStatus.error_summary}</div>
+          ) : null}
+
+          <div className="admin-run-list">
+            {weatherLocations.length === 0 ? (
+              <div className="detail-row">
+                <span>No tracked weather locations are loaded yet.</span>
+              </div>
+            ) : (
+              weatherLocations.map((location) => (
+                <article key={location.code} className="admin-run-row admin-weather-row">
+                  <div className="admin-weather-row-main">
+                    <div>
+                      <strong>{location.name}</strong>
+                      <p>
+                        {location.code}
+                        {location.reference_location_code ? ` · ref ${location.reference_location_code}` : ''}
+                        {location.station_id ? ` · station ${location.station_id}` : ''}
+                      </p>
+                    </div>
+                    <div className="admin-weather-row-detail">
+                      <span>Forecast {formatAgeHours(location.forecast_age_hours)}</span>
+                      <span>Observation {formatAgeHours(location.observation_age_hours)}</span>
+                    </div>
+                  </div>
+                  <div className="admin-run-meta">
+                    <span className={`status-pill status-pill-${weatherHealthTone(location.health_status)}`}>
+                      {weatherHealthLabel(location.health_status)}
+                    </span>
+                    <span>{location.last_observation_at ? `Observed ${formatDate(location.last_observation_at)}` : 'No observation yet'}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="admin-sync-panel">
+          <div className="admin-sync-head">
+            <div>
               <span className="eyebrow">External Data</span>
               <h3>EIA Sync Control</h3>
             </div>
@@ -501,12 +696,12 @@ export function AdminWorkspace({
           {externalDataSuccess ? <div className="feedback-banner feedback-banner-success">{externalDataSuccess}</div> : null}
 
           <div className="admin-run-list">
-            {externalDataRuns.length === 0 ? (
+            {eiaRuns.length === 0 ? (
               <div className="detail-row">
                 <span>No sync history loaded.</span>
               </div>
             ) : (
-              externalDataRuns.map((run) => (
+              eiaRuns.map((run) => (
                 <article key={run.id} className="admin-run-row">
                   <div>
                     <strong>{run.provider} run #{run.id}</strong>

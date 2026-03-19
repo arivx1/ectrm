@@ -20,7 +20,7 @@ operations with session-based access control.
 
 - `/health`, `/version`, `/settings/public`: safe service and runtime metadata
 - `/assistant/*`: assistant provider status, prompt-context preview, protected
-  prompt routing, and public managed-agent listing
+  prompt routing, current-user run lookup, and public managed-agent listing
 - `/auth`: bootstrap the first admin, sign in with password or Google, inspect
   the current session, and log out
 - `/events`: append and list event rows
@@ -30,7 +30,7 @@ operations with session-based access control.
   locations, counterparties, and portfolios
 - `/reports/*`: exposure and activity summaries
 - `/admin/*`: seed data, external-data runs, EIA sync, trading source admin,
-  and assistant-agent administration
+  assistant-agent administration, and assistant run audit listings
 - `/users`: user account administration
 
 ## Access Model
@@ -124,6 +124,11 @@ The most important settings are:
   prompts
 - `ASSISTANT_BUSINESS_CONTEXT`: reusable operating-model context added to
   assistant prompts
+- `use_live_tools` on assistant requests: exposes read-only runtime data tools
+  to the selected model provider, executes requested tool calls server-side,
+  and returns tool-call traces with the response
+- `ASSISTANT_MAX_TOOL_ROUNDS`: caps how many live tool-execution rounds the
+  assistant can take during one response
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`: enable GPT, Claude,
   and Gemini respectively
 - `EIA_API_KEY`: unlocks external EIA sync
@@ -137,3 +142,15 @@ The most important settings are:
 - `alembic`: database migrations
 - `scripts`: rebuild and seed helpers
 - `tests`: API and domain-level tests
+
+## Assistant Governance
+
+Managed assistant agents can now carry an `allowed_tools` list in addition to
+their capability tags. This means `READ` no longer implies unrestricted access
+to every published live tool: admins can pin each agent to the exact
+read-only tool subset it is allowed to use.
+
+Each successful or failed assistant response also records an `assistant_run`
+row for auditability. Those records capture the resolved runtime, prompt
+sections, warnings, tool traces, token usage, user/session metadata, and the
+final assistant or provider-error outcome.

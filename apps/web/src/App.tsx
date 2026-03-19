@@ -46,6 +46,7 @@ import {
   type TradingSourceRecord,
   type UnitRecord,
   type ViewKey,
+  type WeatherSyncStatusRecord,
 } from './shared/models'
 import { formatCommodityClass, formatDate, formatMoney, formatNumber, parseRequiredNumber, statusTone } from './shared/format'
 import { classForCommodity } from './shared/reference'
@@ -175,6 +176,7 @@ export default function App() {
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
   const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
+  const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
   const [error, setError] = useState<string>('')
   const [createError, setCreateError] = useState<string>('')
   const [amendError, setAmendError] = useState<string>('')
@@ -183,6 +185,8 @@ export default function App() {
   const [externalDataSuccess, setExternalDataSuccess] = useState<string>('')
   const [tradingSourcesError, setTradingSourcesError] = useState<string>('')
   const [tradingSourcesSuccess, setTradingSourcesSuccess] = useState<string>('')
+  const [weatherSyncError, setWeatherSyncError] = useState<string>('')
+  const [weatherSyncSuccess, setWeatherSyncSuccess] = useState<string>('')
   const [referenceDataLoading, setReferenceDataLoading] = useState(true)
   const [appLoading, setAppLoading] = useState(true)
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(initialRoute.tradeId)
@@ -190,6 +194,7 @@ export default function App() {
   const [eventFilter, setEventFilter] = useState('ALL')
   const [externalDataSyncing, setExternalDataSyncing] = useState(false)
   const [tradingSourcesSyncing, setTradingSourcesSyncing] = useState(false)
+  const [weatherSyncing, setWeatherSyncing] = useState(false)
   const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => getStoredAuthSession())
 
   const [submitting, setSubmitting] = useState(false)
@@ -218,6 +223,7 @@ export default function App() {
       portfolios: portfoliosJson,
       externalDataRuns: externalDataRunsJson,
       tradingSources: tradingSourcesJson,
+      weatherSyncStatus: weatherSyncStatusJson,
     } = await loadWorkspaceBootstrap(appConfig.apiBase, {
       adminHeaders:
         currentSession && hasAdministrativeAccess(currentSession)
@@ -237,6 +243,7 @@ export default function App() {
     const nextPortfolios = portfoliosJson as PortfolioRecord[]
     const nextExternalDataRuns = externalDataRunsJson as ExternalDataRunRecord[]
     const nextTradingSources = tradingSourcesJson as TradingSourceRecord[]
+    const nextWeatherSyncStatus = weatherSyncStatusJson as WeatherSyncStatusRecord | null
 
     setHealth(healthJson.status ?? 'unknown')
     setTrades(nextTrades)
@@ -252,6 +259,7 @@ export default function App() {
     setPortfolios(nextPortfolios)
     setExternalDataRuns(nextExternalDataRuns)
     setTradingSources(nextTradingSources)
+    setWeatherSyncStatus(nextWeatherSyncStatus)
     setReferenceDataLoading(false)
     setAppLoading(false)
     setReferenceDataError('')
@@ -751,6 +759,35 @@ export default function App() {
       setTradingSourcesError(err instanceof Error ? err.message : 'Failed to seed trading sources.')
     } finally {
       setTradingSourcesSyncing(false)
+    }
+  }
+
+  async function handleRunNwsWeatherSync() {
+    setWeatherSyncing(true)
+    setWeatherSyncError('')
+    setWeatherSyncSuccess('')
+    try {
+      const { actorId } = getMutationContext()
+      const response = await fetch(`${appConfig.apiBase}/admin/weather/sync/nws`, {
+        method: 'POST',
+        headers: buildMutationHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ requested_by: actorId }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || 'Failed to run NWS weather sync.')
+      }
+
+      const payload = (await response.json()) as ExternalDataRunRecord
+      await loadData()
+      setWeatherSyncSuccess(
+        `NWS sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.series_count} series and ${payload.observation_count} observations.`,
+      )
+    } catch (err) {
+      setWeatherSyncError(err instanceof Error ? err.message : 'Failed to run NWS weather sync.')
+    } finally {
+      setWeatherSyncing(false)
     }
   }
 
@@ -1425,13 +1462,18 @@ export default function App() {
             priceIndices={priceIndices}
             externalDataRuns={externalDataRuns}
             tradingSources={tradingSources}
+            weatherSyncStatus={weatherSyncStatus}
             externalDataSyncing={externalDataSyncing}
             externalDataError={externalDataError}
             externalDataSuccess={externalDataSuccess}
             tradingSourcesSyncing={tradingSourcesSyncing}
             tradingSourcesError={tradingSourcesError}
             tradingSourcesSuccess={tradingSourcesSuccess}
+            weatherSyncing={weatherSyncing}
+            weatherSyncError={weatherSyncError}
+            weatherSyncSuccess={weatherSyncSuccess}
             onRunEiaSync={handleRunEiaSync}
+            onRunNwsWeatherSync={handleRunNwsWeatherSync}
             onSeedTradingSources={handleSeedTradingSources}
             formatDate={formatDate}
             formatMoney={formatMoney}

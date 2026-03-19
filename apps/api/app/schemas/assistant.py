@@ -16,6 +16,7 @@ AssistantPromptSectionSource = Literal[
     "user",
     "business",
     "data",
+    "tool",
     "world",
     "workspace",
     "application",
@@ -35,6 +36,7 @@ AssistantWorkspace = Literal[
 AssistantAgentStatus = Literal["DRAFT", "ACTIVE", "PAUSED", "RETIRED"]
 AssistantAgentScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
 AssistantAgentCapability = Literal["READ", "EXPLAIN", "DRAFT", "ACTION"]
+AssistantRunStatus = Literal["COMPLETED", "FAILED"]
 
 AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
 
@@ -119,6 +121,8 @@ class AssistantToolCallOut(BaseModel):
 
 
 class AssistantPromptResponse(BaseModel):
+    run_id: Optional[int] = None
+    run_recorded_at: Optional[datetime] = None
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
     provider: AssistantProvider
@@ -162,6 +166,7 @@ class AssistantAgentBase(BaseModel):
     model: Optional[str] = Field(default=None, max_length=160)
     allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=8)
     capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=16)
     system_prompt: str = Field(..., min_length=1, max_length=20_000)
 
     @field_validator("name")
@@ -193,6 +198,12 @@ class AssistantAgentBase(BaseModel):
     @classmethod
     def validate_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
         return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def normalize_allowed_tools(cls, value: list[str]) -> list[str]:
+        normalized = [normalize_required_text(tool_name, field_name="allowed_tools").lower() for tool_name in value]
+        return _ensure_distinct_values(normalized, field_name="allowed_tools")
 
     @field_validator("model")
     @classmethod
@@ -240,6 +251,7 @@ class AssistantAgentOut(BaseModel):
     model: Optional[str]
     allowed_workspaces: list[AssistantWorkspace]
     capabilities: list[AssistantAgentCapability]
+    allowed_tools: list[str]
 
 
 class AssistantAgentAdminOut(AssistantAgentOut):
@@ -249,3 +261,34 @@ class AssistantAgentAdminOut(AssistantAgentOut):
     updated_at: datetime
     updated_by: str
     version: int
+
+
+class AssistantRunSummaryOut(BaseModel):
+    run_id: int
+    status: AssistantRunStatus
+    created_at: datetime
+    completed_at: datetime
+    user_id: str
+    user_role: str
+    workspace: Optional[AssistantWorkspace]
+    agent_id: Optional[str]
+    agent_name: Optional[str]
+    provider: AssistantProvider
+    model: str
+    use_live_tools: bool
+    warning_count: int
+    tool_call_count: int
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    latest_user_message: Optional[str] = None
+    assistant_message: Optional[str] = None
+    error_detail: Optional[str] = None
+
+
+class AssistantRunOut(AssistantRunSummaryOut):
+    request_messages: list[AssistantMessageIn]
+    application_context: Optional[str] = None
+    prompt_sections: list[AssistantPromptSectionOut]
+    rendered_system_prompt: str
+    warnings: list[str] = Field(default_factory=list)
+    tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)

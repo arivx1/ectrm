@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Iterable, cast
 
 import httpx
+from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptEnvelope
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
-from apps.api.app.domains.assistant.services.tools import build_tool_definitions
+from apps.api.app.domains.assistant.services.tools import (
+    AssistantToolCallTrace,
+    AssistantToolDefinition,
+    AssistantToolExecutionResult,
+    AssistantToolService,
+    AssistantToolServiceError,
+    build_tool_definitions,
+    json_dumps,
+)
 from apps.api.app.schemas.assistant import (
     AssistantMessageIn,
     AssistantMessageOut,
@@ -57,6 +67,15 @@ class AssistantCompletion:
     input_tokens: int | None = None
     output_tokens: int | None = None
     warnings: list[str] | None = None
+    tool_calls: list[AssistantToolCallTrace] | None = None
+
+
+@dataclass(frozen=True)
+class PendingToolCall:
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+    parse_error: str | None = None
 
 
 class AssistantServiceError(Exception):
@@ -67,6 +86,10 @@ class AssistantServiceError(Exception):
 
 
 class AssistantService:
+    def __init__(self, db: Session | None = None) -> None:
+        self._tool_definitions = build_tool_definitions()
+        self._tool_service = AssistantToolService(db) if db is not None else None
+
     async def generate_response(
         self,
         payload: AssistantPromptRequest,
@@ -74,10 +97,18 @@ class AssistantService:
         prompt_context: AssistantPromptEnvelope | None = None,
     ) -> AssistantPromptResponse:
         provider, model, warnings = resolve_effective_runtime(payload, agent_definition)
+        tool_definitions, tool_warnings = self._resolve_tooling(payload, agent_definition)
         system_prompt = (
             prompt_context.system_prompt
             if prompt_context is not None
             else build_system_prompt(payload, agent_definition)
+        )
+        combined_warnings = _dedupe_preserving_order(
+            [
+                *warnings,
+                *tool_warnings,
+                *(prompt_context.warnings if prompt_context is not None else ()),
+            ]
         )
 
         if provider.provider == "openai":
@@ -86,6 +117,7 @@ class AssistantService:
                 model=model,
                 messages=payload.messages,
                 system_prompt=system_prompt,
+                tool_definitions=tool_definitions,
             )
         elif provider.provider == "anthropic":
             completion = await self._generate_anthropic(
@@ -93,6 +125,7 @@ class AssistantService:
                 model=model,
                 messages=payload.messages,
                 system_prompt=system_prompt,
+                tool_definitions=tool_definitions,
             )
         else:
             completion = await self._generate_google(
@@ -100,6 +133,7 @@ class AssistantService:
                 model=model,
                 messages=payload.messages,
                 system_prompt=system_prompt,
+                tool_definitions=tool_definitions,
             )
 
         return AssistantPromptResponse(
@@ -120,7 +154,8 @@ class AssistantService:
                 input_tokens=completion.input_tokens,
                 output_tokens=completion.output_tokens,
             ),
-            warnings=[*warnings, *(prompt_context.warnings if prompt_context is not None else ()), *(completion.warnings or [])],
+            warnings=_dedupe_preserving_order([*combined_warnings, *(completion.warnings or [])]),
+            tool_calls=[trace.to_out() for trace in (completion.tool_calls or [])],
         )
 
     async def _generate_openai(
@@ -130,6 +165,7 @@ class AssistantService:
         model: str,
         messages: list[AssistantMessageIn],
         system_prompt: str,
+        tool_definitions: list[AssistantToolDefinition],
     ) -> AssistantCompletion:
         input_messages: list[dict[str, Any]] = []
 
@@ -151,35 +187,109 @@ class AssistantService:
                 }
             )
 
-        response_payload = await _post_json(
-            url=f"{provider.base_url.rstrip('/')}/responses",
-            headers={
-                "Authorization": f"Bearer {provider.api_key}",
-                "Content-Type": "application/json",
-            },
-            payload={
-                "model": model,
-                "input": input_messages,
-                "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
-                "text": {"format": {"type": "text"}},
-            },
-            provider_label=provider.label,
-        )
+        request_payload: dict[str, Any] = {
+            "model": model,
+            "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
+            "text": {"format": {"type": "text"}},
+        }
+        if tool_definitions:
+            request_payload["tools"] = [
+                {
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+                for tool in tool_definitions
+            ]
 
-        response_text = _extract_openai_text(response_payload)
-        if not response_text:
-            raise AssistantServiceError(
-                status_code=502,
-                detail=f"{provider.label} returned an empty response.",
+        current_input = input_messages
+        previous_response_id: str | None = None
+        executed_tool_rounds = 0
+        accumulated_input_tokens: int | None = None
+        accumulated_output_tokens: int | None = None
+        last_response_text = ""
+        warnings: list[str] = []
+        tool_calls: list[AssistantToolCallTrace] = []
+
+        while True:
+            response_payload = await _post_json(
+                url=f"{provider.base_url.rstrip('/')}/responses",
+                headers={
+                    "Authorization": f"Bearer {provider.api_key}",
+                    "Content-Type": "application/json",
+                },
+                payload={
+                    **request_payload,
+                    "input": current_input,
+                    **({"previous_response_id": previous_response_id} if previous_response_id else {}),
+                },
+                provider_label=provider.label,
             )
 
-        usage = response_payload.get("usage", {})
-        return AssistantCompletion(
-            provider=provider.provider,
-            model=model,
-            content=response_text,
-            input_tokens=_coerce_int(usage.get("input_tokens")),
-            output_tokens=_coerce_int(usage.get("output_tokens")),
+            usage = response_payload.get("usage", {})
+            accumulated_input_tokens = _sum_optional_int(
+                accumulated_input_tokens,
+                _coerce_int(usage.get("input_tokens")),
+            )
+            accumulated_output_tokens = _sum_optional_int(
+                accumulated_output_tokens,
+                _coerce_int(usage.get("output_tokens")),
+            )
+
+            response_text = _extract_openai_text(response_payload)
+            if response_text:
+                last_response_text = response_text
+
+            pending_calls = _extract_openai_tool_calls(response_payload) if tool_definitions else []
+            if pending_calls:
+                if executed_tool_rounds >= settings.ASSISTANT_MAX_TOOL_ROUNDS:
+                    warnings.append(
+                        f"{provider.label} reached the configured live-tool round limit before finishing."
+                    )
+                    break
+
+                previous_response_id = _require_response_id(response_payload, provider.label)
+                current_input = []
+                for pending_call in pending_calls:
+                    result, trace = self._execute_pending_tool_call(pending_call)
+                    tool_calls.append(trace)
+                    current_input.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": pending_call.call_id,
+                            "output": json_dumps(result.output),
+                        }
+                    )
+                executed_tool_rounds += 1
+                continue
+
+            if last_response_text:
+                return AssistantCompletion(
+                    provider=provider.provider,
+                    model=model,
+                    content=last_response_text,
+                    input_tokens=accumulated_input_tokens,
+                    output_tokens=accumulated_output_tokens,
+                    warnings=warnings or None,
+                    tool_calls=tool_calls,
+                )
+            break
+
+        if last_response_text:
+            return AssistantCompletion(
+                provider=provider.provider,
+                model=model,
+                content=last_response_text,
+                input_tokens=accumulated_input_tokens,
+                output_tokens=accumulated_output_tokens,
+                warnings=warnings or None,
+                tool_calls=tool_calls,
+            )
+
+        raise AssistantServiceError(
+            status_code=502,
+            detail=f"{provider.label} returned an empty response.",
         )
 
     async def _generate_anthropic(
@@ -189,51 +299,130 @@ class AssistantService:
         model: str,
         messages: list[AssistantMessageIn],
         system_prompt: str,
+        tool_definitions: list[AssistantToolDefinition],
     ) -> AssistantCompletion:
+        message_history: list[dict[str, Any]] = [
+            {
+                "role": message.role,
+                "content": [{"type": "text", "text": message.content}],
+            }
+            for message in messages
+        ]
         payload: dict[str, Any] = {
             "model": model,
             "max_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
-            "messages": [
-                {
-                    "role": message.role,
-                    "content": message.content,
-                }
-                for message in messages
-            ],
+            "messages": message_history,
         }
         if system_prompt:
             payload["system"] = system_prompt
+        if tool_definitions:
+            payload["tools"] = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.parameters,
+                }
+                for tool in tool_definitions
+            ]
 
-        response_payload = await _post_json(
-            url=f"{provider.base_url.rstrip('/')}/v1/messages",
-            headers={
-                "x-api-key": provider.api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            payload=payload,
-            provider_label=provider.label,
-        )
+        executed_tool_rounds = 0
+        accumulated_input_tokens: int | None = None
+        accumulated_output_tokens: int | None = None
+        last_response_text = ""
+        warnings: list[str] = []
+        tool_calls: list[AssistantToolCallTrace] = []
 
-        content_blocks = response_payload.get("content", [])
-        response_text = "\n".join(
-            block.get("text", "").strip()
-            for block in content_blocks
-            if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
-        ).strip()
-        if not response_text:
-            raise AssistantServiceError(
-                status_code=502,
-                detail=f"{provider.label} returned an empty response.",
+        while True:
+            response_payload = await _post_json(
+                url=f"{provider.base_url.rstrip('/')}/v1/messages",
+                headers={
+                    "x-api-key": provider.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                payload=payload,
+                provider_label=provider.label,
             )
 
-        usage = response_payload.get("usage", {})
-        return AssistantCompletion(
-            provider=provider.provider,
-            model=model,
-            content=response_text,
-            input_tokens=_coerce_int(usage.get("input_tokens")),
-            output_tokens=_coerce_int(usage.get("output_tokens")),
+            usage = response_payload.get("usage", {})
+            accumulated_input_tokens = _sum_optional_int(
+                accumulated_input_tokens,
+                _coerce_int(usage.get("input_tokens")),
+            )
+            accumulated_output_tokens = _sum_optional_int(
+                accumulated_output_tokens,
+                _coerce_int(usage.get("output_tokens")),
+            )
+
+            content_blocks = response_payload.get("content", [])
+            response_text = _extract_anthropic_text(content_blocks)
+            if response_text:
+                last_response_text = response_text
+
+            pending_calls = _extract_anthropic_tool_calls(content_blocks) if tool_definitions else []
+            if pending_calls:
+                if executed_tool_rounds >= settings.ASSISTANT_MAX_TOOL_ROUNDS:
+                    warnings.append(
+                        f"{provider.label} reached the configured live-tool round limit before finishing."
+                    )
+                    break
+
+                message_history.append(
+                    {
+                        "role": "assistant",
+                        "content": content_blocks,
+                    }
+                )
+
+                tool_result_blocks: list[dict[str, Any]] = []
+                for pending_call in pending_calls:
+                    result, trace = self._execute_pending_tool_call(pending_call)
+                    tool_calls.append(trace)
+                    tool_result_block: dict[str, Any] = {
+                        "type": "tool_result",
+                        "tool_use_id": pending_call.call_id,
+                        "content": json_dumps(result.output),
+                    }
+                    if result.is_error:
+                        tool_result_block["is_error"] = True
+                    tool_result_blocks.append(tool_result_block)
+
+                message_history.append(
+                    {
+                        "role": "user",
+                        "content": tool_result_blocks,
+                    }
+                )
+                payload["messages"] = message_history
+                executed_tool_rounds += 1
+                continue
+
+            if last_response_text:
+                return AssistantCompletion(
+                    provider=provider.provider,
+                    model=model,
+                    content=last_response_text,
+                    input_tokens=accumulated_input_tokens,
+                    output_tokens=accumulated_output_tokens,
+                    warnings=warnings or None,
+                    tool_calls=tool_calls,
+                )
+            break
+
+        if last_response_text:
+            return AssistantCompletion(
+                provider=provider.provider,
+                model=model,
+                content=last_response_text,
+                input_tokens=accumulated_input_tokens,
+                output_tokens=accumulated_output_tokens,
+                warnings=warnings or None,
+                tool_calls=tool_calls,
+            )
+
+        raise AssistantServiceError(
+            status_code=502,
+            detail=f"{provider.label} returned an empty response.",
         )
 
     async def _generate_google(
@@ -243,15 +432,17 @@ class AssistantService:
         model: str,
         messages: list[AssistantMessageIn],
         system_prompt: str,
+        tool_definitions: list[AssistantToolDefinition],
     ) -> AssistantCompletion:
+        contents: list[dict[str, Any]] = [
+            {
+                "role": "model" if message.role == "assistant" else "user",
+                "parts": [{"text": message.content}],
+            }
+            for message in messages
+        ]
         payload: dict[str, Any] = {
-            "contents": [
-                {
-                    "role": "model" if message.role == "assistant" else "user",
-                    "parts": [{"text": message.content}],
-                }
-                for message in messages
-            ],
+            "contents": contents,
             "generationConfig": {
                 "maxOutputTokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
             },
@@ -260,53 +451,235 @@ class AssistantService:
             payload["systemInstruction"] = {
                 "parts": [{"text": system_prompt}],
             }
+        if tool_definitions:
+            payload["tools"] = [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
+                        for tool in tool_definitions
+                    ]
+                }
+            ]
 
-        response_payload = await _post_json(
-            url=f"{provider.base_url.rstrip('/')}/models/{model}:generateContent",
-            headers={
-                "x-goog-api-key": provider.api_key,
-                "Content-Type": "application/json",
-            },
-            payload=payload,
-            provider_label=provider.label,
+        executed_tool_rounds = 0
+        accumulated_input_tokens: int | None = None
+        accumulated_output_tokens: int | None = None
+        last_response_text = ""
+        warnings: list[str] = []
+        tool_calls: list[AssistantToolCallTrace] = []
+
+        while True:
+            response_payload = await _post_json(
+                url=f"{provider.base_url.rstrip('/')}/models/{model}:generateContent",
+                headers={
+                    "x-goog-api-key": provider.api_key,
+                    "Content-Type": "application/json",
+                },
+                payload=payload,
+                provider_label=provider.label,
+            )
+
+            prompt_feedback = response_payload.get("promptFeedback", {})
+            block_reason = prompt_feedback.get("blockReason")
+            if block_reason:
+                raise AssistantServiceError(
+                    status_code=400,
+                    detail=f"{provider.label} blocked the request: {block_reason}.",
+                )
+
+            usage = response_payload.get("usageMetadata", {})
+            accumulated_input_tokens = _sum_optional_int(
+                accumulated_input_tokens,
+                _coerce_int(usage.get("promptTokenCount")),
+            )
+            accumulated_output_tokens = _sum_optional_int(
+                accumulated_output_tokens,
+                _coerce_int(usage.get("candidatesTokenCount")),
+            )
+
+            candidates = response_payload.get("candidates", [])
+            if not candidates:
+                raise AssistantServiceError(
+                    status_code=502,
+                    detail=f"{provider.label} returned no candidates.",
+                )
+
+            candidate = candidates[0]
+            content = candidate.get("content", {})
+            parts = content.get("parts", []) if isinstance(content, dict) else []
+            response_text = _extract_google_text(parts)
+            if response_text:
+                last_response_text = response_text
+
+            pending_calls = _extract_google_tool_calls(parts) if tool_definitions else []
+            if pending_calls:
+                if executed_tool_rounds >= settings.ASSISTANT_MAX_TOOL_ROUNDS:
+                    warnings.append(
+                        f"{provider.label} reached the configured live-tool round limit before finishing."
+                    )
+                    break
+
+                model_content = content if isinstance(content, dict) else {"parts": parts}
+                payload["contents"].append(
+                    {
+                        **model_content,
+                        "role": model_content.get("role") or "model",
+                    }
+                )
+
+                tool_response_parts: list[dict[str, Any]] = []
+                for pending_call in pending_calls:
+                    result, trace = self._execute_pending_tool_call(pending_call)
+                    tool_calls.append(trace)
+                    tool_response_parts.append(
+                        {
+                            "functionResponse": {
+                                "name": pending_call.tool_name,
+                                "response": result.output,
+                            }
+                        }
+                    )
+
+                payload["contents"].append(
+                    {
+                        "role": "user",
+                        "parts": tool_response_parts,
+                    }
+                )
+                executed_tool_rounds += 1
+                continue
+
+            if last_response_text:
+                return AssistantCompletion(
+                    provider=provider.provider,
+                    model=model,
+                    content=last_response_text,
+                    input_tokens=accumulated_input_tokens,
+                    output_tokens=accumulated_output_tokens,
+                    warnings=warnings or None,
+                    tool_calls=tool_calls,
+                )
+            break
+
+        if last_response_text:
+            return AssistantCompletion(
+                provider=provider.provider,
+                model=model,
+                content=last_response_text,
+                input_tokens=accumulated_input_tokens,
+                output_tokens=accumulated_output_tokens,
+                warnings=warnings or None,
+                tool_calls=tool_calls,
+            )
+
+        raise AssistantServiceError(
+            status_code=502,
+            detail=f"{provider.label} returned an empty response.",
         )
 
-        prompt_feedback = response_payload.get("promptFeedback", {})
-        block_reason = prompt_feedback.get("blockReason")
-        if block_reason:
-            raise AssistantServiceError(
-                status_code=400,
-                detail=f"{provider.label} blocked the request: {block_reason}.",
+    def _resolve_tooling(
+        self,
+        payload: AssistantPromptRequest,
+        agent_definition: ManagedAssistantAgent | None,
+    ) -> tuple[list[AssistantToolDefinition], list[str]]:
+        warnings: list[str] = []
+        if not payload.use_live_tools:
+            return [], warnings
+        if settings.ASSISTANT_MAX_TOOL_ROUNDS < 1:
+            warnings.append(
+                "Live assistant tools are disabled because the tool-round limit is set to 0."
             )
-
-        candidates = response_payload.get("candidates", [])
-        if not candidates:
-            raise AssistantServiceError(
-                status_code=502,
-                detail=f"{provider.label} returned no candidates.",
+            return [], warnings
+        if self._tool_service is None:
+            warnings.append(
+                "Live assistant tools are unavailable on this API worker, so the response used prompt context only."
             )
-
-        content = candidates[0].get("content", {})
-        parts = content.get("parts", []) if isinstance(content, dict) else []
-        response_text = "\n".join(
-            part.get("text", "").strip()
-            for part in parts
-            if isinstance(part, dict) and part.get("text")
-        ).strip()
-        if not response_text:
-            raise AssistantServiceError(
-                status_code=502,
-                detail=f"{provider.label} returned an empty response.",
+            return [], warnings
+        if agent_definition is not None and "READ" not in {capability.upper() for capability in agent_definition.capabilities}:
+            warnings.append(
+                f"{agent_definition.name} does not include READ capability, so live tools were disabled for this response."
             )
+            return [], warnings
+        if agent_definition is None or not agent_definition.allowed_tools:
+            return self._tool_definitions, warnings
 
-        usage = response_payload.get("usageMetadata", {})
-        return AssistantCompletion(
-            provider=provider.provider,
-            model=model,
-            content=response_text,
-            input_tokens=_coerce_int(usage.get("promptTokenCount")),
-            output_tokens=_coerce_int(usage.get("candidatesTokenCount")),
+        allowed_tool_names = set(agent_definition.allowed_tools)
+        filtered_tool_definitions = [
+            tool_definition
+            for tool_definition in self._tool_definitions
+            if tool_definition.name in allowed_tool_names
+        ]
+        if filtered_tool_definitions:
+            return filtered_tool_definitions, warnings
+
+        warnings.append(
+            f"{agent_definition.name} has no enabled live tools on this API worker, so the response used prompt context only."
         )
+        return [], warnings
+
+    def _execute_pending_tool_call(
+        self,
+        pending_call: PendingToolCall,
+    ) -> tuple[AssistantToolExecutionResult, AssistantToolCallTrace]:
+        if pending_call.parse_error:
+            result = AssistantToolExecutionResult(
+                output={
+                    "ok": False,
+                    "error": pending_call.parse_error,
+                },
+                summary=f"{pending_call.tool_name} failed: {pending_call.parse_error}",
+                record_count=0,
+                is_error=True,
+            )
+            trace = AssistantToolCallTrace(
+                tool_name=pending_call.tool_name,
+                arguments=pending_call.arguments,
+                summary=result.summary,
+                record_count=0,
+            )
+            return result, trace
+
+        if self._tool_service is None:
+            result = AssistantToolExecutionResult(
+                output={
+                    "ok": False,
+                    "error": "Live assistant tools are unavailable on this API worker.",
+                },
+                summary=f"{pending_call.tool_name} failed: live assistant tools are unavailable.",
+                record_count=0,
+                is_error=True,
+            )
+            trace = AssistantToolCallTrace(
+                tool_name=pending_call.tool_name,
+                arguments=pending_call.arguments,
+                summary=result.summary,
+                record_count=0,
+            )
+            return result, trace
+
+        try:
+            return self._tool_service.execute_tool(pending_call.tool_name, pending_call.arguments)
+        except AssistantToolServiceError as exc:
+            result = AssistantToolExecutionResult(
+                output={
+                    "ok": False,
+                    "error": exc.message,
+                },
+                summary=f"{pending_call.tool_name} failed: {exc.message}",
+                record_count=0,
+                is_error=True,
+            )
+            trace = AssistantToolCallTrace(
+                tool_name=pending_call.tool_name,
+                arguments=pending_call.arguments,
+                summary=result.summary,
+                record_count=0,
+            )
+            return result, trace
 
 
 def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
@@ -404,6 +777,17 @@ def determine_effective_default_provider(
     return fallback.provider if fallback is not None else None
 
 
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    deduped_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped_values.append(value)
+    return deduped_values
+
+
 def normalize_default_provider(value: str) -> AssistantProvider:
     normalized = value.strip().lower()
     if normalized in VALID_PROVIDERS:
@@ -448,13 +832,15 @@ def build_system_prompt(
     if base_prompt:
         prompt_parts.append(base_prompt)
     if agent_definition is not None:
+        allowed_tools = ", ".join(agent_definition.allowed_tools) if agent_definition.allowed_tools else "all published read-only tools"
         prompt_parts.append(
             "Managed agent profile:\n"
             f"- id: {agent_definition.agent_id}\n"
             f"- name: {agent_definition.name}\n"
             f"- scope: {agent_definition.scope}\n"
             f"- capabilities: {', '.join(agent_definition.capabilities)}\n"
-            f"- allowed workspaces: {', '.join(agent_definition.allowed_workspaces)}"
+            f"- allowed workspaces: {', '.join(agent_definition.allowed_workspaces)}\n"
+            f"- allowed live tools: {allowed_tools}"
         )
         prompt_parts.append(f"Agent instructions:\n{agent_definition.system_prompt}")
     if payload.workspace:
@@ -550,9 +936,129 @@ def _extract_openai_text(response_payload: dict[str, Any]) -> str:
     return "\n".join(text for text in texts if text).strip()
 
 
+def _extract_openai_tool_calls(response_payload: dict[str, Any]) -> list[PendingToolCall]:
+    pending_calls: list[PendingToolCall] = []
+    for item in response_payload.get("output", []):
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            continue
+        tool_name = str(item.get("name") or "").strip()
+        call_id = str(item.get("call_id") or item.get("id") or "").strip()
+        if not tool_name or not call_id:
+            continue
+        arguments, parse_error = _normalize_tool_arguments(item.get("arguments"))
+        pending_calls.append(
+            PendingToolCall(
+                call_id=call_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                parse_error=parse_error,
+            )
+        )
+    return pending_calls
+
+
+def _extract_anthropic_text(content_blocks: Any) -> str:
+    return "\n".join(
+        block.get("text", "").strip()
+        for block in content_blocks
+        if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+    ).strip()
+
+
+def _extract_anthropic_tool_calls(content_blocks: Any) -> list[PendingToolCall]:
+    pending_calls: list[PendingToolCall] = []
+    for block in content_blocks:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        tool_name = str(block.get("name") or "").strip()
+        call_id = str(block.get("id") or "").strip()
+        if not tool_name or not call_id:
+            continue
+        arguments, parse_error = _normalize_tool_arguments(block.get("input"))
+        pending_calls.append(
+            PendingToolCall(
+                call_id=call_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                parse_error=parse_error,
+            )
+        )
+    return pending_calls
+
+
+def _extract_google_text(parts: Any) -> str:
+    return "\n".join(
+        part.get("text", "").strip()
+        for part in parts
+        if isinstance(part, dict) and part.get("text")
+    ).strip()
+
+
+def _extract_google_tool_calls(parts: Any) -> list[PendingToolCall]:
+    pending_calls: list[PendingToolCall] = []
+    for index, part in enumerate(parts):
+        if not isinstance(part, dict):
+            continue
+        function_call = part.get("functionCall")
+        if not isinstance(function_call, dict):
+            continue
+        tool_name = str(function_call.get("name") or "").strip()
+        if not tool_name:
+            continue
+        arguments, parse_error = _normalize_tool_arguments(function_call.get("args"))
+        pending_calls.append(
+            PendingToolCall(
+                call_id=f"{tool_name}:{index}",
+                tool_name=tool_name,
+                arguments=arguments,
+                parse_error=parse_error,
+            )
+        )
+    return pending_calls
+
+
+def _normalize_tool_arguments(raw_arguments: Any) -> tuple[dict[str, Any], str | None]:
+    if raw_arguments is None:
+        return {}, None
+    if isinstance(raw_arguments, dict):
+        return raw_arguments, None
+    if isinstance(raw_arguments, str):
+        stripped = raw_arguments.strip()
+        if not stripped:
+            return {}, None
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return {}, "Tool arguments were not valid JSON."
+        if isinstance(parsed, dict):
+            return parsed, None
+        return {}, "Tool arguments must decode to a JSON object."
+    return {}, "Tool arguments must be provided as a JSON object."
+
+
+def _require_response_id(response_payload: dict[str, Any], provider_label: str) -> str:
+    response_id = str(response_payload.get("id") or "").strip()
+    if not response_id:
+        raise AssistantServiceError(
+            status_code=502,
+            detail=f"{provider_label} did not return a response id for the next tool round.",
+        )
+    return response_id
+
+
+def _sum_optional_int(current: int | None, next_value: int | None) -> int | None:
+    if next_value is None:
+        return current
+    return (current or 0) + next_value
+
+
 def _coerce_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return int(stripped)
     return None
