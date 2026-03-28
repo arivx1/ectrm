@@ -6,6 +6,7 @@ import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
+import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 
 type Trade = {
   trade_id: string
@@ -507,6 +508,8 @@ export function AdminWorkspace({
 
   return (
     <div className="stack">
+      <SystemStatusPanel />
+
       <section className="surface feature-panel admin-hero-surface">
         <div className="section-head">
           <div>

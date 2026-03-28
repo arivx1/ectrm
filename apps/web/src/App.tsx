@@ -1320,9 +1320,11 @@ export default function App() {
         {currentView === 'dashboard' && (
           <DashboardWorkspace
             appLoading={appLoading}
-            positionsByClass={positionsByClass}
+            activeTrades={activeTrades}
+            positionsWithClass={positionsWithClass}
             events={events}
             formatCommodityClass={formatCommodityClass}
+            formatMoney={formatMoney}
             formatNumber={formatNumber}
             formatDate={formatDate}
           />

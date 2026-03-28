@@ -521,6 +521,7 @@
 
 .admin-explainability-grid,
 .admin-summary-grid,
+.dashboard-report-grid,
 .roadmap-admin-meta-grid,
 .roadmap-admin-phase-grid,
 .roadmap-admin-milestone-grid,
@@ -543,6 +544,10 @@
 
 .admin-summary-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-report-grid {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
 }
 
 .roadmap-admin-meta-grid {
@@ -1762,6 +1767,49 @@
   color: #13293d;
 }
 
+.position-class-card small {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #62707c;
+}
+
+.position-class-card p {
+  margin: 0.45rem 0 0;
+  color: #5d6975;
+  line-height: 1.5;
+}
+
+.dashboard-issue-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.dashboard-issue-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.07);
+  border-radius: 1.05rem;
+  background: rgba(246, 245, 240, 0.76);
+}
+
+.dashboard-issue-row strong {
+  color: #13293d;
+}
+
+.dashboard-issue-row p {
+  margin: 0.45rem 0 0;
+  color: #5d6975;
+  line-height: 1.5;
+}
+
+.dashboard-issue-meta {
+  display: flex;
+  align-items: center;
+}
+
 .position-card {
   display: flex;
   justify-content: space-between;
@@ -2268,6 +2316,7 @@
 }
 
 .admin-summary-card,
+.dashboard-report-card,
 .docs-summary-card,
 .domain-card,
 .schema-detail-card,
@@ -2278,6 +2327,7 @@
 }
 
 .admin-summary-card,
+.dashboard-report-card,
 .docs-summary-card,
 .domain-card,
 .schema-detail-card {
@@ -2285,6 +2335,7 @@
 }
 
 .admin-summary-card span,
+.dashboard-report-card span,
 .docs-summary-card span,
 .domain-card-head span,
 .schema-label,
@@ -2297,6 +2348,7 @@
 }
 
 .admin-summary-card span,
+.dashboard-report-card span,
 .docs-summary-card span,
 .schema-label,
 .schema-entity-button span {
@@ -2304,6 +2356,7 @@
 }
 
 .admin-summary-card strong,
+.dashboard-report-card strong,
 .docs-summary-card strong,
 .schema-detail-head h4,
 .schema-entity-button strong,
@@ -2312,6 +2365,7 @@
 }
 
 .admin-summary-card strong,
+.dashboard-report-card strong,
 .docs-summary-card strong {
   display: block;
   margin-top: 0.55rem;
@@ -2320,6 +2374,7 @@
 }
 
 .admin-summary-card p,
+.dashboard-report-card p,
 .docs-summary-card p,
 .domain-card p,
 .schema-detail-card p {
