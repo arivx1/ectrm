@@ -81,6 +81,23 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertGreaterEqual(payload.total_records, 30)
             self.assertEqual(payload.entity_counts["commodities"], 11)
             self.assertEqual(payload.entity_counts["locations"], 6)
+            self.assertEqual(payload.entity_counts["price_indices"], 7)
+            self.assertEqual(payload.entity_counts["price_index_sources"], 6)
+            self.assertEqual(
+                {
+                    row.code
+                    for row in session.query(ReferencePriceIndex).all()
+                },
+                {
+                    "BRENT_SPOT_D",
+                    "DIESEL_US_RETAIL_W",
+                    "GASOLINE_US_REG_W",
+                    "HENRY_HUB_GAS_D",
+                    "PJM_WEST_ONPEAK_DA",
+                    "USGC_DIESEL_SPOT_D",
+                    "WTI_CUSHING_PHYS_D",
+                },
+            )
 
     def test_transaction_seed_supports_add_replace_and_delete(self) -> None:
         with self.SessionLocal() as session:

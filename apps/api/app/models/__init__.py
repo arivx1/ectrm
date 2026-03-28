@@ -1,4 +1,6 @@
+from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.event import Base, Event
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -24,7 +26,9 @@ from apps.api.app.models.weather_location import WeatherLocation
 from apps.api.app.models.weather_observation import WeatherObservation
 
 __all__ = [
+    "AssistantActionRequest",
     "AssistantAgent",
+    "AssistantConversation",
     "AssistantRun",
     "Base",
     "Event",

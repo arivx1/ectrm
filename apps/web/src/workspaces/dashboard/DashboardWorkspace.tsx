@@ -1,23 +1,4 @@
-import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { SystemStatusPanel } from './SystemStatusPanel'
-
-type ReferenceRecord = {
-  code: string
-  name: string
-  commodity_class?: string
-}
-
-type PortfolioRecord = ReferenceRecord & {
-  book_code: string
-}
-
-type TradeLegDraft = {
-  leg_no: number
-  side: string
-  commodity_class: string
-  commodity: string
-  volume: string
-}
 
 type EventRow = {
   event_id: string
@@ -28,66 +9,6 @@ type EventRow = {
 }
 
 type DashboardWorkspaceProps = {
-  handleCreateTrade: (event: React.FormEvent) => void
-  tradeIdInput: string
-  setTradeIdInput: (value: string) => void
-  tradeNatureInput: string
-  setTradeNatureInput: (value: string) => void
-  tradeStructureInput: string
-  setTradeStructureInput: (value: string) => void
-  tradeSideInput: string
-  setTradeSideInput: (value: string) => void
-  bookInput: string
-  setBookInput: (value: string) => void
-  activeBooks: ReferenceRecord[]
-  commodityClassInput: string
-  setCommodityClassInput: (value: string) => void
-  commodityClassOptions: string[]
-  commodityInput: string
-  setCommodityInput: (value: string) => void
-  createCommodityOptions: ReferenceRecord[]
-  pricingTypeInput: string
-  setPricingTypeInput: (value: string) => void
-  pricingStatusInput: string
-  setPricingStatusInput: (value: string) => void
-  priceIndexInput: string
-  setPriceIndexInput: (value: string) => void
-  createPriceIndexOptions: ReferenceRecord[]
-  priceInput: string
-  setPriceInput: (value: string) => void
-  volumeInput: string
-  setVolumeInput: (value: string) => void
-  externalTradeIdInput: string
-  setExternalTradeIdInput: (value: string) => void
-  sourceSystemInput: string
-  setSourceSystemInput: (value: string) => void
-  executionTimestampInput: string
-  setExecutionTimestampInput: (value: string) => void
-  portfolioInput: string
-  setPortfolioInput: (value: string) => void
-  createPortfolioOptions: PortfolioRecord[]
-  counterpartyInput: string
-  setCounterpartyInput: (value: string) => void
-  createCounterpartyOptions: ReferenceRecord[]
-  settlementStatusInput: string
-  setSettlementStatusInput: (value: string) => void
-  traderUserInput: string
-  setTraderUserInput: (value: string) => void
-  createLegs: TradeLegDraft[]
-  activeCommodities: ReferenceRecord[]
-  addDraftLeg: () => void
-  removeDraftLeg: (index: number) => void
-  updateDraftLeg: (index: number, field: keyof TradeLegDraft, value: string) => void
-  submitting: boolean
-  referenceDataLoading: boolean
-  hasReferenceOptions: boolean
-  createError: string
-  tradeNatureOptions: readonly string[]
-  tradeStructureOptions: readonly string[]
-  tradeSideOptions: readonly string[]
-  pricingTypeOptions: readonly string[]
-  pricingStatusOptions: readonly string[]
-  settlementStatusOptions: readonly string[]
   appLoading: boolean
   positionsByClass: Array<{ commodityClass: string; netVolume: number }>
   events: EventRow[]
@@ -98,66 +19,6 @@ type DashboardWorkspaceProps = {
 
 export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const {
-    handleCreateTrade,
-    tradeIdInput,
-    setTradeIdInput,
-    tradeNatureInput,
-    setTradeNatureInput,
-    tradeStructureInput,
-    setTradeStructureInput,
-    tradeSideInput,
-    setTradeSideInput,
-    bookInput,
-    setBookInput,
-    activeBooks,
-    commodityClassInput,
-    setCommodityClassInput,
-    commodityClassOptions,
-    commodityInput,
-    setCommodityInput,
-    createCommodityOptions,
-    pricingTypeInput,
-    setPricingTypeInput,
-    pricingStatusInput,
-    setPricingStatusInput,
-    priceIndexInput,
-    setPriceIndexInput,
-    createPriceIndexOptions,
-    priceInput,
-    setPriceInput,
-    volumeInput,
-    setVolumeInput,
-    externalTradeIdInput,
-    setExternalTradeIdInput,
-    sourceSystemInput,
-    setSourceSystemInput,
-    executionTimestampInput,
-    setExecutionTimestampInput,
-    portfolioInput,
-    setPortfolioInput,
-    createPortfolioOptions,
-    counterpartyInput,
-    setCounterpartyInput,
-    createCounterpartyOptions,
-    settlementStatusInput,
-    setSettlementStatusInput,
-    traderUserInput,
-    setTraderUserInput,
-    createLegs,
-    activeCommodities,
-    addDraftLeg,
-    removeDraftLeg,
-    updateDraftLeg,
-    submitting,
-    referenceDataLoading,
-    hasReferenceOptions,
-    createError,
-    tradeNatureOptions,
-    tradeStructureOptions,
-    tradeSideOptions,
-    pricingTypeOptions,
-    pricingStatusOptions,
-    settlementStatusOptions,
     appLoading,
     positionsByClass,
     events,
@@ -168,83 +29,9 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
 
   return (
     <div className="dashboard-grid">
-      <section className="surface feature-panel">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">Capture</span>
-            <h3>Create Trade</h3>
-          </div>
-          <p>Get to entry quickly. The main capture flow now carries more visual priority than the page framing.</p>
-        </div>
-
-        <TradeCaptureForm
-          onSubmit={handleCreateTrade}
-          tradeIdInput={tradeIdInput}
-          setTradeIdInput={setTradeIdInput}
-          tradeNatureInput={tradeNatureInput}
-          setTradeNatureInput={setTradeNatureInput}
-          tradeStructureInput={tradeStructureInput}
-          setTradeStructureInput={setTradeStructureInput}
-          tradeSideInput={tradeSideInput}
-          setTradeSideInput={setTradeSideInput}
-          bookInput={bookInput}
-          setBookInput={setBookInput}
-          activeBooks={activeBooks}
-          commodityClassInput={commodityClassInput}
-          setCommodityClassInput={setCommodityClassInput}
-          commodityClassOptions={commodityClassOptions}
-          commodityInput={commodityInput}
-          setCommodityInput={setCommodityInput}
-          createCommodityOptions={createCommodityOptions}
-          pricingTypeInput={pricingTypeInput}
-          setPricingTypeInput={setPricingTypeInput}
-          pricingStatusInput={pricingStatusInput}
-          setPricingStatusInput={setPricingStatusInput}
-          priceIndexInput={priceIndexInput}
-          setPriceIndexInput={setPriceIndexInput}
-          createPriceIndexOptions={createPriceIndexOptions}
-          priceInput={priceInput}
-          setPriceInput={setPriceInput}
-          volumeInput={volumeInput}
-          setVolumeInput={setVolumeInput}
-          externalTradeIdInput={externalTradeIdInput}
-          setExternalTradeIdInput={setExternalTradeIdInput}
-          sourceSystemInput={sourceSystemInput}
-          setSourceSystemInput={setSourceSystemInput}
-          executionTimestampInput={executionTimestampInput}
-          setExecutionTimestampInput={setExecutionTimestampInput}
-          portfolioInput={portfolioInput}
-          setPortfolioInput={setPortfolioInput}
-          createPortfolioOptions={createPortfolioOptions}
-          counterpartyInput={counterpartyInput}
-          setCounterpartyInput={setCounterpartyInput}
-          createCounterpartyOptions={createCounterpartyOptions}
-          settlementStatusInput={settlementStatusInput}
-          setSettlementStatusInput={setSettlementStatusInput}
-          traderUserInput={traderUserInput}
-          setTraderUserInput={setTraderUserInput}
-          createLegs={createLegs}
-          activeCommodities={activeCommodities}
-          addDraftLeg={addDraftLeg}
-          removeDraftLeg={removeDraftLeg}
-          updateDraftLeg={updateDraftLeg}
-          submitting={submitting}
-          referenceDataLoading={referenceDataLoading}
-          hasReferenceOptions={hasReferenceOptions}
-          createError={createError}
-          tradeNatureOptions={tradeNatureOptions}
-          tradeStructureOptions={tradeStructureOptions}
-          tradeSideOptions={tradeSideOptions}
-          pricingTypeOptions={pricingTypeOptions}
-          pricingStatusOptions={pricingStatusOptions}
-          settlementStatusOptions={settlementStatusOptions}
-          formatCommodityClass={formatCommodityClass}
-        />
-      </section>
+      <SystemStatusPanel />
 
       <section className="stack">
-        <SystemStatusPanel />
-
         <article className="surface">
           <div className="section-head">
             <div>

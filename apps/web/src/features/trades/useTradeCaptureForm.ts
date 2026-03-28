@@ -1,19 +1,24 @@
 import { useMemo, useState } from 'react'
 import type {
   CounterpartyRecord,
+  EventRow,
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
+  Trade,
   TradeLegDraft,
+  UnitRecord,
 } from '../../shared/models'
 import {
   buildDefaultTradeLegs,
+  defaultTradeSourceSystem,
   pricingTypeRequiresPriceIndex,
   tradeHeaderDefaults,
   tradeFormDefaults,
   tradeSideOptions,
+  tradeStructureSupportsLegs,
 } from '../../shared/trading'
-import { makeLegDraft } from './tradeDraftUtils'
+import { findLatestPersistedLegs, makeLegDraft } from './tradeDraftUtils'
 
 export function useTradeCaptureForm(
   activeBooks: ReferenceRecord[],
@@ -22,6 +27,7 @@ export function useTradeCaptureForm(
   priceIndices: PriceIndexRecord[],
   activeCounterparties: CounterpartyRecord[],
   activePortfolios: PortfolioRecord[],
+  activeUnits: UnitRecord[],
 ) {
   const [tradeIdInput, setTradeIdInput] = useState('')
   const [tradeNatureInput, setTradeNatureInput] = useState<string>(tradeFormDefaults.nature)
@@ -35,25 +41,33 @@ export function useTradeCaptureForm(
   const [priceInput, setPriceInput] = useState<string>(tradeFormDefaults.price)
   const [volumeInput, setVolumeInput] = useState<string>(tradeFormDefaults.volume)
   const [externalTradeIdInput, setExternalTradeIdInput] = useState<string>(tradeHeaderDefaults.external_trade_id)
-  const [sourceSystemInput, setSourceSystemInput] = useState<string>(tradeHeaderDefaults.source_system)
+  const [sourceSystemInput] = useState<string>(defaultTradeSourceSystem)
   const [executionTimestampInput, setExecutionTimestampInput] = useState<string>(tradeHeaderDefaults.execution_timestamp)
+  const [qualitySpecInput, setQualitySpecInput] = useState<string>(tradeHeaderDefaults.quality_spec)
+  const [unitInput, setUnitInput] = useState<string>(tradeHeaderDefaults.unit_of_measure)
   const [portfolioInput, setPortfolioInput] = useState<string>(tradeHeaderDefaults.portfolio)
   const [counterpartyInput, setCounterpartyInput] = useState<string>(tradeHeaderDefaults.counterparty)
   const [pricingStatusInput, setPricingStatusInput] = useState<string>(tradeHeaderDefaults.pricing_status)
   const [settlementStatusInput, setSettlementStatusInput] = useState<string>(tradeHeaderDefaults.settlement_status)
   const [traderUserInput, setTraderUserInput] = useState<string>(tradeHeaderDefaults.trader_user)
   const [createLegs, setCreateLegs] = useState<TradeLegDraft[]>(() => buildDefaultTradeLegs(makeLegDraft))
+  const [duplicateSourceTradeId, setDuplicateSourceTradeId] = useState<string | null>(null)
 
-  const resolvedBookInput = bookInput || activeBooks[0]?.code || ''
-  const resolvedCommodityClassInput = commodityClassInput || commodityClassOptions[0] || ''
+  const resolvedBookInput = activeBooks.some((book) => book.code === bookInput)
+    ? bookInput
+    : activeBooks[0]?.code || ''
+  const swapPrimaryLeg = tradeStructureSupportsLegs(tradeStructureInput) ? createLegs[0] : null
+  const resolvedCommodityClassInput =
+    swapPrimaryLeg?.commodity_class || commodityClassInput || commodityClassOptions[0] || ''
 
   const createCommodityOptions = useMemo(
     () => activeCommodities.filter((commodity) => commodity.commodity_class === resolvedCommodityClassInput),
     [activeCommodities, resolvedCommodityClassInput],
   )
 
-  const resolvedCommodityInput = createCommodityOptions.some((commodity) => commodity.code === commodityInput)
-    ? commodityInput
+  const preferredCommodityInput = swapPrimaryLeg?.commodity || commodityInput
+  const resolvedCommodityInput = createCommodityOptions.some((commodity) => commodity.code === preferredCommodityInput)
+    ? preferredCommodityInput
     : createCommodityOptions[0]?.code || ''
 
   const createPriceIndexOptions = useMemo(
@@ -68,6 +82,12 @@ export function useTradeCaptureForm(
     () => activePortfolios.filter((portfolio) => portfolio.book_code === resolvedBookInput),
     [activePortfolios, resolvedBookInput],
   )
+  const createUnitOptions = useMemo(() => {
+    const matchingUnits = activeUnits.filter(
+      (unit) => !unit.commodity_class || unit.commodity_class === resolvedCommodityClassInput,
+    )
+    return matchingUnits.length > 0 ? matchingUnits : activeUnits
+  }, [activeUnits, resolvedCommodityClassInput])
 
   const resolvedPortfolioInput = createPortfolioOptions.some((portfolio) => portfolio.code === portfolioInput)
     ? portfolioInput
@@ -83,6 +103,7 @@ export function useTradeCaptureForm(
       : createPriceIndexOptions.some((priceIndex) => priceIndex.code === priceIndexInput)
         ? priceIndexInput
         : createPriceIndexOptions[0]?.code || ''
+  const resolvedUnitInput = createUnitOptions.some((unit) => unit.code === unitInput) ? unitInput : ''
 
   function updateDraftLeg(index: number, field: keyof TradeLegDraft, value: string) {
     setCreateLegs((current) =>
@@ -115,6 +136,49 @@ export function useTradeCaptureForm(
     )
   }
 
+  function duplicateFromTrade(selectedTrade: Trade, selectedTradeEvents: EventRow[]) {
+    const persistedLegs = findLatestPersistedLegs(selectedTradeEvents)
+    const duplicateLegs =
+      persistedLegs.length > 0
+        ? persistedLegs
+        : tradeStructureSupportsLegs(selectedTrade.trade_structure)
+          ? buildDefaultTradeLegs(makeLegDraft, {
+              firstLeg: {
+                side: selectedTrade.trade_side ?? tradeFormDefaults.side,
+                commodity_class: selectedTrade.commodity_class,
+                commodity: selectedTrade.commodity,
+                volume: selectedTrade.volume?.toString() ?? '',
+              },
+              secondLeg: {
+                commodity_class: selectedTrade.commodity_class,
+              },
+            })
+          : buildDefaultTradeLegs(makeLegDraft)
+
+    setTradeIdInput('')
+    setTradeNatureInput(selectedTrade.trade_nature ?? tradeFormDefaults.nature)
+    setTradeStructureInput(selectedTrade.trade_structure ?? tradeFormDefaults.structure)
+    setTradeSideInput(selectedTrade.trade_side ?? tradeFormDefaults.side)
+    setBookInput(selectedTrade.book ?? activeBooks[0]?.code ?? '')
+    setCommodityClassInput(selectedTrade.commodity_class ?? commodityClassOptions[0] ?? '')
+    setCommodityInput(selectedTrade.commodity ?? '')
+    setPricingTypeInput(selectedTrade.pricing_type ?? tradeFormDefaults.pricingType)
+    setPriceIndexInput(selectedTrade.price_index_code ?? '')
+    setPriceInput(selectedTrade.price?.toString() ?? tradeFormDefaults.price)
+    setVolumeInput(selectedTrade.volume?.toString() ?? tradeFormDefaults.volume)
+    setExternalTradeIdInput('')
+    setExecutionTimestampInput(tradeHeaderDefaults.execution_timestamp)
+    setQualitySpecInput(selectedTrade.quality_spec ?? tradeHeaderDefaults.quality_spec)
+    setUnitInput(selectedTrade.unit_of_measure ?? tradeHeaderDefaults.unit_of_measure)
+    setPortfolioInput(selectedTrade.portfolio ?? tradeHeaderDefaults.portfolio)
+    setCounterpartyInput(selectedTrade.counterparty ?? tradeHeaderDefaults.counterparty)
+    setPricingStatusInput(selectedTrade.pricing_status ?? tradeHeaderDefaults.pricing_status)
+    setSettlementStatusInput(tradeHeaderDefaults.settlement_status)
+    setTraderUserInput(selectedTrade.trader_user ?? tradeHeaderDefaults.trader_user)
+    setCreateLegs(duplicateLegs)
+    setDuplicateSourceTradeId(selectedTrade.trade_id)
+  }
+
   function reset() {
     setTradeIdInput('')
     setTradeNatureInput(tradeFormDefaults.nature)
@@ -128,14 +192,16 @@ export function useTradeCaptureForm(
     setPriceInput(tradeFormDefaults.price)
     setVolumeInput(tradeFormDefaults.volume)
     setExternalTradeIdInput(tradeHeaderDefaults.external_trade_id)
-    setSourceSystemInput(tradeHeaderDefaults.source_system)
     setExecutionTimestampInput(tradeHeaderDefaults.execution_timestamp)
+    setQualitySpecInput(tradeHeaderDefaults.quality_spec)
+    setUnitInput(tradeHeaderDefaults.unit_of_measure)
     setPortfolioInput(tradeHeaderDefaults.portfolio)
     setCounterpartyInput(tradeHeaderDefaults.counterparty)
     setPricingStatusInput(tradeHeaderDefaults.pricing_status)
     setSettlementStatusInput(tradeHeaderDefaults.settlement_status)
     setTraderUserInput(tradeHeaderDefaults.trader_user)
     setCreateLegs(buildDefaultTradeLegs(makeLegDraft))
+    setDuplicateSourceTradeId(null)
   }
 
   return {
@@ -164,9 +230,12 @@ export function useTradeCaptureForm(
     externalTradeIdInput,
     setExternalTradeIdInput,
     sourceSystemInput,
-    setSourceSystemInput,
     executionTimestampInput,
     setExecutionTimestampInput,
+    qualitySpecInput,
+    setQualitySpecInput,
+    unitInput: resolvedUnitInput,
+    setUnitInput,
     portfolioInput: resolvedPortfolioInput,
     setPortfolioInput,
     counterpartyInput: resolvedCounterpartyInput,
@@ -177,14 +246,17 @@ export function useTradeCaptureForm(
     setSettlementStatusInput,
     traderUserInput,
     setTraderUserInput,
+    duplicateSourceTradeId,
     createLegs,
     createCommodityOptions,
     createPriceIndexOptions,
+    createUnitOptions,
     createPortfolioOptions,
     createCounterpartyOptions: activeCounterparties,
     updateDraftLeg,
     addDraftLeg,
     removeDraftLeg,
+    duplicateFromTrade,
     reset,
   }
 }

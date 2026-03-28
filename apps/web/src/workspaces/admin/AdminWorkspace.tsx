@@ -3,6 +3,7 @@ import type { WeatherSyncStatusRecord } from '../../shared/models'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
+import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
 
@@ -98,6 +99,7 @@ type AdminWorkspaceProps = {
   onRunEiaSync: () => Promise<void>
   onRunNwsWeatherSync: () => Promise<void>
   onSeedTradingSources: () => Promise<void>
+  onRefreshData: () => Promise<void>
   formatDate: (value: string | null | undefined) => string
   formatMoney: (value: number | null) => string
   formatNumber: (value: number | null, digits?: number) => string
@@ -318,6 +320,7 @@ export function AdminWorkspace({
   onRunEiaSync,
   onRunNwsWeatherSync,
   onSeedTradingSources,
+  onRefreshData,
   formatDate,
   formatMoney,
   formatNumber,
@@ -987,6 +990,13 @@ export function AdminWorkspace({
         authSession={authSession}
         formatDate={formatDate}
         onOpenSettings={onOpenSettings}
+      />
+
+      <AssistantApprovalInboxPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+        onRefreshData={onRefreshData}
       />
 
       <UserManagementPanel

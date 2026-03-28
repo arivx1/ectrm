@@ -1,17 +1,30 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
 import {
+  approveAssistantActionRequest,
+  getAssistantConversation,
+  getAssistantRun,
+  rejectAssistantActionRequest,
+  listAssistantActionRequests,
   listAssistantAgents,
+  listAssistantConversations,
+  listAssistantRuns,
   loadAssistantRuntimeSettings,
   previewAssistantPromptContext,
-  requestAssistantResponse,
+  streamAssistantResponse,
 } from '../../entities/assistant/api'
+import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
 import { appConfig } from '../../shared/config'
 import type {
+  AssistantActionRequest,
   AssistantAgent,
+  AssistantConversation,
+  AssistantConversationSummary,
   AssistantPromptContext,
   AssistantPromptRequest,
   AssistantProvider,
+  AssistantRun,
+  AssistantRunSummary,
   AssistantRuntimeSettings,
   EventRow,
   PositionRow,
@@ -28,6 +41,7 @@ type AssistantWorkspaceProps = {
   selectedTrade: Trade | null
   selectedTradeEvents: EventRow[]
   onOpenSettings: () => void
+  onRefreshData: () => Promise<void>
 }
 
 type ChatMessage = {
@@ -49,6 +63,7 @@ type ChatMessage = {
     arguments: Record<string, unknown>
     record_count: number | null
   }[]
+  actionRequests?: AssistantActionRequest[]
 }
 
 function createChatMessageId(): string {
@@ -62,7 +77,7 @@ function buildAssistantContext({
   positions,
   selectedTrade,
   selectedTradeEvents,
-}: Omit<AssistantWorkspaceProps, 'authSession' | 'onOpenSettings'>): string {
+}: Omit<AssistantWorkspaceProps, 'authSession' | 'onOpenSettings' | 'onRefreshData'>): string {
   const lines = [
     `API health: ${health}.`,
     `Loaded trades: ${trades.length}.`,
@@ -130,6 +145,49 @@ function renderPromptPreview(preview: AssistantPromptContext | null): string {
   return lines.join('\n')
 }
 
+function formatTraceTimestamp(value: string | null | undefined): string {
+  if (!value) {
+    return 'n/a'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleString()
+}
+
+function summarizeRunCard(run: AssistantRunSummary): string {
+  const pieces = [run.provider, run.model]
+  if (run.agent_name) {
+    pieces.push(run.agent_name)
+  }
+  return pieces.join(' · ')
+}
+
+function summarizeConversationCard(conversation: AssistantConversationSummary): string {
+  const pieces = [conversation.provider, conversation.model]
+  if (conversation.agent_name) {
+    pieces.push(conversation.agent_name)
+  }
+  return pieces.join(' · ')
+}
+
+function toChatMessagesFromConversation(conversation: AssistantConversation): ChatMessage[] {
+  return conversation.messages.map((message) => ({
+    id: createChatMessageId(),
+    role: message.role,
+    content: message.content,
+    provider: message.provider ?? undefined,
+    model: message.model ?? undefined,
+    runId: message.run_id ?? undefined,
+    runRecordedAt: message.recorded_at,
+    warnings: message.warnings,
+    toolCalls: message.tool_calls,
+  }))
+}
+
 export function AssistantWorkspace({
   authSession,
   health,
@@ -139,6 +197,7 @@ export function AssistantWorkspace({
   selectedTrade,
   selectedTradeEvents,
   onOpenSettings,
+  onRefreshData,
 }: AssistantWorkspaceProps) {
   const [runtimeSettings, setRuntimeSettings] = useState<AssistantRuntimeSettings | null>(null)
   const [agents, setAgents] = useState<AssistantAgent[]>([])
@@ -152,9 +211,27 @@ export function AssistantWorkspace({
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [actionRequestIdsInFlight, setActionRequestIdsInFlight] = useState<number[]>([])
   const [promptPreview, setPromptPreview] = useState<AssistantPromptContext | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
+  const [recentConversations, setRecentConversations] = useState<AssistantConversationSummary[]>([])
+  const [conversationHistoryLoading, setConversationHistoryLoading] = useState(false)
+  const [conversationHistoryError, setConversationHistoryError] = useState('')
+  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null)
+  const [selectedConversation, setSelectedConversation] = useState<AssistantConversation | null>(null)
+  const [conversationDetailLoading, setConversationDetailLoading] = useState(false)
+  const [conversationDetailError, setConversationDetailError] = useState('')
+  const [pendingActionRequests, setPendingActionRequests] = useState<AssistantActionRequest[]>([])
+  const [pendingActionRequestsLoading, setPendingActionRequestsLoading] = useState(false)
+  const [pendingActionRequestsError, setPendingActionRequestsError] = useState('')
+  const [recentRuns, setRecentRuns] = useState<AssistantRunSummary[]>([])
+  const [runHistoryLoading, setRunHistoryLoading] = useState(false)
+  const [runHistoryError, setRunHistoryError] = useState('')
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
+  const [selectedRun, setSelectedRun] = useState<AssistantRun | null>(null)
+  const [runDetailLoading, setRunDetailLoading] = useState(false)
+  const [runDetailError, setRunDetailError] = useState('')
 
   const contextSummary = buildAssistantContext({
     health,
@@ -164,6 +241,115 @@ export function AssistantWorkspace({
     selectedTrade,
     selectedTradeEvents,
   })
+
+  async function refreshConversationHistory(preferredConversationId: number | null = null) {
+    if (!authSession) {
+      setRecentConversations([])
+      setConversationHistoryError('')
+      setConversationHistoryLoading(false)
+      setSelectedConversationId(null)
+      setSelectedConversation(null)
+      setConversationDetailError('')
+      setConversationDetailLoading(false)
+      return
+    }
+
+    setConversationHistoryLoading(true)
+
+    try {
+      const conversationPayload = await listAssistantConversations(appConfig.apiBase, {
+        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        limit: 12,
+      })
+      setRecentConversations(conversationPayload)
+      setConversationHistoryError('')
+      setSelectedConversationId((current) => {
+        if (
+          preferredConversationId &&
+          conversationPayload.some((conversation) => conversation.conversation_id === preferredConversationId)
+        ) {
+          return preferredConversationId
+        }
+        if (
+          current &&
+          conversationPayload.some((conversation) => conversation.conversation_id === current)
+        ) {
+          return current
+        }
+        return conversationPayload[0]?.conversation_id ?? null
+      })
+    } catch (error) {
+      setRecentConversations([])
+      setConversationHistoryError(
+        error instanceof Error ? error.message : 'Could not load assistant conversations.',
+      )
+    } finally {
+      setConversationHistoryLoading(false)
+    }
+  }
+
+  async function refreshRunHistory(preferredRunId: number | null = null) {
+    if (!authSession) {
+      setRecentRuns([])
+      setRunHistoryError('')
+      setRunHistoryLoading(false)
+      setSelectedRunId(null)
+      return
+    }
+
+    setRunHistoryLoading(true)
+
+    try {
+      const runPayload = await listAssistantRuns(appConfig.apiBase, {
+        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        limit: 12,
+      })
+      setRecentRuns(runPayload)
+      setRunHistoryError('')
+      setSelectedRunId((current) => {
+        if (preferredRunId && runPayload.some((run) => run.run_id === preferredRunId)) {
+          return preferredRunId
+        }
+        if (current && runPayload.some((run) => run.run_id === current)) {
+          return current
+        }
+        return runPayload[0]?.run_id ?? null
+      })
+    } catch (error) {
+      setRecentRuns([])
+      setRunHistoryError(error instanceof Error ? error.message : 'Could not load assistant runs.')
+    } finally {
+      setRunHistoryLoading(false)
+    }
+  }
+
+  async function refreshPendingActionRequests() {
+    if (!authSession) {
+      setPendingActionRequests([])
+      setPendingActionRequestsError('')
+      setPendingActionRequestsLoading(false)
+      return
+    }
+
+    setPendingActionRequestsLoading(true)
+
+    try {
+      const actionRequestPayload = await listAssistantActionRequests(appConfig.apiBase, {
+        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        status: 'PENDING',
+        limit: 12,
+      })
+      setPendingActionRequests(actionRequestPayload)
+      setPendingActionRequestsError('')
+    } catch (error) {
+      setPendingActionRequests([])
+      setPendingActionRequestsError(
+        error instanceof Error ? error.message : 'Could not load pending assistant approvals.',
+      )
+    } finally {
+      setPendingActionRequestsLoading(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -201,6 +387,34 @@ export function AssistantWorkspace({
   }, [])
 
   useEffect(() => {
+    if (!authSession) {
+      setRecentConversations([])
+      setConversationHistoryError('')
+      setConversationHistoryLoading(false)
+      setSelectedConversationId(null)
+      setSelectedConversation(null)
+      setConversationDetailError('')
+      setConversationDetailLoading(false)
+      setMessages([])
+      setPendingActionRequests([])
+      setPendingActionRequestsError('')
+      setPendingActionRequestsLoading(false)
+      setRecentRuns([])
+      setRunHistoryError('')
+      setRunHistoryLoading(false)
+      setSelectedRunId(null)
+      setSelectedRun(null)
+      setRunDetailError('')
+      setRunDetailLoading(false)
+      return
+    }
+
+    void refreshConversationHistory()
+    void refreshPendingActionRequests()
+    void refreshRunHistory()
+  }, [authSession])
+
+  useEffect(() => {
     if (!runtimeSettings || selectedProvider) {
       return
     }
@@ -219,6 +433,60 @@ export function AssistantWorkspace({
       setSelectedAgentId('')
     }
   }, [agents, selectedAgentId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSelectedConversation() {
+      if (!authSession || selectedConversationId === null || submitting) {
+        if (!selectedConversationId) {
+          setSelectedConversation(null)
+          setConversationDetailError('')
+          setConversationDetailLoading(false)
+        }
+        return
+      }
+
+      setConversationDetailLoading(true)
+
+      try {
+        const conversationPayload = await getAssistantConversation(
+          appConfig.apiBase,
+          selectedConversationId,
+          {
+            headers: { Authorization: `Bearer ${authSession.accessToken}` },
+          },
+        )
+
+        if (!cancelled) {
+          setSelectedConversation(conversationPayload)
+          setMessages(toChatMessagesFromConversation(conversationPayload))
+          setSelectedProvider(conversationPayload.provider)
+          setSelectedAgentId(conversationPayload.agent_id ?? '')
+          setUseLiveTools(conversationPayload.use_live_tools)
+          setConversationDetailError('')
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSelectedConversation(null)
+          setMessages([])
+          setConversationDetailError(
+            error instanceof Error ? error.message : 'Could not load assistant conversation.',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setConversationDetailLoading(false)
+        }
+      }
+    }
+
+    void loadSelectedConversation()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authSession, selectedConversationId, submitting])
 
   useEffect(() => {
     let cancelled = false
@@ -271,6 +539,47 @@ export function AssistantWorkspace({
     }
   }, [authSession, contextSummary, includeContext, runtimeSettings, selectedAgentId, selectedProvider, useLiveTools])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSelectedRun() {
+      if (!authSession || selectedRunId === null) {
+        setSelectedRun(null)
+        setRunDetailError('')
+        setRunDetailLoading(false)
+        return
+      }
+
+      setRunDetailLoading(true)
+
+      try {
+        const runPayload = await getAssistantRun(appConfig.apiBase, selectedRunId, {
+          headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        })
+
+        if (!cancelled) {
+          setSelectedRun(runPayload)
+          setRunDetailError('')
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSelectedRun(null)
+          setRunDetailError(error instanceof Error ? error.message : 'Could not load assistant run.')
+        }
+      } finally {
+        if (!cancelled) {
+          setRunDetailLoading(false)
+        }
+      }
+    }
+
+    void loadSelectedRun()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authSession, selectedRunId])
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const trimmedDraft = draft.trim()
@@ -293,7 +602,9 @@ export function AssistantWorkspace({
     setSubmitting(true)
 
     try {
+      const assistantMessageId = createChatMessageId()
       const payload: AssistantPromptRequest = {
+        conversation_id: selectedConversationId ?? undefined,
         agent_id: selectedAgentId || undefined,
         provider: selectedProvider,
         workspace: 'assistant',
@@ -305,26 +616,153 @@ export function AssistantWorkspace({
         })),
       }
 
-      const response = await requestAssistantResponse(appConfig.apiBase, payload, {
+      await streamAssistantResponse(appConfig.apiBase, payload, {
         headers: { Authorization: `Bearer ${authSession.accessToken}` },
-      })
+        onEvent: (streamEvent) => {
+          if (streamEvent.event === 'conversation') {
+            const conversationId = Number(streamEvent.data.conversation_id)
+            if (Number.isFinite(conversationId)) {
+              setSelectedConversationId(conversationId)
+              void refreshConversationHistory(conversationId)
+            }
+            return
+          }
 
-      setSelectedProvider(response.provider)
-      setMessages([
-        ...nextMessages,
-        {
-          id: createChatMessageId(),
-          role: 'assistant',
-          content: response.message.content,
-          provider: response.provider,
-          model: response.model,
-          runId: response.run_id,
-          runRecordedAt: response.run_recorded_at,
-          usage: response.usage,
-          warnings: response.warnings,
-          toolCalls: response.tool_calls,
+          if (streamEvent.event === 'assistant.metadata') {
+            const metadata = streamEvent.data
+            const usage =
+              metadata.usage && typeof metadata.usage === 'object'
+                ? (metadata.usage as Record<string, unknown>)
+                : null
+            const rawToolCalls = Array.isArray(metadata.tool_calls)
+              ? metadata.tool_calls.filter(
+                  (
+                    toolCall,
+                  ): toolCall is {
+                    tool_name?: unknown
+                    summary?: unknown
+                    arguments?: unknown
+                    record_count?: unknown
+                  } => typeof toolCall === 'object' && toolCall !== null,
+                )
+              : []
+            const runId =
+              typeof metadata.run_id === 'number'
+                ? metadata.run_id
+                : typeof metadata.run_id === 'string'
+                  ? Number.parseInt(metadata.run_id, 10)
+                  : null
+
+            if (typeof metadata.provider === 'string') {
+              setSelectedProvider(metadata.provider as AssistantProvider)
+            }
+            if (runId && Number.isFinite(runId)) {
+              setSelectedRunId(runId)
+              void refreshRunHistory(runId)
+            }
+
+            setMessages((currentMessages) => [
+              ...currentMessages,
+              {
+                id: assistantMessageId,
+                role: 'assistant',
+                content: '',
+                provider:
+                  typeof metadata.provider === 'string'
+                    ? (metadata.provider as AssistantProvider)
+                    : undefined,
+                model: typeof metadata.model === 'string' ? metadata.model : undefined,
+                runId: runId && Number.isFinite(runId) ? runId : undefined,
+                runRecordedAt:
+                  typeof metadata.run_recorded_at === 'string' ? metadata.run_recorded_at : undefined,
+                usage: usage
+                  ? {
+                      input_tokens:
+                        typeof usage.input_tokens === 'number' ? usage.input_tokens : null,
+                      output_tokens:
+                        typeof usage.output_tokens === 'number' ? usage.output_tokens : null,
+                    }
+                  : undefined,
+                warnings: Array.isArray(metadata.warnings)
+                  ? metadata.warnings.filter((warning): warning is string => typeof warning === 'string')
+                  : [],
+                toolCalls: rawToolCalls.map((toolCall) => ({
+                  tool_name: typeof toolCall.tool_name === 'string' ? toolCall.tool_name : 'tool',
+                  summary: typeof toolCall.summary === 'string' ? toolCall.summary : '',
+                  arguments:
+                    toolCall.arguments && typeof toolCall.arguments === 'object'
+                      ? (toolCall.arguments as Record<string, unknown>)
+                      : {},
+                  record_count:
+                    typeof toolCall.record_count === 'number' ? toolCall.record_count : null,
+                })),
+                actionRequests: Array.isArray(metadata.action_requests)
+                  ? metadata.action_requests.filter(
+                      (actionRequest): actionRequest is AssistantActionRequest =>
+                        typeof actionRequest === 'object' && actionRequest !== null,
+                    )
+                  : [],
+              },
+            ])
+            return
+          }
+
+          if (streamEvent.event === 'assistant.delta') {
+            const delta = typeof streamEvent.data.delta === 'string' ? streamEvent.data.delta : ''
+            if (!delta) {
+              return
+            }
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.id === assistantMessageId
+                  ? {
+                      ...message,
+                      content: `${message.content}${delta}`,
+                    }
+                  : message,
+              ),
+            )
+            return
+          }
+
+          if (streamEvent.event === 'assistant.complete') {
+            const completed = streamEvent.data
+            const conversationId =
+              typeof completed.conversation_id === 'number'
+                ? completed.conversation_id
+                : typeof completed.conversation_id === 'string'
+                  ? Number.parseInt(completed.conversation_id, 10)
+                  : null
+            const runId =
+              typeof completed.run_id === 'number'
+                ? completed.run_id
+                : typeof completed.run_id === 'string'
+                  ? Number.parseInt(completed.run_id, 10)
+                  : null
+
+            if (conversationId && Number.isFinite(conversationId)) {
+              setSelectedConversationId(conversationId)
+              void refreshConversationHistory(conversationId)
+            }
+            if (runId && Number.isFinite(runId)) {
+              setSelectedRunId(runId)
+              void refreshRunHistory(runId)
+            }
+            if (Array.isArray(completed.action_requests) && completed.action_requests.length > 0) {
+              void refreshPendingActionRequests()
+            }
+            return
+          }
+
+          if (streamEvent.event === 'error') {
+            const detail =
+              typeof streamEvent.data.detail === 'string'
+                ? streamEvent.data.detail
+                : 'Assistant stream failed.'
+            throw new Error(detail)
+          }
         },
-      ])
+      })
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Assistant request failed.')
     } finally {
@@ -332,9 +770,53 @@ export function AssistantWorkspace({
     }
   }
 
+  async function handleActionRequestDecision(
+    actionRequestId: number,
+    decision: 'approve' | 'reject',
+  ) {
+    setSubmitError('')
+    setActionRequestIdsInFlight((current) => [...current, actionRequestId])
+
+    try {
+      const updatedActionRequest =
+        decision === 'approve'
+          ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId)
+          : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId)
+
+      setMessages((currentMessages) =>
+        currentMessages.map((message) => {
+          if (!message.actionRequests?.some((actionRequest) => actionRequest.action_request_id === actionRequestId)) {
+            return message
+          }
+
+          return {
+            ...message,
+            actionRequests: message.actionRequests.map((actionRequest) =>
+              actionRequest.action_request_id === actionRequestId ? updatedActionRequest : actionRequest,
+            ),
+          }
+        }),
+      )
+
+      if (updatedActionRequest.status === 'EXECUTED') {
+        await onRefreshData()
+      }
+      await refreshPendingActionRequests()
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Assistant action request failed.')
+    } finally {
+      setActionRequestIdsInFlight((current) =>
+        current.filter((currentActionRequestId) => currentActionRequestId !== actionRequestId),
+      )
+    }
+  }
+
   const selectedProviderDetails =
     runtimeSettings?.providers.find((provider) => provider.provider === selectedProvider) ?? null
   const selectedAgent = agents.find((agent) => agent.agent_id === selectedAgentId) ?? null
+  const selectedConversationSummary =
+    recentConversations.find((conversation) => conversation.conversation_id === selectedConversationId) ?? null
+  const selectedRunSummary = recentRuns.find((run) => run.run_id === selectedRunId) ?? null
   const assistantReady = Boolean(runtimeSettings?.enabled && authSession && selectedProviderDetails?.enabled)
   const previewText = renderPromptPreview(promptPreview)
 
@@ -499,11 +981,27 @@ export function AssistantWorkspace({
                       <span>Input tokens: {message.usage.input_tokens ?? 'n/a'}</span>
                       <span>Output tokens: {message.usage.output_tokens ?? 'n/a'}</span>
                       {message.runId ? <span>Run #{message.runId}</span> : null}
+                      {message.runId ? (
+                        <button
+                          type="button"
+                          className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
+                          onClick={() => setSelectedRunId(message.runId ?? null)}
+                        >
+                          {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                   {!message.usage && message.runId ? (
                     <div className="assistant-message-meta">
                       <span>Run #{message.runId}</span>
+                      <button
+                        type="button"
+                        className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
+                        onClick={() => setSelectedRunId(message.runId ?? null)}
+                      >
+                        {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
+                      </button>
                     </div>
                   ) : null}
                   {message.toolCalls && message.toolCalls.length > 0 ? (
@@ -528,6 +1026,15 @@ export function AssistantWorkspace({
                         </article>
                       ))}
                     </div>
+                  ) : null}
+                  {message.actionRequests && message.actionRequests.length > 0 ? (
+                    <AssistantActionRequestList
+                      actionRequests={message.actionRequests}
+                      actionRequestIdsInFlight={actionRequestIdsInFlight}
+                      formatDate={formatTraceTimestamp}
+                      onDecision={handleActionRequestDecision}
+                      onOpenRun={setSelectedRunId}
+                    />
                   ) : null}
                   {message.warnings && message.warnings.length > 0 ? (
                     <div className="assistant-message-meta">
@@ -705,6 +1212,243 @@ export function AssistantWorkspace({
                   : 'Preview not available'}
           </p>
         </div>
+
+        <div className="assistant-sidebar-block">
+          <div className="assistant-provider-head">
+            <strong>Recent conversations</strong>
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => {
+                setSelectedConversationId(null)
+                setSelectedConversation(null)
+                setConversationDetailError('')
+                setMessages([])
+              }}
+              disabled={submitting}
+            >
+              New conversation
+            </button>
+          </div>
+          <p>
+            {conversationHistoryLoading
+              ? 'Refreshing your recent assistant conversations.'
+              : conversationHistoryError
+                ? conversationHistoryError
+                : recentConversations.length > 0
+                  ? `${recentConversations.length} recent conversation${recentConversations.length === 1 ? '' : 's'} are available for reload.`
+                  : 'No stored conversations yet.'}
+          </p>
+          {recentConversations.length > 0 ? (
+            <div className="assistant-run-list">
+              {recentConversations.map((conversation) => (
+                <button
+                  key={conversation.conversation_id}
+                  type="button"
+                  className={`assistant-run-card ${selectedConversationId === conversation.conversation_id ? 'is-selected' : ''}`}
+                  onClick={() => setSelectedConversationId(conversation.conversation_id)}
+                  disabled={submitting}
+                >
+                  <div className="assistant-provider-head">
+                    <strong>{conversation.title}</strong>
+                    <span className="status-pill status-pill-active">
+                      {conversation.run_count} run{conversation.run_count === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <p>
+                    {conversation.latest_user_message ??
+                      conversation.latest_assistant_message ??
+                      'Stored assistant conversation.'}
+                  </p>
+                  <small>{summarizeConversationCard(conversation)}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <small>
+            {conversationDetailLoading
+              ? `Loading conversation #${selectedConversationId ?? ''}...`
+              : conversationDetailError
+                ? conversationDetailError
+                : selectedConversation
+                  ? `Inspecting conversation #${selectedConversation.conversation_id}.`
+                  : selectedConversationSummary
+                    ? `Conversation #${selectedConversationSummary.conversation_id} is selected.`
+                    : 'Start a new conversation or reopen a stored one.'}
+          </small>
+        </div>
+
+        <div className="assistant-sidebar-block">
+          <strong>Pending approvals</strong>
+          <p>
+            {pendingActionRequestsLoading
+              ? 'Refreshing your pending assistant approvals.'
+              : pendingActionRequestsError
+                ? pendingActionRequestsError
+                : pendingActionRequests.length > 0
+                  ? `${pendingActionRequests.length} pending assistant action request${pendingActionRequests.length === 1 ? '' : 's'} can be reviewed outside the original chat turn.`
+                  : 'No pending assistant action requests are waiting in your inbox.'}
+          </p>
+          <AssistantActionRequestList
+            actionRequests={pendingActionRequests}
+            actionRequestIdsInFlight={actionRequestIdsInFlight}
+            formatDate={formatTraceTimestamp}
+            onDecision={handleActionRequestDecision}
+            onOpenRun={setSelectedRunId}
+          />
+        </div>
+
+        <div className="assistant-sidebar-block">
+          <strong>Recent run traces</strong>
+          <p>
+            {runHistoryLoading
+              ? 'Refreshing your recent assistant runs.'
+              : runHistoryError
+                ? runHistoryError
+                : recentRuns.length > 0
+                  ? `${recentRuns.length} recent runs are available for inspection.`
+                  : 'No stored runs yet in this session history.'}
+          </p>
+          {recentRuns.length > 0 ? (
+            <div className="assistant-run-list">
+              {recentRuns.map((run) => (
+                <button
+                  key={run.run_id}
+                  type="button"
+                  className={`assistant-run-card ${selectedRunId === run.run_id ? 'is-selected' : ''}`}
+                  onClick={() => setSelectedRunId(run.run_id)}
+                >
+                  <div className="assistant-provider-head">
+                    <strong>Run #{run.run_id}</strong>
+                    <span className={`status-pill status-pill-${run.status === 'COMPLETED' ? 'active' : 'blocked'}`}>
+                      {run.status}
+                    </span>
+                  </div>
+                  <p>{run.latest_user_message ?? run.assistant_message ?? 'Stored assistant run trace.'}</p>
+                  <small>{summarizeRunCard(run)}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="assistant-sidebar-block">
+          <strong>Selected run trace</strong>
+          <p>
+            {runDetailLoading
+              ? `Loading run #${selectedRunId ?? ''}...`
+              : runDetailError
+                ? runDetailError
+                : selectedRun
+                  ? `Inspecting stored trace for run #${selectedRun.run_id}.`
+                  : selectedRunSummary
+                    ? `Run #${selectedRunSummary.run_id} is selected.`
+                    : 'Select a stored run to inspect its trace.'}
+          </p>
+        </div>
+
+        {selectedRun ? (
+          <div className="assistant-run-trace">
+            <div className="assistant-run-summary-grid">
+              <article className="assistant-run-summary-card">
+                <span>Status</span>
+                <strong>{selectedRun.status}</strong>
+                <small>{selectedRun.provider} · {selectedRun.model}</small>
+              </article>
+              <article className="assistant-run-summary-card">
+                <span>Tokens</span>
+                <strong>
+                  {selectedRun.input_tokens ?? 'n/a'} / {selectedRun.output_tokens ?? 'n/a'}
+                </strong>
+                <small>Input / output</small>
+              </article>
+              <article className="assistant-run-summary-card">
+                <span>Tools</span>
+                <strong>{selectedRun.tool_call_count}</strong>
+                <small>{selectedRun.use_live_tools ? 'Live tools enabled' : 'Live tools disabled'}</small>
+              </article>
+            </div>
+
+            <div className="assistant-sidebar-block">
+              <strong>Run metadata</strong>
+              <div className="assistant-message-meta">
+                <span>Created: {formatTraceTimestamp(selectedRun.created_at)}</span>
+                <span>Completed: {formatTraceTimestamp(selectedRun.completed_at)}</span>
+                <span>Workspace: {selectedRun.workspace ?? 'n/a'}</span>
+                <span>Agent: {selectedRun.agent_name ?? 'Platform foundation'}</span>
+              </div>
+              {selectedRun.error_detail ? (
+                <div className="assistant-message-meta">
+                  <span>{selectedRun.error_detail}</span>
+                </div>
+              ) : null}
+            </div>
+
+            {selectedRun.warnings.length > 0 ? (
+              <div className="assistant-sidebar-block">
+                <strong>Warnings</strong>
+                <div className="assistant-run-warning-list">
+                  {selectedRun.warnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {selectedRun.tool_calls.length > 0 ? (
+              <div className="assistant-tool-list">
+                {selectedRun.tool_calls.map((toolCall, index) => (
+                  <article key={`selected-run-tool-${toolCall.tool_name}-${index}`} className="assistant-tool-card">
+                    <div className="assistant-tool-head">
+                      <strong>{toolCall.tool_name}</strong>
+                      <span>
+                        {toolCall.record_count === null ? 'Record count: n/a' : `Record count: ${toolCall.record_count}`}
+                      </span>
+                    </div>
+                    <p>{toolCall.summary}</p>
+                    {Object.keys(toolCall.arguments).length > 0 ? <code>{JSON.stringify(toolCall.arguments)}</code> : null}
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
+            <details className="assistant-trace-details" open>
+              <summary>Prompt sections ({selectedRun.prompt_sections.length})</summary>
+              <div className="assistant-trace-section-list">
+                {selectedRun.prompt_sections.map((section) => (
+                  <div key={section.key} className="assistant-context-preview">
+                    <strong>{section.title}</strong>
+                    <pre>{section.content}</pre>
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            <details className="assistant-trace-details">
+              <summary>Request snapshot ({selectedRun.request_messages.length} messages)</summary>
+              <div className="assistant-context-preview">
+                <pre>
+                  {selectedRun.request_messages
+                    .map((message, index) => `${index + 1}. ${message.role}\n${message.content}`)
+                    .join('\n\n')}
+                </pre>
+              </div>
+              {selectedRun.application_context ? (
+                <div className="assistant-context-preview">
+                  <strong>Application context</strong>
+                  <pre>{selectedRun.application_context}</pre>
+                </div>
+              ) : null}
+            </details>
+
+            <details className="assistant-trace-details">
+              <summary>Rendered system prompt</summary>
+              <div className="assistant-context-preview">
+                <pre>{selectedRun.rendered_system_prompt}</pre>
+              </div>
+            </details>
+          </div>
+        ) : null}
 
         <div className="assistant-context-preview">
           <pre>{previewText}</pre>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+import math
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -18,6 +19,7 @@ from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
@@ -34,6 +36,7 @@ from apps.api.app.shared.enums import (
 router = APIRouter(prefix="/events", tags=["events"])
 
 ZERO = Decimal("0")
+DEFAULT_SOURCE_SYSTEM = "ETRM"
 
 
 def trade_snapshot(db: Session, trade: Trade | None) -> dict[str, object] | None:
@@ -258,6 +261,60 @@ def parse_execution_timestamp(value: object | None) -> datetime | None:
     )
 
 
+def normalize_optional_number(value: object | None, *, field_name: str) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} must be a numeric value",
+        )
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{field_name} must be a finite numeric value",
+            )
+        return float(value)
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            return float(Decimal(candidate))
+        except Exception as exc:  # pragma: no cover - Decimal uses multiple exception types
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{field_name} must be a numeric value",
+            ) from exc
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=f"{field_name} must be a numeric value",
+    )
+
+
+def validate_trade_measurements(
+    *,
+    trade_structure: str,
+    pricing_type: str,
+    price: float | None,
+    volume: float | None,
+) -> None:
+    if pricing_type in {PricingType.FIXED.value, PricingType.HYBRID.value} and price is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Price Differential is required when pricing type is FIXED or HYBRID",
+        )
+    if trade_structure == TradeStructure.SINGLE.value and volume is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Volume is required for SINGLE trades",
+        )
+
+
 def require_active_book(db: Session, book_code: object | None) -> str:
     normalized_book_code = str(book_code or "").strip().upper()
     if not normalized_book_code:
@@ -401,6 +458,26 @@ def require_active_price_index(
         )
 
     return normalized_pricing_type, normalized_price_index_code
+
+
+def require_active_unit(db: Session, unit_code: object | None) -> str | None:
+    normalized_unit_code = normalize_optional_text(unit_code, uppercase=True)
+    if normalized_unit_code is None:
+        return None
+
+    reference_unit = db.execute(
+        select(ReferenceUnit).where(
+            ReferenceUnit.code == normalized_unit_code,
+            ReferenceUnit.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_unit is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unit '{normalized_unit_code}' is not active in reference data",
+        )
+
+    return normalized_unit_code
 
 
 def validate_trade_structure_payload(
@@ -603,11 +680,19 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     payload_data.get("commodity_class"),
                     payload_data.get("commodity"),
                 )
-                price = payload_data.get("price")
-                volume = payload_data.get("volume")
+                price = normalize_optional_number(
+                    payload_data.get("price"),
+                    field_name="Price Differential",
+                )
+                volume = normalize_optional_number(payload_data.get("volume"), field_name="Volume")
                 external_trade_id = normalize_optional_text(payload_data.get("external_trade_id"))
-                source_system = normalize_optional_text(payload_data.get("source_system"), uppercase=True)
+                source_system = (
+                    normalize_optional_text(payload_data.get("source_system"), uppercase=True)
+                    or DEFAULT_SOURCE_SYSTEM
+                )
                 execution_timestamp = parse_execution_timestamp(payload_data.get("execution_timestamp"))
+                quality_spec = normalize_optional_text(payload_data.get("quality_spec"))
+                unit_of_measure = require_active_unit(db, payload_data.get("unit_of_measure"))
                 counterparty = require_active_counterparty(db, payload_data.get("counterparty"))
                 portfolio = require_active_portfolio(
                     db,
@@ -632,6 +717,12 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     payload_data.get("pricing_type"),
                     payload_data.get("price_index_code"),
                 )
+                validate_trade_measurements(
+                    trade_structure=trade_structure,
+                    pricing_type=pricing_type,
+                    price=price,
+                    volume=volume,
+                )
 
                 existing = Trade(
                     trade_id=e.aggregate_id,
@@ -640,6 +731,8 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     created_at=recorded_at,
                     updated_at=recorded_at,
                     execution_timestamp=execution_timestamp,
+                    quality_spec=quality_spec,
+                    unit_of_measure=unit_of_measure,
                     trade_nature=trade_nature,
                     trade_structure=trade_structure,
                     trade_side=trade_side,
@@ -682,7 +775,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
             elif e.event_type == "TradeAmended" and existing is not None:
                 existing.updated_at = recorded_at
 
-                legs_payload: list[dict[str, object]] = []
+                legs_payload: list[dict[str, object]] | None = None
                 should_sync_legs = False
                 if "trade_nature" in payload_data and payload_data["trade_nature"] is not None:
                     existing.trade_nature = normalize_trade_nature(payload_data["trade_nature"])
@@ -693,9 +786,18 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     or "trade_side" in payload_data
                     or "legs" in payload_data
                 ):
+                    trade_side_value = (
+                        payload_data.get("trade_side")
+                        if "trade_side" in payload_data
+                        else (
+                            existing.trade_side
+                            if existing.trade_structure == TradeStructure.SINGLE.value
+                            else None
+                        )
+                    )
                     normalized_trade_side, legs_payload = validate_trade_structure_payload(
                         existing.trade_structure,
-                        payload_data.get("trade_side", existing.trade_side),
+                        trade_side_value,
                         payload_data.get("legs"),
                     )
                     existing.trade_side = normalized_trade_side
@@ -713,6 +815,10 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     existing.execution_timestamp = parse_execution_timestamp(
                         payload_data.get("execution_timestamp")
                     )
+                if "quality_spec" in payload_data:
+                    existing.quality_spec = normalize_optional_text(payload_data.get("quality_spec"))
+                if "unit_of_measure" in payload_data:
+                    existing.unit_of_measure = require_active_unit(db, payload_data.get("unit_of_measure"))
                 if (
                     "commodity" in payload_data and payload_data["commodity"] is not None
                 ) or (
@@ -725,7 +831,8 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     )
                     existing.commodity_class = commodity_class
                     existing.commodity = commodity
-                    should_sync_legs = True
+                    if existing.trade_structure == TradeStructure.SINGLE.value or legs_payload is not None:
+                        should_sync_legs = True
                 if (
                     "pricing_type" in payload_data and payload_data["pricing_type"] is not None
                 ) or (
@@ -738,11 +845,18 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     )
                     existing.pricing_type = pricing_type
                     existing.price_index_code = price_index_code
-                if "price" in payload_data and payload_data["price"] is not None:
-                    existing.price = payload_data["price"]
-                if "volume" in payload_data and payload_data["volume"] is not None:
-                    existing.volume = payload_data["volume"]
-                    should_sync_legs = True
+                if "price" in payload_data:
+                    existing.price = normalize_optional_number(
+                        payload_data.get("price"),
+                        field_name="Price Differential",
+                    )
+                if "volume" in payload_data:
+                    existing.volume = normalize_optional_number(
+                        payload_data.get("volume"),
+                        field_name="Volume",
+                    )
+                    if existing.trade_structure == TradeStructure.SINGLE.value:
+                        should_sync_legs = True
                 if "counterparty" in payload_data:
                     existing.counterparty = require_active_counterparty(
                         db,
@@ -773,6 +887,12 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 if "status" in payload_data and payload_data["status"] is not None:
                     existing.status = payload_data["status"]
 
+                validate_trade_measurements(
+                    trade_structure=existing.trade_structure,
+                    pricing_type=existing.pricing_type,
+                    price=existing.price,
+                    volume=existing.volume,
+                )
                 existing.last_event_id = e.event_id
                 sync_primary_price_term(
                     db,
@@ -791,7 +911,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                         existing.commodity_class,
                         existing.commodity,
                         existing.volume,
-                        legs_payload,
+                        legs_payload or [],
                         recorded_at,
                     )
 

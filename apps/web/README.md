@@ -8,8 +8,8 @@ and runtime settings.
 ## Main Workspaces
 
 - `Guide`: read the checked-in operator guide without leaving the app
-- `Dashboard`: high-level status, activity, and fast trade capture
-- `Trades`: inspect, amend, or cancel an individual trade
+- `Dashboard`: high-level status, activity, and exposure
+- `Trades`: capture, inspect, amend, or cancel an individual trade
 - `Events`: review the event timeline
 - `Positions`: inspect net commodity exposure
 - `Reference Data`: maintain controlled master data

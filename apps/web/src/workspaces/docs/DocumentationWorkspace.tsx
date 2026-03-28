@@ -112,55 +112,60 @@ export function DocumentationWorkspace({
   const [roadmap, setRoadmap] = useState<RoadmapDocumentData | null>(null)
   const [roadmapLoading, setRoadmapLoading] = useState(false)
   const [roadmapError, setRoadmapError] = useState('')
-  const [roadmapRequested, setRoadmapRequested] = useState(false)
   const [lastLoadedRoadmapVersion, setLastLoadedRoadmapVersion] = useState(-1)
 
   const activeDocumentDefinition = DOCUMENT_DEFINITIONS[activeDocumentKey]
   const activeDocumentTitle = activeDocumentKey === 'guide' ? guide.title : activeDocumentDefinition.title
+  const shouldLoadRoadmap = activeDocumentKey === 'roadmap' || roadmap !== null
 
   useEffect(() => {
-    const shouldLoadRoadmap = activeDocumentKey === 'roadmap' || roadmapRequested
     if (!shouldLoadRoadmap) {
       return
     }
 
-    if (roadmapRequested && lastLoadedRoadmapVersion === roadmapRefreshVersion) {
+    if (roadmap !== null && lastLoadedRoadmapVersion === roadmapRefreshVersion) {
       return
     }
 
     let cancelled = false
 
-    setRoadmapRequested(true)
-    setRoadmapLoading(true)
-    setRoadmapError('')
+    async function refreshRoadmap() {
+      setRoadmapLoading(true)
+      setRoadmapError('')
 
-    loadRoadmapDocument(appConfig.apiBase)
-      .then((payload) => {
+      try {
+        const payload = await loadRoadmapDocument(appConfig.apiBase)
         if (!cancelled) {
           setRoadmap(payload)
           setLastLoadedRoadmapVersion(roadmapRefreshVersion)
         }
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (!cancelled) {
           setRoadmapError(error instanceof Error ? error.message : 'Could not load roadmap.')
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) {
           setRoadmapLoading(false)
         }
-      })
+      }
+    }
+
+    void refreshRoadmap()
 
     return () => {
       cancelled = true
     }
-  }, [activeDocumentKey, lastLoadedRoadmapVersion, roadmapRefreshVersion, roadmapRequested])
+  }, [lastLoadedRoadmapVersion, roadmap, roadmapRefreshVersion, shouldLoadRoadmap])
 
   useEffect(() => {
     if (activeDocumentKey !== 'guide') {
-      setActiveSectionId('')
-      return
+      const frameId = window.requestAnimationFrame(() => {
+        setActiveSectionId('')
+      })
+
+      return () => {
+        window.cancelAnimationFrame(frameId)
+      }
     }
 
     let animationFrameId = 0

@@ -74,7 +74,8 @@ This is the main debugging and prompt-review surface for now.
 
 Note that prompt preview shows the stable server-built foundation. Tool calls
 only happen during `/assistant/respond`, because they depend on the user's
-latest message and the model's runtime decisions.
+latest message and the model's runtime decisions. `/assistant/context` does
+not execute tools or inject tool results into the rendered prompt.
 
 ## Run Tracing
 
@@ -89,6 +90,31 @@ Each `/assistant/respond` call now records an `assistant_run` audit row with:
 The API returns `run_id` on successful responses, exposes current-user run
 lookup on `/assistant/runs/*`, and exposes recent admin run listings on
 `/admin/assistant/runs`.
+
+## Assistant Evals
+
+Managed-agent changes should land with eval coverage, not just ad hoc prompt
+spot checks. The backend now includes a fixture-style API eval harness in:
+
+- `apps/api/tests/assistant_eval_harness.py`
+- `apps/api/tests/test_assistant_evals.py`
+
+The harness seeds realistic users, trades, and managed agents, runs
+`/assistant/respond` through the real route stack, captures mocked provider
+requests, and verifies:
+
+- resolved agent, provider, and model metadata
+- expected warnings
+- expected live-tool traces and filtered tool catalogs
+- approval-gated action-request staging
+- persisted run traces and prompt sections
+
+Run it with:
+
+```bash
+PYTHONPATH=/Users/anthonyrivich/Documents/GitHub/ectrm ./.venv/bin/python -m unittest \
+  apps.api.tests.test_assistant_evals
+```
 
 ## Configuration
 

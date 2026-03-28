@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import json
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -21,7 +22,9 @@ from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
@@ -110,7 +113,9 @@ class AssistantApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             session.query(UserSession).delete()
+            session.query(AssistantActionRequest).delete()
             session.query(AssistantRun).delete()
+            session.query(AssistantConversation).delete()
             session.query(AssistantAgent).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
@@ -234,7 +239,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("assistant_user", payload["rendered_system_prompt"])
         self.assertIn("Loaded trades: 0.", payload["rendered_system_prompt"])
 
-    def test_assistant_prompt_context_preview_includes_live_tool_section_for_selected_trade(self) -> None:
+    def test_assistant_prompt_context_preview_stays_pure_grounding_when_live_tools_enabled(self) -> None:
         token = self._create_session_token()
         self._create_trade_with_event(trade_id="T-1000")
 
@@ -251,10 +256,8 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         tool_sections = [section for section in payload["sections"] if section["source"] == "tool"]
-        self.assertEqual(len(tool_sections), 1)
-        self.assertEqual(tool_sections[0]["key"], "live-tool-results")
-        self.assertIn("Loaded trade T-1000", tool_sections[0]["content"])
-        self.assertIn("Live tool results:", payload["rendered_system_prompt"])
+        self.assertEqual(tool_sections, [])
+        self.assertNotIn("Live tool results:", payload["rendered_system_prompt"])
 
     def test_admin_agent_crud_and_public_listing_flow(self) -> None:
         token = self._create_session_token()
@@ -390,6 +393,184 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("not configured for the assistant workspace", response.json()["detail"])
 
+    def test_assistant_prompt_creates_cancel_trade_action_request_for_action_agent(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1007")
+        self._create_agent(
+            agent_id="trade-captain",
+            name="Trade Captain",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "trade-captain",
+                    "workspace": "assistant",
+                    "context": "Selected trade:\n- trade_id: T-1007\n- commodity: WTI",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Cancel the selected trade."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsInstance(payload["run_id"], int)
+        self.assertEqual(len(payload["action_requests"]), 1)
+        self.assertEqual(payload["action_requests"][0]["status"], "PENDING")
+        self.assertEqual(payload["action_requests"][0]["action_type"], "cancel_trade")
+        self.assertEqual(payload["action_requests"][0]["payload"], {"trade_id": "T-1007"})
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(AssistantActionRequest).count(), 1)
+
+    def test_assistant_action_request_approval_executes_trade_cancellation(self) -> None:
+        token = self._create_session_token()
+        action_request_id = self._create_cancel_trade_action_request(
+            token=token,
+            trade_id="T-1008",
+        )
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request_id}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["trade_id"], "T-1008")
+        self.assertEqual(payload["result"]["trade_status"], "CANCELLED")
+
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-1008")
+            assert trade is not None
+            self.assertEqual(trade.status, "CANCELLED")
+            cancelled_events = session.query(Event).filter(Event.event_type == "TradeCancelled").count()
+            self.assertEqual(cancelled_events, 1)
+
+    def test_assistant_action_request_rejection_keeps_trade_active(self) -> None:
+        token = self._create_session_token()
+        action_request_id = self._create_cancel_trade_action_request(
+            token=token,
+            trade_id="T-1009",
+        )
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request_id}/reject",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "REJECTED")
+        self.assertIsNone(payload["result"])
+
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-1009")
+            assert trade is not None
+            self.assertEqual(trade.status, "ACTIVE")
+            cancelled_events = session.query(Event).filter(Event.event_type == "TradeCancelled").count()
+            self.assertEqual(cancelled_events, 0)
+
+    def test_assistant_action_request_listing_is_scoped_to_current_user(self) -> None:
+        token = self._create_session_token()
+        own_action_request_id = self._create_cancel_trade_action_request(
+            token=token,
+            trade_id="T-1010",
+        )
+
+        other_token = self._create_session_token(
+            user_id="desk_user",
+            email="desk@example.com",
+            display_name="Desk User",
+            role="TRADER",
+        )
+        self._create_cancel_trade_action_request(
+            token=other_token,
+            trade_id="T-1011",
+        )
+
+        response = self.client.get(
+            "/assistant/action-requests?status=PENDING",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["action_request_id"], own_action_request_id)
+        self.assertEqual(payload[0]["user_id"], "assistant_user")
+        self.assertEqual(payload[0]["status"], "PENDING")
+
+    def test_admin_action_request_listing_filters_pending_queue_across_users(self) -> None:
+        admin_token = self._create_session_token()
+        own_action_request_id = self._create_cancel_trade_action_request(
+            token=admin_token,
+            trade_id="T-1012",
+        )
+
+        other_token = self._create_session_token(
+            user_id="ops_user",
+            email="ops@example.com",
+            display_name="Ops User",
+            role="TRADER",
+        )
+        other_action_request_id = self._create_cancel_trade_action_request(
+            token=other_token,
+            trade_id="T-1013",
+        )
+
+        reject_response = self.client.post(
+            f"/assistant/action-requests/{own_action_request_id}/reject",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(reject_response.status_code, 200)
+
+        response = self.client.get(
+            "/admin/assistant/action-requests?status=PENDING",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([row["action_request_id"] for row in payload], [other_action_request_id])
+        self.assertEqual(payload[0]["user_id"], "ops_user")
+        self.assertEqual(payload[0]["status"], "PENDING")
+
+    def test_admin_action_request_listing_requires_admin_role(self) -> None:
+        token = self._create_session_token(
+            user_id="desk_user",
+            email="desk@example.com",
+            display_name="Desk User",
+            role="TRADER",
+        )
+
+        response = self.client.get(
+            "/admin/assistant/action-requests",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        payload = response.json()
+        self.assertEqual(payload["error"]["code"], "AUTHENTICATION_REQUIRED")
+        self.assertEqual(
+            payload["error"]["message"],
+            "An administrative session is required for this operation.",
+        )
+
     def test_assistant_prompt_executes_live_tools_and_returns_tool_trace(self) -> None:
         token = self._create_session_token()
         self._create_trade_with_event(trade_id="T-1001")
@@ -488,14 +669,29 @@ class AssistantApiTests(unittest.TestCase):
             provider="openai",
             model="gpt-5-mini",
         )
-        captured_request: dict[str, object] = {}
+        captured_requests: list[dict[str, object]] = []
 
         async def _fake_post_json(*, url, headers, payload, provider_label):
             del url, headers, provider_label
-            captured_request["payload"] = payload
+            captured_requests.append(payload)
+            if len(captured_requests) == 1:
+                return {
+                    "id": "resp_allowed_1",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "id": "fc_allowed_1",
+                            "call_id": "call_allowed_1",
+                            "name": "get_trade_by_id",
+                            "arguments": '{"trade_id":"T-1005"}',
+                        }
+                    ],
+                    "usage": {"input_tokens": 14, "output_tokens": 5},
+                }
             return {
+                "id": "resp_allowed_2",
                 "output_text": "Only the allowed trade lookup was used.",
-                "usage": {"input_tokens": 31, "output_tokens": 7},
+                "usage": {"input_tokens": 9, "output_tokens": 7},
             }
 
         with patch(
@@ -519,11 +715,13 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual([tool_call["tool_name"] for tool_call in payload["tool_calls"]], ["get_trade_by_id"])
-        self.assertIn("skipped disallowed live tools: list_trade_events", " ".join(payload["warnings"]).lower())
+        self.assertEqual(payload["warnings"], [])
 
-        request_payload = captured_request["payload"]
-        assert isinstance(request_payload, dict)
-        self.assertEqual([tool["name"] for tool in request_payload["tools"]], ["get_trade_by_id"])
+        self.assertEqual(len(captured_requests), 2)
+        first_request = captured_requests[0]
+        second_request = captured_requests[1]
+        self.assertEqual([tool["name"] for tool in first_request["tools"]], ["get_trade_by_id"])
+        self.assertEqual(second_request["previous_response_id"], "resp_allowed_1")
 
     def test_assistant_prompt_skips_live_tools_for_non_read_managed_agent(self) -> None:
         token = self._create_session_token()
@@ -576,54 +774,6 @@ class AssistantApiTests(unittest.TestCase):
         request_payload = captured_request["payload"]
         assert isinstance(request_payload, dict)
         self.assertNotIn("Live tool results:", request_payload["input"][0]["content"][0]["text"])
-
-    def test_assistant_prompt_merges_prefetched_and_provider_tool_calls(self) -> None:
-        token = self._create_session_token()
-        self._create_trade_with_event(trade_id="T-1004")
-
-        class _ToolAwareAssistantService:
-            async def generate_response(self, payload, agent_definition=None, prompt_context=None):
-                del payload, agent_definition, prompt_context
-                return {
-                    "provider": "openai",
-                    "model": "gpt-5-mini",
-                    "message": {"role": "assistant", "content": "Merged tool output."},
-                    "usage": {"input_tokens": 18, "output_tokens": 7},
-                    "warnings": [],
-                    "tool_calls": [
-                        {
-                            "tool_name": "list_positions",
-                            "arguments": {"limit": 5},
-                            "summary": "Returned 1 position row(s).",
-                            "record_count": 1,
-                        }
-                    ],
-                }
-
-        with patch(
-            "apps.api.app.routes.assistant.get_assistant_service",
-            return_value=_ToolAwareAssistantService(),
-        ):
-            response = self.client.post(
-                "/assistant/respond",
-                headers={"Authorization": f"Bearer {token}"},
-                json={
-                    "provider": "openai",
-                    "workspace": "assistant",
-                    "context": "Selected trade:\n- trade_id: T-1004\n- commodity: WTI",
-                    "use_live_tools": True,
-                    "messages": [
-                        {"role": "user", "content": "Explain the selected trade and recent changes."},
-                    ],
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(
-            [tool_call["tool_name"] for tool_call in payload["tool_calls"]],
-            ["get_trade_by_id", "list_trade_events", "list_positions"],
-        )
 
     def test_assistant_prompt_skips_live_tools_when_disabled(self) -> None:
         token = self._create_session_token()
@@ -708,6 +858,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(run_payload["assistant_message"], "Recorded run.")
         self.assertEqual(run_payload["latest_user_message"], "Explain the selected trade.")
         self.assertGreaterEqual(len(run_payload["prompt_sections"]), 1)
+        self.assertEqual(
+            [section["source"] for section in run_payload["prompt_sections"] if section["source"] == "tool"],
+            [],
+        )
 
         run_listing = self.client.get(
             "/admin/assistant/runs",
@@ -716,27 +870,187 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(run_listing.status_code, 200)
         self.assertEqual(run_listing.json()[0]["run_id"], payload["run_id"])
 
-    def _create_session_token(self) -> str:
-        now = datetime.now(timezone.utc)
-        with self.SessionLocal() as session:
-            session.add(
-                UserAccount(
-                    user_id="assistant_user",
-                    email="assistant@example.com",
-                    display_name="Assistant User",
-                    role="OPS_ADMIN",
-                    password_hash=hash_password("supersecret1"),
-                    is_active=True,
-                    last_login_at=now,
-                    created_at=now,
-                    created_by="test-suite",
-                    updated_at=now,
-                    updated_by="test-suite",
-                    version=1,
-                )
+    def test_assistant_prompt_persists_conversation_and_reloads_it(self) -> None:
+        token = self._create_session_token()
+
+        responses = [
+            {
+                "output_text": "First answer.",
+                "usage": {"input_tokens": 12, "output_tokens": 4},
+            },
+            {
+                "output_text": "Second answer.",
+                "usage": {"input_tokens": 18, "output_tokens": 7},
+            },
+        ]
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return responses.pop(0)
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            first_response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "First question?"},
+                    ],
+                },
             )
+
+            first_payload = first_response.json()
+            second_response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "conversation_id": first_payload["conversation_id"],
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "First question?"},
+                        {"role": "assistant", "content": "First answer."},
+                        {"role": "user", "content": "Second question?"},
+                    ],
+                },
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+
+        first_payload = first_response.json()
+        second_payload = second_response.json()
+        self.assertIsInstance(first_payload["conversation_id"], int)
+        self.assertEqual(second_payload["conversation_id"], first_payload["conversation_id"])
+
+        conversations_response = self.client.get(
+            "/assistant/conversations",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(conversations_response.status_code, 200)
+        conversations_payload = conversations_response.json()
+        self.assertEqual(conversations_payload[0]["conversation_id"], first_payload["conversation_id"])
+        self.assertEqual(conversations_payload[0]["run_count"], 2)
+
+        detail_response = self.client.get(
+            f"/assistant/conversations/{first_payload['conversation_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        detail_payload = detail_response.json()
+        self.assertEqual([message["role"] for message in detail_payload["messages"]], ["user", "assistant", "user", "assistant"])
+        self.assertEqual(detail_payload["messages"][0]["content"], "First question?")
+        self.assertEqual(detail_payload["messages"][1]["content"], "First answer.")
+        self.assertEqual(detail_payload["messages"][3]["content"], "Second answer.")
+
+    def test_assistant_stream_route_emits_events_and_records_conversation(self) -> None:
+        token = self._create_session_token()
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return {
+                "output_text": "Streamed answer.",
+                "usage": {"input_tokens": 15, "output_tokens": 5},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            with self.client.stream(
+                "POST",
+                "/assistant/respond/stream",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "Stream this reply."},
+                    ],
+                },
+            ) as response:
+                stream_lines = [line for line in response.iter_lines() if line]
+
+        self.assertEqual(response.status_code, 200)
+        stream_body = "\n".join(stream_lines)
+        self.assertIn("event: conversation", stream_body)
+        self.assertIn("event: assistant.metadata", stream_body)
+        self.assertIn("event: assistant.delta", stream_body)
+        self.assertIn("event: assistant.complete", stream_body)
+
+        completion_data = self._decode_last_sse_event_payload(stream_body, "assistant.complete")
+        self.assertEqual(completion_data["message"]["content"], "Streamed answer.")
+        self.assertIsInstance(completion_data["conversation_id"], int)
+
+        detail_response = self.client.get(
+            f"/assistant/conversations/{completion_data['conversation_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(
+            [message["content"] for message in detail_response.json()["messages"]],
+            ["Stream this reply.", "Streamed answer."],
+        )
+
+    def _decode_last_sse_event_payload(self, stream_body: str, event_name: str) -> dict[str, object]:
+        lines = [line.strip() for line in stream_body.splitlines() if line.strip()]
+        for index, line in enumerate(lines):
+            if line != f"event: {event_name}":
+                continue
+            data_lines: list[str] = []
+            next_index = index + 1
+            while next_index < len(lines) and not lines[next_index].startswith("event:"):
+                if lines[next_index].startswith("data:"):
+                    data_lines.append(lines[next_index][len("data:") :].strip())
+                next_index += 1
+            if data_lines:
+                return json.loads("\n".join(data_lines))
+        raise AssertionError(f"Event {event_name} not found in stream body")
+
+    def _create_session_token(
+        self,
+        *,
+        user_id: str = "assistant_user",
+        email: str | None = None,
+        display_name: str | None = None,
+        role: str = "OPS_ADMIN",
+    ) -> str:
+        now = datetime.now(timezone.utc)
+        resolved_email = email or f"{user_id}@example.com"
+        resolved_display_name = display_name or user_id.replace("_", " ").title()
+        with self.SessionLocal() as session:
+            user = session.get(UserAccount, user_id)
+            if user is None:
+                session.add(
+                    UserAccount(
+                        user_id=user_id,
+                        email=resolved_email,
+                        display_name=resolved_display_name,
+                        role=role,
+                        password_hash=hash_password("supersecret1"),
+                        is_active=True,
+                        last_login_at=now,
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    )
+                )
+            else:
+                user.email = resolved_email
+                user.display_name = resolved_display_name
+                user.role = role
+                user.last_login_at = now
+                user.updated_at = now
+                user.updated_by = "test-suite"
             session.commit()
-            user = session.get(UserAccount, "assistant_user")
+            user = session.get(UserAccount, user_id)
             assert user is not None
             _, token = create_user_session(session, user)
             return token
@@ -755,6 +1069,9 @@ class AssistantApiTests(unittest.TestCase):
     ) -> None:
         now = datetime.now(timezone.utc)
         with self.SessionLocal() as session:
+            existing = session.get(AssistantAgent, agent_id)
+            if existing is not None:
+                return
             session.add(
                 AssistantAgent(
                     agent_id=agent_id,
@@ -823,6 +1140,41 @@ class AssistantApiTests(unittest.TestCase):
                 )
             )
             session.commit()
+
+    def _create_cancel_trade_action_request(self, *, token: str, trade_id: str) -> int:
+        self._create_trade_with_event(trade_id=trade_id)
+        self._create_agent(
+            agent_id="trade-captain",
+            name="Trade Captain",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "trade-captain",
+                    "workspace": "assistant",
+                    "context": f"Selected trade:\n- trade_id: {trade_id}\n- commodity: WTI",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Cancel the selected trade."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        return payload["action_requests"][0]["action_request_id"]
 
 
 if __name__ == "__main__":

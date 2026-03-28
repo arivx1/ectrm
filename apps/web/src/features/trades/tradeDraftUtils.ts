@@ -1,5 +1,5 @@
-import type { TradeLegDraft } from '../../shared/models.ts'
-import { tradeFormDefaults } from '../../shared/trading.ts'
+import type { EventRow, TradeLegDraft } from '../../shared/models.ts'
+import { defaultTradeExecutionTime, tradeFormDefaults } from '../../shared/trading.ts'
 
 export function makeLegDraft(overrides: Partial<TradeLegDraft> = {}): TradeLegDraft {
   return {
@@ -35,6 +35,21 @@ export function parseLegsFromPayload(payload: Record<string, unknown> | null | u
     )
 }
 
+export function findLatestPersistedLegs(selectedTradeEvents: EventRow[]): TradeLegDraft[] {
+  for (const event of selectedTradeEvents) {
+    if (event.event_type !== 'TradeAmended' && event.event_type !== 'TradeCreated') {
+      continue
+    }
+
+    const parsedLegs = parseLegsFromPayload(event.payload)
+    if (parsedLegs.length > 0) {
+      return parsedLegs
+    }
+  }
+
+  return []
+}
+
 export function toLocalDateTimeInput(value: string | null | undefined): string {
   if (!value) {
     return ''
@@ -51,4 +66,24 @@ export function toLocalDateTimeInput(value: string | null | undefined): string {
     pad(parsed.getMonth() + 1),
     pad(parsed.getDate()),
   ].join('-') + `T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
+}
+
+export function splitLocalDateTimeInput(value: string | null | undefined): { date: string; time: string } {
+  const localValue = toLocalDateTimeInput(value)
+  if (!localValue) {
+    return { date: '', time: defaultTradeExecutionTime }
+  }
+
+  const [date, time = defaultTradeExecutionTime] = localValue.split('T')
+  return { date, time }
+}
+
+export function combineLocalDateTimeInput(date: string, time: string): string {
+  const normalizedDate = date.trim()
+  if (!normalizedDate) {
+    return ''
+  }
+
+  const normalizedTime = time.trim() || defaultTradeExecutionTime
+  return `${normalizedDate}T${normalizedTime}`
 }

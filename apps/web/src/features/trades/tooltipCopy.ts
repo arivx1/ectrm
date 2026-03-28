@@ -4,7 +4,7 @@ export const tradeTooltipCopy = {
   side:
     'Trade side is used for single-leg deals. When the structure is swap, each leg owns its own side and this field is locked.',
   pricing:
-    'Fixed pricing uses the entered price. Index and Hybrid pricing let you attach a market index for settlement or valuation workflows.',
+    'Fixed pricing uses the entered price differential. Index and Hybrid pricing let you attach a market index for settlement or valuation workflows.',
   priceIndex:
     'Price indices are only relevant for Index or Hybrid pricing. Fixed and Formula trades can leave this blank.',
   legs:

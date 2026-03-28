@@ -1,22 +1,44 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_admin_role, resolve_audit_actor_id, resolve_session_principal
 from apps.api.app.core.query_params import ADMIN_LIST_LIMIT_QUERY, LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.services.action_requests import (
+    AssistantActionRequestError,
+    approve_action_request,
+    create_action_requests,
+    get_action_request,
+    list_action_requests,
+    reject_action_request,
+    to_action_request_out,
+    to_action_request_out_list,
+)
+from apps.api.app.domains.assistant.services.action_runtime import AssistantActionRuntimeResult, plan_action_requests
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
     AssistantServiceError,
     build_assistant_runtime_settings,
     resolve_effective_runtime,
 )
+from apps.api.app.domains.assistant.services.conversations import (
+    create_assistant_conversation,
+    get_assistant_conversation,
+    list_assistant_conversations,
+    to_assistant_conversation_out,
+    to_assistant_conversation_summary_out,
+    update_assistant_conversation_after_run,
+)
 from apps.api.app.domains.assistant.services.prompt_context import (
+    AssistantPromptEnvelope,
     AssistantPromptSection,
     AssistantPromptUser,
     build_prompt_context,
@@ -40,14 +62,17 @@ from apps.api.app.domains.assistant.services.registry import (
     to_managed_agent,
     to_public_agent_out,
 )
-from apps.api.app.domains.assistant.services.tool_runtime import execute_live_tools
 from apps.api.app.domains.assistant.services.tools import list_tool_names
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.assistant import (
+    AssistantActionRequestOut,
     AssistantAgentAdminOut,
     AssistantAgentCreate,
     AssistantAgentOut,
+    AssistantConversationOut,
+    AssistantConversationSummaryOut,
     AssistantAgentUpdate,
     AssistantPromptContextOut,
     AssistantPromptContextRequest,
@@ -63,6 +88,18 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
 admin_router = APIRouter(prefix="/admin/assistant", tags=["assistant-admin"])
 
 
+@dataclass(frozen=True)
+class PreparedAssistantExecution:
+    user: AssistantPromptUser
+    agent_definition: ManagedAssistantAgent | None
+    provider_name: str
+    model_name: str
+    runtime_warnings: tuple[str, ...]
+    prompt_context: AssistantPromptEnvelope
+    action_runtime_result: AssistantActionRuntimeResult
+    conversation: AssistantConversation
+
+
 def get_assistant_service(db: Session) -> AssistantService:
     return AssistantService(db)
 
@@ -75,6 +112,31 @@ def get_assistant_settings() -> AssistantRuntimeSettingsOut:
 @router.get("/agents", response_model=list[AssistantAgentOut])
 def list_assistant_agents(db: Session = Depends(get_db)) -> list[AssistantAgentOut]:
     return [to_public_agent_out(record) for record in list_public_agent_records(db)]
+
+
+@router.get("/conversations", response_model=list[AssistantConversationSummaryOut])
+def list_current_user_assistant_conversations(
+    request: Request,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[AssistantConversationSummaryOut]:
+    user = _resolve_prompt_user(request, db)
+    return [
+        to_assistant_conversation_summary_out(record)
+        for record in list_assistant_conversations(db, limit=limit, offset=offset, user_id=user.user_id)
+    ]
+
+
+@router.get("/conversations/{conversation_id}", response_model=AssistantConversationOut)
+def get_current_user_assistant_conversation(
+    conversation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantConversationOut:
+    user = _resolve_prompt_user(request, db)
+    record = _resolve_accessible_conversation(db, conversation_id, user)
+    return to_assistant_conversation_out(db, record)
 
 
 @router.get("/runs", response_model=list[AssistantRunSummaryOut])
@@ -106,6 +168,77 @@ def get_current_user_assistant_run(
     return to_assistant_run_out(record)
 
 
+@router.get("/action-requests/{action_request_id}", response_model=AssistantActionRequestOut)
+def get_current_user_assistant_action_request(
+    action_request_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantActionRequestOut:
+    user = _resolve_prompt_user(request, db)
+    record = _resolve_accessible_action_request(db, action_request_id, user)
+    return to_action_request_out(record)
+
+
+@router.get("/action-requests", response_model=list[AssistantActionRequestOut])
+def list_current_user_assistant_action_requests(
+    request: Request,
+    status: str | None = None,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[AssistantActionRequestOut]:
+    user = _resolve_prompt_user(request, db)
+    return to_action_request_out_list(
+        list_action_requests(
+            db,
+            limit=limit,
+            offset=offset,
+            user_id=user.user_id,
+            status=status,
+        )
+    )
+
+
+@router.post("/action-requests/{action_request_id}/approve", response_model=AssistantActionRequestOut)
+def approve_current_user_assistant_action_request(
+    action_request_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantActionRequestOut:
+    user = _resolve_prompt_user(request, db)
+    record = _resolve_accessible_action_request(db, action_request_id, user)
+    try:
+        return to_action_request_out(
+            approve_action_request(
+                db=db,
+                record=record,
+                actor_id=user.user_id,
+            )
+        )
+    except AssistantActionRequestError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+
+
+@router.post("/action-requests/{action_request_id}/reject", response_model=AssistantActionRequestOut)
+def reject_current_user_assistant_action_request(
+    action_request_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantActionRequestOut:
+    user = _resolve_prompt_user(request, db)
+    record = _resolve_accessible_action_request(db, action_request_id, user)
+    try:
+        return to_action_request_out(
+            reject_action_request(
+                db=db,
+                record=record,
+                actor_id=user.user_id,
+            )
+        )
+    except AssistantActionRequestError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+
+
 @router.post("/context", response_model=AssistantPromptContextOut)
 def preview_assistant_prompt_context(
     payload: AssistantPromptContextRequest,
@@ -120,14 +253,6 @@ def preview_assistant_prompt_context(
         user=user,
         db=db,
         agent_definition=agent_definition,
-    )
-    prompt_context = _apply_live_tool_result(
-        prompt_context,
-        execute_live_tools(
-            payload=payload,
-            db=db,
-            agent_definition=agent_definition,
-        ),
     )
     return AssistantPromptContextOut(
         agent_id=prompt_context.agent_id,
@@ -147,98 +272,71 @@ async def respond_with_assistant(
     request: Request,
     db: Session = Depends(get_db),
 ) -> AssistantPromptResponse:
-    service = get_assistant_service(db)
-    user: AssistantPromptUser | None = None
-    agent_definition: ManagedAssistantAgent | None = None
-    prompt_context = None
-    live_tool_result = None
-    provider_name: str | None = None
-    model_name: str | None = None
-    runtime_warnings: list[str] = []
+    prepared: PreparedAssistantExecution | None = None
     try:
-        agent_definition = _resolve_agent_definition_for_request(db, payload)
-        user = _resolve_prompt_user(request, db)
-        provider_config, model_name, runtime_warnings = resolve_effective_runtime(payload, agent_definition)
-        provider_name = provider_config.provider
-        prompt_context = build_prompt_context(
-            payload=payload,
-            user=user,
-            db=db,
-            agent_definition=agent_definition,
-        )
-        live_tool_result = execute_live_tools(
+        prepared = _prepare_assistant_execution(payload, request, db)
+        response, _ = await _execute_assistant_request(
             payload=payload,
             db=db,
-            agent_definition=agent_definition,
+            prepared=prepared,
         )
-        prompt_context = _apply_live_tool_result(prompt_context, live_tool_result)
-        response = await service.generate_response(
-            payload,
-            agent_definition=agent_definition,
-            prompt_context=prompt_context,
-        )
-        if not isinstance(response, AssistantPromptResponse):
-            response = AssistantPromptResponse.model_validate(response)
-        response.tool_calls = _merge_tool_calls(response.tool_calls, live_tool_result.traces)
-        run_record = create_assistant_run(
-            db=db,
-            status="COMPLETED",
-            user_id=user.user_id,
-            session_id=user.session_id,
-            user_role=user.role,
-            workspace=payload.workspace,
-            agent_id=response.agent_id,
-            agent_name=response.agent_name,
-            provider=response.provider,
-            model=response.model,
-            use_live_tools=payload.use_live_tools,
-            request_messages=payload.messages,
-            application_context=payload.context,
-            prompt_sections=[_to_prompt_section_out(section) for section in prompt_context.sections],
-            rendered_system_prompt=prompt_context.system_prompt,
-            warnings=response.warnings,
-            tool_calls=response.tool_calls,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            assistant_message=response.message.content,
-        )
-        return attach_run_metadata(response, run_record)
+        return response
     except AssistantServiceError as exc:
-        if user is not None and prompt_context is not None and provider_name is not None and model_name is not None:
-            combined_warnings = [
-                *runtime_warnings,
-                *prompt_context.warnings,
-                *(live_tool_result.warnings if live_tool_result is not None else ()),
-            ]
-            tool_calls = (
-                _merge_tool_calls([], live_tool_result.traces)
-                if live_tool_result is not None
-                else []
-            )
-            create_assistant_run(
+        if prepared is not None:
+            _record_failed_assistant_execution(
+                payload=payload,
                 db=db,
-                status="FAILED",
-                user_id=user.user_id,
-                session_id=user.session_id,
-                user_role=user.role,
-                workspace=payload.workspace,
-                agent_id=prompt_context.agent_id,
-                agent_name=prompt_context.agent_name,
-                provider=provider_name,
-                model=model_name,
-                use_live_tools=payload.use_live_tools,
-                request_messages=payload.messages,
-                application_context=payload.context,
-                prompt_sections=[_to_prompt_section_out(section) for section in prompt_context.sections],
-                rendered_system_prompt=prompt_context.system_prompt,
-                warnings=combined_warnings,
-                tool_calls=tool_calls,
-                input_tokens=None,
-                output_tokens=None,
-                assistant_message=None,
-                error_detail=exc.detail,
+                prepared=prepared,
+                detail=exc.detail,
             )
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/respond/stream")
+async def stream_assistant_response(
+    payload: AssistantPromptRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    prepared = _prepare_assistant_execution(payload, request, db)
+
+    async def event_stream():
+        yield _encode_sse(
+            "conversation",
+            to_assistant_conversation_summary_out(prepared.conversation).model_dump(mode="json"),
+        )
+        yield _encode_sse("status", {"phase": "running"})
+        try:
+            response, _ = await _execute_assistant_request(
+                payload=payload,
+                db=db,
+                prepared=prepared,
+            )
+        except AssistantServiceError as exc:
+            _record_failed_assistant_execution(
+                payload=payload,
+                db=db,
+                prepared=prepared,
+                detail=exc.detail,
+            )
+            yield _encode_sse("error", {"detail": exc.detail})
+            return
+
+        metadata_payload = response.model_dump(mode="json")
+        metadata_payload["message"]["content"] = ""
+        yield _encode_sse("assistant.metadata", metadata_payload)
+        for chunk in _iter_text_chunks(response.message.content):
+            yield _encode_sse("assistant.delta", {"delta": chunk})
+        yield _encode_sse("assistant.complete", response.model_dump(mode="json"))
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @admin_router.get("/agents", response_model=list[AssistantAgentAdminOut])
@@ -256,6 +354,27 @@ def list_admin_assistant_runs(
         to_assistant_run_summary_out(record)
         for record in list_assistant_runs(db, limit=limit, offset=offset)
     ]
+
+
+@admin_router.get("/action-requests", response_model=list[AssistantActionRequestOut])
+def list_admin_assistant_action_requests(
+    request: Request,
+    status: str | None = None,
+    limit: int = ADMIN_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[AssistantActionRequestOut]:
+    user = _resolve_prompt_user(request, db)
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+    return to_action_request_out_list(
+        list_action_requests(
+            db,
+            limit=limit,
+            offset=offset,
+            status=status,
+        )
+    )
 
 
 @admin_router.post("/agents", response_model=AssistantAgentAdminOut, status_code=status.HTTP_201_CREATED)
@@ -379,53 +498,262 @@ def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSe
     )
 
 
-def _apply_live_tool_result(prompt_context, live_tool_result):
-    if not live_tool_result.sections and not live_tool_result.warnings:
+def _apply_prompt_enrichment(
+    prompt_context,
+    *,
+    sections: tuple[AssistantPromptSection, ...],
+    warnings: tuple[str, ...],
+):
+    if not sections and not warnings:
         return prompt_context
 
-    sections = (*prompt_context.sections, *live_tool_result.sections)
-    warnings = (*prompt_context.warnings, *live_tool_result.warnings)
+    next_sections = (*prompt_context.sections, *sections)
+    next_warnings = (*prompt_context.warnings, *warnings)
     return prompt_context.__class__(
         generated_at=prompt_context.generated_at,
         agent_id=prompt_context.agent_id,
         agent_name=prompt_context.agent_name,
-        system_prompt=render_prompt_sections(sections),
-        sections=sections,
-        warnings=warnings,
+        system_prompt=render_prompt_sections(next_sections),
+        sections=next_sections,
+        warnings=next_warnings,
     )
 
 
-def _merge_tool_calls(existing_tool_calls, prefetched_traces):
-    merged_tool_calls = [trace.to_out() for trace in prefetched_traces]
-    prefetched_tool_names = {tool_call.tool_name for tool_call in merged_tool_calls}
+def _resolve_accessible_action_request(
+    db: Session,
+    action_request_id: int,
+    user: AssistantPromptUser,
+):
+    record = get_action_request(db, action_request_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant action request not found")
+    if record.user_id != user.user_id and not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="You do not have access to this assistant action request")
+    return record
 
-    deduped_tool_calls = []
-    seen: set[tuple[str, str, str]] = set()
-    for tool_call in merged_tool_calls:
-        signature = (
-            tool_call.tool_name,
-            json.dumps(tool_call.arguments, sort_keys=True),
-            tool_call.summary,
+
+def _resolve_accessible_conversation(
+    db: Session,
+    conversation_id: int,
+    user: AssistantPromptUser,
+) -> AssistantConversation:
+    record = get_assistant_conversation(db, conversation_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant conversation not found")
+    if record.user_id != user.user_id and not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="You do not have access to this assistant conversation")
+    return record
+
+
+def _prepare_assistant_execution(
+    payload: AssistantPromptRequest,
+    request: Request,
+    db: Session,
+) -> PreparedAssistantExecution:
+    agent_definition = _resolve_agent_definition_for_request(db, payload)
+    user = _resolve_prompt_user(request, db)
+    provider_config, model_name, runtime_warnings = resolve_effective_runtime(payload, agent_definition)
+    conversation = _resolve_conversation_for_request(
+        db=db,
+        payload=payload,
+        user=user,
+        agent_definition=agent_definition,
+        provider_name=provider_config.provider,
+        model_name=model_name,
+    )
+    prompt_context = build_prompt_context(
+        payload=payload,
+        user=user,
+        db=db,
+        agent_definition=agent_definition,
+    )
+    action_runtime_result = plan_action_requests(
+        payload=payload,
+        db=db,
+        agent_definition=agent_definition,
+    )
+    prompt_context = _apply_prompt_enrichment(
+        prompt_context,
+        sections=action_runtime_result.sections,
+        warnings=action_runtime_result.warnings,
+    )
+    return PreparedAssistantExecution(
+        user=user,
+        agent_definition=agent_definition,
+        provider_name=provider_config.provider,
+        model_name=model_name,
+        runtime_warnings=tuple(runtime_warnings),
+        prompt_context=prompt_context,
+        action_runtime_result=action_runtime_result,
+        conversation=conversation,
+    )
+
+
+async def _execute_assistant_request(
+    *,
+    payload: AssistantPromptRequest,
+    db: Session,
+    prepared: PreparedAssistantExecution,
+) -> tuple[AssistantPromptResponse, AssistantConversation]:
+    service = get_assistant_service(db)
+    response = await service.generate_response(
+        payload,
+        agent_definition=prepared.agent_definition,
+        prompt_context=prepared.prompt_context,
+    )
+    if not isinstance(response, AssistantPromptResponse):
+        response = AssistantPromptResponse.model_validate(response)
+
+    run_record = create_assistant_run(
+        db=db,
+        conversation_id=prepared.conversation.id,
+        status="COMPLETED",
+        user_id=prepared.user.user_id,
+        session_id=prepared.user.session_id,
+        user_role=prepared.user.role,
+        workspace=payload.workspace,
+        agent_id=response.agent_id,
+        agent_name=response.agent_name,
+        provider=response.provider,
+        model=response.model,
+        use_live_tools=payload.use_live_tools,
+        request_messages=payload.messages,
+        application_context=payload.context,
+        prompt_sections=[_to_prompt_section_out(section) for section in prepared.prompt_context.sections],
+        rendered_system_prompt=prepared.prompt_context.system_prompt,
+        warnings=response.warnings,
+        tool_calls=response.tool_calls,
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+        assistant_message=response.message.content,
+    )
+
+    response.action_requests = to_action_request_out_list(
+        create_action_requests(
+            db=db,
+            run_id=run_record.id,
+            user_id=prepared.user.user_id,
+            session_id=prepared.user.session_id,
+            workspace=payload.workspace,
+            agent_id=response.agent_id,
+            agent_name=response.agent_name,
+            proposals=prepared.action_runtime_result.proposals,
         )
-        if signature in seen:
-            continue
-        seen.add(signature)
-        deduped_tool_calls.append(tool_call)
+    )
 
-    for tool_call in existing_tool_calls:
-        if tool_call.tool_name in prefetched_tool_names:
-            continue
-        signature = (
-            tool_call.tool_name,
-            json.dumps(tool_call.arguments, sort_keys=True),
-            tool_call.summary,
-        )
-        if signature in seen:
-            continue
-        seen.add(signature)
-        deduped_tool_calls.append(tool_call)
+    updated_conversation = update_assistant_conversation_after_run(
+        db=db,
+        record=prepared.conversation,
+        run_record=run_record,
+        workspace=payload.workspace,
+        agent_id=response.agent_id,
+        agent_name=response.agent_name,
+        provider=response.provider,
+        model=response.model,
+        use_live_tools=payload.use_live_tools,
+        latest_user_message=_latest_request_user_message(payload),
+        latest_assistant_message=response.message.content,
+    )
 
-    return deduped_tool_calls
+    response = attach_run_metadata(response, run_record)
+    response.conversation_id = updated_conversation.id
+    response.conversation_updated_at = updated_conversation.updated_at
+    return response, updated_conversation
+
+
+def _record_failed_assistant_execution(
+    *,
+    payload: AssistantPromptRequest,
+    db: Session,
+    prepared: PreparedAssistantExecution,
+    detail: str,
+) -> None:
+    run_record = create_assistant_run(
+        db=db,
+        conversation_id=prepared.conversation.id,
+        status="FAILED",
+        user_id=prepared.user.user_id,
+        session_id=prepared.user.session_id,
+        user_role=prepared.user.role,
+        workspace=payload.workspace,
+        agent_id=prepared.prompt_context.agent_id,
+        agent_name=prepared.prompt_context.agent_name,
+        provider=prepared.provider_name,
+        model=prepared.model_name,
+        use_live_tools=payload.use_live_tools,
+        request_messages=payload.messages,
+        application_context=payload.context,
+        prompt_sections=[_to_prompt_section_out(section) for section in prepared.prompt_context.sections],
+        rendered_system_prompt=prepared.prompt_context.system_prompt,
+        warnings=[*prepared.runtime_warnings, *prepared.prompt_context.warnings],
+        tool_calls=[],
+        input_tokens=None,
+        output_tokens=None,
+        assistant_message=None,
+        error_detail=detail,
+    )
+    update_assistant_conversation_after_run(
+        db=db,
+        record=prepared.conversation,
+        run_record=run_record,
+        workspace=payload.workspace,
+        agent_id=prepared.prompt_context.agent_id,
+        agent_name=prepared.prompt_context.agent_name,
+        provider=prepared.provider_name,
+        model=prepared.model_name,
+        use_live_tools=payload.use_live_tools,
+        latest_user_message=_latest_request_user_message(payload),
+        latest_assistant_message=detail,
+    )
+
+
+def _resolve_conversation_for_request(
+    *,
+    db: Session,
+    payload: AssistantPromptRequest,
+    user: AssistantPromptUser,
+    agent_definition: ManagedAssistantAgent | None,
+    provider_name: str,
+    model_name: str,
+) -> AssistantConversation:
+    if payload.conversation_id is not None:
+        conversation = get_assistant_conversation(db, payload.conversation_id)
+        if conversation is None:
+            raise AssistantServiceError(status_code=404, detail="Assistant conversation not found")
+        if conversation.user_id != user.user_id and not is_admin_role(user.role):
+            raise AssistantServiceError(status_code=403, detail="You do not have access to this assistant conversation")
+        return conversation
+
+    return create_assistant_conversation(
+        db=db,
+        user_id=user.user_id,
+        session_id=user.session_id,
+        user_role=user.role,
+        workspace=payload.workspace,
+        agent_id=agent_definition.agent_id if agent_definition is not None else None,
+        agent_name=agent_definition.name if agent_definition is not None else None,
+        provider=provider_name,
+        model=model_name,
+        use_live_tools=payload.use_live_tools,
+        title=_latest_request_user_message(payload) or "New conversation",
+    )
+
+
+def _latest_request_user_message(payload: AssistantPromptRequest) -> str | None:
+    for message in reversed(payload.messages):
+        if message.role == "user":
+            return message.content
+    return None
+
+
+def _iter_text_chunks(text: str, chunk_size: int = 160) -> list[str]:
+    if not text:
+        return []
+    return [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)]
+
+
+def _encode_sse(event: str, payload: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 
 def _resolve_allowed_tools(

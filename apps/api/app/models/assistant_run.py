@@ -13,6 +13,7 @@ class AssistantRun(Base):
     __tablename__ = "assistant_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     user_id: Mapped[str] = mapped_column(String(128), nullable=False)
     session_id: Mapped[str] = mapped_column(String(128), nullable=False)

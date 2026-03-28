@@ -60,18 +60,18 @@ Use Dashboard when you want a quick operational picture.
 - highlights current system health
 - surfaces recent trade activity and event flow
 - summarizes exposure without forcing users into raw tables first
-- includes a trade capture path for fast entry
 
 ### Trades
 
-Use Trades when you are working on one deal at a time.
+Use Trades when you need to capture a deal or work on one that already exists.
 
+- capture a new trade
 - select a trade from the list
 - inspect the current state
 - switch between overview, events, amend, and risk tabs
 - cancel or amend a trade without leaving the workspace
 
-This is the main lifecycle workspace once trades already exist.
+This is the main lifecycle workspace for both entry and follow-on changes.
 
 ### Events
 
@@ -160,7 +160,7 @@ For the exact local commands, start with
 
 ### 2. Capture A Trade
 
-You can start from Dashboard or Trades.
+Start from Trades.
 
 - choose the book and commodity
 - fill in core header fields such as counterparty, portfolio, pricing status,

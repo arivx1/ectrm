@@ -29,6 +29,11 @@ import {
 } from './shared/mutation'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
+import {
+  buildAmendTradeSubmission,
+  buildCreateTradeSubmission,
+  previewTradeAmendment,
+} from './features/trades/tradeEventPayloads'
 import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import {
   type CounterpartyRecord,
@@ -42,26 +47,23 @@ import {
   type PriceIndexRecord,
   type ReferenceRecord,
   type Trade,
-  type TradeLegDraft,
   type TradingSourceRecord,
   type UnitRecord,
   type ViewKey,
   type WeatherSyncStatusRecord,
 } from './shared/models'
-import { formatCommodityClass, formatDate, formatMoney, formatNumber, parseRequiredNumber, statusTone } from './shared/format'
+import { formatCommodityClass, formatDate, formatMoney, formatNumber, statusTone } from './shared/format'
 import { classForCommodity } from './shared/reference'
 import {
   commodityClassOrder,
   pricingTypeOptions,
   pricingStatusOptions,
-  pricingTypeRequiresPriceIndex,
   settlementStatusOptions,
   tradeAggregateType,
   tradeNatureOptions,
   tradeSideOptions,
   tradeStatusValues,
   tradeStructureOptions,
-  tradeStructureSupportsLegs,
 } from './shared/trading'
 import { Tooltip } from './shared/ui/Tooltip'
 
@@ -581,6 +583,7 @@ export default function App() {
     priceIndices,
     activeCounterparties,
     activePortfolios,
+    activeUnits,
   )
   const amendForm = useTradeAmendForm(
     selectedTrade,
@@ -591,6 +594,7 @@ export default function App() {
     priceIndices,
     activeCounterparties,
     activePortfolios,
+    activeUnits,
   )
 
   const {
@@ -616,10 +620,13 @@ export default function App() {
     setPriceInput,
     volumeInput,
     setVolumeInput,
+    qualitySpecInput,
+    setQualitySpecInput,
+    unitInput,
+    setUnitInput,
     externalTradeIdInput,
     setExternalTradeIdInput,
     sourceSystemInput,
-    setSourceSystemInput,
     executionTimestampInput,
     setExecutionTimestampInput,
     portfolioInput,
@@ -632,14 +639,17 @@ export default function App() {
     setSettlementStatusInput,
     traderUserInput,
     setTraderUserInput,
+    duplicateSourceTradeId,
     createLegs,
     createCommodityOptions,
     createPriceIndexOptions,
+    createUnitOptions,
     createPortfolioOptions,
     createCounterpartyOptions,
     updateDraftLeg: updateCreateDraftLeg,
     addDraftLeg: addCreateDraftLeg,
     removeDraftLeg: removeCreateDraftLeg,
+    duplicateFromTrade,
     reset: resetCreateForm,
   } = captureForm
 
@@ -647,9 +657,12 @@ export default function App() {
     amendExternalTradeIdInput,
     setAmendExternalTradeIdInput,
     amendSourceSystemInput,
-    setAmendSourceSystemInput,
     amendExecutionTimestampInput,
     setAmendExecutionTimestampInput,
+    amendQualitySpecInput,
+    setAmendQualitySpecInput,
+    amendUnitInput,
+    setAmendUnitInput,
     amendTradeNatureInput,
     setAmendTradeNatureInput,
     amendTradeStructureInput,
@@ -686,10 +699,85 @@ export default function App() {
     amendCounterpartyOptions,
     amendCommodityOptions,
     amendPriceIndexOptions,
+    amendUnitOptions,
     updateDraftLeg: updateAmendDraftLeg,
     addDraftLeg: addAmendDraftLeg,
     removeDraftLeg: removeAmendDraftLeg,
   } = amendForm
+
+  const amendmentPreview = useMemo(() => {
+    if (!selectedTrade) {
+      return {
+        payload: {},
+        changedFields: [],
+        validationError: null,
+      }
+    }
+
+    return previewTradeAmendment(selectedTrade, selectedTradeEvents, {
+      externalTradeId: amendExternalTradeIdInput,
+      sourceSystem: amendSourceSystemInput,
+      executionTimestamp: amendExecutionTimestampInput,
+      qualitySpec: amendQualitySpecInput,
+      unitOfMeasure: amendUnitInput,
+      tradeNature: amendTradeNatureInput,
+      tradeStructure: amendTradeStructureInput,
+      tradeSide: amendTradeSideInput,
+      book: amendBookInput,
+      portfolio: amendPortfolioInput,
+      counterparty: amendCounterpartyInput,
+      commodityClass: amendCommodityClassInput,
+      commodity: amendCommodityInput,
+      pricingType: amendPricingTypeInput,
+      pricingStatus: amendPricingStatusInput,
+      priceIndexCode: amendPriceIndexInput,
+      priceInput: amendPriceInput,
+      volumeInput: amendVolumeInput,
+      settlementStatus: amendSettlementStatusInput,
+      traderUser: amendTraderUserInput,
+      legs: amendLegs,
+    })
+  }, [
+    amendBookInput,
+    amendCommodityClassInput,
+    amendCommodityInput,
+    amendCounterpartyInput,
+    amendExecutionTimestampInput,
+    amendExternalTradeIdInput,
+    amendQualitySpecInput,
+    amendLegs,
+    amendPortfolioInput,
+    amendPriceIndexInput,
+    amendPriceInput,
+    amendPricingStatusInput,
+    amendPricingTypeInput,
+    amendSettlementStatusInput,
+    amendSourceSystemInput,
+    amendTradeNatureInput,
+    amendTradeSideInput,
+    amendTradeStructureInput,
+    amendTraderUserInput,
+    amendUnitInput,
+    amendVolumeInput,
+    selectedTrade,
+    selectedTradeEvents,
+  ])
+
+  const cancelImpactSummary = useMemo(() => {
+    if (!selectedTrade) {
+      return ''
+    }
+
+    if (selectedTrade.trade_structure === 'SWAP') {
+      return `This appends a TradeCancelled event and removes the trade's remaining leg-defined exposure from ${selectedTrade.book}.`
+    }
+
+    if (selectedTrade.volume === null) {
+      return `This appends a TradeCancelled event and clears the trade from active exposure in ${selectedTrade.book}.`
+    }
+
+    return `This appends a TradeCancelled event and removes ${selectedTrade.trade_side ?? 'BUY'} ${formatNumber(Math.abs(selectedTrade.volume), 0)} ${selectedTrade.commodity} from active exposure in ${selectedTrade.book}.`
+  }, [selectedTrade])
 
   const referenceState = useReferenceDataController({
     apiBase: appConfig.apiBase,
@@ -791,157 +879,55 @@ export default function App() {
     }
   }
 
-  function normalizeOptionalDateTimeInput(value: string): string | null {
-    const trimmedValue = value.trim()
-    if (!trimmedValue) {
-      return null
-    }
-
-    const parsedValue = new Date(trimmedValue)
-    if (Number.isNaN(parsedValue.getTime())) {
-      throw new Error('Execution timestamp must be a valid date and time.')
-    }
-
-    return parsedValue.toISOString()
-  }
-
-  function buildTradePayload(input: {
-    externalTradeId: string
-    sourceSystem: string
-    executionTimestamp: string
-    tradeNature: string
-    tradeStructure: string
-    tradeSide: string
-    book: string
-    portfolio: string
-    counterparty: string
-    commodityClass: string
-    commodity: string
-    pricingType: string
-    pricingStatus: string
-    priceIndexCode: string
-    price: number | null
-    volume: number | null
-    settlementStatus: string
-    traderUser: string
-    legs: TradeLegDraft[]
-  }) {
-    const payload: Record<string, unknown> = {
-      external_trade_id: input.externalTradeId.trim() || null,
-      source_system: input.sourceSystem.trim() || null,
-      execution_timestamp: normalizeOptionalDateTimeInput(input.executionTimestamp),
-      trade_nature: input.tradeNature,
-      trade_structure: input.tradeStructure,
-      book: input.book,
-      portfolio: input.portfolio || null,
-      counterparty: input.counterparty || null,
-      commodity_class: input.commodityClass,
-      commodity: input.commodity,
-      pricing_type: input.pricingType,
-      pricing_status: input.pricingStatus,
-      price: input.price,
-      volume: input.volume,
-      settlement_status: input.settlementStatus,
-      trader_user: input.traderUser.trim() || null,
-    }
-
-    if (tradeStructureSupportsLegs(input.tradeStructure)) {
-      payload.legs = input.legs.map((leg, index) => ({
-        leg_no: index + 1,
-        side: leg.side,
-        commodity_class: leg.commodity_class,
-        commodity: leg.commodity,
-        volume: parseRequiredNumber(leg.volume),
-      }))
-    } else {
-      payload.trade_side = input.tradeSide
-    }
-
-    if (pricingTypeRequiresPriceIndex(input.pricingType)) {
-      payload.price_index_code = input.priceIndexCode
-    }
-
-    return payload
-  }
-
   async function handleCreateTrade(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setCreateError('')
+    const submission = buildCreateTradeSubmission({
+      tradeId: tradeIdInput,
+      externalTradeId: externalTradeIdInput,
+      sourceSystem: sourceSystemInput,
+      executionTimestamp: executionTimestampInput,
+      qualitySpec: qualitySpecInput,
+      unitOfMeasure: unitInput,
+      tradeNature: tradeNatureInput,
+      tradeStructure: tradeStructureInput,
+      tradeSide: tradeSideInput,
+      book: bookInput,
+      portfolio: portfolioInput,
+      counterparty: counterpartyInput,
+      commodityClass: commodityClassInput,
+      commodity: commodityInput,
+      pricingType: pricingTypeInput,
+      pricingStatus: pricingStatusInput,
+      priceIndexCode: priceIndexInput,
+      priceInput,
+      volumeInput,
+      settlementStatus: settlementStatusInput,
+      traderUser: traderUserInput,
+      legs: createLegs,
+    })
 
-    const tradeId = tradeIdInput.trim()
-    const externalTradeId = externalTradeIdInput
-    const sourceSystem = sourceSystemInput
-    const executionTimestamp = executionTimestampInput
-    const tradeNature = tradeNatureInput
-    const tradeStructure = tradeStructureInput
-    const tradeSide = tradeSideInput
-    const book = bookInput
-    const portfolio = portfolioInput
-    const counterparty = counterpartyInput
-    const commodityClass = commodityClassInput
-    const commodity = commodityInput.trim()
-    const pricingType = pricingTypeInput
-    const pricingStatus = pricingStatusInput
-    const priceIndexCode = priceIndexInput
-    const price = parseRequiredNumber(priceInput)
-    const volume = parseRequiredNumber(volumeInput)
-    const settlementStatus = settlementStatusInput
-    const traderUser = traderUserInput
-
-    if (!tradeId || !book || !commodityClass || !commodity || price === null || volume === null) {
-      setCreateError('Trade ID, book, commodity class, commodity, price, and volume are required.')
+    if (submission.validationError) {
+      setCreateError(submission.validationError)
       return
     }
-    if (pricingTypeRequiresPriceIndex(pricingType) && !priceIndexCode) {
-      setCreateError('Price index is required when pricing type is INDEX or HYBRID.')
-      return
-    }
-    if (tradeStructureSupportsLegs(tradeStructure)) {
-      const validLegs = createLegs.filter(
-        (leg) =>
-          leg.commodity_class &&
-          leg.commodity &&
-          leg.volume.trim() !== '' &&
-          parseRequiredNumber(leg.volume) !== null,
-      )
-      if (validLegs.length < 2) {
-        setCreateError('Swap trades require at least two complete legs.')
-        return
-      }
+
+    if (!tradeIdInput.trim()) {
+      setTradeIdInput(submission.tradeId)
     }
 
     setSubmitting(true)
 
     try {
       await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: tradeId,
+        aggregate_id: submission.tradeId,
         event_type: 'TradeCreated',
-        payload: buildTradePayload({
-          externalTradeId,
-          sourceSystem,
-          executionTimestamp,
-          tradeNature,
-          tradeStructure,
-          tradeSide,
-          book,
-          portfolio,
-          counterparty,
-          commodityClass,
-          commodity,
-          pricingType,
-          pricingStatus,
-          priceIndexCode,
-          price,
-          volume,
-          settlementStatus,
-          traderUser,
-          legs: createLegs,
-        }),
+        payload: submission.payload,
       })
 
       await loadData()
-      navigateToTrade(tradeId)
+      navigateToTrade(submission.tradeId)
       resetCreateForm()
       setCreateError('')
     } catch (err) {
@@ -951,55 +937,55 @@ export default function App() {
     }
   }
 
+  function handleDuplicateTrade() {
+    if (!selectedTrade) {
+      return
+    }
+
+    duplicateFromTrade(selectedTrade, selectedTradeEvents)
+    setError('')
+    setCreateError('')
+    setAmendError('')
+    navigateToView('trades')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function handleAmendTrade(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setAmendError('')
 
-    if (!selectedTradeId) {
+    if (!selectedTradeId || !selectedTrade) {
       setAmendError('Select a trade first.')
       return
     }
+    const submission = buildAmendTradeSubmission(selectedTrade, selectedTradeEvents, {
+      externalTradeId: amendExternalTradeIdInput,
+      sourceSystem: amendSourceSystemInput,
+      executionTimestamp: amendExecutionTimestampInput,
+      qualitySpec: amendQualitySpecInput,
+      unitOfMeasure: amendUnitInput,
+      tradeNature: amendTradeNatureInput,
+      tradeStructure: amendTradeStructureInput,
+      tradeSide: amendTradeSideInput,
+      book: amendBookInput,
+      portfolio: amendPortfolioInput,
+      counterparty: amendCounterpartyInput,
+      commodityClass: amendCommodityClassInput,
+      commodity: amendCommodityInput,
+      pricingType: amendPricingTypeInput,
+      pricingStatus: amendPricingStatusInput,
+      priceIndexCode: amendPriceIndexInput,
+      priceInput: amendPriceInput,
+      volumeInput: amendVolumeInput,
+      settlementStatus: amendSettlementStatusInput,
+      traderUser: amendTraderUserInput,
+      legs: amendLegs,
+    })
 
-    const externalTradeId = amendExternalTradeIdInput
-    const sourceSystem = amendSourceSystemInput
-    const executionTimestamp = amendExecutionTimestampInput
-    const tradeNature = amendTradeNatureInput
-    const tradeStructure = amendTradeStructureInput
-    const tradeSide = amendTradeSideInput
-    const book = amendBookInput
-    const portfolio = amendPortfolioInput
-    const counterparty = amendCounterpartyInput
-    const commodityClass = amendCommodityClassInput
-    const commodity = amendCommodityInput.trim()
-    const pricingType = amendPricingTypeInput
-    const pricingStatus = amendPricingStatusInput
-    const priceIndexCode = amendPriceIndexInput
-    const price = parseRequiredNumber(amendPriceInput)
-    const volume = parseRequiredNumber(amendVolumeInput)
-    const settlementStatus = amendSettlementStatusInput
-    const traderUser = amendTraderUserInput
-
-    if (!book || !commodityClass || !commodity || price === null || volume === null) {
-      setAmendError('Book, commodity class, commodity, price, and volume are required.')
+    if (submission.validationError) {
+      setAmendError(submission.validationError)
       return
-    }
-    if (pricingTypeRequiresPriceIndex(pricingType) && !priceIndexCode) {
-      setAmendError('Price index is required when pricing type is INDEX or HYBRID.')
-      return
-    }
-    if (tradeStructureSupportsLegs(tradeStructure)) {
-      const validLegs = amendLegs.filter(
-        (leg) =>
-          leg.commodity_class &&
-          leg.commodity &&
-          leg.volume.trim() !== '' &&
-          parseRequiredNumber(leg.volume) !== null,
-      )
-      if (validLegs.length < 2) {
-        setAmendError('Swap trades require at least two complete legs.')
-        return
-      }
     }
 
     setAmending(true)
@@ -1008,27 +994,7 @@ export default function App() {
       await submitTradeEvent(appConfig.apiBase, {
         aggregate_id: selectedTradeId,
         event_type: 'TradeAmended',
-        payload: buildTradePayload({
-          externalTradeId,
-          sourceSystem,
-          executionTimestamp,
-          tradeNature,
-          tradeStructure,
-          tradeSide,
-          book,
-          portfolio,
-          counterparty,
-          commodityClass,
-          commodity,
-          pricingType,
-          pricingStatus,
-          priceIndexCode,
-          price,
-          volume,
-          settlementStatus,
-          traderUser,
-          legs: amendLegs,
-        }),
+        payload: submission.payload,
       })
 
       await loadData()
@@ -1041,12 +1007,17 @@ export default function App() {
     }
   }
 
-  async function handleCancelTrade() {
+  async function handleCancelTrade(reason: string) {
     setError('')
     setAmendError('')
 
     if (!selectedTradeId) {
       setAmendError('Select a trade first.')
+      return
+    }
+
+    if (!reason.trim()) {
+      setAmendError('Cancellation reason is required.')
       return
     }
 
@@ -1056,7 +1027,10 @@ export default function App() {
       await submitTradeEvent(appConfig.apiBase, {
         aggregate_id: selectedTradeId,
         event_type: 'TradeCancelled',
-        payload: { status: tradeStatusValues.cancelled },
+        payload: {
+          status: tradeStatusValues.cancelled,
+          cancellation_reason: reason.trim(),
+        },
       })
 
       await loadData()
@@ -1066,6 +1040,75 @@ export default function App() {
     } finally {
       setCancelling(false)
     }
+  }
+
+  const tradeCaptureFormProps = {
+    onSubmit: handleCreateTrade,
+    tradeIdInput,
+    setTradeIdInput,
+    tradeNatureInput,
+    setTradeNatureInput,
+    tradeStructureInput,
+    setTradeStructureInput,
+    tradeSideInput,
+    setTradeSideInput,
+    bookInput,
+    setBookInput,
+    activeBooks,
+    commodityClassInput,
+    setCommodityClassInput,
+    commodityClassOptions,
+    commodityInput,
+    setCommodityInput,
+    createCommodityOptions,
+    pricingTypeInput,
+    setPricingTypeInput,
+    pricingStatusInput,
+    setPricingStatusInput,
+    priceIndexInput,
+    setPriceIndexInput,
+    createPriceIndexOptions,
+    priceInput,
+    setPriceInput,
+    volumeInput,
+    setVolumeInput,
+    qualitySpecInput,
+    setQualitySpecInput,
+    unitInput,
+    setUnitInput,
+    createUnitOptions,
+    externalTradeIdInput,
+    setExternalTradeIdInput,
+    sourceSystemInput,
+    executionTimestampInput,
+    setExecutionTimestampInput,
+    portfolioInput,
+    setPortfolioInput,
+    createPortfolioOptions,
+    counterpartyInput,
+    setCounterpartyInput,
+    createCounterpartyOptions,
+    settlementStatusInput,
+    setSettlementStatusInput,
+    traderUserInput,
+    setTraderUserInput,
+    duplicateSourceTradeId,
+    createLegs,
+    activeCommodities,
+    addDraftLeg: addCreateDraftLeg,
+    removeDraftLeg: removeCreateDraftLeg,
+    updateDraftLeg: updateCreateDraftLeg,
+    submitting,
+    referenceDataLoading,
+    hasReferenceOptions,
+    createError,
+    tradeNatureOptions,
+    tradeStructureOptions,
+    tradeSideOptions,
+    pricingTypeOptions,
+    pricingStatusOptions,
+    settlementStatusOptions,
+    formatCommodityClass,
   }
 
   const heroTitle = {
@@ -1081,9 +1124,9 @@ export default function App() {
   }[currentView]
 
   const heroBody = {
-    dashboard: 'Monitor capture quality, open exposure, and recent activity from a calmer operating surface.',
+    dashboard: 'Monitor system health, open exposure, and recent activity from a calmer operating surface.',
     guide: 'Read the semi-technical operator guide directly in the app, then jump into the workspace you need.',
-    trades: 'Select a trade to inspect its state, review event history, and amend or cancel it without leaving the workspace.',
+    trades: 'Capture a new trade, then inspect its state, review event history, and amend or cancel it without leaving the workspace.',
     events: 'Read the system as a timeline instead of a log table. Filter it down to the selected trade when you need detail.',
     positions: 'Scan live net exposure first, then drop to commodity-level rows when you need exact numbers.',
     reference: 'Maintain books, commodities, and pricing reference data directly in the application, with activation controls and inline editing.',
@@ -1276,67 +1319,7 @@ export default function App() {
 
         {currentView === 'dashboard' && (
           <DashboardWorkspace
-            handleCreateTrade={handleCreateTrade}
-            tradeIdInput={tradeIdInput}
-            setTradeIdInput={setTradeIdInput}
-            tradeNatureInput={tradeNatureInput}
-            setTradeNatureInput={setTradeNatureInput}
-            tradeStructureInput={tradeStructureInput}
-            setTradeStructureInput={setTradeStructureInput}
-            tradeSideInput={tradeSideInput}
-            setTradeSideInput={setTradeSideInput}
-            bookInput={bookInput}
-            setBookInput={setBookInput}
-            activeBooks={activeBooks}
-            commodityClassInput={commodityClassInput}
-            setCommodityClassInput={setCommodityClassInput}
-            commodityClassOptions={commodityClassOptions}
-            commodityInput={commodityInput}
-            setCommodityInput={setCommodityInput}
-            createCommodityOptions={createCommodityOptions}
-          pricingTypeInput={pricingTypeInput}
-          setPricingTypeInput={setPricingTypeInput}
-          pricingStatusInput={pricingStatusInput}
-          setPricingStatusInput={setPricingStatusInput}
-          priceIndexInput={priceIndexInput}
-          setPriceIndexInput={setPriceIndexInput}
-          createPriceIndexOptions={createPriceIndexOptions}
-          priceInput={priceInput}
-          setPriceInput={setPriceInput}
-          volumeInput={volumeInput}
-          setVolumeInput={setVolumeInput}
-          externalTradeIdInput={externalTradeIdInput}
-          setExternalTradeIdInput={setExternalTradeIdInput}
-          sourceSystemInput={sourceSystemInput}
-          setSourceSystemInput={setSourceSystemInput}
-          executionTimestampInput={executionTimestampInput}
-          setExecutionTimestampInput={setExecutionTimestampInput}
-          portfolioInput={portfolioInput}
-          setPortfolioInput={setPortfolioInput}
-          createPortfolioOptions={createPortfolioOptions}
-          counterpartyInput={counterpartyInput}
-          setCounterpartyInput={setCounterpartyInput}
-          createCounterpartyOptions={createCounterpartyOptions}
-          settlementStatusInput={settlementStatusInput}
-          setSettlementStatusInput={setSettlementStatusInput}
-          traderUserInput={traderUserInput}
-          setTraderUserInput={setTraderUserInput}
-          createLegs={createLegs}
-            activeCommodities={activeCommodities}
-            addDraftLeg={addCreateDraftLeg}
-            removeDraftLeg={removeCreateDraftLeg}
-            updateDraftLeg={updateCreateDraftLeg}
-            submitting={submitting}
-            referenceDataLoading={referenceDataLoading}
-            hasReferenceOptions={hasReferenceOptions}
-            createError={createError}
-            tradeNatureOptions={tradeNatureOptions}
-          tradeStructureOptions={tradeStructureOptions}
-          tradeSideOptions={tradeSideOptions}
-          pricingTypeOptions={pricingTypeOptions}
-          pricingStatusOptions={pricingStatusOptions}
-          settlementStatusOptions={settlementStatusOptions}
-          appLoading={appLoading}
+            appLoading={appLoading}
             positionsByClass={positionsByClass}
             events={events}
             formatCommodityClass={formatCommodityClass}
@@ -1347,6 +1330,7 @@ export default function App() {
 
         {currentView === 'trades' && (
           <TradingWorkspace
+            tradeCaptureFormProps={tradeCaptureFormProps}
             trades={trades}
             selectedTrade={selectedTrade}
             selectedTradeId={selectedTradeId}
@@ -1354,14 +1338,21 @@ export default function App() {
             inspectorTab={inspectorTab}
             setSelectedTradeId={setSelectedTradeId}
             setInspectorTab={setInspectorTab}
+            handleDuplicateTrade={handleDuplicateTrade}
             handleAmendTrade={handleAmendTrade}
             handleCancelTrade={handleCancelTrade}
+            amendmentPreviewFields={amendmentPreview.changedFields}
+            cancelImpactSummary={cancelImpactSummary}
             amendExternalTradeIdInput={amendExternalTradeIdInput}
             setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
             amendSourceSystemInput={amendSourceSystemInput}
-            setAmendSourceSystemInput={setAmendSourceSystemInput}
             amendExecutionTimestampInput={amendExecutionTimestampInput}
             setAmendExecutionTimestampInput={setAmendExecutionTimestampInput}
+            amendQualitySpecInput={amendQualitySpecInput}
+            setAmendQualitySpecInput={setAmendQualitySpecInput}
+            amendUnitInput={amendUnitInput}
+            setAmendUnitInput={setAmendUnitInput}
+            amendUnitOptions={amendUnitOptions}
             amendBookInput={amendBookInput}
             setAmendBookInput={setAmendBookInput}
             amendBookOptions={amendBookOptions}
@@ -1475,6 +1466,7 @@ export default function App() {
             onRunEiaSync={handleRunEiaSync}
             onRunNwsWeatherSync={handleRunNwsWeatherSync}
             onSeedTradingSources={handleSeedTradingSources}
+            onRefreshData={loadData}
             formatDate={formatDate}
             formatMoney={formatMoney}
             formatNumber={formatNumber}
@@ -1500,6 +1492,7 @@ export default function App() {
             selectedTrade={selectedTrade}
             selectedTradeEvents={selectedTradeEvents}
             onOpenSettings={() => navigateToView('settings')}
+            onRefreshData={loadData}
           />
         )}
       </main>

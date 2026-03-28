@@ -5,6 +5,8 @@ export type Trade = {
   created_at: string
   updated_at: string
   execution_timestamp: string | null
+  quality_spec: string | null
+  unit_of_measure: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
@@ -36,6 +38,8 @@ export type TradeHeaderDraft = {
   external_trade_id: string
   source_system: string
   execution_timestamp: string
+  quality_spec: string
+  unit_of_measure: string
   portfolio: string
   counterparty: string
   pricing_status: string
@@ -210,6 +214,8 @@ export type AssistantMessageRole = 'user' | 'assistant'
 export type AssistantAgentStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'RETIRED'
 export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
 export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
+export type AssistantActionType = 'cancel_trade'
+export type AssistantActionRequestStatus = 'PENDING' | 'REJECTED' | 'EXECUTED' | 'FAILED'
 
 export type AssistantProviderStatus = {
   provider: AssistantProvider
@@ -264,6 +270,7 @@ export type AssistantAdminAgent = AssistantAgent & {
 }
 
 export type AssistantPromptRequest = {
+  conversation_id?: number
   agent_id?: string
   provider?: AssistantProvider
   workspace?: ViewKey
@@ -279,7 +286,28 @@ export type AssistantToolCall = {
   record_count: number | null
 }
 
+export type AssistantActionRequest = {
+  action_request_id: number
+  run_id: number
+  user_id: string
+  status: AssistantActionRequestStatus
+  workspace?: ViewKey | null
+  agent_id?: string | null
+  agent_name?: string | null
+  action_type: AssistantActionType
+  summary: string
+  description: string
+  payload: Record<string, unknown>
+  result?: Record<string, unknown> | null
+  error_detail?: string | null
+  created_at: string
+  decided_at?: string | null
+  decided_by?: string | null
+}
+
 export type AssistantPromptResponse = {
+  conversation_id?: number | null
+  conversation_updated_at?: string | null
   run_id?: number | null
   run_recorded_at?: string | null
   agent_id?: string | null
@@ -296,6 +324,7 @@ export type AssistantPromptResponse = {
   }
   warnings: string[]
   tool_calls: AssistantToolCall[]
+  action_requests: AssistantActionRequest[]
 }
 
 export type AssistantPromptContextRequest = {
@@ -334,6 +363,74 @@ export type AssistantPromptContext = {
   warnings: string[]
   sections: AssistantPromptSection[]
   rendered_system_prompt: string
+}
+
+export type AssistantRunStatus = 'COMPLETED' | 'FAILED'
+
+export type AssistantRunSummary = {
+  conversation_id?: number | null
+  run_id: number
+  status: AssistantRunStatus
+  created_at: string
+  completed_at: string
+  user_id: string
+  user_role: string
+  workspace?: ViewKey | null
+  agent_id?: string | null
+  agent_name?: string | null
+  provider: AssistantProvider
+  model: string
+  use_live_tools: boolean
+  warning_count: number
+  tool_call_count: number
+  input_tokens: number | null
+  output_tokens: number | null
+  latest_user_message?: string | null
+  assistant_message?: string | null
+  error_detail?: string | null
+}
+
+export type AssistantRun = AssistantRunSummary & {
+  request_messages: AssistantMessage[]
+  application_context?: string | null
+  prompt_sections: AssistantPromptSection[]
+  rendered_system_prompt: string
+  warnings: string[]
+  tool_calls: AssistantToolCall[]
+}
+
+export type AssistantConversationMessage = {
+  role: AssistantMessageRole
+  content: string
+  recorded_at: string
+  run_id?: number | null
+  provider?: AssistantProvider | null
+  model?: string | null
+  warnings: string[]
+  tool_calls: AssistantToolCall[]
+}
+
+export type AssistantConversationSummary = {
+  conversation_id: number
+  created_at: string
+  updated_at: string
+  user_id: string
+  user_role: string
+  workspace?: ViewKey | null
+  agent_id?: string | null
+  agent_name?: string | null
+  provider: AssistantProvider
+  model: string
+  use_live_tools: boolean
+  title: string
+  run_count: number
+  latest_run_id?: number | null
+  latest_user_message?: string | null
+  latest_assistant_message?: string | null
+}
+
+export type AssistantConversation = AssistantConversationSummary & {
+  messages: AssistantConversationMessage[]
 }
 
 export type ViewKey =

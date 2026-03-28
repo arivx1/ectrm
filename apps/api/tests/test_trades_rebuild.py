@@ -22,6 +22,7 @@ from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
@@ -59,6 +60,7 @@ class TradesRebuildScriptTests(unittest.TestCase):
             session.query(TradeLeg).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
+            session.query(ReferenceUnit).delete()
             session.query(ReferencePortfolio).delete()
             session.query(ReferenceCounterparty).delete()
             session.query(ReferenceCommodity).delete()
@@ -118,6 +120,26 @@ class TradesRebuildScriptTests(unittest.TestCase):
             )
         )
         session.add(
+            ReferenceUnit(
+                code="BBL",
+                name="Barrel",
+                commodity_class="CRUDE_OIL",
+                dimension="VOLUME",
+                base_unit_code=None,
+                conversion_factor=None,
+                precision=3,
+                description="Barrel",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
             ReferencePortfolio(
                 code="OIL_DISCRETIONARY",
                 name="Oil Discretionary",
@@ -158,6 +180,8 @@ class TradesRebuildScriptTests(unittest.TestCase):
                         "external_trade_id": "EXT-9001",
                         "source_system": "ETRM",
                         "execution_timestamp": "2026-03-11T06:15:00-06:00",
+                        "quality_spec": "10 PPM sulfur max",
+                        "unit_of_measure": "BBL",
                         "book": "CRUDE_PHYS",
                         "portfolio": "OIL_DISCRETIONARY",
                         "counterparty": "SHELL_TRADING",
@@ -197,6 +221,8 @@ class TradesRebuildScriptTests(unittest.TestCase):
             coerce_utc(trade.execution_timestamp),
             datetime(2026, 3, 11, 12, 15, tzinfo=timezone.utc),
         )
+        self.assertEqual(trade.quality_spec, "10 PPM sulfur max")
+        self.assertEqual(trade.unit_of_measure, "BBL")
         self.assertEqual(trade.book, "CRUDE_PHYS")
         self.assertEqual(trade.portfolio, "OIL_DISCRETIONARY")
         self.assertEqual(trade.counterparty, "SHELL_TRADING")
@@ -302,6 +328,62 @@ class TradesRebuildScriptTests(unittest.TestCase):
         with patch.object(rebuild_trades_projection, "SessionLocal", self.SessionLocal):
             with self.assertRaisesRegex(ValueError, "Pricing status 'UNKNOWN' is invalid"):
                 rebuild_trades_projection.main()
+
+    def test_rebuild_can_clear_price_when_switching_to_index_pricing(self) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Event(
+                        event_id="event-create-index-shift",
+                        aggregate_type="trade",
+                        aggregate_id="T-REBUILD-INDEX-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        recorded_at=self.now,
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=3,
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "trade_side": "BUY",
+                            "price": 81,
+                            "volume": 500,
+                        },
+                    ),
+                    Event(
+                        event_id="event-amend-index-shift",
+                        aggregate_type="trade",
+                        aggregate_id="T-REBUILD-INDEX-1",
+                        event_type="TradeAmended",
+                        occurred_at=datetime(2026, 3, 11, 12, 5, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 11, 12, 5, tzinfo=timezone.utc),
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=3,
+                        payload={
+                            "pricing_type": "INDEX",
+                            "price_index_code": "WTI_M1",
+                            "price": None,
+                        },
+                    ),
+                ]
+            )
+            session.commit()
+
+        with patch.object(rebuild_trades_projection, "SessionLocal", self.SessionLocal):
+            rebuild_trades_projection.main()
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-REBUILD-INDEX-1").one()
+
+        self.assertEqual(trade.pricing_type, "INDEX")
+        self.assertEqual(trade.price_index_code, "WTI_M1")
+        self.assertIsNone(trade.price)
 
 
 if __name__ == "__main__":

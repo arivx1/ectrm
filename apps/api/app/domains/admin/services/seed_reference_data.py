@@ -88,15 +88,20 @@ PORTFOLIO_ROWS = [
 PRICE_INDEX_ROWS = [
     {"code": "HENRY_HUB_GAS_D", "name": "Henry Hub Spot Daily", "commodity_code": "NATURAL_GAS", "currency_code": "USD", "unit_code": "MMBTU", "provider": "EIA", "market": "NYMEX", "location_code": "HENRY_HUB", "calendar_code": None, "description": "Daily Henry Hub spot reference."},
     {"code": "WTI_CUSHING_PHYS_D", "name": "WTI Cushing Physical Daily", "commodity_code": "WTI", "currency_code": "USD", "unit_code": "BBL", "provider": "EIA", "market": "PHYSICAL", "location_code": "CUSHING", "calendar_code": None, "description": "Daily WTI physical spot reference."},
+    {"code": "BRENT_SPOT_D", "name": "Brent Spot Daily", "commodity_code": "BRENT", "currency_code": "USD", "unit_code": "BBL", "provider": "EIA", "market": "EUROPE", "location_code": None, "calendar_code": None, "description": "Daily Brent spot reference."},
     {"code": "USGC_DIESEL_SPOT_D", "name": "US Gulf Coast Diesel Spot Daily", "commodity_code": "DIESEL", "currency_code": "USD", "unit_code": "GAL", "provider": "EIA", "market": "PHYSICAL", "location_code": "USGC", "calendar_code": None, "description": "Daily USGC diesel spot reference."},
     {"code": "GASOLINE_US_REG_W", "name": "US Retail Gasoline Regular Weekly", "commodity_code": "GASOLINE", "currency_code": "USD", "unit_code": "GAL", "provider": "EIA", "market": "US", "location_code": None, "calendar_code": None, "description": "Weekly US retail gasoline reference."},
+    {"code": "DIESEL_US_RETAIL_W", "name": "US Retail Diesel Weekly", "commodity_code": "DIESEL", "currency_code": "USD", "unit_code": "GAL", "provider": "EIA", "market": "US", "location_code": None, "calendar_code": None, "description": "Weekly US retail diesel reference."},
     {"code": "PJM_WEST_ONPEAK_DA", "name": "PJM West On-Peak Day Ahead", "commodity_code": "POWER", "currency_code": "USD", "unit_code": "MWH", "provider": "INTERNAL", "market": "PJM", "location_code": "PJM_WEST", "calendar_code": "PJM", "description": "Power hub day-ahead reference."},
 ]
 
 PRICE_INDEX_SOURCE_ROWS = [
     {"price_index_code": "HENRY_HUB_GAS_D", "provider": "EIA", "dataset_code": "NG", "series_id": "NG.RNGWHHD.D", "frequency": "daily", "source_unit": "MMBTU", "source_currency_code": "USD", "transform_rule": None},
     {"price_index_code": "WTI_CUSHING_PHYS_D", "provider": "EIA", "dataset_code": "PET", "series_id": "PET.RWTC.D", "frequency": "daily", "source_unit": "BBL", "source_currency_code": "USD", "transform_rule": None},
+    {"price_index_code": "BRENT_SPOT_D", "provider": "EIA", "dataset_code": "PET", "series_id": "PET.RBRTE.D", "frequency": "daily", "source_unit": "BBL", "source_currency_code": "USD", "transform_rule": None},
     {"price_index_code": "USGC_DIESEL_SPOT_D", "provider": "EIA", "dataset_code": "PET", "series_id": "PET.EER_EPD2F_PF4_Y35NY_DPG.D", "frequency": "daily", "source_unit": "GAL", "source_currency_code": "USD", "transform_rule": None},
+    {"price_index_code": "GASOLINE_US_REG_W", "provider": "EIA", "dataset_code": "PET", "series_id": "PET.EMM_EPMRR_PTE_NUS_DPG.W", "frequency": "weekly", "source_unit": "GAL", "source_currency_code": "USD", "transform_rule": None},
+    {"price_index_code": "DIESEL_US_RETAIL_W", "provider": "EIA", "dataset_code": "PET", "series_id": "PET.EMD_EPD2DXL0_PTE_NUS_DPG.W", "frequency": "weekly", "source_unit": "GAL", "source_currency_code": "USD", "transform_rule": None},
 ]
 
 

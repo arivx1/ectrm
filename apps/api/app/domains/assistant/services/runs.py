@@ -20,6 +20,7 @@ from apps.api.app.schemas.assistant import (
 def create_assistant_run(
     *,
     db: Session,
+    conversation_id: int | None,
     status: str,
     user_id: str,
     session_id: str,
@@ -43,6 +44,7 @@ def create_assistant_run(
 ) -> AssistantRun:
     completed_at = datetime.now(timezone.utc)
     record = AssistantRun(
+        conversation_id=conversation_id,
         status=status,
         user_id=user_id,
         session_id=session_id,
@@ -102,6 +104,7 @@ def get_assistant_run(db: Session, run_id: int) -> AssistantRun | None:
 
 def to_assistant_run_summary_out(record: AssistantRun) -> AssistantRunSummaryOut:
     return AssistantRunSummaryOut(
+        conversation_id=record.conversation_id,
         run_id=record.id,
         status=record.status,
         created_at=record.created_at,

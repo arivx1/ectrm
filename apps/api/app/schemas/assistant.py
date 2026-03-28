@@ -36,6 +36,8 @@ AssistantWorkspace = Literal[
 AssistantAgentStatus = Literal["DRAFT", "ACTIVE", "PAUSED", "RETIRED"]
 AssistantAgentScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
 AssistantAgentCapability = Literal["READ", "EXPLAIN", "DRAFT", "ACTION"]
+AssistantActionType = Literal["cancel_trade"]
+AssistantActionRequestStatus = Literal["PENDING", "REJECTED", "EXECUTED", "FAILED"]
 AssistantRunStatus = Literal["COMPLETED", "FAILED"]
 
 AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
@@ -105,6 +107,7 @@ class AssistantPromptContextRequest(BaseModel):
 
 
 class AssistantPromptRequest(AssistantPromptContextRequest):
+    conversation_id: Optional[int] = Field(default=None, ge=1)
     messages: list[AssistantMessageIn] = Field(..., min_length=1, max_length=40)
 
 
@@ -120,7 +123,28 @@ class AssistantToolCallOut(BaseModel):
     record_count: Optional[int] = None
 
 
+class AssistantActionRequestOut(BaseModel):
+    action_request_id: int
+    run_id: int
+    user_id: str
+    status: AssistantActionRequestStatus
+    workspace: Optional[AssistantWorkspace] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    action_type: AssistantActionType
+    summary: str
+    description: str
+    payload: dict[str, object] = Field(default_factory=dict)
+    result: Optional[dict[str, object]] = None
+    error_detail: Optional[str] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
+
+
 class AssistantPromptResponse(BaseModel):
+    conversation_id: Optional[int] = None
+    conversation_updated_at: Optional[datetime] = None
     run_id: Optional[int] = None
     run_recorded_at: Optional[datetime] = None
     agent_id: Optional[str] = None
@@ -131,6 +155,7 @@ class AssistantPromptResponse(BaseModel):
     usage: AssistantUsageOut
     warnings: list[str] = Field(default_factory=list)
     tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+    action_requests: list[AssistantActionRequestOut] = Field(default_factory=list)
 
 
 class AssistantPromptSectionOut(BaseModel):
@@ -264,6 +289,7 @@ class AssistantAgentAdminOut(AssistantAgentOut):
 
 
 class AssistantRunSummaryOut(BaseModel):
+    conversation_id: Optional[int] = None
     run_id: int
     status: AssistantRunStatus
     created_at: datetime
@@ -292,3 +318,37 @@ class AssistantRunOut(AssistantRunSummaryOut):
     rendered_system_prompt: str
     warnings: list[str] = Field(default_factory=list)
     tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+
+
+class AssistantConversationMessageOut(BaseModel):
+    role: AssistantMessageRole
+    content: str
+    recorded_at: datetime
+    run_id: Optional[int] = None
+    provider: Optional[AssistantProvider] = None
+    model: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+
+
+class AssistantConversationSummaryOut(BaseModel):
+    conversation_id: int
+    created_at: datetime
+    updated_at: datetime
+    user_id: str
+    user_role: str
+    workspace: Optional[AssistantWorkspace] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    provider: AssistantProvider
+    model: str
+    use_live_tools: bool
+    title: str
+    run_count: int
+    latest_run_id: Optional[int] = None
+    latest_user_message: Optional[str] = None
+    latest_assistant_message: Optional[str] = None
+
+
+class AssistantConversationOut(AssistantConversationSummaryOut):
+    messages: list[AssistantConversationMessageOut] = Field(default_factory=list)

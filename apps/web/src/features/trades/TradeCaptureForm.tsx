@@ -1,7 +1,14 @@
 import { TradeLegEditor } from './TradeLegEditor'
+import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
 import { FieldLabel } from '../../shared/ui/Tooltip'
-import { pricingTypeRequiresPriceIndex, tradeStructureSupportsLegs } from '../../shared/trading'
+import {
+  defaultTradeExecutionTime,
+  getQualitySpecOptionsForCommodity,
+  pricingTypeRequiresExplicitPrice,
+  pricingTypeRequiresPriceIndex,
+  tradeStructureSupportsLegs,
+} from '../../shared/trading'
 
 type ReferenceRecord = {
   code: string
@@ -51,10 +58,14 @@ type TradeCaptureFormProps = {
   setPriceInput: (value: string) => void
   volumeInput: string
   setVolumeInput: (value: string) => void
+  qualitySpecInput: string
+  setQualitySpecInput: (value: string) => void
+  unitInput: string
+  setUnitInput: (value: string) => void
+  createUnitOptions: ReferenceRecord[]
   externalTradeIdInput: string
   setExternalTradeIdInput: (value: string) => void
   sourceSystemInput: string
-  setSourceSystemInput: (value: string) => void
   executionTimestampInput: string
   setExecutionTimestampInput: (value: string) => void
   portfolioInput: string
@@ -72,6 +83,7 @@ type TradeCaptureFormProps = {
   addDraftLeg: () => void
   removeDraftLeg: (index: number) => void
   updateDraftLeg: (index: number, field: keyof TradeLegDraft, value: string) => void
+  duplicateSourceTradeId: string | null
   submitting: boolean
   referenceDataLoading: boolean
   hasReferenceOptions: boolean
@@ -116,10 +128,14 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     setPriceInput,
     volumeInput,
     setVolumeInput,
+    qualitySpecInput,
+    setQualitySpecInput,
+    unitInput,
+    setUnitInput,
+    createUnitOptions,
     externalTradeIdInput,
     setExternalTradeIdInput,
     sourceSystemInput,
-    setSourceSystemInput,
     executionTimestampInput,
     setExecutionTimestampInput,
     portfolioInput,
@@ -137,6 +153,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     addDraftLeg,
     removeDraftLeg,
     updateDraftLeg,
+    duplicateSourceTradeId,
     submitting,
     referenceDataLoading,
     hasReferenceOptions,
@@ -149,10 +166,22 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     settlementStatusOptions,
     formatCommodityClass,
   } = props
+  const { date: executionDateInput, time: executionTimeInput } = splitLocalDateTimeInput(executionTimestampInput)
+  const qualitySpecOptions = getQualitySpecOptionsForCommodity(commodityInput)
+  const qualitySpecListId = qualitySpecOptions.length > 0 ? 'trade-quality-spec-options' : undefined
 
   return (
     <>
       <form className="trade-form trade-form-feature" onSubmit={onSubmit}>
+        <input type="hidden" value={sourceSystemInput || ''} readOnly />
+        {duplicateSourceTradeId && (
+          <div className="field field-wide">
+            <div className="feedback-banner feedback-banner-success trade-structure-note">
+              <strong>Duplicating {duplicateSourceTradeId}</strong>
+              <p>New trade and external IDs are blank, execution time is reset, and settlement starts back at PENDING.</p>
+            </div>
+          </div>
+        )}
         <label className="field field-wide">
           <span>External Trade ID</span>
           <input
@@ -164,22 +193,24 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           />
         </label>
         <label className="field field-wide">
-          <span>Trade ID</span>
+          <span>Trade ID (optional)</span>
           <input
             className="control"
             value={tradeIdInput}
             onChange={(event) => setTradeIdInput(event.target.value)}
-            placeholder="T-1007"
+            placeholder="Auto-generated if blank"
             disabled={submitting || referenceDataLoading || !hasReferenceOptions}
           />
         </label>
         <label className="field">
-          <span>Source System</span>
+          <span>Execution Date</span>
           <input
             className="control"
-            value={sourceSystemInput}
-            onChange={(event) => setSourceSystemInput(event.target.value.toUpperCase())}
-            placeholder="ETRM"
+            type="date"
+            value={executionDateInput}
+            onChange={(event) =>
+              setExecutionTimestampInput(combineLocalDateTimeInput(event.target.value, executionTimeInput))
+            }
             disabled={submitting}
           />
         </label>
@@ -187,10 +218,12 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           <span>Execution Time</span>
           <input
             className="control"
-            type="datetime-local"
-            value={executionTimestampInput}
-            onChange={(event) => setExecutionTimestampInput(event.target.value)}
-            disabled={submitting}
+            type="time"
+            value={executionTimeInput || defaultTradeExecutionTime}
+            onChange={(event) =>
+              setExecutionTimestampInput(combineLocalDateTimeInput(executionDateInput, event.target.value))
+            }
+            disabled={submitting || executionDateInput === ''}
           />
         </label>
         <label className="field">
@@ -275,44 +308,85 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             ))}
           </select>
         </label>
+        {tradeStructureSupportsLegs(tradeStructureInput) ? (
+          <div className="field field-wide">
+            <div className="feedback-banner trade-structure-note">
+              <strong>Swap trades are leg-driven.</strong>
+              <p>Primary commodity now follows Leg 1 automatically, and top-level volume stays off the trade header.</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <label className="field">
+              <span>Commodity Class</span>
+              <select
+                className="control"
+                value={commodityClassInput}
+                onChange={(event) => setCommodityClassInput(event.target.value)}
+                disabled={submitting || referenceDataLoading || commodityClassOptions.length === 0}
+              >
+                {commodityClassOptions.map((commodityClass) => (
+                  <option key={commodityClass} value={commodityClass}>
+                    {formatCommodityClass(commodityClass)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Commodity</span>
+              <select
+                className="control control-highlight"
+                value={commodityInput}
+                onChange={(event) => setCommodityInput(event.target.value)}
+                disabled={submitting || referenceDataLoading || createCommodityOptions.length === 0}
+              >
+                {createCommodityOptions.map((commodity) => (
+                  <option key={commodity.code} value={commodity.code}>
+                    {commodity.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
         <label className="field">
-          <span>Commodity Class</span>
-          <select
+          <span>Quality Spec</span>
+          <input
             className="control"
-            value={commodityClassInput}
-            onChange={(event) => setCommodityClassInput(event.target.value)}
-            disabled={submitting || referenceDataLoading || commodityClassOptions.length === 0}
-          >
-            {commodityClassOptions.map((commodityClass) => (
-              <option key={commodityClass} value={commodityClass}>
-                {formatCommodityClass(commodityClass)}
+            list={qualitySpecListId}
+            value={qualitySpecInput}
+            onChange={(event) => setQualitySpecInput(event.target.value)}
+            placeholder={qualitySpecOptions.length > 0 ? 'Choose or type a spec' : 'Example: 10 PPM sulfur max'}
+          />
+        </label>
+        {qualitySpecListId && (
+          <datalist id={qualitySpecListId}>
+            {qualitySpecOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        )}
+        <label className="field">
+          <span>Unit of Measure</span>
+          <select className="control" value={unitInput} onChange={(event) => setUnitInput(event.target.value)} disabled={submitting}>
+            <option value="">Select unit</option>
+            {createUnitOptions.map((unit) => (
+              <option key={unit.code} value={unit.code}>
+                {unit.code} · {unit.name}
               </option>
             ))}
           </select>
         </label>
         <label className="field">
-          <span>Commodity</span>
-          <select
-            className="control control-highlight"
-            value={commodityInput}
-            onChange={(event) => setCommodityInput(event.target.value)}
-            disabled={submitting || referenceDataLoading || createCommodityOptions.length === 0}
-          >
-            {createCommodityOptions.map((commodity) => (
-              <option key={commodity.code} value={commodity.code}>
-                {commodity.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Price</span>
+          <span>{pricingTypeRequiresExplicitPrice(pricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
           <input className="control" inputMode="decimal" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} />
         </label>
-        <label className="field">
-          <span>Volume</span>
-          <input className="control" inputMode="decimal" value={volumeInput} onChange={(event) => setVolumeInput(event.target.value)} />
-        </label>
+        {!tradeStructureSupportsLegs(tradeStructureInput) && (
+          <label className="field">
+            <span>Volume</span>
+            <input className="control" inputMode="decimal" value={volumeInput} onChange={(event) => setVolumeInput(event.target.value)} />
+          </label>
+        )}
         <label className="field">
           <FieldLabel label="Pricing" tooltip={tradeTooltipCopy.pricing} />
           <select className="control" value={pricingTypeInput} onChange={(event) => setPricingTypeInput(event.target.value)}>
@@ -390,7 +464,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
 
       <p className={`form-note ${createError ? 'form-note-error' : ''}`}>
         {createError || (hasReferenceOptions
-          ? 'Trade capture now supports nature, structure, pricing mode, and swap legs.'
+          ? 'Leave Trade ID blank to auto-generate it. Pick an execution date to default the time to midnight. INDEX deals can omit price differential, and SWAP deals now derive the trade summary from Leg 1.'
           : 'Trade entry is disabled until at least one active book and one active commodity exist in reference data.')}
       </p>
     </>

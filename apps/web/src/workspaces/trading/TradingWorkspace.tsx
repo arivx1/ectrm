@@ -1,3 +1,4 @@
+import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
@@ -6,6 +7,8 @@ type Trade = {
   trade_id: string
   external_trade_id: string | null
   source_system: string | null
+  quality_spec: string | null
+  unit_of_measure: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
@@ -51,6 +54,7 @@ type TradeLegDraft = {
 }
 
 type InspectorTab = 'overview' | 'events' | 'amend' | 'risk'
+type TradeCaptureFormProps = Parameters<typeof TradeCaptureForm>[0]
 
 const TRADE_TABLE_HEADERS: Array<{
   label: string
@@ -63,7 +67,7 @@ const TRADE_TABLE_HEADERS: Array<{
   { label: 'Book', tooltip: 'Commercial book currently carrying the trade in the live projection.' },
   { label: 'Class', tooltip: 'Commodity family used for grouping, validation, and downstream position rollups.' },
   { label: 'Commodity', tooltip: 'Specific commodity master record linked to the trade.' },
-  { label: 'Price', tooltip: 'Current stored trade price on the read model. Index-linked deals may still settle off a market series.' },
+  { label: 'Price Differential', tooltip: 'Current stored trade price differential on the read model. Index-linked deals may still settle off a market series.' },
   { label: 'Volume', tooltip: 'Projected top-level quantity for the trade. Swap legs can break this out in more detail.' },
   { label: 'Status', tooltip: 'Lifecycle state from the projection, used to decide whether the trade contributes to active exposure.' },
   { label: 'Updated', tooltip: 'Most recent time the trade projection row changed after a capture, amendment, or cancellation.', align: 'end' },
@@ -84,6 +88,7 @@ const RISK_TOOLTIPS = {
 } as const
 
 type TradingWorkspaceProps = {
+  tradeCaptureFormProps: TradeCaptureFormProps
   trades: Trade[]
   selectedTrade: Trade | null
   selectedTradeId: string | null
@@ -91,14 +96,21 @@ type TradingWorkspaceProps = {
   inspectorTab: InspectorTab
   setSelectedTradeId: (tradeId: string) => void
   setInspectorTab: (tab: InspectorTab) => void
+  handleDuplicateTrade: () => void
   handleAmendTrade: (event: React.FormEvent) => void
-  handleCancelTrade: () => void
+  handleCancelTrade: (reason: string) => void
+  amendmentPreviewFields: string[]
+  cancelImpactSummary: string
   amendExternalTradeIdInput: string
   setAmendExternalTradeIdInput: (value: string) => void
   amendSourceSystemInput: string
-  setAmendSourceSystemInput: (value: string) => void
   amendExecutionTimestampInput: string
   setAmendExecutionTimestampInput: (value: string) => void
+  amendQualitySpecInput: string
+  setAmendQualitySpecInput: (value: string) => void
+  amendUnitInput: string
+  setAmendUnitInput: (value: string) => void
+  amendUnitOptions: ReferenceRecord[]
   amendBookInput: string
   setAmendBookInput: (value: string) => void
   amendBookOptions: ReferenceRecord[]
@@ -158,6 +170,7 @@ type TradingWorkspaceProps = {
 
 export function TradingWorkspace(props: TradingWorkspaceProps) {
   const {
+    tradeCaptureFormProps,
     trades,
     selectedTrade,
     selectedTradeId,
@@ -165,14 +178,21 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     inspectorTab,
     setSelectedTradeId,
     setInspectorTab,
+    handleDuplicateTrade,
     handleAmendTrade,
     handleCancelTrade,
+    amendmentPreviewFields,
+    cancelImpactSummary,
     amendExternalTradeIdInput,
     setAmendExternalTradeIdInput,
     amendSourceSystemInput,
-    setAmendSourceSystemInput,
     amendExecutionTimestampInput,
     setAmendExecutionTimestampInput,
+    amendQualitySpecInput,
+    setAmendQualitySpecInput,
+    amendUnitInput,
+    setAmendUnitInput,
+    amendUnitOptions,
     amendBookInput,
     setAmendBookInput,
     amendBookOptions,
@@ -233,13 +253,25 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   return (
     <div className="workspace-grid">
       <section className="stack">
+        <article className="surface feature-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Capture</span>
+              <h3>Create Trade</h3>
+            </div>
+            <p>New trades now start here so capture, inspection, and follow-on changes stay in one workspace.</p>
+          </div>
+
+          <TradeCaptureForm {...tradeCaptureFormProps} />
+        </article>
+
         <article className="surface">
           <div className="section-head">
             <div>
               <span className="eyebrow">Trade Board</span>
               <h3>Open and Historical Trades</h3>
             </div>
-            <p>Select a row to open the inspector. Amendments stay contextual to the active trade.</p>
+            <p>Select a row to open the inspector. Capture and lifecycle actions now stay in the same workspace.</p>
           </div>
           <div className="table-shell">
             <table className="data-table">
@@ -308,6 +340,14 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           </p>
         </div>
 
+        {selectedTrade && (
+          <div className="stack-actions">
+            <button type="button" className="button button-secondary" onClick={handleDuplicateTrade}>
+              Duplicate Into Form
+            </button>
+          </div>
+        )}
+
         <div className="tab-row">
           {INSPECTOR_TABS.map((tab) => (
             <Tooltip key={tab.key} content={tab.tooltip} placement="bottom">
@@ -343,6 +383,14 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
             <div className="detail-row">
               <span>Execution Time</span>
               <strong>{formatDate(selectedTrade.execution_timestamp)}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Quality Spec</span>
+              <strong>{selectedTrade.quality_spec ?? '—'}</strong>
+            </div>
+            <div className="detail-row">
+              <span>Unit of Measure</span>
+              <strong>{selectedTrade.unit_of_measure ?? '—'}</strong>
             </div>
             <div className="detail-row">
               <span>Trade Nature</span>
@@ -389,7 +437,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
               <strong>{selectedTrade.price_index_code ?? '—'}</strong>
             </div>
             <div className="detail-row">
-              <span>Price</span>
+              <span>Price Differential</span>
               <strong>{formatMoney(selectedTrade.price)}</strong>
             </div>
             <div className="detail-row">
@@ -430,14 +478,22 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
 
         {selectedTrade && inspectorTab === 'amend' && (
           <TradeAmendForm
+            key={selectedTrade.trade_id}
             onSubmit={handleAmendTrade}
             handleCancelTrade={handleCancelTrade}
+            selectedTradeId={selectedTrade.trade_id}
+            amendmentPreviewFields={amendmentPreviewFields}
+            cancelImpactSummary={cancelImpactSummary}
             amendExternalTradeIdInput={amendExternalTradeIdInput}
             setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
             amendSourceSystemInput={amendSourceSystemInput}
-            setAmendSourceSystemInput={setAmendSourceSystemInput}
             amendExecutionTimestampInput={amendExecutionTimestampInput}
             setAmendExecutionTimestampInput={setAmendExecutionTimestampInput}
+            amendQualitySpecInput={amendQualitySpecInput}
+            setAmendQualitySpecInput={setAmendQualitySpecInput}
+            amendUnitInput={amendUnitInput}
+            setAmendUnitInput={setAmendUnitInput}
+            amendUnitOptions={amendUnitOptions}
             amendTradeNatureInput={amendTradeNatureInput}
             setAmendTradeNatureInput={setAmendTradeNatureInput}
             amendTradeStructureInput={amendTradeStructureInput}

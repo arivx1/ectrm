@@ -8,11 +8,13 @@ import type {
   ReferenceRecord,
   Trade,
   TradeLegDraft,
+  UnitRecord,
 } from '../../shared/models'
 import { ensureCurrentOption } from '../../shared/reference'
 import {
   pricingTypeRequiresPriceIndex,
   tradeSideOptions,
+  tradeStructureSupportsLegs,
 } from '../../shared/trading'
 import { type AmendDraft, buildAmendDraft } from './amendDraft.ts'
 import { makeLegDraft } from './tradeDraftUtils'
@@ -28,6 +30,7 @@ export function useTradeAmendForm(
   priceIndices: PriceIndexRecord[],
   activeCounterparties: CounterpartyRecord[],
   activePortfolios: PortfolioRecord[],
+  activeUnits: UnitRecord[],
 ) {
   const selectedTradeKey = selectedTrade?.trade_id ?? EMPTY_TRADE_KEY
   const baseDraft = useMemo(
@@ -38,7 +41,9 @@ export function useTradeAmendForm(
 
   const draft = draftsByTrade[selectedTradeKey] ?? baseDraft
   const resolvedBookInput = draft.bookInput || activeBooks[0]?.code || ''
-  const resolvedCommodityClassInput = draft.commodityClassInput || commodityClassOptions[0] || ''
+  const swapPrimaryLeg = tradeStructureSupportsLegs(draft.tradeStructureInput) ? draft.legs[0] : null
+  const resolvedCommodityClassInput =
+    swapPrimaryLeg?.commodity_class || draft.commodityClassInput || commodityClassOptions[0] || ''
 
   const amendCommodityOptions = useMemo(
     () =>
@@ -51,8 +56,9 @@ export function useTradeAmendForm(
     [activeCommodities, draft.commodityInput, resolvedCommodityClassInput],
   )
 
-  const resolvedCommodityInput = amendCommodityOptions.some((commodity) => commodity.code === draft.commodityInput)
-    ? draft.commodityInput
+  const preferredCommodityInput = swapPrimaryLeg?.commodity || draft.commodityInput
+  const resolvedCommodityInput = amendCommodityOptions.some((commodity) => commodity.code === preferredCommodityInput)
+    ? preferredCommodityInput
     : amendCommodityOptions[0]?.code || ''
 
   const amendPriceIndexOptions = useMemo(
@@ -87,6 +93,17 @@ export function useTradeAmendForm(
   const resolvedPortfolioInput = amendPortfolioOptions.some((portfolio) => portfolio.code === draft.portfolioInput)
     ? draft.portfolioInput
     : ''
+  const amendUnitOptions = useMemo(() => {
+    const matchingUnits = activeUnits.filter(
+      (unit) => !unit.commodity_class || unit.commodity_class === resolvedCommodityClassInput,
+    )
+    return ensureCurrentOption(
+      matchingUnits.length > 0 ? matchingUnits : activeUnits,
+      draft.unitInput,
+      resolvedCommodityClassInput,
+      'Current inactive or missing unit',
+    )
+  }, [activeUnits, draft.unitInput, resolvedCommodityClassInput])
 
   const amendCounterpartyOptions = useMemo(
     () =>
@@ -111,6 +128,7 @@ export function useTradeAmendForm(
       : amendPriceIndexOptions.some((priceIndex) => priceIndex.code === draft.priceIndexInput)
         ? draft.priceIndexInput
         : amendPriceIndexOptions[0]?.code || ''
+  const resolvedUnitInput = amendUnitOptions.some((unit) => unit.code === draft.unitInput) ? draft.unitInput : ''
 
   function updateDraft(updater: (current: AmendDraft) => AmendDraft) {
     setDraftsByTrade((current) => ({
@@ -163,9 +181,12 @@ export function useTradeAmendForm(
     amendExternalTradeIdInput: draft.externalTradeIdInput,
     setAmendExternalTradeIdInput: (value: string) => setDraftField('externalTradeIdInput', value),
     amendSourceSystemInput: draft.sourceSystemInput,
-    setAmendSourceSystemInput: (value: string) => setDraftField('sourceSystemInput', value),
     amendExecutionTimestampInput: draft.executionTimestampInput,
     setAmendExecutionTimestampInput: (value: string) => setDraftField('executionTimestampInput', value),
+    amendQualitySpecInput: draft.qualitySpecInput,
+    setAmendQualitySpecInput: (value: string) => setDraftField('qualitySpecInput', value),
+    amendUnitInput: resolvedUnitInput,
+    setAmendUnitInput: (value: string) => setDraftField('unitInput', value),
     amendTradeNatureInput: draft.tradeNatureInput,
     setAmendTradeNatureInput: (value: string) => setDraftField('tradeNatureInput', value),
     amendTradeStructureInput: draft.tradeStructureInput,
@@ -202,6 +223,7 @@ export function useTradeAmendForm(
     amendCounterpartyOptions,
     amendCommodityOptions,
     amendPriceIndexOptions,
+    amendUnitOptions,
     updateDraftLeg,
     addDraftLeg,
     removeDraftLeg,

@@ -13,6 +13,8 @@ class TradeOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     execution_timestamp: Optional[datetime]
+    quality_spec: Optional[str]
+    unit_of_measure: Optional[str]
     trade_nature: str
     trade_structure: str
     trade_side: Optional[str]

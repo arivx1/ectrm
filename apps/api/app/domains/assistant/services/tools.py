@@ -420,6 +420,8 @@ def _serialize_trade(trade: Trade) -> dict[str, Any]:
         "created_at": _json_default(trade.created_at),
         "updated_at": _json_default(trade.updated_at),
         "execution_timestamp": _json_default(trade.execution_timestamp),
+        "quality_spec": trade.quality_spec,
+        "unit_of_measure": trade.unit_of_measure,
         "trade_nature": trade.trade_nature,
         "trade_structure": trade.trade_structure,
         "trade_side": trade.trade_side,

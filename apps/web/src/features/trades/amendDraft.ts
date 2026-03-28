@@ -12,7 +12,7 @@ import {
 } from '../../shared/trading.ts'
 import {
   makeLegDraft,
-  parseLegsFromPayload,
+  findLatestPersistedLegs,
   toLocalDateTimeInput,
 } from './tradeDraftUtils.ts'
 
@@ -20,6 +20,8 @@ export type AmendDraft = {
   externalTradeIdInput: string
   sourceSystemInput: string
   executionTimestampInput: string
+  qualitySpecInput: string
+  unitInput: string
   tradeNatureInput: string
   tradeStructureInput: string
   tradeSideInput: string
@@ -38,21 +40,6 @@ export type AmendDraft = {
   legs: TradeLegDraft[]
 }
 
-function findLatestPersistedLegs(selectedTradeEvents: EventRow[]): TradeLegDraft[] {
-  for (const event of selectedTradeEvents) {
-    if (event.event_type !== 'TradeAmended' && event.event_type !== 'TradeCreated') {
-      continue
-    }
-
-    const parsedLegs = parseLegsFromPayload(event.payload)
-    if (parsedLegs.length > 0) {
-      return parsedLegs
-    }
-  }
-
-  return []
-}
-
 export function buildAmendDraft(
   selectedTrade: Trade | null,
   selectedTradeEvents: EventRow[],
@@ -68,6 +55,8 @@ export function buildAmendDraft(
       externalTradeIdInput: selectedTrade.external_trade_id ?? tradeHeaderDefaults.external_trade_id,
       sourceSystemInput: selectedTrade.source_system ?? tradeHeaderDefaults.source_system,
       executionTimestampInput: toLocalDateTimeInput(selectedTrade.execution_timestamp),
+      qualitySpecInput: selectedTrade.quality_spec ?? tradeHeaderDefaults.quality_spec,
+      unitInput: selectedTrade.unit_of_measure ?? tradeHeaderDefaults.unit_of_measure,
       tradeNatureInput: selectedTrade.trade_nature ?? tradeFormDefaults.nature,
       tradeStructureInput: selectedTrade.trade_structure ?? tradeFormDefaults.structure,
       tradeSideInput: selectedTrade.trade_side ?? tradeFormDefaults.side,
@@ -106,6 +95,8 @@ export function buildAmendDraft(
     externalTradeIdInput: tradeHeaderDefaults.external_trade_id,
     sourceSystemInput: tradeHeaderDefaults.source_system,
     executionTimestampInput: tradeHeaderDefaults.execution_timestamp,
+    qualitySpecInput: tradeHeaderDefaults.quality_spec,
+    unitInput: tradeHeaderDefaults.unit_of_measure,
     tradeNatureInput: tradeFormDefaults.nature,
     tradeStructureInput: tradeFormDefaults.structure,
     tradeSideInput: tradeFormDefaults.side,

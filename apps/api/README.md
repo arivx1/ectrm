@@ -126,7 +126,8 @@ The most important settings are:
   assistant prompts
 - `use_live_tools` on assistant requests: exposes read-only runtime data tools
   to the selected model provider, executes requested tool calls server-side,
-  and returns tool-call traces with the response
+  and returns tool-call traces with the response; prompt preview stays a pure
+  grounding preview and does not execute those tools
 - `ASSISTANT_MAX_TOOL_ROUNDS`: caps how many live tool-execution rounds the
   assistant can take during one response
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`: enable GPT, Claude,
@@ -154,3 +155,15 @@ Each successful or failed assistant response also records an `assistant_run`
 row for auditability. Those records capture the resolved runtime, prompt
 sections, warnings, tool traces, token usage, user/session metadata, and the
 final assistant or provider-error outcome.
+
+The backend also includes a fixture-style managed-agent eval suite in
+`apps/api/tests/test_assistant_evals.py`. It runs `/assistant/respond` through
+the real API stack with mocked provider responses and asserts expected
+warnings, tool usage, action-request staging, and persisted run traces.
+
+Run it with:
+
+```bash
+PYTHONPATH=/Users/anthonyrivich/Documents/GitHub/ectrm ./.venv/bin/python -m unittest \
+  apps.api.tests.test_assistant_evals
+```

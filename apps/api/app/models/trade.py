@@ -18,6 +18,8 @@ class Trade(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     execution_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    quality_spec: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    unit_of_measure: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     trade_nature: Mapped[str] = mapped_column(String(20), nullable=False, default="PHYSICAL")
     trade_structure: Mapped[str] = mapped_column(String(20), nullable=False, default="SINGLE")

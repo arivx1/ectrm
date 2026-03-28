@@ -20,6 +20,7 @@ from apps.api.app.shared.enums import (
 
 
 DEFAULT_BOOK = "CRUDE_PHYS"
+DEFAULT_SOURCE_SYSTEM = "ETRM"
 COMMODITY_CLASS_BY_CODE = {
     "POWER": "POWER",
     "NATURAL_GAS": "NATURAL_GAS",
@@ -207,18 +208,26 @@ def main() -> None:
                 existing = trade_state.get(trade_id)
 
                 if existing is None:
+                    trade_structure = normalize_trade_structure(payload.get("trade_structure"))
                     normalized_book = normalize_book(payload.get("book"))
                     normalized_portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
                     trade_state[trade_id] = {
                         "trade_id": trade_id,
                         "external_trade_id": normalize_optional_text(payload.get("external_trade_id")),
-                        "source_system": normalize_optional_text(payload.get("source_system"), uppercase=True),
+                        "source_system": normalize_optional_text(payload.get("source_system"), uppercase=True)
+                        or DEFAULT_SOURCE_SYSTEM,
                         "created_at": now,
                         "updated_at": now,
                         "execution_timestamp": normalize_execution_timestamp(payload.get("execution_timestamp")),
+                        "quality_spec": normalize_optional_text(payload.get("quality_spec")),
+                        "unit_of_measure": normalize_optional_text(payload.get("unit_of_measure"), uppercase=True),
                         "trade_nature": normalize_trade_nature(payload.get("trade_nature")),
-                        "trade_structure": normalize_trade_structure(payload.get("trade_structure")),
-                        "trade_side": normalize_trade_side(payload.get("trade_side")),
+                        "trade_structure": trade_structure,
+                        "trade_side": (
+                            None
+                            if trade_structure == TradeStructure.SWAP.value
+                            else normalize_trade_side(payload.get("trade_side"))
+                        ),
                         "legs": normalize_legs(payload.get("legs")),
                         "book": normalized_book,
                         "portfolio": normalized_portfolio,
@@ -262,6 +271,13 @@ def main() -> None:
                         existing["execution_timestamp"] = normalize_execution_timestamp(
                             payload.get("execution_timestamp")
                         )
+                    if "quality_spec" in payload:
+                        existing["quality_spec"] = normalize_optional_text(payload.get("quality_spec"))
+                    if "unit_of_measure" in payload:
+                        existing["unit_of_measure"] = normalize_optional_text(
+                            payload.get("unit_of_measure"),
+                            uppercase=True,
+                        )
                     if "trade_nature" in payload:
                         existing["trade_nature"] = normalize_trade_nature(payload.get("trade_nature"))
                     if "trade_structure" in payload:
@@ -269,7 +285,11 @@ def main() -> None:
                             payload.get("trade_structure")
                         )
                     if "trade_side" in payload:
-                        existing["trade_side"] = normalize_trade_side(payload.get("trade_side"))
+                        existing["trade_side"] = (
+                            None
+                            if existing["trade_structure"] == TradeStructure.SWAP.value and payload.get("trade_side") is None
+                            else normalize_trade_side(payload.get("trade_side"))
+                        )
                     if "legs" in payload:
                         existing["legs"] = normalize_legs(payload.get("legs"))
                     previous_book = normalize_book(existing.get("book"))
@@ -304,9 +324,9 @@ def main() -> None:
                         existing["price_index_code"] = normalize_price_index_code(
                             payload.get("price_index_code")
                         )
-                    if payload.get("price") is not None:
+                    if "price" in payload:
                         existing["price"] = to_decimal_or_none(payload.get("price"))
-                    if payload.get("volume") is not None:
+                    if "volume" in payload:
                         existing["volume"] = to_decimal_or_none(payload.get("volume"))
                     if "settlement_status" in payload:
                         existing["settlement_status"] = normalize_trade_header_status(
@@ -340,12 +360,23 @@ def main() -> None:
                     existing["execution_timestamp"] = normalize_execution_timestamp(
                         payload.get("execution_timestamp")
                     )
+                if "quality_spec" in payload:
+                    existing["quality_spec"] = normalize_optional_text(payload.get("quality_spec"))
+                if "unit_of_measure" in payload:
+                    existing["unit_of_measure"] = normalize_optional_text(
+                        payload.get("unit_of_measure"),
+                        uppercase=True,
+                    )
                 if "trade_nature" in payload:
                     existing["trade_nature"] = normalize_trade_nature(payload.get("trade_nature"))
                 if "trade_structure" in payload:
                     existing["trade_structure"] = normalize_trade_structure(payload.get("trade_structure"))
                 if "trade_side" in payload:
-                    existing["trade_side"] = normalize_trade_side(payload.get("trade_side"))
+                    existing["trade_side"] = (
+                        None
+                        if existing["trade_structure"] == TradeStructure.SWAP.value and payload.get("trade_side") is None
+                        else normalize_trade_side(payload.get("trade_side"))
+                    )
                 if "legs" in payload:
                     existing["legs"] = normalize_legs(payload.get("legs"))
                 previous_book = normalize_book(existing.get("book"))
@@ -383,9 +414,9 @@ def main() -> None:
                     existing["price_index_code"] = normalize_price_index_code(
                         payload.get("price_index_code")
                     )
-                if payload.get("price") is not None:
+                if "price" in payload:
                     existing["price"] = to_decimal_or_none(payload.get("price"))
-                if payload.get("volume") is not None:
+                if "volume" in payload:
                     existing["volume"] = to_decimal_or_none(payload.get("volume"))
                 if "settlement_status" in payload:
                     existing["settlement_status"] = normalize_trade_header_status(
@@ -422,6 +453,8 @@ def main() -> None:
                     created_at=trade["created_at"],
                     updated_at=trade["updated_at"],
                     execution_timestamp=trade.get("execution_timestamp"),
+                    quality_spec=trade.get("quality_spec"),
+                    unit_of_measure=trade.get("unit_of_measure"),
                     trade_nature=trade.get("trade_nature", TradeNature.PHYSICAL.value),
                     trade_structure=trade.get("trade_structure", TradeStructure.SINGLE.value),
                     trade_side=(
