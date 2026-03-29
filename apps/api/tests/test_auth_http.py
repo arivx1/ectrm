@@ -257,6 +257,21 @@ class AuthHttpTests(unittest.TestCase):
         )
         self.assertEqual(non_admin_response.status_code, 403)
 
+    def test_admin_preflight_options_requests_do_not_require_authentication(self) -> None:
+        response = self.client.options(
+            "/admin/trading-sources/seed",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://localhost:5173")
+        self.assertIn("POST", response.headers.get("access-control-allow-methods", ""))
+        self.assertNotIn("error", response.text.lower())
+
     def test_bootstrap_admin_rejects_whitespace_only_password(self) -> None:
         response = self.client.post(
             "/auth/bootstrap-admin",
@@ -271,6 +286,32 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn("password", str(response.json()["detail"]))
+
+    def test_god_login_creates_ops_admin_session_with_admin_admin(self) -> None:
+        response = self.client.post(
+            "/auth/session",
+            json={"identifier": "admin", "password": "admin"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["user"]["user_id"], "admin")
+        self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
+
+        admin_response = self.client.get(
+            "/admin/external-data/runs",
+            headers={"Authorization": f"Bearer {payload['access_token']}"},
+        )
+        self.assertEqual(admin_response.status_code, 200)
+
+        with self.SessionLocal() as session:
+            created = session.get(UserAccount, "admin")
+            self.assertIsNotNone(created)
+            assert created is not None
+            self.assertTrue(created.is_active)
+            self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertTrue(created.email.endswith("@local.invalid"))
+            self.assertIsNotNone(created.password_hash)
 
     def test_single_user_session_creates_ops_admin_when_enabled(self) -> None:
         settings.SINGLE_USER_AUTH_ENABLED = True

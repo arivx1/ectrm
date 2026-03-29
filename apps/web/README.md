@@ -51,7 +51,8 @@ The frontend uses these settings from `apps/web/.env.example`:
 - `VITE_BOOTSTRAP_TRADING_SOURCES_LIMIT`: trading source bootstrap size
 
 If `VITE_API_BASE` is not provided, the app points to the current hostname on
-port `8000`.
+port `8000`. The checked-in local default uses `http://127.0.0.1:8000` to
+avoid machines where `localhost:8000` is already claimed by another process.
 
 ## What The App Loads
 

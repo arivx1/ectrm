@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 
+import { MarketPricesPanel } from './MarketPricesPanel'
+
 type EventRow = {
   event_id: string
   aggregate_id: string
@@ -14,6 +16,7 @@ type Trade = {
   commodity: string
   commodity_class: string
   unit_of_measure: string | null
+  price_index_code: string | null
   price: number | null
   volume: number | null
   pricing_status: string
@@ -29,9 +32,19 @@ type PositionRow = {
   net_volume: number
 }
 
+type PriceIndexRecord = {
+  code: string
+  name: string
+  provider: string
+  unit_code: string
+  currency_code: string
+  is_active: boolean
+}
+
 type DashboardWorkspaceProps = {
   appLoading: boolean
   activeTrades: Trade[]
+  priceIndices: PriceIndexRecord[]
   positionsWithClass: PositionRow[]
   events: EventRow[]
   formatCommodityClass: (value: string) => string
@@ -69,6 +82,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const {
     appLoading,
     activeTrades,
+    priceIndices,
     positionsWithClass,
     events,
     formatCommodityClass,
@@ -259,6 +273,13 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           </div>
         )}
       </article>
+
+      <MarketPricesPanel
+        appLoading={appLoading}
+        activeTrades={activeTrades}
+        priceIndices={priceIndices}
+        formatNumber={formatNumber}
+      />
 
       <article className="surface">
         <div className="section-head">

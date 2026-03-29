@@ -105,6 +105,41 @@ class EiaMapperTests(unittest.TestCase):
                 payload={"response": {"frequency": "weekly", "data": [{"value": "3.455"}]}},
             )
 
+    def test_normalize_observations_skips_rows_with_missing_values(self) -> None:
+        mapping = ReferencePriceIndexSource(
+            price_index_code="ULSD_US_RETAIL",
+            provider="EIA",
+            dataset_code="PET",
+            series_id="PET.EMD_EPD2D_PTE_NUS_DPG.W",
+            frequency="weekly",
+            source_unit="gal",
+            source_currency_code="usd",
+            transform_rule=None,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+            created_by="test-user",
+            updated_at=datetime.now(timezone.utc),
+            updated_by="test-user",
+            version=1,
+        )
+
+        observations = normalize_observations(
+            mapping=mapping,
+            payload={
+                "response": {
+                    "frequency": "weekly",
+                    "data": [
+                        {"period": "2026-03-09", "value": None},
+                        {"period": "2026-03-02", "value": "3.455"},
+                    ],
+                }
+            },
+        )
+
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0].observation_date, date(2026, 3, 2))
+        self.assertEqual(observations[0].value, Decimal("3.455"))
+
 
 if __name__ == "__main__":
     unittest.main()

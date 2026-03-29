@@ -799,6 +799,24 @@ export default function App() {
     commodityClassOrder,
   })
 
+  async function refreshTradingSources(sessionOverride?: StoredAuthSession | null) {
+    const currentSession = sessionOverride ?? authSession
+    if (!currentSession || !hasAdministrativeAccess(currentSession)) {
+      setTradingSources([])
+      return []
+    }
+
+    const rows = await fetchJson<TradingSourceRecord[]>(
+      `${appConfig.apiBase}/admin/trading-sources?limit=${bootstrapQueryLimits.tradingSources}`,
+      {
+        headers: sessionHeaders(currentSession),
+        cache: 'no-store',
+      },
+    )
+    setTradingSources(rows)
+    return rows
+  }
+
   async function handleRunEiaSync() {
     setExternalDataSyncing(true)
     setExternalDataError('')
@@ -839,10 +857,19 @@ export default function App() {
         { requested_by: actorId, replace_existing: true },
         { headers: buildMutationHeaders() },
       )
-      await loadData()
       setTradingSourcesSuccess(
         `Trading source register loaded: ${payload.created_count} created, ${payload.updated_count} updated, ${payload.total_rows} total rows.`,
       )
+
+      try {
+        await refreshTradingSources()
+      } catch (refreshError) {
+        setTradingSourcesError(
+          refreshError instanceof Error
+            ? `Trading sources were seeded, but the follow-up refresh failed: ${refreshError.message}`
+            : 'Trading sources were seeded, but the follow-up refresh failed.',
+        )
+      }
     } catch (err) {
       setTradingSourcesError(err instanceof Error ? err.message : 'Failed to seed trading sources.')
     } finally {
@@ -1321,6 +1348,7 @@ export default function App() {
           <DashboardWorkspace
             appLoading={appLoading}
             activeTrades={activeTrades}
+            priceIndices={priceIndices}
             positionsWithClass={positionsWithClass}
             events={events}
             formatCommodityClass={formatCommodityClass}

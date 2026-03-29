@@ -137,6 +137,24 @@ export type ExternalDataRunRecord = {
   created_at: string
 }
 
+export type PriceIndexObservationRecord = {
+  id: number
+  price_index_code: string
+  observation_date: string
+  value: number
+  unit_code: string
+  currency_code: string | null
+  source_provider: string
+  source_series_id: string
+  source_frequency: string
+  source_published_at: string | null
+  source_revision: string | null
+  downloaded_at: string
+  run_id: number
+  created_at: string
+  updated_at: string
+}
+
 export type WeatherSyncLocationStatusRecord = {
   code: string
   name: string

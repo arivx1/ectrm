@@ -100,7 +100,7 @@ npm run dev
 
 The default local URLs are:
 
-- API: `http://localhost:8000`
+- API: `http://127.0.0.1:8000`
 - Web: `http://localhost:5173`
 
 ### Optional: Load demo records

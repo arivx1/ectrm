@@ -57,6 +57,28 @@ def trigger_eia_sync(payload: EIASyncRequest, db: Session = Depends(get_db)) -> 
 
 
 @router.get(
+    "/market-data/price-indices/{price_index_code}/observations",
+    response_model=List[PriceIndexObservationOut],
+)
+def list_price_index_observations(
+    price_index_code: str,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    db: Session = Depends(get_db),
+) -> List[PriceIndexObservationOut]:
+    rows = db.execute(
+        select(PriceIndexObservation)
+        .where(PriceIndexObservation.price_index_code == price_index_code.strip().upper())
+        .order_by(
+            PriceIndexObservation.observation_date.desc(),
+            PriceIndexObservation.downloaded_at.desc(),
+            PriceIndexObservation.id.desc(),
+        )
+        .limit(limit)
+    ).scalars().all()
+    return [_to_observation_out(row) for row in rows]
+
+
+@router.get(
     "/market-data/price-indices/{price_index_code}/observations/latest",
     response_model=PriceIndexObservationOut,
 )

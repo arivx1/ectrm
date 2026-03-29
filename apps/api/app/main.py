@@ -95,10 +95,24 @@ def _auth_error(status_code: int, message: str, correlation_id: str) -> JSONResp
     return response
 
 
+def _is_cors_preflight(request: Request) -> bool:
+    return (
+        request.method.upper() == "OPTIONS"
+        and bool(request.headers.get("origin"))
+        and bool(request.headers.get("access-control-request-method"))
+    )
+
+
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     request.state.correlation_id = correlation_id
+
+    if _is_cors_preflight(request):
+        response = await call_next(request)
+        response.headers["x-correlation-id"] = correlation_id
+        return response
+
     session_factory = request.app.state.session_factory
     principal = None
 

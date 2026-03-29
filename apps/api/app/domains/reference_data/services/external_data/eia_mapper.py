@@ -99,6 +99,8 @@ def normalize_observations(
             raise EIAMappingError(f"EIA row missing period for series {mapping.series_id}")
 
         raw_value = _extract_value(row)
+        if _is_missing_value(raw_value):
+            continue
         try:
             value = Decimal(str(raw_value))
         except (InvalidOperation, TypeError) as exc:
@@ -146,6 +148,14 @@ def _extract_value(row: dict[str, Any]) -> Any:
             return value
 
     raise EIAMappingError("EIA row did not contain a recognizable value field")
+
+
+def _is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    return value.strip().upper() in {"", "NA", "N/A", "NULL"}
 
 
 def _normalize_unit_code(mapping: ReferencePriceIndexSource) -> str:
