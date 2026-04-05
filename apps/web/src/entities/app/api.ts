@@ -1,6 +1,6 @@
 import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
-import type { AssistantRuntimeSettings, WeatherSyncStatusRecord } from '../../shared/models'
+import type { AssistantRuntimeSettings, LocationStandards, WeatherSyncStatusRecord } from '../../shared/models'
 
 export type WorkspaceBootstrap = {
   health: { status?: string }
@@ -13,6 +13,7 @@ export type WorkspaceBootstrap = {
   currencies: unknown[]
   units: unknown[]
   locations: unknown[]
+  locationStandards: LocationStandards
   counterparties: unknown[]
   portfolios: unknown[]
   externalDataRuns: unknown[]
@@ -104,6 +105,7 @@ export async function loadWorkspaceBootstrap(
     currencies,
     units,
     locations,
+    locationStandards,
     counterparties,
     portfolios,
   ] = await Promise.all([
@@ -117,6 +119,7 @@ export async function loadWorkspaceBootstrap(
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/currencies', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/units', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<LocationStandards>(`${apiBase}/reference/locations/standards`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`),
   ])
@@ -165,6 +168,7 @@ export async function loadWorkspaceBootstrap(
     currencies,
     units,
     locations,
+    locationStandards,
     counterparties,
     portfolios,
     externalDataRuns,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import List
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_cftc_series,
     sync_eia_series,
     sync_fred_series,
+    sync_kalshi_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -23,6 +25,7 @@ from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.schemas.external_data import (
     EIASyncRequest,
     ExternalDataRunOut,
+    ExternalSeriesDefinitionUpsertRequest,
     ExternalSeriesDefinitionOut,
     ExternalSeriesObservationOut,
     ExternalSeriesSyncRequest,
@@ -93,6 +96,84 @@ def trigger_cftc_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(
         requested_by=actor_id,
     )
     return _to_run_out(run)
+
+
+@admin_router.post("/kalshi/sync", response_model=ExternalDataRunOut)
+def trigger_kalshi_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_kalshi_series(
+        db,
+        series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post(
+    "/series-definitions",
+    response_model=ExternalSeriesDefinitionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_external_series_definition(
+    payload: ExternalSeriesDefinitionUpsertRequest,
+    db: Session = Depends(get_db),
+) -> ExternalSeriesDefinitionOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by)
+    normalized = _normalize_definition_payload(payload)
+
+    existing = db.get(ExternalSeriesDefinition, normalized["code"])
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="External series definition already exists")
+
+    now = datetime.now(timezone.utc)
+    row = ExternalSeriesDefinition(
+        **normalized,
+        created_at=now,
+        created_by=actor_id,
+        updated_at=now,
+        updated_by=actor_id,
+        version=1,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _to_external_series_definition_out(row)
+
+
+@admin_router.put("/series-definitions/{series_code}", response_model=ExternalSeriesDefinitionOut)
+def update_external_series_definition(
+    series_code: str,
+    payload: ExternalSeriesDefinitionUpsertRequest,
+    db: Session = Depends(get_db),
+) -> ExternalSeriesDefinitionOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by)
+    row = db.get(ExternalSeriesDefinition, series_code.strip().upper())
+    if row is None:
+        raise HTTPException(status_code=404, detail="External series definition not found")
+
+    normalized = _normalize_definition_payload(payload)
+    if normalized["code"] != row.code:
+        raise HTTPException(status_code=400, detail="Series code in the payload must match the route path")
+
+    row.provider = normalized["provider"]
+    row.dataset_code = normalized["dataset_code"]
+    row.series_id = normalized["series_id"]
+    row.name = normalized["name"]
+    row.category = normalized["category"]
+    row.frequency = normalized["frequency"]
+    row.unit_code = normalized["unit_code"]
+    row.source_url = normalized["source_url"]
+    row.description = normalized["description"]
+    row.query_params = normalized["query_params"]
+    row.transform_rule = normalized["transform_rule"]
+    row.is_active = normalized["is_active"]
+    row.updated_at = datetime.now(timezone.utc)
+    row.updated_by = actor_id
+    row.version += 1
+    db.commit()
+    db.refresh(row)
+    return _to_external_series_definition_out(row)
 
 
 @router.get("/market-data/external-series", response_model=List[ExternalSeriesDefinitionOut])
@@ -289,3 +370,40 @@ def _to_observation_out(row: PriceIndexObservation) -> PriceIndexObservationOut:
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _normalize_definition_payload(payload: ExternalSeriesDefinitionUpsertRequest) -> dict[str, object]:
+    provider = payload.provider.strip().upper()
+    dataset_code = payload.dataset_code.strip() if payload.dataset_code else None
+    transform_rule = payload.transform_rule.strip() if payload.transform_rule else None
+    series_id = payload.series_id.strip()
+    frequency = payload.frequency.strip().lower()
+
+    if provider == "KALSHI":
+        if frequency not in {"daily", "day"}:
+            raise HTTPException(status_code=400, detail="Kalshi definitions currently support daily candlesticks only")
+        if not transform_rule:
+            transform_rule = "field:price.close"
+        if not transform_rule.startswith("field:"):
+            raise HTTPException(status_code=400, detail="Kalshi definitions require a field: transform rule")
+        if not dataset_code and "-" not in series_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Kalshi definitions need a dataset_code override or a market ticker that includes a series prefix",
+            )
+
+    return {
+        "code": payload.code.strip().upper(),
+        "provider": provider,
+        "dataset_code": dataset_code,
+        "series_id": series_id,
+        "name": payload.name.strip(),
+        "category": payload.category.strip().lower(),
+        "frequency": frequency,
+        "unit_code": payload.unit_code.strip().upper(),
+        "source_url": payload.source_url.strip() if payload.source_url else None,
+        "description": payload.description.strip() if payload.description else None,
+        "query_params": payload.query_params,
+        "transform_rule": transform_rule,
+        "is_active": payload.is_active,
+    }

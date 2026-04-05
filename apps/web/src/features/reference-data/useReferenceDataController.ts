@@ -6,6 +6,7 @@ import type {
   CounterpartyRecord,
   CurrencyRecord,
   LocationRecord,
+  LocationStandards,
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
@@ -52,6 +53,7 @@ type UseReferenceDataControllerArgs = {
   activeCurrencies: CurrencyRecord[]
   activeUnits: UnitRecord[]
   activeLocations: LocationRecord[]
+  locationStandards: LocationStandards
   commodityClassOrder: readonly string[]
 }
 
@@ -72,6 +74,7 @@ export function useReferenceDataController({
   activeCurrencies,
   activeUnits,
   activeLocations,
+  locationStandards,
   commodityClassOrder,
 }: UseReferenceDataControllerArgs) {
   const [referenceActionError, setReferenceActionError] = useState('')
@@ -94,11 +97,14 @@ export function useReferenceDataController({
     activeCurrencies,
     activeUnits,
     activeLocations,
+    locationStandards,
     commodityClassOrder,
   })
 
   const {
+    filteredBooks,
     bookForm,
+    setBookForm,
     commodityForm,
     priceIndexForm,
     currencyForm,
@@ -274,13 +280,14 @@ export function useReferenceDataController({
   )
 
   const bookSheetDirtyCount = useMemo(
-    () => bookSheetRows.filter((row) => row.sheet_dirty).length,
-    [bookSheetRows],
+    () => Object.keys(bookSheetDrafts).length,
+    [bookSheetDrafts],
   )
 
   const bookSheetInvalidCount = useMemo(
-    () => bookSheetRows.filter((row) => row.sheet_dirty && Boolean(row.sheet_error)).length,
-    [bookSheetRows],
+    () =>
+      Object.values(bookSheetDrafts).filter((draft) => Boolean(validateBookSheetForm(draft))).length,
+    [bookSheetDrafts],
   )
 
   const bookFieldErrors = useMemo(() => {
@@ -380,6 +387,10 @@ export function useReferenceDataController({
 
   const locationFieldErrors = useMemo(() => {
     const errors: Partial<Record<'code' | 'name' | 'location_kind' | 'location_type' | 'coordinates', string>> = {}
+    const normalizedLocationKind = locationForm.location_kind.trim().toUpperCase()
+    const normalizedLocationType = locationForm.location_type.trim().toUpperCase()
+    const allowedLocationKinds = locationStandards.location_kinds
+    const allowedLocationTypes = locationStandards.location_types_by_kind[normalizedLocationKind] ?? []
     if (!locationForm.code.trim()) {
       errors.code = 'Code is required.'
     } else if (
@@ -389,8 +400,16 @@ export function useReferenceDataController({
       errors.code = 'Code already exists.'
     }
     if (!locationForm.name.trim()) errors.name = 'Name is required.'
-    if (!locationForm.location_kind.trim()) errors.location_kind = 'Location kind is required.'
-    if (!locationForm.location_type.trim()) errors.location_type = 'Location type is required.'
+    if (!normalizedLocationKind) {
+      errors.location_kind = 'Location kind is required.'
+    } else if (!allowedLocationKinds.includes(normalizedLocationKind)) {
+      errors.location_kind = 'Location kind is invalid.'
+    }
+    if (!normalizedLocationType) {
+      errors.location_type = 'Location type is required.'
+    } else if (allowedLocationTypes.length > 0 && !allowedLocationTypes.includes(normalizedLocationType)) {
+      errors.location_type = `Location type must be one of ${allowedLocationTypes.join(', ')}.`
+    }
     if ((locationForm.latitude.trim() && !locationForm.longitude.trim()) || (!locationForm.latitude.trim() && locationForm.longitude.trim())) {
       errors.coordinates = 'Latitude and longitude must be provided together.'
     }
@@ -403,6 +422,7 @@ export function useReferenceDataController({
     locationForm.longitude,
     locationForm.name,
     locationFormMode,
+    locationStandards,
     locations,
   ])
 
@@ -526,14 +546,17 @@ export function useReferenceDataController({
       return (
         !sameText(locationForm.code, '') ||
         !sameText(locationForm.name, '') ||
-        !sameText(locationForm.location_kind, 'POINT') ||
-        !sameText(locationForm.location_type, 'HUB') ||
+        !sameText(locationForm.location_kind, locationStandards.default_location_kind) ||
+        !sameText(
+          locationForm.location_type,
+          locationStandards.default_location_type_by_kind[locationStandards.default_location_kind] ?? '',
+        ) ||
         !sameText(locationForm.parent_location_code, '') ||
         !sameText(locationForm.market, '') ||
         !sameText(locationForm.city, '') ||
-        !sameText(locationForm.state_or_territory, '') ||
+        !sameText(locationForm.subdivision_code, '') ||
         !sameText(locationForm.country_code, '') ||
-        !sameText(locationForm.continent, '') ||
+        !sameText(locationForm.continent_code, '') ||
         !sameText(locationForm.latitude, '') ||
         !sameText(locationForm.longitude, '') ||
         !sameText(locationForm.region, '') ||
@@ -550,16 +573,16 @@ export function useReferenceDataController({
       !sameText(locationForm.parent_location_code, selectedLocation.parent_location_code) ||
       !sameText(locationForm.market, selectedLocation.market) ||
       !sameText(locationForm.city, selectedLocation.city) ||
-      !sameText(locationForm.state_or_territory, selectedLocation.state_or_territory) ||
+      !sameText(locationForm.subdivision_code, selectedLocation.subdivision_code) ||
       !sameText(locationForm.country_code, selectedLocation.country_code) ||
-      !sameText(locationForm.continent, selectedLocation.continent) ||
+      !sameText(locationForm.continent_code, selectedLocation.continent_code) ||
       !sameText(locationForm.latitude, selectedLocation.latitude?.toString()) ||
       !sameText(locationForm.longitude, selectedLocation.longitude?.toString()) ||
       !sameText(locationForm.region, selectedLocation.region) ||
       !sameText(locationForm.timezone, selectedLocation.timezone) ||
       !sameText(locationForm.description, selectedLocation.description)
     )
-  }, [locationForm, locationFormMode, selectedLocation])
+  }, [locationForm, locationFormMode, locationStandards, selectedLocation])
 
   function resetReferenceMessages() {
     setReferenceActionError('')
@@ -1112,9 +1135,9 @@ export function useReferenceDataController({
       parent_location_code: locationForm.parent_location_code.trim().toUpperCase() || null,
       market: locationForm.market.trim() || null,
       city: locationForm.city.trim() || null,
-      state_or_territory: locationForm.state_or_territory.trim() || null,
+      subdivision_code: locationForm.subdivision_code.trim().toUpperCase() || null,
       country_code: locationForm.country_code.trim().toUpperCase() || null,
-      continent: locationForm.continent.trim() || null,
+      continent_code: locationForm.continent_code.trim().toUpperCase() || null,
       latitude,
       longitude,
       region: locationForm.region.trim() || null,
@@ -1235,6 +1258,7 @@ export function useReferenceDataController({
     activeCommodities,
     activeCurrencies,
     activeLocations,
+    locationStandards,
     commodityClassOrder,
     referenceActionError,
     referenceActionSuccess,

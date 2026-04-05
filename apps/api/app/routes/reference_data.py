@@ -8,6 +8,23 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reference_data.services.location_standards import (
+    DEFAULT_LOCATION_KIND,
+    DEFAULT_LOCATION_TYPE_BY_KIND,
+    infer_country_code_from_subdivision,
+    list_continent_codes,
+    list_location_kinds,
+    list_location_market_codes,
+    list_location_types_by_kind,
+    normalize_continent_code,
+    normalize_country_code,
+    normalize_location_kind,
+    normalize_location_market,
+    normalize_location_type,
+    normalize_location_type_filter,
+    normalize_subdivision_code,
+    normalize_timezone_name,
+)
 from apps.api.app.domains.reference_data.services.records import (
     create_reference_record,
     get_reference_record,
@@ -44,6 +61,7 @@ from apps.api.app.schemas.reference_data import (
     CurrencyUpdate,
     LocationCreate,
     LocationOut,
+    LocationStandardsOut,
     LocationStatusUpdate,
     LocationUpdate,
     PriceIndexCreate,
@@ -74,8 +92,6 @@ ModelT = TypeVar(
     ReferencePriceIndex,
 )
 
-LOCATION_KINDS = {"POINT", "REGION"}
-
 
 def _clean_optional_text(value: Optional[str]) -> Optional[str]:
     if value is None:
@@ -87,16 +103,6 @@ def _clean_optional_text(value: Optional[str]) -> Optional[str]:
 def _clean_optional_code(value: Optional[str]) -> Optional[str]:
     cleaned = _clean_optional_text(value)
     return normalize_code(cleaned) if cleaned is not None else None
-
-
-def _normalize_location_kind(value: str) -> str:
-    normalized = normalize_code(value)
-    if normalized not in LOCATION_KINDS:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="location_kind must be either POINT or REGION",
-        )
-    return normalized
 
 
 def _normalize_location_parent_code(
@@ -213,9 +219,9 @@ def to_out(record: ModelT, schema_cls):
         payload["parent_location_code"] = record.parent_location_code
         payload["market"] = record.market
         payload["city"] = record.city
-        payload["state_or_territory"] = record.state_or_territory
+        payload["subdivision_code"] = record.subdivision_code
         payload["country_code"] = record.country_code
-        payload["continent"] = record.continent
+        payload["continent_code"] = record.continent_code
         payload["latitude"] = record.latitude
         payload["longitude"] = record.longitude
         payload["region"] = record.region
@@ -824,8 +830,20 @@ def activate_unit(
 def _update_location_fields(db: Session, record, payload, provided_fields: set[str]) -> None:
     next_location_kind = record.location_kind
     if "location_kind" in provided_fields and payload.location_kind is not None:
-        next_location_kind = _normalize_location_kind(payload.location_kind)
+        next_location_kind = normalize_location_kind(payload.location_kind)
     _ensure_location_can_be_region_parent(db, record_code=record.code, next_location_kind=next_location_kind)
+
+    next_location_type = record.location_type
+    if "location_type" in provided_fields and payload.location_type is not None:
+        next_location_type = normalize_location_type(
+            payload.location_type,
+            location_kind=next_location_kind,
+        )
+    elif "location_kind" in provided_fields:
+        next_location_type = normalize_location_type(
+            record.location_type,
+            location_kind=next_location_kind,
+        )
 
     next_parent_location_code = record.parent_location_code
     if "parent_location_code" in provided_fields:
@@ -843,22 +861,51 @@ def _update_location_fields(db: Session, record, payload, provided_fields: set[s
         next_longitude = payload.longitude
     _validate_location_coordinates(next_latitude, next_longitude)
 
+    next_country_code = record.country_code
+    if "country_code" in provided_fields:
+        next_country_code = normalize_country_code(payload.country_code)
+
+    next_subdivision_code = record.subdivision_code
+    if "subdivision_code" in provided_fields:
+        next_subdivision_code = normalize_subdivision_code(
+            payload.subdivision_code,
+            country_code=next_country_code,
+        )
+    elif "country_code" in provided_fields and next_subdivision_code is not None:
+        next_subdivision_code = normalize_subdivision_code(
+            next_subdivision_code,
+            country_code=next_country_code,
+        )
+    if next_country_code is None and next_subdivision_code is not None:
+        next_country_code = infer_country_code_from_subdivision(next_subdivision_code)
+
+    next_continent_code = record.continent_code
+    if "continent_code" in provided_fields:
+        next_continent_code = normalize_continent_code(payload.continent_code)
+
+    next_market = record.market
+    if "market" in provided_fields:
+        next_market = normalize_location_market(payload.market)
+
+    next_timezone = record.timezone
+    if "timezone" in provided_fields:
+        next_timezone = normalize_timezone_name(payload.timezone)
+
     if "location_kind" in provided_fields and payload.location_kind is not None:
         record.location_kind = next_location_kind
-    if "location_type" in provided_fields and payload.location_type is not None:
-        record.location_type = normalize_code(payload.location_type)
+    if "location_type" in provided_fields or "location_kind" in provided_fields:
+        record.location_type = next_location_type
     if "parent_location_code" in provided_fields:
         record.parent_location_code = next_parent_location_code
     if "market" in provided_fields:
-        record.market = _clean_optional_text(payload.market)
+        record.market = next_market
     if "city" in provided_fields:
         record.city = _clean_optional_text(payload.city)
-    if "state_or_territory" in provided_fields:
-        record.state_or_territory = _clean_optional_text(payload.state_or_territory)
-    if "country_code" in provided_fields:
-        record.country_code = _clean_optional_code(payload.country_code)
-    if "continent" in provided_fields:
-        record.continent = _clean_optional_text(payload.continent)
+    if "subdivision_code" in provided_fields or "country_code" in provided_fields:
+        record.subdivision_code = next_subdivision_code
+        record.country_code = next_country_code
+    if "continent_code" in provided_fields:
+        record.continent_code = next_continent_code
     if "latitude" in provided_fields:
         record.latitude = payload.latitude
     if "longitude" in provided_fields:
@@ -866,7 +913,7 @@ def _update_location_fields(db: Session, record, payload, provided_fields: set[s
     if "region" in provided_fields:
         record.region = _clean_optional_text(payload.region)
     if "timezone" in provided_fields:
-        record.timezone = _clean_optional_text(payload.timezone)
+        record.timezone = next_timezone
 
 
 @router.get("/locations", response_model=List[LocationOut])
@@ -881,14 +928,32 @@ def list_locations(
     db: Session = Depends(get_db),
 ) -> List[LocationOut]:
     extra_filters = []
+    normalized_location_kind: Optional[str] = None
     if market:
-        extra_filters.append(ReferenceLocation.market == market.strip())
+        extra_filters.append(ReferenceLocation.market == normalize_location_market(market))
     if location_kind:
-        extra_filters.append(ReferenceLocation.location_kind == _normalize_location_kind(location_kind))
+        normalized_location_kind = normalize_location_kind(location_kind)
+        extra_filters.append(ReferenceLocation.location_kind == normalized_location_kind)
     if location_type:
-        extra_filters.append(ReferenceLocation.location_type == normalize_code(location_type))
+        normalized_location_type = normalize_location_type_filter(
+            location_type,
+            location_kind=normalized_location_kind,
+        )
+        extra_filters.append(ReferenceLocation.location_type == normalized_location_type)
     rows = list_reference_records(db, ReferenceLocation, q, is_active, limit, offset, extra_filters=extra_filters)
     return [to_out(row, LocationOut) for row in rows]
+
+
+@router.get("/locations/standards", response_model=LocationStandardsOut)
+def list_location_standards() -> LocationStandardsOut:
+    return LocationStandardsOut(
+        default_location_kind=DEFAULT_LOCATION_KIND,
+        default_location_type_by_kind=DEFAULT_LOCATION_TYPE_BY_KIND,
+        location_kinds=list_location_kinds(),
+        location_types_by_kind=list_location_types_by_kind(),
+        market_codes=list_location_market_codes(),
+        continent_codes=list_continent_codes(),
+    )
 
 
 @router.post("/locations", response_model=LocationOut, status_code=201)
@@ -900,13 +965,25 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)) -> L
         raise HTTPException(status_code=409, detail="Location already exists")
 
     normalized_code = normalize_code(payload.code)
-    normalized_location_kind = _normalize_location_kind(payload.location_kind)
+    normalized_location_kind = normalize_location_kind(payload.location_kind)
+    normalized_location_type = normalize_location_type(
+        payload.location_type,
+        location_kind=normalized_location_kind,
+    )
     normalized_parent_location_code = _normalize_location_parent_code(
         db,
         record_code=normalized_code,
         parent_location_code=payload.parent_location_code,
     )
     _validate_location_coordinates(payload.latitude, payload.longitude)
+    normalized_country_code = normalize_country_code(payload.country_code)
+    normalized_subdivision_code = normalize_subdivision_code(
+        payload.subdivision_code,
+        country_code=normalized_country_code,
+    )
+    if normalized_country_code is None and normalized_subdivision_code is not None:
+        normalized_country_code = infer_country_code_from_subdivision(normalized_subdivision_code)
+    normalized_continent_code = normalize_continent_code(payload.continent_code)
 
     record = create_reference_record(
         db,
@@ -914,17 +991,17 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)) -> L
         payload,
         extra_values={
             "location_kind": normalized_location_kind,
-            "location_type": normalize_code(payload.location_type),
+            "location_type": normalized_location_type,
             "parent_location_code": normalized_parent_location_code,
-            "market": _clean_optional_text(payload.market),
+            "market": normalize_location_market(payload.market),
             "city": _clean_optional_text(payload.city),
-            "state_or_territory": _clean_optional_text(payload.state_or_territory),
-            "country_code": _clean_optional_code(payload.country_code),
-            "continent": _clean_optional_text(payload.continent),
+            "subdivision_code": normalized_subdivision_code,
+            "country_code": normalized_country_code,
+            "continent_code": normalized_continent_code,
             "latitude": payload.latitude,
             "longitude": payload.longitude,
             "region": _clean_optional_text(payload.region),
-            "timezone": _clean_optional_text(payload.timezone),
+            "timezone": normalize_timezone_name(payload.timezone),
         },
     )
     return to_out(record, LocationOut)

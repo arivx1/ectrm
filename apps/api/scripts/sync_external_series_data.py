@@ -12,12 +12,16 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from apps.api.app.db.engine import SessionLocal
-from apps.api.app.domains.reference_data.services.external_data import sync_cftc_series, sync_fred_series
+from apps.api.app.domains.reference_data.services.external_data import (
+    sync_cftc_series,
+    sync_fred_series,
+    sync_kalshi_series,
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync generic external time-series datasets into local storage.")
-    parser.add_argument("--provider", dest="provider", choices=("fred", "cftc"), required=True)
+    parser.add_argument("--provider", dest="provider", choices=("fred", "cftc", "kalshi"), required=True)
     parser.add_argument("--series-code", dest="series_code")
     parser.add_argument("--lookback-days", dest="lookback_days", type=int)
     parser.add_argument("--requested-by", dest="requested_by")
@@ -32,8 +36,15 @@ def main() -> int:
                 lookback_days=args.lookback_days,
                 requested_by=args.requested_by,
             )
-        else:
+        elif args.provider == "cftc":
             run = sync_cftc_series(
+                db,
+                series_code=args.series_code,
+                lookback_days=args.lookback_days,
+                requested_by=args.requested_by,
+            )
+        else:
+            run = sync_kalshi_series(
                 db,
                 series_code=args.series_code,
                 lookback_days=args.lookback_days,

@@ -108,13 +108,37 @@ export type LocationRecord = ReferenceRecord & {
   parent_location_code?: string | null
   market?: string | null
   city?: string | null
-  state_or_territory?: string | null
+  subdivision_code?: string | null
   country_code?: string | null
-  continent?: string | null
+  continent_code?: string | null
   latitude?: number | null
   longitude?: number | null
   region?: string | null
   timezone?: string | null
+}
+
+export type LocationStandards = {
+  default_location_kind: string
+  default_location_type_by_kind: Record<string, string>
+  location_kinds: string[]
+  location_types_by_kind: Record<string, string[]>
+  market_codes: string[]
+  continent_codes: string[]
+}
+
+export const DEFAULT_LOCATION_STANDARDS: LocationStandards = {
+  default_location_kind: 'POINT',
+  default_location_type_by_kind: {
+    POINT: 'HUB',
+    REGION: 'REGION',
+  },
+  location_kinds: ['POINT', 'REGION'],
+  location_types_by_kind: {
+    POINT: ['AIRPORT', 'CITY', 'DELIVERY_POINT', 'HUB', 'NODE', 'PORT', 'TERMINAL', 'TRADING_POINT', 'ZONE'],
+    REGION: ['BASIN', 'CONTINENT', 'CORRIDOR', 'COUNTRY', 'MARKET_AREA', 'PADD', 'PROVINCE', 'REGION', 'STATE'],
+  },
+  market_codes: ['CAISO', 'CME', 'EEX', 'ERCOT', 'ICE', 'ICE_EUROPE', 'ISO_NE', 'JKM', 'MISO', 'NBP', 'NGX', 'NYISO', 'NYMEX', 'PHYSICAL', 'PJM', 'SPP', 'TTF'],
+  continent_codes: ['AF', 'AN', 'AS', 'EU', 'NA', 'OC', 'SA'],
 }
 
 export type CounterpartyRecord = ReferenceRecord & {
@@ -531,9 +555,9 @@ export type LocationForm = {
   parent_location_code: string
   market: string
   city: string
-  state_or_territory: string
+  subdivision_code: string
   country_code: string
-  continent: string
+  continent_code: string
   latitude: string
   longitude: string
   region: string

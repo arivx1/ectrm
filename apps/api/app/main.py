@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import json
 import uuid
+from time import perf_counter
+from typing import Any
+
 from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, Request
+from fastapi.exception_handlers import (
+    http_exception_handler as fastapi_http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apps.api.app.core.auth import AuthError, is_admin_role, resolve_session_principal
 from apps.api.app.core.logging import configure_logging, get_logger
@@ -19,7 +29,7 @@ from apps.api.app.core.query_params import (
 )
 from apps.api.app.deps.db import get_db
 from apps.api.app.db.engine import SessionLocal
-from apps.api.app.domains.assistant.services.chat import build_assistant_runtime_settings
+from apps.api.app.domains.assistant.services.chat import AssistantServiceError, build_assistant_runtime_settings
 from apps.api.app.domains.operations.services import build_database_overview
 from apps.api.app.routes.assistant import admin_router as assistant_admin_router
 from apps.api.app.routes.assistant import router as assistant_router
@@ -89,6 +99,64 @@ PUBLIC_WRITE_PATHS = frozenset(
 ADMIN_PATH_PREFIXES = ("/admin", "/users")
 
 
+def _correlation_id_for_request(request: Request) -> str | None:
+    return getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
+
+
+def _request_log_extra(request: Request) -> dict[str, Any]:
+    return {
+        "correlation_id": _correlation_id_for_request(request),
+        "actor_id": getattr(request.state, "actor_id", None),
+        "role": getattr(request.state, "actor_role", None),
+        "session_id": getattr(request.state, "session_id", None),
+        "request_method": request.method.upper(),
+        "request_path": request.url.path,
+    }
+
+
+def _serialize_error_detail(detail: Any) -> str:
+    if isinstance(detail, str):
+        return detail
+    try:
+        serialized = json.dumps(detail, default=str, separators=(",", ":"))
+    except TypeError:
+        serialized = str(detail)
+    return serialized if len(serialized) <= 500 else f"{serialized[:497]}..."
+
+
+def _log_request_completion(request: Request, status_code: int) -> None:
+    if getattr(request.state, "request_completion_logged", False):
+        return
+
+    started_at = getattr(request.state, "request_started_at", None)
+    duration_ms = (perf_counter() - started_at) * 1000 if started_at is not None else None
+    request.state.request_completion_logged = True
+
+    logger.info(
+        "Request completed status_code=%s duration_ms=%s",
+        status_code,
+        f"{duration_ms:.2f}" if duration_ms is not None else "-",
+        extra=_request_log_extra(request),
+    )
+
+
+def _attach_correlation_header(request: Request, response: Response) -> Response:
+    correlation_id = _correlation_id_for_request(request)
+    if correlation_id:
+        response.headers["x-correlation-id"] = correlation_id
+    return response
+
+
+def _log_handled_failure(request: Request, *, status_code: int, detail: Any) -> None:
+    log_method = logger.error if status_code >= 500 else logger.warning
+    log_method(
+        "Handled request failure status_code=%s detail=%s",
+        status_code,
+        _serialize_error_detail(detail),
+        extra=_request_log_extra(request),
+    )
+
+
 def _auth_error(request: Request, status_code: int, message: str, correlation_id: str) -> JSONResponse:
     logger.warning(
         "Authentication rejected status_code=%s message=%s",
@@ -126,10 +194,13 @@ def _is_cors_preflight(request: Request) -> bool:
 async def add_correlation_id(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     request.state.correlation_id = correlation_id
+    request.state.request_started_at = perf_counter()
+    request.state.request_completion_logged = False
 
     if _is_cors_preflight(request):
         response = await call_next(request)
         response.headers["x-correlation-id"] = correlation_id
+        _log_request_completion(request, response.status_code)
         return response
 
     session_factory = request.app.state.session_factory
@@ -143,7 +214,9 @@ async def add_correlation_id(request: Request, call_next):
             protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
             admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
             if protected_write or admin_path:
-                return _auth_error(request, exc.status_code, exc.message, correlation_id)
+                response = _auth_error(request, exc.status_code, exc.message, correlation_id)
+                _log_request_completion(request, response.status_code)
+                return response
 
     request.state.actor_id = principal.user_id if principal is not None else None
     request.state.actor_role = principal.role if principal is not None else None
@@ -166,29 +239,26 @@ async def add_correlation_id(request: Request, call_next):
 
         if admin_path:
             if principal is None:
-                return _auth_error(
-                    request,
-                    401,
-                    "Authentication is required for admin operations.",
-                    correlation_id,
-                )
+                response = _auth_error(request, 401, "Authentication is required for admin operations.", correlation_id)
+                _log_request_completion(request, response.status_code)
+                return response
             if not is_admin_role(principal.role):
-                return _auth_error(
-                    request,
-                    403,
-                    "An administrative session is required for this operation.",
-                    correlation_id,
-                )
+                response = _auth_error(request, 403, "An administrative session is required for this operation.", correlation_id)
+                _log_request_completion(request, response.status_code)
+                return response
         elif protected_write and principal is None:
-            return _auth_error(
+            response = _auth_error(
                 request,
                 401,
                 "Authentication is required for write operations.",
                 correlation_id,
             )
+            _log_request_completion(request, response.status_code)
+            return response
 
         response = await call_next(request)
         response.headers["x-correlation-id"] = correlation_id
+        _log_request_completion(request, response.status_code)
         return response
     finally:
         reset_request_identity(identity_token)
@@ -234,17 +304,13 @@ def public_runtime_settings(db: Session = Depends(get_db)) -> PublicRuntimeSetti
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
+    correlation_id = _correlation_id_for_request(request)
     logger.error(
         "Unhandled exception while processing request",
         exc_info=(type(exc), exc, exc.__traceback__),
-        extra={
-            "correlation_id": correlation_id,
-            "request_method": request.method.upper(),
-            "request_path": request.url.path,
-        },
+        extra=_request_log_extra(request),
     )
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content={
             "error": {
@@ -254,3 +320,37 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             }
         },
     )
+    _log_request_completion(request, response.status_code)
+    return _attach_correlation_header(request, response)
+
+
+@app.exception_handler(AuthError)
+async def auth_exception_handler(request: Request, exc: AuthError):
+    correlation_id = _correlation_id_for_request(request) or str(uuid.uuid4())
+    response = _auth_error(request, exc.status_code, exc.message, correlation_id)
+    _log_request_completion(request, response.status_code)
+    return _attach_correlation_header(request, response)
+
+
+@app.exception_handler(AssistantServiceError)
+async def assistant_service_exception_handler(request: Request, exc: AssistantServiceError):
+    _log_handled_failure(request, status_code=exc.status_code, detail=exc.detail)
+    response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    _log_request_completion(request, response.status_code)
+    return _attach_correlation_header(request, response)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    _log_handled_failure(request, status_code=exc.status_code, detail=exc.detail)
+    response = await fastapi_http_exception_handler(request, exc)
+    _log_request_completion(request, response.status_code)
+    return _attach_correlation_header(request, response)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    _log_handled_failure(request, status_code=422, detail=exc.errors())
+    response = await request_validation_exception_handler(request, exc)
+    _log_request_completion(request, response.status_code)
+    return _attach_correlation_header(request, response)

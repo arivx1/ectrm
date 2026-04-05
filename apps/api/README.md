@@ -29,7 +29,7 @@ operations with session-based access control.
 - `/reference/*`: books, commodities, price indices, currencies, units,
   locations, counterparties, and portfolios
 - `/reports/*`: exposure and activity summaries
-- `/admin/*`: seed data, external-data runs, EIA/FRED/CFTC sync, trading source admin,
+- `/admin/*`: seed data, external-data runs, EIA/FRED/CFTC/Kalshi sync, trading source admin,
   assistant-agent administration, and assistant run audit listings
 - `/users`: user account administration
 
@@ -134,6 +134,7 @@ The most important settings are:
   and Gemini respectively
 - `EIA_API_KEY`: unlocks external EIA sync
 - `FRED_API_KEY`: unlocks external FRED sync
+- `KALSHI_BASE_URL`: points at the Kalshi REST API for public market data
 
 ## Implementation Shape
 
@@ -167,4 +168,29 @@ Run it with:
 ```bash
 PYTHONPATH=/Users/anthonyrivich/Documents/GitHub/ectrm ./.venv/bin/python -m unittest \
   apps.api.tests.test_assistant_evals
+```
+
+## Kalshi Setup
+
+Kalshi market data plugs into the generic `external_series` framework. The
+current implementation stores one daily candlestick-derived observation per
+configured market, which fits the existing per-day observation model.
+
+1. Create an external series definition with `POST /admin/external-data/series-definitions`.
+2. Use `provider="KALSHI"` and set `series_id` to the Kalshi market ticker.
+3. Optionally set `dataset_code` to the Kalshi series ticker. If omitted, the
+   sync infers it from the market ticker prefix.
+4. Leave `transform_rule` blank to default to `field:price.close`, or provide
+   another candlestick field such as `field:price.mean` or `field:volume`.
+5. Run the sync with `POST /admin/external-data/kalshi/sync` or the helper
+   script below.
+
+Example script call:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/sync_external_series_data.py \
+  --provider kalshi \
+  --series-code KALSHI_FED_2026_RATE_CUT \
+  --lookback-days 30 \
+  --requested-by local-admin
 ```

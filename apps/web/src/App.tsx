@@ -36,12 +36,14 @@ import {
 } from './features/trades/tradeEventPayloads'
 import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import {
+  DEFAULT_LOCATION_STANDARDS,
   type CounterpartyRecord,
   type CurrencyRecord,
   type EventRow,
   type ExternalDataRunRecord,
   type InspectorTab,
   type LocationRecord,
+  type LocationStandards,
   type PositionRow,
   type PortfolioRecord,
   type PriceIndexRecord,
@@ -68,14 +70,14 @@ import {
 import { Tooltip } from './shared/ui/Tooltip'
 
 const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
-  { key: 'dashboard', label: 'Dashboard', kicker: 'Today' },
-  { key: 'guide', label: 'Guide', kicker: 'Learn' },
-  { key: 'trades', label: 'Trades', kicker: 'Capture' },
-  { key: 'events', label: 'Events', kicker: 'Timeline' },
-  { key: 'positions', label: 'Positions', kicker: 'Exposure' },
+  { key: 'dashboard', label: 'Dashboard', kicker: 'Desk' },
+  { key: 'guide', label: 'Guide', kicker: 'Playbook' },
+  { key: 'trades', label: 'Trades', kicker: 'Blotter' },
+  { key: 'events', label: 'Events', kicker: 'Tape' },
+  { key: 'positions', label: 'Positions', kicker: 'Risk' },
   { key: 'reference', label: 'Reference Data', kicker: 'Master' },
-  { key: 'admin', label: 'Admin', kicker: 'Controls' },
-  { key: 'settings', label: 'Settings', kicker: 'Runtime' },
+  { key: 'admin', label: 'Admin', kicker: 'Ops' },
+  { key: 'settings', label: 'Settings', kicker: 'Config' },
   { key: 'assistant', label: 'Assistant', kicker: 'AI' },
 ]
 
@@ -174,6 +176,7 @@ export default function App() {
   const [currencies, setCurrencies] = useState<CurrencyRecord[]>([])
   const [units, setUnits] = useState<UnitRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
+  const [locationStandards, setLocationStandards] = useState<LocationStandards>(DEFAULT_LOCATION_STANDARDS)
   const [counterparties, setCounterparties] = useState<CounterpartyRecord[]>([])
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
@@ -221,6 +224,7 @@ export default function App() {
       currencies: currenciesJson,
       units: unitsJson,
       locations: locationsJson,
+      locationStandards: locationStandardsJson,
       counterparties: counterpartiesJson,
       portfolios: portfoliosJson,
       externalDataRuns: externalDataRunsJson,
@@ -241,6 +245,7 @@ export default function App() {
     const nextCurrencies = currenciesJson as CurrencyRecord[]
     const nextUnits = unitsJson as UnitRecord[]
     const nextLocations = locationsJson as LocationRecord[]
+    const nextLocationStandards = locationStandardsJson as LocationStandards
     const nextCounterparties = counterpartiesJson as CounterpartyRecord[]
     const nextPortfolios = portfoliosJson as PortfolioRecord[]
     const nextExternalDataRuns = externalDataRunsJson as ExternalDataRunRecord[]
@@ -257,6 +262,7 @@ export default function App() {
     setCurrencies(nextCurrencies)
     setUnits(nextUnits)
     setLocations(nextLocations)
+    setLocationStandards(nextLocationStandards)
     setCounterparties(nextCounterparties)
     setPortfolios(nextPortfolios)
     setExternalDataRuns(nextExternalDataRuns)
@@ -528,6 +534,21 @@ export default function App() {
     [activeTrades],
   )
 
+  const pricedActiveTrades = useMemo(
+    () => activeTrades.filter((trade) => trade.price !== null).length,
+    [activeTrades],
+  )
+
+  const pendingPricingTrades = useMemo(
+    () => activeTrades.filter((trade) => trade.pricing_status === 'PENDING').length,
+    [activeTrades],
+  )
+
+  const pendingSettlementTrades = useMemo(
+    () => activeTrades.filter((trade) => trade.settlement_status !== 'SETTLED').length,
+    [activeTrades],
+  )
+
   const trackedBooks = useMemo(
     () => new Set(activeTrades.map((trade) => trade.book)).size,
     [activeTrades],
@@ -563,6 +584,24 @@ export default function App() {
       netVolume: totals.get(commodityClass) ?? 0,
     })).filter((row) => row.netVolume !== 0)
   }, [positionsWithClass])
+
+  const pricingCoverage = useMemo(() => {
+    if (activeTrades.length === 0) {
+      return null
+    }
+
+    return Math.round((pricedActiveTrades / activeTrades.length) * 100)
+  }, [activeTrades.length, pricedActiveTrades])
+
+  const largestPositionRow = useMemo(
+    () =>
+      positionsWithClass.reduce<PositionRow | null>(
+        (current, position) =>
+          current === null || Math.abs(position.net_volume) > Math.abs(current.net_volume) ? position : current,
+        null,
+      ),
+    [positionsWithClass],
+  )
 
   const filteredEvents = useMemo(() => {
     if (eventFilter === 'ALL') {
@@ -796,6 +835,7 @@ export default function App() {
     activeCurrencies,
     activeUnits,
     activeLocations,
+    locationStandards,
     commodityClassOrder,
   })
 
@@ -1139,27 +1179,27 @@ export default function App() {
   }
 
   const heroTitle = {
-    dashboard: 'Commodity desk at a glance',
-    guide: 'Documentation in the operator console',
-    trades: 'Trade capture and lifecycle',
-    events: 'Event stream and chronology',
-    positions: 'Exposure by commodity',
-    reference: 'Reference data maintenance',
-    admin: 'Operational controls',
-    settings: 'Runtime and access settings',
-    assistant: 'Provider-routed operator assistant',
+    dashboard: 'Desk overview and market pulse',
+    guide: 'Playbooks inside the console',
+    trades: 'Trade blotter and ticket entry',
+    events: 'Lifecycle tape and chronology',
+    positions: 'Risk buckets and net exposure',
+    reference: 'Reference master and mappings',
+    admin: 'Operational controls and governance',
+    settings: 'Runtime profile and access',
+    assistant: 'Analyst copilot for the desk',
   }[currentView]
 
   const heroBody = {
-    dashboard: 'Monitor system health, open exposure, and recent activity from a calmer operating surface.',
-    guide: 'Read the semi-technical operator guide directly in the app, then jump into the workspace you need.',
-    trades: 'Capture a new trade, then inspect its state, review event history, and amend or cancel it without leaving the workspace.',
-    events: 'Read the system as a timeline instead of a log table. Filter it down to the selected trade when you need detail.',
-    positions: 'Scan live net exposure first, then drop to commodity-level rows when you need exact numbers.',
-    reference: 'Maintain books, commodities, and pricing reference data directly in the application, with activation controls and inline editing.',
-    admin: 'Use Admin as both a governance surface and a live window into the event, projection, and schema model behind the product.',
-    settings: 'Review safe server runtime settings, manage browser-stored write credentials, and adjust local client overrides in one place.',
-    assistant: 'Route prompts through GPT, Claude, or Gemini while grounding responses in the application state already loaded into the console.',
+    dashboard: 'Track the desk like a live terminal: health, market marks, positions, and operational attention stay on one screen.',
+    guide: 'Keep the operating model close to the product so onboarding, runbooks, and design notes stay in flow.',
+    trades: 'Enter tickets, inspect the active trade, and run lifecycle actions without losing the blotter context.',
+    events: 'Read the system as a tape instead of a log table, then narrow to the trade that needs attention.',
+    positions: 'Scan class-level risk first, then drop straight into the exact commodity rows carrying exposure.',
+    reference: 'Manage books, commodities, and price references from a denser master-data surface built for operators.',
+    admin: 'Watch the platform as a governed system: controls, provenance, approvals, and model visibility in one place.',
+    settings: 'Adjust runtime behavior, stored credentials, and client overrides without leaving the trading console.',
+    assistant: 'Ask for grounded analysis with the desk state already loaded so AI stays anchored to what operations can see.',
   }[currentView]
 
   const systemStateLabel = error
@@ -1194,7 +1234,7 @@ export default function App() {
         <div className="brand-lockup">
           <span className="brand-mark">E/CTRM</span>
           <h1>Operator Console</h1>
-          <p>A calmer control surface for event-led trading, reference data, and live projection views.</p>
+          <p>A trading operations cockpit for ticket entry, lifecycle management, and live projection views.</p>
         </div>
 
         <nav className="nav-stack" aria-label="Primary">
@@ -1214,75 +1254,129 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="side-card side-card-contrast">
-          <span className="eyebrow">System</span>
-          <Tooltip
-            content={systemStateTone === 'active' ? tradeTooltipCopy.systemReady : tradeTooltipCopy.systemAttention}
-            focusable
-          >
-            <span className={`status-pill status-pill-${systemStateTone} system-pill tooltip-trigger-hint`}>
-              {systemStateLabel}
-            </span>
-          </Tooltip>
-          <div className="health-line">
-            <span>API</span>
-            <strong>{health}</strong>
+        <div className="side-card side-card-contrast side-card-terminal">
+          <div className="side-card-head">
+            <div>
+              <span className="eyebrow">Desk State</span>
+              <strong className="side-card-title">Projection + routing</strong>
+            </div>
+            <Tooltip
+              content={systemStateTone === 'active' ? tradeTooltipCopy.systemReady : tradeTooltipCopy.systemAttention}
+              focusable
+            >
+              <span className={`status-pill status-pill-${systemStateTone} system-pill tooltip-trigger-hint`}>
+                {systemStateLabel}
+              </span>
+            </Tooltip>
           </div>
-          <div className="health-line">
-            <span>Books</span>
-            <strong>{books.length}</strong>
+
+          <div className="side-stat-grid">
+            <article className="side-stat">
+              <span>Open Trades</span>
+              <strong>{activeTrades.length}</strong>
+            </article>
+            <article className="side-stat">
+              <span>Pricing</span>
+              <strong>{pricingCoverage === null ? '0%' : `${pricingCoverage}%`}</strong>
+            </article>
+            <article className="side-stat">
+              <span>Pending Settle</span>
+              <strong>{pendingSettlementTrades}</strong>
+            </article>
+            <article className="side-stat">
+              <span>Books</span>
+              <strong>{trackedBooks}</strong>
+            </article>
           </div>
-          <div className="health-line">
-            <span>Commodities</span>
-            <strong>{commodities.length}</strong>
-          </div>
-          <div className="health-line">
-            <span>Price indices</span>
-            <strong>{priceIndices.length}</strong>
-          </div>
-          <div className="health-line">
-            <span>Currencies</span>
-            <strong>{currencies.length}</strong>
-          </div>
-          <div className="health-line">
-            <span>Units</span>
-            <strong>{units.length}</strong>
-          </div>
-          <div className="health-line">
-            <span>Locations</span>
-            <strong>{locations.length}</strong>
-          </div>
-          <div className="health-line">
-            <span>Counterparties</span>
-            <strong>{counterparties.length}</strong>
-          </div>
-          <div className="health-line">
-            <span>Portfolios</span>
-            <strong>{portfolios.length}</strong>
-          </div>
-          <div className="health-line">
-            <span>Open trades</span>
-            <strong>{activeTrades.length}</strong>
+
+          <div className="side-card-section">
+            <span className="side-section-title">Registry coverage</span>
+            <div className="health-line">
+              <span>API</span>
+              <strong>{health}</strong>
+            </div>
+            <div className="health-line">
+              <span>Books</span>
+              <strong>{books.length}</strong>
+            </div>
+            <div className="health-line">
+              <span>Commodities</span>
+              <strong>{commodities.length}</strong>
+            </div>
+            <div className="health-line">
+              <span>Price indices</span>
+              <strong>{priceIndices.length}</strong>
+            </div>
+            <div className="health-line">
+              <span>Currencies</span>
+              <strong>{currencies.length}</strong>
+            </div>
+            <div className="health-line">
+              <span>Units</span>
+              <strong>{units.length}</strong>
+            </div>
+            <div className="health-line">
+              <span>Locations</span>
+              <strong>{locations.length}</strong>
+            </div>
+            <div className="health-line">
+              <span>Counterparties</span>
+              <strong>{counterparties.length}</strong>
+            </div>
+            <div className="health-line">
+              <span>Portfolios</span>
+              <strong>{portfolios.length}</strong>
+            </div>
           </div>
         </div>
 
         {currentView !== 'guide' && (
-          <div className="side-card">
-            <span className="eyebrow">Selected Trade</span>
-            {selectedTrade ? (
-              <>
-                <strong className="side-card-title">{selectedTrade.trade_id}</strong>
-                <p>
-                  {selectedTrade.trade_nature} • {selectedTrade.trade_structure} • {selectedTrade.book}
-                </p>
+          <div className="side-card side-card-focus">
+            <div className="side-card-head">
+              <span className="eyebrow">Selected Trade</span>
+              {selectedTrade ? (
                 <Tooltip
-                  content={selectedTrade.status === tradeStatusValues.cancelled ? tradeTooltipCopy.cancelledTrade : tradeTooltipCopy.activeTrade}
+                  content={
+                    selectedTrade.status === tradeStatusValues.cancelled
+                      ? tradeTooltipCopy.cancelledTrade
+                      : tradeTooltipCopy.activeTrade
+                  }
                   focusable
                 >
                   <span className={`status-pill status-pill-${statusTone(selectedTrade.status)} tooltip-trigger-hint`}>
                     {selectedTrade.status}
                   </span>
                 </Tooltip>
+              ) : null}
+            </div>
+            {selectedTrade ? (
+              <>
+                <strong className="side-card-title">{selectedTrade.trade_id}</strong>
+                <p>
+                  {selectedTrade.trade_nature} • {selectedTrade.trade_structure} • {selectedTrade.book}
+                </p>
+                <div className="selection-pill-row">
+                  <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
+                  <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
+                </div>
+                <div className="side-selection-grid">
+                  <article className="side-stat">
+                    <span>Price</span>
+                    <strong>{formatMoney(selectedTrade.price)}</strong>
+                  </article>
+                  <article className="side-stat">
+                    <span>Volume</span>
+                    <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
+                  </article>
+                  <article className="side-stat">
+                    <span>Counterparty</span>
+                    <strong>{selectedTrade.counterparty ?? 'TBD'}</strong>
+                  </article>
+                  <article className="side-stat">
+                    <span>Updated</span>
+                    <strong>{formatDate(selectedTrade.updated_at)}</strong>
+                  </article>
+                </div>
               </>
             ) : (
               <>
@@ -1296,15 +1390,50 @@ export default function App() {
 
       <main className="main-stage">
         <header className="hero">
-          <div>
-            <span className="eyebrow">Workspace</span>
+          <div className="hero-copy">
+            <div className="hero-heading-row">
+              <span className="eyebrow">Workspace</span>
+              <span className={`hero-session-pill hero-session-pill-${systemStateTone}`}>{systemStateLabel}</span>
+            </div>
             <h2>{heroTitle}</h2>
             <p>{heroBody}</p>
+
+            {currentView !== 'guide' && (
+              <div className="hero-tape">
+                <article className="hero-tape-item">
+                  <span>Pricing Coverage</span>
+                  <strong>{pricingCoverage === null ? '0%' : `${pricingCoverage}%`}</strong>
+                  <small>
+                    {pricedActiveTrades} of {activeTrades.length} active tickets priced
+                  </small>
+                </article>
+                <article className="hero-tape-item">
+                  <span>Pending Pricing</span>
+                  <strong>{pendingPricingTrades}</strong>
+                  <small>Trades still waiting on explicit pricing state</small>
+                </article>
+                <article className="hero-tape-item">
+                  <span>Books in Play</span>
+                  <strong>{trackedBooks}</strong>
+                  <small>Distinct books carrying active exposure</small>
+                </article>
+                <article className="hero-tape-item">
+                  <span>Largest Line</span>
+                  <strong>{largestPositionRow ? formatNumber(largestPositionRow.net_volume, 0) : 'Flat'}</strong>
+                  <small>{largestPositionRow ? largestPositionRow.commodity : 'Waiting for open positions'}</small>
+                </article>
+              </div>
+            )}
           </div>
 
           <div className="hero-badge">
-            <span>Mode</span>
-            <strong>{VIEWS.find((view) => view.key === currentView)?.label}</strong>
+            <span>Focus</span>
+            <strong>{selectedTrade ? selectedTrade.trade_id : VIEWS.find((view) => view.key === currentView)?.label}</strong>
+            <small>
+              {selectedTrade
+                ? `${selectedTrade.commodity} • ${selectedTrade.book}`
+                : `${events.length} loaded events across the current session`}
+            </small>
           </div>
         </header>
 
@@ -1323,9 +1452,16 @@ export default function App() {
               <p>Total active volume across uncancelled trades.</p>
             </article>
             <article className="metric-card">
-              <span>Tracked Books</span>
-              <strong>{trackedBooks}</strong>
-              <p>Distinct books represented in the live book.</p>
+              <span>Pricing Coverage</span>
+              <strong>{pricingCoverage === null ? '0%' : `${pricingCoverage}%`}</strong>
+              <p>
+                {pricedActiveTrades} of {activeTrades.length} active trades currently carry a stored price differential.
+              </p>
+            </article>
+            <article className="metric-card">
+              <span>Open Positions</span>
+              <strong>{positionsWithClass.length}</strong>
+              <p>Commodity rows now contributing to the live position projection.</p>
             </article>
             <article className="metric-card">
               <span>Events Loaded</span>

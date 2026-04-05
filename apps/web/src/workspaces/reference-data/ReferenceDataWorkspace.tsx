@@ -91,9 +91,15 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     setReferenceTab,
     referenceSearch,
     setReferenceSearch,
-    filteredBooks,
+    bookSheetRows,
+    bookSheetDirtyCount,
+    bookSheetInvalidCount,
     selectedBookCode,
     startEditBook,
+    updateBookSheetField,
+    applyBookSheetChanges,
+    resetBookSheetRow,
+    resetAllBookSheetChanges,
     referenceCommodityGroups,
     selectedCommodityCode,
     startEditCommodity,
@@ -143,6 +149,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     activeCurrencies,
     selectablePriceIndexUnits,
     activeLocations,
+    locationStandards,
     selectedCurrency,
     currencyFormMode,
     currencyForm,
@@ -201,6 +208,12 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
   } = controller
 
   const commoditySheetRows = referenceCommodityGroups.flatMap((group) => group.items)
+  const selectedBookSheetRow = bookSheetRows.find((row) => row.code === selectedBookCode) ?? null
+  const normalizedLocationFormCode = locationForm.code.trim().toUpperCase()
+  const locationTypeOptions = locationStandards.location_types_by_kind[locationForm.location_kind] ?? []
+  const parentLocationOptions = activeLocations
+    .filter((location) => location.location_kind === 'REGION' && location.code !== normalizedLocationFormCode)
+    .sort((left, right) => left.name.localeCompare(right.name) || left.code.localeCompare(right.code))
   const statusColumn = <Row extends { is_active: boolean }>(): DataSheetColumn<Row> => ({
     id: 'status',
     label: 'Status',
@@ -215,13 +228,43 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
       referenceDirectory = (
         <DataSheet
           label="Books"
-          description="Review book records in a dense grid, then move straight into the maintenance panel without leaving the directory."
+          description="Stage book updates directly in the grid, then apply them through the normal reference-data write path once the highlighted rows look clean."
           columns={[
             { id: 'code', label: 'Code', width: '8rem', renderCell: (book) => book.code },
-            { id: 'name', label: 'Name', width: '18rem', renderCell: (book) => book.name },
-            statusColumn<(typeof filteredBooks)[number]>(),
+            {
+              id: 'name',
+              label: 'Name',
+              width: '18rem',
+              editable: {
+                value: (book) => book.name,
+                onChange: (book, value) => updateBookSheetField(book.code, 'name', value),
+                isDirty: (book) => book.sheet_dirty,
+                error: (book) => book.sheet_error,
+              },
+            },
+            {
+              id: 'description',
+              label: 'Description',
+              width: '20rem',
+              editable: {
+                value: (book) => book.description,
+                onChange: (book, value) => updateBookSheetField(book.code, 'description', value),
+                isDirty: (book) => book.sheet_dirty,
+              },
+            },
+            statusColumn<(typeof bookSheetRows)[number]>(),
+            {
+              id: 'draft-state',
+              label: 'Draft State',
+              width: '11rem',
+              renderCell: (book) => (
+                <span className={`entity-chip ${book.sheet_error ? '' : 'entity-chip-soft'}`}>
+                  {book.sheet_error ? 'Needs attention' : book.sheet_dirty ? 'Staged' : 'Saved'}
+                </span>
+              ),
+            },
           ]}
-          rows={filteredBooks}
+          rows={bookSheetRows}
           getRowId={(book) => book.code}
           getRowLabel={(book) => `${book.code} ${book.name}`}
           selectedRowId={selectedBookCode}
@@ -408,6 +451,50 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               onChange={(event) => setReferenceSearch(event.target.value)}
               placeholder="Search codes or names"
             />
+            {referenceTab === 'books' && (
+              <>
+                <span className="entity-chip entity-chip-soft">
+                  {bookSheetDirtyCount} staged row{bookSheetDirtyCount === 1 ? '' : 's'}
+                </span>
+                {bookSheetDirtyCount > 0 && (
+                  <span className={`entity-chip ${bookSheetInvalidCount > 0 ? '' : 'entity-chip-soft'}`}>
+                    {bookSheetInvalidCount} blocked
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => applyBookSheetChanges(selectedBookCode ? [selectedBookCode] : undefined)}
+                  disabled={savingReference || !selectedBookSheetRow?.sheet_dirty}
+                >
+                  Apply Selected
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={() => selectedBookCode && resetBookSheetRow(selectedBookCode)}
+                  disabled={savingReference || !selectedBookSheetRow?.sheet_dirty}
+                >
+                  Reset Selected
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => applyBookSheetChanges()}
+                  disabled={savingReference || bookSheetDirtyCount === 0}
+                >
+                  Apply Staged
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={resetAllBookSheetChanges}
+                  disabled={savingReference || bookSheetDirtyCount === 0}
+                >
+                  Reset Staged
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -1137,17 +1224,45 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   <select
                     className="control"
                     value={locationForm.location_kind}
-                    onChange={(event) => setLocationForm((current) => ({ ...current, location_kind: event.target.value }))}
+                    onChange={(event) => {
+                      const nextLocationKind = event.target.value
+                      const nextLocationTypes = locationStandards.location_types_by_kind[nextLocationKind] ?? []
+                      const fallbackLocationType =
+                        locationStandards.default_location_type_by_kind[nextLocationKind] ??
+                        nextLocationTypes[0] ??
+                        ''
+                      setLocationForm((current) => ({
+                        ...current,
+                        location_kind: nextLocationKind,
+                        location_type: nextLocationTypes.includes(current.location_type)
+                          ? current.location_type
+                          : fallbackLocationType,
+                      }))
+                    }}
                     disabled={savingReference}
                   >
-                    <option value="POINT">POINT</option>
-                    <option value="REGION">REGION</option>
+                    {locationStandards.location_kinds.map((locationKind) => (
+                      <option key={locationKind} value={locationKind}>
+                        {locationKind}
+                      </option>
+                    ))}
                   </select>
                   {locationFieldErrors.location_kind && <small className="field-error">{locationFieldErrors.location_kind}</small>}
                 </label>
                 <label className="field">
                   <span>Location Type</span>
-                  <input className="control" value={locationForm.location_type} onChange={(event) => setLocationForm((current) => ({ ...current, location_type: event.target.value.toUpperCase() }))} disabled={savingReference} />
+                  <select
+                    className="control"
+                    value={locationForm.location_type}
+                    onChange={(event) => setLocationForm((current) => ({ ...current, location_type: event.target.value }))}
+                    disabled={savingReference}
+                  >
+                    {locationTypeOptions.map((locationType) => (
+                      <option key={locationType} value={locationType}>
+                        {locationType}
+                      </option>
+                    ))}
+                  </select>
                   {locationFieldErrors.location_type && <small className="field-error">{locationFieldErrors.location_type}</small>}
                 </label>
               </div>
@@ -1155,11 +1270,35 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <div className="mini-grid">
                 <label className="field">
                   <span>Parent Location Code</span>
-                  <input className="control" value={locationForm.parent_location_code} onChange={(event) => setLocationForm((current) => ({ ...current, parent_location_code: event.target.value.toUpperCase() }))} disabled={savingReference} />
+                  <select
+                    className="control"
+                    value={locationForm.parent_location_code}
+                    onChange={(event) => setLocationForm((current) => ({ ...current, parent_location_code: event.target.value }))}
+                    disabled={savingReference}
+                  >
+                    <option value="">None</option>
+                    {parentLocationOptions.map((location) => (
+                      <option key={location.code} value={location.code}>
+                        {location.code} - {location.name}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="field">
                   <span>Market</span>
-                  <input className="control" value={locationForm.market} onChange={(event) => setLocationForm((current) => ({ ...current, market: event.target.value }))} disabled={savingReference} />
+                  <select
+                    className="control"
+                    value={locationForm.market}
+                    onChange={(event) => setLocationForm((current) => ({ ...current, market: event.target.value }))}
+                    disabled={savingReference}
+                  >
+                    <option value="">None</option>
+                    {locationStandards.market_codes.map((marketCode) => (
+                      <option key={marketCode} value={marketCode}>
+                        {marketCode}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
 
@@ -1169,8 +1308,8 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   <input className="control" value={locationForm.city} onChange={(event) => setLocationForm((current) => ({ ...current, city: event.target.value }))} disabled={savingReference} />
                 </label>
                 <label className="field">
-                  <span>State / Territory</span>
-                  <input className="control" value={locationForm.state_or_territory} onChange={(event) => setLocationForm((current) => ({ ...current, state_or_territory: event.target.value }))} disabled={savingReference} />
+                  <span>Subdivision Code</span>
+                  <input className="control" value={locationForm.subdivision_code} onChange={(event) => setLocationForm((current) => ({ ...current, subdivision_code: event.target.value.toUpperCase() }))} disabled={savingReference} />
                 </label>
               </div>
 
@@ -1180,8 +1319,20 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   <input className="control" value={locationForm.country_code} onChange={(event) => setLocationForm((current) => ({ ...current, country_code: event.target.value.toUpperCase() }))} disabled={savingReference} />
                 </label>
                 <label className="field">
-                  <span>Continent</span>
-                  <input className="control" value={locationForm.continent} onChange={(event) => setLocationForm((current) => ({ ...current, continent: event.target.value }))} disabled={savingReference} />
+                  <span>Continent Code</span>
+                  <select
+                    className="control"
+                    value={locationForm.continent_code}
+                    onChange={(event) => setLocationForm((current) => ({ ...current, continent_code: event.target.value }))}
+                    disabled={savingReference}
+                  >
+                    <option value="">None</option>
+                    {locationStandards.continent_codes.map((continentCode) => (
+                      <option key={continentCode} value={continentCode}>
+                        {continentCode}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
 
@@ -1248,9 +1399,9 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   <span>Geography</span>
                   <strong>
                     {selectedLocation.city ?? '—'}
-                    {selectedLocation.state_or_territory ? `, ${selectedLocation.state_or_territory}` : ''}
+                    {selectedLocation.subdivision_code ? ` • ${selectedLocation.subdivision_code}` : ''}
                     {selectedLocation.country_code ? ` • ${selectedLocation.country_code}` : ''}
-                    {selectedLocation.continent ? ` • ${selectedLocation.continent}` : ''}
+                    {selectedLocation.continent_code ? ` • ${selectedLocation.continent_code}` : ''}
                   </strong>
                 </div>
                 <div className="detail-row">

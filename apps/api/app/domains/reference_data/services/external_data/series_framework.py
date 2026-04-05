@@ -228,6 +228,18 @@ def parse_numeric_value(value: Any) -> Optional[Decimal]:
         raise ExternalSeriesSyncError(f"Could not parse numeric value {value!r}") from exc
 
 
+def _lookup_field_value(row: dict[str, Any], field_name: str) -> Any:
+    current: Any = row
+    for part in field_name.split("."):
+        key = part.strip()
+        if not key:
+            raise ExternalSeriesSyncError("Transform rule field name was blank")
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
 def evaluate_transform_rule(
     transform_rule: Optional[str],
     row: dict[str, Any],
@@ -236,18 +248,16 @@ def evaluate_transform_rule(
 ) -> Optional[Decimal]:
     rule = (transform_rule or "").strip()
     if not rule:
-        return parse_numeric_value(row.get(default_field))
+        return parse_numeric_value(_lookup_field_value(row, default_field))
 
     if rule.startswith("field:"):
         field_name = rule.split(":", maxsplit=1)[1].strip()
-        if not field_name:
-            raise ExternalSeriesSyncError("Transform rule field name was blank")
-        return parse_numeric_value(row.get(field_name))
+        return parse_numeric_value(_lookup_field_value(row, field_name))
 
     if rule.startswith("net:"):
         _, long_field, short_field = rule.split(":", maxsplit=2)
-        long_value = parse_numeric_value(row.get(long_field.strip()))
-        short_value = parse_numeric_value(row.get(short_field.strip()))
+        long_value = parse_numeric_value(_lookup_field_value(row, long_field.strip()))
+        short_value = parse_numeric_value(_lookup_field_value(row, short_field.strip()))
         if long_value is None or short_value is None:
             return None
         return long_value - short_value

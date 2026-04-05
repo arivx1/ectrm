@@ -316,9 +316,9 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
       tiles={[
         {
           id: 'create-trade',
-          eyebrow: 'Capture',
+          eyebrow: 'Ticket Entry',
           title: 'Create Trade',
-          description: 'Capture now lives in a movable tile so the form can stay next to whichever context panel you need.',
+          description: 'Enter a ticket on the left and keep the blotter plus inspector docked beside it while you work.',
           span: 'wide',
           availableSpans: ['full', 'wide'],
           content: <TradeCaptureForm {...tradeCaptureFormProps} />,
@@ -329,7 +329,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           title: selectedTrade ? selectedTrade.trade_id : 'No Selection',
           description: selectedTrade
             ? `${selectedTrade.trade_nature} • ${selectedTrade.trade_structure} • ${selectedTrade.book}`
-            : 'Pick a trade to inspect details, event history, and amendment controls.',
+            : 'Pick a blotter row to inspect state, event history, and amendment controls.',
           span: 'side',
           availableSpans: ['wide', 'half', 'side'],
           content: (
@@ -340,6 +340,47 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     Duplicate Into Form
                   </button>
                 </div>
+              )}
+
+              {selectedTrade && (
+                <section className="trade-inspector-summary">
+                  <div className="trade-inspector-summary-copy">
+                    <span className="eyebrow">Active Ticket</span>
+                    <strong>{selectedTrade.commodity}</strong>
+                    <p>
+                      {selectedTrade.trade_side ?? 'LEG-DEFINED'} • {selectedTrade.trade_nature} • {selectedTrade.book}
+                    </p>
+                  </div>
+
+                  <div className="trade-inspector-pill-row">
+                    <span className={`status-pill status-pill-${statusTone(selectedTrade.status)}`}>{selectedTrade.status}</span>
+                    <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
+                    <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
+                  </div>
+
+                  <div className="trade-inspector-summary-grid">
+                    <article>
+                      <span>Price</span>
+                      <strong>{formatMoney(selectedTrade.price)}</strong>
+                    </article>
+                    <article>
+                      <span>Volume</span>
+                      <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
+                    </article>
+                    <article>
+                      <span>Notional</span>
+                      <strong>
+                        {selectedTrade.price !== null && selectedTrade.volume !== null
+                          ? formatMoney(selectedTrade.price * selectedTrade.volume)
+                          : '—'}
+                      </strong>
+                    </article>
+                    <article>
+                      <span>Trader</span>
+                      <strong>{selectedTrade.trader_user ?? 'TBD'}</strong>
+                    </article>
+                  </div>
+                </section>
               )}
 
               <div className="tab-row">
@@ -585,15 +626,15 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
         },
         {
           id: 'trade-board',
-          eyebrow: 'Trade Board',
+          eyebrow: 'Blotter',
           title: 'Open and Historical Trades',
-          description: 'Select a row to open the inspector. Capture and lifecycle actions now stay in one workspace.',
+          description: 'Select a row to keep the inspector and ticket entry anchored to the same live blotter context.',
           span: 'full',
           availableSpans: ['full', 'wide'],
           content: (
             <DataSheet
-              label="Trade Board"
-              description="Browse the live trade projection like a dense sheet. Arrow between cells to keep the inspector aligned with the active row."
+              label="Trade Blotter"
+              description="Browse the live trade projection like a terminal blotter. Arrow between cells to keep the inspector synced to the active row."
               columns={tradeBoardColumns}
               rows={trades}
               getRowId={(trade) => trade.trade_id}

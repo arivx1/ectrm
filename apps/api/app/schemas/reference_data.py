@@ -121,9 +121,9 @@ class LocationCreate(ReferenceDataCreate):
     parent_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
     market: Optional[str] = Field(None, min_length=1, max_length=80)
     city: Optional[str] = Field(None, min_length=1, max_length=120)
-    state_or_territory: Optional[str] = Field(None, min_length=1, max_length=120)
+    subdivision_code: Optional[str] = Field(None, min_length=1, max_length=20)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
-    continent: Optional[str] = Field(None, min_length=1, max_length=40)
+    continent_code: Optional[str] = Field(None, min_length=1, max_length=10)
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     region: Optional[str] = Field(None, min_length=1, max_length=80)
@@ -136,9 +136,9 @@ class LocationUpdate(ReferenceDataUpdate):
     parent_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
     market: Optional[str] = Field(None, min_length=1, max_length=80)
     city: Optional[str] = Field(None, min_length=1, max_length=120)
-    state_or_territory: Optional[str] = Field(None, min_length=1, max_length=120)
+    subdivision_code: Optional[str] = Field(None, min_length=1, max_length=20)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
-    continent: Optional[str] = Field(None, min_length=1, max_length=40)
+    continent_code: Optional[str] = Field(None, min_length=1, max_length=10)
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     region: Optional[str] = Field(None, min_length=1, max_length=80)
@@ -155,13 +155,22 @@ class LocationOut(ReferenceDataOut):
     parent_location_code: Optional[str]
     market: Optional[str]
     city: Optional[str]
-    state_or_territory: Optional[str]
+    subdivision_code: Optional[str]
     country_code: Optional[str]
-    continent: Optional[str]
+    continent_code: Optional[str]
     latitude: Optional[float]
     longitude: Optional[float]
     region: Optional[str]
     timezone: Optional[str]
+
+
+class LocationStandardsOut(BaseModel):
+    default_location_kind: str
+    default_location_type_by_kind: dict[str, str]
+    location_kinds: list[str]
+    location_types_by_kind: dict[str, list[str]]
+    market_codes: list[str]
+    continent_codes: list[str]
 
 
 class CounterpartyCreate(ReferenceDataCreate):

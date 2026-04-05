@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react'
 
 type DataSheetInputType = 'text' | 'textarea'
 type CellFocusableElement = HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
@@ -319,7 +319,7 @@ export function DataSheet<Row>({
                             tabIndex: active ? 0 : -1,
                             'aria-label': `${column.label}: ${getRowLabel(row)}`,
                             onFocus: () => handleCellFocus(rowIndex, columnIndex),
-                            onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+                            onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
                               editable.onChange(row, event.target.value),
                           }
 

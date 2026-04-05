@@ -35,6 +35,23 @@ class ExternalSeriesSyncRequest(BaseModel):
     requested_by: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
+class ExternalSeriesDefinitionUpsertRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=80)
+    provider: str = Field(min_length=1, max_length=50)
+    dataset_code: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    series_id: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=160)
+    category: str = Field(min_length=1, max_length=50)
+    frequency: str = Field(min_length=1, max_length=20)
+    unit_code: str = Field(min_length=1, max_length=20)
+    source_url: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    description: Optional[str] = Field(default=None, min_length=1)
+    query_params: Optional[dict[str, Any]] = None
+    transform_rule: Optional[str] = Field(default=None, min_length=1)
+    is_active: bool = True
+    requested_by: Optional[str] = Field(default=None, min_length=1, max_length=128)
+
+
 class ExternalSeriesDefinitionOut(BaseModel):
     code: str
     provider: str

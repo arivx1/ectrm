@@ -56,6 +56,8 @@ from apps.api.app.routes.reference_data import (
     deactivate_location,
     deactivate_price_index,
     deactivate_unit,
+    list_location_standards,
+    list_locations,
     list_price_indices,
     update_location,
     update_price_index,
@@ -188,9 +190,9 @@ class ReferenceDataApiTests(unittest.TestCase):
                     parent_location_code=parent_location_code,
                     market="PHYSICAL",
                     city="Test City",
-                    state_or_territory="Test State",
+                    subdivision_code="US-TX",
                     country_code="US",
-                    continent="North America",
+                    continent_code="NA",
                     latitude=29.0,
                     longitude=-95.0,
                     region="GULF",
@@ -214,9 +216,9 @@ class ReferenceDataApiTests(unittest.TestCase):
                     parent_location_code=" usgc ",
                     market=" physical ",
                     city=" Houston ",
-                    state_or_territory=" Texas ",
+                    subdivision_code=" us-tx ",
                     country_code=" us ",
-                    continent=" North America ",
+                    continent_code=" na ",
                     latitude=29.7285,
                     longitude=-95.265,
                     region=" Gulf Coast ",
@@ -231,11 +233,11 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertEqual(payload.location_kind, "POINT")
         self.assertEqual(payload.location_type, "TERMINAL")
         self.assertEqual(payload.parent_location_code, "USGC")
-        self.assertEqual(payload.market, "physical")
+        self.assertEqual(payload.market, "PHYSICAL")
         self.assertEqual(payload.city, "Houston")
-        self.assertEqual(payload.state_or_territory, "Texas")
+        self.assertEqual(payload.subdivision_code, "US-TX")
         self.assertEqual(payload.country_code, "US")
-        self.assertEqual(payload.continent, "North America")
+        self.assertEqual(payload.continent_code, "NA")
         self.assertEqual(payload.region, "Gulf Coast")
         self.assertEqual(payload.timezone, "America/Chicago")
         self.assertAlmostEqual(payload.latitude or 0.0, 29.7285)
@@ -255,9 +257,9 @@ class ReferenceDataApiTests(unittest.TestCase):
                         parent_location_code="POINT_A",
                         market="PHYSICAL",
                         city="Test City",
-                        state_or_territory="Test State",
+                        subdivision_code="US-TX",
                         country_code="US",
-                        continent="North America",
+                        continent_code="NA",
                         latitude=30.0,
                         longitude=-95.0,
                         region="Test Region",
@@ -296,6 +298,126 @@ class ReferenceDataApiTests(unittest.TestCase):
         with self.SessionLocal() as session:
             with self.assertRaisesRegex(Exception, "Location cannot be deactivated while active child locations reference it"):
                 deactivate_location("USGC", LocationStatusUpdate(updated_by="test-user"), db=session)
+
+    def test_create_location_rejects_invalid_standard_codes(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "country_code 'ZZ' must be a valid ISO 3166-1 alpha-2 code"):
+                create_location(
+                    LocationCreate(
+                        code="BAD_COUNTRY",
+                        name="Bad Country",
+                        location_kind="POINT",
+                        location_type="HUB",
+                        market="PHYSICAL",
+                        city="Test City",
+                        subdivision_code="ZZ-XX",
+                        country_code="ZZ",
+                        continent_code="NA",
+                        latitude=30.0,
+                        longitude=-95.0,
+                        region="Test Region",
+                        timezone="America/Chicago",
+                        description="test location",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "timezone 'Mars/Olympus' must be a valid IANA timezone name"):
+                create_location(
+                    LocationCreate(
+                        code="BAD_TZ",
+                        name="Bad Timezone",
+                        location_kind="POINT",
+                        location_type="HUB",
+                        market="PHYSICAL",
+                        city="Test City",
+                        subdivision_code="US-TX",
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=30.0,
+                        longitude=-95.0,
+                        region="Test Region",
+                        timezone="Mars/Olympus",
+                        description="test location",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+    def test_create_location_rejects_invalid_type_for_kind_and_market_code(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "location_type 'REGION' is invalid for POINT"):
+                create_location(
+                    LocationCreate(
+                        code="BAD_TYPE",
+                        name="Bad Type",
+                        location_kind="POINT",
+                        location_type="REGION",
+                        market="PHYSICAL",
+                        city="Test City",
+                        subdivision_code="US-TX",
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=30.0,
+                        longitude=-95.0,
+                        region="Test Region",
+                        timezone="America/Chicago",
+                        description="test location",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "market 'NOT_A_REAL_MARKET' is invalid for locations"):
+                create_location(
+                    LocationCreate(
+                        code="BAD_MARKET",
+                        name="Bad Market",
+                        location_kind="POINT",
+                        location_type="HUB",
+                        market="not a real market",
+                        city="Test City",
+                        subdivision_code="US-TX",
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=30.0,
+                        longitude=-95.0,
+                        region="Test Region",
+                        timezone="America/Chicago",
+                        description="test location",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+    def test_list_location_standards_returns_controlled_taxonomy(self) -> None:
+        payload = list_location_standards()
+
+        self.assertEqual(payload.default_location_kind, "POINT")
+        self.assertEqual(payload.default_location_type_by_kind["POINT"], "HUB")
+        self.assertEqual(payload.default_location_type_by_kind["REGION"], "REGION")
+        self.assertEqual(payload.location_kinds, ["POINT", "REGION"])
+        self.assertIn("TERMINAL", payload.location_types_by_kind["POINT"])
+        self.assertIn("PADD", payload.location_types_by_kind["REGION"])
+        self.assertIn("PHYSICAL", payload.market_codes)
+        self.assertEqual(payload.continent_codes, ["AF", "AN", "AS", "EU", "NA", "OC", "SA"])
+
+    def test_list_locations_rejects_invalid_location_type_filter(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "location_type 'NOT_A_REAL_TYPE' is invalid for locations"):
+                list_locations(
+                    q=None,
+                    market=None,
+                    location_kind=None,
+                    location_type="not a real type",
+                    is_active=None,
+                    limit=50,
+                    offset=0,
+                    db=session,
+                )
 
     def test_create_price_index_requires_active_commodity(self) -> None:
         self._create_currency("USD", "$")

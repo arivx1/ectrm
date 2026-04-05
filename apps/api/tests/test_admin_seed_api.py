@@ -121,11 +121,11 @@ class AdminSeedApiTests(unittest.TestCase):
             assert usgc is not None
             self.assertEqual(cushing.location_kind, "POINT")
             self.assertEqual(cushing.parent_location_code, "PADD2")
-            self.assertEqual(cushing.state_or_territory, "Oklahoma")
+            self.assertEqual(cushing.subdivision_code, "US-OK")
             self.assertAlmostEqual(cushing.latitude or 0.0, 35.9853)
             self.assertEqual(usgc.location_kind, "REGION")
             self.assertEqual(usgc.city, "New Orleans")
-            self.assertEqual(usgc.continent, "North America")
+            self.assertEqual(usgc.continent_code, "NA")
             self.assertTrue(
                 {
                     row.code

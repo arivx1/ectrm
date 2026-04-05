@@ -16,6 +16,7 @@ from apps.api.app.models.external_series_observation import ExternalSeriesObserv
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.routes.external_data import (
+    create_external_series_definition,
     get_latest_external_series_observation,
     get_external_data_run,
     get_market_context,
@@ -24,11 +25,17 @@ from apps.api.app.routes.external_data import (
     list_external_series_observations,
     list_price_index_observations,
     list_external_data_runs,
+    trigger_kalshi_sync,
     trigger_cftc_sync,
     trigger_eia_sync,
     trigger_fred_sync,
+    update_external_series_definition,
 )
-from apps.api.app.schemas.external_data import EIASyncRequest, ExternalSeriesSyncRequest
+from apps.api.app.schemas.external_data import (
+    EIASyncRequest,
+    ExternalSeriesDefinitionUpsertRequest,
+    ExternalSeriesSyncRequest,
+)
 
 
 class ExternalDataApiTests(unittest.TestCase):
@@ -354,6 +361,110 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.id, 2)
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
+
+    def test_trigger_kalshi_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_kalshi_series", return_value=expected_run) as sync_mock:
+                payload = trigger_kalshi_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="KALSHI_FED_2026_RATE_CUT",
+                        lookback_days=30,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
+    def test_create_external_series_definition_normalizes_kalshi_defaults(self) -> None:
+        with self.SessionLocal() as session:
+            payload = create_external_series_definition(
+                ExternalSeriesDefinitionUpsertRequest(
+                    code="kalshi_fed_2026_rate_cut",
+                    provider="kalshi",
+                    dataset_code="KXFEDRATECUT",
+                    series_id="KXFEDRATECUT-26DEC17-25BPYES",
+                    name="Fed Cuts At Least 25bp In 2026",
+                    category="Prediction",
+                    frequency="daily",
+                    unit_code="usd",
+                    source_url="https://kalshi.com",
+                    description="Test Kalshi market",
+                    query_params={"book": "macro"},
+                    transform_rule=None,
+                    is_active=True,
+                    requested_by="anthony",
+                ),
+                db=session,
+            )
+
+            stored = session.get(ExternalSeriesDefinition, "KALSHI_FED_2026_RATE_CUT")
+
+        self.assertEqual(payload.code, "KALSHI_FED_2026_RATE_CUT")
+        self.assertEqual(payload.provider, "KALSHI")
+        self.assertEqual(payload.transform_rule, "field:price.close")
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored.created_by, "anthony")
+
+    def test_update_external_series_definition_bumps_version(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            session.add(
+                ExternalSeriesDefinition(
+                    code="KALSHI_FED_2026_RATE_CUT",
+                    provider="KALSHI",
+                    dataset_code="KXFEDRATECUT",
+                    series_id="KXFEDRATECUT-26DEC17-25BPYES",
+                    name="Fed Cuts At Least 25bp In 2026",
+                    category="prediction",
+                    frequency="daily",
+                    unit_code="USD",
+                    source_url="https://kalshi.com",
+                    description="Before",
+                    query_params=None,
+                    transform_rule="field:price.close",
+                    is_active=True,
+                    created_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                    created_by="system",
+                    updated_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            payload = update_external_series_definition(
+                "kalshi_fed_2026_rate_cut",
+                ExternalSeriesDefinitionUpsertRequest(
+                    code="KALSHI_FED_2026_RATE_CUT",
+                    provider="KALSHI",
+                    dataset_code="KXFEDRATECUT",
+                    series_id="KXFEDRATECUT-26DEC17-25BPYES",
+                    name="Fed Cuts At Least 25bp In 2026",
+                    category="prediction",
+                    frequency="daily",
+                    unit_code="USD",
+                    source_url="https://kalshi.com",
+                    description="After",
+                    query_params={"desk": "macro"},
+                    transform_rule="field:price.mean",
+                    is_active=False,
+                    requested_by="anthony",
+                ),
+                db=session,
+            )
+
+            stored = session.get(ExternalSeriesDefinition, "KALSHI_FED_2026_RATE_CUT")
+
+        self.assertEqual(payload.description, "After")
+        self.assertFalse(payload.is_active)
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored.version, 2)
+        self.assertEqual(stored.updated_by, "anthony")
 
 
 if __name__ == "__main__":

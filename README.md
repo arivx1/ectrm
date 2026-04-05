@@ -33,7 +33,7 @@ This project is a good fit for:
 - exposes operator workspaces for guide, dashboard, trades, events, positions,
   reference data, admin, settings, and a provider-routed assistant
 - supports administrative tasks such as user management, trading source
-  seeding, and external EIA market-data sync
+  seeding, and external EIA/FRED/CFTC/Kalshi market-data sync
 - can proxy assistant prompts through GPT, Claude, or Gemini when the
   corresponding backend API keys are configured
 - can manage assistant-agent prompt profiles and build server-owned prompt

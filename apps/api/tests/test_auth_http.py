@@ -302,6 +302,76 @@ class AuthHttpTests(unittest.TestCase):
         self.assertIn("correlation_id=auth-log-123", output)
         self.assertIn("request_method=GET", output)
         self.assertIn("request_path=/admin/external-data/runs", output)
+        self.assertIn("Request completed status_code=401", output)
+
+    def test_invalid_bearer_token_uses_auth_error_handler(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            response = self.client.get(
+                "/auth/me",
+                headers={
+                    "Authorization": "Token nope",
+                    "x-correlation-id": "bad-auth-123",
+                },
+            )
+            handler.flush()
+        finally:
+            handler.setStream(original_stream)
+
+        self.assertEqual(response.status_code, 401)
+        payload = response.json()
+        self.assertEqual(payload["error"]["code"], "AUTHENTICATION_REQUIRED")
+        self.assertEqual(payload["error"]["message"], "A valid Bearer session token is required.")
+        self.assertEqual(payload["error"]["correlation_id"], "bad-auth-123")
+        self.assertEqual(response.headers.get("x-correlation-id"), "bad-auth-123")
+
+        output = stream.getvalue()
+        self.assertIn("Authentication rejected status_code=401", output)
+        self.assertIn("correlation_id=bad-auth-123", output)
+        self.assertIn("request_path=/auth/me", output)
+        self.assertIn("Request completed status_code=401", output)
+
+    def test_http_exception_is_logged_with_request_context(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            response = self.client.get(
+                "/trades/MISSING",
+                headers={"x-correlation-id": "http-log-123"},
+            )
+            handler.flush()
+        finally:
+            handler.setStream(original_stream)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Trade not found")
+        self.assertEqual(response.headers.get("x-correlation-id"), "http-log-123")
+
+        output = stream.getvalue()
+        self.assertIn("Handled request failure status_code=404 detail=Trade not found", output)
+        self.assertIn("correlation_id=http-log-123", output)
+        self.assertIn("request_method=GET", output)
+        self.assertIn("request_path=/trades/MISSING", output)
+        self.assertIn("Request completed status_code=404", output)
+
+    def test_successful_requests_emit_completion_logs(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            response = self.client.get(
+                "/health",
+                headers={"x-correlation-id": "health-log-123"},
+            )
+            handler.flush()
+        finally:
+            handler.setStream(original_stream)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+        output = stream.getvalue()
+        self.assertIn("Request completed status_code=200", output)
+        self.assertIn("correlation_id=health-log-123", output)
+        self.assertIn("request_method=GET", output)
+        self.assertIn("request_path=/health", output)
 
     def test_unhandled_exception_is_logged_with_request_context(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()
@@ -327,6 +397,7 @@ class AuthHttpTests(unittest.TestCase):
         self.assertIn("correlation_id=error-log-123", output)
         self.assertIn("request_method=GET", output)
         self.assertIn("request_path=/settings/public", output)
+        self.assertIn("Request completed status_code=500", output)
 
     def test_bootstrap_admin_rejects_whitespace_only_password(self) -> None:
         response = self.client.post(

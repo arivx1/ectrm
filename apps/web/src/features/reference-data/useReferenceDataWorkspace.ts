@@ -10,6 +10,7 @@ import type {
   CurrencyRecord,
   LocationForm,
   LocationRecord,
+  LocationStandards,
   PortfolioForm,
   PortfolioRecord,
   PriceIndexForm,
@@ -19,6 +20,7 @@ import type {
   UnitForm,
   UnitRecord,
 } from '../../shared/models'
+import { DEFAULT_LOCATION_STANDARDS as defaultLocationStandards } from '../../shared/models'
 
 export function emptyBookForm(): BookForm {
   return { code: '', name: '', description: '' }
@@ -60,18 +62,23 @@ export function emptyUnitForm(defaultCommodityClass: string): UnitForm {
   }
 }
 
-export function emptyLocationForm(): LocationForm {
+export function emptyLocationForm(locationStandards: LocationStandards = defaultLocationStandards): LocationForm {
+  const defaultLocationKind = locationStandards.default_location_kind
+  const defaultLocationType =
+    locationStandards.default_location_type_by_kind[defaultLocationKind] ??
+    locationStandards.location_types_by_kind[defaultLocationKind]?.[0] ??
+    ''
   return {
     code: '',
     name: '',
-    location_kind: 'POINT',
-    location_type: 'HUB',
+    location_kind: defaultLocationKind,
+    location_type: defaultLocationType,
     parent_location_code: '',
     market: '',
     city: '',
-    state_or_territory: '',
+    subdivision_code: '',
     country_code: '',
-    continent: '',
+    continent_code: '',
     latitude: '',
     longitude: '',
     region: '',
@@ -125,6 +132,7 @@ type UseReferenceDataWorkspaceArgs = {
   activeCurrencies: CurrencyRecord[]
   activeUnits: UnitRecord[]
   activeLocations: LocationRecord[]
+  locationStandards: LocationStandards
   commodityClassOrder: readonly string[]
 }
 
@@ -142,6 +150,7 @@ export function useReferenceDataWorkspace({
   activeCurrencies,
   activeUnits,
   activeLocations,
+  locationStandards,
   commodityClassOrder,
 }: UseReferenceDataWorkspaceArgs) {
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>('books')
@@ -160,7 +169,7 @@ export function useReferenceDataWorkspace({
   const [priceIndexForm, setPriceIndexForm] = useState(emptyPriceIndexForm())
   const [currencyForm, setCurrencyForm] = useState(emptyCurrencyForm())
   const [unitForm, setUnitForm] = useState(emptyUnitForm(commodityClassOrder[0]))
-  const [locationForm, setLocationForm] = useState(emptyLocationForm())
+  const [locationForm, setLocationForm] = useState(emptyLocationForm(locationStandards))
   const [counterpartyForm, setCounterpartyForm] = useState(emptyCounterpartyForm())
   const [portfolioForm, setPortfolioForm] = useState(emptyPortfolioForm())
 
@@ -302,9 +311,9 @@ export function useReferenceDataWorkspace({
         (location.parent_location_code ?? '').toLowerCase().includes(query) ||
         (location.market ?? '').toLowerCase().includes(query) ||
         (location.city ?? '').toLowerCase().includes(query) ||
-        (location.state_or_territory ?? '').toLowerCase().includes(query) ||
+        (location.subdivision_code ?? '').toLowerCase().includes(query) ||
         (location.country_code ?? '').toLowerCase().includes(query) ||
-        (location.continent ?? '').toLowerCase().includes(query) ||
+        (location.continent_code ?? '').toLowerCase().includes(query) ||
         (location.region ?? '').toLowerCase().includes(query) ||
         (location.description ?? '').toLowerCase().includes(query)
       )
@@ -487,7 +496,7 @@ export function useReferenceDataWorkspace({
 
   function startCreateLocation() {
     setLocationFormMode('create')
-    setLocationForm(emptyLocationForm())
+    setLocationForm(emptyLocationForm(locationStandards))
   }
 
   function startEditLocation(code: string) {
@@ -505,9 +514,9 @@ export function useReferenceDataWorkspace({
       parent_location_code: record.parent_location_code ?? '',
       market: record.market ?? '',
       city: record.city ?? '',
-      state_or_territory: record.state_or_territory ?? '',
+      subdivision_code: record.subdivision_code ?? '',
       country_code: record.country_code ?? '',
-      continent: record.continent ?? '',
+      continent_code: record.continent_code ?? '',
       latitude: record.latitude?.toString() ?? '',
       longitude: record.longitude?.toString() ?? '',
       region: record.region ?? '',

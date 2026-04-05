@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     FRED_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
     CFTC_BASE_URL: str = "https://publicreporting.cftc.gov"
     CFTC_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    KALSHI_BASE_URL: str = "https://api.elections.kalshi.com/trade-api/v2"
+    KALSHI_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    KALSHI_DEFAULT_LOOKBACK_DAYS: int = Field(default=90, ge=1, le=3650)
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
