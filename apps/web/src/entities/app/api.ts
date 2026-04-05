@@ -24,6 +24,13 @@ export type SystemOverview = {
   generated_at: string
   server_status: string
   database_status: string
+  database: {
+    dialect: string
+    name: string
+    size_bytes: number | null
+    table_count: number
+    record_count: number
+  }
   uptime_seconds: number
   presence_window_seconds: number
   active_session_count: number
@@ -50,6 +57,13 @@ export type SystemOverview = {
 
 export type PublicRuntimeSettings = {
   app_version: string
+  database: {
+    dialect: string
+    name: string
+    size_bytes: number | null
+    table_count: number
+    record_count: number
+  }
   cors_allow_origins: string[]
   mutation_protection_enabled: boolean
   bootstrap_admin_enabled: boolean

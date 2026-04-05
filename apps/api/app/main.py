@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import AuthError, is_admin_role, resolve_session_principal
+from apps.api.app.core.logging import configure_logging, get_logger
 from apps.api.app.core.request_context import reset_request_identity, set_request_identity
 from apps.api.app.config import settings
 from apps.api.app.core.query_params import (
@@ -15,8 +17,10 @@ from apps.api.app.core.query_params import (
     STANDARD_LIST_LIMIT_DEFAULT,
     STANDARD_LIST_LIMIT_MAX,
 )
+from apps.api.app.deps.db import get_db
 from apps.api.app.db.engine import SessionLocal
 from apps.api.app.domains.assistant.services.chat import build_assistant_runtime_settings
+from apps.api.app.domains.operations.services import build_database_overview
 from apps.api.app.routes.assistant import admin_router as assistant_admin_router
 from apps.api.app.routes.assistant import router as assistant_router
 from apps.api.app.routes.auth import router as auth_router
@@ -24,6 +28,7 @@ from apps.api.app.routes.admin_data import admin_router as admin_data_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
 from apps.api.app.routes.external_data import router as external_data_router
 from apps.api.app.routes.events import router as events_router
+from apps.api.app.routes.layout_definitions import router as layout_definitions_router
 from apps.api.app.routes.operations import router as operations_router
 from apps.api.app.routes.reference_data import router as reference_data_router
 from apps.api.app.routes.reports import router as reports_router
@@ -41,6 +46,9 @@ from apps.api.app.schemas.runtime_settings import (
     PublicRuntimeSettingsOut,
 )
 
+configure_logging()
+logger = get_logger(__name__)
+
 app = FastAPI(title="E/CTRM API", version=settings.APP_VERSION)
 
 app.add_middleware(
@@ -56,6 +64,7 @@ app.state.started_at = datetime.now(timezone.utc)
 
 app.include_router(auth_router)
 app.include_router(events_router)
+app.include_router(layout_definitions_router)
 app.include_router(operations_router)
 app.include_router(reference_data_router)
 app.include_router(admin_data_router)
@@ -80,7 +89,17 @@ PUBLIC_WRITE_PATHS = frozenset(
 ADMIN_PATH_PREFIXES = ("/admin", "/users")
 
 
-def _auth_error(status_code: int, message: str, correlation_id: str) -> JSONResponse:
+def _auth_error(request: Request, status_code: int, message: str, correlation_id: str) -> JSONResponse:
+    logger.warning(
+        "Authentication rejected status_code=%s message=%s",
+        status_code,
+        message,
+        extra={
+            "correlation_id": correlation_id,
+            "request_method": request.method.upper(),
+            "request_path": request.url.path,
+        },
+    )
     response = JSONResponse(
         status_code=status_code,
         content={
@@ -124,7 +143,7 @@ async def add_correlation_id(request: Request, call_next):
             protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
             admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
             if protected_write or admin_path:
-                return _auth_error(exc.status_code, exc.message, correlation_id)
+                return _auth_error(request, exc.status_code, exc.message, correlation_id)
 
     request.state.actor_id = principal.user_id if principal is not None else None
     request.state.actor_role = principal.role if principal is not None else None
@@ -135,6 +154,9 @@ async def add_correlation_id(request: Request, call_next):
         actor_id=request.state.actor_id,
         role=request.state.actor_role,
         session_id=request.state.session_id,
+        correlation_id=correlation_id,
+        request_method=request.method.upper(),
+        request_path=request.url.path,
     )
 
     try:
@@ -145,18 +167,21 @@ async def add_correlation_id(request: Request, call_next):
         if admin_path:
             if principal is None:
                 return _auth_error(
+                    request,
                     401,
                     "Authentication is required for admin operations.",
                     correlation_id,
                 )
             if not is_admin_role(principal.role):
                 return _auth_error(
+                    request,
                     403,
                     "An administrative session is required for this operation.",
                     correlation_id,
                 )
         elif protected_write and principal is None:
             return _auth_error(
+                request,
                 401,
                 "Authentication is required for write operations.",
                 correlation_id,
@@ -180,10 +205,11 @@ def version():
 
 
 @app.get("/settings/public", response_model=PublicRuntimeSettingsOut)
-def public_runtime_settings() -> PublicRuntimeSettingsOut:
+def public_runtime_settings(db: Session = Depends(get_db)) -> PublicRuntimeSettingsOut:
     google_auth_client_id = settings.GOOGLE_AUTH_CLIENT_ID.strip() or None
     return PublicRuntimeSettingsOut(
         app_version=settings.APP_VERSION,
+        database=build_database_overview(db),
         cors_allow_origins=settings.cors_allow_origins,
         mutation_protection_enabled=True,
         bootstrap_admin_enabled=bool(settings.BOOTSTRAP_ADMIN_TOKEN.strip() or settings.MUTATION_API_TOKEN.strip()),
@@ -209,6 +235,15 @@ def public_runtime_settings() -> PublicRuntimeSettingsOut:
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id")
+    logger.error(
+        "Unhandled exception while processing request",
+        exc_info=(type(exc), exc, exc.__traceback__),
+        extra={
+            "correlation_id": correlation_id,
+            "request_method": request.method.upper(),
+            "request_path": request.url.path,
+        },
+    )
     return JSONResponse(
         status_code=500,
         content={

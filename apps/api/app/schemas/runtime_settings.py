@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from apps.api.app.schemas.operations import DatabaseOverviewOut
 from apps.api.app.schemas.assistant import AssistantRuntimeSettingsOut
 
 
@@ -20,6 +21,7 @@ class GoogleAuthRuntimeSettingsOut(BaseModel):
 
 class PublicRuntimeSettingsOut(BaseModel):
     app_version: str
+    database: DatabaseOverviewOut
     cors_allow_origins: list[str]
     mutation_protection_enabled: bool
     bootstrap_admin_enabled: bool

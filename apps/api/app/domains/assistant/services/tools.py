@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
 from apps.api.app.domains.reference_data.services.records import list_reference_records, normalize_code
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
@@ -269,6 +270,29 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
             },
             executor=_search_reference_data,
         ),
+        AssistantToolDefinition(
+            name="get_market_context",
+            description=(
+                "Load the latest unified market context across price-index observations, macro series, and "
+                "positioning series. Use this when the user asks what is happening in crude, gas, power, or "
+                "macro right now and you need current structured data instead of a generic summary."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "commodity": {
+                        "type": "string",
+                        "description": "Optional commodity hint such as WTI, BRENT, HH, NATURAL_GAS, or POWER.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return per section. Defaults to 5 and is capped at 10.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_get_market_context,
+        ),
     ]
 
 
@@ -412,6 +436,30 @@ def _search_reference_data(db: Session, arguments: dict[str, Any]) -> AssistantT
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(rows))
 
 
+def _get_market_context(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    commodity = _optional_upper(arguments.get("commodity"))
+    limit = _normalize_market_context_limit(arguments.get("limit"), default=5)
+    payload = build_market_context(db, commodity=commodity, limit=limit)
+    price_count = len(payload["price_indices"])
+    macro_count = len(payload["macro"])
+    positioning_count = len(payload["positioning"])
+    if commodity:
+        summary = (
+            f"Loaded market context for {commodity}: {price_count} price index row(s), "
+            f"{macro_count} macro row(s), and {positioning_count} positioning row(s)."
+        )
+    else:
+        summary = (
+            f"Loaded market context: {price_count} price index row(s), "
+            f"{macro_count} macro row(s), and {positioning_count} positioning row(s)."
+        )
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=price_count + macro_count + positioning_count,
+    )
+
+
 def _serialize_trade(trade: Trade) -> dict[str, Any]:
     return {
         "trade_id": trade.trade_id,
@@ -545,6 +593,16 @@ def _normalize_limit(value: Any, *, default: int) -> int:
     except (TypeError, ValueError) as exc:
         raise AssistantToolServiceError("limit must be a whole number.") from exc
     return max(1, min(limit, 25))
+
+
+def _normalize_market_context_limit(value: Any, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AssistantToolServiceError("limit must be a whole number.") from exc
+    return max(1, min(limit, 10))
 
 
 def _require_text(value: Any, *, field_name: str) -> str:

@@ -291,6 +291,12 @@ class OperationsHttpTests(unittest.TestCase):
 
         self.assertEqual(payload.server_status, "ok")
         self.assertEqual(payload.database_status, "ok")
+        self.assertEqual(payload.database.dialect, "sqlite")
+        self.assertEqual(payload.database.name, "in-memory")
+        self.assertEqual(payload.database.table_count, len(Base.metadata.sorted_tables))
+        self.assertEqual(payload.database.record_count, 16)
+        self.assertIsNotNone(payload.database.size_bytes)
+        self.assertGreater(payload.database.size_bytes, 0)
         self.assertEqual(payload.presence_window_seconds, 120)
         self.assertEqual(payload.active_session_count, 3)
         self.assertEqual(payload.active_user_count, 2)

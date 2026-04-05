@@ -22,7 +22,7 @@ type PriceSeries = {
   observations: PriceIndexObservationRecord[]
 }
 
-type MarketPricesPanelProps = {
+type MarketPricesTileContentProps = {
   appLoading: boolean
   activeTrades: DashboardTrade[]
   priceIndices: DashboardPriceIndex[]
@@ -260,12 +260,12 @@ function Sparkline({
   )
 }
 
-export function MarketPricesPanel({
+export function MarketPricesTileContent({
   appLoading,
   activeTrades,
   priceIndices,
   formatNumber,
-}: MarketPricesPanelProps) {
+}: MarketPricesTileContentProps) {
   const [priceSeries, setPriceSeries] = useState<PriceSeries[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -341,15 +341,7 @@ export function MarketPricesPanel({
   }, [appLoading, selectedPriceIndices])
 
   return (
-    <article className="surface">
-      <div className="section-head">
-        <div>
-          <span className="eyebrow">Market Data</span>
-          <h3>Market Prices</h3>
-        </div>
-        <p>Current marks with a rolling line graph so you can see where the curve has been moving.</p>
-      </div>
-
+    <>
       {appLoading || loading ? (
         <div className="market-price-grid">
           <div className="skeleton-block" />
@@ -418,6 +410,6 @@ export function MarketPricesPanel({
           <p>Run a price sync or add tracked price indices to start populating the dashboard chart cards.</p>
         </div>
       )}
-    </article>
+    </>
   )
 }

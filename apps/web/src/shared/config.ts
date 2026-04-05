@@ -65,6 +65,27 @@ function resolvePositiveIntSetting(storageKey: string, envName: string, fallback
   return readPositiveInt(readEnvString(envName), fallback)
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+}
+
+function resolveBrowserReachableApiBase(configuredBase: string): string {
+  if (typeof window === 'undefined') {
+    return configuredBase
+  }
+
+  try {
+    const parsedBase = new URL(configuredBase, window.location.href)
+    if (isLoopbackHost(parsedBase.hostname) && !isLoopbackHost(window.location.hostname)) {
+      parsedBase.hostname = window.location.hostname
+    }
+
+    return parsedBase.toString().replace(/\/+$/, '')
+  } catch {
+    return configuredBase.replace(/\/+$/, '')
+  }
+}
+
 function resolveApiBase(): string {
   const storedOverride = readStoredString(API_BASE_OVERRIDE_STORAGE_KEY)
   if (storedOverride) {
@@ -73,7 +94,7 @@ function resolveApiBase(): string {
 
   const configuredBase = readEnvString('VITE_API_BASE')
   if (configuredBase) {
-    return configuredBase.replace(/\/+$/, '')
+    return resolveBrowserReachableApiBase(configuredBase)
   }
 
   const configuredPort = readEnvString('VITE_API_PORT') ?? '8000'

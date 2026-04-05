@@ -76,6 +76,43 @@ function normalizePositiveInteger(value: string, label: string): string {
   return String(parsedValue)
 }
 
+function formatBytes(value: number | null | undefined): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return '--'
+  }
+
+  if (value < 1024) {
+    return `${value} B`
+  }
+
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let normalized = value / 1024
+  let unitIndex = 0
+
+  while (normalized >= 1024 && unitIndex < units.length - 1) {
+    normalized /= 1024
+    unitIndex += 1
+  }
+
+  return `${normalized.toFixed(normalized >= 10 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function formatDatabaseType(value: string | null | undefined): string {
+  if (!value) {
+    return '--'
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'postgresql') {
+    return 'PostgreSQL'
+  }
+  if (normalized === 'sqlite') {
+    return 'SQLite'
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
 export function SettingsWorkspace({ health, authSession, onSessionChange }: SettingsWorkspaceProps) {
   const [loginForm, setLoginForm] = useState({ identifier: '', password: '' })
   const [bootstrapForm, setBootstrapForm] = useState({
@@ -880,6 +917,23 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
               </div>
 
               <div className="settings-kv">
+                <SettingsValueRow
+                  label="Database type"
+                  value={formatDatabaseType(serverSettings.database.dialect)}
+                />
+                <SettingsValueRow label="Database name" value={serverSettings.database.name} />
+                <SettingsValueRow
+                  label="Database size"
+                  value={formatBytes(serverSettings.database.size_bytes)}
+                />
+                <SettingsValueRow
+                  label="Database tables"
+                  value={String(serverSettings.database.table_count)}
+                />
+                <SettingsValueRow
+                  label="Database records"
+                  value={String(serverSettings.database.record_count)}
+                />
                 <SettingsValueRow
                   label="Session TTL"
                   value={`${serverSettings.session_ttl_hours}h`}

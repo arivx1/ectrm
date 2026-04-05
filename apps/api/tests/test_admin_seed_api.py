@@ -78,9 +78,10 @@ class AdminSeedApiTests(unittest.TestCase):
                 db=session,
             )
 
-            self.assertGreaterEqual(payload.total_records, 30)
+            self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
             self.assertEqual(payload.entity_counts["commodities"], 11)
-            self.assertEqual(payload.entity_counts["locations"], 6)
+            self.assertEqual(payload.entity_counts["locations"], 14)
+            self.assertEqual(payload.entity_counts["counterparties"], 16)
             self.assertEqual(payload.entity_counts["price_indices"], 7)
             self.assertEqual(payload.entity_counts["price_index_sources"], 6)
             self.assertEqual(
@@ -97,6 +98,48 @@ class AdminSeedApiTests(unittest.TestCase):
                     "USGC_DIESEL_SPOT_D",
                     "WTI_CUSHING_PHYS_D",
                 },
+            )
+            self.assertTrue(
+                {
+                    row.code
+                    for row in session.query(ReferenceLocation).all()
+                }.issuperset(
+                    {
+                        "ARA",
+                        "CUSHING",
+                        "ERCOT_NORTH",
+                        "MIDLAND",
+                        "WAHA",
+                    }
+                )
+            )
+            cushing = session.get(ReferenceLocation, "CUSHING")
+            usgc = session.get(ReferenceLocation, "USGC")
+            self.assertIsNotNone(cushing)
+            self.assertIsNotNone(usgc)
+            assert cushing is not None
+            assert usgc is not None
+            self.assertEqual(cushing.location_kind, "POINT")
+            self.assertEqual(cushing.parent_location_code, "PADD2")
+            self.assertEqual(cushing.state_or_territory, "Oklahoma")
+            self.assertAlmostEqual(cushing.latitude or 0.0, 35.9853)
+            self.assertEqual(usgc.location_kind, "REGION")
+            self.assertEqual(usgc.city, "New Orleans")
+            self.assertEqual(usgc.continent, "North America")
+            self.assertTrue(
+                {
+                    row.code
+                    for row in session.query(ReferenceCounterparty).all()
+                }.issuperset(
+                    {
+                        "BP",
+                        "CHEVRON",
+                        "CONSTELLATION",
+                        "MERCURIA",
+                        "TRAFIGURA",
+                        "VALERO",
+                    }
+                )
             )
 
     def test_transaction_seed_supports_add_replace_and_delete(self) -> None:

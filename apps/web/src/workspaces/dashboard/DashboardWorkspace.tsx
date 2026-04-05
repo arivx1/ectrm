@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 
-import { MarketPricesPanel } from './MarketPricesPanel'
+import { TileLayout } from '../../shared/ui/TileLayout'
+import type { StoredAuthSession } from '../../shared/mutation'
+import { MarketPricesTileContent } from './MarketPricesPanel'
 
 type EventRow = {
   event_id: string
@@ -42,6 +44,7 @@ type PriceIndexRecord = {
 }
 
 type DashboardWorkspaceProps = {
+  authSession: StoredAuthSession | null
   appLoading: boolean
   activeTrades: Trade[]
   priceIndices: PriceIndexRecord[]
@@ -80,6 +83,7 @@ function tradeDirection(trade: Trade): number {
 
 export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const {
+    authSession,
     appLoading,
     activeTrades,
     priceIndices,
@@ -216,179 +220,185 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   }, [activeTrades])
 
   return (
-    <section className="stack">
-      <article className="surface">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">Reporting</span>
-            <h3>Desk Snapshot</h3>
-          </div>
-          <p>P&L proxy, gross exposure, and operational attention points from the live trade and position set.</p>
-        </div>
-
-        {appLoading ? (
-          <div className="skeleton-stack">
-            <div className="skeleton-block" />
-            <div className="skeleton-block" />
-          </div>
-        ) : (
-          <div className="dashboard-report-grid">
-            <article className="dashboard-report-card">
-              <span>P&amp;L Proxy</span>
-              <strong>{formatMoney(markedPnlProxy)}</strong>
-              <p>
-                Based on {pricedTradeCount} priced trade{pricedTradeCount === 1 ? '' : 's'} using stored price differential
-                times current volume. True P&amp;L will need market marks and settlements.
-              </p>
-            </article>
-            <article className="dashboard-report-card">
-              <span>Gross Exposure</span>
-              <strong>{formatNumber(grossExposure, 0)}</strong>
-              <p>
-                Across {positionsWithClass.length} commodity position{positionsWithClass.length === 1 ? '' : 's'} and{' '}
-                {exposureByClass.length} reporting bucket{exposureByClass.length === 1 ? '' : 's'} with UOM coverage.
-              </p>
-            </article>
-            <article className="dashboard-report-card">
-              <span>Needs Attention</span>
-              <strong>{formatNumber(dashboardIssues.total, 0)}</strong>
-              <p>
-                Trade-driven operational watchlist. Shipment and invoice exceptions can slot in here once those workflows
-                are modeled in the platform.
-              </p>
-            </article>
-            <article className="dashboard-report-card">
-              <span>Largest Bucket</span>
-              <strong>
-                {largestExposureBucket
-                  ? `${formatNumber(largestExposureBucket.netVolume, 0)} ${largestExposureBucket.unitLabel}`
-                  : '—'}
-              </strong>
-              <p>
-                {largestExposureBucket
-                  ? `${formatCommodityClass(largestExposureBucket.commodityClass)} currently leads the dashboard exposure view.`
-                  : 'No open exposure bucket is available yet.'}
-              </p>
-            </article>
-          </div>
-        )}
-      </article>
-
-      <MarketPricesPanel
-        appLoading={appLoading}
-        activeTrades={activeTrades}
-        priceIndices={priceIndices}
-        formatNumber={formatNumber}
-      />
-
-      <article className="surface">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">Exposure</span>
-            <h3>Position Snapshot</h3>
-          </div>
-          <p>Class-level overview first, detailed rows later.</p>
-        </div>
-
-        {appLoading ? (
-          <div className="skeleton-stack">
-            <div className="skeleton-block" />
-            <div className="skeleton-block" />
-          </div>
-        ) : exposureByClass.length > 0 ? (
-          <div className="position-class-grid">
-            {exposureByClass.map((row) => (
-              <article key={`${row.commodityClass}-${row.unitLabel}`} className="position-class-card">
-                <span>{formatCommodityClass(row.commodityClass)}</span>
-                <strong>
-                  {formatNumber(row.netVolume, 0)} <small>{row.unitLabel}</small>
-                </strong>
+    <TileLayout
+      workspaceId="dashboard"
+      workspaceLabel="Dashboard"
+      authSession={authSession}
+      tiles={[
+        {
+          id: 'desk-snapshot',
+          eyebrow: 'Reporting',
+          title: 'Desk Snapshot',
+          description: 'P&L proxy, gross exposure, and operational attention points from the live desk state.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: appLoading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : (
+            <div className="dashboard-report-grid">
+              <article className="dashboard-report-card">
+                <span>P&amp;L Proxy</span>
+                <strong>{formatMoney(markedPnlProxy)}</strong>
                 <p>
-                  {row.commodityCount} commodit{row.commodityCount === 1 ? 'y' : 'ies'} contributing to this reporting
-                  bucket.
+                  Based on {pricedTradeCount} priced trade{pricedTradeCount === 1 ? '' : 's'} using stored price
+                  differential times current volume. True P&amp;L will need market marks and settlements.
                 </p>
               </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>No open exposure</strong>
-            <p>The system is healthy, but there are no active trades contributing exposure yet.</p>
-          </div>
-        )}
-      </article>
-
-      <article className="surface">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">Watchlist</span>
-            <h3>Operational Attention</h3>
-          </div>
-          <p>Current issues are derived from trade aging and completeness until shipment and invoice workflows land.</p>
-        </div>
-
-        {appLoading ? (
-          <div className="skeleton-stack">
-            <div className="skeleton-block" />
-          </div>
-        ) : dashboardIssues.rows.some((row) => row.count > 0) ? (
-          <div className="dashboard-issue-list">
-            {dashboardIssues.rows.map((row) => (
-              <article key={row.label} className="dashboard-issue-row">
-                <div>
-                  <strong>{row.label}</strong>
-                  <p>{row.detail}</p>
-                </div>
-                <div className="dashboard-issue-meta">
-                  <span className={`status-pill status-pill-${row.tone}`}>{row.count} open</span>
-                </div>
+              <article className="dashboard-report-card">
+                <span>Gross Exposure</span>
+                <strong>{formatNumber(grossExposure, 0)}</strong>
+                <p>
+                  Across {positionsWithClass.length} commodity position{positionsWithClass.length === 1 ? '' : 's'} and{' '}
+                  {exposureByClass.length} reporting bucket{exposureByClass.length === 1 ? '' : 's'} with UOM coverage.
+                </p>
               </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>No active operational issues</strong>
-            <p>The live trades are priced, settled, and populated well enough that nothing is currently flagged here.</p>
-          </div>
-        )}
-      </article>
-
-      <article className="surface">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">Activity</span>
-            <h3>Recent Timeline</h3>
-          </div>
-          <p>The latest event flow without leaving the dashboard.</p>
-        </div>
-        <div className="timeline">
-          {appLoading ? (
+              <article className="dashboard-report-card">
+                <span>Needs Attention</span>
+                <strong>{formatNumber(dashboardIssues.total, 0)}</strong>
+                <p>
+                  Trade-driven operational watchlist. Shipment and invoice exceptions can slot in here once those
+                  workflows are modeled in the platform.
+                </p>
+              </article>
+              <article className="dashboard-report-card">
+                <span>Largest Bucket</span>
+                <strong>
+                  {largestExposureBucket
+                    ? `${formatNumber(largestExposureBucket.netVolume, 0)} ${largestExposureBucket.unitLabel}`
+                    : '—'}
+                </strong>
+                <p>
+                  {largestExposureBucket
+                    ? `${formatCommodityClass(largestExposureBucket.commodityClass)} currently leads the dashboard exposure view.`
+                    : 'No open exposure bucket is available yet.'}
+                </p>
+              </article>
+            </div>
+          ),
+        },
+        {
+          id: 'market-prices',
+          eyebrow: 'Market Data',
+          title: 'Market Prices',
+          description: 'Current marks with a rolling view so you can see where tracked curves are moving.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <MarketPricesTileContent
+              appLoading={appLoading}
+              activeTrades={activeTrades}
+              priceIndices={priceIndices}
+              formatNumber={formatNumber}
+            />
+          ),
+        },
+        {
+          id: 'position-snapshot',
+          eyebrow: 'Exposure',
+          title: 'Position Snapshot',
+          description: 'Class-level exposure first, with commodity coverage called out in each reporting bucket.',
+          span: 'half',
+          availableSpans: ['full', 'wide', 'half'],
+          content: appLoading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : exposureByClass.length > 0 ? (
+            <div className="position-class-grid">
+              {exposureByClass.map((row) => (
+                <article key={`${row.commodityClass}-${row.unitLabel}`} className="position-class-card">
+                  <span>{formatCommodityClass(row.commodityClass)}</span>
+                  <strong>
+                    {formatNumber(row.netVolume, 0)} <small>{row.unitLabel}</small>
+                  </strong>
+                  <p>
+                    {row.commodityCount} commodit{row.commodityCount === 1 ? 'y' : 'ies'} contributing to this
+                    reporting bucket.
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No open exposure</strong>
+              <p>The system is healthy, but there are no active trades contributing exposure yet.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'operational-attention',
+          eyebrow: 'Watchlist',
+          title: 'Operational Attention',
+          description: 'A lightweight issue board derived from trade aging and data completeness.',
+          span: 'half',
+          availableSpans: ['full', 'wide', 'half', 'side'],
+          content: appLoading ? (
             <div className="skeleton-stack">
               <div className="skeleton-block" />
             </div>
-          ) : events.slice(0, 5).length > 0 ? (
-            events.slice(0, 5).map((event) => (
-              <article key={event.event_id} className="timeline-item">
-                <div className="timeline-dot" />
-                <div className="timeline-body">
-                  <div className="timeline-head">
-                    <strong>{event.event_type}</strong>
-                    <span>{formatDate(event.recorded_at)}</span>
+          ) : dashboardIssues.rows.some((row) => row.count > 0) ? (
+            <div className="dashboard-issue-list">
+              {dashboardIssues.rows.map((row) => (
+                <article key={row.label} className="dashboard-issue-row">
+                  <div>
+                    <strong>{row.label}</strong>
+                    <p>{row.detail}</p>
                   </div>
-                  <p>
-                    {event.aggregate_id} • {event.aggregate_type}
-                  </p>
-                </div>
-              </article>
-            ))
+                  <div className="dashboard-issue-meta">
+                    <span className={`status-pill status-pill-${row.tone}`}>{row.count} open</span>
+                  </div>
+                </article>
+              ))}
+            </div>
           ) : (
             <div className="empty-state">
-              <strong>No recent events</strong>
-              <p>Create or amend a trade to start building the operational timeline.</p>
+              <strong>No active operational issues</strong>
+              <p>The live trades are priced, settled, and populated well enough that nothing is currently flagged here.</p>
             </div>
-          )}
-        </div>
-      </article>
-    </section>
+          ),
+        },
+        {
+          id: 'recent-timeline',
+          eyebrow: 'Activity',
+          title: 'Recent Timeline',
+          description: 'The latest event flow without leaving the dashboard.',
+          span: 'full',
+          availableSpans: ['full', 'wide', 'half', 'side'],
+          content: (
+            <div className="timeline">
+              {appLoading ? (
+                <div className="skeleton-stack">
+                  <div className="skeleton-block" />
+                </div>
+              ) : events.slice(0, 5).length > 0 ? (
+                events.slice(0, 5).map((event) => (
+                  <article key={event.event_id} className="timeline-item">
+                    <div className="timeline-dot" />
+                    <div className="timeline-body">
+                      <div className="timeline-head">
+                        <strong>{event.event_type}</strong>
+                        <span>{formatDate(event.recorded_at)}</span>
+                      </div>
+                      <p>
+                        {event.aggregate_id} • {event.aggregate_type}
+                      </p>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state">
+                  <strong>No recent events</strong>
+                  <p>Create or amend a trade to start building the operational timeline.</p>
+                </div>
+              )}
+            </div>
+          ),
+        },
+      ]}
+    />
   )
 }

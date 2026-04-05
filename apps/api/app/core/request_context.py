@@ -10,11 +10,21 @@ class RequestIdentity:
     actor_id: Optional[str]
     role: Optional[str]
     session_id: Optional[str]
+    correlation_id: Optional[str]
+    request_method: Optional[str]
+    request_path: Optional[str]
 
 
 _CURRENT_IDENTITY: ContextVar[RequestIdentity] = ContextVar(
     "ectrm_request_identity",
-    default=RequestIdentity(actor_id=None, role=None, session_id=None),
+    default=RequestIdentity(
+        actor_id=None,
+        role=None,
+        session_id=None,
+        correlation_id=None,
+        request_method=None,
+        request_path=None,
+    ),
 )
 
 
@@ -23,9 +33,19 @@ def set_request_identity(
     actor_id: Optional[str],
     role: Optional[str],
     session_id: Optional[str],
+    correlation_id: Optional[str] = None,
+    request_method: Optional[str] = None,
+    request_path: Optional[str] = None,
 ) -> Token[RequestIdentity]:
     return _CURRENT_IDENTITY.set(
-        RequestIdentity(actor_id=actor_id, role=role, session_id=session_id),
+        RequestIdentity(
+            actor_id=actor_id,
+            role=role,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_method=request_method,
+            request_path=request_path,
+        ),
     )
 
 

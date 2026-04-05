@@ -164,6 +164,7 @@ class AssistantApiTests(unittest.TestCase):
         public_settings_response = self.client.get("/settings/public")
         self.assertEqual(public_settings_response.status_code, 200)
         self.assertIn("assistant", public_settings_response.json())
+        self.assertIn("database", public_settings_response.json())
 
     def test_assistant_prompt_requires_authentication(self) -> None:
         response = self.client.post(
@@ -650,6 +651,15 @@ class AssistantApiTests(unittest.TestCase):
         first_request = captured_requests[0]
         second_request = captured_requests[1]
         self.assertIn("tools", first_request)
+        self.assertIsInstance(first_request["instructions"], str)
+        first_input = first_request["input"]
+        assert isinstance(first_input, list)
+        self.assertEqual(first_input[0]["role"], "user")
+        self.assertEqual(
+            first_input[0]["content"],
+            "Explain the selected trade and recent changes.",
+        )
+        self.assertNotIn("type", first_input[0])
         self.assertEqual(second_request["previous_response_id"], "resp_1")
 
         second_input = second_request["input"]

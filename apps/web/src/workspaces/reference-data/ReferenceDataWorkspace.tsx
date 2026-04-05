@@ -1,4 +1,7 @@
+import type { ReactNode } from 'react'
+
 import type { useReferenceDataController } from '../../features/reference-data/useReferenceDataController'
+import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { Tooltip } from '../../shared/ui/Tooltip'
 
 type ReferenceTabKey =
@@ -197,6 +200,199 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     commodityClassOrder,
   } = controller
 
+  const commoditySheetRows = referenceCommodityGroups.flatMap((group) => group.items)
+  const statusColumn = <Row extends { is_active: boolean }>(): DataSheetColumn<Row> => ({
+    id: 'status',
+    label: 'Status',
+    width: '8rem',
+    renderCell: (row) => <ReferenceStatusBadge isActive={row.is_active} />,
+  })
+
+  let referenceDirectory: ReactNode = null
+
+  switch (referenceTab) {
+    case 'books':
+      referenceDirectory = (
+        <DataSheet
+          label="Books"
+          description="Review book records in a dense grid, then move straight into the maintenance panel without leaving the directory."
+          columns={[
+            { id: 'code', label: 'Code', width: '8rem', renderCell: (book) => book.code },
+            { id: 'name', label: 'Name', width: '18rem', renderCell: (book) => book.name },
+            statusColumn<(typeof filteredBooks)[number]>(),
+          ]}
+          rows={filteredBooks}
+          getRowId={(book) => book.code}
+          getRowLabel={(book) => `${book.code} ${book.name}`}
+          selectedRowId={selectedBookCode}
+          onSelectRow={(book) => startEditBook(book.code)}
+          emptyMessage="No books match the current filter."
+        />
+      )
+      break
+    case 'commodities':
+      referenceDirectory = (
+        <DataSheet
+          label="Commodities"
+          description="Browse commodity masters as a sortable-feeling sheet with class context instead of a stacked card list."
+          columns={[
+            { id: 'code', label: 'Code', width: '9rem', renderCell: (commodity) => commodity.code },
+            { id: 'name', label: 'Name', width: '18rem', renderCell: (commodity) => commodity.name },
+            {
+              id: 'commodity-class',
+              label: 'Class',
+              width: '10rem',
+              renderCell: (commodity) => formatCommodityClass(commodity.commodity_class ?? ''),
+            },
+            statusColumn<(typeof commoditySheetRows)[number]>(),
+          ]}
+          rows={commoditySheetRows}
+          getRowId={(commodity) => commodity.code}
+          getRowLabel={(commodity) => `${commodity.code} ${commodity.name}`}
+          selectedRowId={selectedCommodityCode}
+          onSelectRow={(commodity) => startEditCommodity(commodity.code)}
+          emptyMessage="No commodities match the current filter."
+        />
+      )
+      break
+    case 'price-indices':
+      referenceDirectory = (
+        <DataSheet
+          label="Price Indices"
+          description="Use the grid to scan index metadata quickly before opening the full editor for controlled updates."
+          columns={[
+            { id: 'code', label: 'Code', width: '12rem', renderCell: (priceIndex) => priceIndex.code },
+            { id: 'commodity', label: 'Commodity', width: '10rem', renderCell: (priceIndex) => priceIndex.commodity_code },
+            { id: 'provider', label: 'Provider', width: '10rem', renderCell: (priceIndex) => priceIndex.provider },
+            { id: 'market', label: 'Market', width: '10rem', renderCell: (priceIndex) => priceIndex.market ?? '—' },
+            { id: 'currency', label: 'Currency', width: '8rem', renderCell: (priceIndex) => priceIndex.currency_code },
+            { id: 'unit', label: 'Unit', width: '8rem', renderCell: (priceIndex) => priceIndex.unit_code },
+            statusColumn<(typeof filteredPriceIndices)[number]>(),
+          ]}
+          rows={filteredPriceIndices}
+          getRowId={(priceIndex) => priceIndex.code}
+          getRowLabel={(priceIndex) => `${priceIndex.code} ${priceIndex.name}`}
+          selectedRowId={selectedPriceIndexCode}
+          onSelectRow={(priceIndex) => startEditPriceIndex(priceIndex.code)}
+          emptyMessage="No price indices match the current filter."
+        />
+      )
+      break
+    case 'currencies':
+      referenceDirectory = (
+        <DataSheet
+          label="Currencies"
+          description="Use cell focus and row selection to move through supporting monetary reference data at spreadsheet density."
+          columns={[
+            { id: 'code', label: 'Code', width: '8rem', renderCell: (currency) => currency.code },
+            { id: 'name', label: 'Name', width: '16rem', renderCell: (currency) => currency.name },
+            { id: 'symbol', label: 'Symbol', width: '8rem', renderCell: (currency) => currency.symbol ?? '—' },
+            statusColumn<(typeof filteredCurrencies)[number]>(),
+          ]}
+          rows={filteredCurrencies}
+          getRowId={(currency) => currency.code}
+          getRowLabel={(currency) => `${currency.code} ${currency.name}`}
+          selectedRowId={selectedCurrencyCode}
+          onSelectRow={(currency) => startEditCurrency(currency.code)}
+          emptyMessage="No currencies match the current filter."
+        />
+      )
+      break
+    case 'units':
+      referenceDirectory = (
+        <DataSheet
+          label="Units"
+          description="Inspect unit metadata in a single grid so operators can scan dimensions, class mappings, and precision together."
+          columns={[
+            { id: 'code', label: 'Code', width: '8rem', renderCell: (unit) => unit.code },
+            { id: 'name', label: 'Name', width: '16rem', renderCell: (unit) => unit.name },
+            { id: 'dimension', label: 'Dimension', width: '10rem', renderCell: (unit) => unit.dimension },
+            {
+              id: 'commodity-class',
+              label: 'Class',
+              width: '10rem',
+              renderCell: (unit) => (unit.commodity_class ? formatCommodityClass(unit.commodity_class) : '—'),
+            },
+            { id: 'precision', label: 'Precision', align: 'end', width: '7rem', renderCell: (unit) => unit.precision },
+            statusColumn<(typeof filteredUnits)[number]>(),
+          ]}
+          rows={filteredUnits}
+          getRowId={(unit) => unit.code}
+          getRowLabel={(unit) => `${unit.code} ${unit.name}`}
+          selectedRowId={selectedUnitCode}
+          onSelectRow={(unit) => startEditUnit(unit.code)}
+          emptyMessage="No units match the current filter."
+        />
+      )
+      break
+    case 'locations':
+      referenceDirectory = (
+        <DataSheet
+          label="Locations"
+          description="Scan delivery and market locations in a grid first, then use the editor for governed changes and audit details."
+          columns={[
+            { id: 'code', label: 'Code', width: '10rem', renderCell: (location) => location.code },
+            { id: 'name', label: 'Name', width: '18rem', renderCell: (location) => location.name },
+            { id: 'kind', label: 'Kind', width: '8rem', renderCell: (location) => location.location_kind },
+            { id: 'type', label: 'Type', width: '9rem', renderCell: (location) => location.location_type },
+            { id: 'market', label: 'Market', width: '10rem', renderCell: (location) => location.market ?? '—' },
+            { id: 'parent', label: 'Parent', width: '10rem', renderCell: (location) => location.parent_location_code ?? '—' },
+            { id: 'region', label: 'Region', width: '10rem', renderCell: (location) => location.region ?? '—' },
+            statusColumn<(typeof filteredLocations)[number]>(),
+          ]}
+          rows={filteredLocations}
+          getRowId={(location) => location.code}
+          getRowLabel={(location) => `${location.code} ${location.name}`}
+          selectedRowId={selectedLocationCode}
+          onSelectRow={(location) => startEditLocation(location.code)}
+          emptyMessage="No locations match the current filter."
+        />
+      )
+      break
+    case 'counterparties':
+      referenceDirectory = (
+        <DataSheet
+          label="Counterparties"
+          description="Browse commercial party records in a compact sheet while keeping activation and maintenance controls in the side panel."
+          columns={[
+            { id: 'code', label: 'Code', width: '10rem', renderCell: (counterparty) => counterparty.code },
+            { id: 'name', label: 'Name', width: '18rem', renderCell: (counterparty) => counterparty.name },
+            { id: 'type', label: 'Type', width: '10rem', renderCell: (counterparty) => counterparty.counterparty_type },
+            { id: 'country', label: 'Country', width: '8rem', renderCell: (counterparty) => counterparty.country_code ?? '—' },
+            statusColumn<(typeof filteredCounterparties)[number]>(),
+          ]}
+          rows={filteredCounterparties}
+          getRowId={(counterparty) => counterparty.code}
+          getRowLabel={(counterparty) => `${counterparty.code} ${counterparty.name}`}
+          selectedRowId={selectedCounterpartyCode}
+          onSelectRow={(counterparty) => startEditCounterparty(counterparty.code)}
+          emptyMessage="No counterparties match the current filter."
+        />
+      )
+      break
+    case 'portfolios':
+      referenceDirectory = (
+        <DataSheet
+          label="Portfolios"
+          description="Use the sheet to scan portfolio ownership context before making controlled updates in the editor."
+          columns={[
+            { id: 'code', label: 'Code', width: '10rem', renderCell: (portfolio) => portfolio.code },
+            { id: 'name', label: 'Name', width: '18rem', renderCell: (portfolio) => portfolio.name },
+            { id: 'book', label: 'Book', width: '8rem', renderCell: (portfolio) => portfolio.book_code },
+            { id: 'strategy', label: 'Strategy', width: '12rem', renderCell: (portfolio) => portfolio.strategy ?? '—' },
+            statusColumn<(typeof filteredPortfolios)[number]>(),
+          ]}
+          rows={filteredPortfolios}
+          getRowId={(portfolio) => portfolio.code}
+          getRowLabel={(portfolio) => `${portfolio.code} ${portfolio.name}`}
+          selectedRowId={selectedPortfolioCode}
+          onSelectRow={(portfolio) => startEditPortfolio(portfolio.code)}
+          emptyMessage="No portfolios match the current filter."
+        />
+      )
+      break
+  }
+
   return (
     <div className="reference-workspace">
       <section className="surface reference-directory">
@@ -226,187 +422,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
           <ReferenceTabButton label="Portfolios" active={referenceTab === 'portfolios'} tooltip={REFERENCE_TAB_TOOLTIPS.portfolios} onClick={() => setReferenceTab('portfolios')} />
         </div>
 
-        {referenceTab === 'books' && (
-          <div className="reference-stack">
-            {filteredBooks.map((book) => (
-              <button
-                key={book.code}
-                type="button"
-                className={`reference-row ${selectedBookCode === book.code ? 'is-selected' : ''}`}
-                onClick={() => startEditBook(book.code)}
-              >
-                <div>
-                  <strong>{book.code}</strong>
-                  <p>{book.name}</p>
-                </div>
-                <ReferenceStatusBadge isActive={book.is_active} />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {referenceTab === 'commodities' && (
-          <div className="reference-groups">
-            {referenceCommodityGroups.map((group) => (
-              <section key={group.commodityClass} className="reference-group">
-                <div className="reference-group-head">
-                  <strong>{formatCommodityClass(group.commodityClass)}</strong>
-                  <span>{group.items.length}</span>
-                </div>
-                <div className="reference-stack">
-                  {group.items.map((commodity) => (
-                    <button
-                      key={commodity.code}
-                      type="button"
-                      className={`reference-row ${selectedCommodityCode === commodity.code ? 'is-selected' : ''}`}
-                      onClick={() => startEditCommodity(commodity.code)}
-                    >
-                      <div>
-                        <strong>{commodity.code}</strong>
-                        <p>{commodity.name}</p>
-                      </div>
-                      <ReferenceStatusBadge isActive={commodity.is_active} />
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
-
-        {referenceTab === 'price-indices' && (
-          <div className="reference-stack">
-            {filteredPriceIndices.map((priceIndex) => (
-              <button
-                key={priceIndex.code}
-                type="button"
-                className={`reference-row ${selectedPriceIndexCode === priceIndex.code ? 'is-selected' : ''}`}
-                onClick={() => startEditPriceIndex(priceIndex.code)}
-              >
-                <div>
-                  <strong>{priceIndex.code}</strong>
-                  <p>{priceIndex.name}</p>
-                  <p>
-                    {priceIndex.commodity_code} • {priceIndex.provider}
-                    {priceIndex.market ? ` • ${priceIndex.market}` : ''}
-                  </p>
-                </div>
-                <ReferenceStatusBadge isActive={priceIndex.is_active} />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {referenceTab === 'currencies' && (
-          <div className="reference-stack">
-            {filteredCurrencies.map((currency) => (
-              <button
-                key={currency.code}
-                type="button"
-                className={`reference-row ${selectedCurrencyCode === currency.code ? 'is-selected' : ''}`}
-                onClick={() => startEditCurrency(currency.code)}
-              >
-                <div>
-                  <strong>{currency.code}</strong>
-                  <p>{currency.name}</p>
-                </div>
-                <ReferenceStatusBadge isActive={currency.is_active} />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {referenceTab === 'units' && (
-          <div className="reference-stack">
-            {filteredUnits.map((unit) => (
-              <button
-                key={unit.code}
-                type="button"
-                className={`reference-row ${selectedUnitCode === unit.code ? 'is-selected' : ''}`}
-                onClick={() => startEditUnit(unit.code)}
-              >
-                <div>
-                  <strong>{unit.code}</strong>
-                  <p>{unit.name}</p>
-                  <p>
-                    {unit.dimension}
-                    {unit.commodity_class ? ` • ${formatCommodityClass(unit.commodity_class)}` : ''}
-                  </p>
-                </div>
-                <ReferenceStatusBadge isActive={unit.is_active} />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {referenceTab === 'locations' && (
-          <div className="reference-stack">
-            {filteredLocations.map((location) => (
-              <button
-                key={location.code}
-                type="button"
-                className={`reference-row ${selectedLocationCode === location.code ? 'is-selected' : ''}`}
-                onClick={() => startEditLocation(location.code)}
-              >
-                <div>
-                  <strong>{location.code}</strong>
-                  <p>{location.name}</p>
-                  <p>
-                    {location.location_type}
-                    {location.market ? ` • ${location.market}` : ''}
-                  </p>
-                </div>
-                <ReferenceStatusBadge isActive={location.is_active} />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {referenceTab === 'counterparties' && (
-          <div className="reference-stack">
-            {filteredCounterparties.map((counterparty) => (
-              <button
-                key={counterparty.code}
-                type="button"
-                className={`reference-row ${selectedCounterpartyCode === counterparty.code ? 'is-selected' : ''}`}
-                onClick={() => startEditCounterparty(counterparty.code)}
-              >
-                <div>
-                  <strong>{counterparty.code}</strong>
-                  <p>{counterparty.name}</p>
-                  <p>
-                    {counterparty.counterparty_type}
-                    {counterparty.country_code ? ` • ${counterparty.country_code}` : ''}
-                  </p>
-                </div>
-                <ReferenceStatusBadge isActive={counterparty.is_active} />
-              </button>
-            ))}
-          </div>
-        )}
-
-        {referenceTab === 'portfolios' && (
-          <div className="reference-stack">
-            {filteredPortfolios.map((portfolio) => (
-              <button
-                key={portfolio.code}
-                type="button"
-                className={`reference-row ${selectedPortfolioCode === portfolio.code ? 'is-selected' : ''}`}
-                onClick={() => startEditPortfolio(portfolio.code)}
-              >
-                <div>
-                  <strong>{portfolio.code}</strong>
-                  <p>{portfolio.name}</p>
-                  <p>
-                    {portfolio.book_code}
-                    {portfolio.strategy ? ` • ${portfolio.strategy}` : ''}
-                  </p>
-                </div>
-                <ReferenceStatusBadge isActive={portfolio.is_active} />
-              </button>
-            ))}
-          </div>
-        )}
+        {referenceDirectory}
       </section>
 
       <aside className="surface reference-editor">
@@ -1117,9 +1133,29 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
 
               <div className="mini-grid">
                 <label className="field">
+                  <span>Location Kind</span>
+                  <select
+                    className="control"
+                    value={locationForm.location_kind}
+                    onChange={(event) => setLocationForm((current) => ({ ...current, location_kind: event.target.value }))}
+                    disabled={savingReference}
+                  >
+                    <option value="POINT">POINT</option>
+                    <option value="REGION">REGION</option>
+                  </select>
+                  {locationFieldErrors.location_kind && <small className="field-error">{locationFieldErrors.location_kind}</small>}
+                </label>
+                <label className="field">
                   <span>Location Type</span>
                   <input className="control" value={locationForm.location_type} onChange={(event) => setLocationForm((current) => ({ ...current, location_type: event.target.value.toUpperCase() }))} disabled={savingReference} />
                   {locationFieldErrors.location_type && <small className="field-error">{locationFieldErrors.location_type}</small>}
+                </label>
+              </div>
+
+              <div className="mini-grid">
+                <label className="field">
+                  <span>Parent Location Code</span>
+                  <input className="control" value={locationForm.parent_location_code} onChange={(event) => setLocationForm((current) => ({ ...current, parent_location_code: event.target.value.toUpperCase() }))} disabled={savingReference} />
                 </label>
                 <label className="field">
                   <span>Market</span>
@@ -1129,19 +1165,48 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
 
               <div className="mini-grid">
                 <label className="field">
-                  <span>Country</span>
+                  <span>City</span>
+                  <input className="control" value={locationForm.city} onChange={(event) => setLocationForm((current) => ({ ...current, city: event.target.value }))} disabled={savingReference} />
+                </label>
+                <label className="field">
+                  <span>State / Territory</span>
+                  <input className="control" value={locationForm.state_or_territory} onChange={(event) => setLocationForm((current) => ({ ...current, state_or_territory: event.target.value }))} disabled={savingReference} />
+                </label>
+              </div>
+
+              <div className="mini-grid">
+                <label className="field">
+                  <span>Country Code</span>
                   <input className="control" value={locationForm.country_code} onChange={(event) => setLocationForm((current) => ({ ...current, country_code: event.target.value.toUpperCase() }))} disabled={savingReference} />
                 </label>
+                <label className="field">
+                  <span>Continent</span>
+                  <input className="control" value={locationForm.continent} onChange={(event) => setLocationForm((current) => ({ ...current, continent: event.target.value }))} disabled={savingReference} />
+                </label>
+              </div>
+
+              <div className="mini-grid">
+                <label className="field">
+                  <span>Latitude</span>
+                  <input className="control" value={locationForm.latitude} onChange={(event) => setLocationForm((current) => ({ ...current, latitude: event.target.value }))} disabled={savingReference} />
+                </label>
+                <label className="field">
+                  <span>Longitude</span>
+                  <input className="control" value={locationForm.longitude} onChange={(event) => setLocationForm((current) => ({ ...current, longitude: event.target.value }))} disabled={savingReference} />
+                </label>
+              </div>
+              {locationFieldErrors.coordinates && <small className="field-error">{locationFieldErrors.coordinates}</small>}
+
+              <div className="mini-grid">
                 <label className="field">
                   <span>Region</span>
                   <input className="control" value={locationForm.region} onChange={(event) => setLocationForm((current) => ({ ...current, region: event.target.value }))} disabled={savingReference} />
                 </label>
+                <label className="field">
+                  <span>Timezone</span>
+                  <input className="control" value={locationForm.timezone} onChange={(event) => setLocationForm((current) => ({ ...current, timezone: event.target.value }))} disabled={savingReference} />
+                </label>
               </div>
-
-              <label className="field">
-                <span>Timezone</span>
-                <input className="control" value={locationForm.timezone} onChange={(event) => setLocationForm((current) => ({ ...current, timezone: event.target.value }))} disabled={savingReference} />
-              </label>
 
               <label className="field">
                 <span>Description</span>
@@ -1151,7 +1216,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               <button
                 type="submit"
                 className="button button-primary"
-                disabled={savingReference || Boolean(locationFieldErrors.code || locationFieldErrors.name || locationFieldErrors.location_type) || !locationFormDirty}
+                disabled={savingReference || Boolean(locationFieldErrors.code || locationFieldErrors.name || locationFieldErrors.location_kind || locationFieldErrors.location_type || locationFieldErrors.coordinates) || !locationFormDirty}
               >
                 {savingReference ? 'Saving...' : locationFormMode === 'create' ? 'Create Location' : 'Save Changes'}
               </button>
@@ -1164,12 +1229,37 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                   <strong>{selectedLocation.is_active ? 'Active' : 'Inactive'}</strong>
                 </div>
                 <div className="detail-row">
+                  <span>Kind</span>
+                  <strong>{selectedLocation.location_kind}</strong>
+                </div>
+                <div className="detail-row">
                   <span>Type</span>
                   <strong>{selectedLocation.location_type}</strong>
                 </div>
                 <div className="detail-row">
+                  <span>Parent</span>
+                  <strong>{selectedLocation.parent_location_code ?? '—'}</strong>
+                </div>
+                <div className="detail-row">
                   <span>Market</span>
                   <strong>{selectedLocation.market ?? '—'}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Geography</span>
+                  <strong>
+                    {selectedLocation.city ?? '—'}
+                    {selectedLocation.state_or_territory ? `, ${selectedLocation.state_or_territory}` : ''}
+                    {selectedLocation.country_code ? ` • ${selectedLocation.country_code}` : ''}
+                    {selectedLocation.continent ? ` • ${selectedLocation.continent}` : ''}
+                  </strong>
+                </div>
+                <div className="detail-row">
+                  <span>Coordinates</span>
+                  <strong>
+                    {selectedLocation.latitude != null && selectedLocation.longitude != null
+                      ? `${selectedLocation.latitude}, ${selectedLocation.longitude}`
+                      : '—'}
+                  </strong>
                 </div>
                 <div className="detail-row">
                   <span>Updated</span>

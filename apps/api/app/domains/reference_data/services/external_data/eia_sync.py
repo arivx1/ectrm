@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.logging import get_logger
 from apps.api.app.domains.reference_data.services.external_data.eia_client import (
     EIAClient,
     EIAClientError,
@@ -23,6 +24,9 @@ from apps.api.app.models.reference_price_index_source import ReferencePriceIndex
 
 class EIASyncError(RuntimeError):
     pass
+
+
+logger = get_logger(__name__)
 
 
 def sync_eia_series(
@@ -73,6 +77,13 @@ def sync_eia_series(
         db.rollback()
         run = db.get(ExternalDataRun, run.id)
         if run is not None:
+            logger.error(
+                "External data sync failed provider=%s job_name=%s run_id=%s",
+                run.provider,
+                run.job_name,
+                run.id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
             run.status = "FAILED"
             run.finished_at = datetime.now(timezone.utc)
             run.error_summary = str(exc)

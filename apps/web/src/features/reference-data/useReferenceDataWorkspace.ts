@@ -64,9 +64,16 @@ export function emptyLocationForm(): LocationForm {
   return {
     code: '',
     name: '',
+    location_kind: 'POINT',
     location_type: 'HUB',
+    parent_location_code: '',
     market: '',
+    city: '',
+    state_or_territory: '',
     country_code: '',
+    continent: '',
+    latitude: '',
+    longitude: '',
     region: '',
     timezone: '',
     description: '',
@@ -290,8 +297,14 @@ export function useReferenceDataWorkspace({
       return (
         location.code.toLowerCase().includes(query) ||
         location.name.toLowerCase().includes(query) ||
+        location.location_kind.toLowerCase().includes(query) ||
         location.location_type.toLowerCase().includes(query) ||
+        (location.parent_location_code ?? '').toLowerCase().includes(query) ||
         (location.market ?? '').toLowerCase().includes(query) ||
+        (location.city ?? '').toLowerCase().includes(query) ||
+        (location.state_or_territory ?? '').toLowerCase().includes(query) ||
+        (location.country_code ?? '').toLowerCase().includes(query) ||
+        (location.continent ?? '').toLowerCase().includes(query) ||
         (location.region ?? '').toLowerCase().includes(query) ||
         (location.description ?? '').toLowerCase().includes(query)
       )
@@ -487,9 +500,16 @@ export function useReferenceDataWorkspace({
     setLocationForm({
       code: record.code,
       name: record.name,
+      location_kind: record.location_kind,
       location_type: record.location_type,
+      parent_location_code: record.parent_location_code ?? '',
       market: record.market ?? '',
+      city: record.city ?? '',
+      state_or_territory: record.state_or_territory ?? '',
       country_code: record.country_code ?? '',
+      continent: record.continent ?? '',
+      latitude: record.latitude?.toString() ?? '',
+      longitude: record.longitude?.toString() ?? '',
       region: record.region ?? '',
       timezone: record.timezone ?? '',
       description: record.description ?? '',

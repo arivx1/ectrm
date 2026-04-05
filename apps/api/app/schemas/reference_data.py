@@ -116,17 +116,31 @@ class UnitOut(ReferenceDataOut):
 
 
 class LocationCreate(ReferenceDataCreate):
+    location_kind: str = Field(..., min_length=1, max_length=20)
     location_type: str = Field(..., min_length=1, max_length=50)
+    parent_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
     market: Optional[str] = Field(None, min_length=1, max_length=80)
+    city: Optional[str] = Field(None, min_length=1, max_length=120)
+    state_or_territory: Optional[str] = Field(None, min_length=1, max_length=120)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    continent: Optional[str] = Field(None, min_length=1, max_length=40)
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
     region: Optional[str] = Field(None, min_length=1, max_length=80)
     timezone: Optional[str] = Field(None, min_length=1, max_length=60)
 
 
 class LocationUpdate(ReferenceDataUpdate):
+    location_kind: Optional[str] = Field(None, min_length=1, max_length=20)
     location_type: Optional[str] = Field(None, min_length=1, max_length=50)
+    parent_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
     market: Optional[str] = Field(None, min_length=1, max_length=80)
+    city: Optional[str] = Field(None, min_length=1, max_length=120)
+    state_or_territory: Optional[str] = Field(None, min_length=1, max_length=120)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    continent: Optional[str] = Field(None, min_length=1, max_length=40)
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
     region: Optional[str] = Field(None, min_length=1, max_length=80)
     timezone: Optional[str] = Field(None, min_length=1, max_length=60)
 
@@ -136,9 +150,16 @@ class LocationStatusUpdate(ReferenceDataStatusUpdate):
 
 
 class LocationOut(ReferenceDataOut):
+    location_kind: str
     location_type: str
+    parent_location_code: Optional[str]
     market: Optional[str]
+    city: Optional[str]
+    state_or_territory: Optional[str]
     country_code: Optional[str]
+    continent: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
     region: Optional[str]
     timezone: Optional[str]
 

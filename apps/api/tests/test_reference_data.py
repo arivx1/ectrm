@@ -37,6 +37,7 @@ from apps.api.app.routes.reference_data import (
     CurrencyStatusUpdate,
     LocationCreate,
     LocationStatusUpdate,
+    LocationUpdate,
     PriceIndexCreate,
     PriceIndexUpdate,
     PortfolioCreate,
@@ -56,6 +57,7 @@ from apps.api.app.routes.reference_data import (
     deactivate_price_index,
     deactivate_unit,
     list_price_indices,
+    update_location,
     update_price_index,
 )
 from apps.api.app.schemas.reference_data import PriceIndexStatusUpdate
@@ -168,15 +170,29 @@ class ReferenceDataApiTests(unittest.TestCase):
                 db=session,
             )
 
-    def _create_location(self, code: str) -> None:
+    def _create_location(
+        self,
+        code: str,
+        *,
+        location_kind: str = "POINT",
+        location_type: str = "HUB",
+        parent_location_code: str | None = None,
+    ) -> None:
         with self.SessionLocal() as session:
             create_location(
                 LocationCreate(
                     code=code,
                     name=f"{code} Location",
-                    location_type="HUB",
+                    location_kind=location_kind,
+                    location_type=location_type,
+                    parent_location_code=parent_location_code,
                     market="PHYSICAL",
+                    city="Test City",
+                    state_or_territory="Test State",
                     country_code="US",
+                    continent="North America",
+                    latitude=29.0,
+                    longitude=-95.0,
                     region="GULF",
                     timezone="America/Chicago",
                     description="test location",
@@ -184,6 +200,102 @@ class ReferenceDataApiTests(unittest.TestCase):
                 ),
                 db=session,
             )
+
+    def test_create_location_supports_hierarchy_and_coordinates(self) -> None:
+        self._create_location("USGC", location_kind="REGION", location_type="REGION")
+
+        with self.SessionLocal() as session:
+            payload = create_location(
+                LocationCreate(
+                    code=" hsc ",
+                    name="Houston Ship Channel",
+                    location_kind=" point ",
+                    location_type=" terminal ",
+                    parent_location_code=" usgc ",
+                    market=" physical ",
+                    city=" Houston ",
+                    state_or_territory=" Texas ",
+                    country_code=" us ",
+                    continent=" North America ",
+                    latitude=29.7285,
+                    longitude=-95.265,
+                    region=" Gulf Coast ",
+                    timezone=" America/Chicago ",
+                    description="test location",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(payload.code, "HSC")
+        self.assertEqual(payload.location_kind, "POINT")
+        self.assertEqual(payload.location_type, "TERMINAL")
+        self.assertEqual(payload.parent_location_code, "USGC")
+        self.assertEqual(payload.market, "physical")
+        self.assertEqual(payload.city, "Houston")
+        self.assertEqual(payload.state_or_territory, "Texas")
+        self.assertEqual(payload.country_code, "US")
+        self.assertEqual(payload.continent, "North America")
+        self.assertEqual(payload.region, "Gulf Coast")
+        self.assertEqual(payload.timezone, "America/Chicago")
+        self.assertAlmostEqual(payload.latitude or 0.0, 29.7285)
+        self.assertAlmostEqual(payload.longitude or 0.0, -95.265)
+
+    def test_location_parent_must_be_active_region_and_cycles_are_rejected(self) -> None:
+        self._create_location("POINT_A", location_kind="POINT", location_type="HUB")
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Parent location must be an active REGION"):
+                create_location(
+                    LocationCreate(
+                        code="POINT_B",
+                        name="Point B",
+                        location_kind="POINT",
+                        location_type="HUB",
+                        parent_location_code="POINT_A",
+                        market="PHYSICAL",
+                        city="Test City",
+                        state_or_territory="Test State",
+                        country_code="US",
+                        continent="North America",
+                        latitude=30.0,
+                        longitude=-95.0,
+                        region="Test Region",
+                        timezone="America/Chicago",
+                        description="test location",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        self._create_location("REGION_A", location_kind="REGION", location_type="REGION")
+        self._create_location(
+            "REGION_B",
+            location_kind="REGION",
+            location_type="REGION",
+            parent_location_code="REGION_A",
+        )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Location hierarchy cannot contain cycles"):
+                update_location(
+                    "REGION_A",
+                    LocationUpdate(parent_location_code="REGION_B", updated_by="test-user"),
+                    db=session,
+                )
+
+    def test_deactivate_location_blocked_by_active_child_location(self) -> None:
+        self._create_location("USGC", location_kind="REGION", location_type="REGION")
+        self._create_location(
+            "HSC",
+            location_kind="POINT",
+            location_type="TERMINAL",
+            parent_location_code="USGC",
+        )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Location cannot be deactivated while active child locations reference it"):
+                deactivate_location("USGC", LocationStatusUpdate(updated_by="test-user"), db=session)
 
     def test_create_price_index_requires_active_commodity(self) -> None:
         self._create_currency("USD", "$")

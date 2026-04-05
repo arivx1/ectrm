@@ -4,6 +4,9 @@ from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.event import Base, Event
 from apps.api.app.models.external_data_run import ExternalDataRun
+from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
+from apps.api.app.models.external_series_observation import ExternalSeriesObservation
+from apps.api.app.models.layout_definition import LayoutDefinition
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.roadmap_document import RoadmapDocument
@@ -33,6 +36,9 @@ __all__ = [
     "Base",
     "Event",
     "ExternalDataRun",
+    "ExternalSeriesDefinition",
+    "ExternalSeriesObservation",
+    "LayoutDefinition",
     "Position",
     "PriceIndexObservation",
     "RoadmapDocument",

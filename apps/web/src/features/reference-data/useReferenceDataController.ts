@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { submitReferenceMutation } from '../../entities/reference-data/api'
 import type {
+  BookForm,
   CounterpartyRecord,
   CurrencyRecord,
   LocationRecord,
@@ -16,6 +17,22 @@ import { useReferenceDataWorkspace } from './useReferenceDataWorkspace'
 
 function sameText(left: string | null | undefined, right: string | null | undefined): boolean {
   return (left ?? '').trim() === (right ?? '').trim()
+}
+
+type BookSheetField = 'name' | 'description'
+
+type BookSheetRow = ReferenceRecord & {
+  description: string
+  sheet_dirty: boolean
+  sheet_error: string
+}
+
+function buildBookForm(record: ReferenceRecord): BookForm {
+  return {
+    code: record.code,
+    name: record.name,
+    description: record.description ?? '',
+  }
 }
 
 type UseReferenceDataControllerArgs = {
@@ -60,6 +77,8 @@ export function useReferenceDataController({
   const [referenceActionError, setReferenceActionError] = useState('')
   const [referenceActionSuccess, setReferenceActionSuccess] = useState('')
   const [savingReference, setSavingReference] = useState(false)
+  const [bookSheetDrafts, setBookSheetDrafts] = useState<Record<string, BookForm>>({})
+  const [bookSheetApplyErrors, setBookSheetApplyErrors] = useState<Record<string, string>>({})
 
   const workspace = useReferenceDataWorkspace({
     books,
@@ -221,6 +240,49 @@ export function useReferenceDataController({
     ? locationUsageByCode.get(selectedLocation.code) ?? { activeChildren: 0, totalChildren: 0 }
     : null
 
+  function resolveBookSheetForm(code: string): BookForm | null {
+    const record = books.find((book) => book.code === code)
+    if (!record) {
+      return null
+    }
+
+    return bookSheetDrafts[code] ?? buildBookForm(record)
+  }
+
+  function validateBookSheetForm(candidate: Pick<BookForm, 'name'>): string {
+    if (!candidate.name.trim()) {
+      return 'Name is required.'
+    }
+
+    return ''
+  }
+
+  const bookSheetRows = useMemo<BookSheetRow[]>(
+    () =>
+      filteredBooks.map((book) => {
+        const draft = bookSheetDrafts[book.code]
+        const rowForm = draft ?? buildBookForm(book)
+        return {
+          ...book,
+          name: rowForm.name,
+          description: rowForm.description,
+          sheet_dirty: draft !== undefined,
+          sheet_error: validateBookSheetForm(rowForm) || bookSheetApplyErrors[book.code] || '',
+        }
+      }),
+    [bookSheetApplyErrors, bookSheetDrafts, filteredBooks],
+  )
+
+  const bookSheetDirtyCount = useMemo(
+    () => bookSheetRows.filter((row) => row.sheet_dirty).length,
+    [bookSheetRows],
+  )
+
+  const bookSheetInvalidCount = useMemo(
+    () => bookSheetRows.filter((row) => row.sheet_dirty && Boolean(row.sheet_error)).length,
+    [bookSheetRows],
+  )
+
   const bookFieldErrors = useMemo(() => {
     const errors: Partial<Record<'code' | 'name', string>> = {}
     if (!bookForm.code.trim()) {
@@ -317,7 +379,7 @@ export function useReferenceDataController({
   }, [unitForm.code, unitForm.commodity_class, unitForm.dimension, unitForm.name, unitForm.precision, unitFormMode, units])
 
   const locationFieldErrors = useMemo(() => {
-    const errors: Partial<Record<'code' | 'name' | 'location_type', string>> = {}
+    const errors: Partial<Record<'code' | 'name' | 'location_kind' | 'location_type' | 'coordinates', string>> = {}
     if (!locationForm.code.trim()) {
       errors.code = 'Code is required.'
     } else if (
@@ -327,9 +389,22 @@ export function useReferenceDataController({
       errors.code = 'Code already exists.'
     }
     if (!locationForm.name.trim()) errors.name = 'Name is required.'
+    if (!locationForm.location_kind.trim()) errors.location_kind = 'Location kind is required.'
     if (!locationForm.location_type.trim()) errors.location_type = 'Location type is required.'
+    if ((locationForm.latitude.trim() && !locationForm.longitude.trim()) || (!locationForm.latitude.trim() && locationForm.longitude.trim())) {
+      errors.coordinates = 'Latitude and longitude must be provided together.'
+    }
     return errors
-  }, [locationForm.code, locationForm.location_type, locationForm.name, locationFormMode, locations])
+  }, [
+    locationForm.code,
+    locationForm.latitude,
+    locationForm.location_kind,
+    locationForm.location_type,
+    locationForm.longitude,
+    locationForm.name,
+    locationFormMode,
+    locations,
+  ])
 
   const bookFormDirty = useMemo(() => {
     if (bookFormMode === 'create') {
@@ -451,9 +526,16 @@ export function useReferenceDataController({
       return (
         !sameText(locationForm.code, '') ||
         !sameText(locationForm.name, '') ||
+        !sameText(locationForm.location_kind, 'POINT') ||
         !sameText(locationForm.location_type, 'HUB') ||
+        !sameText(locationForm.parent_location_code, '') ||
         !sameText(locationForm.market, '') ||
+        !sameText(locationForm.city, '') ||
+        !sameText(locationForm.state_or_territory, '') ||
         !sameText(locationForm.country_code, '') ||
+        !sameText(locationForm.continent, '') ||
+        !sameText(locationForm.latitude, '') ||
+        !sameText(locationForm.longitude, '') ||
         !sameText(locationForm.region, '') ||
         !sameText(locationForm.timezone, '') ||
         !sameText(locationForm.description, '')
@@ -463,9 +545,16 @@ export function useReferenceDataController({
     return (
       !sameText(locationForm.code, selectedLocation.code) ||
       !sameText(locationForm.name, selectedLocation.name) ||
+      !sameText(locationForm.location_kind, selectedLocation.location_kind) ||
       !sameText(locationForm.location_type, selectedLocation.location_type) ||
+      !sameText(locationForm.parent_location_code, selectedLocation.parent_location_code) ||
       !sameText(locationForm.market, selectedLocation.market) ||
+      !sameText(locationForm.city, selectedLocation.city) ||
+      !sameText(locationForm.state_or_territory, selectedLocation.state_or_territory) ||
       !sameText(locationForm.country_code, selectedLocation.country_code) ||
+      !sameText(locationForm.continent, selectedLocation.continent) ||
+      !sameText(locationForm.latitude, selectedLocation.latitude?.toString()) ||
+      !sameText(locationForm.longitude, selectedLocation.longitude?.toString()) ||
       !sameText(locationForm.region, selectedLocation.region) ||
       !sameText(locationForm.timezone, selectedLocation.timezone) ||
       !sameText(locationForm.description, selectedLocation.description)
@@ -484,6 +573,173 @@ export function useReferenceDataController({
 
   function currentActorId(): string {
     return getMutationContext().actorId
+  }
+
+  function clearBookSheetDraft(code: string) {
+    setBookSheetDrafts((current) => {
+      if (!(code in current)) {
+        return current
+      }
+
+      const next = { ...current }
+      delete next[code]
+      return next
+    })
+    setBookSheetApplyErrors((current) => {
+      if (!(code in current)) {
+        return current
+      }
+
+      const next = { ...current }
+      delete next[code]
+      return next
+    })
+  }
+
+  function updateBookSheetField(code: string, field: BookSheetField, value: string) {
+    const record = books.find((book) => book.code === code)
+    if (!record) {
+      return
+    }
+
+    resetReferenceMessages()
+    setBookSheetApplyErrors((current) => {
+      if (!(code in current)) {
+        return current
+      }
+
+      const next = { ...current }
+      delete next[code]
+      return next
+    })
+
+    const currentDraft = resolveBookSheetForm(code)
+    if (!currentDraft) {
+      return
+    }
+
+    const nextDraft = {
+      ...currentDraft,
+      [field]: value,
+    }
+    const hasChanges =
+      !sameText(nextDraft.name, record.name) ||
+      !sameText(nextDraft.description, record.description)
+
+    setBookSheetDrafts((current) => {
+      const next = { ...current }
+      if (hasChanges) {
+        next[code] = nextDraft
+      } else {
+        delete next[code]
+      }
+      return next
+    })
+
+    if (selectedBook?.code === code && bookFormMode === 'edit') {
+      setBookForm(nextDraft)
+    }
+  }
+
+  function resetBookSheetRow(code: string) {
+    const record = books.find((book) => book.code === code)
+    if (!record) {
+      return
+    }
+
+    resetReferenceMessages()
+    clearBookSheetDraft(code)
+
+    if (selectedBook?.code === code && bookFormMode === 'edit') {
+      setBookForm(buildBookForm(record))
+    }
+  }
+
+  function resetAllBookSheetChanges() {
+    resetReferenceMessages()
+    setBookSheetDrafts({})
+    setBookSheetApplyErrors({})
+
+    if (selectedBook && bookFormMode === 'edit') {
+      setBookForm(buildBookForm(selectedBook))
+    }
+  }
+
+  async function applyBookSheetChanges(targetCodes?: string[]) {
+    const candidateCodes = targetCodes?.length
+      ? targetCodes
+      : Object.keys(bookSheetDrafts)
+    const dirtyCodes = candidateCodes.filter((code, index) => candidateCodes.indexOf(code) === index && bookSheetDrafts[code])
+
+    if (dirtyCodes.length === 0) {
+      setReferenceActionError('There are no staged book changes to apply.')
+      setReferenceActionSuccess('')
+      return
+    }
+
+    setSavingReference(true)
+    resetReferenceMessages()
+
+    const nextDrafts = { ...bookSheetDrafts }
+    const nextApplyErrors = { ...bookSheetApplyErrors }
+    const actorId = currentActorId()
+    let successCount = 0
+
+    try {
+      for (const code of dirtyCodes) {
+        const draft = nextDrafts[code]
+        if (!draft) {
+          continue
+        }
+
+        const validationError = validateBookSheetForm(draft)
+        if (validationError) {
+          nextApplyErrors[code] = validationError
+          continue
+        }
+
+        try {
+          await submitReferenceMutation(
+            apiBase,
+            `/reference/books/${code}`,
+            'PUT',
+            {
+              name: draft.name.trim(),
+              description: draft.description.trim() || null,
+              updated_by: actorId,
+            },
+          )
+          delete nextDrafts[code]
+          delete nextApplyErrors[code]
+          successCount += 1
+        } catch (err) {
+          nextApplyErrors[code] = err instanceof Error ? err.message : 'Book update failed.'
+        }
+      }
+
+      setBookSheetDrafts(nextDrafts)
+      setBookSheetApplyErrors(nextApplyErrors)
+
+      if (successCount > 0) {
+        await reloadData()
+      }
+
+      const failureCount = Object.keys(nextApplyErrors).filter((code) => dirtyCodes.includes(code)).length
+      if (successCount > 0 && failureCount === 0) {
+        setReferenceActionSuccess(`Applied ${successCount} staged book ${successCount === 1 ? 'change' : 'changes'}.`)
+        return
+      }
+
+      if (successCount > 0) {
+        setReferenceActionSuccess(`Applied ${successCount} staged book ${successCount === 1 ? 'change' : 'changes'}.`)
+        setReferenceActionError(`${failureCount} row${failureCount === 1 ? '' : 's'} still need attention before they can be applied.`)
+        return
+      }
+
+      setReferenceActionError('No staged book changes were applied. Review the highlighted rows and try again.')
+    } finally {
+      setSavingReference(false)
+    }
   }
 
   async function submitReference(
@@ -511,7 +767,13 @@ export function useReferenceDataController({
   }
 
   function startEditBook(code: string) {
-    beginReferenceAction(() => startEditBookBase(code))
+    beginReferenceAction(() => {
+      startEditBookBase(code)
+      const draft = resolveBookSheetForm(code)
+      if (draft) {
+        setBookForm(draft)
+      }
+    })
   }
 
   function startCreateCommodity() {
@@ -593,6 +855,7 @@ export function useReferenceDataController({
         { name: bookForm.name.trim(), description: bookForm.description.trim() || null, updated_by: currentActorId() },
         `Book ${selectedBook.code} updated.`,
       )
+      clearBookSheetDraft(selectedBook.code)
     }
   }
 
@@ -825,17 +1088,35 @@ export function useReferenceDataController({
 
   async function handleSaveLocation(e: React.FormEvent) {
     e.preventDefault()
-    if (!locationForm.code.trim() || !locationForm.name.trim() || !locationForm.location_type.trim()) {
-      setReferenceActionError('Location code, name, and location type are required.')
+    if (!locationForm.code.trim() || !locationForm.name.trim() || !locationForm.location_kind.trim() || !locationForm.location_type.trim()) {
+      setReferenceActionError('Location code, name, kind, and location type are required.')
+      return
+    }
+
+    const latitude = locationForm.latitude.trim() ? Number(locationForm.latitude) : null
+    const longitude = locationForm.longitude.trim() ? Number(locationForm.longitude) : null
+    if ((latitude === null) !== (longitude === null)) {
+      setReferenceActionError('Latitude and longitude must be provided together.')
+      return
+    }
+    if ((latitude !== null && Number.isNaN(latitude)) || (longitude !== null && Number.isNaN(longitude))) {
+      setReferenceActionError('Latitude and longitude must be numeric.')
       return
     }
 
     const payload = {
       code: locationForm.code.trim().toUpperCase(),
       name: locationForm.name.trim(),
+      location_kind: locationForm.location_kind.trim().toUpperCase(),
       location_type: locationForm.location_type.trim().toUpperCase(),
+      parent_location_code: locationForm.parent_location_code.trim().toUpperCase() || null,
       market: locationForm.market.trim() || null,
+      city: locationForm.city.trim() || null,
+      state_or_territory: locationForm.state_or_territory.trim() || null,
       country_code: locationForm.country_code.trim().toUpperCase() || null,
+      continent: locationForm.continent.trim() || null,
+      latitude,
+      longitude,
       region: locationForm.region.trim() || null,
       timezone: locationForm.timezone.trim() || null,
       description: locationForm.description.trim() || null,
@@ -964,6 +1245,9 @@ export function useReferenceDataController({
     selectedCurrencyUsage,
     selectedUnitUsage,
     selectedLocationUsage,
+    bookSheetRows,
+    bookSheetDirtyCount,
+    bookSheetInvalidCount,
     bookFieldErrors,
     commodityFieldErrors,
     priceIndexFieldErrors,
@@ -978,6 +1262,10 @@ export function useReferenceDataController({
     locationFormDirty,
     startCreateBook,
     startEditBook,
+    updateBookSheetField,
+    applyBookSheetChanges,
+    resetBookSheetRow,
+    resetAllBookSheetChanges,
     startCreateCommodity,
     startEditCommodity,
     startCreatePriceIndex,

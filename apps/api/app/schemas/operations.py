@@ -18,10 +18,19 @@ class DependencyHealthOut(BaseModel):
     error_summary: Optional[str]
 
 
+class DatabaseOverviewOut(BaseModel):
+    dialect: str
+    name: str
+    size_bytes: Optional[int]
+    table_count: int
+    record_count: int
+
+
 class SystemOverviewOut(BaseModel):
     generated_at: datetime
     server_status: str
     database_status: str
+    database: DatabaseOverviewOut
     uptime_seconds: int
     presence_window_seconds: int
     active_session_count: int

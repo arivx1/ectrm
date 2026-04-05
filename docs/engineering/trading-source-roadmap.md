@@ -4,6 +4,9 @@ This roadmap turns the source register into an implementation sequence for an
 ETRM and multi-asset trading platform. The bias is operational credibility
 first, analytics second, and optional alpha datasets last.
 
+Concrete public-feed and vendor options that map back to these logical source
+IDs live in `trading-source-candidates.csv`.
+
 ## Phase 1: Must Have
 
 These sources are required before the platform can claim credible trade
@@ -29,7 +32,8 @@ noticeably weaker.
 | P1 | `fx_spot_curves`, `rates_curves` | Required for cross-currency valuation, discounting, and funding-aware marks |
 | P1 | `weather_forecast_obs`, `power_iso_load`, `gas_pipeline_storage` | Core external drivers for power, gas, and weather-sensitive books |
 | P1 | `eia_energy_data`, `commodity_inventory` | Benchmark public fundamentals and event-driven inventory signals |
-| P1 | `trading-source-register.csv` governance loop | Review source ownership, fallback, and licensing quarterly to prevent drift |
+| P1 | `macro_timeseries`, `market_positioning` | Add revision-aware macro context and futures positioning signals for scenario analysis and trader tooling |
+| P1 | `trading-source-register.csv`, `trading-source-candidates.csv` governance loop | Review logical source ownership, candidate feeds, fallback, and licensing quarterly to prevent drift |
 
 ## Phase 3: Optional / Edge
 

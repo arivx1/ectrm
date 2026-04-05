@@ -167,31 +167,21 @@ class AssistantService:
         system_prompt: str,
         tool_definitions: list[AssistantToolDefinition],
     ) -> AssistantCompletion:
-        input_messages: list[dict[str, Any]] = []
-
-        if system_prompt:
-            input_messages.append(
-                {
-                    "type": "message",
-                    "role": "system",
-                    "content": [{"type": "input_text", "text": system_prompt}],
-                }
-            )
-
-        for message in messages:
-            input_messages.append(
-                {
-                    "type": "message",
-                    "role": message.role,
-                    "content": [{"type": "input_text", "text": message.content}],
-                }
-            )
+        input_messages: list[dict[str, Any]] = [
+            {
+                "role": message.role,
+                "content": message.content,
+            }
+            for message in messages
+        ]
 
         request_payload: dict[str, Any] = {
             "model": model,
             "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
             "text": {"format": {"type": "text"}},
         }
+        if system_prompt:
+            request_payload["instructions"] = system_prompt
         if tool_definitions:
             request_payload["tools"] = [
                 {

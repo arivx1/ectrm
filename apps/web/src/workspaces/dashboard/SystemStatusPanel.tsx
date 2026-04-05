@@ -54,6 +54,43 @@ function formatInteger(value: number | null | undefined): string {
   return typeof value === 'number' ? new Intl.NumberFormat('en-US').format(value) : '--'
 }
 
+function formatBytes(value: number | null | undefined): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return '--'
+  }
+
+  if (value < 1024) {
+    return `${value} B`
+  }
+
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let normalized = value / 1024
+  let unitIndex = 0
+
+  while (normalized >= 1024 && unitIndex < units.length - 1) {
+    normalized /= 1024
+    unitIndex += 1
+  }
+
+  return `${normalized.toFixed(normalized >= 10 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function formatDatabaseType(value: string | null | undefined): string {
+  if (!value) {
+    return '--'
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'postgresql') {
+    return 'PostgreSQL'
+  }
+  if (normalized === 'sqlite') {
+    return 'SQLite'
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
 function formatDownlink(value: number | null): string {
   if (value === null) {
     return 'Estimate unavailable'
@@ -144,6 +181,16 @@ function serverTone(overview: SystemOverview | null, error: string): StatusTone 
     return 'in-progress'
   }
   return overview.server_status === 'ok' && overview.database_status === 'ok' ? 'active' : 'cancelled'
+}
+
+function databaseTone(overview: SystemOverview | null, error: string): StatusTone {
+  if (error && !overview) {
+    return 'cancelled'
+  }
+  if (!overview) {
+    return 'in-progress'
+  }
+  return overview.database_status === 'ok' ? 'active' : 'cancelled'
 }
 
 function usersTone(overview: SystemOverview | null): StatusTone {
@@ -296,7 +343,7 @@ export function SystemStatusPanel() {
           <span className="eyebrow">Operations</span>
           <h3>System Dashboard</h3>
         </div>
-        <p>Browser connectivity, API health, live user presence, and event flow in one operating snapshot.</p>
+        <p>Browser connectivity, API health, database profile, live user presence, and event flow in one operating snapshot.</p>
       </div>
 
       {loading && !overview ? (
@@ -351,6 +398,25 @@ export function SystemStatusPanel() {
                 }
               />
               <DetailRow label="Open trades" value={formatInteger(overview?.open_trade_count)} />
+            </div>
+          </article>
+
+          <article className={`system-status-card tone-${databaseTone(overview, error)}`}>
+            <div className="system-status-card-head">
+              <div>
+                <span>Database Profile</span>
+                <strong>{formatDatabaseType(overview?.database.dialect)}</strong>
+              </div>
+              <span className={`status-pill status-pill-${databaseTone(overview, error)}`}>
+                {!overview ? 'Loading' : overview.database_status === 'ok' ? 'Live DB' : 'Check DB'}
+              </span>
+            </div>
+            <p>Connection metadata and app-table footprint captured from the live database session.</p>
+            <div className="system-status-detail-list">
+              <DetailRow label="Name" value={overview?.database.name ?? '--'} />
+              <DetailRow label="Size" value={formatBytes(overview?.database.size_bytes)} />
+              <DetailRow label="App tables" value={formatInteger(overview?.database.table_count)} />
+              <DetailRow label="Records" value={formatInteger(overview?.database.record_count)} />
             </div>
           </article>
 

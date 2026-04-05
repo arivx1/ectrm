@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import resolve_audit_actor_id
+from apps.api.app.core.logging import get_logger
 from apps.api.app.domains.weather.services.external_data.nws_client import NWSClient
 from apps.api.app.domains.weather.services.external_data.nws_client import NWSClientError
 from apps.api.app.domains.weather.services.external_data.nws_mapper import NWSForecastPeriod
@@ -24,6 +25,9 @@ from apps.api.app.models.weather_observation import WeatherObservation
 
 class NWSSyncError(RuntimeError):
     pass
+
+
+logger = get_logger(__name__)
 
 
 def sync_nws_weather_locations(
@@ -107,6 +111,13 @@ def sync_nws_weather_locations(
         db.rollback()
         run = db.get(ExternalDataRun, run.id)
         if run is not None:
+            logger.error(
+                "External data sync failed provider=%s job_name=%s run_id=%s",
+                run.provider,
+                run.job_name,
+                run.id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
             run.status = "FAILED"
             run.finished_at = datetime.now(timezone.utc)
             run.error_summary = str(exc)

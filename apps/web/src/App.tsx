@@ -1346,6 +1346,7 @@ export default function App() {
 
         {currentView === 'dashboard' && (
           <DashboardWorkspace
+            authSession={authSession}
             appLoading={appLoading}
             activeTrades={activeTrades}
             priceIndices={priceIndices}
@@ -1360,6 +1361,7 @@ export default function App() {
 
         {currentView === 'trades' && (
           <TradingWorkspace
+            authSession={authSession}
             tradeCaptureFormProps={tradeCaptureFormProps}
             trades={trades}
             selectedTrade={selectedTrade}
@@ -1443,6 +1445,7 @@ export default function App() {
 
         {currentView === 'events' && (
           <EventsWorkspace
+            authSession={authSession}
             eventFilter={eventFilter}
             setEventFilter={setEventFilter}
             filteredEvents={filteredEvents}
@@ -1452,6 +1455,7 @@ export default function App() {
 
         {currentView === 'positions' && (
           <PositionsWorkspace
+            authSession={authSession}
             positionsByClass={positionsByClass}
             positionsWithClass={positionsWithClass}
             formatCommodityClass={formatCommodityClass}

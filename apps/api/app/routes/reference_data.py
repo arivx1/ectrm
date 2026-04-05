@@ -74,6 +74,109 @@ ModelT = TypeVar(
     ReferencePriceIndex,
 )
 
+LOCATION_KINDS = {"POINT", "REGION"}
+
+
+def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _clean_optional_code(value: Optional[str]) -> Optional[str]:
+    cleaned = _clean_optional_text(value)
+    return normalize_code(cleaned) if cleaned is not None else None
+
+
+def _normalize_location_kind(value: str) -> str:
+    normalized = normalize_code(value)
+    if normalized not in LOCATION_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="location_kind must be either POINT or REGION",
+        )
+    return normalized
+
+
+def _normalize_location_parent_code(
+    db: Session,
+    *,
+    record_code: str,
+    parent_location_code: Optional[str],
+) -> Optional[str]:
+    normalized_parent_code = _clean_optional_code(parent_location_code)
+    if normalized_parent_code is None:
+        return None
+    if normalized_parent_code == record_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Location cannot be its own parent",
+        )
+
+    parent = db.execute(
+        select(ReferenceLocation).where(ReferenceLocation.code == normalized_parent_code)
+    ).scalars().first()
+    if parent is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Parent location '{normalized_parent_code}' does not exist",
+        )
+    if not parent.is_active or parent.location_kind != "REGION":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Parent location must be an active REGION",
+        )
+
+    current_parent_code = parent.parent_location_code
+    visited = {normalized_parent_code}
+    while current_parent_code is not None:
+        if current_parent_code == record_code:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Location hierarchy cannot contain cycles",
+            )
+        if current_parent_code in visited:
+            break
+        visited.add(current_parent_code)
+        current_parent_code = db.execute(
+            select(ReferenceLocation.parent_location_code).where(
+                ReferenceLocation.code == current_parent_code
+            )
+        ).scalars().first()
+
+    return normalized_parent_code
+
+
+def _validate_location_coordinates(latitude: Optional[float], longitude: Optional[float]) -> None:
+    if (latitude is None) != (longitude is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Latitude and longitude must be provided together",
+        )
+
+
+def _ensure_location_can_be_region_parent(
+    db: Session,
+    *,
+    record_code: str,
+    next_location_kind: str,
+) -> None:
+    if next_location_kind != "POINT":
+        return
+
+    active_child_location_count = db.execute(
+        select(func.count()).select_from(ReferenceLocation).where(
+            ReferenceLocation.parent_location_code == record_code,
+            ReferenceLocation.is_active.is_(True),
+        )
+    ).scalar_one()
+    if active_child_location_count:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Location with active child locations must remain a REGION",
+        )
+
 
 def to_out(record: ModelT, schema_cls):
     payload = dict(
@@ -105,9 +208,16 @@ def to_out(record: ModelT, schema_cls):
         payload["conversion_factor"] = float(record.conversion_factor) if record.conversion_factor is not None else None
         payload["precision"] = record.precision
     if isinstance(record, ReferenceLocation):
+        payload["location_kind"] = record.location_kind
         payload["location_type"] = record.location_type
+        payload["parent_location_code"] = record.parent_location_code
         payload["market"] = record.market
+        payload["city"] = record.city
+        payload["state_or_territory"] = record.state_or_territory
         payload["country_code"] = record.country_code
+        payload["continent"] = record.continent
+        payload["latitude"] = record.latitude
+        payload["longitude"] = record.longitude
         payload["region"] = record.region
         payload["timezone"] = record.timezone
     if isinstance(record, ReferencePortfolio):
@@ -265,6 +375,18 @@ def ensure_unit_not_in_active_use(db: Session, code: str) -> None:
 
 
 def ensure_location_not_in_active_use(db: Session, code: str) -> None:
+    active_child_location_count = db.execute(
+        select(func.count()).select_from(ReferenceLocation).where(
+            ReferenceLocation.parent_location_code == code,
+            ReferenceLocation.is_active.is_(True),
+        )
+    ).scalar_one()
+    if active_child_location_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Location cannot be deactivated while active child locations reference it",
+        )
+
     active_price_index_count = db.execute(
         select(func.count()).select_from(ReferencePriceIndex).where(
             ReferencePriceIndex.location_code == code,
@@ -699,23 +821,59 @@ def activate_unit(
     return to_out(record, UnitOut)
 
 
-def _update_location_fields(record, payload, provided_fields: set[str]) -> None:
+def _update_location_fields(db: Session, record, payload, provided_fields: set[str]) -> None:
+    next_location_kind = record.location_kind
+    if "location_kind" in provided_fields and payload.location_kind is not None:
+        next_location_kind = _normalize_location_kind(payload.location_kind)
+    _ensure_location_can_be_region_parent(db, record_code=record.code, next_location_kind=next_location_kind)
+
+    next_parent_location_code = record.parent_location_code
+    if "parent_location_code" in provided_fields:
+        next_parent_location_code = _normalize_location_parent_code(
+            db,
+            record_code=record.code,
+            parent_location_code=payload.parent_location_code,
+        )
+
+    next_latitude = record.latitude
+    if "latitude" in provided_fields:
+        next_latitude = payload.latitude
+    next_longitude = record.longitude
+    if "longitude" in provided_fields:
+        next_longitude = payload.longitude
+    _validate_location_coordinates(next_latitude, next_longitude)
+
+    if "location_kind" in provided_fields and payload.location_kind is not None:
+        record.location_kind = next_location_kind
     if "location_type" in provided_fields and payload.location_type is not None:
         record.location_type = normalize_code(payload.location_type)
+    if "parent_location_code" in provided_fields:
+        record.parent_location_code = next_parent_location_code
     if "market" in provided_fields:
-        record.market = payload.market.strip() if payload.market is not None else None
+        record.market = _clean_optional_text(payload.market)
+    if "city" in provided_fields:
+        record.city = _clean_optional_text(payload.city)
+    if "state_or_territory" in provided_fields:
+        record.state_or_territory = _clean_optional_text(payload.state_or_territory)
     if "country_code" in provided_fields:
-        record.country_code = normalize_code(payload.country_code) if payload.country_code else None
+        record.country_code = _clean_optional_code(payload.country_code)
+    if "continent" in provided_fields:
+        record.continent = _clean_optional_text(payload.continent)
+    if "latitude" in provided_fields:
+        record.latitude = payload.latitude
+    if "longitude" in provided_fields:
+        record.longitude = payload.longitude
     if "region" in provided_fields:
-        record.region = payload.region.strip() if payload.region is not None else None
+        record.region = _clean_optional_text(payload.region)
     if "timezone" in provided_fields:
-        record.timezone = payload.timezone.strip() if payload.timezone is not None else None
+        record.timezone = _clean_optional_text(payload.timezone)
 
 
 @router.get("/locations", response_model=List[LocationOut])
 def list_locations(
     q: Optional[str] = None,
     market: Optional[str] = None,
+    location_kind: Optional[str] = None,
     location_type: Optional[str] = None,
     is_active: Optional[bool] = None,
     limit: int = STANDARD_LIST_LIMIT_QUERY,
@@ -725,6 +883,8 @@ def list_locations(
     extra_filters = []
     if market:
         extra_filters.append(ReferenceLocation.market == market.strip())
+    if location_kind:
+        extra_filters.append(ReferenceLocation.location_kind == _normalize_location_kind(location_kind))
     if location_type:
         extra_filters.append(ReferenceLocation.location_type == normalize_code(location_type))
     rows = list_reference_records(db, ReferenceLocation, q, is_active, limit, offset, extra_filters=extra_filters)
@@ -739,16 +899,32 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)) -> L
     if existing is not None:
         raise HTTPException(status_code=409, detail="Location already exists")
 
+    normalized_code = normalize_code(payload.code)
+    normalized_location_kind = _normalize_location_kind(payload.location_kind)
+    normalized_parent_location_code = _normalize_location_parent_code(
+        db,
+        record_code=normalized_code,
+        parent_location_code=payload.parent_location_code,
+    )
+    _validate_location_coordinates(payload.latitude, payload.longitude)
+
     record = create_reference_record(
         db,
         ReferenceLocation,
         payload,
         extra_values={
+            "location_kind": normalized_location_kind,
             "location_type": normalize_code(payload.location_type),
-            "market": payload.market.strip() if payload.market is not None else None,
-            "country_code": normalize_code(payload.country_code) if payload.country_code else None,
-            "region": payload.region.strip() if payload.region is not None else None,
-            "timezone": payload.timezone.strip() if payload.timezone is not None else None,
+            "parent_location_code": normalized_parent_location_code,
+            "market": _clean_optional_text(payload.market),
+            "city": _clean_optional_text(payload.city),
+            "state_or_territory": _clean_optional_text(payload.state_or_territory),
+            "country_code": _clean_optional_code(payload.country_code),
+            "continent": _clean_optional_text(payload.continent),
+            "latitude": payload.latitude,
+            "longitude": payload.longitude,
+            "region": _clean_optional_text(payload.region),
+            "timezone": _clean_optional_text(payload.timezone),
         },
     )
     return to_out(record, LocationOut)
@@ -763,7 +939,16 @@ def get_location(code: str, db: Session = Depends(get_db)) -> LocationOut:
 @router.put("/locations/{code}", response_model=LocationOut)
 def update_location(code: str, payload: LocationUpdate, db: Session = Depends(get_db)) -> LocationOut:
     record = get_reference_record(db, ReferenceLocation, code.strip().upper())
-    update_reference_record(record, payload, extra_updates=_update_location_fields)
+    update_reference_record(
+        record,
+        payload,
+        extra_updates=lambda current_record, current_payload, provided_fields: _update_location_fields(
+            db,
+            current_record,
+            current_payload,
+            provided_fields,
+        ),
+    )
     db.commit()
     db.refresh(record)
     return to_out(record, LocationOut)

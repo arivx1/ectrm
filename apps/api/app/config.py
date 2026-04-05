@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    FRED_API_KEY: str = ""
+    FRED_BASE_URL: str = "https://api.stlouisfed.org/fred"
+    FRED_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    CFTC_BASE_URL: str = "https://publicreporting.cftc.gov"
+    CFTC_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

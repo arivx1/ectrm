@@ -127,5 +127,7 @@ to explore.
 
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)
+- [Trading source candidates](docs/engineering/trading-source-candidates.csv)
+- [Trading source candidate guide](docs/engineering/trading-source-candidates.md)
 - [Trading source seed script](docs/engineering/trading-source-register-seed.psql)
 - [Trading source roadmap](docs/engineering/trading-source-roadmap.md)

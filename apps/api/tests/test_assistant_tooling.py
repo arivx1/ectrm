@@ -20,6 +20,11 @@ from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.chat import AssistantService
 from apps.api.app.domains.assistant.services.tools import AssistantToolService
 from apps.api.app.models import Base
+from apps.api.app.models.external_data_run import ExternalDataRun
+from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
+from apps.api.app.models.external_series_observation import ExternalSeriesObservation
+from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.assistant import AssistantPromptRequest
 
@@ -51,6 +56,11 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with self.SessionLocal() as session:
+            session.query(ExternalSeriesObservation).delete()
+            session.query(ExternalSeriesDefinition).delete()
+            session.query(PriceIndexObservation).delete()
+            session.query(ReferencePriceIndex).delete()
+            session.query(ExternalDataRun).delete()
             session.query(Trade).delete()
             session.add(
                 Trade(
@@ -79,6 +89,141 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                     last_event_id="evt-1001",
                 )
             )
+            session.add(
+                ReferencePriceIndex(
+                    code="WTI_CUSHING_D",
+                    name="WTI Cushing Spot Daily",
+                    commodity_code="WTI",
+                    currency_code="USD",
+                    unit_code="BBL",
+                    provider="EIA",
+                    market="CUSHING",
+                    location_code=None,
+                    calendar_code=None,
+                    description="WTI test index",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                    created_by="system",
+                    updated_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                ExternalDataRun(
+                    id=1,
+                    provider="FRED",
+                    job_name="sync_fred_series",
+                    status="SUCCEEDED",
+                    started_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                    finished_at=datetime(2026, 3, 17, 12, 1, tzinfo=timezone.utc),
+                    requested_by="system",
+                    series_count=2,
+                    observation_count=3,
+                    error_summary=None,
+                    created_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                )
+            )
+            session.add(
+                PriceIndexObservation(
+                    id=1,
+                    price_index_code="WTI_CUSHING_D",
+                    observation_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
+                    value=66.1,
+                    unit_code="BBL",
+                    currency_code="USD",
+                    source_provider="EIA",
+                    source_series_id="PET.RWTC.D",
+                    source_frequency="DAILY",
+                    source_published_at=datetime(2026, 3, 17, 17, 0, tzinfo=timezone.utc),
+                    source_revision="2026-03-17T17:00:00Z",
+                    downloaded_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                    run_id=1,
+                    raw_payload={"period": "2026-03-17", "value": "66.1"},
+                    created_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                    updated_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                )
+            )
+            session.add_all(
+                [
+                    ExternalSeriesDefinition(
+                        code="FRED_DGS10",
+                        provider="FRED",
+                        dataset_code=None,
+                        series_id="DGS10",
+                        name="10-Year Treasury Constant Maturity Rate",
+                        category="macro",
+                        frequency="daily",
+                        unit_code="PCT",
+                        source_url="https://fred.stlouisfed.org/series/DGS10",
+                        description="Macro test series",
+                        query_params=None,
+                        transform_rule="field:value",
+                        is_active=True,
+                        created_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
+                        code="CFTC_WTI_MM_NET",
+                        provider="CFTC",
+                        dataset_code="72hh-3qpy",
+                        series_id="067651",
+                        name="WTI Managed Money Net Position",
+                        category="positioning",
+                        frequency="weekly",
+                        unit_code="CONTRACTS",
+                        source_url="https://publicreporting.cftc.gov/",
+                        description="WTI positioning test series",
+                        query_params={"cftc_contract_market_code": "067651"},
+                        transform_rule="net:m_money_positions_long_all:m_money_positions_short_all",
+                        is_active=True,
+                        created_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesObservation(
+                        id=1,
+                        series_code="FRED_DGS10",
+                        observation_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
+                        value=4.2,
+                        unit_code="PCT",
+                        source_provider="FRED",
+                        source_series_id="DGS10",
+                        source_frequency="DAILY",
+                        source_published_at=None,
+                        source_revision="2026-03-17:2026-03-17",
+                        downloaded_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload={"date": "2026-03-17", "value": "4.2"},
+                        created_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                    ),
+                    ExternalSeriesObservation(
+                        id=2,
+                        series_code="CFTC_WTI_MM_NET",
+                        observation_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
+                        value=73347,
+                        unit_code="CONTRACTS",
+                        source_provider="CFTC",
+                        source_series_id="067651",
+                        source_frequency="WEEKLY",
+                        source_published_at=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc),
+                        source_revision="abc-1",
+                        downloaded_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload={"id": "abc-1", "report_date_as_yyyy_mm_dd": "2026-03-17T00:00:00.000"},
+                        created_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                    ),
+                ]
+            )
             session.commit()
 
         settings.ASSISTANT_ENABLED = True
@@ -101,6 +246,17 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["trade"]["trade_id"], "T-1001")
         self.assertEqual(trace.tool_name, "get_trade_by_id")
         self.assertEqual(trace.record_count, 1)
+
+    def test_tool_service_returns_market_context(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("get_market_context", {"commodity": "WTI", "limit": 5})
+
+        self.assertEqual(trace.tool_name, "get_market_context")
+        self.assertEqual(result.output["commodity"], "WTI")
+        self.assertEqual(result.output["price_indices"][0]["price_index_code"], "WTI_CUSHING_D")
+        self.assertEqual(result.output["macro"][0]["series_code"], "FRED_DGS10")
+        self.assertEqual(result.output["positioning"][0]["series_code"], "CFTC_WTI_MM_NET")
 
     async def test_openai_response_executes_tool_call_and_returns_trace(self) -> None:
         captured_payloads: list[dict[str, object]] = []
@@ -171,6 +327,12 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(captured_payloads), 2)
         self.assertIn("tools", captured_payloads[0])
+        self.assertIsInstance(captured_payloads[0]["instructions"], str)
+        first_input = captured_payloads[0]["input"]
+        assert isinstance(first_input, list)
+        self.assertEqual(first_input[0]["role"], "user")
+        self.assertEqual(first_input[0]["content"], "Summarize trade T-1001.")
+        self.assertNotIn("type", first_input[0])
         self.assertEqual(captured_payloads[1]["previous_response_id"], "resp_1")
 
         second_input = captured_payloads[1]["input"]

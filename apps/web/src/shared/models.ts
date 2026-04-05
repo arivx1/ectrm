@@ -103,9 +103,16 @@ export type UnitRecord = ReferenceRecord & {
 }
 
 export type LocationRecord = ReferenceRecord & {
+  location_kind: string
   location_type: string
+  parent_location_code?: string | null
   market?: string | null
+  city?: string | null
+  state_or_territory?: string | null
   country_code?: string | null
+  continent?: string | null
+  latitude?: number | null
+  longitude?: number | null
   region?: string | null
   timezone?: string | null
 }
@@ -519,9 +526,16 @@ export type UnitForm = {
 export type LocationForm = {
   code: string
   name: string
+  location_kind: string
   location_type: string
+  parent_location_code: string
   market: string
+  city: string
+  state_or_territory: string
   country_code: string
+  continent: string
+  latitude: string
+  longitude: string
   region: string
   timezone: string
   description: string

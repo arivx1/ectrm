@@ -29,7 +29,7 @@ operations with session-based access control.
 - `/reference/*`: books, commodities, price indices, currencies, units,
   locations, counterparties, and portfolios
 - `/reports/*`: exposure and activity summaries
-- `/admin/*`: seed data, external-data runs, EIA sync, trading source admin,
+- `/admin/*`: seed data, external-data runs, EIA/FRED/CFTC sync, trading source admin,
   assistant-agent administration, and assistant run audit listings
 - `/users`: user account administration
 
@@ -133,6 +133,7 @@ The most important settings are:
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`: enable GPT, Claude,
   and Gemini respectively
 - `EIA_API_KEY`: unlocks external EIA sync
+- `FRED_API_KEY`: unlocks external FRED sync
 
 ## Implementation Shape
 

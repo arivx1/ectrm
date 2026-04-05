@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import io
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -32,6 +33,7 @@ from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.core.auth import GoogleIdentity, hash_password
+from apps.api.app.core.logging import configure_logging
 
 
 def coerce_utc(value: datetime) -> datetime:
@@ -211,6 +213,17 @@ class AuthHttpTests(unittest.TestCase):
             )
             session.commit()
 
+    def _swap_log_stream(self) -> tuple[io.StringIO, object, object]:
+        logger = configure_logging()
+        handler = next(
+            handler
+            for handler in logger.handlers
+            if getattr(handler, "_ectrm_handler", False)
+        )
+        stream = io.StringIO()
+        original_stream = handler.setStream(stream)
+        return stream, handler, original_stream
+
     def test_admin_routes_require_admin_session(self) -> None:
         bootstrap = self._bootstrap_admin()
         token = bootstrap["access_token"]
@@ -271,6 +284,49 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(response.headers.get("access-control-allow-origin"), "http://localhost:5173")
         self.assertIn("POST", response.headers.get("access-control-allow-methods", ""))
         self.assertNotIn("error", response.text.lower())
+
+    def test_admin_auth_rejection_is_logged_with_request_context(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            response = self.client.get(
+                "/admin/external-data/runs",
+                headers={"x-correlation-id": "auth-log-123"},
+            )
+            handler.flush()
+        finally:
+            handler.setStream(original_stream)
+
+        self.assertEqual(response.status_code, 401)
+        output = stream.getvalue()
+        self.assertIn("Authentication rejected status_code=401", output)
+        self.assertIn("correlation_id=auth-log-123", output)
+        self.assertIn("request_method=GET", output)
+        self.assertIn("request_path=/admin/external-data/runs", output)
+
+    def test_unhandled_exception_is_logged_with_request_context(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            with patch("apps.api.app.main.build_database_overview", side_effect=RuntimeError("boom")):
+                with TestClient(app, raise_server_exceptions=False) as client:
+                    response = client.get(
+                        "/settings/public",
+                        headers={"x-correlation-id": "error-log-123"},
+                    )
+            handler.flush()
+        finally:
+            handler.setStream(original_stream)
+
+        self.assertEqual(response.status_code, 500)
+        payload = response.json()
+        self.assertEqual(payload["error"]["code"], "UNHANDLED_EXCEPTION")
+        self.assertEqual(payload["error"]["correlation_id"], "error-log-123")
+
+        output = stream.getvalue()
+        self.assertIn("Unhandled exception while processing request", output)
+        self.assertIn("RuntimeError: boom", output)
+        self.assertIn("correlation_id=error-log-123", output)
+        self.assertIn("request_method=GET", output)
+        self.assertIn("request_path=/settings/public", output)
 
     def test_bootstrap_admin_rejects_whitespace_only_password(self) -> None:
         response = self.client.post(
@@ -511,6 +567,19 @@ class AuthHttpTests(unittest.TestCase):
                 "auto_create_users": True,
             },
         )
+
+    def test_public_settings_include_database_metadata(self) -> None:
+        response = self.client.get("/settings/public")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("database", payload)
+        self.assertEqual(payload["database"]["dialect"], "sqlite")
+        self.assertEqual(payload["database"]["name"], "in-memory")
+        self.assertEqual(payload["database"]["table_count"], len(Base.metadata.sorted_tables))
+        self.assertEqual(payload["database"]["record_count"], 0)
+        self.assertIsInstance(payload["database"]["size_bytes"], int)
+        self.assertGreater(payload["database"]["size_bytes"], 0)
 
     def test_trade_writes_require_session_and_use_session_actor(self) -> None:
         self._seed_trade_reference_data()

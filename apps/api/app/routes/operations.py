@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.operations.services import build_database_overview
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.trade import Trade
@@ -118,7 +119,6 @@ def _build_dependency_health(now: datetime, db: Session) -> tuple[list[Dependenc
 
     return dependencies, healthy_dependency_count
 
-
 @router.get("/system-overview", response_model=SystemOverviewOut)
 def get_system_overview(request: Request, db: Session = Depends(get_db)) -> SystemOverviewOut:
     now = datetime.now(timezone.utc)
@@ -161,11 +161,13 @@ def get_system_overview(request: Request, db: Session = Depends(get_db)) -> Syst
     ).scalar_one()
     last_event_recorded_at = db.execute(select(func.max(Event.recorded_at))).scalar_one()
     dependencies, healthy_dependency_count = _build_dependency_health(now, db)
+    database = build_database_overview(db)
 
     return SystemOverviewOut(
         generated_at=now,
         server_status="ok",
         database_status="ok",
+        database=database,
         uptime_seconds=uptime_seconds,
         presence_window_seconds=PRESENCE_WINDOW_SECONDS,
         active_session_count=active_session_count,
