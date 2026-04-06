@@ -1745,6 +1745,33 @@ export function useReferenceDataController({
     )
   }
 
+  async function handlePromoteCounterpartyExternalCreditSnapshot(snapshotId: number) {
+    if (workspace.counterpartyFormMode !== 'edit' || !selectedCounterparty) {
+      setReferenceActionError('Save the counterparty first before promoting external credit data.')
+      setReferenceActionSuccess('')
+      return
+    }
+
+    const snapshot = selectedCounterpartyExternalCreditSnapshots.find((entry) => entry.id === snapshotId)
+    if (!snapshot) {
+      setReferenceActionError('The selected external credit snapshot could not be found.')
+      setReferenceActionSuccess('')
+      return
+    }
+
+    await submitReference(
+      `/reference/counterparties/${selectedCounterparty.code}/external-credit-snapshots/${snapshotId}/promote`,
+      'POST',
+      {
+        promote_rating: true,
+        promote_limit: true,
+        append_commentary_to_notes: true,
+        updated_by: currentActorId(),
+      },
+      `${snapshot.provider} credit snapshot promoted into ${selectedCounterparty.code}.`,
+    )
+  }
+
   async function handleSavePortfolio(e: React.FormEvent) {
     e.preventDefault()
     if (!workspace.portfolioForm.code.trim() || !workspace.portfolioForm.name.trim() || !workspace.portfolioForm.book_code.trim()) {
@@ -1864,6 +1891,7 @@ export function useReferenceDataController({
     handleSaveCounterparty,
     handleToggleCounterparty,
     handleSaveCounterpartyCreditProfile,
+    handlePromoteCounterpartyExternalCreditSnapshot,
     handleSavePortfolio,
     handleTogglePortfolio,
   }

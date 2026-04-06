@@ -1,14 +1,21 @@
+import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import { TileLayout } from '../../shared/ui/TileLayout'
-import type { Trade } from '../../shared/models'
+import type { Trade, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { WorkflowQueueEditor } from '../operations/WorkflowQueueEditor'
 
 type SettlementWorkspaceProps = {
   authSession: StoredAuthSession | null
   activeTrades: Trade[]
+  workItems: TradeWorkflowItemRecord[]
+  formatCommodityClass: (value: string) => string
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
+  workflowMutationError: string
+  workflowMutationPendingId: number | null
   onOpenTrade: (tradeId: string) => void
+  onSaveWorkflowItem: (itemId: number, payload: UpdateTradeWorkflowItemInput) => Promise<void>
 }
 
 function ageInDays(value: string | null | undefined): number | null {
@@ -41,24 +48,24 @@ function settlementPriority(trade: Trade): number {
   return 3
 }
 
-function cashDirectionLabel(trade: Trade): string {
-  if (trade.trade_side === 'SELL') {
-    return 'Receivable'
-  }
-  if (trade.trade_side === 'BUY') {
-    return 'Payable'
-  }
-  return 'Structured cashflow'
-}
-
 export function SettlementWorkspace({
   authSession,
   activeTrades,
+  workItems,
+  formatCommodityClass,
   formatNumber,
   formatDate,
   formatDateOnly,
+  workflowMutationError,
+  workflowMutationPendingId,
   onOpenTrade,
+  onSaveWorkflowItem,
 }: SettlementWorkspaceProps) {
+  const settlementWorkItems = workItems.filter((item) => item.queue === 'settlement')
+  const openSettlementWorkItems = settlementWorkItems.filter((item) => !item.is_closed)
+  const settlementExceptionItems = openSettlementWorkItems.filter(
+    (item) => item.is_overdue || item.status === 'DISPUTED' || item.status === 'OVERDUE',
+  )
   const openSettlementTrades = [...activeTrades]
     .filter(
       (trade) =>
@@ -72,7 +79,10 @@ export function SettlementWorkspace({
       if (priority !== 0) {
         return priority
       }
-      return (ageInDays(right.execution_timestamp ?? right.trade_date) ?? -1) - (ageInDays(left.execution_timestamp ?? left.trade_date) ?? -1)
+      return (
+        (ageInDays(right.execution_timestamp ?? right.trade_date) ?? -1) -
+        (ageInDays(left.execution_timestamp ?? left.trade_date) ?? -1)
+      )
     })
 
   const disputedTrades = activeTrades.filter(
@@ -116,8 +126,8 @@ export function SettlementWorkspace({
               <div className="dashboard-report-grid">
                 <article className="dashboard-report-card">
                   <span>Open Settlement</span>
-                  <strong>{formatNumber(openSettlementTrades.length, 0)}</strong>
-                  <p>Trades that are not fully settled and cash-complete yet.</p>
+                  <strong>{formatNumber(openSettlementWorkItems.length, 0)}</strong>
+                  <p>Invoice and payment workflow tickets still open on the active trade book.</p>
                 </article>
                 <article className="dashboard-report-card">
                   <span>Invoice Pending</span>
@@ -168,33 +178,37 @@ export function SettlementWorkspace({
         {
           id: 'settlement-disputes',
           eyebrow: 'Escalation',
-          title: disputedTrades.length > 0 ? 'Settlement Exceptions' : 'No active settlement exceptions',
-          description: 'Disputed or overdue cashflow rows that usually need direct human escalation.',
+          title:
+            settlementExceptionItems.length > 0 || disputedTrades.length > 0
+              ? 'Settlement Exceptions'
+              : 'No active settlement exceptions',
+          description: 'Disputed, overdue, or otherwise late settlement tasks that usually need direct human escalation.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
-          content: disputedTrades.length > 0 ? (
+          content: settlementExceptionItems.length > 0 ? (
             <div className="position-list">
-              {disputedTrades.map((trade) => (
-                <article key={trade.trade_id} className="position-card shipment-card">
+              {settlementExceptionItems.map((item) => (
+                <article key={item.item_id} className="position-card shipment-card">
                   <div className="shipment-card-head">
                     <div className="shipment-card-copy">
-                      <strong>{trade.trade_id}</strong>
+                      <strong>{item.trade_id}</strong>
                       <span>
-                        {trade.commodity} • {cashDirectionLabel(trade)}
+                        {item.commodity} • {item.counterparty ?? 'Counterparty TBD'}
                       </span>
                     </div>
-                    <span className="status-pill status-pill-blocked">
-                      {trade.payment_status === 'OVERDUE' ? 'OVERDUE' : 'DISPUTED'}
-                    </span>
+                    <span className="status-pill status-pill-blocked">{item.status.replaceAll('_', ' ')}</span>
                   </div>
                   <div className="shipment-card-meta">
-                    <span className="entity-chip entity-chip-soft">Invoice {trade.invoice_status}</span>
-                    <span className="entity-chip entity-chip-soft">Payment {trade.payment_status}</span>
-                    <span className="entity-chip entity-chip-soft">Settlement {trade.settlement_status}</span>
+                    <span className="entity-chip entity-chip-soft">{item.workflow_type.replaceAll('_', ' ')}</span>
+                    <span className="entity-chip entity-chip-soft">{formatCommodityClass(item.commodity_class)}</span>
+                    <span className="entity-chip entity-chip-soft">{item.owner ? `Owner ${item.owner}` : 'Unassigned'}</span>
+                  </div>
+                  <div className="shipment-card-copy">
+                    <p>{item.due_at ? `Due ${formatDateOnly(item.due_at)}` : 'No due date'} • Updated {formatDate(item.updated_at)}</p>
                   </div>
                   <div className="shipment-card-actions">
-                    <span>Updated {formatDate(trade.updated_at)}</span>
-                    <button type="button" className="button button-ghost" onClick={() => onOpenTrade(trade.trade_id)}>
+                    <span>{item.notes ? item.notes : 'Awaiting operator follow-up.'}</span>
+                    <button type="button" className="button button-ghost" onClick={() => onOpenTrade(item.trade_id)}>
                       Open Trade
                     </button>
                   </div>
@@ -212,55 +226,22 @@ export function SettlementWorkspace({
           id: 'settlement-queue',
           eyebrow: 'Queue',
           title: 'Open Settlement Queue',
-          description: 'An age-ordered list of trades still moving through invoice, payment, or final settlement.',
+          description: 'Editable invoice and payment queue cards so settlement work can actually be assigned and advanced.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: openSettlementTrades.length > 0 ? (
-            <div className="position-list">
-              {openSettlementTrades.map((trade) => {
-                const age = ageInDays(trade.execution_timestamp ?? trade.trade_date)
-                const tone =
-                  settlementPriority(trade) === 0
-                    ? 'blocked'
-                    : settlementPriority(trade) === 1
-                      ? 'in-progress'
-                      : 'active'
-
-                return (
-                  <article key={trade.trade_id} className="position-card shipment-card">
-                    <div className="shipment-card-head">
-                      <div className="shipment-card-copy">
-                        <strong>{trade.trade_id}</strong>
-                        <span>
-                          {trade.commodity} • {trade.counterparty ?? 'Counterparty TBD'}
-                        </span>
-                      </div>
-                      <span className={`status-pill status-pill-${tone}`}>
-                        {trade.settlement_status.replaceAll('_', ' ')}
-                      </span>
-                    </div>
-                    <div className="shipment-card-meta">
-                      <span className="entity-chip entity-chip-soft">{cashDirectionLabel(trade)}</span>
-                      <span className="entity-chip entity-chip-soft">Invoice {trade.invoice_status}</span>
-                      <span className="entity-chip entity-chip-soft">Payment {trade.payment_status}</span>
-                      <span className="entity-chip entity-chip-soft">{trade.book}</span>
-                    </div>
-                    <div className="shipment-card-copy">
-                      <p>
-                        Trade date {formatDateOnly(trade.trade_date)} • Execution {formatDate(trade.execution_timestamp)} • Open{' '}
-                        {age === null ? '—' : `${age}d`}
-                      </p>
-                    </div>
-                    <div className="shipment-card-actions">
-                      <span>{trade.trader_user ?? 'Trader TBD'}</span>
-                      <button type="button" className="button button-ghost" onClick={() => onOpenTrade(trade.trade_id)}>
-                        Open Trade
-                      </button>
-                    </div>
-                  </article>
-                )
-              })}
-            </div>
+          content: openSettlementWorkItems.length > 0 ? (
+            <WorkflowQueueEditor
+              key={openSettlementWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
+              authSession={authSession}
+              items={openSettlementWorkItems}
+              savingItemId={workflowMutationPendingId}
+              saveError={workflowMutationError}
+              formatCommodityClass={formatCommodityClass}
+              formatDate={formatDate}
+              formatDateOnly={formatDateOnly}
+              onOpenTrade={onOpenTrade}
+              onSaveItem={onSaveWorkflowItem}
+            />
           ) : (
             <div className="empty-state">
               <strong>No open settlement rows</strong>

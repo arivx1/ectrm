@@ -72,6 +72,7 @@ from apps.api.app.schemas.reference_data import (
     CounterpartyCreate,
     CounterpartyCreditProfileOut,
     CounterpartyCreditProfileUpsert,
+    CounterpartyExternalCreditPromotionRequest,
     CounterpartyExternalCreditSnapshotOut,
     CounterpartyOut,
     CounterpartyStandardsOut,
@@ -675,6 +676,22 @@ def _to_counterparty_external_credit_snapshot_out(
     )
 
 
+def _build_external_credit_promotion_note(
+    record: ReferenceCounterpartyExternalCreditSnapshot,
+) -> str:
+    parts = [f"{record.provider} snapshot {record.as_of_date.isoformat()} promoted"]
+    if record.rating_value:
+        parts.append(f"rating {record.rating_value}")
+    if record.recommended_limit_amount is not None and record.recommended_limit_currency_code:
+        parts.append(
+            f"limit {record.recommended_limit_currency_code} {float(record.recommended_limit_amount):,.2f}"
+        )
+    note = "; ".join(parts) + "."
+    if record.commentary:
+        return f"{note} {record.commentary}"
+    return note
+
+
 def _resolve_counterparty_credit_profile_values(
     db: Session,
     payload: CounterpartyCreditProfileUpsert,
@@ -893,6 +910,80 @@ def upsert_counterparty_credit_profile(
         record.updated_at = now
         record.updated_by = actor_id
         record.version += 1
+
+    db.commit()
+    db.refresh(record)
+    return _to_counterparty_credit_profile_out(record)
+
+
+@router.post(
+    "/counterparties/{code}/external-credit-snapshots/{snapshot_id}/promote",
+    response_model=CounterpartyCreditProfileOut,
+)
+def promote_counterparty_external_credit_snapshot(
+    code: str,
+    snapshot_id: int,
+    payload: CounterpartyExternalCreditPromotionRequest,
+    db: Session = Depends(get_db),
+) -> CounterpartyCreditProfileOut:
+    normalized_code = normalize_code(code)
+    get_reference_record(db, ReferenceCounterparty, normalized_code)
+    snapshot = db.get(ReferenceCounterpartyExternalCreditSnapshot, snapshot_id)
+    if snapshot is None or snapshot.counterparty_code != normalized_code:
+        raise HTTPException(status_code=404, detail="Counterparty external credit snapshot not found")
+
+    if not payload.promote_rating and not payload.promote_limit and not payload.append_commentary_to_notes and payload.review_due_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Select at least one credit field to promote",
+        )
+
+    record = db.execute(
+        select(ReferenceCounterpartyCreditProfile).where(
+            ReferenceCounterpartyCreditProfile.counterparty_code == normalized_code
+        )
+    ).scalars().first()
+    now = datetime.now(timezone.utc)
+    actor_id = resolve_audit_actor_id(payload.updated_by)
+    if record is None:
+        record = ReferenceCounterpartyCreditProfile(
+            counterparty_code=normalized_code,
+            credit_rating=None,
+            review_due_at=None,
+            limit_currency_code=None,
+            limit_amount=None,
+            breach_action=DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION,
+            notes=None,
+            created_at=now,
+            created_by=actor_id,
+            updated_at=now,
+            updated_by=actor_id,
+            version=1,
+        )
+        db.add(record)
+    else:
+        record.updated_at = now
+        record.updated_by = actor_id
+        record.version += 1
+
+    if payload.promote_rating and snapshot.rating_value:
+        record.credit_rating = snapshot.rating_value
+
+    if payload.review_due_at is not None:
+        record.review_due_at = payload.review_due_at
+
+    if payload.promote_limit and snapshot.recommended_limit_amount is not None and snapshot.recommended_limit_currency_code:
+        record.limit_currency_code = snapshot.recommended_limit_currency_code
+        record.limit_amount = snapshot.recommended_limit_amount
+
+    if payload.append_commentary_to_notes:
+        next_note = _build_external_credit_promotion_note(snapshot)
+        existing_notes = _clean_optional_text(record.notes)
+        if existing_notes:
+            if next_note not in existing_notes:
+                record.notes = f"{existing_notes}\n{next_note}"
+        else:
+            record.notes = next_note
 
     db.commit()
     db.refresh(record)

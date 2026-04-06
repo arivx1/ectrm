@@ -21,6 +21,7 @@ import { SettingsWorkspace } from './workspaces/settings/SettingsWorkspace'
 import { TradingWorkspace } from './workspaces/trading/TradingWorkspace'
 import { loadWorkspaceBootstrap } from './entities/app/api'
 import { loadCurrentSession, sendSessionHeartbeat } from './entities/auth/api'
+import { updateTradeWorkflowItem, type UpdateTradeWorkflowItemInput } from './entities/operations/api'
 import { submitTradeEvent } from './entities/trade/api'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
 import { ApiError, fetchJson, postJson } from './shared/api'
@@ -43,6 +44,7 @@ import {
 } from './features/trades/tradeEventPayloads'
 import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import {
+  type CounterpartyCreditPreviewRecord,
   type CounterpartyCreditProfileRecord,
   type CounterpartyCreditReportRow,
   type CounterpartyExternalCreditSnapshotRecord,
@@ -63,6 +65,7 @@ import {
   type PriceIndexRecord,
   type ReferenceRecord,
   type Trade,
+  type TradeWorkflowItemRecord,
   type TradingSourceRecord,
   type UnitRecord,
   type ViewKey,
@@ -203,6 +206,7 @@ export default function App() {
   const [events, setEvents] = useState<EventRow[]>([])
   const [positions, setPositions] = useState<PositionRow[]>([])
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
+  const [tradeWorkflowItems, setTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
   const [books, setBooks] = useState<ReferenceRecord[]>([])
   const [commodities, setCommodities] = useState<ReferenceRecord[]>([])
   const [priceIndices, setPriceIndices] = useState<PriceIndexRecord[]>([])
@@ -222,14 +226,19 @@ export default function App() {
   const [externalDataSyncStatus, setExternalDataSyncStatus] = useState<ExternalDataSyncStatusRecord | null>(null)
   const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
+  const [workflowMutationError, setWorkflowMutationError] = useState('')
+  const [workflowMutationPendingId, setWorkflowMutationPendingId] = useState<number | null>(null)
   const [error, setError] = useState<string>('')
   const [createError, setCreateError] = useState<string>('')
   const [amendError, setAmendError] = useState<string>('')
   const [referenceDataError, setReferenceDataError] = useState<string>('')
   const [externalDataError, setExternalDataError] = useState<string>('')
   const [externalDataSuccess, setExternalDataSuccess] = useState<string>('')
-  const [counterpartyCreditImportProvider, setCounterpartyCreditImportProvider] = useState('DNB')
   const [counterpartyCreditImportDraft, setCounterpartyCreditImportDraft] = useState('')
+  const [counterpartyCreditPreview, setCounterpartyCreditPreview] = useState<CounterpartyCreditPreviewRecord | null>(null)
+  const [counterpartyCreditPreviewing, setCounterpartyCreditPreviewing] = useState(false)
+  const [counterpartyCreditPreviewError, setCounterpartyCreditPreviewError] = useState('')
+  const [counterpartyCreditPreviewSuccess, setCounterpartyCreditPreviewSuccess] = useState('')
   const [counterpartyCreditImporting, setCounterpartyCreditImporting] = useState(false)
   const [counterpartyCreditImportError, setCounterpartyCreditImportError] = useState('')
   const [counterpartyCreditImportSuccess, setCounterpartyCreditImportSuccess] = useState('')
@@ -265,6 +274,7 @@ export default function App() {
       events: eventsJson,
       positions: positionsJson,
       deliveries: deliveriesJson,
+      workItems: workItemsJson,
       books: booksJson,
       commodities: commoditiesJson,
       priceIndices: priceIndicesJson,
@@ -292,6 +302,7 @@ export default function App() {
     const nextEvents = eventsJson as EventRow[]
     const nextPositions = positionsJson as PositionRow[]
     const nextDeliveries = deliveriesJson as DeliveryRecord[]
+    const nextTradeWorkflowItems = workItemsJson as TradeWorkflowItemRecord[]
     const nextBooks = booksJson as ReferenceRecord[]
     const nextCommodities = commoditiesJson as ReferenceRecord[]
     const nextPriceIndices = priceIndicesJson as PriceIndexRecord[]
@@ -316,6 +327,7 @@ export default function App() {
     setEvents(nextEvents)
     setPositions(nextPositions)
     setDeliveries(nextDeliveries)
+    setTradeWorkflowItems(nextTradeWorkflowItems)
     setBooks(nextBooks)
     setCommodities(nextCommodities)
     setPriceIndices(nextPriceIndices)
@@ -349,6 +361,20 @@ export default function App() {
 
   const loadDataRef = useRef(loadData)
   loadDataRef.current = loadData
+
+  async function handleSaveWorkflowItem(itemId: number, payload: UpdateTradeWorkflowItemInput) {
+    setWorkflowMutationError('')
+    setWorkflowMutationPendingId(itemId)
+
+    try {
+      await updateTradeWorkflowItem(appConfig.apiBase, itemId, payload)
+      await loadDataRef.current()
+    } catch (error) {
+      setWorkflowMutationError(error instanceof Error ? error.message : 'Failed to update workflow item.')
+    } finally {
+      setWorkflowMutationPendingId((current) => (current === itemId ? null : current))
+    }
+  }
 
   async function refreshAuthSession(): Promise<StoredAuthSession | null> {
     const storedSession = getStoredAuthSession()
@@ -1061,32 +1087,75 @@ export default function App() {
     }
   }
 
-  async function handleImportCounterpartyCreditSnapshots() {
-    const provider = counterpartyCreditImportProvider.trim().toUpperCase()
-    if (!provider) {
-      setCounterpartyCreditImportError('Provider is required before importing counterparty credit snapshots.')
-      setCounterpartyCreditImportSuccess('')
-      return
-    }
-
+  async function handlePreviewCounterpartyCreditImport() {
     const draft = counterpartyCreditImportDraft.trim()
     if (!draft) {
-      setCounterpartyCreditImportError('Paste a JSON array of snapshot rows before importing.')
-      setCounterpartyCreditImportSuccess('')
+      setCounterpartyCreditPreviewError('Paste a JSON array of D&B rows before previewing.')
+      setCounterpartyCreditPreviewSuccess('')
       return
     }
 
-    let snapshots: unknown
+    let rows: unknown
     try {
-      snapshots = JSON.parse(draft)
+      rows = JSON.parse(draft)
     } catch {
-      setCounterpartyCreditImportError('Snapshot payload must be valid JSON.')
-      setCounterpartyCreditImportSuccess('')
+      setCounterpartyCreditPreviewError('D&B preview payload must be valid JSON.')
+      setCounterpartyCreditPreviewSuccess('')
       return
     }
 
-    if (!Array.isArray(snapshots) || snapshots.length === 0) {
-      setCounterpartyCreditImportError('Snapshot payload must be a non-empty JSON array.')
+    if (!Array.isArray(rows) || rows.length === 0) {
+      setCounterpartyCreditPreviewError('D&B preview payload must be a non-empty JSON array.')
+      setCounterpartyCreditPreviewSuccess('')
+      return
+    }
+
+    setCounterpartyCreditPreviewing(true)
+    setCounterpartyCreditPreviewError('')
+    setCounterpartyCreditPreviewSuccess('')
+    setCounterpartyCreditImportError('')
+    setCounterpartyCreditImportSuccess('')
+    try {
+      const payload = await postJson<CounterpartyCreditPreviewRecord>(
+        `${appConfig.apiBase}/admin/external-data/dnb/counterparty-credit/preview`,
+        {
+          rows,
+          default_limit_currency_code: 'USD',
+        },
+        { headers: buildMutationHeaders() },
+      )
+
+      setCounterpartyCreditPreview(payload)
+      setCounterpartyCreditPreviewSuccess(
+        `D&B preview analyzed ${payload.total_rows} row${payload.total_rows === 1 ? '' : 's'}: ${payload.ready_rows} ready, ${payload.blocked_rows} blocked.`,
+      )
+    } catch (err) {
+      setCounterpartyCreditPreview(null)
+      setCounterpartyCreditPreviewError(
+        err instanceof Error ? err.message : 'Failed to preview D&B counterparty credit rows.',
+      )
+    } finally {
+      setCounterpartyCreditPreviewing(false)
+    }
+  }
+
+  function handleCounterpartyCreditImportDraftChange(value: string) {
+    setCounterpartyCreditImportDraft(value)
+    setCounterpartyCreditPreview(null)
+    setCounterpartyCreditPreviewError('')
+    setCounterpartyCreditPreviewSuccess('')
+    setCounterpartyCreditImportError('')
+    setCounterpartyCreditImportSuccess('')
+  }
+
+  async function handleImportCounterpartyCreditSnapshots() {
+    const snapshots =
+      counterpartyCreditPreview?.rows
+        .filter((row) => row.ready_to_import && row.snapshot)
+        .map((row) => row.snapshot) ?? []
+
+    if (snapshots.length === 0) {
+      setCounterpartyCreditImportError('Preview D&B rows first and make sure at least one row is ready to import.')
       setCounterpartyCreditImportSuccess('')
       return
     }
@@ -1099,7 +1168,7 @@ export default function App() {
       const payload = await postJson<ExternalDataRunRecord>(
         `${appConfig.apiBase}/admin/external-data/counterparty-credit/import`,
         {
-          provider,
+          provider: 'DNB',
           snapshots,
           requested_by: actorId,
         },
@@ -1109,13 +1178,13 @@ export default function App() {
       await loadData()
       if (payload.status === 'FAILED') {
         setCounterpartyCreditImportError(
-          payload.error_summary || `${provider} counterparty credit import run ${payload.id} failed.`,
+          payload.error_summary || `DNB counterparty credit import run ${payload.id} failed.`,
         )
         return
       }
 
       setCounterpartyCreditImportSuccess(
-        `${provider} counterparty credit import run ${payload.id} loaded ${payload.observation_count} snapshot${payload.observation_count === 1 ? '' : 's'}.`,
+        `DNB counterparty credit import run ${payload.id} loaded ${payload.observation_count} snapshot${payload.observation_count === 1 ? '' : 's'}.`,
       )
     } catch (err) {
       setCounterpartyCreditImportError(
@@ -1987,13 +2056,18 @@ export default function App() {
           <OperationsWorkspace
             authSession={authSession}
             deliveries={deliveries}
+            workItems={tradeWorkflowItems}
             externalDataSyncStatus={externalDataSyncStatus}
             weatherSyncStatus={weatherSyncStatus}
             tradingSources={tradingSources}
             formatCommodityClass={formatCommodityClass}
             formatNumber={formatNumber}
             formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            workflowMutationError={workflowMutationError}
+            workflowMutationPendingId={workflowMutationPendingId}
             onOpenTrade={navigateToTrade}
+            onSaveWorkflowItem={handleSaveWorkflowItem}
           />
         )}
 
@@ -2001,10 +2075,15 @@ export default function App() {
           <SettlementWorkspace
             authSession={authSession}
             activeTrades={activeTrades}
+            workItems={tradeWorkflowItems}
+            formatCommodityClass={formatCommodityClass}
             formatNumber={formatNumber}
             formatDate={formatDate}
             formatDateOnly={formatDateOnly}
+            workflowMutationError={workflowMutationError}
+            workflowMutationPendingId={workflowMutationPendingId}
             onOpenTrade={navigateToTrade}
+            onSaveWorkflowItem={handleSaveWorkflowItem}
           />
         )}
 
@@ -2047,8 +2126,11 @@ export default function App() {
             externalDataSyncingProvider={externalDataSyncingProvider}
             externalDataError={externalDataError}
             externalDataSuccess={externalDataSuccess}
-            counterpartyCreditImportProvider={counterpartyCreditImportProvider}
             counterpartyCreditImportDraft={counterpartyCreditImportDraft}
+            counterpartyCreditPreview={counterpartyCreditPreview}
+            counterpartyCreditPreviewing={counterpartyCreditPreviewing}
+            counterpartyCreditPreviewError={counterpartyCreditPreviewError}
+            counterpartyCreditPreviewSuccess={counterpartyCreditPreviewSuccess}
             counterpartyCreditImporting={counterpartyCreditImporting}
             counterpartyCreditImportError={counterpartyCreditImportError}
             counterpartyCreditImportSuccess={counterpartyCreditImportSuccess}
@@ -2059,8 +2141,8 @@ export default function App() {
             weatherSyncError={weatherSyncError}
             weatherSyncSuccess={weatherSyncSuccess}
             onRunExternalDataSync={handleRunExternalDataSync}
-            onCounterpartyCreditImportProviderChange={setCounterpartyCreditImportProvider}
-            onCounterpartyCreditImportDraftChange={setCounterpartyCreditImportDraft}
+            onCounterpartyCreditImportDraftChange={handleCounterpartyCreditImportDraftChange}
+            onPreviewCounterpartyCreditImport={handlePreviewCounterpartyCreditImport}
             onImportCounterpartyCreditSnapshots={handleImportCounterpartyCreditSnapshots}
             onRunNwsWeatherSync={handleRunNwsWeatherSync}
             onSeedTradingSources={handleSeedTradingSources}

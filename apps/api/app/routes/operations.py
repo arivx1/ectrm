@@ -3,13 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services import build_database_overview
+from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
+from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
+from apps.api.app.domains.operations.services.workflow_items import update_trade_workflow_item
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.trade import Trade
@@ -17,6 +20,9 @@ from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas.operations import DependencyHealthOut
 from apps.api.app.schemas.operations import SystemOverviewOut
+from apps.api.app.schemas.operations import TradeWorkflowItemCreate
+from apps.api.app.schemas.operations import TradeWorkflowItemOut
+from apps.api.app.schemas.operations import TradeWorkflowItemUpdate
 
 router = APIRouter(prefix="/operations", tags=["operations"])
 
@@ -119,6 +125,19 @@ def _build_dependency_health(now: datetime, db: Session) -> tuple[list[Dependenc
 
     return dependencies, healthy_dependency_count
 
+
+def _require_authenticated_actor(request: Request) -> str:
+    actor_id = getattr(request.state, "actor_id", None)
+    if not actor_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
+    return actor_id
+
+
+def _provided_fields(payload: TradeWorkflowItemUpdate) -> set[str]:
+    if hasattr(payload, "model_fields_set"):
+        return set(payload.model_fields_set)
+    return set(getattr(payload, "__fields_set__", set()))
+
 @router.get("/system-overview", response_model=SystemOverviewOut)
 def get_system_overview(request: Request, db: Session = Depends(get_db)) -> SystemOverviewOut:
     now = datetime.now(timezone.utc)
@@ -181,3 +200,94 @@ def get_system_overview(request: Request, db: Session = Depends(get_db)) -> Syst
         healthy_dependency_count=healthy_dependency_count,
         dependencies=dependencies,
     )
+
+
+@router.get("/work-items", response_model=list[TradeWorkflowItemOut])
+def get_work_items(
+    queue: str | None = Query(default=None),
+    include_closed: bool = Query(default=False),
+    trade_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> list[TradeWorkflowItemOut]:
+    try:
+        items = list_trade_workflow_items(
+            db,
+            queue=queue,
+            include_closed=include_closed,
+            trade_id=trade_id,
+        )
+        db.commit()
+        return items
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/work-items", response_model=TradeWorkflowItemOut, status_code=status.HTTP_201_CREATED)
+def post_work_item(
+    payload: TradeWorkflowItemCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TradeWorkflowItemOut:
+    actor_id = _require_authenticated_actor(request)
+    try:
+        item = create_trade_workflow_item(
+            db,
+            trade_id=payload.trade_id,
+            workflow_type=payload.workflow_type,
+            actor_id=actor_id,
+            status=payload.status,
+            owner=payload.owner,
+            due_at=payload.due_at,
+            notes=payload.notes,
+        )
+        db.commit()
+        return item
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.patch("/work-items/{item_id}", response_model=TradeWorkflowItemOut)
+def patch_work_item(
+    item_id: int,
+    payload: TradeWorkflowItemUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TradeWorkflowItemOut:
+    actor_id = _require_authenticated_actor(request)
+    provided_fields = _provided_fields(payload)
+    if not provided_fields:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one workflow item field must be provided.",
+        )
+
+    changes = {field_name: getattr(payload, field_name) for field_name in provided_fields}
+    try:
+        item = update_trade_workflow_item(
+            db,
+            item_id=item_id,
+            actor_id=actor_id,
+            changes=changes,
+        )
+        db.commit()
+        return item
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise

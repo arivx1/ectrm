@@ -79,6 +79,14 @@ class PaymentStatus(StrEnum):
     OVERDUE = "OVERDUE"
 
 
+class TradeWorkflowType(StrEnum):
+    CONFIRMATION = "CONFIRMATION"
+    NOMINATION = "NOMINATION"
+    ALLOCATION = "ALLOCATION"
+    INVOICE = "INVOICE"
+    PAYMENT = "PAYMENT"
+
+
 class TransportMode(StrEnum):
     UNSPECIFIED = "UNSPECIFIED"
     TRUCK = "TRUCK"

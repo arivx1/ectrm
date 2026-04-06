@@ -222,7 +222,10 @@ class AdminSeedApiTests(unittest.TestCase):
     def test_transaction_seed_supports_add_replace_and_delete(self) -> None:
         with self.SessionLocal() as session:
             scenarios = list_admin_transaction_scenarios()
-            self.assertEqual([row.code for row in scenarios], ["core_demo", "gulf_coast_dislocation"])
+            self.assertEqual(
+                [row.code for row in scenarios],
+                ["core_demo", "gulf_coast_dislocation", "market_mix_expansion"],
+            )
 
             first = seed_admin_transactions(
                 TransactionSeedRequest(
@@ -248,13 +251,24 @@ class AdminSeedApiTests(unittest.TestCase):
 
             third = seed_admin_transactions(
                 TransactionSeedRequest(
+                    action="add",
+                    scenario_codes=["market_mix_expansion"],
+                    requested_by="test-user",
+                ),
+                db=session,
+            )
+            self.assertEqual(third.trades_seeded, 20)
+            self.assertEqual(session.query(Trade).count(), 26)
+
+            fourth = seed_admin_transactions(
+                TransactionSeedRequest(
                     action="replace",
                     scenario_codes=["gulf_coast_dislocation"],
                     requested_by="test-user",
                 ),
                 db=session,
             )
-            self.assertEqual(third.scenario_codes, ["gulf_coast_dislocation"])
+            self.assertEqual(fourth.scenario_codes, ["gulf_coast_dislocation"])
             self.assertEqual(session.query(Trade).count(), 2)
 
             final_payload = seed_admin_transactions(

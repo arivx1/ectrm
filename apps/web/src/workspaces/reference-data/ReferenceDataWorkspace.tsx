@@ -188,6 +188,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     handleSaveCounterparty,
     handleToggleCounterparty,
     handleSaveCounterpartyCreditProfile,
+    handlePromoteCounterpartyExternalCreditSnapshot,
     selectedPortfolio,
     portfolioFormMode,
     portfolioForm,
@@ -1789,6 +1790,19 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                             <strong>{snapshot.commentary}</strong>
                           </div>
                         ) : null}
+                        <div className="toolbar">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void handlePromoteCounterpartyExternalCreditSnapshot(snapshot.id)}
+                            disabled={
+                              savingReference ||
+                              (snapshot.rating_value == null && snapshot.recommended_limit_amount == null)
+                            }
+                          >
+                            Promote to Credit Profile
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

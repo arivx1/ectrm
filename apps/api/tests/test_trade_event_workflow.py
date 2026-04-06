@@ -29,6 +29,7 @@ from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.routes.events import append_event
 from apps.api.app.schemas.event import EventCreate
 
@@ -54,6 +55,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(Position).delete()
             session.query(TradePriceTerm).delete()
+            session.query(TradeWorkflowItem).delete()
             session.query(TradeLeg).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
@@ -431,6 +433,12 @@ class TradeEventWorkflowTests(unittest.TestCase):
 
             physical_trade = session.query(Trade).filter(Trade.trade_id == "T-WORKFLOW-1").one()
             financial_trade = session.query(Trade).filter(Trade.trade_id == "T-WORKFLOW-2").one()
+            physical_workflow_items = (
+                session.query(TradeWorkflowItem)
+                .filter(TradeWorkflowItem.trade_id == "T-WORKFLOW-1")
+                .order_by(TradeWorkflowItem.workflow_type.asc())
+                .all()
+            )
 
             self.assertEqual(physical_trade.confirmation_status, "PENDING")
             self.assertEqual(physical_trade.nomination_status, "PENDING")
@@ -442,6 +450,17 @@ class TradeEventWorkflowTests(unittest.TestCase):
             self.assertEqual(financial_trade.allocation_status, "NOT_REQUIRED")
             self.assertEqual(financial_trade.invoice_status, "NOT_REQUIRED")
             self.assertEqual(financial_trade.payment_status, "PENDING")
+            self.assertEqual(len(physical_workflow_items), 5)
+            self.assertEqual(
+                {item.workflow_type: item.status for item in physical_workflow_items},
+                {
+                    "ALLOCATION": "PENDING",
+                    "CONFIRMATION": "PENDING",
+                    "INVOICE": "PENDING",
+                    "NOMINATION": "PENDING",
+                    "PAYMENT": "PENDING",
+                },
+            )
 
             append_event(
                 EventCreate(
@@ -466,6 +485,12 @@ class TradeEventWorkflowTests(unittest.TestCase):
             )
 
             amended_trade = session.query(Trade).filter(Trade.trade_id == "T-WORKFLOW-1").one()
+            amended_workflow_items = (
+                session.query(TradeWorkflowItem)
+                .filter(TradeWorkflowItem.trade_id == "T-WORKFLOW-1")
+                .order_by(TradeWorkflowItem.workflow_type.asc())
+                .all()
+            )
 
         self.assertEqual(amended_trade.pricing_status, "PARTIALLY_PRICED")
         self.assertEqual(amended_trade.confirmation_status, "CONFIRMED")
@@ -474,6 +499,16 @@ class TradeEventWorkflowTests(unittest.TestCase):
         self.assertEqual(amended_trade.invoice_status, "ISSUED")
         self.assertEqual(amended_trade.payment_status, "DUE")
         self.assertEqual(amended_trade.settlement_status, "INVOICED")
+        self.assertEqual(
+            {item.workflow_type: item.status for item in amended_workflow_items},
+            {
+                "ALLOCATION": "ALLOCATED",
+                "CONFIRMATION": "CONFIRMED",
+                "INVOICE": "ISSUED",
+                "NOMINATION": "NOMINATED",
+                "PAYMENT": "DUE",
+            },
+        )
 
     def test_swap_trade_can_omit_top_level_volume_when_legs_are_present(self) -> None:
         with self.SessionLocal() as session:

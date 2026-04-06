@@ -237,3 +237,19 @@ export async function putJson<T>(
     body: JSON.stringify(body),
   })
 }
+
+export async function patchJson<T>(
+  url: string,
+  body: Record<string, unknown>,
+  init?: Omit<RequestInit, 'body' | 'method'>,
+): Promise<T> {
+  return fetchJson<T>(url, {
+    ...init,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+    body: JSON.stringify(body),
+  })
+}

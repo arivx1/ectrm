@@ -1,61 +1,82 @@
+import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type {
   DeliveryRecord,
   ExternalDataSyncStatusRecord,
+  TradeWorkflowItemRecord,
   TradingSourceRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
+import { WorkflowQueueEditor } from './WorkflowQueueEditor'
 
 type OperationsWorkspaceProps = {
   authSession: StoredAuthSession | null
   deliveries: DeliveryRecord[]
+  workItems: TradeWorkflowItemRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
   weatherSyncStatus: WeatherSyncStatusRecord | null
   tradingSources: TradingSourceRecord[]
   formatCommodityClass: (value: string) => string
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
+  formatDateOnly: (value: string | null | undefined) => string
+  workflowMutationError: string
+  workflowMutationPendingId: number | null
   onOpenTrade: (tradeId: string) => void
+  onSaveWorkflowItem: (itemId: number, payload: UpdateTradeWorkflowItemInput) => Promise<void>
 }
 
 function formatModeFamily(value: DeliveryRecord['mode_family']): string {
   return value.replaceAll('_', ' ')
 }
 
+function dueWithinDays(value: string | null | undefined, days: number): boolean {
+  if (!value) {
+    return false
+  }
+
+  const dueAt = Date.parse(value)
+  if (Number.isNaN(dueAt)) {
+    return false
+  }
+
+  const differenceMs = dueAt - Date.now()
+  return differenceMs >= 0 && differenceMs <= days * 86_400_000
+}
+
 export function OperationsWorkspace({
   authSession,
   deliveries,
+  workItems,
   externalDataSyncStatus,
   weatherSyncStatus,
   tradingSources,
   formatCommodityClass,
   formatNumber,
   formatDate,
+  formatDateOnly,
+  workflowMutationError,
+  workflowMutationPendingId,
   onOpenTrade,
+  onSaveWorkflowItem,
 }: OperationsWorkspaceProps) {
   const openDeliveries = deliveries.filter((delivery) => delivery.status !== 'COMPLETED')
   const blockedDeliveries = deliveries.filter((delivery) => delivery.status === 'BLOCKED')
-  const confirmationPending = openDeliveries.filter((delivery) => delivery.confirmation_status !== 'CONFIRMED').length
-  const invoicePending = openDeliveries.filter(
-    (delivery) => !['NOT_REQUIRED', 'ISSUED', 'APPROVED'].includes(delivery.invoice_status),
+  const operationsWorkItems = workItems.filter((item) => item.queue === 'operations')
+  const openOperationsWorkItems = operationsWorkItems.filter((item) => !item.is_closed)
+  const unassignedWorkflowItems = openOperationsWorkItems.filter((item) => !item.owner?.trim()).length
+  const dueSoonWorkflowItems = openOperationsWorkItems.filter((item) => dueWithinDays(item.due_at, 2)).length
+  const blockedWorkflowItems = openOperationsWorkItems.filter(
+    (item) => item.is_overdue || item.status === 'DISPUTED',
   ).length
-  const overduePayments = openDeliveries.filter((delivery) => delivery.payment_status === 'OVERDUE').length
   const modeCoverage = ['LOGISTICS', 'NETWORK_FLOW', 'POWER_SCHEDULE']
     .map((modeFamily) => ({
       modeFamily,
       count: deliveries.filter((delivery) => delivery.mode_family === modeFamily).length,
     }))
     .filter((row) => row.count > 0)
-  const workflowQueue = [...openDeliveries]
-    .sort((left, right) => {
-      if (left.status !== right.status) {
-        return left.status.localeCompare(right.status)
-      }
-      return right.blocker_count - left.blocker_count
-    })
-    .slice(0, 8)
   const tradingSourceCounts = ['tier_0', 'tier_1', 'tier_2', 'tier_3']
     .map((criticality) => ({
       criticality,
@@ -80,27 +101,27 @@ export function OperationsWorkspace({
             span: 'full',
             availableSpans: ['full', 'wide'],
             content:
-              deliveries.length > 0 ? (
+              openDeliveries.length > 0 || openOperationsWorkItems.length > 0 ? (
                 <div className="dashboard-report-grid">
                   <article className="dashboard-report-card">
-                    <span>Open Deliveries</span>
-                    <strong>{formatNumber(openDeliveries.length, 0)}</strong>
-                    <p>Live physical obligations still moving through execution or post-trade workflow.</p>
+                    <span>Open Workflow</span>
+                    <strong>{formatNumber(openOperationsWorkItems.length, 0)}</strong>
+                    <p>Confirmation, nomination, and allocation tasks still open on the live book.</p>
+                  </article>
+                  <article className="dashboard-report-card">
+                    <span>Unassigned</span>
+                    <strong>{formatNumber(unassignedWorkflowItems, 0)}</strong>
+                    <p>Open post-trade tickets that still need a named owner.</p>
+                  </article>
+                  <article className="dashboard-report-card">
+                    <span>Due Next 48h</span>
+                    <strong>{formatNumber(dueSoonWorkflowItems, 0)}</strong>
+                    <p>Near-term operational handoffs likely to hit the desk this week.</p>
                   </article>
                   <article className="dashboard-report-card">
                     <span>Blocked Queue</span>
-                    <strong>{formatNumber(blockedDeliveries.length, 0)}</strong>
-                    <p>Rows currently held up by missing operational data or incomplete workflow steps.</p>
-                  </article>
-                  <article className="dashboard-report-card">
-                    <span>Confirmation Pending</span>
-                    <strong>{formatNumber(confirmationPending, 0)}</strong>
-                    <p>Open obligations still waiting on completed confirmation state.</p>
-                  </article>
-                  <article className="dashboard-report-card">
-                    <span>Settlement Attention</span>
-                    <strong>{formatNumber(invoicePending + overduePayments, 0)}</strong>
-                    <p>Invoice-pending plus overdue-payment rows visible from the live delivery set.</p>
+                    <strong>{formatNumber(Math.max(blockedDeliveries.length, blockedWorkflowItems), 0)}</strong>
+                    <p>Either the delivery projection or the workflow queue is currently carrying an execution blocker.</p>
                   </article>
                 </div>
               ) : (
@@ -113,52 +134,23 @@ export function OperationsWorkspace({
           {
             id: 'operations-queue',
             eyebrow: 'Critical Path',
-            title: workflowQueue.length > 0 ? 'Operational Work Queue' : 'No open work queue',
-            description: 'Blocked and in-flight delivery rows ordered to surface the most actionable operational tickets first.',
+            title: openOperationsWorkItems.length > 0 ? 'Operational Work Queue' : 'No open work queue',
+            description: 'Editable queue cards for confirmation, nomination, and allocation follow-up across the active physical book.',
             span: 'full',
             availableSpans: ['full', 'wide'],
-            content: workflowQueue.length > 0 ? (
-              <div className="position-list">
-                {workflowQueue.map((delivery) => (
-                  <article key={delivery.delivery_id} className="position-card shipment-card">
-                    <div className="shipment-card-head">
-                      <div className="shipment-card-copy">
-                        <strong>{delivery.trade_id}</strong>
-                        <span>
-                          {delivery.commodity} • {formatModeFamily(delivery.mode_family)} • {delivery.book}
-                        </span>
-                      </div>
-                      <span className={`status-pill status-pill-${delivery.status === 'BLOCKED' ? 'blocked' : 'active'}`}>
-                        {delivery.status.replaceAll('_', ' ')}
-                      </span>
-                    </div>
-                    <div className="shipment-card-meta">
-                      <span className="entity-chip entity-chip-soft">{formatCommodityClass(delivery.commodity_class)}</span>
-                      <span className="entity-chip entity-chip-soft">Confirmation {delivery.confirmation_status}</span>
-                      <span className="entity-chip entity-chip-soft">Nomination {delivery.nomination_status}</span>
-                      <span className="entity-chip entity-chip-soft">Invoice {delivery.invoice_status}</span>
-                      <span className="entity-chip entity-chip-soft">Payment {delivery.payment_status}</span>
-                    </div>
-                    {delivery.blockers.length > 0 ? (
-                      <ul className="shipment-blocker-list">
-                        {delivery.blockers.map((blocker) => (
-                          <li key={blocker}>{blocker}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="shipment-card-copy">
-                        <p>No explicit blockers are currently projected on this row.</p>
-                      </div>
-                    )}
-                    <div className="shipment-card-actions">
-                      <span>Updated {formatDate(delivery.last_updated_at)}</span>
-                      <button type="button" className="button button-ghost" onClick={() => onOpenTrade(delivery.trade_id)}>
-                        Open Trade
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
+            content: openOperationsWorkItems.length > 0 ? (
+              <WorkflowQueueEditor
+                key={openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
+                authSession={authSession}
+                items={openOperationsWorkItems}
+                savingItemId={workflowMutationPendingId}
+                saveError={workflowMutationError}
+                formatCommodityClass={formatCommodityClass}
+                formatDate={formatDate}
+                formatDateOnly={formatDateOnly}
+                onOpenTrade={onOpenTrade}
+                onSaveItem={onSaveWorkflowItem}
+              />
             ) : (
               <div className="empty-state">
                 <strong>No active delivery work</strong>

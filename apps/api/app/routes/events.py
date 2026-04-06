@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
 from apps.api.app.domains.reference_data.services.counterparty_standards import (
     counterparty_credit_status_allows_trading,
     normalize_counterparty_credit_status,
@@ -1048,6 +1049,12 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     legs_payload,
                     recorded_at,
                 )
+                synchronize_trade_workflow_items(
+                    db,
+                    existing,
+                    actor_id=e.actor_id or "system.event",
+                    now=recorded_at,
+                )
 
             elif e.event_type == "TradeAmended" and existing is not None:
                 existing.updated_at = recorded_at
@@ -1293,6 +1300,12 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                         legs_payload or [],
                         recorded_at,
                     )
+                synchronize_trade_workflow_items(
+                    db,
+                    existing,
+                    actor_id=e.actor_id or "system.event",
+                    now=recorded_at,
+                )
 
             elif e.event_type == "TradeCancelled" and existing is not None:
                 existing.updated_at = recorded_at

@@ -25,6 +25,7 @@ from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.trading_source import TradingSource
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
@@ -59,6 +60,7 @@ __all__ = [
     "ReferencePriceIndexSource",
     "ReferenceUnit",
     "Trade",
+    "TradeWorkflowItem",
     "TradingSource",
     "UserAccount",
     "UserSession",

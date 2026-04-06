@@ -13,6 +13,7 @@ from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMI
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import (
     import_counterparty_credit_snapshots,
+    preview_dnb_counterparty_credit_rows,
     sync_caiso_series,
     sync_cftc_series,
     sync_eia_fundamental_series,
@@ -29,6 +30,8 @@ from apps.api.app.models.external_series_observation import ExternalSeriesObserv
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.schemas.external_data import (
     CounterpartyCreditImportRequest,
+    CounterpartyCreditPreviewOut,
+    DNBCounterpartyCreditPreviewRequest,
     EIASyncRequest,
     ExternalDataProviderStatusOut,
     ExternalDataRunOut,
@@ -182,6 +185,20 @@ def trigger_counterparty_credit_import(
         requested_by=actor_id,
     )
     return _to_run_out(run)
+
+
+@admin_router.post("/dnb/counterparty-credit/preview", response_model=CounterpartyCreditPreviewOut)
+def preview_dnb_counterparty_credit(
+    payload: DNBCounterpartyCreditPreviewRequest,
+    db: Session = Depends(get_db),
+) -> CounterpartyCreditPreviewOut:
+    return CounterpartyCreditPreviewOut(
+        **preview_dnb_counterparty_credit_rows(
+            db,
+            rows=payload.rows,
+            default_limit_currency_code=payload.default_limit_currency_code,
+        )
+    )
 
 
 @admin_router.post(

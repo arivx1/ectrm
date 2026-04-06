@@ -8,6 +8,7 @@ import type {
   CounterpartyStandards,
   ExternalDataSyncStatusRecord,
   LocationStandards,
+  TradeWorkflowItemRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 
@@ -17,6 +18,7 @@ export type WorkspaceBootstrap = {
   events: unknown[]
   positions: unknown[]
   deliveries: unknown[]
+  workItems: TradeWorkflowItemRecord[]
   books: unknown[]
   commodities: unknown[]
   priceIndices: unknown[]
@@ -115,6 +117,7 @@ export async function loadWorkspaceBootstrap(
     events,
     positions,
     deliveries,
+    workItems,
     books,
     commodities,
     priceIndices,
@@ -123,9 +126,6 @@ export async function loadWorkspaceBootstrap(
     locations,
     locationStandards,
     counterparties,
-    counterpartyCreditProfiles,
-    counterpartyExternalCreditSnapshots,
-    counterpartyCreditReport,
     counterpartyStandards,
     portfolios,
   ] = await Promise.all([
@@ -134,6 +134,9 @@ export async function loadWorkspaceBootstrap(
     fetchJson<unknown[]>(`${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`),
     fetchJson<unknown[]>(`${apiBase}/positions`),
     fetchJson<unknown[]>(`${apiBase}/deliveries`),
+    fetchJson<TradeWorkflowItemRecord[]>(`${apiBase}/operations/work-items?include_closed=true`, {
+      cache: 'no-store',
+    }),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/commodities', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/price-indices', bootstrapQueryLimits.referenceData)}`),
@@ -142,18 +145,38 @@ export async function loadWorkspaceBootstrap(
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`),
     fetchJson<LocationStandards>(`${apiBase}/reference/locations/standards`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`),
-    fetchJson<CounterpartyCreditProfileRecord[]>(
-      `${apiBase}${withLimit('/reference/counterparties/credit-profiles', bootstrapQueryLimits.referenceData)}`,
-    ),
-    fetchJson<CounterpartyExternalCreditSnapshotRecord[]>(
-      `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', bootstrapQueryLimits.referenceData)}`,
-    ),
-    fetchJson<CounterpartyCreditReportRow[]>(`${apiBase}/reports/counterparty-credit`, {
-      cache: 'no-store',
-    }),
     fetchJson<CounterpartyStandards>(`${apiBase}/reference/counterparties/standards`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`),
   ])
+
+  let counterpartyCreditProfiles: CounterpartyCreditProfileRecord[] = []
+  let counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[] = []
+  let counterpartyCreditReport: CounterpartyCreditReportRow[] = []
+
+  const [counterpartyCreditProfilesResult, counterpartyExternalCreditSnapshotsResult, counterpartyCreditReportResult] =
+    await Promise.allSettled([
+      fetchJson<CounterpartyCreditProfileRecord[]>(
+        `${apiBase}${withLimit('/reference/counterparties/credit-profiles', bootstrapQueryLimits.referenceData)}`,
+      ),
+      fetchJson<CounterpartyExternalCreditSnapshotRecord[]>(
+        `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', bootstrapQueryLimits.referenceData)}`,
+      ),
+      fetchJson<CounterpartyCreditReportRow[]>(`${apiBase}/reports/counterparty-credit`, {
+        cache: 'no-store',
+      }),
+    ])
+
+  if (counterpartyCreditProfilesResult.status === 'fulfilled') {
+    counterpartyCreditProfiles = counterpartyCreditProfilesResult.value
+  }
+
+  if (counterpartyExternalCreditSnapshotsResult.status === 'fulfilled') {
+    counterpartyExternalCreditSnapshots = counterpartyExternalCreditSnapshotsResult.value
+  }
+
+  if (counterpartyCreditReportResult.status === 'fulfilled') {
+    counterpartyCreditReport = counterpartyCreditReportResult.value
+  }
 
   let externalDataRuns: unknown[] = []
   let externalDataSyncStatus: ExternalDataSyncStatusRecord | null = null
@@ -204,6 +227,7 @@ export async function loadWorkspaceBootstrap(
     events,
     positions,
     deliveries,
+    workItems,
     books,
     commodities,
     priceIndices,

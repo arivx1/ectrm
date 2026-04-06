@@ -60,6 +60,50 @@ class CounterpartyCreditImportRequest(BaseModel):
     requested_by: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
+class DNBCounterpartyCreditPreviewRequest(BaseModel):
+    rows: list[dict[str, Any]] = Field(min_length=1)
+    default_limit_currency_code: Optional[str] = Field(default="USD", min_length=1, max_length=20)
+
+
+class CounterpartyCreditPreviewIssueOut(BaseModel):
+    severity: str
+    code: str
+    message: str
+
+
+class CounterpartyCreditPreviewRowOut(BaseModel):
+    row_number: int
+    source_entity_id: Optional[str]
+    source_entity_name: Optional[str]
+    matched_counterparty_code: Optional[str]
+    matched_counterparty_name: Optional[str]
+    counterparty_is_active: Optional[bool]
+    match_status: str
+    match_basis: Optional[str]
+    matched_identifier_value: Optional[str]
+    rating_scale: Optional[str]
+    rating_value: Optional[str]
+    rating_outlook: Optional[str]
+    credit_score: Optional[float]
+    probability_of_default: Optional[float]
+    recommended_limit_currency_code: Optional[str]
+    recommended_limit_amount: Optional[float]
+    commentary: Optional[str]
+    issues: list[CounterpartyCreditPreviewIssueOut]
+    ready_to_import: bool
+    snapshot: Optional[CounterpartyCreditSnapshotImport]
+
+
+class CounterpartyCreditPreviewOut(BaseModel):
+    provider: str
+    total_rows: int
+    matched_rows: int
+    ready_rows: int
+    warning_rows: int
+    blocked_rows: int
+    rows: list[CounterpartyCreditPreviewRowOut]
+
+
 class ExternalSeriesDefinitionUpsertRequest(BaseModel):
     code: str = Field(min_length=1, max_length=80)
     provider: str = Field(min_length=1, max_length=50)

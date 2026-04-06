@@ -140,6 +140,35 @@ export type DeliveryRecord = {
 
 export type ShipmentRecord = DeliveryRecord
 
+export type TradeWorkflowItemRecord = {
+  item_id: number
+  trade_id: string
+  queue: 'operations' | 'settlement'
+  workflow_type: 'CONFIRMATION' | 'NOMINATION' | 'ALLOCATION' | 'INVOICE' | 'PAYMENT'
+  status: string
+  owner: string | null
+  due_at: string | null
+  notes: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  is_closed: boolean
+  is_overdue: boolean
+  age_days: number
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+}
+
 export type ReferenceRecord = {
   code: string
   name: string
@@ -262,6 +291,64 @@ export type CounterpartyExternalCreditSnapshotRecord = {
   created_at: string
   updated_at: string
   version: number
+}
+
+export type CounterpartyCreditSnapshotCandidate = {
+  counterparty_code: string
+  source_entity_id?: string | null
+  source_entity_name?: string | null
+  match_basis?: string | null
+  matched_identifier_value?: string | null
+  as_of_date: string
+  rating_scale?: string | null
+  rating_value?: string | null
+  rating_outlook?: string | null
+  credit_score?: number | null
+  probability_of_default?: number | null
+  recommended_limit_currency_code?: string | null
+  recommended_limit_amount?: number | null
+  commentary?: string | null
+  downloaded_at?: string | null
+  raw_payload?: Record<string, unknown> | null
+}
+
+export type CounterpartyCreditPreviewIssueRecord = {
+  severity: string
+  code: string
+  message: string
+}
+
+export type CounterpartyCreditPreviewRowRecord = {
+  row_number: number
+  source_entity_id?: string | null
+  source_entity_name?: string | null
+  matched_counterparty_code?: string | null
+  matched_counterparty_name?: string | null
+  counterparty_is_active?: boolean | null
+  match_status: string
+  match_basis?: string | null
+  matched_identifier_value?: string | null
+  rating_scale?: string | null
+  rating_value?: string | null
+  rating_outlook?: string | null
+  credit_score?: number | null
+  probability_of_default?: number | null
+  recommended_limit_currency_code?: string | null
+  recommended_limit_amount?: number | null
+  commentary?: string | null
+  issues: CounterpartyCreditPreviewIssueRecord[]
+  ready_to_import: boolean
+  snapshot?: CounterpartyCreditSnapshotCandidate | null
+}
+
+export type CounterpartyCreditPreviewRecord = {
+  provider: string
+  total_rows: number
+  matched_rows: number
+  ready_rows: number
+  warning_rows: number
+  blocked_rows: number
+  rows: CounterpartyCreditPreviewRowRecord[]
 }
 
 export type CounterpartyCreditReportRow = {

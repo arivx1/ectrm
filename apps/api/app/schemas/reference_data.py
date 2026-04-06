@@ -277,6 +277,14 @@ class CounterpartyExternalCreditSnapshotOut(BaseModel):
     version: int
 
 
+class CounterpartyExternalCreditPromotionRequest(BaseModel):
+    promote_rating: bool = True
+    promote_limit: bool = True
+    append_commentary_to_notes: bool = True
+    review_due_at: Optional[date] = None
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
 class PortfolioCreate(ReferenceDataCreate):
     book_code: str = Field(..., min_length=1, max_length=50)
     owner: Optional[str] = Field(None, min_length=1, max_length=120)

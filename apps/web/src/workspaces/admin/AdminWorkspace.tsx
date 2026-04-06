@@ -1,5 +1,10 @@
 import { useMemo, useState } from 'react'
-import type { ExternalDataSyncStatusRecord, WeatherSyncStatusRecord } from '../../shared/models'
+import type {
+  CounterpartyCreditPreviewRecord,
+  ExternalDataSyncStatusRecord,
+  WeatherSyncStatusRecord,
+} from '../../shared/models'
+import { formatDateOnly } from '../../shared/format'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
@@ -96,8 +101,11 @@ type AdminWorkspaceProps = {
   externalDataSyncingProvider: string | null
   externalDataError: string
   externalDataSuccess: string
-  counterpartyCreditImportProvider: string
   counterpartyCreditImportDraft: string
+  counterpartyCreditPreview: CounterpartyCreditPreviewRecord | null
+  counterpartyCreditPreviewing: boolean
+  counterpartyCreditPreviewError: string
+  counterpartyCreditPreviewSuccess: string
   counterpartyCreditImporting: boolean
   counterpartyCreditImportError: string
   counterpartyCreditImportSuccess: string
@@ -108,8 +116,8 @@ type AdminWorkspaceProps = {
   weatherSyncError: string
   weatherSyncSuccess: string
   onRunExternalDataSync: (provider: ExternalDataSyncProvider) => Promise<void>
-  onCounterpartyCreditImportProviderChange: (value: string) => void
   onCounterpartyCreditImportDraftChange: (value: string) => void
+  onPreviewCounterpartyCreditImport: () => Promise<void>
   onImportCounterpartyCreditSnapshots: () => Promise<void>
   onRunNwsWeatherSync: () => Promise<void>
   onSeedTradingSources: () => Promise<void>
@@ -344,8 +352,11 @@ export function AdminWorkspace({
   externalDataSyncingProvider,
   externalDataError,
   externalDataSuccess,
-  counterpartyCreditImportProvider,
   counterpartyCreditImportDraft,
+  counterpartyCreditPreview,
+  counterpartyCreditPreviewing,
+  counterpartyCreditPreviewError,
+  counterpartyCreditPreviewSuccess,
   counterpartyCreditImporting,
   counterpartyCreditImportError,
   counterpartyCreditImportSuccess,
@@ -356,8 +367,8 @@ export function AdminWorkspace({
   weatherSyncError,
   weatherSyncSuccess,
   onRunExternalDataSync,
-  onCounterpartyCreditImportProviderChange,
   onCounterpartyCreditImportDraftChange,
+  onPreviewCounterpartyCreditImport,
   onImportCounterpartyCreditSnapshots,
   onRunNwsWeatherSync,
   onSeedTradingSources,
@@ -564,6 +575,12 @@ export function AdminWorkspace({
     () => counterpartyCreditImportRuns[0] ?? null,
     [counterpartyCreditImportRuns],
   )
+  const readyCounterpartyCreditPreviewRows = useMemo(
+    () => counterpartyCreditPreview?.rows.filter((row) => row.ready_to_import) ?? [],
+    [counterpartyCreditPreview],
+  )
+  const previewBlockedRowCount = counterpartyCreditPreview?.blocked_rows ?? 0
+  const previewWarningRowCount = counterpartyCreditPreview?.warning_rows ?? 0
 
   const weatherLocations = weatherSyncStatus?.locations ?? []
   const latestNwsRun = weatherSyncStatus?.latest_run ?? null
@@ -894,20 +911,31 @@ export function AdminWorkspace({
           <div className="admin-sync-head">
             <div>
               <span className="eyebrow">Credit Operations</span>
-              <h3>Counterparty Credit Imports</h3>
+              <h3>D&amp;B Counterparty Credit Preview</h3>
             </div>
             <div className="admin-sync-head-actions">
               <button
                 type="button"
+                className="button button-secondary"
+                onClick={() => void onPreviewCounterpartyCreditImport()}
+                disabled={counterpartyCreditPreviewing || counterpartyCreditImporting}
+              >
+                {counterpartyCreditPreviewing ? 'Previewing D&B Rows...' : 'Preview D&B Rows'}
+              </button>
+              <button
+                type="button"
                 className="button button-primary"
                 onClick={() => void onImportCounterpartyCreditSnapshots()}
-                disabled={counterpartyCreditImporting}
+                disabled={counterpartyCreditImporting || readyCounterpartyCreditPreviewRows.length === 0}
               >
-                {counterpartyCreditImporting ? 'Importing Credit Snapshots...' : 'Import Credit Snapshots'}
+                {counterpartyCreditImporting ? 'Importing Ready Rows...' : 'Import Ready Rows'}
               </button>
             </div>
           </div>
-          <p>Paste a provider-tagged JSON snapshot batch from D&B, Creditsafe, S&P, Fitch, Moody’s, or an internal adapter and store it as an auditable external credit run.</p>
+          <p>
+            Paste a raw D&amp;B JSON array, preview how each row matches counterparties, then import only the rows that are ready.
+            The stored snapshots still land in the auditable external-credit run log after import.
+          </p>
 
           <div className="admin-sync-status-grid">
             <article className="admin-card">
@@ -942,50 +970,134 @@ export function AdminWorkspace({
                   : 'No providers imported yet'}
               </span>
             </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Preview Readiness"
+                tooltip="Current D&B preview status for the pasted JSON batch in this session."
+              />
+              <p>
+                {counterpartyCreditPreview
+                  ? `${readyCounterpartyCreditPreviewRows.length} ready, ${previewBlockedRowCount} blocked, ${previewWarningRowCount} with warnings.`
+                  : 'Preview a D&B batch to see row-level match and validation results.'}
+              </p>
+              <span>
+                {counterpartyCreditPreview
+                  ? `${counterpartyCreditPreview.matched_rows} matched of ${counterpartyCreditPreview.total_rows}`
+                  : 'Awaiting preview'}
+              </span>
+            </article>
           </div>
 
+          {counterpartyCreditPreviewError ? <div className="feedback-banner feedback-banner-error">{counterpartyCreditPreviewError}</div> : null}
+          {counterpartyCreditPreviewSuccess ? <div className="feedback-banner feedback-banner-success">{counterpartyCreditPreviewSuccess}</div> : null}
           {counterpartyCreditImportError ? <div className="feedback-banner feedback-banner-error">{counterpartyCreditImportError}</div> : null}
           {counterpartyCreditImportSuccess ? <div className="feedback-banner feedback-banner-success">{counterpartyCreditImportSuccess}</div> : null}
 
           <div className="stack-form">
-            <div className="mini-grid">
-              <label className="field">
-                <span>Provider</span>
-                <input
-                  className="control"
-                  value={counterpartyCreditImportProvider}
-                  onChange={(event) => onCounterpartyCreditImportProviderChange(event.target.value.toUpperCase())}
-                  disabled={counterpartyCreditImporting}
-                />
-              </label>
-            </div>
-
             <label className="field">
-              <span>Snapshots JSON Array</span>
+              <span>D&amp;B Rows JSON Array</span>
               <textarea
                 className="control control-textarea"
                 value={counterpartyCreditImportDraft}
                 onChange={(event) => onCounterpartyCreditImportDraftChange(event.target.value)}
-                disabled={counterpartyCreditImporting}
+                disabled={counterpartyCreditPreviewing || counterpartyCreditImporting}
                 placeholder={`[
   {
-    "counterparty_code": "ACME",
-    "source_entity_id": "123456789",
-    "match_basis": "DUNS",
-    "matched_identifier_value": "123456789",
-    "as_of_date": "2026-04-05",
-    "rating_value": "3A2",
-    "rating_outlook": "STABLE",
-    "credit_score": 81.5,
-    "probability_of_default": 0.0142,
-    "recommended_limit_currency_code": "USD",
-    "recommended_limit_amount": 2500000,
-    "commentary": "Imported from vendor file"
+    "duns": "123456789",
+    "organizationPrimaryName": "Acme Trading LLC",
+    "scoreDate": "2026-04-05",
+    "dnbRating": "4A1",
+    "ratingOutlook": "Stable",
+    "commercialCreditScore": { "rawScore": 74 },
+    "dnbCreditLimitRecommendation": {
+      "maximumRecommendedLimitAmount": 2000000
+    }
   }
 ]`}
               />
             </label>
           </div>
+
+          {counterpartyCreditPreview ? (
+            <div className="stack">
+              <div className="chip-row">
+                <span className="entity-chip entity-chip-soft">
+                  {counterpartyCreditPreview.total_rows} row{counterpartyCreditPreview.total_rows === 1 ? '' : 's'}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  {counterpartyCreditPreview.matched_rows} matched
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  {readyCounterpartyCreditPreviewRows.length} ready
+                </span>
+                <span className={`entity-chip ${previewWarningRowCount > 0 ? '' : 'entity-chip-soft'}`}>
+                  {previewWarningRowCount} warnings
+                </span>
+                <span className={`entity-chip ${previewBlockedRowCount > 0 ? '' : 'entity-chip-soft'}`}>
+                  {previewBlockedRowCount} blocked
+                </span>
+              </div>
+
+              <div className="admin-run-list">
+                {counterpartyCreditPreview.rows.map((row) => {
+                  const recommendedLimit =
+                    row.recommended_limit_amount != null
+                      ? `${row.recommended_limit_currency_code ?? '—'} ${formatNumber(row.recommended_limit_amount, 2)}`
+                      : '—'
+
+                  return (
+                    <article
+                      key={`${row.row_number}-${row.source_entity_id ?? row.source_entity_name ?? 'row'}`}
+                      className="admin-run-row"
+                    >
+                      <div>
+                        <strong>
+                          Row {row.row_number}
+                          {row.source_entity_name ? ` · ${row.source_entity_name}` : ''}
+                        </strong>
+                        <p>
+                          {row.match_status}
+                          {row.matched_counterparty_code ? ` · ${row.matched_counterparty_code}` : ''}
+                          {row.match_basis ? ` · ${row.match_basis}` : ''}
+                          {row.matched_identifier_value ? ` ${row.matched_identifier_value}` : ''}
+                        </p>
+                        <span>
+                          Rating {row.rating_value ?? '—'}
+                          {row.rating_outlook ? ` · ${row.rating_outlook}` : ''}
+                          {row.credit_score != null ? ` · Score ${formatNumber(row.credit_score, 2)}` : ''}
+                          {row.probability_of_default != null
+                            ? ` · PD ${formatNumber(row.probability_of_default * 100, 2)}%`
+                            : ''}
+                          {` · Limit ${recommendedLimit}`}
+                        </span>
+                        {row.commentary ? <p>{row.commentary}</p> : null}
+                        {row.issues.length > 0 ? (
+                          <div className="chip-row">
+                            {row.issues.map((issue) => (
+                              <span
+                                key={`${row.row_number}-${issue.code}-${issue.message}`}
+                                className={`entity-chip ${issue.severity === 'error' ? '' : 'entity-chip-soft'}`}
+                              >
+                                {issue.severity.toUpperCase()}: {issue.message}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="admin-run-meta">
+                        <span>{row.ready_to_import ? 'Ready to import' : 'Needs attention'}</span>
+                        <span>
+                          {row.snapshot?.as_of_date
+                            ? `As of ${formatDateOnly(row.snapshot.as_of_date)}`
+                            : 'Missing source date'}
+                        </span>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <div className="admin-run-list">
             {counterpartyCreditImportRuns.length === 0 ? (

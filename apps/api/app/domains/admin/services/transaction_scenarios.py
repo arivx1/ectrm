@@ -499,6 +499,518 @@ DISLOCATION_PRICE_TERM_ROWS = [
 ]
 
 
+MARKET_MIX_BOOK_ROWS = [
+    {
+        "code": "DEMO_CRUDE",
+        "name": "Crude Physical",
+        "description": "Physical crude capture book for prompt barrels and terminal transfers.",
+    },
+    {
+        "code": "DEMO_GAS",
+        "name": "Gas Optimization",
+        "description": "Gas optimization book for indexed supply and balancing transactions.",
+    },
+    {
+        "code": "DEMO_PRODUCTS",
+        "name": "Products Arbitrage",
+        "description": "Refined products book for crack, blend, and location-driven opportunities.",
+    },
+    {
+        "code": "DEMO_DISTILLATES",
+        "name": "Distillates Dislocation",
+        "description": "Prompt distillate and gasoline dislocation book for scenario testing.",
+    },
+    {
+        "code": "DEMO_POWER",
+        "name": "Power Basis",
+        "description": "Regional power and basis activity for prompt balancing and optionality.",
+    },
+]
+
+
+MARKET_MIX_TRADE_SPECS = [
+    {
+        "trade_id": "TRD-30001",
+        "occurred_at": "2026-02-12T08:00:00Z",
+        "recorded_at": "2026-02-12T08:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_CRUDE",
+        "commodity_class": "CRUDE_OIL",
+        "commodity": "WTI",
+        "pricing_type": "FIXED",
+        "price": "71.100000",
+        "volume": "85000.000000",
+    },
+    {
+        "trade_id": "TRD-30002",
+        "occurred_at": "2026-02-12T09:00:00Z",
+        "recorded_at": "2026-02-12T09:03:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "SELL",
+        "book": "DEMO_CRUDE",
+        "commodity_class": "CRUDE_OIL",
+        "commodity": "BRENT",
+        "pricing_type": "FIXED",
+        "price": "74.350000",
+        "volume": "60000.000000",
+    },
+    {
+        "trade_id": "TRD-30003",
+        "occurred_at": "2026-02-12T10:00:00Z",
+        "recorded_at": "2026-02-12T10:01:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_CRUDE",
+        "commodity_class": "CRUDE_OIL",
+        "commodity": "WTI",
+        "pricing_type": "INDEX",
+        "price_index_code": "WTI_CUSHING_D",
+        "price": None,
+        "volume": "120000.000000",
+    },
+    {
+        "trade_id": "TRD-30004",
+        "occurred_at": "2026-02-12T11:00:00Z",
+        "recorded_at": "2026-02-12T11:04:00Z",
+        "trade_nature": "FINANCIAL",
+        "trade_structure": "SWAP",
+        "trade_side": None,
+        "book": "DEMO_CRUDE",
+        "commodity_class": "CRUDE_OIL",
+        "commodity": "WTI",
+        "pricing_type": "HYBRID",
+        "price_index_code": "WTI_CUSHING_PHYS_D",
+        "price": "0.850000",
+        "volume": "50000.000000",
+        "legs": [
+            {
+                "leg_no": 1,
+                "side": "BUY",
+                "commodity_class": "CRUDE_OIL",
+                "commodity": "WTI",
+                "volume": "50000.000000",
+            },
+            {
+                "leg_no": 2,
+                "side": "SELL",
+                "commodity_class": "CRUDE_OIL",
+                "commodity": "BRENT",
+                "volume": "50000.000000",
+            },
+        ],
+    },
+    {
+        "trade_id": "TRD-30005",
+        "occurred_at": "2026-02-12T12:00:00Z",
+        "recorded_at": "2026-02-12T12:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_CRUDE",
+        "commodity_class": "CRUDE_OIL",
+        "commodity": "BRENT",
+        "pricing_type": "INDEX",
+        "price_index_code": "BRENT_SPOT_D",
+        "price": None,
+        "volume": "95000.000000",
+    },
+    {
+        "trade_id": "TRD-30006",
+        "occurred_at": "2026-02-12T13:00:00Z",
+        "recorded_at": "2026-02-12T13:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_GAS",
+        "commodity_class": "NATURAL_GAS",
+        "commodity": "NATURAL_GAS",
+        "pricing_type": "INDEX",
+        "price_index_code": "HENRY_HUB_GAS_D",
+        "price": None,
+        "volume": "250000.000000",
+    },
+    {
+        "trade_id": "TRD-30007",
+        "occurred_at": "2026-02-12T14:00:00Z",
+        "recorded_at": "2026-02-12T14:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "SELL",
+        "book": "DEMO_GAS",
+        "commodity_class": "NATURAL_GAS",
+        "commodity": "NATURAL_GAS",
+        "pricing_type": "FIXED",
+        "price": "2.950000",
+        "volume": "180000.000000",
+    },
+    {
+        "trade_id": "TRD-30008",
+        "occurred_at": "2026-02-12T15:00:00Z",
+        "recorded_at": "2026-02-12T15:03:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_GAS",
+        "commodity_class": "NATURAL_GAS",
+        "commodity": "LNG",
+        "pricing_type": "FIXED",
+        "price": "12.400000",
+        "volume": "90000.000000",
+    },
+    {
+        "trade_id": "TRD-30009",
+        "occurred_at": "2026-02-12T16:00:00Z",
+        "recorded_at": "2026-02-12T16:04:00Z",
+        "trade_nature": "FINANCIAL",
+        "trade_structure": "SWAP",
+        "trade_side": None,
+        "book": "DEMO_GAS",
+        "commodity_class": "NATURAL_GAS",
+        "commodity": "NATURAL_GAS",
+        "pricing_type": "HYBRID",
+        "price_index_code": "HENRY_HUB_GAS_D",
+        "price": "0.120000",
+        "volume": "150000.000000",
+        "legs": [
+            {
+                "leg_no": 1,
+                "side": "BUY",
+                "commodity_class": "NATURAL_GAS",
+                "commodity": "NATURAL_GAS",
+                "volume": "150000.000000",
+            },
+            {
+                "leg_no": 2,
+                "side": "SELL",
+                "commodity_class": "NATURAL_GAS",
+                "commodity": "LNG",
+                "volume": "150000.000000",
+            },
+        ],
+    },
+    {
+        "trade_id": "TRD-30010",
+        "occurred_at": "2026-02-12T17:00:00Z",
+        "recorded_at": "2026-02-12T17:01:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "SELL",
+        "book": "DEMO_GAS",
+        "commodity_class": "NATURAL_GAS",
+        "commodity": "NGL",
+        "pricing_type": "FIXED",
+        "price": "0.880000",
+        "volume": "70000.000000",
+    },
+    {
+        "trade_id": "TRD-30011",
+        "occurred_at": "2026-02-12T18:00:00Z",
+        "recorded_at": "2026-02-12T18:03:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_PRODUCTS",
+        "commodity_class": "REFINED_PRODUCTS",
+        "commodity": "DIESEL",
+        "pricing_type": "HYBRID",
+        "price_index_code": "USGC_DIESEL_SPOT_D",
+        "price": "2.110000",
+        "volume": "42000.000000",
+    },
+    {
+        "trade_id": "TRD-30012",
+        "occurred_at": "2026-02-12T19:00:00Z",
+        "recorded_at": "2026-02-12T19:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "SELL",
+        "book": "DEMO_PRODUCTS",
+        "commodity_class": "REFINED_PRODUCTS",
+        "commodity": "GASOLINE",
+        "pricing_type": "INDEX",
+        "price_index_code": "GASOLINE_US_REG_W",
+        "price": None,
+        "volume": "38000.000000",
+    },
+    {
+        "trade_id": "TRD-30013",
+        "occurred_at": "2026-02-12T20:00:00Z",
+        "recorded_at": "2026-02-12T20:01:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_PRODUCTS",
+        "commodity_class": "REFINED_PRODUCTS",
+        "commodity": "JET_FUEL",
+        "pricing_type": "FIXED",
+        "price": "2.540000",
+        "volume": "21000.000000",
+    },
+    {
+        "trade_id": "TRD-30014",
+        "occurred_at": "2026-02-12T21:00:00Z",
+        "recorded_at": "2026-02-12T21:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "SELL",
+        "book": "DEMO_DISTILLATES",
+        "commodity_class": "REFINED_PRODUCTS",
+        "commodity": "FUEL_OIL",
+        "pricing_type": "FIXED",
+        "price": "2.020000",
+        "volume": "30000.000000",
+    },
+    {
+        "trade_id": "TRD-30015",
+        "occurred_at": "2026-02-12T22:00:00Z",
+        "recorded_at": "2026-02-12T22:05:00Z",
+        "trade_nature": "FINANCIAL",
+        "trade_structure": "SWAP",
+        "trade_side": None,
+        "book": "DEMO_PRODUCTS",
+        "commodity_class": "REFINED_PRODUCTS",
+        "commodity": "GASOLINE",
+        "pricing_type": "HYBRID",
+        "price_index_code": "GASOLINE_US_REG_W",
+        "price": "0.090000",
+        "volume": "25000.000000",
+        "legs": [
+            {
+                "leg_no": 1,
+                "side": "BUY",
+                "commodity_class": "REFINED_PRODUCTS",
+                "commodity": "GASOLINE",
+                "volume": "25000.000000",
+            },
+            {
+                "leg_no": 2,
+                "side": "SELL",
+                "commodity_class": "REFINED_PRODUCTS",
+                "commodity": "DIESEL",
+                "volume": "25000.000000",
+            },
+        ],
+    },
+    {
+        "trade_id": "TRD-30016",
+        "occurred_at": "2026-02-13T08:00:00Z",
+        "recorded_at": "2026-02-13T08:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_POWER",
+        "commodity_class": "POWER",
+        "commodity": "POWER",
+        "pricing_type": "FIXED",
+        "price": "31.500000",
+        "volume": "1200.000000",
+    },
+    {
+        "trade_id": "TRD-30017",
+        "occurred_at": "2026-02-13T09:00:00Z",
+        "recorded_at": "2026-02-13T09:01:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "SELL",
+        "book": "DEMO_POWER",
+        "commodity_class": "POWER",
+        "commodity": "POWER",
+        "pricing_type": "FIXED",
+        "price": "42.750000",
+        "volume": "950.000000",
+    },
+    {
+        "trade_id": "TRD-30018",
+        "occurred_at": "2026-02-13T10:00:00Z",
+        "recorded_at": "2026-02-13T10:03:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_POWER",
+        "commodity_class": "POWER",
+        "commodity": "POWER",
+        "pricing_type": "INDEX",
+        "price_index_code": "PJM_WEST_ONPEAK_DA",
+        "price": None,
+        "volume": "1400.000000",
+    },
+    {
+        "trade_id": "TRD-30019",
+        "occurred_at": "2026-02-13T11:00:00Z",
+        "recorded_at": "2026-02-13T11:02:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "SELL",
+        "book": "DEMO_POWER",
+        "commodity_class": "POWER",
+        "commodity": "POWER",
+        "pricing_type": "FIXED",
+        "price": "37.200000",
+        "volume": "1100.000000",
+    },
+    {
+        "trade_id": "TRD-30020",
+        "occurred_at": "2026-02-13T12:00:00Z",
+        "recorded_at": "2026-02-13T12:01:00Z",
+        "trade_nature": "PHYSICAL",
+        "trade_structure": "SINGLE",
+        "trade_side": "BUY",
+        "book": "DEMO_DISTILLATES",
+        "commodity_class": "REFINED_PRODUCTS",
+        "commodity": "DIESEL",
+        "pricing_type": "INDEX",
+        "price_index_code": "DIESEL_US_RETAIL_W",
+        "price": None,
+        "volume": "26000.000000",
+    },
+]
+
+
+def _seed_uuid(value: int) -> str:
+    hex_value = f"{value:032x}"
+    return f"{hex_value[:8]}-{hex_value[8:12]}-{hex_value[12:16]}-{hex_value[16:20]}-{hex_value[20:]}"
+
+
+def _decimal_or_none(value: str | None) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(value)
+
+
+def _float_or_none(value: str | None) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _build_market_mix_rows() -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    event_rows: list[dict] = []
+    trade_rows: list[dict] = []
+    trade_leg_rows: list[dict] = []
+    trade_price_term_rows: list[dict] = []
+
+    for index, spec in enumerate(MARKET_MIX_TRADE_SPECS, start=1):
+        created_event_id = _seed_uuid(300000 + index)
+        correlation_id = _seed_uuid(400000 + index)
+        occurred_at = utc(spec["occurred_at"])
+        recorded_at = utc(spec["recorded_at"])
+        price = _decimal_or_none(spec["price"])
+        volume = _decimal_or_none(spec["volume"])
+        legs = spec.get("legs") or [
+            {
+                "leg_no": 1,
+                "side": spec["trade_side"],
+                "commodity_class": spec["commodity_class"],
+                "commodity": spec["commodity"],
+                "volume": spec["volume"],
+            }
+        ]
+
+        payload = {
+            "trade_nature": spec["trade_nature"],
+            "trade_structure": spec["trade_structure"],
+            "book": spec["book"],
+            "commodity_class": spec["commodity_class"],
+            "commodity": spec["commodity"],
+            "pricing_type": spec["pricing_type"],
+            "price": _float_or_none(spec["price"]),
+            "volume": _float_or_none(spec["volume"]),
+        }
+        if spec["trade_side"] is not None:
+            payload["trade_side"] = spec["trade_side"]
+        if spec.get("price_index_code") is not None:
+            payload["price_index_code"] = spec["price_index_code"]
+        if spec["trade_structure"] == "SWAP":
+            payload["legs"] = [
+                {
+                    "leg_no": leg["leg_no"],
+                    "side": leg["side"],
+                    "commodity_class": leg["commodity_class"],
+                    "commodity": leg["commodity"],
+                    "volume": _float_or_none(leg["volume"]),
+                }
+                for leg in legs
+            ]
+
+        event_rows.append(
+            {
+                "event_id": created_event_id,
+                "aggregate_type": "trade",
+                "aggregate_id": spec["trade_id"],
+                "event_type": "TradeCreated",
+                "occurred_at": occurred_at,
+                "recorded_at": recorded_at,
+                "actor_id": "system-scenario",
+                "correlation_id": correlation_id,
+                "causation_id": None,
+                "schema_version": 1,
+                "payload": payload,
+            }
+        )
+
+        trade_rows.append(
+            {
+                "trade_id": spec["trade_id"],
+                "created_at": recorded_at,
+                "updated_at": recorded_at,
+                "trade_nature": spec["trade_nature"],
+                "trade_structure": spec["trade_structure"],
+                "trade_side": spec["trade_side"],
+                "book": spec["book"],
+                "commodity_class": spec["commodity_class"],
+                "commodity": spec["commodity"],
+                "pricing_type": spec["pricing_type"],
+                "price_index_code": spec.get("price_index_code"),
+                "price": price,
+                "volume": volume,
+                "status": "ACTIVE",
+                "last_event_id": created_event_id,
+            }
+        )
+
+        for leg in legs:
+            trade_leg_rows.append(
+                {
+                    "trade_leg_id": _seed_uuid(500000 + (index * 10) + leg["leg_no"]),
+                    "trade_id": spec["trade_id"],
+                    "leg_no": leg["leg_no"],
+                    "side": leg["side"],
+                    "commodity_class": leg["commodity_class"],
+                    "commodity_code": leg["commodity"],
+                    "quantity": _decimal_or_none(leg["volume"]),
+                    "created_at": recorded_at,
+                    "updated_at": recorded_at,
+                }
+            )
+
+        trade_price_term_rows.append(
+            {
+                "trade_price_term_id": _seed_uuid(600000 + index),
+                "trade_id": spec["trade_id"],
+                "term_no": 1,
+                "pricing_type": spec["pricing_type"],
+                "fixed_price": price,
+                "price_index_code": spec.get("price_index_code"),
+                "created_at": recorded_at,
+                "updated_at": recorded_at,
+            }
+        )
+
+    return event_rows, trade_rows, trade_leg_rows, trade_price_term_rows
+
+
+(
+    MARKET_MIX_EVENT_ROWS,
+    MARKET_MIX_TRADE_ROWS,
+    MARKET_MIX_TRADE_LEG_ROWS,
+    MARKET_MIX_PRICE_TERM_ROWS,
+) = _build_market_mix_rows()
+
+
 SCENARIOS = {
     "core_demo": ScenarioDefinition(
         code="core_demo",
@@ -519,6 +1031,16 @@ SCENARIOS = {
         trade_rows=DISLOCATION_TRADE_ROWS,
         trade_leg_rows=DISLOCATION_TRADE_LEG_ROWS,
         trade_price_term_rows=DISLOCATION_PRICE_TERM_ROWS,
+    ),
+    "market_mix_expansion": ScenarioDefinition(
+        code="market_mix_expansion",
+        name="Market Mix Expansion",
+        description="Twenty additional crude, gas, products, distillates, and power trades for richer demos.",
+        book_rows=MARKET_MIX_BOOK_ROWS,
+        event_rows=MARKET_MIX_EVENT_ROWS,
+        trade_rows=MARKET_MIX_TRADE_ROWS,
+        trade_leg_rows=MARKET_MIX_TRADE_LEG_ROWS,
+        trade_price_term_rows=MARKET_MIX_PRICE_TERM_ROWS,
     ),
 }
 

@@ -5,6 +5,9 @@ from apps.api.app.domains.reference_data.services.external_data.cftc_sync import
 from apps.api.app.domains.reference_data.services.external_data.counterparty_credit_import import (
     import_counterparty_credit_snapshots,
 )
+from apps.api.app.domains.reference_data.services.external_data.dnb_counterparty_credit import (
+    preview_dnb_counterparty_credit_rows,
+)
 from apps.api.app.domains.reference_data.services.external_data.eia_fundamentals_sync import (
     sync_eia_fundamental_series,
 )
@@ -17,6 +20,7 @@ __all__ = [
     "sync_caiso_series",
     "sync_cftc_series",
     "import_counterparty_credit_snapshots",
+    "preview_dnb_counterparty_credit_rows",
     "sync_eia_fundamental_series",
     "sync_eia_series",
     "sync_ercot_series",
