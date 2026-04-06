@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { MarketContextTileContent } from './MarketContextPanel'
 import { MarketPricesTileContent } from './MarketPricesPanel'
 
 type EventRow = {
@@ -277,6 +278,21 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                 </p>
               </article>
             </div>
+          ),
+        },
+        {
+          id: 'market-context',
+          eyebrow: 'Signals',
+          title: 'Market Context',
+          description: 'Desk-facing price, fundamental, macro, positioning, and provider-health context in one place.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <MarketContextTileContent
+              appLoading={appLoading}
+              formatDate={formatDate}
+              formatNumber={formatNumber}
+            />
           ),
         },
         {

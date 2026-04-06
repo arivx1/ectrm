@@ -66,6 +66,7 @@ type TradingSourceRecord = {
 }
 
 type ExternalDataProviderStatusRecord = ExternalDataSyncStatusRecord['providers'][number]
+type ExternalDataSyncProvider = 'EIA' | 'EIA_FUNDAMENTALS' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT' | 'KALSHI'
 
 type SchemaEntityKey =
   | 'events'
@@ -101,7 +102,7 @@ type AdminWorkspaceProps = {
   weatherSyncing: boolean
   weatherSyncError: string
   weatherSyncSuccess: string
-  onRunExternalDataSync: (provider: 'EIA' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT') => Promise<void>
+  onRunExternalDataSync: (provider: ExternalDataSyncProvider) => Promise<void>
   onRunNwsWeatherSync: () => Promise<void>
   onSeedTradingSources: () => Promise<void>
   onRefreshData: () => Promise<void>
@@ -304,6 +305,8 @@ function marketDataCategoryLabel(value: string): string {
       return 'Prices'
     case 'power':
       return 'Power'
+    case 'fundamentals':
+      return 'Fundamentals'
     case 'macro':
       return 'Macro'
     case 'positioning':
@@ -826,7 +829,7 @@ export function AdminWorkspace({
                     <button
                       type="button"
                       className="button button-secondary"
-                      onClick={() => void onRunExternalDataSync(provider.provider as 'EIA' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT')}
+                      onClick={() => void onRunExternalDataSync(provider.provider as ExternalDataSyncProvider)}
                       disabled={externalDataSyncing}
                     >
                       {externalDataSyncingProvider === provider.provider ? 'Running Sync...' : `Run ${provider.provider}`}

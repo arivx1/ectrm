@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     EIA_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
     EIA_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
     EIA_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
+    EIA_FUNDAMENTALS_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=5, le=10080)
+    EIA_FUNDAMENTALS_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=120, ge=1, le=3650)
+    EIA_FUNDAMENTALS_SYNC_SUCCESS_SLA_HOURS: int = Field(default=240, ge=1, le=336)
     FRED_API_KEY: str = ""
     FRED_BASE_URL: str = "https://api.stlouisfed.org/fred"
     FRED_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

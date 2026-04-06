@@ -710,6 +710,7 @@
 .admin-explainability-grid,
 .admin-summary-grid,
 .dashboard-report-grid,
+.market-context-section-grid,
 .market-price-grid,
 .roadmap-admin-meta-grid,
 .roadmap-admin-phase-grid,
@@ -739,8 +740,90 @@
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
 }
 
+.market-context-section-grid {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
 .market-price-grid {
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.market-context-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.market-context-section,
+.market-context-freshness-card {
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 250, 0.9));
+  padding: 1rem;
+}
+
+.market-context-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.market-context-section-head {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.market-context-section-head strong,
+.market-context-row-copy strong,
+.market-context-row-meta strong,
+.market-context-freshness-head strong {
+  color: #13293d;
+}
+
+.market-context-section-head p,
+.market-context-row-copy p,
+.market-context-row-meta span,
+.market-context-freshness-card p {
+  margin: 0;
+  color: #66717c;
+}
+
+.market-context-list,
+.market-context-freshness {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.market-context-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.market-context-row-copy,
+.market-context-row-meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.market-context-row-meta {
+  justify-items: end;
+  text-align: right;
+}
+
+.market-context-freshness {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.market-context-freshness-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
 }
 
 .roadmap-admin-meta-grid {

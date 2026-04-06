@@ -38,6 +38,12 @@ def build_market_context(
         "generated_at": datetime.now(timezone.utc),
         "commodity": normalized_commodity,
         "price_indices": _load_price_index_context(db, commodity=normalized_commodity, limit=normalized_limit),
+        "fundamentals": _load_external_series_context(
+            db,
+            category="fundamentals",
+            commodity=normalized_commodity,
+            limit=normalized_limit,
+        ),
         "power": _load_external_series_context(db, category="power", limit=normalized_limit),
         "macro": _load_external_series_context(db, category="macro", limit=normalized_limit),
         "positioning": _load_external_series_context(
@@ -191,7 +197,7 @@ def _load_external_series_context(
         .order_by(ExternalSeriesDefinition.code.asc())
     ).scalars().all()
 
-    if commodity and category == "positioning":
+    if commodity and category in {"fundamentals", "positioning"}:
         terms = _commodity_terms(commodity)
         definitions = [definition for definition in definitions if _matches_terms(definition, terms)]
 

@@ -15,6 +15,7 @@ from apps.api.app.db.engine import SessionLocal
 from apps.api.app.domains.reference_data.services.external_data import (
     sync_caiso_series,
     sync_cftc_series,
+    sync_eia_fundamental_series,
     sync_fred_series,
     sync_kalshi_series,
     sync_ercot_series,
@@ -23,7 +24,12 @@ from apps.api.app.domains.reference_data.services.external_data import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync generic external time-series datasets into local storage.")
-    parser.add_argument("--provider", dest="provider", choices=("fred", "cftc", "caiso", "ercot", "kalshi"), required=True)
+    parser.add_argument(
+        "--provider",
+        dest="provider",
+        choices=("fred", "cftc", "caiso", "ercot", "kalshi", "eia-fundamentals"),
+        required=True,
+    )
     parser.add_argument("--series-code", dest="series_code")
     parser.add_argument("--lookback-days", dest="lookback_days", type=int)
     parser.add_argument("--requested-by", dest="requested_by")
@@ -33,6 +39,13 @@ def main() -> int:
     try:
         if args.provider == "fred":
             run = sync_fred_series(
+                db,
+                series_code=args.series_code,
+                lookback_days=args.lookback_days,
+                requested_by=args.requested_by,
+            )
+        elif args.provider == "eia-fundamentals":
+            run = sync_eia_fundamental_series(
                 db,
                 series_code=args.series_code,
                 lookback_days=args.lookback_days,

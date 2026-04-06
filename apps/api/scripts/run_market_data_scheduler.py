@@ -18,6 +18,7 @@ from apps.api.app.db.engine import SessionLocal
 from apps.api.app.domains.reference_data.services.external_data import (
     sync_caiso_series,
     sync_cftc_series,
+    sync_eia_fundamental_series,
     sync_eia_series,
     sync_ercot_series,
     sync_fred_series,
@@ -25,7 +26,7 @@ from apps.api.app.domains.reference_data.services.external_data import (
 )
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 
-DEFAULT_PROVIDERS = ("EIA", "FRED", "CFTC", "CAISO", "ERCOT", "KALSHI")
+DEFAULT_PROVIDERS = ("EIA", "EIA_FUNDAMENTALS", "FRED", "CFTC", "CAISO", "ERCOT", "KALSHI")
 
 
 def main() -> int:
@@ -34,14 +35,14 @@ def main() -> int:
         "--provider",
         dest="providers",
         action="append",
-        choices=("eia", "fred", "cftc", "caiso", "ercot", "kalshi"),
+        choices=("eia", "eia-fundamentals", "fred", "cftc", "caiso", "ercot", "kalshi"),
     )
     parser.add_argument("--poll-seconds", dest="poll_seconds", type=int, default=60)
     parser.add_argument("--requested-by", dest="requested_by", default="scheduler")
     parser.add_argument("--max-cycles", dest="max_cycles", type=int)
     args = parser.parse_args()
 
-    providers = tuple(provider.strip().upper() for provider in (args.providers or DEFAULT_PROVIDERS))
+    providers = tuple(provider.strip().replace("-", "_").upper() for provider in (args.providers or DEFAULT_PROVIDERS))
     cycle_count = 0
     had_failure = False
 
@@ -88,6 +89,12 @@ def _sync_provider(*, provider: str, requested_by: str, db):
         return sync_eia_series(
             db,
             lookback_days=settings.EIA_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if provider == "EIA_FUNDAMENTALS":
+        return sync_eia_fundamental_series(
+            db,
+            lookback_days=settings.EIA_FUNDAMENTALS_SYNC_DEFAULT_LOOKBACK_DAYS,
             requested_by=requested_by,
         )
     if provider == "FRED":

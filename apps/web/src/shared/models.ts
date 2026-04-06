@@ -227,6 +227,57 @@ export type PriceIndexObservationRecord = {
   updated_at: string
 }
 
+export type MarketContextPriceRecord = {
+  price_index_code: string
+  name: string
+  commodity_code: string
+  market: string | null
+  location_code: string | null
+  observation_date: string
+  value: number
+  unit_code: string
+  currency_code: string | null
+  source_provider: string
+  source_series_id: string
+  downloaded_at: string
+}
+
+export type MarketContextSeriesRecord = {
+  series_code: string
+  name: string
+  category: string
+  observation_date: string
+  value: number
+  unit_code: string
+  source_provider: string
+  source_series_id: string
+  downloaded_at: string
+}
+
+export type MarketContextFreshnessRecord = {
+  provider: string
+  label: string
+  category: string
+  health_status: string
+  latest_run_status: string
+  due_for_sync: boolean
+  last_success_at: string | null
+  latest_observation_at: string | null
+  observation_age_hours: number | null
+  error_summary: string | null
+}
+
+export type MarketContextRecord = {
+  generated_at: string
+  commodity: string | null
+  price_indices: MarketContextPriceRecord[]
+  fundamentals: MarketContextSeriesRecord[]
+  power: MarketContextSeriesRecord[]
+  macro: MarketContextSeriesRecord[]
+  positioning: MarketContextSeriesRecord[]
+  freshness: MarketContextFreshnessRecord[]
+}
+
 export type WeatherSyncLocationStatusRecord = {
   code: string
   name: string

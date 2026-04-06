@@ -473,12 +473,13 @@ def seed_reference_master_data(
     replace_existing: bool = True,
 ) -> ReferenceSeedSummary:
     now = datetime.now(timezone.utc)
+    ordered_location_rows = _order_location_rows(LOCATION_ROWS)
     entity_counts = {
         "books": _seed_reference_table(db, ReferenceBook, BOOK_ROWS, "code", requested_by, now, replace_existing),
         "commodities": _seed_reference_table(db, ReferenceCommodity, COMMODITY_ROWS, "code", requested_by, now, replace_existing),
         "currencies": _seed_reference_table(db, ReferenceCurrency, CURRENCY_ROWS, "code", requested_by, now, replace_existing),
         "units": _seed_reference_table(db, ReferenceUnit, UNIT_ROWS, "code", requested_by, now, replace_existing),
-        "locations": _seed_reference_table(db, ReferenceLocation, LOCATION_ROWS, "code", requested_by, now, replace_existing),
+        "locations": _seed_reference_table(db, ReferenceLocation, ordered_location_rows, "code", requested_by, now, replace_existing),
         "counterparties": _seed_reference_table(db, ReferenceCounterparty, COUNTERPARTY_ROWS, "code", requested_by, now, replace_existing),
         "portfolios": _seed_reference_table(db, ReferencePortfolio, PORTFOLIO_ROWS, "code", requested_by, now, replace_existing),
         "price_indices": _seed_reference_table(db, ReferencePriceIndex, PRICE_INDEX_ROWS, "code", requested_by, now, replace_existing),
@@ -490,6 +491,33 @@ def seed_reference_master_data(
         total_records=sum(entity_counts.values()),
         replace_existing=replace_existing,
     )
+
+
+def _order_location_rows(rows: list[dict]) -> list[dict]:
+    rows_by_code = {row["code"]: row for row in rows}
+    ordered_rows: list[dict] = []
+    visited: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(code: str) -> None:
+        if code in visited:
+            return
+        if code in visiting:
+            raise ValueError(f"Location seed hierarchy contains a cycle at '{code}'")
+
+        row = rows_by_code[code]
+        visiting.add(code)
+        parent_code = row.get("parent_location_code")
+        if parent_code and parent_code in rows_by_code:
+            visit(parent_code)
+        visiting.remove(code)
+        visited.add(code)
+        ordered_rows.append(row)
+
+    for row in rows:
+        visit(row["code"])
+
+    return ordered_rows
 
 
 def _seed_reference_table(

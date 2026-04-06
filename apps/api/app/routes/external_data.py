@@ -14,6 +14,7 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import (
     sync_caiso_series,
     sync_cftc_series,
+    sync_eia_fundamental_series,
     sync_eia_series,
     sync_ercot_series,
     sync_fred_series,
@@ -95,6 +96,21 @@ def trigger_eia_sync(payload: EIASyncRequest, db: Session = Depends(get_db)) -> 
 def trigger_fred_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
     actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
     run = sync_fred_series(
+        db,
+        series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/eia-fundamentals/sync", response_model=ExternalDataRunOut)
+def trigger_eia_fundamentals_sync(
+    payload: ExternalSeriesSyncRequest,
+    db: Session = Depends(get_db),
+) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_eia_fundamental_series(
         db,
         series_code=payload.series_code,
         lookback_days=payload.lookback_days,

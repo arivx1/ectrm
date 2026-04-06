@@ -163,6 +163,7 @@ class MarketContextOut(BaseModel):
     generated_at: datetime
     commodity: Optional[str]
     price_indices: list[MarketContextPriceOut]
+    fundamentals: list[MarketContextSeriesOut]
     power: list[MarketContextSeriesOut]
     macro: list[MarketContextSeriesOut]
     positioning: list[MarketContextSeriesOut]

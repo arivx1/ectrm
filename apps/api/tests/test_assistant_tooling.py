@@ -164,6 +164,26 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.add_all(
                 [
                     ExternalSeriesDefinition(
+                        code="EIA_CRUDE_PROD_US_M",
+                        provider="EIA_FUNDAMENTALS",
+                        dataset_code="PET",
+                        series_id="PET.MCRFPUS2.M",
+                        name="U.S. Crude Oil Field Production",
+                        category="fundamentals",
+                        frequency="monthly",
+                        unit_code="KBBL_D",
+                        source_url="https://www.eia.gov/dnav/pet/pet_crd_crpdn_adc_mbblpd_m.htm",
+                        description="Fundamentals test series",
+                        query_params=None,
+                        transform_rule="field:value",
+                        is_active=True,
+                        created_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
                         code="FRED_DGS10",
                         provider="FRED",
                         dataset_code=None,
@@ -225,6 +245,23 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                     ),
                     ExternalSeriesObservation(
                         id=1,
+                        series_code="EIA_CRUDE_PROD_US_M",
+                        observation_date=datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc).date(),
+                        value=13246,
+                        unit_code="KBBL_D",
+                        source_provider="EIA_FUNDAMENTALS",
+                        source_series_id="PET.MCRFPUS2.M",
+                        source_frequency="MONTHLY",
+                        source_published_at=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+                        source_revision="2026-03-01T12:00:00Z",
+                        downloaded_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload={"period": "2026-02", "value": "13246"},
+                        created_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
+                    ),
+                    ExternalSeriesObservation(
+                        id=2,
                         series_code="FRED_DGS10",
                         observation_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
                         value=4.2,
@@ -241,7 +278,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                         updated_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
                     ),
                     ExternalSeriesObservation(
-                        id=2,
+                        id=3,
                         series_code="CFTC_WTI_MM_NET",
                         observation_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
                         value=73347,
@@ -258,7 +295,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                         updated_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
                     ),
                     ExternalSeriesObservation(
-                        id=3,
+                        id=4,
                         series_code="CAISO_NP15_RT5M",
                         observation_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
                         value=29.4,
@@ -307,6 +344,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trace.tool_name, "get_market_context")
         self.assertEqual(result.output["commodity"], "WTI")
         self.assertEqual(result.output["price_indices"][0]["price_index_code"], "WTI_CUSHING_D")
+        self.assertEqual(result.output["fundamentals"][0]["series_code"], "EIA_CRUDE_PROD_US_M")
         self.assertEqual(result.output["power"][0]["series_code"], "CAISO_NP15_RT5M")
         self.assertEqual(result.output["macro"][0]["series_code"], "FRED_DGS10")
         self.assertEqual(result.output["positioning"][0]["series_code"], "CFTC_WTI_MM_NET")

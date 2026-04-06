@@ -117,6 +117,15 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "scheduler_interval_minutes": settings.EIA_SYNC_INTERVAL_MINUTES,
         },
         {
+            "provider": "EIA_FUNDAMENTALS",
+            "label": "EIA Fundamentals Sync",
+            "category": "fundamentals",
+            "observation_kind": "series",
+            "series_kind": "series",
+            "success_sla_hours": settings.EIA_FUNDAMENTALS_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.EIA_FUNDAMENTALS_SYNC_INTERVAL_MINUTES,
+        },
+        {
             "provider": "FRED",
             "label": "FRED Macro Sync",
             "category": "macro",

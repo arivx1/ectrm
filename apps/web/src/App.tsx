@@ -17,7 +17,7 @@ import { loadWorkspaceBootstrap } from './entities/app/api'
 import { loadCurrentSession, sendSessionHeartbeat } from './entities/auth/api'
 import { submitTradeEvent } from './entities/trade/api'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
-import { fetchJson, postJson } from './shared/api'
+import { ApiError, fetchJson, postJson } from './shared/api'
 import { appConfig, bootstrapQueryLimits } from './shared/config'
 import {
   buildMutationHeaders,
@@ -339,9 +339,14 @@ export default function App() {
       try {
         const session = await refreshAuthSession()
         await loadDataRef.current(session)
-      } catch {
+      } catch (error) {
         setReferenceDataLoading(false)
         setAppLoading(false)
+        if (error instanceof ApiError) {
+          setError(error.message)
+          return
+        }
+
         setError(`Could not reach API. Make sure backend is running on ${appConfig.apiDisplayHost} and CORS is enabled.`)
       }
     }
@@ -872,7 +877,9 @@ export default function App() {
     return rows
   }
 
-  async function handleRunExternalDataSync(provider: 'EIA' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT') {
+  async function handleRunExternalDataSync(
+    provider: 'EIA' | 'EIA_FUNDAMENTALS' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT' | 'KALSHI',
+  ) {
     setExternalDataSyncing(true)
     setExternalDataSyncingProvider(provider)
     setExternalDataError('')
@@ -881,10 +888,12 @@ export default function App() {
       const { actorId } = getMutationContext()
       const routeByProvider: Record<typeof provider, string> = {
         EIA: 'eia',
+        EIA_FUNDAMENTALS: 'eia-fundamentals',
         FRED: 'fred',
         CFTC: 'cftc',
         CAISO: 'caiso',
         ERCOT: 'ercot',
+        KALSHI: 'kalshi',
       }
       const response = await fetch(`${appConfig.apiBase}/admin/external-data/${routeByProvider[provider]}/sync`, {
         method: 'POST',

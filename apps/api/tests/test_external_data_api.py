@@ -30,6 +30,7 @@ from apps.api.app.routes.external_data import (
     trigger_caiso_sync,
     trigger_kalshi_sync,
     trigger_cftc_sync,
+    trigger_eia_fundamentals_sync,
     trigger_eia_sync,
     trigger_ercot_sync,
     trigger_fred_sync,
@@ -155,6 +156,46 @@ class ExternalDataApiTests(unittest.TestCase):
                         updated_at=datetime(2026, 3, 10, 18, 0, tzinfo=timezone.utc),
                     ),
                     ExternalSeriesDefinition(
+                        code="EIA_CRUDE_PROD_US_M",
+                        provider="EIA_FUNDAMENTALS",
+                        dataset_code="PET",
+                        series_id="PET.MCRFPUS2.M",
+                        name="U.S. Crude Oil Field Production",
+                        category="fundamentals",
+                        frequency="monthly",
+                        unit_code="KBBL_D",
+                        source_url="https://www.eia.gov/dnav/pet/pet_crd_crpdn_adc_mbblpd_m.htm",
+                        description="Test crude production series",
+                        query_params=None,
+                        transform_rule="field:value",
+                        is_active=True,
+                        created_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
+                        code="EIA_NG_STORAGE_LOWER48_W",
+                        provider="EIA_FUNDAMENTALS",
+                        dataset_code="NG",
+                        series_id="NG.NW2_EPG0_SWO_R48_BCF.W",
+                        name="Lower 48 Working Gas in Storage",
+                        category="fundamentals",
+                        frequency="weekly",
+                        unit_code="BCF",
+                        source_url="https://www.eia.gov/dnav/ng/ng_stor_wkly_s1_w.htm",
+                        description="Test natural gas storage series",
+                        query_params=None,
+                        transform_rule="field:value",
+                        is_active=True,
+                        created_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
                         code="FRED_DGS10",
                         provider="FRED",
                         dataset_code=None,
@@ -216,6 +257,40 @@ class ExternalDataApiTests(unittest.TestCase):
                     ),
                     ExternalSeriesObservation(
                         id=1,
+                        series_code="EIA_CRUDE_PROD_US_M",
+                        observation_date=date(2026, 2, 1),
+                        value=Decimal("13246.000000"),
+                        unit_code="KBBL_D",
+                        source_provider="EIA_FUNDAMENTALS",
+                        source_series_id="PET.MCRFPUS2.M",
+                        source_frequency="MONTHLY",
+                        source_published_at=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+                        source_revision="2026-03-01T12:00:00Z",
+                        downloaded_at=datetime(2026, 3, 1, 12, 5, tzinfo=timezone.utc),
+                        run_id=2,
+                        raw_payload={"period": "2026-02", "value": "13246"},
+                        created_at=datetime(2026, 3, 1, 12, 5, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 1, 12, 5, tzinfo=timezone.utc),
+                    ),
+                    ExternalSeriesObservation(
+                        id=2,
+                        series_code="EIA_NG_STORAGE_LOWER48_W",
+                        observation_date=date(2026, 4, 3),
+                        value=Decimal("1865.000000"),
+                        unit_code="BCF",
+                        source_provider="EIA_FUNDAMENTALS",
+                        source_series_id="NG.NW2_EPG0_SWO_R48_BCF.W",
+                        source_frequency="WEEKLY",
+                        source_published_at=datetime(2026, 4, 3, 14, 30, tzinfo=timezone.utc),
+                        source_revision="2026-04-03T14:30:00Z",
+                        downloaded_at=datetime(2026, 4, 3, 14, 35, tzinfo=timezone.utc),
+                        run_id=2,
+                        raw_payload={"period": "2026-04-03", "value": "1865"},
+                        created_at=datetime(2026, 4, 3, 14, 35, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 4, 3, 14, 35, tzinfo=timezone.utc),
+                    ),
+                    ExternalSeriesObservation(
+                        id=3,
                         series_code="FRED_DGS10",
                         observation_date=date(2026, 3, 10),
                         value=Decimal("4.280000"),
@@ -232,7 +307,7 @@ class ExternalDataApiTests(unittest.TestCase):
                         updated_at=datetime(2026, 3, 10, 18, 0, tzinfo=timezone.utc),
                     ),
                     ExternalSeriesObservation(
-                        id=2,
+                        id=4,
                         series_code="CFTC_WTI_MM_NET",
                         observation_date=date(2026, 3, 31),
                         value=Decimal("73347.000000"),
@@ -249,7 +324,7 @@ class ExternalDataApiTests(unittest.TestCase):
                         updated_at=datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc),
                     ),
                     ExternalSeriesObservation(
-                        id=3,
+                        id=5,
                         series_code="CAISO_NP15_RT5M",
                         observation_date=date(2026, 4, 5),
                         value=Decimal("28.450000"),
@@ -335,13 +410,15 @@ class ExternalDataApiTests(unittest.TestCase):
 
         self.assertEqual(len(payload.price_indices), 1)
         self.assertEqual(payload.price_indices[0].price_index_code, "WTI_CUSHING_D")
+        self.assertEqual(len(payload.fundamentals), 2)
+        self.assertEqual(payload.fundamentals[0].series_code, "EIA_CRUDE_PROD_US_M")
         self.assertEqual(len(payload.power), 1)
         self.assertEqual(payload.power[0].series_code, "CAISO_NP15_RT5M")
         self.assertEqual(len(payload.macro), 1)
         self.assertEqual(payload.macro[0].series_code, "FRED_DGS10")
         self.assertEqual(len(payload.positioning), 1)
         self.assertEqual(payload.positioning[0].series_code, "CFTC_WTI_MM_NET")
-        self.assertGreaterEqual(len(payload.freshness), 6)
+        self.assertGreaterEqual(len(payload.freshness), 7)
 
     def test_get_market_context_filters_positioning_by_commodity(self) -> None:
         self._seed_rows()
@@ -350,6 +427,8 @@ class ExternalDataApiTests(unittest.TestCase):
 
         self.assertEqual(payload.commodity, "HH")
         self.assertEqual(payload.price_indices, [])
+        self.assertEqual(len(payload.fundamentals), 1)
+        self.assertEqual(payload.fundamentals[0].series_code, "EIA_NG_STORAGE_LOWER48_W")
         self.assertEqual(len(payload.power), 1)
         self.assertEqual(len(payload.macro), 1)
         self.assertEqual(payload.positioning, [])
@@ -389,6 +468,26 @@ class ExternalDataApiTests(unittest.TestCase):
                         source_unit="BBL",
                         source_currency_code="USD",
                         transform_rule=None,
+                        is_active=True,
+                        created_at=now,
+                        created_by="system",
+                        updated_at=now,
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
+                        code="EIA_CRUDE_PROD_US_M",
+                        provider="EIA_FUNDAMENTALS",
+                        dataset_code="PET",
+                        series_id="PET.MCRFPUS2.M",
+                        name="U.S. Crude Oil Field Production",
+                        category="fundamentals",
+                        frequency="monthly",
+                        unit_code="KBBL_D",
+                        source_url=None,
+                        description=None,
+                        query_params=None,
+                        transform_rule="field:value",
                         is_active=True,
                         created_at=now,
                         created_by="system",
@@ -491,6 +590,19 @@ class ExternalDataApiTests(unittest.TestCase):
                     ),
                     ExternalDataRun(
                         id=11,
+                        provider="EIA_FUNDAMENTALS",
+                        job_name="sync_eia_fundamental_series",
+                        status="SUCCEEDED",
+                        started_at=now - timedelta(hours=8),
+                        finished_at=now - timedelta(hours=8) + timedelta(minutes=3),
+                        requested_by="scheduler",
+                        series_count=1,
+                        observation_count=1,
+                        error_summary=None,
+                        created_at=now - timedelta(hours=8),
+                    ),
+                    ExternalDataRun(
+                        id=12,
                         provider="FRED",
                         job_name="sync_fred_series",
                         status="SUCCEEDED",
@@ -503,7 +615,7 @@ class ExternalDataApiTests(unittest.TestCase):
                         created_at=now - timedelta(hours=4),
                     ),
                     ExternalDataRun(
-                        id=12,
+                        id=13,
                         provider="CFTC",
                         job_name="sync_cftc_series",
                         status="FAILED",
@@ -516,7 +628,7 @@ class ExternalDataApiTests(unittest.TestCase):
                         created_at=now - timedelta(hours=2),
                     ),
                     ExternalDataRun(
-                        id=13,
+                        id=14,
                         provider="CAISO",
                         job_name="sync_caiso_power_series",
                         status="SUCCEEDED",
@@ -529,7 +641,7 @@ class ExternalDataApiTests(unittest.TestCase):
                         created_at=now - timedelta(minutes=10),
                     ),
                     ExternalDataRun(
-                        id=14,
+                        id=15,
                         provider="KALSHI",
                         job_name="sync_kalshi_series",
                         status="SUCCEEDED",
@@ -561,6 +673,23 @@ class ExternalDataApiTests(unittest.TestCase):
                     ),
                     ExternalSeriesObservation(
                         id=10,
+                        series_code="EIA_CRUDE_PROD_US_M",
+                        observation_date=(now - timedelta(days=14)).date(),
+                        value=Decimal("13246.000000"),
+                        unit_code="KBBL_D",
+                        source_provider="EIA_FUNDAMENTALS",
+                        source_series_id="PET.MCRFPUS2.M",
+                        source_frequency="MONTHLY",
+                        source_published_at=now - timedelta(days=14),
+                        source_revision="rev-eia-fund",
+                        downloaded_at=now - timedelta(hours=8),
+                        run_id=11,
+                        raw_payload={},
+                        created_at=now - timedelta(hours=8),
+                        updated_at=now - timedelta(hours=8),
+                    ),
+                    ExternalSeriesObservation(
+                        id=11,
                         series_code="FRED_DGS10",
                         observation_date=now.date(),
                         value=Decimal("4.100000"),
@@ -571,13 +700,13 @@ class ExternalDataApiTests(unittest.TestCase):
                         source_published_at=None,
                         source_revision="rev-2",
                         downloaded_at=now - timedelta(hours=4),
-                        run_id=11,
+                        run_id=12,
                         raw_payload={},
                         created_at=now - timedelta(hours=4),
                         updated_at=now - timedelta(hours=4),
                     ),
                     ExternalSeriesObservation(
-                        id=11,
+                        id=12,
                         series_code="CAISO_NP15_RT5M",
                         observation_date=now.date(),
                         value=Decimal("23.000000"),
@@ -588,13 +717,13 @@ class ExternalDataApiTests(unittest.TestCase):
                         source_published_at=None,
                         source_revision="rev-3",
                         downloaded_at=now - timedelta(minutes=10),
-                        run_id=13,
+                        run_id=14,
                         raw_payload={},
                         created_at=now - timedelta(minutes=10),
                         updated_at=now - timedelta(minutes=10),
                     ),
                     ExternalSeriesObservation(
-                        id=12,
+                        id=13,
                         series_code="KALSHI_FED_27APR_T350",
                         observation_date=now.date(),
                         value=Decimal("0.420000"),
@@ -605,7 +734,7 @@ class ExternalDataApiTests(unittest.TestCase):
                         source_published_at=now - timedelta(hours=1),
                         source_revision="rev-kalshi",
                         downloaded_at=now - timedelta(hours=1),
-                        run_id=14,
+                        run_id=15,
                         raw_payload={},
                         created_at=now - timedelta(hours=1),
                         updated_at=now - timedelta(hours=1),
@@ -616,8 +745,9 @@ class ExternalDataApiTests(unittest.TestCase):
             payload = get_external_data_sync_status(db=session)
 
         providers = {row.provider: row for row in payload.providers}
-        self.assertEqual(payload.provider_count, 6)
+        self.assertEqual(payload.provider_count, 7)
         self.assertEqual(providers["EIA"].health_status, "healthy")
+        self.assertEqual(providers["EIA_FUNDAMENTALS"].health_status, "healthy")
         self.assertEqual(providers["FRED"].health_status, "healthy")
         self.assertEqual(providers["CFTC"].health_status, "failed")
         self.assertEqual(providers["CAISO"].health_status, "healthy")
@@ -636,6 +766,27 @@ class ExternalDataApiTests(unittest.TestCase):
                     EIASyncRequest(
                         price_index_code="WTI_CUSHING_D",
                         lookback_days=30,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
+    def test_trigger_eia_fundamentals_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_eia_fundamental_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_eia_fundamentals_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="EIA_CRUDE_PROD_US_M",
+                        lookback_days=120,
                         requested_by="anthony",
                     ),
                     db=session,
