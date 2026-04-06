@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.deps.db import get_db
@@ -36,5 +38,25 @@ def get_reporting_overview(db: Session = Depends(get_db)) -> ReportingOverview:
 
 
 @router.get("/pnl-history", response_model=PnlHistoryReport)
-def get_pnl_history(db: Session = Depends(get_db)) -> PnlHistoryReport:
-    return PnlHistoryReport(**build_pnl_history_report(db))
+def get_pnl_history(
+    book: str | None = Query(default=None),
+    commodity_class: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> PnlHistoryReport:
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_from must be on or before date_to",
+        )
+
+    return PnlHistoryReport(
+        **build_pnl_history_report(
+            db,
+            book=book,
+            commodity_class=commodity_class,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    )

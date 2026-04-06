@@ -42,6 +42,8 @@ def _empty_trade_state(trade_id: str) -> dict[str, Any]:
     return {
         "trade_id": trade_id,
         "status": "ACTIVE",
+        "book": None,
+        "commodity_class": None,
         "pricing_type": DEFAULT_PRICING_TYPE,
         "price_index_code": None,
         "trade_side": None,
@@ -159,11 +161,33 @@ def _serialize_pnl_snapshot(snapshot: PnlSnapshot) -> dict[str, float | int]:
     }
 
 
+def _normalize_filter_code(value: str | None) -> str | None:
+    normalized = str(value or "").strip().upper()
+    return normalized or None
+
+
+def _state_matches_filters(
+    state: dict[str, Any],
+    *,
+    book: str | None,
+    commodity_class: str | None,
+) -> bool:
+    if book and _normalize_filter_code(state.get("book")) != book:
+        return False
+
+    if commodity_class and _normalize_filter_code(state.get("commodity_class")) != commodity_class:
+        return False
+
+    return True
+
+
 def _apply_trade_event(current: dict[str, Any] | None, event: Event) -> dict[str, Any]:
     payload = event.payload or {}
 
     if event.event_type == "TradeCreated":
         next_state = _empty_trade_state(event.aggregate_id)
+        next_state["book"] = payload.get("book")
+        next_state["commodity_class"] = payload.get("commodity_class")
         next_state["pricing_type"] = payload.get("pricing_type") or DEFAULT_PRICING_TYPE
         next_state["price_index_code"] = payload.get("price_index_code")
         next_state["trade_side"] = payload.get("trade_side")
@@ -176,7 +200,17 @@ def _apply_trade_event(current: dict[str, Any] | None, event: Event) -> dict[str
     next_state = dict(current or _empty_trade_state(event.aggregate_id))
 
     if event.event_type == "TradeAmended":
-        for field_name in ("pricing_type", "price_index_code", "trade_side", "price", "volume", "settlement_status", "status"):
+        for field_name in (
+            "book",
+            "commodity_class",
+            "pricing_type",
+            "price_index_code",
+            "trade_side",
+            "price",
+            "volume",
+            "settlement_status",
+            "status",
+        ):
             if field_name in payload:
                 next_state[field_name] = payload[field_name]
         return next_state
@@ -192,6 +226,8 @@ def _legacy_trade_state(row: Trade) -> dict[str, Any]:
     return {
         "trade_id": row.trade_id,
         "status": row.status,
+        "book": row.book,
+        "commodity_class": row.commodity_class,
         "pricing_type": row.pricing_type,
         "price_index_code": row.price_index_code,
         "trade_side": row.trade_side,
@@ -231,9 +267,20 @@ def _load_daily_mark_updates(
     return by_date
 
 
-def build_pnl_history_report(db: Session, *, as_of: date | None = None) -> dict[str, Any]:
+def build_pnl_history_report(
+    db: Session,
+    *,
+    as_of: date | None = None,
+    book: str | None = None,
+    commodity_class: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc)
-    end_date = as_of or generated_at.date()
+    normalized_book = _normalize_filter_code(book)
+    normalized_commodity_class = _normalize_filter_code(commodity_class)
+    end_date = date_to or as_of or generated_at.date()
+    window_start_date = date_from
 
     rows = db.execute(
         select(Event)
@@ -312,17 +359,24 @@ def build_pnl_history_report(db: Session, *, as_of: date | None = None) -> dict[
 
         latest_snapshot = PnlSnapshot()
         for state in active_states.values():
+            if not _state_matches_filters(
+                state,
+                book=normalized_book,
+                commodity_class=normalized_commodity_class,
+            ):
+                continue
             latest_snapshot = _add_pnl_snapshots(
                 latest_snapshot,
                 _pnl_snapshot_for_state(state, latest_marks),
             )
 
-        points.append(
-            {
-                "date": current_date,
-                **_serialize_pnl_snapshot(latest_snapshot),
-            }
-        )
+        if window_start_date is None or current_date >= window_start_date:
+            points.append(
+                {
+                    "date": current_date,
+                    **_serialize_pnl_snapshot(latest_snapshot),
+                }
+            )
         current_date += timedelta(days=1)
 
     return {

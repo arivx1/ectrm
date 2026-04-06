@@ -31,6 +31,11 @@ from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.schemas.event import EventCreate, EventOut
 from apps.api.app.shared.enums import (
+    AllocationStatus,
+    ConfirmationStatus,
+    InvoiceStatus,
+    NominationStatus,
+    PaymentStatus,
     PricingStatus,
     PricingType,
     SettlementStatus,
@@ -341,6 +346,29 @@ def validate_date_range(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"{end_field} must be on or after {start_field}",
         )
+
+
+def default_trade_workflow_statuses(trade_nature: str) -> dict[str, str]:
+    requires_physical_workflows = trade_nature == TradeNature.PHYSICAL.value
+    return {
+        "confirmation_status": ConfirmationStatus.PENDING.value,
+        "nomination_status": (
+            NominationStatus.PENDING.value
+            if requires_physical_workflows
+            else NominationStatus.NOT_REQUIRED.value
+        ),
+        "allocation_status": (
+            AllocationStatus.PENDING.value
+            if requires_physical_workflows
+            else AllocationStatus.NOT_REQUIRED.value
+        ),
+        "invoice_status": (
+            InvoiceStatus.PENDING.value
+            if requires_physical_workflows
+            else InvoiceStatus.NOT_REQUIRED.value
+        ),
+        "payment_status": PaymentStatus.PENDING.value,
+    }
 
 
 def validate_trade_measurements(
@@ -827,6 +855,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 
             if e.event_type == "TradeCreated":
                 trade_nature = normalize_trade_nature(payload_data.get("trade_nature"))
+                workflow_defaults = default_trade_workflow_statuses(trade_nature)
                 trade_structure = normalize_trade_structure(payload_data.get("trade_structure"))
                 trade_side, legs_payload = validate_trade_structure_payload(
                     trade_structure,
@@ -892,11 +921,41 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     field_name="Pricing status",
                     valid_values={pricing_status.value for pricing_status in PricingStatus},
                 )
+                confirmation_status = normalize_trade_header_status(
+                    payload_data.get("confirmation_status"),
+                    default=workflow_defaults["confirmation_status"],
+                    field_name="Confirmation status",
+                    valid_values={confirmation_status.value for confirmation_status in ConfirmationStatus},
+                )
+                nomination_status = normalize_trade_header_status(
+                    payload_data.get("nomination_status"),
+                    default=workflow_defaults["nomination_status"],
+                    field_name="Nomination status",
+                    valid_values={nomination_status.value for nomination_status in NominationStatus},
+                )
+                allocation_status = normalize_trade_header_status(
+                    payload_data.get("allocation_status"),
+                    default=workflow_defaults["allocation_status"],
+                    field_name="Allocation status",
+                    valid_values={allocation_status.value for allocation_status in AllocationStatus},
+                )
                 settlement_status = normalize_trade_header_status(
                     payload_data.get("settlement_status"),
                     default="PENDING",
                     field_name="Settlement status",
                     valid_values={settlement_status.value for settlement_status in SettlementStatus},
+                )
+                invoice_status = normalize_trade_header_status(
+                    payload_data.get("invoice_status"),
+                    default=workflow_defaults["invoice_status"],
+                    field_name="Invoice status",
+                    valid_values={invoice_status.value for invoice_status in InvoiceStatus},
+                )
+                payment_status = normalize_trade_header_status(
+                    payload_data.get("payment_status"),
+                    default=workflow_defaults["payment_status"],
+                    field_name="Payment status",
+                    valid_values={payment_status.value for payment_status in PaymentStatus},
                 )
                 trader_user = normalize_optional_text(payload_data.get("trader_user"))
                 pricing_type, price_index_code = require_active_price_index(
@@ -950,9 +1009,14 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     commodity=commodity,
                     pricing_type=pricing_type,
                     pricing_status=pricing_status,
+                    confirmation_status=confirmation_status,
+                    nomination_status=nomination_status,
+                    allocation_status=allocation_status,
                     price_index_code=price_index_code,
                     price=price,
                     volume=volume,
+                    invoice_status=invoice_status,
+                    payment_status=payment_status,
                     settlement_status=settlement_status,
                     trader_user=trader_user,
                     status="ACTIVE",
@@ -1136,6 +1200,41 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                         default=existing.pricing_status,
                         field_name="Pricing status",
                         valid_values={pricing_status.value for pricing_status in PricingStatus},
+                    )
+                if "confirmation_status" in payload_data:
+                    existing.confirmation_status = normalize_trade_header_status(
+                        payload_data.get("confirmation_status"),
+                        default=existing.confirmation_status,
+                        field_name="Confirmation status",
+                        valid_values={confirmation_status.value for confirmation_status in ConfirmationStatus},
+                    )
+                if "nomination_status" in payload_data:
+                    existing.nomination_status = normalize_trade_header_status(
+                        payload_data.get("nomination_status"),
+                        default=existing.nomination_status,
+                        field_name="Nomination status",
+                        valid_values={nomination_status.value for nomination_status in NominationStatus},
+                    )
+                if "allocation_status" in payload_data:
+                    existing.allocation_status = normalize_trade_header_status(
+                        payload_data.get("allocation_status"),
+                        default=existing.allocation_status,
+                        field_name="Allocation status",
+                        valid_values={allocation_status.value for allocation_status in AllocationStatus},
+                    )
+                if "invoice_status" in payload_data:
+                    existing.invoice_status = normalize_trade_header_status(
+                        payload_data.get("invoice_status"),
+                        default=existing.invoice_status,
+                        field_name="Invoice status",
+                        valid_values={invoice_status.value for invoice_status in InvoiceStatus},
+                    )
+                if "payment_status" in payload_data:
+                    existing.payment_status = normalize_trade_header_status(
+                        payload_data.get("payment_status"),
+                        default=existing.payment_status,
+                        field_name="Payment status",
+                        valid_values={payment_status.value for payment_status in PaymentStatus},
                     )
                 if "settlement_status" in payload_data:
                     existing.settlement_status = normalize_trade_header_status(

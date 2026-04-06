@@ -33,9 +33,14 @@ class TradeOut(BaseModel):
     commodity: str
     pricing_type: str
     pricing_status: str
+    confirmation_status: str
+    nomination_status: str
+    allocation_status: str
     price_index_code: Optional[str]
     price: Optional[float]
     volume: Optional[float]
+    invoice_status: str
+    payment_status: str
     settlement_status: str
     trader_user: Optional[str]
     status: str

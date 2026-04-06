@@ -23,6 +23,11 @@ class ShipmentOut(BaseModel):
     last_updated_at: datetime
     age_days: int
     pricing_status: str
+    confirmation_status: str
+    nomination_status: str
+    allocation_status: str
+    invoice_status: str
+    payment_status: str
     settlement_status: str
     blocker_count: int
     blockers: list[str]

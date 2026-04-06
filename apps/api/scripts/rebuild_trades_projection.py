@@ -10,6 +10,11 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.shared.enums import (
+    AllocationStatus,
+    ConfirmationStatus,
+    InvoiceStatus,
+    NominationStatus,
+    PaymentStatus,
     PricingStatus,
     PricingType,
     SettlementStatus,
@@ -180,6 +185,29 @@ def validate_date_range(start_value, end_value, *, start_field, end_field):
         raise ValueError(f"{end_field} must be on or after {start_field}")
 
 
+def default_trade_workflow_statuses(trade_nature):
+    requires_physical_workflows = trade_nature == TradeNature.PHYSICAL.value
+    return {
+        "confirmation_status": ConfirmationStatus.PENDING.value,
+        "nomination_status": (
+            NominationStatus.PENDING.value
+            if requires_physical_workflows
+            else NominationStatus.NOT_REQUIRED.value
+        ),
+        "allocation_status": (
+            AllocationStatus.PENDING.value
+            if requires_physical_workflows
+            else AllocationStatus.NOT_REQUIRED.value
+        ),
+        "invoice_status": (
+            InvoiceStatus.PENDING.value
+            if requires_physical_workflows
+            else InvoiceStatus.NOT_REQUIRED.value
+        ),
+        "payment_status": PaymentStatus.PENDING.value,
+    }
+
+
 def apply_portfolio_payload(trade_state, payload, *, book_changed=False):
     if "portfolio" in payload:
         portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
@@ -230,6 +258,8 @@ def main() -> None:
 
                 if existing is None:
                     trade_structure = normalize_trade_structure(payload.get("trade_structure"))
+                    trade_nature = normalize_trade_nature(payload.get("trade_nature"))
+                    workflow_defaults = default_trade_workflow_statuses(trade_nature)
                     normalized_book = normalize_book(payload.get("book"))
                     normalized_portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
                     execution_timestamp = normalize_execution_timestamp(payload.get("execution_timestamp"))
@@ -276,7 +306,7 @@ def main() -> None:
                             payload.get("price_unit_code"),
                             uppercase=True,
                         ),
-                        "trade_nature": normalize_trade_nature(payload.get("trade_nature")),
+                        "trade_nature": trade_nature,
                         "trade_structure": trade_structure,
                         "trade_side": (
                             None
@@ -300,9 +330,46 @@ def main() -> None:
                             field_name="Pricing status",
                             valid_values={pricing_status.value for pricing_status in PricingStatus},
                         ),
+                        "confirmation_status": normalize_trade_header_status(
+                            payload.get("confirmation_status"),
+                            workflow_defaults["confirmation_status"],
+                            field_name="Confirmation status",
+                            valid_values={
+                                confirmation_status.value
+                                for confirmation_status in ConfirmationStatus
+                            },
+                        ),
+                        "nomination_status": normalize_trade_header_status(
+                            payload.get("nomination_status"),
+                            workflow_defaults["nomination_status"],
+                            field_name="Nomination status",
+                            valid_values={
+                                nomination_status.value for nomination_status in NominationStatus
+                            },
+                        ),
+                        "allocation_status": normalize_trade_header_status(
+                            payload.get("allocation_status"),
+                            workflow_defaults["allocation_status"],
+                            field_name="Allocation status",
+                            valid_values={
+                                allocation_status.value for allocation_status in AllocationStatus
+                            },
+                        ),
                         "price_index_code": normalize_price_index_code(payload.get("price_index_code")),
                         "price": to_decimal_or_none(payload.get("price")),
                         "volume": to_decimal_or_none(payload.get("volume")),
+                        "invoice_status": normalize_trade_header_status(
+                            payload.get("invoice_status"),
+                            workflow_defaults["invoice_status"],
+                            field_name="Invoice status",
+                            valid_values={invoice_status.value for invoice_status in InvoiceStatus},
+                        ),
+                        "payment_status": normalize_trade_header_status(
+                            payload.get("payment_status"),
+                            workflow_defaults["payment_status"],
+                            field_name="Payment status",
+                            valid_values={payment_status.value for payment_status in PaymentStatus},
+                        ),
                         "settlement_status": normalize_trade_header_status(
                             payload.get("settlement_status"),
                             "PENDING",
@@ -404,6 +471,33 @@ def main() -> None:
                             field_name="Pricing status",
                             valid_values={pricing_status.value for pricing_status in PricingStatus},
                         )
+                    if "confirmation_status" in payload:
+                        existing["confirmation_status"] = normalize_trade_header_status(
+                            payload.get("confirmation_status"),
+                            existing.get("confirmation_status", ConfirmationStatus.PENDING.value),
+                            field_name="Confirmation status",
+                            valid_values={
+                                confirmation_status.value for confirmation_status in ConfirmationStatus
+                            },
+                        )
+                    if "nomination_status" in payload:
+                        existing["nomination_status"] = normalize_trade_header_status(
+                            payload.get("nomination_status"),
+                            existing.get("nomination_status", NominationStatus.PENDING.value),
+                            field_name="Nomination status",
+                            valid_values={
+                                nomination_status.value for nomination_status in NominationStatus
+                            },
+                        )
+                    if "allocation_status" in payload:
+                        existing["allocation_status"] = normalize_trade_header_status(
+                            payload.get("allocation_status"),
+                            existing.get("allocation_status", AllocationStatus.PENDING.value),
+                            field_name="Allocation status",
+                            valid_values={
+                                allocation_status.value for allocation_status in AllocationStatus
+                            },
+                        )
                     if "price_index_code" in payload:
                         existing["price_index_code"] = normalize_price_index_code(
                             payload.get("price_index_code")
@@ -412,6 +506,20 @@ def main() -> None:
                         existing["price"] = to_decimal_or_none(payload.get("price"))
                     if "volume" in payload:
                         existing["volume"] = to_decimal_or_none(payload.get("volume"))
+                    if "invoice_status" in payload:
+                        existing["invoice_status"] = normalize_trade_header_status(
+                            payload.get("invoice_status"),
+                            existing.get("invoice_status", InvoiceStatus.PENDING.value),
+                            field_name="Invoice status",
+                            valid_values={invoice_status.value for invoice_status in InvoiceStatus},
+                        )
+                    if "payment_status" in payload:
+                        existing["payment_status"] = normalize_trade_header_status(
+                            payload.get("payment_status"),
+                            existing.get("payment_status", PaymentStatus.PENDING.value),
+                            field_name="Payment status",
+                            valid_values={payment_status.value for payment_status in PaymentStatus},
+                        )
                     if "settlement_status" in payload:
                         existing["settlement_status"] = normalize_trade_header_status(
                             payload.get("settlement_status"),
@@ -535,6 +643,29 @@ def main() -> None:
                         field_name="Pricing status",
                         valid_values={pricing_status.value for pricing_status in PricingStatus},
                     )
+                if "confirmation_status" in payload:
+                    existing["confirmation_status"] = normalize_trade_header_status(
+                        payload.get("confirmation_status"),
+                        existing.get("confirmation_status", ConfirmationStatus.PENDING.value),
+                        field_name="Confirmation status",
+                        valid_values={
+                            confirmation_status.value for confirmation_status in ConfirmationStatus
+                        },
+                    )
+                if "nomination_status" in payload:
+                    existing["nomination_status"] = normalize_trade_header_status(
+                        payload.get("nomination_status"),
+                        existing.get("nomination_status", NominationStatus.PENDING.value),
+                        field_name="Nomination status",
+                        valid_values={nomination_status.value for nomination_status in NominationStatus},
+                    )
+                if "allocation_status" in payload:
+                    existing["allocation_status"] = normalize_trade_header_status(
+                        payload.get("allocation_status"),
+                        existing.get("allocation_status", AllocationStatus.PENDING.value),
+                        field_name="Allocation status",
+                        valid_values={allocation_status.value for allocation_status in AllocationStatus},
+                    )
                 if "price_index_code" in payload:
                     existing["price_index_code"] = normalize_price_index_code(
                         payload.get("price_index_code")
@@ -543,6 +674,20 @@ def main() -> None:
                     existing["price"] = to_decimal_or_none(payload.get("price"))
                 if "volume" in payload:
                     existing["volume"] = to_decimal_or_none(payload.get("volume"))
+                if "invoice_status" in payload:
+                    existing["invoice_status"] = normalize_trade_header_status(
+                        payload.get("invoice_status"),
+                        existing.get("invoice_status", InvoiceStatus.PENDING.value),
+                        field_name="Invoice status",
+                        valid_values={invoice_status.value for invoice_status in InvoiceStatus},
+                    )
+                if "payment_status" in payload:
+                    existing["payment_status"] = normalize_trade_header_status(
+                        payload.get("payment_status"),
+                        existing.get("payment_status", PaymentStatus.PENDING.value),
+                        field_name="Payment status",
+                        valid_values={payment_status.value for payment_status in PaymentStatus},
+                    )
                 if "settlement_status" in payload:
                     existing["settlement_status"] = normalize_trade_header_status(
                         payload.get("settlement_status"),
@@ -614,9 +759,23 @@ def main() -> None:
                     commodity=trade["commodity"],
                     pricing_type=trade.get("pricing_type", PricingType.FIXED.value),
                     pricing_status=trade.get("pricing_status", "PENDING"),
+                    confirmation_status=trade.get(
+                        "confirmation_status",
+                        ConfirmationStatus.PENDING.value,
+                    ),
+                    nomination_status=trade.get(
+                        "nomination_status",
+                        NominationStatus.PENDING.value,
+                    ),
+                    allocation_status=trade.get(
+                        "allocation_status",
+                        AllocationStatus.PENDING.value,
+                    ),
                     price_index_code=trade.get("price_index_code"),
                     price=trade["price"],
                     volume=trade["volume"],
+                    invoice_status=trade.get("invoice_status", InvoiceStatus.PENDING.value),
+                    payment_status=trade.get("payment_status", PaymentStatus.PENDING.value),
                     settlement_status=trade.get("settlement_status", "PENDING"),
                     trader_user=trade.get("trader_user"),
                     status=trade["status"],

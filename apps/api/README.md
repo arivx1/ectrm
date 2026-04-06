@@ -125,6 +125,14 @@ PYTHONPATH=. python apps/api/scripts/import_robinhood_csv.py \
 This writes `/absolute/path/to/robinhood-account-activity.normalized.json` by
 default. Use `--format csv` to emit a flat normalized CSV instead.
 
+Summarize a Robinhood CSV export into cash-flow and symbol rollups:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/summarize_robinhood_csv.py \
+  --input /absolute/path/to/robinhood-account-activity.csv \
+  --json-output /absolute/path/to/robinhood-summary.json
+```
+
 ## Configuration
 
 Example settings live in `apps/api/.env.example`.
