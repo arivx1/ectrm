@@ -30,6 +30,11 @@ export type AmendDraft = {
   deliveryStartInput: string
   deliveryEndInput: string
   priceUnitInput: string
+  tradeInstrumentTypeInput: string
+  optionTypeInput: string
+  optionStyleInput: string
+  optionExpirationDateInput: string
+  optionStrikePriceInput: string
   tradeNatureInput: string
   tradeStructureInput: string
   tradeSideInput: string
@@ -81,6 +86,13 @@ export function buildAmendDraft(
       deliveryStartInput: selectedTrade.delivery_start ?? tradeHeaderDefaults.delivery_start,
       deliveryEndInput: selectedTrade.delivery_end ?? tradeHeaderDefaults.delivery_end,
       priceUnitInput: selectedTrade.price_unit_code ?? tradeHeaderDefaults.price_unit_code,
+      tradeInstrumentTypeInput: selectedTrade.instrument_type ?? tradeFormDefaults.instrumentType,
+      optionTypeInput: selectedTrade.option_type ?? tradeFormDefaults.optionType,
+      optionStyleInput: selectedTrade.option_style ?? tradeFormDefaults.optionStyle,
+      optionExpirationDateInput:
+        selectedTrade.option_expiration_date ?? tradeFormDefaults.optionExpirationDate,
+      optionStrikePriceInput:
+        selectedTrade.option_strike_price?.toString() ?? tradeFormDefaults.optionStrikePrice,
       tradeNatureInput: selectedTrade.trade_nature ?? tradeFormDefaults.nature,
       tradeStructureInput: selectedTrade.trade_structure ?? tradeFormDefaults.structure,
       tradeSideInput: selectedTrade.trade_side ?? tradeFormDefaults.side,
@@ -137,6 +149,11 @@ export function buildAmendDraft(
     deliveryStartInput: tradeHeaderDefaults.delivery_start,
     deliveryEndInput: tradeHeaderDefaults.delivery_end,
     priceUnitInput: tradeHeaderDefaults.price_unit_code,
+    tradeInstrumentTypeInput: tradeFormDefaults.instrumentType,
+    optionTypeInput: tradeFormDefaults.optionType,
+    optionStyleInput: tradeFormDefaults.optionStyle,
+    optionExpirationDateInput: tradeFormDefaults.optionExpirationDate,
+    optionStrikePriceInput: tradeFormDefaults.optionStrikePrice,
     tradeNatureInput: tradeFormDefaults.nature,
     tradeStructureInput: tradeFormDefaults.structure,
     tradeSideInput: tradeFormDefaults.side,

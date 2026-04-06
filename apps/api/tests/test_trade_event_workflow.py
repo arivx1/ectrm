@@ -5,6 +5,8 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from fastapi import HTTPException
+
 if not hasattr(enum, "StrEnum"):
     class _CompatStrEnum(str, enum.Enum):
         pass
@@ -15,18 +17,24 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
+from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
 from apps.api.app.models.event import Base
 from apps.api.app.models.event import Event
+from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
@@ -53,7 +61,10 @@ class TradeEventWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.now = datetime(2026, 3, 19, 15, 0, tzinfo=timezone.utc)
         with self.SessionLocal() as session:
+            session.query(OptionExposure).delete()
             session.query(Position).delete()
+            session.query(TradePayment).delete()
+            session.query(TradeInvoice).delete()
             session.query(TradePriceTerm).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(TradeLeg).delete()
@@ -64,6 +75,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
             session.query(ReferenceLocation).delete()
             session.query(ReferenceCurrency).delete()
             session.query(ReferencePortfolio).delete()
+            session.query(ReferenceCounterpartyCreditProfile).delete()
             session.query(ReferenceCounterparty).delete()
             session.query(ReferenceCommodity).delete()
             session.query(ReferenceBook).delete()
@@ -75,6 +87,45 @@ class TradeEventWorkflowTests(unittest.TestCase):
             state=SimpleNamespace(correlation_id="test-correlation", actor_id=None),
             headers={},
         )
+
+    def _upsert_counterparty_credit_profile(
+        self,
+        session,
+        *,
+        limit_amount: float,
+        breach_action: str,
+        limit_currency_code: str = "USD",
+    ) -> None:
+        existing = (
+            session.query(ReferenceCounterpartyCreditProfile)
+            .filter(ReferenceCounterpartyCreditProfile.counterparty_code == "SHELL_TRADING")
+            .one_or_none()
+        )
+        if existing is None:
+            session.add(
+                ReferenceCounterpartyCreditProfile(
+                    counterparty_code="SHELL_TRADING",
+                    credit_rating="4A1",
+                    review_due_at=None,
+                    limit_currency_code=limit_currency_code,
+                    limit_amount=limit_amount,
+                    breach_action=breach_action,
+                    notes="Test profile",
+                    created_at=self.now,
+                    created_by="test-user",
+                    updated_at=self.now,
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+        else:
+            existing.limit_currency_code = limit_currency_code
+            existing.limit_amount = limit_amount
+            existing.breach_action = breach_action
+            existing.updated_at = self.now
+            existing.updated_by = "test-user"
+            existing.version += 1
+        session.commit()
 
     def _seed_reference_data(self, session) -> None:
         session.add(
@@ -313,6 +364,92 @@ class TradeEventWorkflowTests(unittest.TestCase):
         self.assertEqual(trade.quality_spec, "10 PPM sulfur max")
         self.assertEqual(trade.unit_of_measure, "BBL")
 
+    def test_option_trade_persists_option_fields_and_stays_out_of_positions(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-OPTION-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "instrument_type": "OPTION",
+                        "trade_nature": "FINANCIAL",
+                        "trade_structure": "SINGLE",
+                        "trade_side": "BUY",
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "price": 4.25,
+                        "volume": 12,
+                        "option_type": "CALL",
+                        "option_style": "EUROPEAN",
+                        "option_strike_price": 82.5,
+                        "option_expiration_date": "2026-06-30",
+                    },
+                    schema_version=5,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            trade = session.query(Trade).filter(Trade.trade_id == "T-OPTION-1").one()
+            option_exposure = (
+                session.query(OptionExposure)
+                .filter(OptionExposure.trade_id == "T-OPTION-1")
+                .one()
+            )
+            positions = session.query(Position).all()
+
+        self.assertEqual(trade.instrument_type, "OPTION")
+        self.assertEqual(trade.trade_nature, "FINANCIAL")
+        self.assertEqual(trade.trade_structure, "SINGLE")
+        self.assertEqual(trade.option_type, "CALL")
+        self.assertEqual(trade.option_style, "EUROPEAN")
+        self.assertEqual(float(trade.option_strike_price), 82.5)
+        self.assertEqual(str(trade.option_expiration_date), "2026-06-30")
+        self.assertEqual(float(trade.price), 4.25)
+        self.assertEqual(float(trade.volume), 12.0)
+        self.assertEqual(float(option_exposure.contract_volume), 12.0)
+        self.assertEqual(float(option_exposure.premium_cashflow), 51.0)
+        self.assertEqual(float(option_exposure.underlying_equivalent_volume), 12.0)
+        self.assertEqual(positions, [])
+
+    def test_option_trade_rejects_missing_required_strike_price(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaises(HTTPException) as error:
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-OPTION-INVALID-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        actor_id="test-user",
+                        payload={
+                            "instrument_type": "OPTION",
+                            "trade_nature": "FINANCIAL",
+                            "trade_structure": "SINGLE",
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 4.25,
+                            "volume": 12,
+                            "option_type": "CALL",
+                            "option_expiration_date": "2026-06-30",
+                        },
+                        schema_version=5,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        self.assertEqual(error.exception.status_code, 422)
+        self.assertIn("option_strike_price is required", error.exception.detail)
+
     def test_trade_commercial_terms_persist_to_projection_legs_and_price_terms(self) -> None:
         with self.SessionLocal() as session:
             append_event(
@@ -509,6 +646,442 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 "PAYMENT": "DUE",
             },
         )
+
+    def test_trade_amendment_rejects_invoice_projection_override_when_invoice_exists(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-INVOICE-LOCK-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "trade_nature": "PHYSICAL",
+                        "trade_structure": "SINGLE",
+                        "portfolio": "OIL_DISCRETIONARY",
+                        "counterparty": "SHELL_TRADING",
+                        "trade_currency_code": "USD",
+                        "price_unit_code": "BBL",
+                        "unit_of_measure": "BBL",
+                        "location_code": "CUSHING",
+                        "trade_date": "2026-03-21",
+                        "delivery_start": "2026-03-22",
+                        "delivery_end": "2026-03-24",
+                        "price": 75.25,
+                        "volume": 1000,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            issue_trade_invoice(
+                session,
+                trade_id="T-INVOICE-LOCK-1",
+                actor_id="settlement.ops",
+                invoice_number="INV-LOCK-1",
+                now=self.now,
+            )
+            session.commit()
+
+            with self.assertRaises(HTTPException) as error:
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-INVOICE-LOCK-1",
+                        event_type="TradeAmended",
+                        occurred_at=self.now,
+                        actor_id="test-user",
+                        payload={
+                            "invoice_status": "DISPUTED",
+                            "settlement_status": "DISPUTED",
+                        },
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        self.assertEqual(error.exception.status_code, 422)
+        self.assertIn("settlement invoices", str(error.exception.detail))
+
+    def test_trade_amendment_rejects_payment_projection_override_when_payment_exists(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-PAYMENT-LOCK-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "trade_nature": "PHYSICAL",
+                        "trade_structure": "SINGLE",
+                        "portfolio": "OIL_DISCRETIONARY",
+                        "counterparty": "SHELL_TRADING",
+                        "trade_currency_code": "USD",
+                        "price_unit_code": "BBL",
+                        "unit_of_measure": "BBL",
+                        "location_code": "CUSHING",
+                        "trade_date": "2026-03-21",
+                        "delivery_start": "2026-03-22",
+                        "delivery_end": "2026-03-24",
+                        "price": 75.25,
+                        "volume": 1000,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            invoice = issue_trade_invoice(
+                session,
+                trade_id="T-PAYMENT-LOCK-1",
+                actor_id="settlement.ops",
+                invoice_number="INV-PAY-1",
+                now=self.now,
+            )
+            create_trade_payment(
+                session,
+                invoice_id=invoice.invoice_id,
+                actor_id="settlement.ops",
+                payment_amount=1000,
+                status="PAID",
+                now=self.now,
+            )
+            session.commit()
+
+            with self.assertRaises(HTTPException) as error:
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-PAYMENT-LOCK-1",
+                        event_type="TradeAmended",
+                        occurred_at=self.now,
+                        actor_id="test-user",
+                        payload={
+                            "payment_status": "OVERDUE",
+                        },
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        self.assertEqual(error.exception.status_code, 422)
+        self.assertIn("settlement payments", str(error.exception.detail))
+
+    def test_trade_create_blocks_when_counterparty_credit_limit_breach_action_is_block(self) -> None:
+        with self.SessionLocal() as session:
+            self._upsert_counterparty_credit_profile(
+                session,
+                limit_amount=1000,
+                breach_action="BLOCK",
+            )
+
+            with self.assertRaises(HTTPException) as error:
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CREDIT-BLOCK-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        actor_id="test-user",
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "trade_side": "BUY",
+                            "counterparty": "SHELL_TRADING",
+                            "trade_currency_code": "USD",
+                            "price": 10,
+                            "volume": 150,
+                        },
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+            self.assertEqual(error.exception.status_code, 422)
+            self.assertIn("Breach action is 'BLOCK'", error.exception.detail)
+            self.assertEqual(
+                session.query(Trade).filter(Trade.trade_id == "T-CREDIT-BLOCK-1").count(),
+                0,
+            )
+            self.assertEqual(
+                session.query(TradeWorkflowItem)
+                .filter(TradeWorkflowItem.trade_id == "T-CREDIT-BLOCK-1")
+                .count(),
+                0,
+            )
+
+    def test_trade_create_routes_limit_breach_to_credit_approval_workflow_item(self) -> None:
+        with self.SessionLocal() as session:
+            self._upsert_counterparty_credit_profile(
+                session,
+                limit_amount=1000,
+                breach_action="REQUIRE_APPROVAL",
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-APPROVAL-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "counterparty": "SHELL_TRADING",
+                        "trade_currency_code": "USD",
+                        "price": 10,
+                        "volume": 150,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            credit_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CREDIT-APPROVAL-1",
+                    TradeWorkflowItem.workflow_type == "CREDIT_APPROVAL",
+                )
+                .one()
+            )
+
+        self.assertEqual(credit_item.status, "PENDING_REVIEW")
+        self.assertIn("projected exposure USD 1,500.00", credit_item.notes or "")
+
+    def test_trade_amendment_creates_and_closes_credit_approval_workflow_item(self) -> None:
+        with self.SessionLocal() as session:
+            self._upsert_counterparty_credit_profile(
+                session,
+                limit_amount=1000,
+                breach_action="REQUIRE_APPROVAL",
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-AMEND-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "counterparty": "SHELL_TRADING",
+                        "trade_currency_code": "USD",
+                        "price": 5,
+                        "volume": 100,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            self.assertEqual(
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CREDIT-AMEND-1",
+                    TradeWorkflowItem.workflow_type == "CREDIT_APPROVAL",
+                )
+                .count(),
+                0,
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-AMEND-1",
+                    event_type="TradeAmended",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "price": 10,
+                        "volume": 150,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            credit_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CREDIT-AMEND-1",
+                    TradeWorkflowItem.workflow_type == "CREDIT_APPROVAL",
+                )
+                .one()
+            )
+            self.assertEqual(credit_item.status, "PENDING_REVIEW")
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-AMEND-1",
+                    event_type="TradeAmended",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "price": 4,
+                        "volume": 100,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            session.refresh(credit_item)
+
+        self.assertEqual(credit_item.status, "NOT_REQUIRED")
+        self.assertIn("Closed automatically", credit_item.notes or "")
+
+    def test_trade_amendment_blocks_lifecycle_progress_while_credit_hold_is_active(self) -> None:
+        with self.SessionLocal() as session:
+            self._upsert_counterparty_credit_profile(
+                session,
+                limit_amount=1000,
+                breach_action="REQUIRE_APPROVAL",
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-HOLD-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "counterparty": "SHELL_TRADING",
+                        "trade_currency_code": "USD",
+                        "price": 10,
+                        "volume": 150,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            with self.assertRaises(HTTPException) as error:
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CREDIT-HOLD-1",
+                        event_type="TradeAmended",
+                        occurred_at=self.now,
+                        actor_id="test-user",
+                        payload={"confirmation_status": "CONFIRMED"},
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        self.assertEqual(error.exception.status_code, 422)
+        self.assertIn("credit hold", error.exception.detail.lower())
+        self.assertIn("confirmation", error.exception.detail.lower())
+
+    def test_rejected_credit_hold_clears_after_trade_returns_within_limit(self) -> None:
+        with self.SessionLocal() as session:
+            self._upsert_counterparty_credit_profile(
+                session,
+                limit_amount=1000,
+                breach_action="REQUIRE_APPROVAL",
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-REJECT-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "counterparty": "SHELL_TRADING",
+                        "trade_currency_code": "USD",
+                        "price": 10,
+                        "volume": 150,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            credit_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CREDIT-REJECT-1",
+                    TradeWorkflowItem.workflow_type == "CREDIT_APPROVAL",
+                )
+                .one()
+            )
+            credit_item.status = "REJECTED"
+            credit_item.notes = "Rejected by credit."
+            credit_item.updated_at = self.now
+            credit_item.updated_by = "credit.ops"
+            credit_item.version += 1
+            session.commit()
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-REJECT-1",
+                    event_type="TradeAmended",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "price": 4,
+                        "volume": 100,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            session.refresh(credit_item)
+
+        self.assertEqual(credit_item.status, "NOT_REQUIRED")
+        self.assertIn("Closed automatically", credit_item.notes or "")
 
     def test_swap_trade_can_omit_top_level_volume_when_legs_are_present(self) -> None:
         with self.SessionLocal() as session:

@@ -4,6 +4,7 @@ import {
   pricingTypeRequiresExplicitPrice,
   pricingTypeRequiresPriceIndex,
   tradeFormDefaults,
+  tradeInstrumentUsesOptionFields,
   tradeStructureRequiresTopLevelVolume,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
@@ -24,6 +25,11 @@ export type TradeEditorValues = {
   deliveryStart: string
   deliveryEnd: string
   priceUnitCode: string
+  instrumentType: string
+  optionType: string
+  optionStyle: string
+  optionExpirationDate: string
+  optionStrikePriceInput: string
   tradeNature: string
   tradeStructure: string
   tradeSide: string
@@ -70,6 +76,11 @@ type NormalizedTradeValues = {
   deliveryStart: string | null
   deliveryEnd: string | null
   priceUnitCode: string | null
+  instrumentType: string
+  optionType: string | null
+  optionStyle: string | null
+  optionExpirationDate: string | null
+  optionStrikePrice: number | null
   tradeNature: string
   tradeStructure: string
   tradeSide: string | null
@@ -119,6 +130,11 @@ const TRADE_FIELD_LABELS = {
   delivery_start: 'Delivery Start',
   delivery_end: 'Delivery End',
   price_unit_code: 'Price Unit',
+  instrument_type: 'Instrument',
+  option_type: 'Option Type',
+  option_style: 'Option Style',
+  option_expiration_date: 'Expiration',
+  option_strike_price: 'Strike Price',
   trade_nature: 'Nature',
   trade_structure: 'Structure',
   trade_side: 'Side',
@@ -266,6 +282,23 @@ function buildTradeAmendment(
   compareField(payload, changedFields, 'delivery_start', values.deliveryStart, selectedTrade.delivery_start)
   compareField(payload, changedFields, 'delivery_end', values.deliveryEnd, selectedTrade.delivery_end)
   compareField(payload, changedFields, 'price_unit_code', values.priceUnitCode, selectedTrade.price_unit_code)
+  compareField(payload, changedFields, 'instrument_type', values.instrumentType, selectedTrade.instrument_type)
+  compareField(payload, changedFields, 'option_type', values.optionType, selectedTrade.option_type)
+  compareField(payload, changedFields, 'option_style', values.optionStyle, selectedTrade.option_style)
+  compareField(
+    payload,
+    changedFields,
+    'option_expiration_date',
+    values.optionExpirationDate,
+    selectedTrade.option_expiration_date,
+  )
+  compareField(
+    payload,
+    changedFields,
+    'option_strike_price',
+    values.optionStrikePrice,
+    selectedTrade.option_strike_price,
+  )
   compareField(payload, changedFields, 'trade_nature', values.tradeNature, selectedTrade.trade_nature)
   compareField(payload, changedFields, 'trade_structure', values.tradeStructure, selectedTrade.trade_structure)
 
@@ -350,6 +383,11 @@ function buildTradePayload(values: NormalizedTradeValues): Record<string, unknow
     delivery_start: values.deliveryStart,
     delivery_end: values.deliveryEnd,
     price_unit_code: values.priceUnitCode,
+    instrument_type: values.instrumentType,
+    option_type: values.optionType,
+    option_style: values.optionStyle,
+    option_expiration_date: values.optionExpirationDate,
+    option_strike_price: values.optionStrikePrice,
     trade_nature: values.tradeNature,
     trade_structure: values.tradeStructure,
     book: values.book,
@@ -418,6 +456,19 @@ function normalizeTradeValues(values: TradeEditorValues): NormalizedTradeValues 
     deliveryStart: normalizeOptionalDateInput(values.deliveryStart),
     deliveryEnd: normalizeOptionalDateInput(values.deliveryEnd),
     priceUnitCode: normalizeOptionalUppercaseText(values.priceUnitCode),
+    instrumentType: values.instrumentType,
+    optionType: tradeInstrumentUsesOptionFields(values.instrumentType)
+      ? normalizeOptionalUppercaseText(values.optionType)
+      : null,
+    optionStyle: tradeInstrumentUsesOptionFields(values.instrumentType)
+      ? normalizeOptionalUppercaseText(values.optionStyle) ?? tradeFormDefaults.optionStyle
+      : null,
+    optionExpirationDate: tradeInstrumentUsesOptionFields(values.instrumentType)
+      ? normalizeOptionalDateInput(values.optionExpirationDate)
+      : null,
+    optionStrikePrice: tradeInstrumentUsesOptionFields(values.instrumentType)
+      ? parseRequiredNumber(values.optionStrikePriceInput)
+      : null,
     tradeNature: values.tradeNature,
     tradeStructure: values.tradeStructure,
     tradeSide: legsDriveTrade ? null : values.tradeSide,
@@ -476,8 +527,17 @@ function validateTradeValues(values: NormalizedTradeValues, rawValues: TradeEdit
   if (rawValues.deliveryEnd.trim() !== '' && !isValidDateOnlyInput(rawValues.deliveryEnd)) {
     return 'Delivery end must be a valid date.'
   }
+  if (
+    rawValues.optionExpirationDate.trim() !== '' &&
+    !isValidDateOnlyInput(rawValues.optionExpirationDate)
+  ) {
+    return 'Option expiration date must be a valid date.'
+  }
   if (rawValues.priceInput.trim() !== '' && values.price === null) {
     return 'Price Differential must be a valid number.'
+  }
+  if (rawValues.optionStrikePriceInput.trim() !== '' && values.optionStrikePrice === null) {
+    return 'Strike Price must be a valid number.'
   }
   if (rawValues.volumeInput.trim() !== '' && values.volume === null) {
     return 'Volume must be a valid number.'
@@ -507,6 +567,26 @@ function validateTradeValues(values: NormalizedTradeValues, rawValues: TradeEdit
     values.deliveryEnd < values.deliveryStart
   ) {
     return 'Delivery end must be on or after delivery start.'
+  }
+  if (tradeInstrumentUsesOptionFields(values.instrumentType)) {
+    if (values.tradeNature !== 'FINANCIAL') {
+      return 'Options must be booked as financial trades.'
+    }
+    if (values.tradeStructure !== 'SINGLE') {
+      return 'Options currently support single-leg trades only.'
+    }
+    if (values.pricingType !== 'FIXED') {
+      return 'Options currently require fixed premium pricing.'
+    }
+    if (values.optionType === null) {
+      return 'Option Type is required for options.'
+    }
+    if (values.optionExpirationDate === null) {
+      return 'Option expiration date is required for options.'
+    }
+    if (values.optionStrikePrice === null) {
+      return 'Strike Price is required for options.'
+    }
   }
 
   if (!tradeStructureSupportsLegs(values.tradeStructure)) {

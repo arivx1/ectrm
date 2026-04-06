@@ -1,4 +1,6 @@
 export const tradeTooltipCopy = {
+  instrument:
+    'Linear trades follow the existing physical or financial path. Option trades capture premium, strike, style, and expiration while staying single-leg in this first slice.',
   structure:
     'Single trades use one top-level side and volume. Swap trades open the leg editor so each leg can carry its own side and volume.',
   side:

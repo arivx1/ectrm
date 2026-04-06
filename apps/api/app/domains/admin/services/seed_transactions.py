@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.admin.services.transaction_scenarios import get_scenarios, list_scenarios
+from apps.api.app.domains.risk.services.option_exposures import rebuild_option_exposures_projection
 from apps.api.app.models.event import Event
+from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.trade import Trade
@@ -34,6 +36,7 @@ def list_transaction_scenarios():
 def delete_existing_transaction_data(db: Session) -> None:
     db.query(TradePriceTerm).delete()
     db.query(TradeLeg).delete()
+    db.query(OptionExposure).delete()
     db.query(Position).delete()
     db.query(Trade).delete()
     db.query(Event).filter(Event.aggregate_type == "trade").delete()
@@ -107,6 +110,7 @@ def seed_transaction_data(
     _upsert_rows(db, TradePriceTerm, "trade_price_term_id", trade_price_term_rows)
     db.flush()
     positions_rebuilt = _rebuild_positions(db)
+    rebuild_option_exposures_projection(db)
     db.commit()
 
     return TransactionSeedSummary(

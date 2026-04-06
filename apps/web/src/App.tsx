@@ -22,6 +22,16 @@ import { TradingWorkspace } from './workspaces/trading/TradingWorkspace'
 import { loadWorkspaceBootstrap } from './entities/app/api'
 import { loadCurrentSession, sendSessionHeartbeat } from './entities/auth/api'
 import { updateTradeWorkflowItem, type UpdateTradeWorkflowItemInput } from './entities/operations/api'
+import {
+  createTradePayment,
+  createTradeInvoice,
+  updateTradePayment,
+  updateTradeInvoice,
+  type CreateTradePaymentInput,
+  type CreateTradeInvoiceInput,
+  type UpdateTradePaymentInput,
+  type UpdateTradeInvoiceInput,
+} from './entities/settlement/api'
 import { submitTradeEvent } from './entities/trade/api'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
 import { ApiError, fetchJson, postJson } from './shared/api'
@@ -36,7 +46,10 @@ import {
 } from './shared/mutation'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
-import { buildCounterpartyCreditRestrictionMessage } from './features/trades/counterpartyCredit'
+import {
+  buildCounterpartyCreditPolicyPreview,
+  buildCounterpartyCreditRestrictionMessage,
+} from './features/trades/counterpartyCredit'
 import {
   buildAmendTradeSubmission,
   buildCreateTradeSubmission,
@@ -59,12 +72,15 @@ import {
   type InspectorTab,
   type LocationRecord,
   type LocationStandards,
+  type OptionExposureRow,
   type PositionRow,
   type DeliveryRecord,
   type PortfolioRecord,
   type PriceIndexRecord,
   type ReferenceRecord,
   type Trade,
+  type TradeInvoiceRecord,
+  type TradePaymentRecord,
   type TradeWorkflowItemRecord,
   type TradingSourceRecord,
   type UnitRecord,
@@ -82,15 +98,19 @@ import {
 import { classForCommodity } from './shared/reference'
 import {
   allocationStatusOptions,
+  buildTradeCreditHoldSummary,
   commodityClassOrder,
   confirmationStatusOptions,
   invoiceStatusOptions,
   nominationStatusOptions,
+  optionStyleOptions,
+  optionTypeOptions,
   paymentStatusOptions,
   pricingTypeOptions,
   pricingStatusOptions,
   settlementStatusOptions,
   tradeAggregateType,
+  tradeInstrumentTypeOptions,
   tradeNatureOptions,
   tradeSideOptions,
   tradeStatusValues,
@@ -193,6 +213,16 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
   return `${window.location.pathname}${search ? `?${search}` : ''}${hash}`
 }
 
+function parseOptionalTradeNumber(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export default function App() {
   const initialRoute = useMemo(() => readAppRouteState(), [])
   const [currentView, setCurrentView] = useState<ViewKey>(initialRoute.view)
@@ -205,8 +235,11 @@ export default function App() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [events, setEvents] = useState<EventRow[]>([])
   const [positions, setPositions] = useState<PositionRow[]>([])
+  const [optionExposures, setOptionExposures] = useState<OptionExposureRow[]>([])
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
   const [tradeWorkflowItems, setTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
+  const [tradeInvoices, setTradeInvoices] = useState<TradeInvoiceRecord[]>([])
+  const [tradePayments, setTradePayments] = useState<TradePaymentRecord[]>([])
   const [books, setBooks] = useState<ReferenceRecord[]>([])
   const [commodities, setCommodities] = useState<ReferenceRecord[]>([])
   const [priceIndices, setPriceIndices] = useState<PriceIndexRecord[]>([])
@@ -228,6 +261,10 @@ export default function App() {
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
   const [workflowMutationError, setWorkflowMutationError] = useState('')
   const [workflowMutationPendingId, setWorkflowMutationPendingId] = useState<number | null>(null)
+  const [invoiceMutationError, setInvoiceMutationError] = useState('')
+  const [invoiceMutationPendingKey, setInvoiceMutationPendingKey] = useState<string | null>(null)
+  const [paymentMutationError, setPaymentMutationError] = useState('')
+  const [paymentMutationPendingKey, setPaymentMutationPendingKey] = useState<string | null>(null)
   const [error, setError] = useState<string>('')
   const [createError, setCreateError] = useState<string>('')
   const [amendError, setAmendError] = useState<string>('')
@@ -273,8 +310,11 @@ export default function App() {
       trades: tradesJson,
       events: eventsJson,
       positions: positionsJson,
+      optionExposures: optionExposuresJson,
       deliveries: deliveriesJson,
       workItems: workItemsJson,
+      invoices: invoicesJson,
+      payments: paymentsJson,
       books: booksJson,
       commodities: commoditiesJson,
       priceIndices: priceIndicesJson,
@@ -298,11 +338,26 @@ export default function App() {
           ? sessionHeaders(currentSession)
           : null,
     })
-    const nextTrades = tradesJson as Trade[]
+    const rawTradeWorkflowItems = workItemsJson as TradeWorkflowItemRecord[]
+    const creditApprovalItemsByTradeId = new Map(
+      rawTradeWorkflowItems
+        .filter((item) => item.workflow_type === 'CREDIT_APPROVAL')
+        .map((item) => [item.trade_id, item] as const),
+    )
+    const nextTrades = (tradesJson as Trade[]).map((trade) => ({
+      ...trade,
+      ...buildTradeCreditHoldSummary(creditApprovalItemsByTradeId.get(trade.trade_id)),
+    }))
     const nextEvents = eventsJson as EventRow[]
     const nextPositions = positionsJson as PositionRow[]
+    const nextOptionExposures = optionExposuresJson as OptionExposureRow[]
     const nextDeliveries = deliveriesJson as DeliveryRecord[]
-    const nextTradeWorkflowItems = workItemsJson as TradeWorkflowItemRecord[]
+    const nextTradeWorkflowItems = rawTradeWorkflowItems.map((item) => ({
+      ...item,
+      ...buildTradeCreditHoldSummary(creditApprovalItemsByTradeId.get(item.trade_id)),
+    }))
+    const nextTradeInvoices = invoicesJson as TradeInvoiceRecord[]
+    const nextTradePayments = paymentsJson as TradePaymentRecord[]
     const nextBooks = booksJson as ReferenceRecord[]
     const nextCommodities = commoditiesJson as ReferenceRecord[]
     const nextPriceIndices = priceIndicesJson as PriceIndexRecord[]
@@ -326,8 +381,11 @@ export default function App() {
     setTrades(nextTrades)
     setEvents(nextEvents)
     setPositions(nextPositions)
+    setOptionExposures(nextOptionExposures)
     setDeliveries(nextDeliveries)
     setTradeWorkflowItems(nextTradeWorkflowItems)
+    setTradeInvoices(nextTradeInvoices)
+    setTradePayments(nextTradePayments)
     setBooks(nextBooks)
     setCommodities(nextCommodities)
     setPriceIndices(nextPriceIndices)
@@ -347,6 +405,7 @@ export default function App() {
     setWeatherSyncStatus(nextWeatherSyncStatus)
     setReferenceDataLoading(false)
     setAppLoading(false)
+    setError('')
     setReferenceDataError('')
 
     if (nextTrades.length > 0) {
@@ -373,6 +432,66 @@ export default function App() {
       setWorkflowMutationError(error instanceof Error ? error.message : 'Failed to update workflow item.')
     } finally {
       setWorkflowMutationPendingId((current) => (current === itemId ? null : current))
+    }
+  }
+
+  async function handleIssueTradeInvoice(tradeId: string, payload: CreateTradeInvoiceInput) {
+    const pendingKey = `trade:${tradeId}`
+    setInvoiceMutationError('')
+    setInvoiceMutationPendingKey(pendingKey)
+
+    try {
+      await createTradeInvoice(appConfig.apiBase, payload)
+      await loadDataRef.current()
+    } catch (error) {
+      setInvoiceMutationError(error instanceof Error ? error.message : 'Failed to issue invoice.')
+    } finally {
+      setInvoiceMutationPendingKey((current) => (current === pendingKey ? null : current))
+    }
+  }
+
+  async function handleUpdateTradeInvoice(invoiceId: number, payload: UpdateTradeInvoiceInput) {
+    const pendingKey = `invoice:${invoiceId}`
+    setInvoiceMutationError('')
+    setInvoiceMutationPendingKey(pendingKey)
+
+    try {
+      await updateTradeInvoice(appConfig.apiBase, invoiceId, payload)
+      await loadDataRef.current()
+    } catch (error) {
+      setInvoiceMutationError(error instanceof Error ? error.message : 'Failed to update invoice.')
+    } finally {
+      setInvoiceMutationPendingKey((current) => (current === pendingKey ? null : current))
+    }
+  }
+
+  async function handleCreateTradePayment(invoiceId: number, payload: CreateTradePaymentInput) {
+    const pendingKey = `invoice:${invoiceId}:new`
+    setPaymentMutationError('')
+    setPaymentMutationPendingKey(pendingKey)
+
+    try {
+      await createTradePayment(appConfig.apiBase, payload)
+      await loadDataRef.current()
+    } catch (error) {
+      setPaymentMutationError(error instanceof Error ? error.message : 'Failed to create payment.')
+    } finally {
+      setPaymentMutationPendingKey((current) => (current === pendingKey ? null : current))
+    }
+  }
+
+  async function handleUpdateTradePayment(paymentId: number, payload: UpdateTradePaymentInput) {
+    const pendingKey = `payment:${paymentId}`
+    setPaymentMutationError('')
+    setPaymentMutationPendingKey(pendingKey)
+
+    try {
+      await updateTradePayment(appConfig.apiBase, paymentId, payload)
+      await loadDataRef.current()
+    } catch (error) {
+      setPaymentMutationError(error instanceof Error ? error.message : 'Failed to update payment.')
+    } finally {
+      setPaymentMutationPendingKey((current) => (current === pendingKey ? null : current))
     }
   }
 
@@ -420,6 +539,11 @@ export default function App() {
         setReferenceDataLoading(false)
         setAppLoading(false)
         if (error instanceof ApiError) {
+          setError(error.message)
+          return
+        }
+
+        if (error instanceof Error) {
           setError(error.message)
           return
         }
@@ -750,6 +874,16 @@ export default function App() {
   const {
     tradeIdInput,
     setTradeIdInput,
+    tradeInstrumentTypeInput,
+    setTradeInstrumentTypeInput,
+    optionTypeInput,
+    setOptionTypeInput,
+    optionStyleInput,
+    setOptionStyleInput,
+    optionExpirationDateInput,
+    setOptionExpirationDateInput,
+    optionStrikePriceInput,
+    setOptionStrikePriceInput,
     tradeNatureInput,
     setTradeNatureInput,
     tradeStructureInput,
@@ -849,6 +983,16 @@ export default function App() {
     setAmendDeliveryEndInput,
     amendPriceUnitInput,
     setAmendPriceUnitInput,
+    amendTradeInstrumentTypeInput,
+    setAmendTradeInstrumentTypeInput,
+    amendOptionTypeInput,
+    setAmendOptionTypeInput,
+    amendOptionStyleInput,
+    setAmendOptionStyleInput,
+    amendOptionExpirationDateInput,
+    setAmendOptionExpirationDateInput,
+    amendOptionStrikePriceInput,
+    setAmendOptionStrikePriceInput,
     amendTradeNatureInput,
     setAmendTradeNatureInput,
     amendTradeStructureInput,
@@ -902,6 +1046,48 @@ export default function App() {
     removeDraftLeg: removeAmendDraftLeg,
   } = amendForm
 
+  const createCounterpartyCreditPolicyPreview = useMemo(
+    () =>
+      buildCounterpartyCreditPolicyPreview({
+        profiles: counterpartyCreditProfiles,
+        trades,
+        counterpartyCode: counterpartyInput,
+        tradeCurrencyCode: tradeCurrencyInput,
+        price: parseOptionalTradeNumber(priceInput),
+        volume: parseOptionalTradeNumber(volumeInput),
+      }),
+    [
+      counterpartyCreditProfiles,
+      counterpartyInput,
+      priceInput,
+      tradeCurrencyInput,
+      trades,
+      volumeInput,
+    ],
+  )
+
+  const amendCounterpartyCreditPolicyPreview = useMemo(
+    () =>
+      buildCounterpartyCreditPolicyPreview({
+        profiles: counterpartyCreditProfiles,
+        trades,
+        tradeId: selectedTrade?.trade_id ?? null,
+        counterpartyCode: amendCounterpartyInput,
+        tradeCurrencyCode: amendTradeCurrencyInput,
+        price: parseOptionalTradeNumber(amendPriceInput),
+        volume: parseOptionalTradeNumber(amendVolumeInput),
+      }),
+    [
+      amendCounterpartyInput,
+      amendPriceInput,
+      amendTradeCurrencyInput,
+      amendVolumeInput,
+      counterpartyCreditProfiles,
+      selectedTrade?.trade_id,
+      trades,
+    ],
+  )
+
   const amendmentPreview = useMemo(() => {
     if (!selectedTrade) {
       return {
@@ -925,6 +1111,11 @@ export default function App() {
       deliveryStart: amendDeliveryStartInput,
       deliveryEnd: amendDeliveryEndInput,
       priceUnitCode: amendPriceUnitInput,
+      instrumentType: amendTradeInstrumentTypeInput,
+      optionType: amendOptionTypeInput,
+      optionStyle: amendOptionStyleInput,
+      optionExpirationDate: amendOptionExpirationDateInput,
+      optionStrikePriceInput: amendOptionStrikePriceInput,
       tradeNature: amendTradeNatureInput,
       tradeStructure: amendTradeStructureInput,
       tradeSide: amendTradeSideInput,
@@ -963,6 +1154,10 @@ export default function App() {
     amendInvoiceStatusInput,
     amendLocationInput,
     amendNominationStatusInput,
+    amendOptionExpirationDateInput,
+    amendOptionStrikePriceInput,
+    amendOptionStyleInput,
+    amendOptionTypeInput,
     amendPaymentStatusInput,
     amendPriceUnitInput,
     amendQualitySpecInput,
@@ -976,6 +1171,7 @@ export default function App() {
     amendSourceSystemInput,
     amendTradeCurrencyInput,
     amendTradeDateInput,
+    amendTradeInstrumentTypeInput,
     amendTradeNatureInput,
     amendTradeSideInput,
     amendTradeStructureInput,
@@ -1265,6 +1461,10 @@ export default function App() {
       setCreateError(counterpartyCreditRestriction)
       return
     }
+    if (createCounterpartyCreditPolicyPreview?.tone === 'error') {
+      setCreateError(createCounterpartyCreditPolicyPreview.message)
+      return
+    }
 
     const submission = buildCreateTradeSubmission({
       tradeId: tradeIdInput,
@@ -1281,6 +1481,11 @@ export default function App() {
       deliveryStart: deliveryStartInput,
       deliveryEnd: deliveryEndInput,
       priceUnitCode: priceUnitInput,
+      instrumentType: tradeInstrumentTypeInput,
+      optionType: optionTypeInput,
+      optionStyle: optionStyleInput,
+      optionExpirationDate: optionExpirationDateInput,
+      optionStrikePriceInput,
       tradeNature: tradeNatureInput,
       tradeStructure: tradeStructureInput,
       tradeSide: tradeSideInput,
@@ -1356,6 +1561,10 @@ export default function App() {
       setAmendError(counterpartyCreditRestriction)
       return
     }
+    if (amendCounterpartyCreditPolicyPreview?.tone === 'error') {
+      setAmendError(amendCounterpartyCreditPolicyPreview.message)
+      return
+    }
 
     const submission = buildAmendTradeSubmission(selectedTrade, selectedTradeEvents, {
       externalTradeId: amendExternalTradeIdInput,
@@ -1371,6 +1580,11 @@ export default function App() {
       deliveryStart: amendDeliveryStartInput,
       deliveryEnd: amendDeliveryEndInput,
       priceUnitCode: amendPriceUnitInput,
+      instrumentType: amendTradeInstrumentTypeInput,
+      optionType: amendOptionTypeInput,
+      optionStyle: amendOptionStyleInput,
+      optionExpirationDate: amendOptionExpirationDateInput,
+      optionStrikePriceInput: amendOptionStrikePriceInput,
       tradeNature: amendTradeNatureInput,
       tradeStructure: amendTradeStructureInput,
       tradeSide: amendTradeSideInput,
@@ -1457,6 +1671,16 @@ export default function App() {
     onSubmit: handleCreateTrade,
     tradeIdInput,
     setTradeIdInput,
+    tradeInstrumentTypeInput,
+    setTradeInstrumentTypeInput,
+    optionTypeInput,
+    setOptionTypeInput,
+    optionStyleInput,
+    setOptionStyleInput,
+    optionExpirationDateInput,
+    setOptionExpirationDateInput,
+    optionStrikePriceInput,
+    setOptionStrikePriceInput,
     tradeNatureInput,
     setTradeNatureInput,
     tradeStructureInput,
@@ -1531,6 +1755,10 @@ export default function App() {
     referenceDataLoading,
     hasReferenceOptions,
     createError,
+    counterpartyCreditPolicyPreview: createCounterpartyCreditPolicyPreview,
+    tradeInstrumentTypeOptions,
+    optionTypeOptions,
+    optionStyleOptions,
     tradeNatureOptions,
     tradeStructureOptions,
     tradeSideOptions,
@@ -1737,7 +1965,15 @@ export default function App() {
                 <div className="selection-pill-row">
                   <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
                   <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
+                  {selectedTrade.credit_hold_active ? (
+                    <span className="status-pill status-pill-blocked">
+                      Credit {selectedTrade.credit_approval_status?.replaceAll('_', ' ') ?? 'HOLD'}
+                    </span>
+                  ) : null}
                 </div>
+                {selectedTrade.credit_hold_active ? (
+                  <p className="field-error">{selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}</p>
+                ) : null}
                 <div className="side-selection-grid">
                   <article className="side-stat">
                     <span>Price</span>
@@ -1919,6 +2155,16 @@ export default function App() {
             amendPriceUnitInput={amendPriceUnitInput}
             setAmendPriceUnitInput={setAmendPriceUnitInput}
             amendPriceUnitOptions={amendPriceUnitOptions}
+            amendTradeInstrumentTypeInput={amendTradeInstrumentTypeInput}
+            setAmendTradeInstrumentTypeInput={setAmendTradeInstrumentTypeInput}
+            amendOptionTypeInput={amendOptionTypeInput}
+            setAmendOptionTypeInput={setAmendOptionTypeInput}
+            amendOptionStyleInput={amendOptionStyleInput}
+            setAmendOptionStyleInput={setAmendOptionStyleInput}
+            amendOptionExpirationDateInput={amendOptionExpirationDateInput}
+            setAmendOptionExpirationDateInput={setAmendOptionExpirationDateInput}
+            amendOptionStrikePriceInput={amendOptionStrikePriceInput}
+            setAmendOptionStrikePriceInput={setAmendOptionStrikePriceInput}
             amendBookInput={amendBookInput}
             setAmendBookInput={setAmendBookInput}
             amendBookOptions={amendBookOptions}
@@ -1973,6 +2219,10 @@ export default function App() {
             amending={amending}
             cancelling={cancelling}
             amendError={amendError}
+            counterpartyCreditPolicyPreview={amendCounterpartyCreditPolicyPreview}
+            tradeInstrumentTypeOptions={tradeInstrumentTypeOptions}
+            optionTypeOptions={optionTypeOptions}
+            optionStyleOptions={optionStyleOptions}
             tradeNatureOptions={tradeNatureOptions}
             tradeStructureOptions={tradeStructureOptions}
             tradeSideOptions={tradeSideOptions}
@@ -2009,10 +2259,12 @@ export default function App() {
             activeTrades={activeTrades}
             positionsByClass={positionsByClass}
             positionsWithClass={positionsWithClass}
+            optionExposures={optionExposures}
             formatCommodityClass={formatCommodityClass}
             formatNumber={formatNumber}
             formatMoney={formatMoney}
             formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
             onOpenTrade={navigateToTrade}
           />
         )}
@@ -2075,14 +2327,23 @@ export default function App() {
           <SettlementWorkspace
             authSession={authSession}
             activeTrades={activeTrades}
+            invoices={tradeInvoices}
+            payments={tradePayments}
             workItems={tradeWorkflowItems}
             formatCommodityClass={formatCommodityClass}
+            formatMoney={formatMoney}
             formatNumber={formatNumber}
             formatDate={formatDate}
             formatDateOnly={formatDateOnly}
-            workflowMutationError={workflowMutationError}
-            workflowMutationPendingId={workflowMutationPendingId}
+            invoiceMutationError={invoiceMutationError}
+            invoiceMutationPendingKey={invoiceMutationPendingKey}
+            paymentMutationError={paymentMutationError}
+            paymentMutationPendingKey={paymentMutationPendingKey}
             onOpenTrade={navigateToTrade}
+            onIssueInvoice={handleIssueTradeInvoice}
+            onSaveInvoice={handleUpdateTradeInvoice}
+            onCreatePayment={handleCreateTradePayment}
+            onSavePayment={handleUpdateTradePayment}
             onSaveWorkflowItem={handleSaveWorkflowItem}
           />
         )}

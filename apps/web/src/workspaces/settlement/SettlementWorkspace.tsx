@@ -1,20 +1,36 @@
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
+import type {
+  CreateTradeInvoiceInput,
+  CreateTradePaymentInput,
+  UpdateTradeInvoiceInput,
+  UpdateTradePaymentInput,
+} from '../../entities/settlement/api'
 import { TileLayout } from '../../shared/ui/TileLayout'
-import type { Trade, TradeWorkflowItemRecord } from '../../shared/models'
+import type { Trade, TradeInvoiceRecord, TradePaymentRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
-import { WorkflowQueueEditor } from '../operations/WorkflowQueueEditor'
+import { SettlementInvoiceBoard } from './SettlementInvoiceBoard'
+import { SettlementPaymentBoard } from './SettlementPaymentBoard'
 
 type SettlementWorkspaceProps = {
   authSession: StoredAuthSession | null
   activeTrades: Trade[]
+  invoices: TradeInvoiceRecord[]
+  payments: TradePaymentRecord[]
   workItems: TradeWorkflowItemRecord[]
   formatCommodityClass: (value: string) => string
+  formatMoney: (value: number | null, currencyCode?: string | null) => string
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
-  workflowMutationError: string
-  workflowMutationPendingId: number | null
+  invoiceMutationError: string
+  invoiceMutationPendingKey: string | null
+  paymentMutationError: string
+  paymentMutationPendingKey: string | null
   onOpenTrade: (tradeId: string) => void
+  onIssueInvoice: (tradeId: string, payload: CreateTradeInvoiceInput) => Promise<void>
+  onSaveInvoice: (invoiceId: number, payload: UpdateTradeInvoiceInput) => Promise<void>
+  onCreatePayment: (invoiceId: number, payload: CreateTradePaymentInput) => Promise<void>
+  onSavePayment: (paymentId: number, payload: UpdateTradePaymentInput) => Promise<void>
   onSaveWorkflowItem: (itemId: number, payload: UpdateTradeWorkflowItemInput) => Promise<void>
 }
 
@@ -32,6 +48,9 @@ function ageInDays(value: string | null | undefined): number | null {
 }
 
 function settlementPriority(trade: Trade): number {
+  if (trade.credit_hold_active) {
+    return 0
+  }
   if (
     trade.settlement_status === 'DISPUTED' ||
     trade.invoice_status === 'DISPUTED' ||
@@ -51,17 +70,28 @@ function settlementPriority(trade: Trade): number {
 export function SettlementWorkspace({
   authSession,
   activeTrades,
+  invoices,
+  payments,
   workItems,
   formatCommodityClass,
+  formatMoney,
   formatNumber,
   formatDate,
   formatDateOnly,
-  workflowMutationError,
-  workflowMutationPendingId,
+  invoiceMutationError,
+  invoiceMutationPendingKey,
+  paymentMutationError,
+  paymentMutationPendingKey,
   onOpenTrade,
-  onSaveWorkflowItem,
+  onIssueInvoice,
+  onSaveInvoice,
+  onCreatePayment,
+  onSavePayment,
 }: SettlementWorkspaceProps) {
+  const invoiceByTradeId = new Map(invoices.map((invoice) => [invoice.trade_id, invoice]))
   const settlementWorkItems = workItems.filter((item) => item.queue === 'settlement')
+  const invoiceWorkItems = settlementWorkItems.filter((item) => item.workflow_type === 'INVOICE')
+  const paymentWorkItems = settlementWorkItems.filter((item) => item.workflow_type === 'PAYMENT')
   const openSettlementWorkItems = settlementWorkItems.filter((item) => !item.is_closed)
   const settlementExceptionItems = openSettlementWorkItems.filter(
     (item) => item.is_overdue || item.status === 'DISPUTED' || item.status === 'OVERDUE',
@@ -87,13 +117,18 @@ export function SettlementWorkspace({
 
   const disputedTrades = activeTrades.filter(
     (trade) =>
+      trade.credit_hold_active ||
       trade.settlement_status === 'DISPUTED' ||
       trade.invoice_status === 'DISPUTED' ||
       trade.payment_status === 'OVERDUE',
   )
-  const invoicePendingCount = activeTrades.filter(
-    (trade) => !['NOT_REQUIRED', 'ISSUED', 'APPROVED'].includes(trade.invoice_status),
-  ).length
+  const invoiceQueueTrades = openSettlementTrades.filter(
+    (trade) => trade.invoice_status !== 'NOT_REQUIRED' || invoiceByTradeId.has(trade.trade_id),
+  )
+  const paymentQueueInvoices = invoiceQueueTrades
+    .map((trade) => invoiceByTradeId.get(trade.trade_id))
+    .filter((invoice): invoice is TradeInvoiceRecord => Boolean(invoice))
+  const invoicePendingCount = invoiceQueueTrades.filter((trade) => !invoiceByTradeId.has(trade.trade_id)).length
   const paymentDueCount = activeTrades.filter((trade) => ['DUE', 'OVERDUE'].includes(trade.payment_status)).length
   const settledCount = activeTrades.filter(
     (trade) =>
@@ -130,9 +165,9 @@ export function SettlementWorkspace({
                   <p>Invoice and payment workflow tickets still open on the active trade book.</p>
                 </article>
                 <article className="dashboard-report-card">
-                  <span>Invoice Pending</span>
+                  <span>Unissued Invoices</span>
                   <strong>{formatNumber(invoicePendingCount, 0)}</strong>
-                  <p>Active trades still waiting on issued or approved invoice status.</p>
+                  <p>Trades that still need their first settlement invoice record issued from the ledger.</p>
                 </article>
                 <article className="dashboard-report-card">
                   <span>Due / Overdue</span>
@@ -226,22 +261,74 @@ export function SettlementWorkspace({
           id: 'settlement-queue',
           eyebrow: 'Queue',
           title: 'Open Settlement Queue',
-          description: 'Editable invoice and payment queue cards so settlement work can actually be assigned and advanced.',
+          description: 'Issue invoices first, then schedule and reconcile cash receipts against those invoices on the payment ledger.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: openSettlementWorkItems.length > 0 ? (
-            <WorkflowQueueEditor
-              key={openSettlementWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
-              authSession={authSession}
-              items={openSettlementWorkItems}
-              savingItemId={workflowMutationPendingId}
-              saveError={workflowMutationError}
-              formatCommodityClass={formatCommodityClass}
-              formatDate={formatDate}
-              formatDateOnly={formatDateOnly}
-              onOpenTrade={onOpenTrade}
-              onSaveItem={onSaveWorkflowItem}
-            />
+          content: invoiceQueueTrades.length > 0 || paymentQueueInvoices.length > 0 ? (
+            <div className="settlement-queue-stack">
+              {invoiceQueueTrades.length > 0 ? (
+                <section className="settlement-queue-section">
+                  <div className="scheduler-section-banner">
+                    <div className="scheduler-section-copy">
+                      <strong>Invoice Ledger</strong>
+                      <p>Dedicated invoice records now drive invoice and settlement rollups for each active trade.</p>
+                    </div>
+                  </div>
+                  <SettlementInvoiceBoard
+                    key={invoiceQueueTrades
+                      .map((trade) => {
+                        const invoice = invoiceByTradeId.get(trade.trade_id)
+                        return `${trade.trade_id}:${invoice?.version ?? 'new'}`
+                      })
+                      .join('|')}
+                    authSession={authSession}
+                    trades={invoiceQueueTrades}
+                    invoices={invoices}
+                    invoiceWorkItems={invoiceWorkItems}
+                    saveError={invoiceMutationError}
+                    savingKey={invoiceMutationPendingKey}
+                    formatCommodityClass={formatCommodityClass}
+                    formatDate={formatDate}
+                    formatDateOnly={formatDateOnly}
+                    formatMoney={formatMoney}
+                    onIssueInvoice={onIssueInvoice}
+                    onOpenTrade={onOpenTrade}
+                    onSaveInvoice={onSaveInvoice}
+                  />
+                </section>
+              ) : null}
+              {paymentQueueInvoices.length > 0 ? (
+                <section className="settlement-queue-section">
+                  <div className="scheduler-section-banner">
+                    <div className="scheduler-section-copy">
+                      <strong>Payment Ledger</strong>
+                      <p>Cash collection and settlement now run from dedicated payment records instead of a status-only queue row.</p>
+                    </div>
+                  </div>
+                  <SettlementPaymentBoard
+                    key={[
+                      paymentQueueInvoices.map((invoice) => `${invoice.invoice_id}:${invoice.version}`).join('|'),
+                      payments.map((payment) => `${payment.payment_id}:${payment.version}`).join('|'),
+                    ].join('|')}
+                    authSession={authSession}
+                    invoices={paymentQueueInvoices}
+                    payments={payments.filter((payment) =>
+                      paymentQueueInvoices.some((invoice) => invoice.invoice_id === payment.invoice_id),
+                    )}
+                    paymentWorkItems={paymentWorkItems}
+                    saveError={paymentMutationError}
+                    savingKey={paymentMutationPendingKey}
+                    formatCommodityClass={formatCommodityClass}
+                    formatDate={formatDate}
+                    formatDateOnly={formatDateOnly}
+                    formatMoney={formatMoney}
+                    onCreatePayment={onCreatePayment}
+                    onOpenTrade={onOpenTrade}
+                    onSavePayment={onSavePayment}
+                  />
+                </section>
+              ) : null}
+            </div>
           ) : (
             <div className="empty-state">
               <strong>No open settlement rows</strong>

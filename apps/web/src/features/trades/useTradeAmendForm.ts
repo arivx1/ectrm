@@ -15,6 +15,7 @@ import type {
 import { ensureCurrentOption } from '../../shared/reference'
 import {
   pricingTypeRequiresPriceIndex,
+  tradeInstrumentUsesOptionFields,
   tradeSideOptions,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
@@ -158,7 +159,7 @@ export function useTradeAmendForm(
   )
 
   const resolvedPriceIndexInput =
-    !pricingTypeRequiresPriceIndex(draft.pricingTypeInput)
+    tradeInstrumentUsesOptionFields(draft.tradeInstrumentTypeInput) || !pricingTypeRequiresPriceIndex(draft.pricingTypeInput)
       ? ''
       : amendPriceIndexOptions.some((priceIndex) => priceIndex.code === draft.priceIndexInput)
         ? draft.priceIndexInput
@@ -185,6 +186,17 @@ export function useTradeAmendForm(
 
   function setDraftField<Key extends keyof AmendDraft>(field: Key, value: AmendDraft[Key]) {
     updateDraft((current) => ({ ...current, [field]: value }))
+  }
+
+  function setTradeInstrumentTypeInput(value: string) {
+    updateDraft((current) => ({
+      ...current,
+      tradeInstrumentTypeInput: value,
+      tradeNatureInput: tradeInstrumentUsesOptionFields(value) ? 'FINANCIAL' : current.tradeNatureInput,
+      tradeStructureInput: tradeInstrumentUsesOptionFields(value) ? 'SINGLE' : current.tradeStructureInput,
+      pricingTypeInput: tradeInstrumentUsesOptionFields(value) ? 'FIXED' : current.pricingTypeInput,
+      priceIndexInput: tradeInstrumentUsesOptionFields(value) ? '' : current.priceIndexInput,
+    }))
   }
 
   function updateDraftLeg(index: number, field: keyof TradeLegDraft, value: string) {
@@ -252,6 +264,16 @@ export function useTradeAmendForm(
     amendPriceUnitInput: resolvedPriceUnitInput,
     setAmendPriceUnitInput: (value: string) => setDraftField('priceUnitInput', value),
     amendPriceUnitOptions,
+    amendTradeInstrumentTypeInput: draft.tradeInstrumentTypeInput,
+    setAmendTradeInstrumentTypeInput: setTradeInstrumentTypeInput,
+    amendOptionTypeInput: draft.optionTypeInput,
+    setAmendOptionTypeInput: (value: string) => setDraftField('optionTypeInput', value),
+    amendOptionStyleInput: draft.optionStyleInput,
+    setAmendOptionStyleInput: (value: string) => setDraftField('optionStyleInput', value),
+    amendOptionExpirationDateInput: draft.optionExpirationDateInput,
+    setAmendOptionExpirationDateInput: (value: string) => setDraftField('optionExpirationDateInput', value),
+    amendOptionStrikePriceInput: draft.optionStrikePriceInput,
+    setAmendOptionStrikePriceInput: (value: string) => setDraftField('optionStrikePriceInput', value),
     amendTradeNatureInput: draft.tradeNatureInput,
     setAmendTradeNatureInput: (value: string) => setDraftField('tradeNatureInput', value),
     amendTradeStructureInput: draft.tradeStructureInput,

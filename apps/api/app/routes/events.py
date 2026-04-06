@@ -12,7 +12,22 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.operations.services.trade_credit_hold import (
+    CREDIT_HOLD_GATED_TRADE_FIELDS,
+)
+from apps.api.app.domains.operations.services.trade_credit_hold import (
+    format_trade_credit_hold_message,
+)
+from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
+from apps.api.app.domains.operations.services.settlement_payments import trade_has_payment_records
+from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
+from apps.api.app.domains.risk.services.option_exposures import sync_option_exposures_for_trade_change
+from apps.api.app.domains.operations.services.settlement_invoices import trade_has_invoice_record
+from apps.api.app.domains.reports.services.counterparty_credit import (
+    CounterpartyCreditTradeInput,
+    evaluate_counterparty_credit_policy,
+)
 from apps.api.app.domains.reference_data.services.counterparty_standards import (
     counterparty_credit_status_allows_trading,
     normalize_counterparty_credit_status,
@@ -30,25 +45,39 @@ from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.event import EventCreate, EventOut
 from apps.api.app.shared.enums import (
     AllocationStatus,
     ConfirmationStatus,
+    CreditApprovalStatus,
     InvoiceStatus,
     NominationStatus,
+    OptionStyle,
+    OptionType,
     PaymentStatus,
     PricingStatus,
     PricingType,
     SettlementStatus,
+    TradeInstrumentType,
     TradeNature,
     TradeSide,
     TradeStructure,
+    TradeWorkflowType,
 )
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 ZERO = Decimal("0")
 DEFAULT_SOURCE_SYSTEM = "ETRM"
+CREDIT_HOLD_FIELD_LABELS = {
+    "confirmation_status": "confirmation",
+    "nomination_status": "nomination",
+    "allocation_status": "allocation",
+    "invoice_status": "invoice",
+    "payment_status": "payment",
+    "settlement_status": "settlement",
+}
 
 
 def trade_snapshot(db: Session, trade: Trade | None) -> dict[str, object] | None:
@@ -64,12 +93,26 @@ def trade_snapshot(db: Session, trade: Trade | None) -> dict[str, object] | None
 
     return {
         "trade_id": trade.trade_id,
+        "instrument_type": trade.instrument_type,
+        "book": trade.book,
+        "portfolio": trade.portfolio,
+        "counterparty": trade.counterparty,
         "commodity_class": trade.commodity_class,
         "commodity": trade.commodity,
         "trade_structure": trade.trade_structure,
         "trade_side": trade.trade_side,
+        "trade_currency_code": trade.trade_currency_code,
+        "price_unit_code": trade.price_unit_code,
+        "price": Decimal(str(trade.price or 0)) if trade.price is not None else None,
         "volume": Decimal(str(trade.volume or 0)),
+        "option_type": trade.option_type,
+        "option_style": trade.option_style,
+        "option_strike_price": Decimal(str(trade.option_strike_price))
+        if trade.option_strike_price is not None
+        else None,
+        "option_expiration_date": trade.option_expiration_date,
         "status": trade.status,
+        "updated_at": trade.updated_at,
         "legs": [
             {
                 "commodity": leg.commodity_code,
@@ -90,7 +133,16 @@ def signed_volume(side: object | None, quantity: object | None) -> Decimal:
 
 
 def active_volume_by_commodity(trade: dict[str, object] | None) -> dict[str, Decimal]:
-    if trade is None or trade.get("status") == "CANCELLED":
+    instrument_type = (
+        str(trade.get("instrument_type") or TradeInstrumentType.LINEAR.value).strip().upper()
+        if trade is not None
+        else None
+    )
+    if (
+        trade is None
+        or trade.get("status") == "CANCELLED"
+        or instrument_type == TradeInstrumentType.OPTION.value
+    ):
         return {}
 
     if trade.get("trade_structure") == TradeStructure.SWAP.value:
@@ -171,6 +223,20 @@ def normalize_trade_nature(value: object | None) -> str:
     return normalized
 
 
+def normalize_instrument_type(value: object | None) -> str:
+    normalized = str(value or TradeInstrumentType.LINEAR.value).strip().upper()
+    valid_values = {instrument_type.value for instrument_type in TradeInstrumentType}
+    if normalized not in valid_values:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Instrument type '{normalized}' is invalid. Expected one of: "
+                f"{', '.join(sorted(valid_values))}"
+            ),
+        )
+    return normalized
+
+
 def normalize_trade_structure(value: object | None) -> str:
     normalized = str(value or TradeStructure.SINGLE.value).strip().upper()
     valid_values = {trade_structure.value for trade_structure in TradeStructure}
@@ -193,6 +259,38 @@ def normalize_trade_side(value: object | None) -> str:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
                 f"Trade side '{normalized}' is invalid. Expected one of: "
+                f"{', '.join(sorted(valid_values))}"
+            ),
+        )
+    return normalized
+
+
+def normalize_option_type(value: object | None) -> str | None:
+    normalized = normalize_optional_text(value, uppercase=True)
+    if normalized is None:
+        return None
+    valid_values = {option_type.value for option_type in OptionType}
+    if normalized not in valid_values:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Option type '{normalized}' is invalid. Expected one of: "
+                f"{', '.join(sorted(valid_values))}"
+            ),
+        )
+    return normalized
+
+
+def normalize_option_style(value: object | None) -> str | None:
+    normalized = normalize_optional_text(value, uppercase=True)
+    if normalized is None:
+        return None
+    valid_values = {option_style.value for option_style in OptionStyle}
+    if normalized not in valid_values:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Option style '{normalized}' is invalid. Expected one of: "
                 f"{', '.join(sorted(valid_values))}"
             ),
         )
@@ -391,6 +489,110 @@ def validate_trade_measurements(
         )
 
 
+def validate_option_fields(
+    *,
+    instrument_type: str,
+    trade_nature: str,
+    trade_structure: str,
+    pricing_type: str,
+    option_type: object | None,
+    option_style: object | None,
+    option_strike_price: object | None,
+    option_expiration_date: object | None,
+) -> tuple[str | None, str | None, float | None, date | None]:
+    normalized_option_type = normalize_option_type(option_type)
+    normalized_option_style = normalize_option_style(option_style)
+    normalized_option_strike_price = normalize_optional_number(
+        option_strike_price,
+        field_name="Option strike price",
+    )
+    normalized_option_expiration_date = parse_optional_date(
+        option_expiration_date,
+        field_name="option_expiration_date",
+    )
+
+    if instrument_type != TradeInstrumentType.OPTION.value:
+        if any(
+            value is not None
+            for value in (
+                normalized_option_type,
+                normalized_option_style,
+                normalized_option_strike_price,
+                normalized_option_expiration_date,
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Option fields can only be set when instrument_type is OPTION",
+            )
+        return None, None, None, None
+
+    if trade_nature != TradeNature.FINANCIAL.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Options must be booked as FINANCIAL trades",
+        )
+    if trade_structure != TradeStructure.SINGLE.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Options currently support SINGLE structure only",
+        )
+    if pricing_type != PricingType.FIXED.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Options currently require FIXED pricing for premium capture",
+        )
+    if normalized_option_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="option_type is required when instrument_type is OPTION",
+        )
+    if normalized_option_strike_price is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="option_strike_price is required when instrument_type is OPTION",
+        )
+    if normalized_option_expiration_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="option_expiration_date is required when instrument_type is OPTION",
+        )
+
+    return (
+        normalized_option_type,
+        normalized_option_style or OptionStyle.AMERICAN.value,
+        normalized_option_strike_price,
+        normalized_option_expiration_date,
+        )
+
+
+def reject_invoice_projection_override(
+    db: Session,
+    *,
+    trade_id: str,
+    payload_data: dict[str, object],
+) -> None:
+    payload_fields = set(payload_data)
+
+    if {"invoice_status", "settlement_status"} & payload_fields and trade_has_invoice_record(db, trade_id=trade_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Invoice and settlement statuses are now derived from settlement invoices for this trade. "
+                "Update the invoice record from the Settlement workspace instead of amending the trade header."
+            ),
+        )
+
+    if "payment_status" in payload_fields and trade_has_payment_records(db, trade_id=trade_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Payment status is now derived from settlement payments for this trade. "
+                "Update the payment record from the Settlement workspace instead of amending the trade header."
+            ),
+        )
+
+
 def require_active_book(db: Session, book_code: object | None) -> str:
     normalized_book_code = str(book_code or "").strip().upper()
     if not normalized_book_code:
@@ -481,6 +683,103 @@ def require_active_counterparty(db: Session, counterparty_code: object | None) -
         )
 
     return normalized_counterparty_code
+
+
+def _format_counterparty_credit_limit_message(policy_result: dict[str, object]) -> str:
+    counterparty_code = str(policy_result["counterparty_code"])
+    limit_currency_code = str(policy_result["limit_currency_code"])
+    projected_exposure_amount = float(policy_result["projected_exposure_amount"])
+    limit_amount = float(policy_result["limit_amount"])
+    projected_utilization_percent = float(policy_result["projected_utilization_percent"])
+    breach_action = str(policy_result["breach_action"])
+    return (
+        f"Counterparty '{counterparty_code}' would exceed its approved credit limit: projected exposure "
+        f"{limit_currency_code} {projected_exposure_amount:,.2f} versus limit "
+        f"{limit_currency_code} {limit_amount:,.2f} ({projected_utilization_percent:.1f}% utilization). "
+        f"Breach action is '{breach_action}'."
+    )
+
+
+def _requested_credit_hold_blocked_fields(
+    trade: Trade,
+    payload_data: dict[str, object],
+) -> list[str]:
+    blocked_fields: list[str] = []
+    for field_name in CREDIT_HOLD_GATED_TRADE_FIELDS:
+        if field_name not in payload_data:
+            continue
+        next_value = payload_data.get(field_name)
+        if next_value is None:
+            continue
+        normalized_next_value = str(next_value).strip().upper()
+        current_value = str(getattr(trade, field_name) or "").strip().upper()
+        if normalized_next_value and normalized_next_value != current_value:
+            blocked_fields.append(CREDIT_HOLD_FIELD_LABELS[field_name])
+    return blocked_fields
+
+
+def _sync_credit_approval_workflow_item(
+    db: Session,
+    *,
+    trade: Trade,
+    actor_id: str,
+    now: datetime,
+    policy_result: dict[str, object] | None,
+) -> None:
+    existing_item = db.execute(
+        select(TradeWorkflowItem).where(
+            TradeWorkflowItem.trade_id == trade.trade_id,
+            TradeWorkflowItem.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value,
+        )
+    ).scalars().first()
+
+    requires_approval = bool(
+        policy_result is not None
+        and policy_result.get("limit_breached")
+        and policy_result.get("breach_action") == "REQUIRE_APPROVAL"
+    )
+    if requires_approval:
+        if existing_item is not None and existing_item.status in {
+            CreditApprovalStatus.APPROVED.value,
+            CreditApprovalStatus.REJECTED.value,
+        }:
+            return
+        notes = (
+            f"{_format_counterparty_credit_limit_message(policy_result)} "
+            "Trade booking is allowed, but credit review is required before the breach can be accepted."
+        )
+        create_trade_workflow_item(
+            db,
+            trade_id=trade.trade_id,
+            workflow_type=TradeWorkflowType.CREDIT_APPROVAL.value,
+            actor_id=actor_id,
+            status=CreditApprovalStatus.PENDING_REVIEW.value,
+            notes=notes,
+            now=now,
+        )
+        return
+
+    if existing_item is None or existing_item.status in {
+        CreditApprovalStatus.APPROVED.value,
+        CreditApprovalStatus.NOT_REQUIRED.value,
+    }:
+        return
+
+    notes = (
+        f"{existing_item.notes}\n"
+        "Closed automatically because projected exposure is now within the approved credit tolerance."
+        if existing_item.notes
+        else "Closed automatically because projected exposure is now within the approved credit tolerance."
+    )
+    create_trade_workflow_item(
+        db,
+        trade_id=trade.trade_id,
+        workflow_type=TradeWorkflowType.CREDIT_APPROVAL.value,
+        actor_id=actor_id,
+        status=CreditApprovalStatus.NOT_REQUIRED.value,
+        notes=notes,
+        now=now,
+    )
 
 
 def require_active_portfolio(
@@ -855,7 +1154,11 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 raise HTTPException(status_code=404, detail="Trade not found")
 
             if e.event_type == "TradeCreated":
-                trade_nature = normalize_trade_nature(payload_data.get("trade_nature"))
+                instrument_type = normalize_instrument_type(payload_data.get("instrument_type"))
+                trade_nature_value = payload_data.get("trade_nature")
+                if instrument_type == TradeInstrumentType.OPTION.value and trade_nature_value in {None, ""}:
+                    trade_nature_value = TradeNature.FINANCIAL.value
+                trade_nature = normalize_trade_nature(trade_nature_value)
                 workflow_defaults = default_trade_workflow_statuses(trade_nature)
                 trade_structure = normalize_trade_structure(payload_data.get("trade_structure"))
                 trade_side, legs_payload = validate_trade_structure_payload(
@@ -964,6 +1267,18 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     payload_data.get("pricing_type"),
                     payload_data.get("price_index_code"),
                 )
+                option_type, option_style, option_strike_price, option_expiration_date = (
+                    validate_option_fields(
+                        instrument_type=instrument_type,
+                        trade_nature=trade_nature,
+                        trade_structure=trade_structure,
+                        pricing_type=pricing_type,
+                        option_type=payload_data.get("option_type"),
+                        option_style=payload_data.get("option_style"),
+                        option_strike_price=payload_data.get("option_strike_price"),
+                        option_expiration_date=payload_data.get("option_expiration_date"),
+                    )
+                )
                 validate_date_range(
                     effective_start_date,
                     effective_end_date,
@@ -982,6 +1297,28 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     price=price,
                     volume=volume,
                 )
+                counterparty_credit_policy = evaluate_counterparty_credit_policy(
+                    db,
+                    trade_input=CounterpartyCreditTradeInput(
+                        trade_id=e.aggregate_id,
+                        counterparty_code=counterparty,
+                        trade_currency_code=trade_currency_code,
+                        price=price,
+                        volume=volume,
+                    ),
+                )
+                if (
+                    counterparty_credit_policy is not None
+                    and counterparty_credit_policy["limit_breached"]
+                    and counterparty_credit_policy["breach_action"] == "BLOCK"
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"{_format_counterparty_credit_limit_message(counterparty_credit_policy)} "
+                            "Booking stays blocked until credit raises the limit or changes the breach action."
+                        ),
+                    )
 
                 existing = Trade(
                     trade_id=e.aggregate_id,
@@ -1000,6 +1337,11 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     delivery_start=delivery_start,
                     delivery_end=delivery_end,
                     price_unit_code=price_unit_code,
+                    instrument_type=instrument_type,
+                    option_type=option_type,
+                    option_style=option_style,
+                    option_strike_price=option_strike_price,
+                    option_expiration_date=option_expiration_date,
                     trade_nature=trade_nature,
                     trade_structure=trade_structure,
                     trade_side=trade_side,
@@ -1049,18 +1391,48 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     legs_payload,
                     recorded_at,
                 )
+                workflow_actor_id = e.actor_id or "system.event"
                 synchronize_trade_workflow_items(
                     db,
                     existing,
-                    actor_id=e.actor_id or "system.event",
+                    actor_id=workflow_actor_id,
                     now=recorded_at,
+                )
+                _sync_credit_approval_workflow_item(
+                    db,
+                    trade=existing,
+                    actor_id=workflow_actor_id,
+                    now=recorded_at,
+                    policy_result=counterparty_credit_policy,
                 )
 
             elif e.event_type == "TradeAmended" and existing is not None:
                 existing.updated_at = recorded_at
+                reject_invoice_projection_override(db, trade_id=existing.trade_id, payload_data=payload_data)
+                credit_hold_state = get_trade_credit_hold_state(db, trade_id=existing.trade_id)
+                blocked_fields = (
+                    _requested_credit_hold_blocked_fields(existing, payload_data)
+                    if credit_hold_state.hold_active
+                    else []
+                )
+                if blocked_fields:
+                    field_summary = ", ".join(blocked_fields)
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=format_trade_credit_hold_message(
+                            existing.trade_id,
+                            credit_hold_state,
+                            blocked_action=(
+                                f"Changing {field_summary} lifecycle status is blocked until credit approves "
+                                "the trade or the trade is amended back within limit."
+                            ),
+                        ),
+                    )
 
                 legs_payload: list[dict[str, object]] | None = None
                 should_sync_legs = False
+                if "instrument_type" in payload_data and payload_data["instrument_type"] is not None:
+                    existing.instrument_type = normalize_instrument_type(payload_data["instrument_type"])
                 if "trade_nature" in payload_data and payload_data["trade_nature"] is not None:
                     existing.trade_nature = normalize_trade_nature(payload_data["trade_nature"])
                 if "trade_structure" in payload_data and payload_data["trade_structure"] is not None:
@@ -1255,6 +1627,27 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 if "status" in payload_data and payload_data["status"] is not None:
                     existing.status = payload_data["status"]
 
+                option_type_value = existing.option_type
+                if "option_type" in payload_data:
+                    option_type_value = payload_data.get("option_type")
+                option_style_value = existing.option_style
+                if "option_style" in payload_data:
+                    option_style_value = payload_data.get("option_style")
+                option_strike_price_value = existing.option_strike_price
+                if "option_strike_price" in payload_data:
+                    option_strike_price_value = payload_data.get("option_strike_price")
+                option_expiration_date_value = existing.option_expiration_date
+                if "option_expiration_date" in payload_data:
+                    option_expiration_date_value = payload_data.get("option_expiration_date")
+                if (
+                    "instrument_type" in payload_data
+                    and existing.instrument_type != TradeInstrumentType.OPTION.value
+                ):
+                    option_type_value = payload_data.get("option_type")
+                    option_style_value = payload_data.get("option_style")
+                    option_strike_price_value = payload_data.get("option_strike_price")
+                    option_expiration_date_value = payload_data.get("option_expiration_date")
+
                 validate_date_range(
                     existing.effective_start_date,
                     existing.effective_end_date,
@@ -1273,6 +1666,44 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     price=existing.price,
                     volume=existing.volume,
                 )
+                (
+                    existing.option_type,
+                    existing.option_style,
+                    existing.option_strike_price,
+                    existing.option_expiration_date,
+                ) = validate_option_fields(
+                    instrument_type=existing.instrument_type,
+                    trade_nature=existing.trade_nature,
+                    trade_structure=existing.trade_structure,
+                    pricing_type=existing.pricing_type,
+                    option_type=option_type_value,
+                    option_style=option_style_value,
+                    option_strike_price=option_strike_price_value,
+                    option_expiration_date=option_expiration_date_value,
+                )
+                counterparty_credit_policy = evaluate_counterparty_credit_policy(
+                    db,
+                    trade_input=CounterpartyCreditTradeInput(
+                        trade_id=existing.trade_id,
+                        counterparty_code=existing.counterparty,
+                        trade_currency_code=existing.trade_currency_code,
+                        price=existing.price,
+                        volume=existing.volume,
+                        status=existing.status,
+                    ),
+                )
+                if (
+                    counterparty_credit_policy is not None
+                    and counterparty_credit_policy["limit_breached"]
+                    and counterparty_credit_policy["breach_action"] == "BLOCK"
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"{_format_counterparty_credit_limit_message(counterparty_credit_policy)} "
+                            "Amendment stays blocked until credit raises the limit or changes the breach action."
+                        ),
+                    )
                 existing.last_event_id = e.event_id
                 sync_primary_price_term(
                     db,
@@ -1300,11 +1731,19 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                         legs_payload or [],
                         recorded_at,
                     )
+                workflow_actor_id = e.actor_id or "system.event"
                 synchronize_trade_workflow_items(
                     db,
                     existing,
-                    actor_id=e.actor_id or "system.event",
+                    actor_id=workflow_actor_id,
                     now=recorded_at,
+                )
+                _sync_credit_approval_workflow_item(
+                    db,
+                    trade=existing,
+                    actor_id=workflow_actor_id,
+                    now=recorded_at,
+                    policy_result=counterparty_credit_policy,
                 )
 
             elif e.event_type == "TradeCancelled" and existing is not None:
@@ -1314,6 +1753,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 
             after = trade_snapshot(db, existing)
             sync_positions_for_trade_change(db, before, after, recorded_at)
+            sync_option_exposures_for_trade_change(db, before, after, recorded_at)
 
         db.commit()
         db.refresh(e)

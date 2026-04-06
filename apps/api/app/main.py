@@ -40,6 +40,7 @@ from apps.api.app.routes.external_data import admin_router as external_data_admi
 from apps.api.app.routes.external_data import router as external_data_router
 from apps.api.app.routes.events import router as events_router
 from apps.api.app.routes.layout_definitions import router as layout_definitions_router
+from apps.api.app.routes.option_exposures import router as option_exposures_router
 from apps.api.app.routes.operations import router as operations_router
 from apps.api.app.routes.reference_data import router as reference_data_router
 from apps.api.app.routes.reports import router as reports_router
@@ -49,6 +50,7 @@ from apps.api.app.routes.positions import router as positions_router
 from apps.api.app.routes.roadmap import admin_router as roadmap_admin_router
 from apps.api.app.routes.roadmap import router as roadmap_router
 from apps.api.app.routes.shipments import router as shipments_router
+from apps.api.app.routes.settlement import router as settlement_router
 from apps.api.app.routes.users import router as users_router
 from apps.api.app.routes.weather import admin_router as weather_admin_router
 from apps.api.app.routes.weather import router as weather_router
@@ -87,9 +89,11 @@ app.include_router(external_data_admin_router)
 app.include_router(assistant_router)
 app.include_router(assistant_admin_router)
 app.include_router(trades_router)
+app.include_router(option_exposures_router)
 app.include_router(positions_router)
 app.include_router(deliveries_router)
 app.include_router(shipments_router)
+app.include_router(settlement_router)
 app.include_router(roadmap_router)
 app.include_router(roadmap_admin_router)
 app.include_router(reports_router)

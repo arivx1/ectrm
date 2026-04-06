@@ -10,12 +10,15 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services import build_database_overview
+from apps.api.app.domains.operations.services.settlement_invoices import trade_has_invoice_record
+from apps.api.app.domains.operations.services.settlement_payments import trade_has_payment_records
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
 from apps.api.app.domains.operations.services.workflow_items import update_trade_workflow_item
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas.operations import DependencyHealthOut
@@ -137,6 +140,31 @@ def _provided_fields(payload: TradeWorkflowItemUpdate) -> set[str]:
     if hasattr(payload, "model_fields_set"):
         return set(payload.model_fields_set)
     return set(getattr(payload, "__fields_set__", set()))
+
+
+def _assert_workflow_status_is_not_ledger_managed(
+    db: Session,
+    *,
+    item_id: int,
+    changes: dict[str, object | None],
+) -> None:
+    if "status" not in changes:
+        return
+
+    item = db.execute(select(TradeWorkflowItem).where(TradeWorkflowItem.id == item_id)).scalars().first()
+    if item is None:
+        return
+
+    if item.workflow_type == "INVOICE" and trade_has_invoice_record(db, trade_id=item.trade_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invoice workflow status is ledger-managed. Update the invoice record from Settlement instead.",
+        )
+    if item.workflow_type == "PAYMENT" and trade_has_payment_records(db, trade_id=item.trade_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Payment workflow status is ledger-managed. Update the payment record from Settlement instead.",
+        )
 
 @router.get("/system-overview", response_model=SystemOverviewOut)
 def get_system_overview(request: Request, db: Session = Depends(get_db)) -> SystemOverviewOut:
@@ -273,6 +301,7 @@ def patch_work_item(
         )
 
     changes = {field_name: getattr(payload, field_name) for field_name in provided_fields}
+    _assert_workflow_status_is_not_ledger_managed(db, item_id=item_id, changes=changes)
     try:
         item = update_trade_workflow_item(
             db,

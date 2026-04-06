@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from apps.api.app.models.event import Base
 from apps.api.app.models.event import Event
+from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
@@ -48,6 +49,7 @@ class PositionsRebuildScriptTests(unittest.TestCase):
     def setUp(self) -> None:
         self.base_time = datetime(2026, 3, 11, 12, 0, tzinfo=timezone.utc)
         with self.SessionLocal() as session:
+            session.query(OptionExposure).delete()
             session.query(TradePriceTerm).delete()
             session.query(TradeLeg).delete()
             session.query(Position).delete()
@@ -156,6 +158,7 @@ class PositionsRebuildScriptTests(unittest.TestCase):
                 "commodity_class": "CRUDE_OIL",
                 "commodity": "WTI",
                 "pricing_type": "FIXED",
+                "price": 80,
                 "volume": 100,
             },
         )
@@ -172,6 +175,7 @@ class PositionsRebuildScriptTests(unittest.TestCase):
                 "commodity_class": "CRUDE_OIL",
                 "commodity": "WTI",
                 "pricing_type": "FIXED",
+                "price": 1.5,
                 "legs": [
                     {
                         "leg_no": 1,
@@ -233,6 +237,46 @@ class PositionsRebuildScriptTests(unittest.TestCase):
 
         self._rebuild_positions()
         self.assertEqual(self._position_snapshot(), {"WTI": -25.0})
+
+    def test_rebuild_excludes_option_trades_from_live_and_rebuilt_positions(self) -> None:
+        self._append_trade_event(
+            trade_id="T-LINEAR",
+            event_type="TradeCreated",
+            seconds_after_base=1,
+            payload={
+                "trade_nature": "PHYSICAL",
+                "trade_structure": "SINGLE",
+                "trade_side": "BUY",
+                "book": "CRUDE_PHYS",
+                "commodity_class": "CRUDE_OIL",
+                "commodity": "WTI",
+                "pricing_type": "FIXED",
+                "price": 80,
+                "volume": 100,
+            },
+        )
+        self._append_trade_event(
+            trade_id="T-OPTION",
+            event_type="TradeCreated",
+            seconds_after_base=2,
+            payload={
+                "instrument_type": "OPTION",
+                "trade_nature": "FINANCIAL",
+                "trade_structure": "SINGLE",
+                "trade_side": "BUY",
+                "book": "CRUDE_PHYS",
+                "commodity_class": "CRUDE_OIL",
+                "commodity": "WTI",
+                "pricing_type": "FIXED",
+                "price": 4.25,
+                "volume": 12,
+                "option_type": "CALL",
+                "option_strike_price": 82.5,
+                "option_expiration_date": "2026-06-30",
+            },
+        )
+
+        self._assert_rebuild_matches_live_positions({"WTI": 100.0})
 
 
 if __name__ == "__main__":

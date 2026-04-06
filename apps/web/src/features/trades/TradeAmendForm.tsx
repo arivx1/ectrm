@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import {
   buildCounterpartyCreditRestrictionMessage,
+  type CounterpartyCreditPolicyPreview,
   formatCounterpartyOptionLabel,
 } from './counterpartyCredit'
 import { TradeLegEditor } from './TradeLegEditor'
@@ -13,6 +14,7 @@ import {
   getQualitySpecOptionsForCommodity,
   pricingTypeRequiresExplicitPrice,
   pricingTypeRequiresPriceIndex,
+  tradeInstrumentUsesOptionFields,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
 
@@ -115,6 +117,16 @@ type TradeAmendFormProps = {
   amendPriceUnitInput: string
   setAmendPriceUnitInput: (value: string) => void
   amendPriceUnitOptions: ReferenceRecord[]
+  amendTradeInstrumentTypeInput: string
+  setAmendTradeInstrumentTypeInput: (value: string) => void
+  amendOptionTypeInput: string
+  setAmendOptionTypeInput: (value: string) => void
+  amendOptionStyleInput: string
+  setAmendOptionStyleInput: (value: string) => void
+  amendOptionExpirationDateInput: string
+  setAmendOptionExpirationDateInput: (value: string) => void
+  amendOptionStrikePriceInput: string
+  setAmendOptionStrikePriceInput: (value: string) => void
   amendSettlementStatusInput: string
   setAmendSettlementStatusInput: (value: string) => void
   amendTraderUserInput: string
@@ -127,6 +139,10 @@ type TradeAmendFormProps = {
   amending: boolean
   cancelling: boolean
   amendError: string
+  counterpartyCreditPolicyPreview: CounterpartyCreditPolicyPreview | null
+  tradeInstrumentTypeOptions: readonly string[]
+  optionTypeOptions: readonly string[]
+  optionStyleOptions: readonly string[]
   tradeNatureOptions: readonly string[]
   tradeStructureOptions: readonly string[]
   tradeSideOptions: readonly string[]
@@ -219,6 +235,16 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     amendPriceUnitInput,
     setAmendPriceUnitInput,
     amendPriceUnitOptions,
+    amendTradeInstrumentTypeInput,
+    setAmendTradeInstrumentTypeInput,
+    amendOptionTypeInput,
+    setAmendOptionTypeInput,
+    amendOptionStyleInput,
+    setAmendOptionStyleInput,
+    amendOptionExpirationDateInput,
+    setAmendOptionExpirationDateInput,
+    amendOptionStrikePriceInput,
+    setAmendOptionStrikePriceInput,
     amendSettlementStatusInput,
     setAmendSettlementStatusInput,
     amendTraderUserInput,
@@ -231,6 +257,10 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     amending,
     cancelling,
     amendError,
+    counterpartyCreditPolicyPreview,
+    tradeInstrumentTypeOptions,
+    optionTypeOptions,
+    optionStyleOptions,
     tradeNatureOptions,
     tradeStructureOptions,
     tradeSideOptions,
@@ -250,6 +280,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
   const { date: executionDateInput, time: executionTimeInput } = splitLocalDateTimeInput(amendExecutionTimestampInput)
   const qualitySpecOptions = getQualitySpecOptionsForCommodity(amendCommodityInput)
   const qualitySpecListId = qualitySpecOptions.length > 0 ? `trade-quality-spec-options-${selectedTradeId}` : undefined
+  const optionTrade = tradeInstrumentUsesOptionFields(amendTradeInstrumentTypeInput)
   const selectedCounterparty =
     amendCounterpartyOptions.find((counterparty) => counterparty.code === amendCounterpartyInput) ?? null
   const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
@@ -320,8 +351,23 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
 
       <div className="mini-grid">
         <label className="field">
+          <FieldLabel label="Instrument" tooltip={tradeTooltipCopy.instrument} />
+          <select
+            className="control"
+            value={amendTradeInstrumentTypeInput}
+            onChange={(event) => setAmendTradeInstrumentTypeInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            {tradeInstrumentTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <span>Nature</span>
-          <select className="control" value={amendTradeNatureInput} onChange={(event) => setAmendTradeNatureInput(event.target.value)} disabled={amending || cancelling}>
+          <select className="control" value={amendTradeNatureInput} onChange={(event) => setAmendTradeNatureInput(event.target.value)} disabled={amending || cancelling || optionTrade}>
             {tradeNatureOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -331,7 +377,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
         </label>
         <label className="field">
           <FieldLabel label="Structure" tooltip={tradeTooltipCopy.structure} />
-          <select className="control" value={amendTradeStructureInput} onChange={(event) => setAmendTradeStructureInput(event.target.value)} disabled={amending || cancelling}>
+          <select className="control" value={amendTradeStructureInput} onChange={(event) => setAmendTradeStructureInput(event.target.value)} disabled={amending || cancelling || optionTrade}>
             {tradeStructureOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -370,6 +416,16 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             <div className="feedback-banner feedback-banner-error trade-structure-note">
               <strong>Counterparty blocked for trading</strong>
               <p>{counterpartyCreditWarning}</p>
+            </div>
+          </div>
+        )}
+        {counterpartyCreditPolicyPreview && (
+          <div className="field field-wide">
+            <div
+              className={`feedback-banner ${counterpartyCreditPolicyPreview.tone === 'error' ? 'feedback-banner-error' : ''} trade-structure-note`}
+            >
+              <strong>{counterpartyCreditPolicyPreview.title}</strong>
+              <p>{counterpartyCreditPolicyPreview.message}</p>
             </div>
           </div>
         )}
@@ -432,6 +488,14 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             </label>
           </>
         )}
+        {optionTrade && (
+          <div className="field field-wide">
+            <div className="feedback-banner trade-structure-note">
+              <strong>Option tickets are single-leg financial trades.</strong>
+              <p>Premium is captured in the price field, the commodity stays as the underlying, and option tickets stay out of the net-position projection until option risk math is added.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mini-grid">
@@ -463,6 +527,56 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
               </option>
             ))}
           </select>
+        </label>
+        <label className="field">
+          <span>Option Type</span>
+          <select
+            className="control"
+            value={amendOptionTypeInput}
+            onChange={(event) => setAmendOptionTypeInput(event.target.value)}
+            disabled={amending || cancelling || !optionTrade}
+          >
+            {optionTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Option Style</span>
+          <select
+            className="control"
+            value={amendOptionStyleInput}
+            onChange={(event) => setAmendOptionStyleInput(event.target.value)}
+            disabled={amending || cancelling || !optionTrade}
+          >
+            {optionStyleOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Expiration</span>
+          <input
+            className="control"
+            type="date"
+            value={amendOptionExpirationDateInput}
+            onChange={(event) => setAmendOptionExpirationDateInput(event.target.value)}
+            disabled={amending || cancelling || !optionTrade}
+          />
+        </label>
+        <label className="field">
+          <span>Strike Price</span>
+          <input
+            className="control"
+            inputMode="decimal"
+            value={amendOptionStrikePriceInput}
+            onChange={(event) => setAmendOptionStrikePriceInput(event.target.value)}
+            disabled={amending || cancelling || !optionTrade}
+          />
         </label>
         <label className="field">
           <span>Trade Currency</span>
@@ -534,7 +648,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
         </label>
         <label className="field">
           <FieldLabel label="Pricing" tooltip={tradeTooltipCopy.pricing} />
-          <select className="control" value={amendPricingTypeInput} onChange={(event) => setAmendPricingTypeInput(event.target.value)} disabled={amending || cancelling}>
+          <select className="control" value={amendPricingTypeInput} onChange={(event) => setAmendPricingTypeInput(event.target.value)} disabled={amending || cancelling || optionTrade}>
             {pricingTypeOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -558,7 +672,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             className="control"
             value={amendPriceIndexInput}
             onChange={(event) => setAmendPriceIndexInput(event.target.value)}
-            disabled={amending || cancelling || !pricingTypeRequiresPriceIndex(amendPricingTypeInput) || amendPriceIndexOptions.length === 0}
+            disabled={amending || cancelling || optionTrade || !pricingTypeRequiresPriceIndex(amendPricingTypeInput) || amendPriceIndexOptions.length === 0}
           >
             <option value="">No price index</option>
             {amendPriceIndexOptions.map((priceIndex) => (
@@ -569,12 +683,12 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>{pricingTypeRequiresExplicitPrice(amendPricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
+          <span>{optionTrade ? 'Premium' : pricingTypeRequiresExplicitPrice(amendPricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
           <input className="control" inputMode="decimal" value={amendPriceInput} onChange={(event) => setAmendPriceInput(event.target.value)} />
         </label>
         {!tradeStructureSupportsLegs(amendTradeStructureInput) && (
           <label className="field">
-            <span>Volume</span>
+            <span>{optionTrade ? 'Contracts' : 'Volume'}</span>
             <input className="control" inputMode="decimal" value={amendVolumeInput} onChange={(event) => setAmendVolumeInput(event.target.value)} />
           </label>
         )}
@@ -743,7 +857,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
       )}
 
       <p className={`form-note ${amendError ? 'form-note-error' : ''}`}>
-        {amendError || 'Amendments now submit only changed fields, and SWAP headers stay aligned to Leg 1 instead of duplicating leg economics.'}
+        {amendError || 'Amendments now submit only changed fields, SWAP headers stay aligned to Leg 1 instead of duplicating leg economics, and option tickets keep premium plus strike and expiry on the trade header.'}
       </p>
     </form>
   )

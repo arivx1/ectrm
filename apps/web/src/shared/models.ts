@@ -15,6 +15,11 @@ export type Trade = {
   delivery_start: string | null
   delivery_end: string | null
   price_unit_code: string | null
+  instrument_type: string
+  option_type: string | null
+  option_style: string | null
+  option_strike_price: number | null
+  option_expiration_date: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
@@ -37,6 +42,9 @@ export type Trade = {
   trader_user: string | null
   status: string
   last_event_id: string
+  credit_approval_status?: string
+  credit_hold_active?: boolean
+  credit_hold_reason?: string | null
 }
 
 export type TradeLegDraft = {
@@ -93,6 +101,27 @@ export type PositionRow = {
   updated_at: string
 }
 
+export type OptionExposureRow = {
+  trade_id: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trade_side: string
+  option_type: string
+  option_style: string | null
+  option_strike_price: number | null
+  option_expiration_date: string | null
+  contract_volume: number
+  premium_price: number | null
+  premium_cashflow: number | null
+  underlying_equivalent_volume: number
+  trade_currency_code: string | null
+  price_unit_code: string | null
+  updated_at: string
+}
+
 export type DeliveryRecord = {
   delivery_id: string
   trade_id: string
@@ -144,7 +173,7 @@ export type TradeWorkflowItemRecord = {
   item_id: number
   trade_id: string
   queue: 'operations' | 'settlement'
-  workflow_type: 'CONFIRMATION' | 'NOMINATION' | 'ALLOCATION' | 'INVOICE' | 'PAYMENT'
+  workflow_type: 'CONFIRMATION' | 'NOMINATION' | 'ALLOCATION' | 'INVOICE' | 'PAYMENT' | 'CREDIT_APPROVAL'
   status: string
   owner: string | null
   due_at: string | null
@@ -167,6 +196,81 @@ export type TradeWorkflowItemRecord = {
   trade_date: string | null
   delivery_start: string | null
   delivery_end: string | null
+  credit_approval_status?: string
+  credit_hold_active?: boolean
+  credit_hold_reason?: string | null
+}
+
+export type TradeInvoiceRecord = {
+  invoice_id: number
+  trade_id: string
+  invoice_number: string
+  invoice_currency_code: string
+  invoice_amount: number
+  status: string
+  issued_at: string
+  due_at: string
+  dispute_reason: string | null
+  notes: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  workflow_item_id: number | null
+  workflow_owner: string | null
+  is_overdue: boolean
+  age_days: number
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  payment_status: string
+  settlement_status: string
+}
+
+export type TradePaymentRecord = {
+  payment_id: number
+  trade_id: string
+  invoice_id: number
+  invoice_number: string
+  payment_reference: string
+  payment_currency_code: string
+  payment_amount: number
+  status: string
+  due_at: string
+  received_at: string | null
+  notes: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  workflow_item_id: number | null
+  workflow_owner: string | null
+  is_overdue: boolean
+  age_days: number
+  invoice_amount: number
+  total_paid_amount: number
+  outstanding_amount: number
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  invoice_status: string
+  settlement_status: string
 }
 
 export type ReferenceRecord = {

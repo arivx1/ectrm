@@ -69,7 +69,7 @@ export function OperationsWorkspace({
   const unassignedWorkflowItems = openOperationsWorkItems.filter((item) => !item.owner?.trim()).length
   const dueSoonWorkflowItems = openOperationsWorkItems.filter((item) => dueWithinDays(item.due_at, 2)).length
   const blockedWorkflowItems = openOperationsWorkItems.filter(
-    (item) => item.is_overdue || item.status === 'DISPUTED',
+    (item) => item.credit_hold_active || item.is_overdue || item.status === 'DISPUTED' || item.status === 'PENDING_REVIEW',
   ).length
   const modeCoverage = ['LOGISTICS', 'NETWORK_FLOW', 'POWER_SCHEDULE']
     .map((modeFamily) => ({

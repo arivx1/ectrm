@@ -26,8 +26,11 @@ from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.routes.events import append_event
 from apps.api.app.schemas.event import EventCreate
 from apps.api.scripts import rebuild_trades_projection
@@ -58,6 +61,9 @@ class TradesRebuildScriptTests(unittest.TestCase):
     def setUp(self) -> None:
         self.now = datetime(2026, 3, 11, 12, 0, tzinfo=timezone.utc)
         with self.SessionLocal() as session:
+            session.query(TradePayment).delete()
+            session.query(TradeInvoice).delete()
+            session.query(TradeWorkflowItem).delete()
             session.query(TradePriceTerm).delete()
             session.query(TradeLeg).delete()
             session.query(Trade).delete()

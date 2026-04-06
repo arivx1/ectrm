@@ -8,6 +8,11 @@ class TradeNature(StrEnum):
     FINANCIAL = "FINANCIAL"
 
 
+class TradeInstrumentType(StrEnum):
+    LINEAR = "LINEAR"
+    OPTION = "OPTION"
+
+
 class TradeStructure(StrEnum):
     SINGLE = "SINGLE"
     SWAP = "SWAP"
@@ -16,6 +21,16 @@ class TradeStructure(StrEnum):
 class TradeSide(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
+
+
+class OptionType(StrEnum):
+    CALL = "CALL"
+    PUT = "PUT"
+
+
+class OptionStyle(StrEnum):
+    AMERICAN = "AMERICAN"
+    EUROPEAN = "EUROPEAN"
 
 
 class PricingType(StrEnum):
@@ -79,12 +94,20 @@ class PaymentStatus(StrEnum):
     OVERDUE = "OVERDUE"
 
 
+class CreditApprovalStatus(StrEnum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    NOT_REQUIRED = "NOT_REQUIRED"
+    REJECTED = "REJECTED"
+
+
 class TradeWorkflowType(StrEnum):
     CONFIRMATION = "CONFIRMATION"
     NOMINATION = "NOMINATION"
     ALLOCATION = "ALLOCATION"
     INVOICE = "INVOICE"
     PAYMENT = "PAYMENT"
+    CREDIT_APPROVAL = "CREDIT_APPROVAL"
 
 
 class TransportMode(StrEnum):

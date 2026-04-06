@@ -4,7 +4,9 @@ import type { StoredAuthSession } from '../../shared/mutation'
 import type { TradeWorkflowItemRecord } from '../../shared/models'
 import {
   allocationStatusOptions,
+  buildTradeCreditHoldSummary,
   confirmationStatusOptions,
+  creditApprovalStatusOptions,
   invoiceStatusOptions,
   nominationStatusOptions,
   paymentStatusOptions,
@@ -33,6 +35,7 @@ const WORKFLOW_STATUS_OPTIONS = {
   CONFIRMATION: confirmationStatusOptions,
   NOMINATION: nominationStatusOptions,
   ALLOCATION: allocationStatusOptions,
+  CREDIT_APPROVAL: creditApprovalStatusOptions,
   INVOICE: invoiceStatusOptions,
   PAYMENT: paymentStatusOptions,
 } as const
@@ -56,7 +59,14 @@ function emptyDraft(): WorkflowDraft {
 }
 
 function workflowTone(item: TradeWorkflowItemRecord): 'active' | 'in-progress' | 'blocked' {
-  if (item.is_overdue || item.status === 'DISPUTED' || item.status === 'OVERDUE') {
+  if (
+    item.credit_hold_active ||
+    item.is_overdue ||
+    item.status === 'DISPUTED' ||
+    item.status === 'OVERDUE' ||
+    item.status === 'PENDING_REVIEW' ||
+    item.status === 'REJECTED'
+  ) {
     return 'blocked'
   }
   if (item.owner || item.due_at) {
@@ -154,6 +164,23 @@ export function WorkflowQueueEditor({
       <div className="position-list">
         {items.map((item) => {
           const draft = drafts[item.item_id] ?? buildDraft(item)
+          const creditHoldSummary = buildTradeCreditHoldSummary(
+            item.credit_approval_status
+              ? {
+                  status: item.credit_approval_status ?? '',
+                  notes: item.credit_hold_reason ?? null,
+                }
+              : null,
+          )
+          const lifecycleStatusLocked = item.workflow_type !== 'CREDIT_APPROVAL' && creditHoldSummary.credit_hold_active
+          const approvePayload =
+            item.workflow_type === 'CREDIT_APPROVAL'
+              ? buildPayload(item, { ...draft, status: 'APPROVED' })
+              : null
+          const rejectPayload =
+            item.workflow_type === 'CREDIT_APPROVAL'
+              ? buildPayload(item, { ...draft, status: 'REJECTED' })
+              : null
           const saveDisabled =
             savingItemId === item.item_id ||
             !authSession ||
@@ -197,7 +224,7 @@ export function WorkflowQueueEditor({
                     className="control control-compact"
                     value={draft.status}
                     onChange={(event) => updateDraft(item.item_id, { status: event.target.value })}
-                    disabled={savingItemId === item.item_id}
+                    disabled={savingItemId === item.item_id || lifecycleStatusLocked}
                   >
                     {statusOptions.map((option) => (
                       <option key={option} value={option}>
@@ -238,6 +265,11 @@ export function WorkflowQueueEditor({
                   />
                 </label>
               </div>
+              {lifecycleStatusLocked ? (
+                <p className="field-error">
+                  {creditHoldSummary.credit_hold_reason ?? 'Credit approval is pending review.'}
+                </p>
+              ) : null}
               <div className="shipment-card-actions workflow-item-actions">
                 <span>Updated {formatDate(item.updated_at)}</span>
                 <div className="workflow-item-button-row">
@@ -264,6 +296,45 @@ export function WorkflowQueueEditor({
                   >
                     {savingItemId === item.item_id ? 'Saving…' : 'Save'}
                   </button>
+                  {item.workflow_type === 'CREDIT_APPROVAL' ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => {
+                        if (approvePayload) {
+                          void onSaveItem(item.item_id, approvePayload)
+                        }
+                      }}
+                      disabled={
+                        !authSession ||
+                        savingItemId === item.item_id ||
+                        !approvePayload ||
+                        Object.keys(approvePayload).length === 0
+                      }
+                    >
+                      Approve
+                    </button>
+                  ) : null}
+                  {item.workflow_type === 'CREDIT_APPROVAL' ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => {
+                        if (rejectPayload) {
+                          void onSaveItem(item.item_id, rejectPayload)
+                        }
+                      }}
+                      disabled={
+                        !authSession ||
+                        savingItemId === item.item_id ||
+                        !rejectPayload ||
+                        Object.keys(rejectPayload).length === 0 ||
+                        !(draft.notes.trim() || item.notes?.trim())
+                      }
+                    >
+                      Reject With Comment
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </article>

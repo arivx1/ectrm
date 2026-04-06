@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
@@ -15,10 +16,137 @@ from apps.api.app.models.reference_counterparty_credit_profile import ReferenceC
 from apps.api.app.models.trade import Trade
 
 
+@dataclass(frozen=True)
+class CounterpartyCreditTradeInput:
+    counterparty_code: str | None
+    trade_currency_code: str | None
+    price: object | None
+    volume: object | None
+    trade_id: str | None = None
+    status: str = "ACTIVE"
+
+
 def _to_decimal(value: object) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def _trade_exposure_amount(
+    *,
+    trade_currency_code: str | None,
+    price: object | None,
+    volume: object | None,
+    required_currency_code: str | None,
+) -> Decimal | None:
+    if required_currency_code is None:
+        return None
+    if trade_currency_code != required_currency_code:
+        return None
+
+    price_decimal = _to_decimal(price)
+    volume_decimal = _to_decimal(volume)
+    if price_decimal is None or volume_decimal is None:
+        return None
+    return abs(price_decimal * volume_decimal)
+
+
+def evaluate_counterparty_credit_policy(
+    db: Session,
+    *,
+    trade_input: CounterpartyCreditTradeInput,
+) -> dict[str, object] | None:
+    counterparty_code = trade_input.counterparty_code
+    if counterparty_code is None or trade_input.status == "CANCELLED":
+        return None
+
+    profile = db.execute(
+        select(ReferenceCounterpartyCreditProfile).where(
+            ReferenceCounterpartyCreditProfile.counterparty_code == counterparty_code
+        )
+    ).scalars().first()
+    if profile is None:
+        return None
+
+    limit_currency_code = profile.limit_currency_code
+    limit_amount_decimal = _to_decimal(profile.limit_amount)
+    if limit_currency_code is None or limit_amount_decimal is None or limit_amount_decimal <= Decimal("0"):
+        return {
+            "counterparty_code": counterparty_code,
+            "breach_action": profile.breach_action,
+            "limit_currency_code": limit_currency_code,
+            "limit_amount": float(limit_amount_decimal) if limit_amount_decimal is not None else None,
+            "current_exposure_amount": None,
+            "projected_trade_exposure_amount": None,
+            "projected_exposure_amount": None,
+            "projected_utilization_percent": None,
+            "limit_breached": False,
+            "comparable": False,
+            "comparison_reason": "missing_limit_configuration",
+        }
+
+    active_trade_stmt = select(Trade).where(
+        Trade.status != "CANCELLED",
+        Trade.counterparty == counterparty_code,
+    )
+    if trade_input.trade_id is not None:
+        active_trade_stmt = active_trade_stmt.where(Trade.trade_id != trade_input.trade_id)
+
+    active_trades = db.execute(active_trade_stmt).scalars().all()
+
+    current_exposure_amount_decimal = Decimal("0")
+    for trade in active_trades:
+        trade_exposure_amount = _trade_exposure_amount(
+            trade_currency_code=trade.trade_currency_code,
+            price=trade.price,
+            volume=trade.volume,
+            required_currency_code=limit_currency_code,
+        )
+        if trade_exposure_amount is None:
+            continue
+        current_exposure_amount_decimal += trade_exposure_amount
+
+    projected_trade_exposure_amount_decimal = _trade_exposure_amount(
+        trade_currency_code=trade_input.trade_currency_code,
+        price=trade_input.price,
+        volume=trade_input.volume,
+        required_currency_code=limit_currency_code,
+    )
+    projected_exposure_amount_decimal = current_exposure_amount_decimal
+    comparable = projected_trade_exposure_amount_decimal is not None
+    comparison_reason = "comparable"
+    if projected_trade_exposure_amount_decimal is not None:
+        projected_exposure_amount_decimal += projected_trade_exposure_amount_decimal
+    elif trade_input.trade_currency_code != limit_currency_code:
+        comparison_reason = "currency_mismatch"
+    else:
+        comparison_reason = "missing_trade_measurements"
+
+    projected_utilization_percent = None
+    limit_breached = False
+    if comparable:
+        projected_utilization_percent = float(
+            (projected_exposure_amount_decimal / limit_amount_decimal) * Decimal("100")
+        )
+        limit_breached = projected_exposure_amount_decimal > limit_amount_decimal
+
+    return {
+        "counterparty_code": counterparty_code,
+        "breach_action": profile.breach_action,
+        "limit_currency_code": limit_currency_code,
+        "limit_amount": float(limit_amount_decimal),
+        "current_exposure_amount": float(current_exposure_amount_decimal),
+        "projected_trade_exposure_amount": float(projected_trade_exposure_amount_decimal)
+        if projected_trade_exposure_amount_decimal is not None
+        else None,
+        "projected_exposure_amount": float(projected_exposure_amount_decimal)
+        if comparable
+        else None,
+        "projected_utilization_percent": projected_utilization_percent,
+        "limit_breached": limit_breached,
+        "comparable": comparable,
+        "comparison_reason": comparison_reason,
+    }
 
 
 def build_counterparty_credit_report(

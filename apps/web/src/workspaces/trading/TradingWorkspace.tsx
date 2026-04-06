@@ -1,10 +1,17 @@
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
+import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  calculateDaysToExpiration,
+  calculatePremiumCashflow,
+  calculateUnderlyingEquivalentVolume,
+} from '../../shared/optionExposure'
 import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
+import { tradeInstrumentUsesOptionFields } from '../../shared/trading'
 
 type Trade = {
   trade_id: string
@@ -20,6 +27,11 @@ type Trade = {
   delivery_start: string | null
   delivery_end: string | null
   price_unit_code: string | null
+  instrument_type: string
+  option_type: string | null
+  option_style: string | null
+  option_strike_price: number | null
+  option_expiration_date: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
@@ -43,6 +55,9 @@ type Trade = {
   trader_user: string | null
   status: string
   updated_at: string
+  credit_approval_status?: string
+  credit_hold_active?: boolean
+  credit_hold_reason?: string | null
 }
 
 type EventRow = {
@@ -90,6 +105,10 @@ const RISK_TOOLTIPS = {
   projectionState: 'Current lifecycle status on the trade read model, not the raw event stream.',
 } as const
 
+function creditApprovalLabel(value: string | undefined): string {
+  return (value || 'NOT_REQUIRED').replaceAll('_', ' ')
+}
+
 type TradingWorkspaceProps = {
   authSession: StoredAuthSession | null
   tradeCaptureFormProps: TradeCaptureFormProps
@@ -134,6 +153,16 @@ type TradingWorkspaceProps = {
   amendPriceUnitInput: string
   setAmendPriceUnitInput: (value: string) => void
   amendPriceUnitOptions: ReferenceRecord[]
+  amendTradeInstrumentTypeInput: string
+  setAmendTradeInstrumentTypeInput: (value: string) => void
+  amendOptionTypeInput: string
+  setAmendOptionTypeInput: (value: string) => void
+  amendOptionStyleInput: string
+  setAmendOptionStyleInput: (value: string) => void
+  amendOptionExpirationDateInput: string
+  setAmendOptionExpirationDateInput: (value: string) => void
+  amendOptionStrikePriceInput: string
+  setAmendOptionStrikePriceInput: (value: string) => void
   amendBookInput: string
   setAmendBookInput: (value: string) => void
   amendBookOptions: ReferenceRecord[]
@@ -188,6 +217,10 @@ type TradingWorkspaceProps = {
   amending: boolean
   cancelling: boolean
   amendError: string
+  counterpartyCreditPolicyPreview: CounterpartyCreditPolicyPreview | null
+  tradeInstrumentTypeOptions: readonly string[]
+  optionTypeOptions: readonly string[]
+  optionStyleOptions: readonly string[]
   tradeNatureOptions: readonly string[]
   tradeStructureOptions: readonly string[]
   tradeSideOptions: readonly string[]
@@ -252,6 +285,16 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     amendPriceUnitInput,
     setAmendPriceUnitInput,
     amendPriceUnitOptions,
+    amendTradeInstrumentTypeInput,
+    setAmendTradeInstrumentTypeInput,
+    amendOptionTypeInput,
+    setAmendOptionTypeInput,
+    amendOptionStyleInput,
+    setAmendOptionStyleInput,
+    amendOptionExpirationDateInput,
+    setAmendOptionExpirationDateInput,
+    amendOptionStrikePriceInput,
+    setAmendOptionStrikePriceInput,
     amendBookInput,
     setAmendBookInput,
     amendBookOptions,
@@ -306,6 +349,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     amending,
     cancelling,
     amendError,
+    counterpartyCreditPolicyPreview,
+    tradeInstrumentTypeOptions,
+    optionTypeOptions,
+    optionStyleOptions,
     tradeNatureOptions,
     tradeStructureOptions,
     tradeSideOptions,
@@ -324,6 +371,24 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     formatDateOnly,
     statusTone,
   } = props
+  const selectedTradeIsOption = selectedTrade
+    ? tradeInstrumentUsesOptionFields(selectedTrade.instrument_type)
+    : false
+  const selectedTradePriceLabel = selectedTradeIsOption ? 'Premium' : 'Price'
+  const selectedTradeVolumeLabel = selectedTradeIsOption ? 'Contracts' : 'Volume'
+  const selectedTradePremiumCashflow = selectedTrade
+    ? calculatePremiumCashflow(selectedTrade.trade_side, selectedTrade.price, selectedTrade.volume)
+    : null
+  const selectedTradeUnderlyingEquivalent = selectedTrade
+    ? calculateUnderlyingEquivalentVolume(
+        selectedTrade.trade_side,
+        selectedTrade.option_type,
+        selectedTrade.volume,
+      )
+    : 0
+  const selectedTradeDaysToExpiration = selectedTrade
+    ? calculateDaysToExpiration(selectedTrade.option_expiration_date)
+    : null
 
   const tradeBoardColumns: DataSheetColumn<Trade>[] = [
     {
@@ -331,6 +396,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
       label: 'Trade',
       width: '12rem',
       renderCell: (trade) => trade.trade_id,
+    },
+    {
+      id: 'instrument',
+      label: 'Instrument',
+      width: '9rem',
+      renderCell: (trade) => trade.instrument_type,
     },
     {
       id: 'nature',
@@ -387,6 +458,19 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
       ),
     },
     {
+      id: 'credit',
+      label: 'Credit',
+      width: '12rem',
+      renderCell: (trade) =>
+        trade.credit_hold_active ? (
+          <span className="status-pill status-pill-blocked">{creditApprovalLabel(trade.credit_approval_status)}</span>
+        ) : (
+          <span className="entity-chip entity-chip-soft">
+            {trade.credit_approval_status === 'APPROVED' ? 'APPROVED' : 'CLEAR'}
+          </span>
+        ),
+    },
+    {
       id: 'updated',
       label: 'Updated',
       align: 'end',
@@ -415,7 +499,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           eyebrow: 'Inspector',
           title: selectedTrade ? selectedTrade.trade_id : 'No Selection',
           description: selectedTrade
-            ? `${selectedTrade.trade_nature} • ${selectedTrade.trade_structure} • ${selectedTrade.book}`
+            ? `${selectedTrade.instrument_type} • ${selectedTrade.trade_nature} • ${selectedTrade.trade_structure} • ${selectedTrade.book}`
             : 'Pick a blotter row to inspect state, event history, and amendment controls.',
           span: 'side',
           availableSpans: ['wide', 'half', 'side'],
@@ -435,26 +519,36 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <span className="eyebrow">Active Ticket</span>
                     <strong>{selectedTrade.commodity}</strong>
                     <p>
-                      {selectedTrade.trade_side ?? 'LEG-DEFINED'} • {selectedTrade.trade_nature} • {selectedTrade.book}
+                      {selectedTrade.trade_side ?? 'LEG-DEFINED'} • {selectedTrade.instrument_type} • {selectedTrade.trade_nature} • {selectedTrade.book}
                     </p>
                   </div>
 
                   <div className="trade-inspector-pill-row">
                     <span className={`status-pill status-pill-${statusTone(selectedTrade.status)}`}>{selectedTrade.status}</span>
+                    {selectedTrade.credit_hold_active ? (
+                      <span className="status-pill status-pill-blocked">
+                        Credit {creditApprovalLabel(selectedTrade.credit_approval_status)}
+                      </span>
+                    ) : null}
                     <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
                     <span className="entity-chip entity-chip-soft">Confirmation {selectedTrade.confirmation_status}</span>
                     <span className="entity-chip entity-chip-soft">Nomination {selectedTrade.nomination_status}</span>
                     <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
                     <span className="entity-chip entity-chip-soft">Payment {selectedTrade.payment_status}</span>
                   </div>
+                  {selectedTrade.credit_hold_active ? (
+                    <p className="field-error">
+                      {selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}
+                    </p>
+                  ) : null}
 
                   <div className="trade-inspector-summary-grid">
                     <article>
-                      <span>Price</span>
+                      <span>{selectedTradePriceLabel}</span>
                       <strong>{formatMoney(selectedTrade.price)}</strong>
                     </article>
                     <article>
-                      <span>Volume</span>
+                      <span>{selectedTradeVolumeLabel}</span>
                       <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
                     </article>
                     <article>
@@ -550,6 +644,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <strong>{formatDateOnly(selectedTrade.delivery_end)}</strong>
                   </div>
                   <div className="detail-row">
+                    <span>Instrument</span>
+                    <strong>{selectedTrade.instrument_type}</strong>
+                  </div>
+                  <div className="detail-row">
                     <span>Trade Nature</span>
                     <strong>{selectedTrade.trade_nature}</strong>
                   </div>
@@ -557,6 +655,30 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <span>Trade Structure</span>
                     <strong>{selectedTrade.trade_structure}</strong>
                   </div>
+                  {selectedTradeIsOption && (
+                    <div className="detail-row">
+                      <span>Option Type</span>
+                      <strong>{selectedTrade.option_type ?? '—'}</strong>
+                    </div>
+                  )}
+                  {selectedTradeIsOption && (
+                    <div className="detail-row">
+                      <span>Option Style</span>
+                      <strong>{selectedTrade.option_style ?? '—'}</strong>
+                    </div>
+                  )}
+                  {selectedTradeIsOption && (
+                    <div className="detail-row">
+                      <span>Option Expiration</span>
+                      <strong>{formatDateOnly(selectedTrade.option_expiration_date)}</strong>
+                    </div>
+                  )}
+                  {selectedTradeIsOption && (
+                    <div className="detail-row">
+                      <span>Strike Price</span>
+                      <strong>{formatMoney(selectedTrade.option_strike_price)}</strong>
+                    </div>
+                  )}
                   <div className="detail-row">
                     <span>Trade Side</span>
                     <strong>{selectedTrade.trade_side ?? 'Leg-defined'}</strong>
@@ -606,11 +728,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <strong>{selectedTrade.price_index_code ?? '—'}</strong>
                   </div>
                   <div className="detail-row">
-                    <span>Price Differential</span>
+                    <span>{selectedTradePriceLabel}</span>
                     <strong>{formatMoney(selectedTrade.price)}</strong>
                   </div>
                   <div className="detail-row">
-                    <span>Volume</span>
+                    <span>{selectedTradeVolumeLabel}</span>
                     <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
                   </div>
                   <div className="detail-row">
@@ -625,6 +747,20 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <span>Settlement Status</span>
                     <strong>{selectedTrade.settlement_status}</strong>
                   </div>
+                  <div className="detail-row">
+                    <span>Credit Approval</span>
+                    <strong>{creditApprovalLabel(selectedTrade.credit_approval_status)}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Credit Hold</span>
+                    <strong>{selectedTrade.credit_hold_active ? 'ACTIVE' : 'CLEARED'}</strong>
+                  </div>
+                  {selectedTrade.credit_hold_active ? (
+                    <div className="detail-row">
+                      <span>Credit Hold Reason</span>
+                      <strong>{selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}</strong>
+                    </div>
+                  ) : null}
                   <div className="detail-row">
                     <span>Trader User</span>
                     <strong>{selectedTrade.trader_user ?? '—'}</strong>
@@ -690,6 +826,16 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   amendPriceUnitInput={amendPriceUnitInput}
                   setAmendPriceUnitInput={setAmendPriceUnitInput}
                   amendPriceUnitOptions={amendPriceUnitOptions}
+                  amendTradeInstrumentTypeInput={amendTradeInstrumentTypeInput}
+                  setAmendTradeInstrumentTypeInput={setAmendTradeInstrumentTypeInput}
+                  amendOptionTypeInput={amendOptionTypeInput}
+                  setAmendOptionTypeInput={setAmendOptionTypeInput}
+                  amendOptionStyleInput={amendOptionStyleInput}
+                  setAmendOptionStyleInput={setAmendOptionStyleInput}
+                  amendOptionExpirationDateInput={amendOptionExpirationDateInput}
+                  setAmendOptionExpirationDateInput={setAmendOptionExpirationDateInput}
+                  amendOptionStrikePriceInput={amendOptionStrikePriceInput}
+                  setAmendOptionStrikePriceInput={setAmendOptionStrikePriceInput}
                   amendTradeNatureInput={amendTradeNatureInput}
                   setAmendTradeNatureInput={setAmendTradeNatureInput}
                   amendTradeStructureInput={amendTradeStructureInput}
@@ -744,6 +890,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   amending={amending}
                   cancelling={cancelling}
                   amendError={amendError}
+                  counterpartyCreditPolicyPreview={counterpartyCreditPolicyPreview}
+                  tradeInstrumentTypeOptions={tradeInstrumentTypeOptions}
+                  optionTypeOptions={optionTypeOptions}
+                  optionStyleOptions={optionStyleOptions}
                   tradeNatureOptions={tradeNatureOptions}
                   tradeStructureOptions={tradeStructureOptions}
                   tradeSideOptions={tradeSideOptions}
@@ -761,16 +911,51 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
 
               {selectedTrade && inspectorTab === 'risk' && (
                 <div className="detail-list">
-                  <div className="detail-row">
-                    <InlineTooltipLabel tooltip={RISK_TOOLTIPS.notional} tooltipLabel="More information about notional">
-                      Notional
-                    </InlineTooltipLabel>
-                    <strong>
-                      {selectedTrade.price !== null && selectedTrade.volume !== null
-                        ? formatMoney(selectedTrade.price * selectedTrade.volume)
-                        : '—'}
-                    </strong>
-                  </div>
+                  {selectedTradeIsOption ? (
+                    <>
+                      <div className="detail-row">
+                        <InlineTooltipLabel tooltip={RISK_TOOLTIPS.notional} tooltipLabel="More information about notional">
+                          Premium Cashflow
+                        </InlineTooltipLabel>
+                        <strong>
+                          {selectedTradePremiumCashflow === null
+                            ? '—'
+                            : `${selectedTrade.trade_side === 'SELL' ? 'Received' : 'Paid'} ${formatMoney(Math.abs(selectedTradePremiumCashflow))}`}
+                        </strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Contracts</span>
+                        <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Underlying Equivalent</span>
+                        <strong>{formatNumber(selectedTradeUnderlyingEquivalent, 0)}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Strike</span>
+                        <strong>{formatMoney(selectedTrade.option_strike_price)}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Expiration</span>
+                        <strong>
+                          {selectedTrade.option_expiration_date
+                            ? `${formatDateOnly(selectedTrade.option_expiration_date)}${selectedTradeDaysToExpiration === null ? '' : ` · ${selectedTradeDaysToExpiration}d`}`
+                            : '—'}
+                        </strong>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="detail-row">
+                      <InlineTooltipLabel tooltip={RISK_TOOLTIPS.notional} tooltipLabel="More information about notional">
+                        Notional
+                      </InlineTooltipLabel>
+                      <strong>
+                        {selectedTrade.price !== null && selectedTrade.volume !== null
+                          ? formatMoney(selectedTrade.price * selectedTrade.volume)
+                          : '—'}
+                      </strong>
+                    </div>
+                  )}
                   <div className="detail-row">
                     <InlineTooltipLabel tooltip={RISK_TOOLTIPS.lifecycle} tooltipLabel="More information about lifecycle">
                       Lifecycle
@@ -784,7 +969,15 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     >
                       Exposure Side
                     </InlineTooltipLabel>
-                    <strong>{(selectedTrade.volume ?? 0) >= 0 ? 'Long' : 'Short'}</strong>
+                    <strong>
+                      {selectedTradeIsOption
+                        ? selectedTradeUnderlyingEquivalent >= 0
+                          ? 'Long Underlying Proxy'
+                          : 'Short Underlying Proxy'
+                        : (selectedTrade.volume ?? 0) >= 0
+                          ? 'Long'
+                          : 'Short'}
+                    </strong>
                   </div>
                   <div className="detail-row">
                     <InlineTooltipLabel

@@ -8,6 +8,8 @@ import type {
   CounterpartyStandards,
   ExternalDataSyncStatusRecord,
   LocationStandards,
+  TradeInvoiceRecord,
+  TradePaymentRecord,
   TradeWorkflowItemRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
@@ -17,8 +19,11 @@ export type WorkspaceBootstrap = {
   trades: unknown[]
   events: unknown[]
   positions: unknown[]
+  optionExposures: unknown[]
   deliveries: unknown[]
   workItems: TradeWorkflowItemRecord[]
+  invoices: TradeInvoiceRecord[]
+  payments: TradePaymentRecord[]
   books: unknown[]
   commodities: unknown[]
   priceIndices: unknown[]
@@ -116,8 +121,11 @@ export async function loadWorkspaceBootstrap(
     trades,
     events,
     positions,
+    optionExposures,
     deliveries,
     workItems,
+    invoices,
+    payments,
     books,
     commodities,
     priceIndices,
@@ -133,8 +141,15 @@ export async function loadWorkspaceBootstrap(
     fetchJson<unknown[]>(`${apiBase}/trades`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`),
     fetchJson<unknown[]>(`${apiBase}/positions`),
+    fetchJson<unknown[]>(`${apiBase}/option-exposures`),
     fetchJson<unknown[]>(`${apiBase}/deliveries`),
     fetchJson<TradeWorkflowItemRecord[]>(`${apiBase}/operations/work-items?include_closed=true`, {
+      cache: 'no-store',
+    }),
+    fetchJson<TradeInvoiceRecord[]>(`${apiBase}/settlement/invoices`, {
+      cache: 'no-store',
+    }),
+    fetchJson<TradePaymentRecord[]>(`${apiBase}/settlement/payments`, {
       cache: 'no-store',
     }),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`),
@@ -226,8 +241,11 @@ export async function loadWorkspaceBootstrap(
     trades,
     events,
     positions,
+    optionExposures,
     deliveries,
     workItems,
+    invoices,
+    payments,
     books,
     commodities,
     priceIndices,

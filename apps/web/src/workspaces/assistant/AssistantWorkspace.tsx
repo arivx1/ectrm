@@ -89,12 +89,25 @@ function buildAssistantContext({
     lines.push('Selected trade:')
     lines.push(`- trade_id: ${selectedTrade.trade_id}`)
     lines.push(`- status: ${selectedTrade.status}`)
+    lines.push(`- instrument_type: ${selectedTrade.instrument_type}`)
     lines.push(`- trade_nature: ${selectedTrade.trade_nature}`)
     lines.push(`- trade_structure: ${selectedTrade.trade_structure}`)
     lines.push(`- book: ${selectedTrade.book}`)
     lines.push(`- commodity: ${selectedTrade.commodity}`)
     lines.push(`- counterparty: ${selectedTrade.counterparty ?? 'n/a'}`)
     lines.push(`- pricing_type: ${selectedTrade.pricing_type}`)
+    if (selectedTrade.option_type) {
+      lines.push(`- option_type: ${selectedTrade.option_type}`)
+    }
+    if (selectedTrade.option_style) {
+      lines.push(`- option_style: ${selectedTrade.option_style}`)
+    }
+    if (selectedTrade.option_expiration_date) {
+      lines.push(`- option_expiration_date: ${selectedTrade.option_expiration_date}`)
+    }
+    if (selectedTrade.option_strike_price !== null) {
+      lines.push(`- option_strike_price: ${selectedTrade.option_strike_price}`)
+    }
     if (selectedTrade.volume !== null) {
       lines.push(`- volume: ${selectedTrade.volume}`)
     }

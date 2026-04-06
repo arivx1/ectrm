@@ -17,6 +17,7 @@ import {
   pricingTypeRequiresPriceIndex,
   tradeHeaderDefaults,
   tradeFormDefaults,
+  tradeInstrumentUsesOptionFields,
   tradeSideOptions,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
@@ -34,6 +35,11 @@ export function useTradeCaptureForm(
   activeLocations: LocationRecord[],
 ) {
   const [tradeIdInput, setTradeIdInput] = useState('')
+  const [tradeInstrumentTypeInput, setTradeInstrumentTypeInputState] = useState<string>(tradeFormDefaults.instrumentType)
+  const [optionTypeInput, setOptionTypeInput] = useState<string>(tradeFormDefaults.optionType)
+  const [optionStyleInput, setOptionStyleInput] = useState<string>(tradeFormDefaults.optionStyle)
+  const [optionExpirationDateInput, setOptionExpirationDateInput] = useState<string>(tradeFormDefaults.optionExpirationDate)
+  const [optionStrikePriceInput, setOptionStrikePriceInput] = useState<string>(tradeFormDefaults.optionStrikePrice)
   const [tradeNatureInput, setTradeNatureInput] = useState<string>(tradeFormDefaults.nature)
   const [tradeStructureInput, setTradeStructureInput] = useState<string>(tradeFormDefaults.structure)
   const [tradeSideInput, setTradeSideInput] = useState<string>(tradeFormDefaults.side)
@@ -116,7 +122,7 @@ export function useTradeCaptureForm(
     : ''
 
   const resolvedPriceIndexInput =
-    !pricingTypeRequiresPriceIndex(pricingTypeInput)
+    tradeInstrumentUsesOptionFields(tradeInstrumentTypeInput) || !pricingTypeRequiresPriceIndex(pricingTypeInput)
       ? ''
       : createPriceIndexOptions.some((priceIndex) => priceIndex.code === priceIndexInput)
         ? priceIndexInput
@@ -125,6 +131,17 @@ export function useTradeCaptureForm(
   const resolvedPriceUnitInput = createUnitOptions.some((unit) => unit.code === priceUnitInput)
     ? priceUnitInput
     : ''
+
+  function setTradeInstrumentTypeInput(value: string) {
+    setTradeInstrumentTypeInputState(value)
+    if (!tradeInstrumentUsesOptionFields(value)) {
+      return
+    }
+    setTradeNatureInput('FINANCIAL')
+    setTradeStructureInput('SINGLE')
+    setPricingTypeInput('FIXED')
+    setPriceIndexInput('')
+  }
 
   function updateDraftLeg(index: number, field: keyof TradeLegDraft, value: string) {
     setCreateLegs((current) =>
@@ -177,6 +194,11 @@ export function useTradeCaptureForm(
           : buildDefaultTradeLegs(makeLegDraft)
 
     setTradeIdInput('')
+    setTradeInstrumentTypeInputState(selectedTrade.instrument_type ?? tradeFormDefaults.instrumentType)
+    setOptionTypeInput(selectedTrade.option_type ?? tradeFormDefaults.optionType)
+    setOptionStyleInput(selectedTrade.option_style ?? tradeFormDefaults.optionStyle)
+    setOptionExpirationDateInput(selectedTrade.option_expiration_date ?? tradeFormDefaults.optionExpirationDate)
+    setOptionStrikePriceInput(selectedTrade.option_strike_price?.toString() ?? tradeFormDefaults.optionStrikePrice)
     setTradeNatureInput(selectedTrade.trade_nature ?? tradeFormDefaults.nature)
     setTradeStructureInput(selectedTrade.trade_structure ?? tradeFormDefaults.structure)
     setTradeSideInput(selectedTrade.trade_side ?? tradeFormDefaults.side)
@@ -210,6 +232,11 @@ export function useTradeCaptureForm(
 
   function reset() {
     setTradeIdInput('')
+    setTradeInstrumentTypeInputState(tradeFormDefaults.instrumentType)
+    setOptionTypeInput(tradeFormDefaults.optionType)
+    setOptionStyleInput(tradeFormDefaults.optionStyle)
+    setOptionExpirationDateInput(tradeFormDefaults.optionExpirationDate)
+    setOptionStrikePriceInput(tradeFormDefaults.optionStrikePrice)
     setTradeNatureInput(tradeFormDefaults.nature)
     setTradeStructureInput(tradeFormDefaults.structure)
     setTradeSideInput(tradeFormDefaults.side)
@@ -244,6 +271,16 @@ export function useTradeCaptureForm(
   return {
     tradeIdInput,
     setTradeIdInput,
+    tradeInstrumentTypeInput,
+    setTradeInstrumentTypeInput,
+    optionTypeInput,
+    setOptionTypeInput,
+    optionStyleInput,
+    setOptionStyleInput,
+    optionExpirationDateInput,
+    setOptionExpirationDateInput,
+    optionStrikePriceInput,
+    setOptionStrikePriceInput,
     tradeNatureInput,
     setTradeNatureInput,
     tradeStructureInput,

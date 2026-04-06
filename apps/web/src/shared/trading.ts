@@ -1,7 +1,7 @@
-import type { TradeHeaderDraft, TradeLegDraft } from './models'
+import type { TradeHeaderDraft, TradeLegDraft, TradeWorkflowItemRecord } from './models'
 
 export const tradeAggregateType = 'trade'
-export const currentTradeEventSchemaVersion = 4
+export const currentTradeEventSchemaVersion = 5
 export const defaultTradeSourceSystem = 'ETRM'
 export const defaultTradeExecutionTime = '00:00'
 
@@ -20,14 +20,18 @@ export const commodityClassOrder = [
   'OTHER',
 ] as const
 
+export const tradeInstrumentTypeOptions = ['LINEAR', 'OPTION'] as const
 export const tradeNatureOptions = ['PHYSICAL', 'FINANCIAL'] as const
 export const tradeStructureOptions = ['SINGLE', 'SWAP'] as const
 export const tradeSideOptions = ['BUY', 'SELL'] as const
+export const optionTypeOptions = ['CALL', 'PUT'] as const
+export const optionStyleOptions = ['AMERICAN', 'EUROPEAN'] as const
 export const pricingTypeOptions = ['FIXED', 'INDEX', 'FORMULA', 'HYBRID'] as const
 export const pricingStatusOptions = ['PENDING', 'PARTIALLY_PRICED', 'PRICED', 'DISPUTED'] as const
 export const confirmationStatusOptions = ['PENDING', 'SENT', 'CONFIRMED', 'DISPUTED'] as const
 export const nominationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'SCHEDULED', 'NOMINATED', 'COMPLETED'] as const
 export const allocationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'PARTIALLY_ALLOCATED', 'ALLOCATED', 'COMPLETED'] as const
+export const creditApprovalStatusOptions = ['PENDING_REVIEW', 'APPROVED', 'NOT_REQUIRED', 'REJECTED'] as const
 export const invoiceStatusOptions = ['NOT_REQUIRED', 'PENDING', 'ISSUED', 'APPROVED', 'DISPUTED'] as const
 export const paymentStatusOptions = ['NOT_REQUIRED', 'PENDING', 'DUE', 'PAID', 'OVERDUE'] as const
 export const settlementStatusOptions = ['PENDING', 'INVOICED', 'PARTIALLY_SETTLED', 'SETTLED', 'DISPUTED'] as const
@@ -37,10 +41,50 @@ export const tradeStatusValues = {
   cancelled: 'CANCELLED',
 } as const
 
+export type TradeCreditHoldSummary = {
+  credit_approval_status: string
+  credit_hold_active: boolean
+  credit_hold_reason: string | null
+}
+
+export function buildTradeCreditHoldSummary(
+  item?: Pick<TradeWorkflowItemRecord, 'status' | 'notes'> | null,
+): TradeCreditHoldSummary {
+  const approvalStatus = item?.status?.trim().toUpperCase() || creditApprovalStatusOptions[2]
+  const note = item?.notes?.trim() || ''
+
+  if (approvalStatus === 'PENDING_REVIEW') {
+    return {
+      credit_approval_status: approvalStatus,
+      credit_hold_active: true,
+      credit_hold_reason: note || 'Credit approval is pending review.',
+    }
+  }
+
+  if (approvalStatus === 'REJECTED') {
+    return {
+      credit_approval_status: approvalStatus,
+      credit_hold_active: true,
+      credit_hold_reason: note || 'Credit approval was rejected.',
+    }
+  }
+
+  return {
+    credit_approval_status: approvalStatus,
+    credit_hold_active: false,
+    credit_hold_reason: null,
+  }
+}
+
 export const tradeFormDefaults = {
+  instrumentType: tradeInstrumentTypeOptions[0],
   nature: tradeNatureOptions[0],
   structure: tradeStructureOptions[0],
   side: tradeSideOptions[0],
+  optionType: optionTypeOptions[0],
+  optionStyle: optionStyleOptions[0],
+  optionStrikePrice: '',
+  optionExpirationDate: '',
   pricingType: pricingTypeOptions[0],
   pricingStatus: pricingStatusOptions[0],
   settlementStatus: settlementStatusOptions[0],
@@ -91,6 +135,10 @@ export function buildDefaultTradeLegs(
 
 export function tradeStructureSupportsLegs(tradeStructure: string): boolean {
   return tradeStructure === tradeStructureOptions[1]
+}
+
+export function tradeInstrumentUsesOptionFields(instrumentType: string): boolean {
+  return instrumentType === tradeInstrumentTypeOptions[1]
 }
 
 export function tradeStructureRequiresTopLevelVolume(tradeStructure: string): boolean {

@@ -14,10 +14,13 @@ from apps.api.app.shared.enums import (
     ConfirmationStatus,
     InvoiceStatus,
     NominationStatus,
+    OptionStyle,
+    OptionType,
     PaymentStatus,
     PricingStatus,
     PricingType,
     SettlementStatus,
+    TradeInstrumentType,
     TradeNature,
     TradeSide,
     TradeStructure,
@@ -112,6 +115,12 @@ def normalize_trade_nature(value):
     return normalized if normalized in valid_values else TradeNature.PHYSICAL.value
 
 
+def normalize_instrument_type(value):
+    normalized = str(value or TradeInstrumentType.LINEAR.value).strip().upper()
+    valid_values = {instrument_type.value for instrument_type in TradeInstrumentType}
+    return normalized if normalized in valid_values else TradeInstrumentType.LINEAR.value
+
+
 def normalize_trade_structure(value):
     normalized = str(value or TradeStructure.SINGLE.value).strip().upper()
     valid_values = {trade_structure.value for trade_structure in TradeStructure}
@@ -122,6 +131,22 @@ def normalize_trade_side(value):
     normalized = str(value or TradeSide.BUY.value).strip().upper()
     valid_values = {trade_side.value for trade_side in TradeSide}
     return normalized if normalized in valid_values else TradeSide.BUY.value
+
+
+def normalize_option_type(value):
+    normalized = normalize_optional_text(value, uppercase=True)
+    valid_values = {option_type.value for option_type in OptionType}
+    if normalized in valid_values:
+        return normalized
+    return None
+
+
+def normalize_option_style(value):
+    normalized = normalize_optional_text(value, uppercase=True)
+    valid_values = {option_style.value for option_style in OptionStyle}
+    if normalized in valid_values:
+        return normalized
+    return None
 
 
 def normalize_price_index_code(value):
@@ -227,6 +252,56 @@ def normalize_legs(value):
     return [leg for leg in value if isinstance(leg, dict)]
 
 
+def validate_option_fields(
+    *,
+    instrument_type,
+    trade_nature,
+    trade_structure,
+    pricing_type,
+    option_type,
+    option_style,
+    option_strike_price,
+    option_expiration_date,
+):
+    normalized_option_type = normalize_option_type(option_type)
+    normalized_option_style = normalize_option_style(option_style)
+    normalized_option_strike_price = to_decimal_or_none(option_strike_price)
+    normalized_option_expiration_date = parse_optional_date(option_expiration_date)
+
+    if instrument_type != TradeInstrumentType.OPTION.value:
+        if any(
+            value is not None
+            for value in (
+                normalized_option_type,
+                normalized_option_style,
+                normalized_option_strike_price,
+                normalized_option_expiration_date,
+            )
+        ):
+            raise ValueError("Option fields can only be set when instrument_type is OPTION")
+        return None, None, None, None
+
+    if trade_nature != TradeNature.FINANCIAL.value:
+        raise ValueError("Options must be booked as FINANCIAL trades")
+    if trade_structure != TradeStructure.SINGLE.value:
+        raise ValueError("Options currently support SINGLE structure only")
+    if pricing_type != PricingType.FIXED.value:
+        raise ValueError("Options currently require FIXED pricing for premium capture")
+    if normalized_option_type is None:
+        raise ValueError("option_type is required when instrument_type is OPTION")
+    if normalized_option_strike_price is None:
+        raise ValueError("option_strike_price is required when instrument_type is OPTION")
+    if normalized_option_expiration_date is None:
+        raise ValueError("option_expiration_date is required when instrument_type is OPTION")
+
+    return (
+        normalized_option_type,
+        normalized_option_style or OptionStyle.AMERICAN.value,
+        normalized_option_strike_price,
+        normalized_option_expiration_date,
+    )
+
+
 def main() -> None:
     db = SessionLocal()
 
@@ -258,7 +333,11 @@ def main() -> None:
 
                 if existing is None:
                     trade_structure = normalize_trade_structure(payload.get("trade_structure"))
-                    trade_nature = normalize_trade_nature(payload.get("trade_nature"))
+                    instrument_type = normalize_instrument_type(payload.get("instrument_type"))
+                    trade_nature_value = payload.get("trade_nature")
+                    if instrument_type == TradeInstrumentType.OPTION.value and trade_nature_value in {None, ""}:
+                        trade_nature_value = TradeNature.FINANCIAL.value
+                    trade_nature = normalize_trade_nature(trade_nature_value)
                     workflow_defaults = default_trade_workflow_statuses(trade_nature)
                     normalized_book = normalize_book(payload.get("book"))
                     normalized_portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
@@ -281,6 +360,22 @@ def main() -> None:
                         delivery_end,
                         start_field="delivery_start",
                         end_field="delivery_end",
+                    )
+                    pricing_type = normalize_pricing_type(payload.get("pricing_type"))
+                    (
+                        option_type,
+                        option_style,
+                        option_strike_price,
+                        option_expiration_date,
+                    ) = validate_option_fields(
+                        instrument_type=instrument_type,
+                        trade_nature=trade_nature,
+                        trade_structure=trade_structure,
+                        pricing_type=pricing_type,
+                        option_type=payload.get("option_type"),
+                        option_style=payload.get("option_style"),
+                        option_strike_price=payload.get("option_strike_price"),
+                        option_expiration_date=payload.get("option_expiration_date"),
                     )
                     trade_state[trade_id] = {
                         "trade_id": trade_id,
@@ -306,6 +401,11 @@ def main() -> None:
                             payload.get("price_unit_code"),
                             uppercase=True,
                         ),
+                        "instrument_type": instrument_type,
+                        "option_type": option_type,
+                        "option_style": option_style,
+                        "option_strike_price": option_strike_price,
+                        "option_expiration_date": option_expiration_date,
                         "trade_nature": trade_nature,
                         "trade_structure": trade_structure,
                         "trade_side": (
@@ -323,7 +423,7 @@ def main() -> None:
                             payload.get("commodity"),
                         ),
                         "commodity": normalize_commodity_code(payload.get("commodity")),
-                        "pricing_type": normalize_pricing_type(payload.get("pricing_type")),
+                        "pricing_type": pricing_type,
                         "pricing_status": normalize_trade_header_status(
                             payload.get("pricing_status"),
                             "PENDING",
@@ -382,6 +482,8 @@ def main() -> None:
                     }
                 else:
                     existing["updated_at"] = now
+                    if "instrument_type" in payload:
+                        existing["instrument_type"] = normalize_instrument_type(payload.get("instrument_type"))
                     if "external_trade_id" in payload:
                         existing["external_trade_id"] = normalize_optional_text(payload.get("external_trade_id"))
                     if "source_system" in payload:
@@ -543,6 +645,40 @@ def main() -> None:
                         start_field="delivery_start",
                         end_field="delivery_end",
                     )
+                    option_type_value = payload.get("option_type", existing.get("option_type"))
+                    option_style_value = payload.get("option_style", existing.get("option_style"))
+                    option_strike_price_value = payload.get(
+                        "option_strike_price",
+                        existing.get("option_strike_price"),
+                    )
+                    option_expiration_date_value = payload.get(
+                        "option_expiration_date",
+                        existing.get("option_expiration_date"),
+                    )
+                    if (
+                        "instrument_type" in payload
+                        and existing.get("instrument_type", TradeInstrumentType.LINEAR.value)
+                        != TradeInstrumentType.OPTION.value
+                    ):
+                        option_type_value = payload.get("option_type")
+                        option_style_value = payload.get("option_style")
+                        option_strike_price_value = payload.get("option_strike_price")
+                        option_expiration_date_value = payload.get("option_expiration_date")
+                    (
+                        existing["option_type"],
+                        existing["option_style"],
+                        existing["option_strike_price"],
+                        existing["option_expiration_date"],
+                    ) = validate_option_fields(
+                        instrument_type=existing.get("instrument_type", TradeInstrumentType.LINEAR.value),
+                        trade_nature=existing.get("trade_nature", TradeNature.PHYSICAL.value),
+                        trade_structure=existing.get("trade_structure", TradeStructure.SINGLE.value),
+                        pricing_type=existing.get("pricing_type", PricingType.FIXED.value),
+                        option_type=option_type_value,
+                        option_style=option_style_value,
+                        option_strike_price=option_strike_price_value,
+                        option_expiration_date=option_expiration_date_value,
+                    )
                     existing["last_event_id"] = e.event_id
 
             elif e.event_type == "TradeAmended":
@@ -553,6 +689,8 @@ def main() -> None:
                     continue
 
                 existing["updated_at"] = now
+                if "instrument_type" in payload:
+                    existing["instrument_type"] = normalize_instrument_type(payload.get("instrument_type"))
                 if "external_trade_id" in payload:
                     existing["external_trade_id"] = normalize_optional_text(payload.get("external_trade_id"))
                 if "source_system" in payload:
@@ -711,6 +849,40 @@ def main() -> None:
                     start_field="delivery_start",
                     end_field="delivery_end",
                 )
+                option_type_value = payload.get("option_type", existing.get("option_type"))
+                option_style_value = payload.get("option_style", existing.get("option_style"))
+                option_strike_price_value = payload.get(
+                    "option_strike_price",
+                    existing.get("option_strike_price"),
+                )
+                option_expiration_date_value = payload.get(
+                    "option_expiration_date",
+                    existing.get("option_expiration_date"),
+                )
+                if (
+                    "instrument_type" in payload
+                    and existing.get("instrument_type", TradeInstrumentType.LINEAR.value)
+                    != TradeInstrumentType.OPTION.value
+                ):
+                    option_type_value = payload.get("option_type")
+                    option_style_value = payload.get("option_style")
+                    option_strike_price_value = payload.get("option_strike_price")
+                    option_expiration_date_value = payload.get("option_expiration_date")
+                (
+                    existing["option_type"],
+                    existing["option_style"],
+                    existing["option_strike_price"],
+                    existing["option_expiration_date"],
+                ) = validate_option_fields(
+                    instrument_type=existing.get("instrument_type", TradeInstrumentType.LINEAR.value),
+                    trade_nature=existing.get("trade_nature", TradeNature.PHYSICAL.value),
+                    trade_structure=existing.get("trade_structure", TradeStructure.SINGLE.value),
+                    pricing_type=existing.get("pricing_type", PricingType.FIXED.value),
+                    option_type=option_type_value,
+                    option_style=option_style_value,
+                    option_strike_price=option_strike_price_value,
+                    option_expiration_date=option_expiration_date_value,
+                )
                 existing["last_event_id"] = e.event_id
 
             elif e.event_type == "TradeCancelled":
@@ -745,6 +917,11 @@ def main() -> None:
                     delivery_start=trade.get("delivery_start"),
                     delivery_end=trade.get("delivery_end"),
                     price_unit_code=trade.get("price_unit_code"),
+                    instrument_type=trade.get("instrument_type", TradeInstrumentType.LINEAR.value),
+                    option_type=trade.get("option_type"),
+                    option_style=trade.get("option_style"),
+                    option_strike_price=trade.get("option_strike_price"),
+                    option_expiration_date=trade.get("option_expiration_date"),
                     trade_nature=trade.get("trade_nature", TradeNature.PHYSICAL.value),
                     trade_structure=trade.get("trade_structure", TradeStructure.SINGLE.value),
                     trade_side=(

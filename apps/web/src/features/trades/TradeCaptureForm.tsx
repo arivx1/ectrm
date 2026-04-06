@@ -1,6 +1,7 @@
 import { TradeLegEditor } from './TradeLegEditor'
 import {
   buildCounterpartyCreditRestrictionMessage,
+  type CounterpartyCreditPolicyPreview,
   formatCounterpartyOptionLabel,
 } from './counterpartyCredit'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
@@ -11,6 +12,7 @@ import {
   getQualitySpecOptionsForCommodity,
   pricingTypeRequiresExplicitPrice,
   pricingTypeRequiresPriceIndex,
+  tradeInstrumentUsesOptionFields,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
 
@@ -100,6 +102,16 @@ type TradeCaptureFormProps = {
   setDeliveryEndInput: (value: string) => void
   priceUnitInput: string
   setPriceUnitInput: (value: string) => void
+  tradeInstrumentTypeInput: string
+  setTradeInstrumentTypeInput: (value: string) => void
+  optionTypeInput: string
+  setOptionTypeInput: (value: string) => void
+  optionStyleInput: string
+  setOptionStyleInput: (value: string) => void
+  optionExpirationDateInput: string
+  setOptionExpirationDateInput: (value: string) => void
+  optionStrikePriceInput: string
+  setOptionStrikePriceInput: (value: string) => void
   settlementStatusInput: string
   setSettlementStatusInput: (value: string) => void
   traderUserInput: string
@@ -114,6 +126,10 @@ type TradeCaptureFormProps = {
   referenceDataLoading: boolean
   hasReferenceOptions: boolean
   createError: string
+  counterpartyCreditPolicyPreview: CounterpartyCreditPolicyPreview | null
+  tradeInstrumentTypeOptions: readonly string[]
+  optionTypeOptions: readonly string[]
+  optionStyleOptions: readonly string[]
   tradeNatureOptions: readonly string[]
   tradeStructureOptions: readonly string[]
   tradeSideOptions: readonly string[]
@@ -188,6 +204,16 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     setDeliveryEndInput,
     priceUnitInput,
     setPriceUnitInput,
+    tradeInstrumentTypeInput,
+    setTradeInstrumentTypeInput,
+    optionTypeInput,
+    setOptionTypeInput,
+    optionStyleInput,
+    setOptionStyleInput,
+    optionExpirationDateInput,
+    setOptionExpirationDateInput,
+    optionStrikePriceInput,
+    setOptionStrikePriceInput,
     settlementStatusInput,
     setSettlementStatusInput,
     traderUserInput,
@@ -202,6 +228,10 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     referenceDataLoading,
     hasReferenceOptions,
     createError,
+    counterpartyCreditPolicyPreview,
+    tradeInstrumentTypeOptions,
+    optionTypeOptions,
+    optionStyleOptions,
     tradeNatureOptions,
     tradeStructureOptions,
     tradeSideOptions,
@@ -213,6 +243,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
   const { date: executionDateInput, time: executionTimeInput } = splitLocalDateTimeInput(executionTimestampInput)
   const qualitySpecOptions = getQualitySpecOptionsForCommodity(commodityInput)
   const qualitySpecListId = qualitySpecOptions.length > 0 ? 'trade-quality-spec-options' : undefined
+  const optionTrade = tradeInstrumentUsesOptionFields(tradeInstrumentTypeInput)
   const selectedCounterparty =
     createCounterpartyOptions.find((counterparty) => counterparty.code === counterpartyInput) ?? null
   const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
@@ -304,8 +335,28 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           />
         </label>
         <label className="field">
+          <FieldLabel label="Instrument" tooltip={tradeTooltipCopy.instrument} />
+          <select
+            className="control"
+            value={tradeInstrumentTypeInput}
+            onChange={(event) => setTradeInstrumentTypeInput(event.target.value)}
+            disabled={submitting}
+          >
+            {tradeInstrumentTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <span>Nature</span>
-          <select className="control" value={tradeNatureInput} onChange={(event) => setTradeNatureInput(event.target.value)}>
+          <select
+            className="control"
+            value={tradeNatureInput}
+            onChange={(event) => setTradeNatureInput(event.target.value)}
+            disabled={submitting || optionTrade}
+          >
             {tradeNatureOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -315,7 +366,12 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
         </label>
         <label className="field">
           <FieldLabel label="Structure" tooltip={tradeTooltipCopy.structure} />
-          <select className="control" value={tradeStructureInput} onChange={(event) => setTradeStructureInput(event.target.value)}>
+          <select
+            className="control"
+            value={tradeStructureInput}
+            onChange={(event) => setTradeStructureInput(event.target.value)}
+            disabled={submitting || optionTrade}
+          >
             {tradeStructureOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -359,6 +415,16 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             <div className="feedback-banner feedback-banner-error trade-structure-note">
               <strong>Counterparty blocked for trading</strong>
               <p>{counterpartyCreditWarning}</p>
+            </div>
+          </div>
+        )}
+        {counterpartyCreditPolicyPreview && (
+          <div className="field field-wide">
+            <div
+              className={`feedback-banner ${counterpartyCreditPolicyPreview.tone === 'error' ? 'feedback-banner-error' : ''} trade-structure-note`}
+            >
+              <strong>{counterpartyCreditPolicyPreview.title}</strong>
+              <p>{counterpartyCreditPolicyPreview.message}</p>
             </div>
           </div>
         )}
@@ -434,6 +500,14 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             </label>
           </>
         )}
+        {optionTrade && (
+          <div className="field field-wide">
+            <div className="feedback-banner trade-structure-note">
+              <strong>Option tickets are single-leg financial trades.</strong>
+              <p>Premium is captured in the price field, the commodity stays as the underlying, and option tickets stay out of the net-position projection until option risk math is added.</p>
+            </div>
+          </div>
+        )}
         <label className="field">
           <span>Quality Spec</span>
           <input
@@ -461,6 +535,56 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
               </option>
             ))}
           </select>
+        </label>
+        <label className="field">
+          <span>Option Type</span>
+          <select
+            className="control"
+            value={optionTypeInput}
+            onChange={(event) => setOptionTypeInput(event.target.value)}
+            disabled={submitting || !optionTrade}
+          >
+            {optionTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Option Style</span>
+          <select
+            className="control"
+            value={optionStyleInput}
+            onChange={(event) => setOptionStyleInput(event.target.value)}
+            disabled={submitting || !optionTrade}
+          >
+            {optionStyleOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Expiration</span>
+          <input
+            className="control"
+            type="date"
+            value={optionExpirationDateInput}
+            onChange={(event) => setOptionExpirationDateInput(event.target.value)}
+            disabled={submitting || !optionTrade}
+          />
+        </label>
+        <label className="field">
+          <span>Strike Price</span>
+          <input
+            className="control"
+            inputMode="decimal"
+            value={optionStrikePriceInput}
+            onChange={(event) => setOptionStrikePriceInput(event.target.value)}
+            disabled={submitting || !optionTrade}
+          />
         </label>
         <label className="field">
           <span>Trade Currency</span>
@@ -531,18 +655,18 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           />
         </label>
         <label className="field">
-          <span>{pricingTypeRequiresExplicitPrice(pricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
+          <span>{optionTrade ? 'Premium' : pricingTypeRequiresExplicitPrice(pricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
           <input className="control" inputMode="decimal" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} />
         </label>
         {!tradeStructureSupportsLegs(tradeStructureInput) && (
           <label className="field">
-            <span>Volume</span>
+            <span>{optionTrade ? 'Contracts' : 'Volume'}</span>
             <input className="control" inputMode="decimal" value={volumeInput} onChange={(event) => setVolumeInput(event.target.value)} />
           </label>
         )}
         <label className="field">
           <FieldLabel label="Pricing" tooltip={tradeTooltipCopy.pricing} />
-          <select className="control" value={pricingTypeInput} onChange={(event) => setPricingTypeInput(event.target.value)}>
+          <select className="control" value={pricingTypeInput} onChange={(event) => setPricingTypeInput(event.target.value)} disabled={optionTrade}>
             {pricingTypeOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -576,7 +700,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             className="control"
             value={priceIndexInput}
             onChange={(event) => setPriceIndexInput(event.target.value)}
-            disabled={!pricingTypeRequiresPriceIndex(pricingTypeInput) || createPriceIndexOptions.length === 0}
+            disabled={optionTrade || !pricingTypeRequiresPriceIndex(pricingTypeInput) || createPriceIndexOptions.length === 0}
           >
             <option value="">No price index</option>
             {createPriceIndexOptions.map((priceIndex) => (
@@ -617,7 +741,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
 
       <p className={`form-note ${createError ? 'form-note-error' : ''}`}>
         {createError || (hasReferenceOptions
-          ? 'Leave Trade ID blank to auto-generate it. Pick an execution date to default the time to midnight. INDEX deals can omit price differential, and SWAP deals now derive the trade summary from Leg 1.'
+          ? 'Leave Trade ID blank to auto-generate it. Pick an execution date to default the time to midnight. INDEX deals can omit price differential, SWAP deals derive the trade summary from Leg 1, and the first options slice books premium plus strike and expiry on single-leg tickets.'
           : 'Trade entry is disabled until at least one active book and one active commodity exist in reference data.')}
       </p>
     </>

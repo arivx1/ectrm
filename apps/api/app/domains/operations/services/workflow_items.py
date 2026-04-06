@@ -6,11 +6,19 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.trade_credit_hold import (
+    DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES,
+)
+from apps.api.app.domains.operations.services.trade_credit_hold import (
+    format_trade_credit_hold_message,
+)
+from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.shared.enums import AllocationStatus
 from apps.api.app.shared.enums import ConfirmationStatus
+from apps.api.app.shared.enums import CreditApprovalStatus
 from apps.api.app.shared.enums import InvoiceStatus
 from apps.api.app.shared.enums import NominationStatus
 from apps.api.app.shared.enums import PaymentStatus
@@ -23,6 +31,7 @@ WORKFLOW_TYPE_TO_QUEUE: dict[str, str] = {
     TradeWorkflowType.CONFIRMATION.value: "operations",
     TradeWorkflowType.NOMINATION.value: "operations",
     TradeWorkflowType.ALLOCATION.value: "operations",
+    TradeWorkflowType.CREDIT_APPROVAL.value: "operations",
     TradeWorkflowType.INVOICE.value: "settlement",
     TradeWorkflowType.PAYMENT.value: "settlement",
 }
@@ -39,6 +48,9 @@ WORKFLOW_ALLOWED_STATUS_VALUES: dict[str, tuple[str, ...]] = {
     TradeWorkflowType.CONFIRMATION.value: tuple(status.value for status in ConfirmationStatus),
     TradeWorkflowType.NOMINATION.value: tuple(status.value for status in NominationStatus),
     TradeWorkflowType.ALLOCATION.value: tuple(status.value for status in AllocationStatus),
+    TradeWorkflowType.CREDIT_APPROVAL.value: tuple(
+        status.value for status in CreditApprovalStatus
+    ),
     TradeWorkflowType.INVOICE.value: tuple(status.value for status in InvoiceStatus),
     TradeWorkflowType.PAYMENT.value: tuple(status.value for status in PaymentStatus),
 }
@@ -61,7 +73,22 @@ WORKFLOW_CLOSED_STATUS_VALUES: dict[str, set[str]] = {
         PaymentStatus.NOT_REQUIRED.value,
         PaymentStatus.PAID.value,
     },
+    TradeWorkflowType.CREDIT_APPROVAL.value: {
+        CreditApprovalStatus.APPROVED.value,
+        CreditApprovalStatus.NOT_REQUIRED.value,
+        CreditApprovalStatus.REJECTED.value,
+    },
 }
+
+AUTOMATED_WORKFLOW_TYPES: tuple[str, ...] = (
+    TradeWorkflowType.CONFIRMATION.value,
+    TradeWorkflowType.NOMINATION.value,
+    TradeWorkflowType.ALLOCATION.value,
+    TradeWorkflowType.INVOICE.value,
+    TradeWorkflowType.PAYMENT.value,
+)
+
+_UNSET = object()
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -147,6 +174,8 @@ def _default_due_at_for_trade(trade: Trade, workflow_type: str) -> Optional[date
     if normalized_type == TradeWorkflowType.PAYMENT.value:
         payment_anchor = trade.delivery_end or trade.effective_end_date or trade_anchor
         return _at_midday_utc(payment_anchor + timedelta(days=5))
+    if normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value:
+        return _at_midday_utc(trade_anchor + timedelta(days=1))
     return None
 
 
@@ -185,26 +214,26 @@ def synchronize_trade_workflow_items(
     ).scalars().all()
     items_by_type = {item.workflow_type: item for item in existing_items}
 
-    for workflow_type in (workflow_type.value for workflow_type in TradeWorkflowType):
+    for workflow_type in AUTOMATED_WORKFLOW_TYPES:
         expected_status = workflow_status_from_trade(trade, workflow_type)
         default_due_at = _default_due_at_for_trade(trade, workflow_type)
         item = items_by_type.get(workflow_type)
         if item is None:
-            db.add(
-                TradeWorkflowItem(
-                    trade_id=trade.trade_id,
-                    workflow_type=workflow_type,
-                    status=expected_status,
-                    owner=None,
-                    due_at=default_due_at,
-                    notes=None,
-                    created_at=reference_time,
-                    created_by=actor_id,
-                    updated_at=reference_time,
-                    updated_by=actor_id,
-                    version=1,
-                )
+            item = TradeWorkflowItem(
+                trade_id=trade.trade_id,
+                workflow_type=workflow_type,
+                status=expected_status,
+                owner=None,
+                due_at=default_due_at,
+                notes=None,
+                created_at=reference_time,
+                created_by=actor_id,
+                updated_at=reference_time,
+                updated_by=actor_id,
+                version=1,
             )
+            db.add(item)
+            items_by_type[workflow_type] = item
             continue
 
         changed = False
@@ -218,6 +247,8 @@ def synchronize_trade_workflow_items(
             item.updated_at = reference_time
             item.updated_by = actor_id
             item.version += 1
+
+    rollup_trade_workflow_statuses(trade, list(items_by_type.values()), now=reference_time)
 
 
 def synchronize_active_trade_workflow_items(
@@ -283,8 +314,81 @@ def rollup_trade_workflow_statuses(
     return changed
 
 
+def set_trade_workflow_item_projection(
+    db: Session,
+    *,
+    trade: Trade,
+    workflow_type: str,
+    status: object | None,
+    actor_id: str,
+    now: Optional[datetime] = None,
+    due_at: datetime | None | object = _UNSET,
+    notes: object | None | object = _UNSET,
+) -> TradeWorkflowItem:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    normalized_type = normalize_workflow_type(workflow_type)
+    normalized_status = normalize_workflow_status(normalized_type, status)
+    item = db.execute(
+        select(TradeWorkflowItem).where(
+            TradeWorkflowItem.trade_id == trade.trade_id,
+            TradeWorkflowItem.workflow_type == normalized_type,
+        )
+    ).scalars().first()
+
+    if item is None:
+        resolved_due_at = (
+            normalize_workflow_due_at(due_at) if due_at is not _UNSET else _default_due_at_for_trade(trade, normalized_type)
+        )
+        item = TradeWorkflowItem(
+            trade_id=trade.trade_id,
+            workflow_type=normalized_type,
+            status=normalized_status,
+            owner=None,
+            due_at=resolved_due_at,
+            notes=_normalize_optional_text(notes) if notes is not _UNSET else None,
+            created_at=reference_time,
+            created_by=actor_id,
+            updated_at=reference_time,
+            updated_by=actor_id,
+            version=1,
+        )
+        db.add(item)
+        db.flush()
+    else:
+        changed = False
+        if item.status != normalized_status:
+            item.status = normalized_status
+            changed = True
+        if due_at is _UNSET:
+            default_due_at = _default_due_at_for_trade(trade, normalized_type)
+            if item.due_at is None and default_due_at is not None:
+                item.due_at = default_due_at
+                changed = True
+        else:
+            normalized_due_at = normalize_workflow_due_at(due_at)
+            if item.due_at != normalized_due_at:
+                item.due_at = normalized_due_at
+                changed = True
+        if notes is not _UNSET:
+            normalized_notes = _normalize_optional_text(notes)
+            if item.notes != normalized_notes:
+                item.notes = normalized_notes
+                changed = True
+        if changed:
+            item.updated_at = reference_time
+            item.updated_by = actor_id
+            item.version += 1
+
+    workflow_items = db.execute(
+        select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == trade.trade_id)
+    ).scalars().all()
+    rollup_trade_workflow_statuses(trade, workflow_items, now=reference_time)
+    db.flush()
+    return item
+
+
 def _workflow_attention_rank(item: TradeWorkflowItemOut) -> tuple[int, datetime, datetime, str, str]:
-    if item.status in {"DISPUTED", "OVERDUE"}:
+    if item.status in {"DISPUTED", "OVERDUE", CreditApprovalStatus.REJECTED.value}:
         priority = 0
     elif item.is_overdue:
         priority = 1
@@ -383,6 +487,7 @@ def create_trade_workflow_item(
 ) -> TradeWorkflowItemOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     normalized_type = normalize_workflow_type(workflow_type)
+    db.flush()
 
     trade = db.execute(
         select(Trade).where(Trade.trade_id == trade_id, Trade.status != "CANCELLED")
@@ -400,7 +505,40 @@ def create_trade_workflow_item(
         )
     ).scalars().first()
     if item is None:
-        raise LookupError(f"Workflow item for trade '{trade_id}' and type '{normalized_type}' was not found.")
+        if status is not None:
+            normalized_status = normalize_workflow_status(normalized_type, status)
+        elif normalized_type in WORKFLOW_TYPE_TO_TRADE_FIELD:
+            normalized_status = workflow_status_from_trade(trade, normalized_type)
+        elif normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value:
+            normalized_status = CreditApprovalStatus.PENDING_REVIEW.value
+        else:
+            raise LookupError(
+                f"Workflow item for trade '{trade_id}' and type '{normalized_type}' was not found."
+            )
+
+        item = TradeWorkflowItem(
+            trade_id=trade_id,
+            workflow_type=normalized_type,
+            status=normalized_status,
+            owner=_normalize_optional_text(owner),
+            due_at=normalize_workflow_due_at(due_at)
+            if due_at is not None
+            else _default_due_at_for_trade(trade, normalized_type),
+            notes=_normalize_optional_text(notes),
+            created_at=reference_time,
+            created_by=actor_id,
+            updated_at=reference_time,
+            updated_by=actor_id,
+            version=1,
+        )
+        db.add(item)
+        db.flush()
+        workflow_items = db.execute(
+            select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == trade_id)
+        ).scalars().all()
+        rollup_trade_workflow_statuses(trade, workflow_items, now=reference_time)
+        db.flush()
+        return _to_out(item, trade, now=reference_time)
 
     changed = False
     if status is not None:
@@ -459,6 +597,31 @@ def update_trade_workflow_item(
 
     item, trade = row
     changed = False
+
+    if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value and "status" in changes:
+        requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
+        next_notes = item.notes
+        if "notes" in changes:
+            next_notes = _normalize_optional_text(changes.get("notes"))
+        if requested_status == CreditApprovalStatus.REJECTED.value and not next_notes:
+            raise ValueError("Rejecting a credit approval item requires an audit comment in notes.")
+
+    if item.workflow_type in DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES and "status" in changes:
+        requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
+        if requested_status != item.status:
+            credit_hold_state = get_trade_credit_hold_state(db, trade_id=item.trade_id)
+            if credit_hold_state.hold_active:
+                workflow_label = item.workflow_type.replace("_", " ").lower()
+                raise ValueError(
+                    format_trade_credit_hold_message(
+                        trade.trade_id,
+                        credit_hold_state,
+                        blocked_action=(
+                            f"Updating {workflow_label} status is blocked until credit approves the trade "
+                            "or the trade is amended back within limit."
+                        ),
+                    )
+                )
 
     if "status" in changes:
         normalized_status = normalize_workflow_status(item.workflow_type, changes.get("status"))

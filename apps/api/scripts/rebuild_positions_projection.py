@@ -60,6 +60,8 @@ def main() -> None:
         for t in trades:
             if t.status == "CANCELLED":
                 continue
+            if str(getattr(t, "instrument_type", "LINEAR") or "LINEAR").strip().upper() == "OPTION":
+                continue
 
             trade_updated_at = t.updated_at or now
             legs = legs_by_trade_id.get(t.trade_id, [])

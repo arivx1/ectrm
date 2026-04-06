@@ -23,6 +23,11 @@ class TradeOut(BaseModel):
     delivery_start: Optional[date]
     delivery_end: Optional[date]
     price_unit_code: Optional[str]
+    instrument_type: str
+    option_type: Optional[str]
+    option_style: Optional[str]
+    option_strike_price: Optional[float]
+    option_expiration_date: Optional[date]
     trade_nature: str
     trade_structure: str
     trade_side: Optional[str]

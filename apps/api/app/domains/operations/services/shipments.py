@@ -7,6 +7,9 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.trade_credit_hold import (
+    build_trade_credit_hold_lookup,
+)
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.schemas.shipment import DeliveryObligationOut
@@ -104,10 +107,13 @@ def _build_blockers(
     location_code: str | None,
     delivery_start: date | None,
     delivery_end: date | None,
+    credit_hold_reason: str | None,
     reference_time: datetime,
 ) -> list[str]:
     blockers: list[str] = []
 
+    if credit_hold_reason:
+        blockers.append(f"Credit hold: {credit_hold_reason}")
     if not (trade.counterparty or "").strip():
         blockers.append("Counterparty assignment is missing.")
     if volume is None or volume == 0:
@@ -179,6 +185,7 @@ def _build_delivery_obligation(
     *,
     trade: Trade,
     leg: TradeLeg | None,
+    credit_hold_reason: str | None,
     reference_time: datetime,
 ) -> DeliveryObligationOut:
     commodity_class = leg.commodity_class if leg is not None else trade.commodity_class
@@ -198,6 +205,7 @@ def _build_delivery_obligation(
         location_code=location_code,
         delivery_start=delivery_start,
         delivery_end=delivery_end,
+        credit_hold_reason=credit_hold_reason,
         reference_time=reference_time,
     )
     status = _status_for_trade(trade, blockers)
@@ -264,6 +272,7 @@ def list_delivery_obligations_for_operations(db: Session, *, now: Optional[datet
     ).scalars().all()
 
     trade_ids = [trade.trade_id for trade in trades]
+    credit_hold_states = build_trade_credit_hold_lookup(db, trade_ids=trade_ids)
     legs_by_trade_id: dict[str, list[TradeLeg]] = {}
     if trade_ids:
         trade_legs = db.execute(
@@ -276,13 +285,29 @@ def list_delivery_obligations_for_operations(db: Session, *, now: Optional[datet
 
     deliveries: list[DeliveryObligationOut] = []
     for trade in trades:
+        credit_hold_state = credit_hold_states.get(trade.trade_id)
+        credit_hold_reason = credit_hold_state.hold_reason if credit_hold_state and credit_hold_state.hold_active else None
         trade_legs = legs_by_trade_id.get(trade.trade_id, [])
         if trade_legs:
             for leg in trade_legs:
-                deliveries.append(_build_delivery_obligation(trade=trade, leg=leg, reference_time=reference_time))
+                deliveries.append(
+                    _build_delivery_obligation(
+                        trade=trade,
+                        leg=leg,
+                        credit_hold_reason=credit_hold_reason,
+                        reference_time=reference_time,
+                    )
+                )
             continue
 
-        deliveries.append(_build_delivery_obligation(trade=trade, leg=None, reference_time=reference_time))
+        deliveries.append(
+            _build_delivery_obligation(
+                trade=trade,
+                leg=None,
+                credit_hold_reason=credit_hold_reason,
+                reference_time=reference_time,
+            )
+        )
 
     return sorted(deliveries, key=_delivery_sort_key)
 

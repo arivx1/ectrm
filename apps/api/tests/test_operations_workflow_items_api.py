@@ -21,6 +21,8 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
@@ -63,6 +65,8 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         settings.BOOTSTRAP_ADMIN_TOKEN = "bootstrap-secret"
 
         with self.SessionLocal() as session:
+            session.query(TradePayment).delete()
+            session.query(TradeInvoice).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
             session.query(UserSession).delete()
@@ -167,6 +171,31 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             )
             session.commit()
 
+    def _seed_credit_approval_item(
+        self,
+        *,
+        trade_id: str,
+        status: str = "PENDING_REVIEW",
+        notes: str = "Credit approval is pending review.",
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                TradeWorkflowItem(
+                    trade_id=trade_id,
+                    workflow_type="CREDIT_APPROVAL",
+                    status=status,
+                    owner=None,
+                    due_at=None,
+                    notes=notes,
+                    created_at=self.now,
+                    created_by="credit.ops",
+                    updated_at=self.now,
+                    updated_by="credit.ops",
+                    version=1,
+                )
+            )
+            session.commit()
+
     def test_work_items_list_backfills_trade_rows_and_filters_by_queue(self) -> None:
         self._seed_trade(trade_id="T-OPS-1")
 
@@ -234,6 +263,50 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             self.assertEqual(trade.invoice_status, "APPROVED")
             self.assertEqual(trade.payment_status, "PAID")
             self.assertEqual(trade.settlement_status, "SETTLED")
+
+    def test_credit_approval_actions_require_comment_and_release_lifecycle_hold(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-CREDIT-OPS-1")
+        self._seed_credit_approval_item(
+            trade_id="T-CREDIT-OPS-1",
+            notes="",
+        )
+
+        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        self.assertEqual(queue_response.status_code, 200)
+        work_items = {item["workflow_type"]: item for item in queue_response.json() if item["trade_id"] == "T-CREDIT-OPS-1"}
+
+        blocked_response = self.client.patch(
+            f"/operations/work-items/{work_items['CONFIRMATION']['item_id']}",
+            json={"status": "CONFIRMED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(blocked_response.status_code, 422)
+        self.assertIn("credit hold", blocked_response.text.lower())
+
+        reject_without_comment_response = self.client.patch(
+            f"/operations/work-items/{work_items['CREDIT_APPROVAL']['item_id']}",
+            json={"status": "REJECTED", "notes": None},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(reject_without_comment_response.status_code, 422)
+        self.assertIn("audit comment", reject_without_comment_response.text.lower())
+
+        approve_response = self.client.patch(
+            f"/operations/work-items/{work_items['CREDIT_APPROVAL']['item_id']}",
+            json={"status": "APPROVED", "notes": "Approved by credit duty officer."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["status"], "APPROVED")
+
+        release_response = self.client.patch(
+            f"/operations/work-items/{work_items['CONFIRMATION']['item_id']}",
+            json={"status": "CONFIRMED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(release_response.status_code, 200)
+        self.assertEqual(release_response.json()["status"], "CONFIRMED")
 
     def test_work_item_mutations_require_authentication(self) -> None:
         self._seed_trade(trade_id="T-AUTH-1")

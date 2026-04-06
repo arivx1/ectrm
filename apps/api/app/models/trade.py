@@ -28,6 +28,11 @@ class Trade(Base):
     delivery_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     delivery_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     price_unit_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    instrument_type: Mapped[str] = mapped_column(String(20), nullable=False, default="LINEAR")
+    option_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    option_style: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    option_strike_price: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    option_expiration_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
     trade_nature: Mapped[str] = mapped_column(String(20), nullable=False, default="PHYSICAL")
     trade_structure: Mapped[str] = mapped_column(String(20), nullable=False, default="SINGLE")
