@@ -18,6 +18,7 @@ class ReferenceCounterparty(Base):
     legal_entity_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     counterparty_type: Mapped[str] = mapped_column(String(50), nullable=False)
     country_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    credit_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     effective_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

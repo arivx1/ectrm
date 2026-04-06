@@ -72,12 +72,30 @@ type TradeAmendFormProps = {
   amendSourceSystemInput: string
   amendExecutionTimestampInput: string
   setAmendExecutionTimestampInput: (value: string) => void
+  amendTradeDateInput: string
+  setAmendTradeDateInput: (value: string) => void
+  amendEffectiveStartDateInput: string
+  setAmendEffectiveStartDateInput: (value: string) => void
+  amendEffectiveEndDateInput: string
+  setAmendEffectiveEndDateInput: (value: string) => void
   amendPortfolioInput: string
   setAmendPortfolioInput: (value: string) => void
   amendPortfolioOptions: PortfolioRecord[]
   amendCounterpartyInput: string
   setAmendCounterpartyInput: (value: string) => void
   amendCounterpartyOptions: ReferenceRecord[]
+  amendTradeCurrencyInput: string
+  setAmendTradeCurrencyInput: (value: string) => void
+  amendCurrencyOptions: ReferenceRecord[]
+  amendLocationInput: string
+  setAmendLocationInput: (value: string) => void
+  amendLocationOptions: ReferenceRecord[]
+  amendDeliveryStartInput: string
+  setAmendDeliveryStartInput: (value: string) => void
+  amendDeliveryEndInput: string
+  setAmendDeliveryEndInput: (value: string) => void
+  amendPriceUnitInput: string
+  setAmendPriceUnitInput: (value: string) => void
   amendSettlementStatusInput: string
   setAmendSettlementStatusInput: (value: string) => void
   amendTraderUserInput: string
@@ -142,12 +160,30 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     amendSourceSystemInput,
     amendExecutionTimestampInput,
     setAmendExecutionTimestampInput,
+    amendTradeDateInput,
+    setAmendTradeDateInput,
+    amendEffectiveStartDateInput,
+    setAmendEffectiveStartDateInput,
+    amendEffectiveEndDateInput,
+    setAmendEffectiveEndDateInput,
     amendPortfolioInput,
     setAmendPortfolioInput,
     amendPortfolioOptions,
     amendCounterpartyInput,
     setAmendCounterpartyInput,
     amendCounterpartyOptions,
+    amendTradeCurrencyInput,
+    setAmendTradeCurrencyInput,
+    amendCurrencyOptions,
+    amendLocationInput,
+    setAmendLocationInput,
+    amendLocationOptions,
+    amendDeliveryStartInput,
+    setAmendDeliveryStartInput,
+    amendDeliveryEndInput,
+    setAmendDeliveryEndInput,
+    amendPriceUnitInput,
+    setAmendPriceUnitInput,
     amendSettlementStatusInput,
     setAmendSettlementStatusInput,
     amendTraderUserInput,
@@ -205,6 +241,36 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
               setAmendExecutionTimestampInput(combineLocalDateTimeInput(executionDateInput, event.target.value))
             }
             disabled={amending || cancelling || executionDateInput === ''}
+          />
+        </label>
+        <label className="field">
+          <span>Trade Date</span>
+          <input
+            className="control"
+            type="date"
+            value={amendTradeDateInput}
+            onChange={(event) => setAmendTradeDateInput(event.target.value)}
+            disabled={amending || cancelling}
+          />
+        </label>
+        <label className="field">
+          <span>Effective Start</span>
+          <input
+            className="control"
+            type="date"
+            value={amendEffectiveStartDateInput}
+            onChange={(event) => setAmendEffectiveStartDateInput(event.target.value)}
+            disabled={amending || cancelling}
+          />
+        </label>
+        <label className="field">
+          <span>Effective End</span>
+          <input
+            className="control"
+            type="date"
+            value={amendEffectiveEndDateInput}
+            onChange={(event) => setAmendEffectiveEndDateInput(event.target.value)}
+            disabled={amending || cancelling}
           />
         </label>
       </div>
@@ -337,7 +403,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </datalist>
         )}
         <label className="field">
-          <span>Unit of Measure</span>
+          <span>Quantity Unit</span>
           <select className="control" value={amendUnitInput} onChange={(event) => setAmendUnitInput(event.target.value)} disabled={amending || cancelling}>
             <option value="">Select unit</option>
             {amendUnitOptions.map((unit) => (
@@ -346,6 +412,74 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
               </option>
             ))}
           </select>
+        </label>
+        <label className="field">
+          <span>Trade Currency</span>
+          <select
+            className="control"
+            value={amendTradeCurrencyInput}
+            onChange={(event) => setAmendTradeCurrencyInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            <option value="">No currency</option>
+            {amendCurrencyOptions.map((currency) => (
+              <option key={currency.code} value={currency.code}>
+                {currency.code} · {currency.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Price Unit</span>
+          <select
+            className="control"
+            value={amendPriceUnitInput}
+            onChange={(event) => setAmendPriceUnitInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            <option value="">No price unit</option>
+            {amendUnitOptions.map((unit) => (
+              <option key={unit.code} value={unit.code}>
+                {unit.code} · {unit.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Location</span>
+          <select
+            className="control"
+            value={amendLocationInput}
+            onChange={(event) => setAmendLocationInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            <option value="">No location</option>
+            {amendLocationOptions.map((location) => (
+              <option key={location.code} value={location.code}>
+                {location.code} · {location.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Delivery Start</span>
+          <input
+            className="control"
+            type="date"
+            value={amendDeliveryStartInput}
+            onChange={(event) => setAmendDeliveryStartInput(event.target.value)}
+            disabled={amending || cancelling}
+          />
+        </label>
+        <label className="field">
+          <span>Delivery End</span>
+          <input
+            className="control"
+            type="date"
+            value={amendDeliveryEndInput}
+            onChange={(event) => setAmendDeliveryEndInput(event.target.value)}
+            disabled={amending || cancelling}
+          />
         </label>
         <label className="field">
           <FieldLabel label="Pricing" tooltip={tradeTooltipCopy.pricing} />

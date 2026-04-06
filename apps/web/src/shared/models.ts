@@ -5,8 +5,16 @@ export type Trade = {
   created_at: string
   updated_at: string
   execution_timestamp: string | null
+  trade_date: string | null
+  effective_start_date: string | null
+  effective_end_date: string | null
   quality_spec: string | null
   unit_of_measure: string | null
+  trade_currency_code: string | null
+  location_code: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  price_unit_code: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
@@ -38,8 +46,16 @@ export type TradeHeaderDraft = {
   external_trade_id: string
   source_system: string
   execution_timestamp: string
+  trade_date: string
+  effective_start_date: string
+  effective_end_date: string
   quality_spec: string
   unit_of_measure: string
+  trade_currency_code: string
+  location_code: string
+  delivery_start: string
+  delivery_end: string
+  price_unit_code: string
   portfolio: string
   counterparty: string
   pricing_status: string
@@ -168,6 +184,7 @@ export type CounterpartyRecord = ReferenceRecord & {
   legal_entity_name?: string | null
   counterparty_type: string
   country_code?: string | null
+  credit_status?: string | null
 }
 
 export type CounterpartyStandards = {
@@ -229,6 +246,34 @@ export type ExternalDataSyncStatusRecord = {
   running_provider_count: number
   unknown_provider_count: number
   providers: ExternalDataProviderStatusRecord[]
+}
+
+export type PnlHistoryPoint = {
+  date: string
+  total_pnl: number
+  realized_pnl: number
+  unrealized_pnl: number
+  priced_trade_count: number
+  realized_trade_count: number
+  unrealized_trade_count: number
+}
+
+export type PnlHistorySummary = {
+  total_pnl: number
+  realized_pnl: number
+  unrealized_pnl: number
+  priced_trade_count: number
+  realized_trade_count: number
+  unrealized_trade_count: number
+}
+
+export type PnlHistoryReport = {
+  generated_at: string
+  basis: string
+  methodology: string
+  point_count: number
+  points: PnlHistoryPoint[]
+  summary: PnlHistorySummary
 }
 
 export type PriceIndexObservationRecord = {
@@ -687,6 +732,7 @@ export type CounterpartyForm = {
   legal_entity_name: string
   counterparty_type: string
   country_code: string
+  credit_status: string
   description: string
 }
 

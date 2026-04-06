@@ -101,6 +101,7 @@ export function emptyCounterpartyForm(
     legal_entity_name: '',
     counterparty_type: counterpartyStandards.default_counterparty_type,
     country_code: '',
+    credit_status: '',
     description: '',
   }
 }
@@ -342,6 +343,7 @@ export function useReferenceDataWorkspace({
         (counterparty.short_name ?? '').toLowerCase().includes(query) ||
         counterparty.counterparty_type.toLowerCase().includes(query) ||
         (counterparty.country_code ?? '').toLowerCase().includes(query) ||
+        (counterparty.credit_status ?? '').toLowerCase().includes(query) ||
         (counterparty.description ?? '').toLowerCase().includes(query)
       )
     })
@@ -556,6 +558,7 @@ export function useReferenceDataWorkspace({
       legal_entity_name: record.legal_entity_name ?? '',
       counterparty_type: record.counterparty_type,
       country_code: record.country_code ?? '',
+      credit_status: record.credit_status ?? '',
       description: record.description ?? '',
     })
   }

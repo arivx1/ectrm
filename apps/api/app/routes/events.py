@@ -631,8 +631,20 @@ def sync_trade_legs(
             }
         ]
     else:
+        source_legs_payload = legs_payload
+        if not source_legs_payload:
+            source_legs_payload = [
+                {
+                    "leg_no": leg.leg_no,
+                    "side": leg.side,
+                    "commodity_class": leg.commodity_class,
+                    "commodity": leg.commodity_code,
+                    "volume": leg.quantity,
+                }
+                for leg in sorted(existing_legs, key=lambda leg: leg.leg_no)
+            ]
         legs_to_sync = []
-        for index, leg_payload in enumerate(legs_payload, start=1):
+        for index, leg_payload in enumerate(source_legs_payload, start=1):
             leg_no_raw = leg_payload.get("leg_no", index)
             try:
                 leg_no = int(leg_no_raw)
@@ -822,8 +834,36 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     or DEFAULT_SOURCE_SYSTEM
                 )
                 execution_timestamp = parse_execution_timestamp(payload_data.get("execution_timestamp"))
+                trade_date = parse_optional_date(
+                    payload_data.get("trade_date"),
+                    field_name="trade_date",
+                )
+                if trade_date is None:
+                    trade_date = (execution_timestamp or e.occurred_at).date()
+                effective_start_date = parse_optional_date(
+                    payload_data.get("effective_start_date"),
+                    field_name="effective_start_date",
+                )
+                effective_end_date = parse_optional_date(
+                    payload_data.get("effective_end_date"),
+                    field_name="effective_end_date",
+                )
                 quality_spec = normalize_optional_text(payload_data.get("quality_spec"))
                 unit_of_measure = require_active_unit(db, payload_data.get("unit_of_measure"))
+                trade_currency_code = require_active_currency(
+                    db,
+                    payload_data.get("trade_currency_code"),
+                )
+                location_code = require_active_location(db, payload_data.get("location_code"))
+                delivery_start = parse_optional_date(
+                    payload_data.get("delivery_start"),
+                    field_name="delivery_start",
+                )
+                delivery_end = parse_optional_date(
+                    payload_data.get("delivery_end"),
+                    field_name="delivery_end",
+                )
+                price_unit_code = require_active_unit(db, payload_data.get("price_unit_code"))
                 counterparty = require_active_counterparty(db, payload_data.get("counterparty"))
                 portfolio = require_active_portfolio(
                     db,
@@ -848,6 +888,18 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     payload_data.get("pricing_type"),
                     payload_data.get("price_index_code"),
                 )
+                validate_date_range(
+                    effective_start_date,
+                    effective_end_date,
+                    start_field="effective_start_date",
+                    end_field="effective_end_date",
+                )
+                validate_date_range(
+                    delivery_start,
+                    delivery_end,
+                    start_field="delivery_start",
+                    end_field="delivery_end",
+                )
                 validate_trade_measurements(
                     trade_structure=trade_structure,
                     pricing_type=pricing_type,
@@ -862,8 +914,16 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     created_at=recorded_at,
                     updated_at=recorded_at,
                     execution_timestamp=execution_timestamp,
+                    trade_date=trade_date,
+                    effective_start_date=effective_start_date,
+                    effective_end_date=effective_end_date,
                     quality_spec=quality_spec,
                     unit_of_measure=unit_of_measure,
+                    trade_currency_code=trade_currency_code,
+                    location_code=location_code,
+                    delivery_start=delivery_start,
+                    delivery_end=delivery_end,
+                    price_unit_code=price_unit_code,
                     trade_nature=trade_nature,
                     trade_structure=trade_structure,
                     trade_side=trade_side,
@@ -889,6 +949,8 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     pricing_type,
                     price,
                     price_index_code,
+                    trade_currency_code,
+                    price_unit_code,
                     recorded_at,
                 )
                 sync_trade_legs(
@@ -899,6 +961,10 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     commodity_class,
                     commodity,
                     volume,
+                    location_code,
+                    unit_of_measure,
+                    delivery_start,
+                    delivery_end,
                     legs_payload,
                     recorded_at,
                 )
@@ -946,10 +1012,54 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     existing.execution_timestamp = parse_execution_timestamp(
                         payload_data.get("execution_timestamp")
                     )
+                if "trade_date" in payload_data:
+                    existing.trade_date = parse_optional_date(
+                        payload_data.get("trade_date"),
+                        field_name="trade_date",
+                    )
+                if "effective_start_date" in payload_data:
+                    existing.effective_start_date = parse_optional_date(
+                        payload_data.get("effective_start_date"),
+                        field_name="effective_start_date",
+                    )
+                if "effective_end_date" in payload_data:
+                    existing.effective_end_date = parse_optional_date(
+                        payload_data.get("effective_end_date"),
+                        field_name="effective_end_date",
+                    )
                 if "quality_spec" in payload_data:
                     existing.quality_spec = normalize_optional_text(payload_data.get("quality_spec"))
                 if "unit_of_measure" in payload_data:
                     existing.unit_of_measure = require_active_unit(db, payload_data.get("unit_of_measure"))
+                    should_sync_legs = True
+                if "trade_currency_code" in payload_data:
+                    existing.trade_currency_code = require_active_currency(
+                        db,
+                        payload_data.get("trade_currency_code"),
+                    )
+                if "location_code" in payload_data:
+                    existing.location_code = require_active_location(
+                        db,
+                        payload_data.get("location_code"),
+                    )
+                    should_sync_legs = True
+                if "delivery_start" in payload_data:
+                    existing.delivery_start = parse_optional_date(
+                        payload_data.get("delivery_start"),
+                        field_name="delivery_start",
+                    )
+                    should_sync_legs = True
+                if "delivery_end" in payload_data:
+                    existing.delivery_end = parse_optional_date(
+                        payload_data.get("delivery_end"),
+                        field_name="delivery_end",
+                    )
+                    should_sync_legs = True
+                if "price_unit_code" in payload_data:
+                    existing.price_unit_code = require_active_unit(
+                        db,
+                        payload_data.get("price_unit_code"),
+                    )
                 if (
                     "commodity" in payload_data and payload_data["commodity"] is not None
                 ) or (
@@ -1018,6 +1128,18 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 if "status" in payload_data and payload_data["status"] is not None:
                     existing.status = payload_data["status"]
 
+                validate_date_range(
+                    existing.effective_start_date,
+                    existing.effective_end_date,
+                    start_field="effective_start_date",
+                    end_field="effective_end_date",
+                )
+                validate_date_range(
+                    existing.delivery_start,
+                    existing.delivery_end,
+                    start_field="delivery_start",
+                    end_field="delivery_end",
+                )
                 validate_trade_measurements(
                     trade_structure=existing.trade_structure,
                     pricing_type=existing.pricing_type,
@@ -1031,6 +1153,8 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     existing.pricing_type,
                     existing.price,
                     existing.price_index_code,
+                    existing.trade_currency_code,
+                    existing.price_unit_code,
                     recorded_at,
                 )
                 if should_sync_legs:
@@ -1042,6 +1166,10 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                         existing.commodity_class,
                         existing.commodity,
                         existing.volume,
+                        existing.location_code,
+                        existing.unit_of_measure,
+                        existing.delivery_start,
+                        existing.delivery_end,
                         legs_payload or [],
                         recorded_at,
                     )

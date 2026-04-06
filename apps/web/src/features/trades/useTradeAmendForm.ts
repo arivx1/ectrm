@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react'
 
 import type {
   CounterpartyRecord,
+  CurrencyRecord,
   EventRow,
+  LocationRecord,
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
@@ -31,6 +33,8 @@ export function useTradeAmendForm(
   activeCounterparties: CounterpartyRecord[],
   activePortfolios: PortfolioRecord[],
   activeUnits: UnitRecord[],
+  activeCurrencies: CurrencyRecord[],
+  activeLocations: LocationRecord[],
 ) {
   const selectedTradeKey = selectedTrade?.trade_id ?? EMPTY_TRADE_KEY
   const baseDraft = useMemo(
@@ -121,6 +125,26 @@ export function useTradeAmendForm(
   )
     ? draft.counterpartyInput
     : ''
+  const amendCurrencyOptions = useMemo(
+    () =>
+      ensureCurrentOption(
+        activeCurrencies,
+        draft.tradeCurrencyInput,
+        '',
+        'Current inactive or missing currency',
+      ),
+    [activeCurrencies, draft.tradeCurrencyInput],
+  )
+  const amendLocationOptions = useMemo(
+    () =>
+      ensureCurrentOption(
+        activeLocations,
+        draft.locationInput,
+        '',
+        'Current inactive or missing location',
+      ),
+    [activeLocations, draft.locationInput],
+  )
 
   const resolvedPriceIndexInput =
     !pricingTypeRequiresPriceIndex(draft.pricingTypeInput)
@@ -129,6 +153,17 @@ export function useTradeAmendForm(
         ? draft.priceIndexInput
         : amendPriceIndexOptions[0]?.code || ''
   const resolvedUnitInput = amendUnitOptions.some((unit) => unit.code === draft.unitInput) ? draft.unitInput : ''
+  const resolvedPriceUnitInput = amendUnitOptions.some((unit) => unit.code === draft.priceUnitInput)
+    ? draft.priceUnitInput
+    : ''
+  const resolvedTradeCurrencyInput = amendCurrencyOptions.some(
+    (currency) => currency.code === draft.tradeCurrencyInput,
+  )
+    ? draft.tradeCurrencyInput
+    : ''
+  const resolvedLocationInput = amendLocationOptions.some((location) => location.code === draft.locationInput)
+    ? draft.locationInput
+    : ''
 
   function updateDraft(updater: (current: AmendDraft) => AmendDraft) {
     setDraftsByTrade((current) => ({
@@ -183,10 +218,28 @@ export function useTradeAmendForm(
     amendSourceSystemInput: draft.sourceSystemInput,
     amendExecutionTimestampInput: draft.executionTimestampInput,
     setAmendExecutionTimestampInput: (value: string) => setDraftField('executionTimestampInput', value),
+    amendTradeDateInput: draft.tradeDateInput,
+    setAmendTradeDateInput: (value: string) => setDraftField('tradeDateInput', value),
+    amendEffectiveStartDateInput: draft.effectiveStartDateInput,
+    setAmendEffectiveStartDateInput: (value: string) => setDraftField('effectiveStartDateInput', value),
+    amendEffectiveEndDateInput: draft.effectiveEndDateInput,
+    setAmendEffectiveEndDateInput: (value: string) => setDraftField('effectiveEndDateInput', value),
     amendQualitySpecInput: draft.qualitySpecInput,
     setAmendQualitySpecInput: (value: string) => setDraftField('qualitySpecInput', value),
     amendUnitInput: resolvedUnitInput,
     setAmendUnitInput: (value: string) => setDraftField('unitInput', value),
+    amendTradeCurrencyInput: resolvedTradeCurrencyInput,
+    setAmendTradeCurrencyInput: (value: string) => setDraftField('tradeCurrencyInput', value),
+    amendCurrencyOptions,
+    amendLocationInput: resolvedLocationInput,
+    setAmendLocationInput: (value: string) => setDraftField('locationInput', value),
+    amendLocationOptions,
+    amendDeliveryStartInput: draft.deliveryStartInput,
+    setAmendDeliveryStartInput: (value: string) => setDraftField('deliveryStartInput', value),
+    amendDeliveryEndInput: draft.deliveryEndInput,
+    setAmendDeliveryEndInput: (value: string) => setDraftField('deliveryEndInput', value),
+    amendPriceUnitInput: resolvedPriceUnitInput,
+    setAmendPriceUnitInput: (value: string) => setDraftField('priceUnitInput', value),
     amendTradeNatureInput: draft.tradeNatureInput,
     setAmendTradeNatureInput: (value: string) => setDraftField('tradeNatureInput', value),
     amendTradeStructureInput: draft.tradeStructureInput,

@@ -1519,6 +1519,7 @@ export function useReferenceDataController({
       legal_entity_name: workspace.counterpartyForm.legal_entity_name.trim() || null,
       counterparty_type: workspace.counterpartyForm.counterparty_type.trim().toUpperCase(),
       country_code: workspace.counterpartyForm.country_code.trim().toUpperCase() || null,
+      credit_status: workspace.counterpartyForm.credit_status.trim() || null,
       description: workspace.counterpartyForm.description.trim() || null,
     }
 

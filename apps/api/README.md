@@ -113,6 +113,18 @@ Run one scheduler cycle for Kalshi only:
 PYTHONPATH=. python apps/api/scripts/run_market_data_scheduler.py --provider kalshi --max-cycles 1
 ```
 
+Normalize a Robinhood CSV export for analysis:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/import_robinhood_csv.py \
+  --input /absolute/path/to/robinhood-account-activity.csv \
+  --format json \
+  --include-raw
+```
+
+This writes `/absolute/path/to/robinhood-account-activity.normalized.json` by
+default. Use `--format csv` to emit a flat normalized CSV instead.
+
 ## Configuration
 
 Example settings live in `apps/api/.env.example`.

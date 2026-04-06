@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from sqlalchemy import text, select
 
@@ -159,6 +159,27 @@ def normalize_execution_timestamp(value):
     return parsed.astimezone(timezone.utc)
 
 
+def parse_optional_date(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        coerced = value if value.tzinfo is None else value.astimezone(timezone.utc)
+        return coerced.date()
+    if isinstance(value, date):
+        return value
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    if "T" in candidate:
+        return datetime.fromisoformat(candidate.replace("Z", "+00:00")).date()
+    return date.fromisoformat(candidate)
+
+
+def validate_date_range(start_value, end_value, *, start_field, end_field):
+    if start_value is not None and end_value is not None and end_value < start_value:
+        raise ValueError(f"{end_field} must be on or after {start_field}")
+
+
 def apply_portfolio_payload(trade_state, payload, *, book_changed=False):
     if "portfolio" in payload:
         portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
@@ -211,6 +232,26 @@ def main() -> None:
                     trade_structure = normalize_trade_structure(payload.get("trade_structure"))
                     normalized_book = normalize_book(payload.get("book"))
                     normalized_portfolio = normalize_optional_text(payload.get("portfolio"), uppercase=True)
+                    execution_timestamp = normalize_execution_timestamp(payload.get("execution_timestamp"))
+                    trade_date = parse_optional_date(payload.get("trade_date"))
+                    if trade_date is None:
+                        trade_date = (execution_timestamp or e.occurred_at or now).date()
+                    effective_start_date = parse_optional_date(payload.get("effective_start_date"))
+                    effective_end_date = parse_optional_date(payload.get("effective_end_date"))
+                    delivery_start = parse_optional_date(payload.get("delivery_start"))
+                    delivery_end = parse_optional_date(payload.get("delivery_end"))
+                    validate_date_range(
+                        effective_start_date,
+                        effective_end_date,
+                        start_field="effective_start_date",
+                        end_field="effective_end_date",
+                    )
+                    validate_date_range(
+                        delivery_start,
+                        delivery_end,
+                        start_field="delivery_start",
+                        end_field="delivery_end",
+                    )
                     trade_state[trade_id] = {
                         "trade_id": trade_id,
                         "external_trade_id": normalize_optional_text(payload.get("external_trade_id")),
@@ -218,9 +259,23 @@ def main() -> None:
                         or DEFAULT_SOURCE_SYSTEM,
                         "created_at": now,
                         "updated_at": now,
-                        "execution_timestamp": normalize_execution_timestamp(payload.get("execution_timestamp")),
+                        "execution_timestamp": execution_timestamp,
+                        "trade_date": trade_date,
+                        "effective_start_date": effective_start_date,
+                        "effective_end_date": effective_end_date,
                         "quality_spec": normalize_optional_text(payload.get("quality_spec")),
                         "unit_of_measure": normalize_optional_text(payload.get("unit_of_measure"), uppercase=True),
+                        "trade_currency_code": normalize_optional_text(
+                            payload.get("trade_currency_code"),
+                            uppercase=True,
+                        ),
+                        "location_code": normalize_optional_text(payload.get("location_code"), uppercase=True),
+                        "delivery_start": delivery_start,
+                        "delivery_end": delivery_end,
+                        "price_unit_code": normalize_optional_text(
+                            payload.get("price_unit_code"),
+                            uppercase=True,
+                        ),
                         "trade_nature": normalize_trade_nature(payload.get("trade_nature")),
                         "trade_structure": trade_structure,
                         "trade_side": (
@@ -271,11 +326,40 @@ def main() -> None:
                         existing["execution_timestamp"] = normalize_execution_timestamp(
                             payload.get("execution_timestamp")
                         )
+                    if "trade_date" in payload:
+                        existing["trade_date"] = parse_optional_date(payload.get("trade_date"))
+                    if "effective_start_date" in payload:
+                        existing["effective_start_date"] = parse_optional_date(
+                            payload.get("effective_start_date")
+                        )
+                    if "effective_end_date" in payload:
+                        existing["effective_end_date"] = parse_optional_date(
+                            payload.get("effective_end_date")
+                        )
                     if "quality_spec" in payload:
                         existing["quality_spec"] = normalize_optional_text(payload.get("quality_spec"))
                     if "unit_of_measure" in payload:
                         existing["unit_of_measure"] = normalize_optional_text(
                             payload.get("unit_of_measure"),
+                            uppercase=True,
+                        )
+                    if "trade_currency_code" in payload:
+                        existing["trade_currency_code"] = normalize_optional_text(
+                            payload.get("trade_currency_code"),
+                            uppercase=True,
+                        )
+                    if "location_code" in payload:
+                        existing["location_code"] = normalize_optional_text(
+                            payload.get("location_code"),
+                            uppercase=True,
+                        )
+                    if "delivery_start" in payload:
+                        existing["delivery_start"] = parse_optional_date(payload.get("delivery_start"))
+                    if "delivery_end" in payload:
+                        existing["delivery_end"] = parse_optional_date(payload.get("delivery_end"))
+                    if "price_unit_code" in payload:
+                        existing["price_unit_code"] = normalize_optional_text(
+                            payload.get("price_unit_code"),
                             uppercase=True,
                         )
                     if "trade_nature" in payload:
@@ -339,6 +423,18 @@ def main() -> None:
                         existing["trader_user"] = normalize_optional_text(payload.get("trader_user"))
                     if payload.get("status") is not None:
                         existing["status"] = payload.get("status")
+                    validate_date_range(
+                        existing.get("effective_start_date"),
+                        existing.get("effective_end_date"),
+                        start_field="effective_start_date",
+                        end_field="effective_end_date",
+                    )
+                    validate_date_range(
+                        existing.get("delivery_start"),
+                        existing.get("delivery_end"),
+                        start_field="delivery_start",
+                        end_field="delivery_end",
+                    )
                     existing["last_event_id"] = e.event_id
 
             elif e.event_type == "TradeAmended":
@@ -360,11 +456,40 @@ def main() -> None:
                     existing["execution_timestamp"] = normalize_execution_timestamp(
                         payload.get("execution_timestamp")
                     )
+                if "trade_date" in payload:
+                    existing["trade_date"] = parse_optional_date(payload.get("trade_date"))
+                if "effective_start_date" in payload:
+                    existing["effective_start_date"] = parse_optional_date(
+                        payload.get("effective_start_date")
+                    )
+                if "effective_end_date" in payload:
+                    existing["effective_end_date"] = parse_optional_date(
+                        payload.get("effective_end_date")
+                    )
                 if "quality_spec" in payload:
                     existing["quality_spec"] = normalize_optional_text(payload.get("quality_spec"))
                 if "unit_of_measure" in payload:
                     existing["unit_of_measure"] = normalize_optional_text(
                         payload.get("unit_of_measure"),
+                        uppercase=True,
+                    )
+                if "trade_currency_code" in payload:
+                    existing["trade_currency_code"] = normalize_optional_text(
+                        payload.get("trade_currency_code"),
+                        uppercase=True,
+                    )
+                if "location_code" in payload:
+                    existing["location_code"] = normalize_optional_text(
+                        payload.get("location_code"),
+                        uppercase=True,
+                    )
+                if "delivery_start" in payload:
+                    existing["delivery_start"] = parse_optional_date(payload.get("delivery_start"))
+                if "delivery_end" in payload:
+                    existing["delivery_end"] = parse_optional_date(payload.get("delivery_end"))
+                if "price_unit_code" in payload:
+                    existing["price_unit_code"] = normalize_optional_text(
+                        payload.get("price_unit_code"),
                         uppercase=True,
                     )
                 if "trade_nature" in payload:
@@ -429,6 +554,18 @@ def main() -> None:
                     existing["trader_user"] = normalize_optional_text(payload.get("trader_user"))
                 if payload.get("status") is not None:
                     existing["status"] = payload.get("status")
+                validate_date_range(
+                    existing.get("effective_start_date"),
+                    existing.get("effective_end_date"),
+                    start_field="effective_start_date",
+                    end_field="effective_end_date",
+                )
+                validate_date_range(
+                    existing.get("delivery_start"),
+                    existing.get("delivery_end"),
+                    start_field="delivery_start",
+                    end_field="delivery_end",
+                )
                 existing["last_event_id"] = e.event_id
 
             elif e.event_type == "TradeCancelled":
@@ -453,8 +590,16 @@ def main() -> None:
                     created_at=trade["created_at"],
                     updated_at=trade["updated_at"],
                     execution_timestamp=trade.get("execution_timestamp"),
+                    trade_date=trade.get("trade_date"),
+                    effective_start_date=trade.get("effective_start_date"),
+                    effective_end_date=trade.get("effective_end_date"),
                     quality_spec=trade.get("quality_spec"),
                     unit_of_measure=trade.get("unit_of_measure"),
+                    trade_currency_code=trade.get("trade_currency_code"),
+                    location_code=trade.get("location_code"),
+                    delivery_start=trade.get("delivery_start"),
+                    delivery_end=trade.get("delivery_end"),
+                    price_unit_code=trade.get("price_unit_code"),
                     trade_nature=trade.get("trade_nature", TradeNature.PHYSICAL.value),
                     trade_structure=trade.get("trade_structure", TradeStructure.SINGLE.value),
                     trade_side=(
@@ -487,7 +632,11 @@ def main() -> None:
                         side=trade.get("trade_side", TradeSide.BUY.value),
                         commodity_class=trade["commodity_class"],
                         commodity_code=trade["commodity"],
+                        location_code=trade.get("location_code"),
                         quantity=trade["volume"],
+                        quantity_unit_code=trade.get("unit_of_measure"),
+                        delivery_start=trade.get("delivery_start"),
+                        delivery_end=trade.get("delivery_end"),
                         created_at=trade["created_at"],
                         updated_at=trade["updated_at"],
                     )
@@ -507,7 +656,21 @@ def main() -> None:
                             commodity_code=normalize_commodity_code(
                                 leg.get("commodity", trade["commodity"])
                             ),
+                            location_code=normalize_optional_text(
+                                leg.get("location_code"),
+                                uppercase=True,
+                            )
+                            or trade.get("location_code"),
                             quantity=to_decimal_or_none(leg.get("volume", trade["volume"])),
+                            quantity_unit_code=normalize_optional_text(
+                                leg.get("quantity_unit_code"),
+                                uppercase=True,
+                            )
+                            or trade.get("unit_of_measure"),
+                            delivery_start=parse_optional_date(leg.get("delivery_start"))
+                            or trade.get("delivery_start"),
+                            delivery_end=parse_optional_date(leg.get("delivery_end"))
+                            or trade.get("delivery_end"),
                             created_at=trade["created_at"],
                             updated_at=trade["updated_at"],
                         )
@@ -520,6 +683,8 @@ def main() -> None:
                     pricing_type=trade.get("pricing_type", PricingType.FIXED.value),
                     fixed_price=trade["price"],
                     price_index_code=trade.get("price_index_code"),
+                    currency_code=trade.get("trade_currency_code"),
+                    price_unit_code=trade.get("price_unit_code"),
                     created_at=trade["created_at"],
                     updated_at=trade["updated_at"],
                 )

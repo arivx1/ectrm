@@ -68,12 +68,30 @@ type TradeCaptureFormProps = {
   sourceSystemInput: string
   executionTimestampInput: string
   setExecutionTimestampInput: (value: string) => void
+  tradeDateInput: string
+  setTradeDateInput: (value: string) => void
+  effectiveStartDateInput: string
+  setEffectiveStartDateInput: (value: string) => void
+  effectiveEndDateInput: string
+  setEffectiveEndDateInput: (value: string) => void
   portfolioInput: string
   setPortfolioInput: (value: string) => void
   createPortfolioOptions: PortfolioRecord[]
   counterpartyInput: string
   setCounterpartyInput: (value: string) => void
   createCounterpartyOptions: ReferenceRecord[]
+  tradeCurrencyInput: string
+  setTradeCurrencyInput: (value: string) => void
+  createCurrencyOptions: ReferenceRecord[]
+  locationInput: string
+  setLocationInput: (value: string) => void
+  createLocationOptions: ReferenceRecord[]
+  deliveryStartInput: string
+  setDeliveryStartInput: (value: string) => void
+  deliveryEndInput: string
+  setDeliveryEndInput: (value: string) => void
+  priceUnitInput: string
+  setPriceUnitInput: (value: string) => void
   settlementStatusInput: string
   setSettlementStatusInput: (value: string) => void
   traderUserInput: string
@@ -138,12 +156,30 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     sourceSystemInput,
     executionTimestampInput,
     setExecutionTimestampInput,
+    tradeDateInput,
+    setTradeDateInput,
+    effectiveStartDateInput,
+    setEffectiveStartDateInput,
+    effectiveEndDateInput,
+    setEffectiveEndDateInput,
     portfolioInput,
     setPortfolioInput,
     createPortfolioOptions,
     counterpartyInput,
     setCounterpartyInput,
     createCounterpartyOptions,
+    tradeCurrencyInput,
+    setTradeCurrencyInput,
+    createCurrencyOptions,
+    locationInput,
+    setLocationInput,
+    createLocationOptions,
+    deliveryStartInput,
+    setDeliveryStartInput,
+    deliveryEndInput,
+    setDeliveryEndInput,
+    priceUnitInput,
+    setPriceUnitInput,
     settlementStatusInput,
     setSettlementStatusInput,
     traderUserInput,
@@ -224,6 +260,36 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
               setExecutionTimestampInput(combineLocalDateTimeInput(executionDateInput, event.target.value))
             }
             disabled={submitting || executionDateInput === ''}
+          />
+        </label>
+        <label className="field">
+          <span>Trade Date</span>
+          <input
+            className="control"
+            type="date"
+            value={tradeDateInput}
+            onChange={(event) => setTradeDateInput(event.target.value)}
+            disabled={submitting}
+          />
+        </label>
+        <label className="field">
+          <span>Effective Start</span>
+          <input
+            className="control"
+            type="date"
+            value={effectiveStartDateInput}
+            onChange={(event) => setEffectiveStartDateInput(event.target.value)}
+            disabled={submitting}
+          />
+        </label>
+        <label className="field">
+          <span>Effective End</span>
+          <input
+            className="control"
+            type="date"
+            value={effectiveEndDateInput}
+            onChange={(event) => setEffectiveEndDateInput(event.target.value)}
+            disabled={submitting}
           />
         </label>
         <label className="field">
@@ -367,7 +433,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           </datalist>
         )}
         <label className="field">
-          <span>Unit of Measure</span>
+          <span>Quantity Unit</span>
           <select className="control" value={unitInput} onChange={(event) => setUnitInput(event.target.value)} disabled={submitting}>
             <option value="">Select unit</option>
             {createUnitOptions.map((unit) => (
@@ -376,6 +442,74 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
               </option>
             ))}
           </select>
+        </label>
+        <label className="field">
+          <span>Trade Currency</span>
+          <select
+            className="control"
+            value={tradeCurrencyInput}
+            onChange={(event) => setTradeCurrencyInput(event.target.value)}
+            disabled={submitting}
+          >
+            <option value="">No currency</option>
+            {createCurrencyOptions.map((currency) => (
+              <option key={currency.code} value={currency.code}>
+                {currency.code} · {currency.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Price Unit</span>
+          <select
+            className="control"
+            value={priceUnitInput}
+            onChange={(event) => setPriceUnitInput(event.target.value)}
+            disabled={submitting}
+          >
+            <option value="">No price unit</option>
+            {createUnitOptions.map((unit) => (
+              <option key={unit.code} value={unit.code}>
+                {unit.code} · {unit.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Location</span>
+          <select
+            className="control"
+            value={locationInput}
+            onChange={(event) => setLocationInput(event.target.value)}
+            disabled={submitting}
+          >
+            <option value="">No location</option>
+            {createLocationOptions.map((location) => (
+              <option key={location.code} value={location.code}>
+                {location.code} · {location.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Delivery Start</span>
+          <input
+            className="control"
+            type="date"
+            value={deliveryStartInput}
+            onChange={(event) => setDeliveryStartInput(event.target.value)}
+            disabled={submitting}
+          />
+        </label>
+        <label className="field">
+          <span>Delivery End</span>
+          <input
+            className="control"
+            type="date"
+            value={deliveryEndInput}
+            onChange={(event) => setDeliveryEndInput(event.target.value)}
+            disabled={submitting}
+          />
         </label>
         <label className="field">
           <span>{pricingTypeRequiresExplicitPrice(pricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>

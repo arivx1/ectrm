@@ -33,6 +33,7 @@ from apps.api.app.routes.reference_data import (
     CommodityCreate,
     CommodityStatusUpdate,
     CounterpartyCreate,
+    CounterpartyUpdate,
     CurrencyCreate,
     CurrencyStatusUpdate,
     LocationCreate,
@@ -61,6 +62,7 @@ from apps.api.app.routes.reference_data import (
     list_location_standards,
     list_locations,
     list_price_indices,
+    update_counterparty,
     update_location,
     update_price_index,
 )
@@ -1105,6 +1107,7 @@ class ReferenceDataApiTests(unittest.TestCase):
                     legal_entity_name="Shell Trading US Company",
                     counterparty_type="supplier",
                     country_code="us",
+                    credit_status=" approved ",
                     description="test counterparty",
                     created_by="test-user",
                 ),
@@ -1114,6 +1117,35 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertEqual(payload.code, "SHELL_TRADING")
         self.assertEqual(payload.counterparty_type, "SUPPLIER")
         self.assertEqual(payload.country_code, "US")
+        self.assertEqual(payload.credit_status, "approved")
+
+    def test_update_counterparty_allows_credit_status_changes(self) -> None:
+        with self.SessionLocal() as session:
+            create_counterparty(
+                CounterpartyCreate(
+                    code="shell_trading",
+                    name="Shell Trading",
+                    short_name="Shell",
+                    legal_entity_name="Shell Trading US Company",
+                    counterparty_type="supplier",
+                    country_code="us",
+                    credit_status="approved",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+            payload = update_counterparty(
+                "SHELL_TRADING",
+                CounterpartyUpdate(
+                    credit_status=" review required ",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(payload.credit_status, "review required")
 
     def test_create_counterparty_rejects_invalid_type_and_country(self) -> None:
         with self.SessionLocal() as session:

@@ -212,6 +212,7 @@ def to_out(record: ModelT, schema_cls):
         payload["legal_entity_name"] = record.legal_entity_name
         payload["counterparty_type"] = record.counterparty_type
         payload["country_code"] = record.country_code
+        payload["credit_status"] = record.credit_status
     if isinstance(record, ReferenceCurrency):
         payload["symbol"] = record.symbol
     if isinstance(record, ReferenceUnit):
@@ -580,6 +581,8 @@ def _update_counterparty_fields(record, payload, provided_fields: set[str]) -> N
         record.counterparty_type = normalize_counterparty_type(payload.counterparty_type)
     if "country_code" in provided_fields:
         record.country_code = normalize_country_code(payload.country_code)
+    if "credit_status" in provided_fields:
+        record.credit_status = _clean_optional_text(payload.credit_status)
 
 
 @router.get("/counterparties", response_model=List[CounterpartyOut])
@@ -625,6 +628,7 @@ def create_counterparty(payload: CounterpartyCreate, db: Session = Depends(get_d
             "legal_entity_name": payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None,
             "counterparty_type": normalize_counterparty_type(payload.counterparty_type),
             "country_code": normalize_country_code(payload.country_code),
+            "credit_status": _clean_optional_text(payload.credit_status),
         },
     )
     return to_out(record, CounterpartyOut)

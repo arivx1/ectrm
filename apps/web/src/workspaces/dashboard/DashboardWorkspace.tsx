@@ -1,6 +1,8 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import type { Trade as TradeRecord } from '../../shared/models'
+import { loadPnlHistoryReport } from '../../entities/reports/api'
+import { appConfig } from '../../shared/config'
+import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord } from '../../shared/models'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { MarketContextTileContent } from './MarketContextPanel'
@@ -78,113 +80,28 @@ function tradeDirection(trade: TradeRecord): number {
 
 type TrendTone = 'up' | 'down' | 'flat'
 
-type PnlTrendPoint = {
-  label: string
-  value: number
+function parseReportDate(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) {
+    return null
+  }
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  return new Date(year, month - 1, day)
 }
 
-type PnlTrendSummary = {
-  points: PnlTrendPoint[]
-  pricedTradeCount: number
-  executionAnchoredTradeCount: number
-}
+function formatReportDateLabel(value: string): string {
+  const parsed = parseReportDate(value)
+  if (!parsed) {
+    return value
+  }
 
-function formatTrendDateLabel(date: Date): string {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
-  }).format(date)
-}
-
-function localDateKey(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function tradeTimelineAnchor(trade: TradeRecord): { date: Date; usedExecutionTimestamp: boolean } | null {
-  const executionTimestamp = trade.execution_timestamp ? Date.parse(trade.execution_timestamp) : Number.NaN
-  if (!Number.isNaN(executionTimestamp)) {
-    return {
-      date: new Date(executionTimestamp),
-      usedExecutionTimestamp: true,
-    }
-  }
-
-  const createdTimestamp = Date.parse(trade.created_at)
-  if (Number.isNaN(createdTimestamp)) {
-    return null
-  }
-
-  return {
-    date: new Date(createdTimestamp),
-    usedExecutionTimestamp: false,
-  }
-}
-
-function markedTradeContribution(trade: TradeRecord): number | null {
-  if (trade.price === null || trade.volume === null) {
-    return null
-  }
-
-  return trade.price * Math.abs(trade.volume) * tradeDirection(trade)
-}
-
-function buildPnlTrend(activeTrades: TradeRecord[]): PnlTrendSummary {
-  const grouped = new Map<string, { timestamp: number; label: string; contribution: number }>()
-  let pricedTradeCount = 0
-  let executionAnchoredTradeCount = 0
-
-  for (const trade of activeTrades) {
-    const contribution = markedTradeContribution(trade)
-    if (contribution === null) {
-      continue
-    }
-
-    const anchor = tradeTimelineAnchor(trade)
-    if (!anchor) {
-      continue
-    }
-
-    pricedTradeCount += 1
-    if (anchor.usedExecutionTimestamp) {
-      executionAnchoredTradeCount += 1
-    }
-
-    const dateKey = localDateKey(anchor.date)
-    const dayTimestamp = new Date(
-      anchor.date.getFullYear(),
-      anchor.date.getMonth(),
-      anchor.date.getDate(),
-    ).getTime()
-    const current = grouped.get(dateKey) ?? {
-      timestamp: dayTimestamp,
-      label: formatTrendDateLabel(anchor.date),
-      contribution: 0,
-    }
-
-    current.contribution += contribution
-    grouped.set(dateKey, current)
-  }
-
-  let runningValue = 0
-  const points = [...grouped.entries()]
-    .sort((left, right) => left[1].timestamp - right[1].timestamp)
-    .map(([, row]) => {
-      runningValue += row.contribution
-
-      return {
-        label: row.label,
-        value: runningValue,
-      }
-    })
-
-  return {
-    points,
-    pricedTradeCount,
-    executionAnchoredTradeCount,
-  }
+  }).format(parsed)
 }
 
 function trendTone(firstValue: number | null, lastValue: number | null): TrendTone {
@@ -220,17 +137,17 @@ function PnlTrendChart({
   points,
   tone,
 }: {
-  points: PnlTrendPoint[]
+  points: PnlHistoryPoint[]
   tone: TrendTone
 }) {
-  const values = points.map((point) => point.value)
+  const values = points.map((point) => point.total_pnl)
   const chartPoints = buildChartPoints(values)
   const linePath = buildLinePath(chartPoints)
   const baselineY = projectChartY(0, values, true)
   const areaPath = buildAreaPath(chartPoints, baselineY)
   const lastPoint = chartPoints[chartPoints.length - 1]
-  const firstLabel = points[0]?.label
-  const lastLabel = points[points.length - 1]?.label
+  const firstLabel = points[0] ? formatReportDateLabel(points[0].date) : null
+  const lastLabel = points[points.length - 1] ? formatReportDateLabel(points[points.length - 1].date) : null
 
   return (
     <div className={`market-price-chart market-price-chart-${tone} pnl-trend-chart`}>
@@ -271,6 +188,44 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     formatNumber,
     formatDate,
   } = props
+  const [pnlHistoryReport, setPnlHistoryReport] = useState<PnlHistoryReport | null>(null)
+  const [pnlHistoryLoading, setPnlHistoryLoading] = useState(true)
+  const [pnlHistoryError, setPnlHistoryError] = useState('')
+
+  useEffect(() => {
+    if (appLoading) {
+      return
+    }
+
+    let cancelled = false
+
+    async function loadReport() {
+      setPnlHistoryLoading(true)
+      setPnlHistoryError('')
+
+      try {
+        const nextReport = await loadPnlHistoryReport(appConfig.apiBase)
+        if (!cancelled) {
+          setPnlHistoryReport(nextReport)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPnlHistoryReport(null)
+          setPnlHistoryError(error instanceof Error ? error.message : 'Unable to load P&L history.')
+        }
+      } finally {
+        if (!cancelled) {
+          setPnlHistoryLoading(false)
+        }
+      }
+    }
+
+    void loadReport()
+
+    return () => {
+      cancelled = true
+    }
+  }, [appLoading, activeTrades, events])
 
   const exposureByClass = useMemo(() => {
     const unitsByCommodity = new Map<string, Set<string>>()
@@ -328,14 +283,15 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     () => activeTrades.filter((trade) => trade.price !== null && trade.volume !== null).length,
     [activeTrades],
   )
-
-  const pnlTrend = useMemo(() => buildPnlTrend(activeTrades), [activeTrades])
-
-  const pnlTrendStart = pnlTrend.points[0] ?? null
-  const pnlTrendEnd = pnlTrend.points[pnlTrend.points.length - 1] ?? null
+  const pnlTrendPoints = pnlHistoryReport?.points ?? []
+  const pnlTrendStart = pnlTrendPoints[0] ?? null
+  const pnlTrendEnd = pnlTrendPoints[pnlTrendPoints.length - 1] ?? null
   const pnlTrendWindowChange =
-    pnlTrendStart && pnlTrendEnd ? pnlTrendEnd.value - pnlTrendStart.value : 0
-  const pnlTrendTone = trendTone(pnlTrendStart?.value ?? null, pnlTrendEnd?.value ?? null)
+    pnlTrendStart && pnlTrendEnd ? pnlTrendEnd.total_pnl - pnlTrendStart.total_pnl : 0
+  const pnlTrendTone = trendTone(pnlTrendStart?.total_pnl ?? null, pnlTrendEnd?.total_pnl ?? null)
+  const reportSummary = pnlHistoryReport?.summary ?? null
+  const currentPnlProxy = reportSummary?.total_pnl ?? markedPnlProxy
+  const currentPricedTradeCount = reportSummary?.priced_trade_count ?? pricedTradeCount
 
   const grossExposure = useMemo(
     () => positionsWithClass.reduce((sum, position) => sum + Math.abs(position.net_volume), 0),
@@ -424,15 +380,20 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             </div>
           ) : (
             <div className="dashboard-snapshot-panel">
-              {pnlTrend.points.length > 0 ? (
+              {pnlHistoryLoading ? (
+                <div className="skeleton-stack">
+                  <div className="skeleton-block" />
+                  <div className="skeleton-block" />
+                </div>
+              ) : pnlTrendPoints.length > 0 ? (
                 <section className="pnl-trend-panel">
                   <div className="pnl-trend-head">
                     <div className="pnl-trend-copy">
                       <span>P&amp;L Over Time</span>
-                      <strong>{formatMoney(pnlTrendEnd?.value ?? null)}</strong>
+                      <strong>{formatMoney(pnlTrendEnd?.total_pnl ?? null)}</strong>
                       <p>
-                        Cumulative proxy across {pnlTrend.pricedTradeCount} priced active trade
-                        {pnlTrend.pricedTradeCount === 1 ? '' : 's'}, grouped by trade date.
+                        Event-sourced daily history across {reportSummary?.priced_trade_count ?? 0} priced trade
+                        {reportSummary?.priced_trade_count === 1 ? '' : 's'}.
                       </p>
                     </div>
                     <div className="pnl-trend-summary">
@@ -440,29 +401,27 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                         {formatSignedMoney(pnlTrendWindowChange, formatMoney)} window move
                       </small>
                       <span>
-                        {pnlTrend.points.length} plotted day{pnlTrend.points.length === 1 ? '' : 's'}
+                        {reportSummary?.realized_trade_count ?? 0} realized • {reportSummary?.unrealized_trade_count ?? 0} open
                       </span>
                     </div>
                   </div>
 
-                  <PnlTrendChart points={pnlTrend.points} tone={pnlTrendTone} />
+                  <PnlTrendChart points={pnlTrendPoints} tone={pnlTrendTone} />
 
                   <div className="pnl-trend-axis">
-                    <span>{pnlTrendStart?.label ?? 'Start'}</span>
-                    <span>{pnlTrendEnd?.label ?? 'Latest'}</span>
+                    <span>{pnlTrendStart ? formatReportDateLabel(pnlTrendStart.date) : 'Start'}</span>
+                    <span>{pnlTrendEnd ? formatReportDateLabel(pnlTrendEnd.date) : 'Latest'}</span>
                   </div>
 
-                  {pnlTrend.executionAnchoredTradeCount < pnlTrend.pricedTradeCount ? (
-                    <p className="pnl-trend-note">
-                      Uses trade creation date when an execution timestamp is not available.
-                    </p>
-                  ) : null}
+                  <p className="pnl-trend-note">{pnlHistoryReport?.methodology}</p>
                 </section>
               ) : (
                 <div className="empty-state">
                   <strong>No P&amp;L trend yet</strong>
                   <p>
-                    {activeTrades.length > 0
+                    {pnlHistoryError
+                      ? pnlHistoryError
+                      : activeTrades.length > 0
                       ? 'Price the active trades to start plotting the desk P&L proxy over time.'
                       : 'Create active trades to start building the desk P&L proxy curve.'}
                   </p>
@@ -472,10 +431,10 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
               <div className="dashboard-report-grid">
                 <article className="dashboard-report-card">
                   <span>P&amp;L Proxy</span>
-                  <strong>{formatMoney(markedPnlProxy)}</strong>
+                  <strong>{formatMoney(currentPnlProxy)}</strong>
                   <p>
-                    Based on {pricedTradeCount} priced trade{pricedTradeCount === 1 ? '' : 's'} using stored price
-                    differential times current volume. True P&amp;L will need market marks and settlements.
+                    Based on {currentPricedTradeCount} priced trade{currentPricedTradeCount === 1 ? '' : 's'} from the
+                    reporting service using stored price differentials and settlement history.
                   </p>
                 </article>
                 <article className="dashboard-report-card">

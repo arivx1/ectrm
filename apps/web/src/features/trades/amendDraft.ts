@@ -20,8 +20,16 @@ export type AmendDraft = {
   externalTradeIdInput: string
   sourceSystemInput: string
   executionTimestampInput: string
+  tradeDateInput: string
+  effectiveStartDateInput: string
+  effectiveEndDateInput: string
   qualitySpecInput: string
   unitInput: string
+  tradeCurrencyInput: string
+  locationInput: string
+  deliveryStartInput: string
+  deliveryEndInput: string
+  priceUnitInput: string
   tradeNatureInput: string
   tradeStructureInput: string
   tradeSideInput: string
@@ -55,8 +63,19 @@ export function buildAmendDraft(
       externalTradeIdInput: selectedTrade.external_trade_id ?? tradeHeaderDefaults.external_trade_id,
       sourceSystemInput: selectedTrade.source_system ?? tradeHeaderDefaults.source_system,
       executionTimestampInput: toLocalDateTimeInput(selectedTrade.execution_timestamp),
+      tradeDateInput: selectedTrade.trade_date ?? tradeHeaderDefaults.trade_date,
+      effectiveStartDateInput:
+        selectedTrade.effective_start_date ?? tradeHeaderDefaults.effective_start_date,
+      effectiveEndDateInput:
+        selectedTrade.effective_end_date ?? tradeHeaderDefaults.effective_end_date,
       qualitySpecInput: selectedTrade.quality_spec ?? tradeHeaderDefaults.quality_spec,
       unitInput: selectedTrade.unit_of_measure ?? tradeHeaderDefaults.unit_of_measure,
+      tradeCurrencyInput:
+        selectedTrade.trade_currency_code ?? tradeHeaderDefaults.trade_currency_code,
+      locationInput: selectedTrade.location_code ?? tradeHeaderDefaults.location_code,
+      deliveryStartInput: selectedTrade.delivery_start ?? tradeHeaderDefaults.delivery_start,
+      deliveryEndInput: selectedTrade.delivery_end ?? tradeHeaderDefaults.delivery_end,
+      priceUnitInput: selectedTrade.price_unit_code ?? tradeHeaderDefaults.price_unit_code,
       tradeNatureInput: selectedTrade.trade_nature ?? tradeFormDefaults.nature,
       tradeStructureInput: selectedTrade.trade_structure ?? tradeFormDefaults.structure,
       tradeSideInput: selectedTrade.trade_side ?? tradeFormDefaults.side,
@@ -95,8 +114,16 @@ export function buildAmendDraft(
     externalTradeIdInput: tradeHeaderDefaults.external_trade_id,
     sourceSystemInput: tradeHeaderDefaults.source_system,
     executionTimestampInput: tradeHeaderDefaults.execution_timestamp,
+    tradeDateInput: tradeHeaderDefaults.trade_date,
+    effectiveStartDateInput: tradeHeaderDefaults.effective_start_date,
+    effectiveEndDateInput: tradeHeaderDefaults.effective_end_date,
     qualitySpecInput: tradeHeaderDefaults.quality_spec,
     unitInput: tradeHeaderDefaults.unit_of_measure,
+    tradeCurrencyInput: tradeHeaderDefaults.trade_currency_code,
+    locationInput: tradeHeaderDefaults.location_code,
+    deliveryStartInput: tradeHeaderDefaults.delivery_start,
+    deliveryEndInput: tradeHeaderDefaults.delivery_end,
+    priceUnitInput: tradeHeaderDefaults.price_unit_code,
     tradeNatureInput: tradeFormDefaults.nature,
     tradeStructureInput: tradeFormDefaults.structure,
     tradeSideInput: tradeFormDefaults.side,

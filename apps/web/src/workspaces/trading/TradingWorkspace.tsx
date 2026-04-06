@@ -10,8 +10,16 @@ type Trade = {
   trade_id: string
   external_trade_id: string | null
   source_system: string | null
+  trade_date: string | null
+  effective_start_date: string | null
+  effective_end_date: string | null
   quality_spec: string | null
   unit_of_measure: string | null
+  trade_currency_code: string | null
+  location_code: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  price_unit_code: string | null
   trade_nature: string
   trade_structure: string
   trade_side: string | null
@@ -93,11 +101,29 @@ type TradingWorkspaceProps = {
   amendSourceSystemInput: string
   amendExecutionTimestampInput: string
   setAmendExecutionTimestampInput: (value: string) => void
+  amendTradeDateInput: string
+  setAmendTradeDateInput: (value: string) => void
+  amendEffectiveStartDateInput: string
+  setAmendEffectiveStartDateInput: (value: string) => void
+  amendEffectiveEndDateInput: string
+  setAmendEffectiveEndDateInput: (value: string) => void
   amendQualitySpecInput: string
   setAmendQualitySpecInput: (value: string) => void
   amendUnitInput: string
   setAmendUnitInput: (value: string) => void
   amendUnitOptions: ReferenceRecord[]
+  amendTradeCurrencyInput: string
+  setAmendTradeCurrencyInput: (value: string) => void
+  amendCurrencyOptions: ReferenceRecord[]
+  amendLocationInput: string
+  setAmendLocationInput: (value: string) => void
+  amendLocationOptions: ReferenceRecord[]
+  amendDeliveryStartInput: string
+  setAmendDeliveryStartInput: (value: string) => void
+  amendDeliveryEndInput: string
+  setAmendDeliveryEndInput: (value: string) => void
+  amendPriceUnitInput: string
+  setAmendPriceUnitInput: (value: string) => void
   amendBookInput: string
   setAmendBookInput: (value: string) => void
   amendBookOptions: ReferenceRecord[]
@@ -152,6 +178,7 @@ type TradingWorkspaceProps = {
   formatMoney: (value: number | null) => string
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
+  formatDateOnly: (value: string | null | undefined) => string
   statusTone: (status: string) => 'active' | 'cancelled'
 }
 
@@ -176,11 +203,29 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     amendSourceSystemInput,
     amendExecutionTimestampInput,
     setAmendExecutionTimestampInput,
+    amendTradeDateInput,
+    setAmendTradeDateInput,
+    amendEffectiveStartDateInput,
+    setAmendEffectiveStartDateInput,
+    amendEffectiveEndDateInput,
+    setAmendEffectiveEndDateInput,
     amendQualitySpecInput,
     setAmendQualitySpecInput,
     amendUnitInput,
     setAmendUnitInput,
     amendUnitOptions,
+    amendTradeCurrencyInput,
+    setAmendTradeCurrencyInput,
+    amendCurrencyOptions,
+    amendLocationInput,
+    setAmendLocationInput,
+    amendLocationOptions,
+    amendDeliveryStartInput,
+    setAmendDeliveryStartInput,
+    amendDeliveryEndInput,
+    setAmendDeliveryEndInput,
+    amendPriceUnitInput,
+    setAmendPriceUnitInput,
     amendBookInput,
     setAmendBookInput,
     amendBookOptions,
@@ -235,6 +280,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     formatMoney,
     formatNumber,
     formatDate,
+    formatDateOnly,
     statusTone,
   } = props
 
@@ -420,12 +466,44 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <strong>{formatDate(selectedTrade.execution_timestamp)}</strong>
                   </div>
                   <div className="detail-row">
+                    <span>Trade Date</span>
+                    <strong>{formatDateOnly(selectedTrade.trade_date)}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Effective Start</span>
+                    <strong>{formatDateOnly(selectedTrade.effective_start_date)}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Effective End</span>
+                    <strong>{formatDateOnly(selectedTrade.effective_end_date)}</strong>
+                  </div>
+                  <div className="detail-row">
                     <span>Quality Spec</span>
                     <strong>{selectedTrade.quality_spec ?? '—'}</strong>
                   </div>
                   <div className="detail-row">
-                    <span>Unit of Measure</span>
+                    <span>Quantity Unit</span>
                     <strong>{selectedTrade.unit_of_measure ?? '—'}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Trade Currency</span>
+                    <strong>{selectedTrade.trade_currency_code ?? '—'}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Price Unit</span>
+                    <strong>{selectedTrade.price_unit_code ?? '—'}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Location</span>
+                    <strong>{selectedTrade.location_code ?? '—'}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Delivery Start</span>
+                    <strong>{formatDateOnly(selectedTrade.delivery_start)}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Delivery End</span>
+                    <strong>{formatDateOnly(selectedTrade.delivery_end)}</strong>
                   </div>
                   <div className="detail-row">
                     <span>Trade Nature</span>
@@ -524,11 +602,29 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   amendSourceSystemInput={amendSourceSystemInput}
                   amendExecutionTimestampInput={amendExecutionTimestampInput}
                   setAmendExecutionTimestampInput={setAmendExecutionTimestampInput}
+                  amendTradeDateInput={amendTradeDateInput}
+                  setAmendTradeDateInput={setAmendTradeDateInput}
+                  amendEffectiveStartDateInput={amendEffectiveStartDateInput}
+                  setAmendEffectiveStartDateInput={setAmendEffectiveStartDateInput}
+                  amendEffectiveEndDateInput={amendEffectiveEndDateInput}
+                  setAmendEffectiveEndDateInput={setAmendEffectiveEndDateInput}
                   amendQualitySpecInput={amendQualitySpecInput}
                   setAmendQualitySpecInput={setAmendQualitySpecInput}
                   amendUnitInput={amendUnitInput}
                   setAmendUnitInput={setAmendUnitInput}
                   amendUnitOptions={amendUnitOptions}
+                  amendTradeCurrencyInput={amendTradeCurrencyInput}
+                  setAmendTradeCurrencyInput={setAmendTradeCurrencyInput}
+                  amendCurrencyOptions={amendCurrencyOptions}
+                  amendLocationInput={amendLocationInput}
+                  setAmendLocationInput={setAmendLocationInput}
+                  amendLocationOptions={amendLocationOptions}
+                  amendDeliveryStartInput={amendDeliveryStartInput}
+                  setAmendDeliveryStartInput={setAmendDeliveryStartInput}
+                  amendDeliveryEndInput={amendDeliveryEndInput}
+                  setAmendDeliveryEndInput={setAmendDeliveryEndInput}
+                  amendPriceUnitInput={amendPriceUnitInput}
+                  setAmendPriceUnitInput={setAmendPriceUnitInput}
                   amendTradeNatureInput={amendTradeNatureInput}
                   setAmendTradeNatureInput={setAmendTradeNatureInput}
                   amendTradeStructureInput={amendTradeStructureInput}

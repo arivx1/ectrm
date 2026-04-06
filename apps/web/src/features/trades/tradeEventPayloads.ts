@@ -14,8 +14,16 @@ export type TradeEditorValues = {
   externalTradeId: string
   sourceSystem: string
   executionTimestamp: string
+  tradeDate: string
+  effectiveStartDate: string
+  effectiveEndDate: string
   qualitySpec: string
   unitOfMeasure: string
+  tradeCurrencyCode: string
+  locationCode: string
+  deliveryStart: string
+  deliveryEnd: string
+  priceUnitCode: string
   tradeNature: string
   tradeStructure: string
   tradeSide: string
@@ -47,8 +55,16 @@ type NormalizedTradeValues = {
   externalTradeId: string | null
   sourceSystem: string | null
   executionTimestamp: string | null
+  tradeDate: string | null
+  effectiveStartDate: string | null
+  effectiveEndDate: string | null
   qualitySpec: string | null
   unitOfMeasure: string | null
+  tradeCurrencyCode: string | null
+  locationCode: string | null
+  deliveryStart: string | null
+  deliveryEnd: string | null
+  priceUnitCode: string | null
   tradeNature: string
   tradeStructure: string
   tradeSide: string | null
@@ -83,8 +99,16 @@ const TRADE_FIELD_LABELS = {
   external_trade_id: 'External Trade ID',
   source_system: 'Source System',
   execution_timestamp: 'Execution Time',
+  trade_date: 'Trade Date',
+  effective_start_date: 'Effective Start',
+  effective_end_date: 'Effective End',
   quality_spec: 'Quality Spec',
-  unit_of_measure: 'Unit of Measure',
+  unit_of_measure: 'Quantity Unit',
+  trade_currency_code: 'Trade Currency',
+  location_code: 'Location',
+  delivery_start: 'Delivery Start',
+  delivery_end: 'Delivery End',
+  price_unit_code: 'Price Unit',
   trade_nature: 'Nature',
   trade_structure: 'Structure',
   trade_side: 'Side',
@@ -199,8 +223,34 @@ function buildTradeAmendment(
     values.executionTimestamp,
     normalizeExistingExecutionTimestamp(selectedTrade.execution_timestamp),
   )
+  compareField(payload, changedFields, 'trade_date', values.tradeDate, selectedTrade.trade_date)
+  compareField(
+    payload,
+    changedFields,
+    'effective_start_date',
+    values.effectiveStartDate,
+    selectedTrade.effective_start_date,
+  )
+  compareField(
+    payload,
+    changedFields,
+    'effective_end_date',
+    values.effectiveEndDate,
+    selectedTrade.effective_end_date,
+  )
   compareField(payload, changedFields, 'quality_spec', values.qualitySpec, selectedTrade.quality_spec)
   compareField(payload, changedFields, 'unit_of_measure', values.unitOfMeasure, selectedTrade.unit_of_measure)
+  compareField(
+    payload,
+    changedFields,
+    'trade_currency_code',
+    values.tradeCurrencyCode,
+    selectedTrade.trade_currency_code,
+  )
+  compareField(payload, changedFields, 'location_code', values.locationCode, selectedTrade.location_code)
+  compareField(payload, changedFields, 'delivery_start', values.deliveryStart, selectedTrade.delivery_start)
+  compareField(payload, changedFields, 'delivery_end', values.deliveryEnd, selectedTrade.delivery_end)
+  compareField(payload, changedFields, 'price_unit_code', values.priceUnitCode, selectedTrade.price_unit_code)
   compareField(payload, changedFields, 'trade_nature', values.tradeNature, selectedTrade.trade_nature)
   compareField(payload, changedFields, 'trade_structure', values.tradeStructure, selectedTrade.trade_structure)
 
@@ -252,8 +302,16 @@ function buildTradePayload(values: NormalizedTradeValues): Record<string, unknow
     external_trade_id: values.externalTradeId,
     source_system: values.sourceSystem,
     execution_timestamp: values.executionTimestamp,
+    trade_date: values.tradeDate,
+    effective_start_date: values.effectiveStartDate,
+    effective_end_date: values.effectiveEndDate,
     quality_spec: values.qualitySpec,
     unit_of_measure: values.unitOfMeasure,
+    trade_currency_code: values.tradeCurrencyCode,
+    location_code: values.locationCode,
+    delivery_start: values.deliveryStart,
+    delivery_end: values.deliveryEnd,
+    price_unit_code: values.priceUnitCode,
     trade_nature: values.tradeNature,
     trade_structure: values.tradeStructure,
     book: values.book,
@@ -307,8 +365,16 @@ function normalizeTradeValues(values: TradeEditorValues): NormalizedTradeValues 
     externalTradeId: normalizeOptionalText(values.externalTradeId),
     sourceSystem: normalizeOptionalUppercaseText(values.sourceSystem),
     executionTimestamp: normalizeOptionalDateTimeInput(values.executionTimestamp),
+    tradeDate: normalizeOptionalDateInput(values.tradeDate),
+    effectiveStartDate: normalizeOptionalDateInput(values.effectiveStartDate),
+    effectiveEndDate: normalizeOptionalDateInput(values.effectiveEndDate),
     qualitySpec: normalizeOptionalText(values.qualitySpec),
     unitOfMeasure: normalizeOptionalUppercaseText(values.unitOfMeasure),
+    tradeCurrencyCode: normalizeOptionalUppercaseText(values.tradeCurrencyCode),
+    locationCode: normalizeOptionalUppercaseText(values.locationCode),
+    deliveryStart: normalizeOptionalDateInput(values.deliveryStart),
+    deliveryEnd: normalizeOptionalDateInput(values.deliveryEnd),
+    priceUnitCode: normalizeOptionalUppercaseText(values.priceUnitCode),
     tradeNature: values.tradeNature,
     tradeStructure: values.tradeStructure,
     tradeSide: legsDriveTrade ? null : values.tradeSide,
@@ -341,6 +407,27 @@ function validateTradeValues(values: NormalizedTradeValues, rawValues: TradeEdit
   ) {
     return 'Execution timestamp must be a valid date and time.'
   }
+  if (rawValues.tradeDate.trim() !== '' && !isValidDateOnlyInput(rawValues.tradeDate)) {
+    return 'Trade date must be a valid date.'
+  }
+  if (
+    rawValues.effectiveStartDate.trim() !== '' &&
+    !isValidDateOnlyInput(rawValues.effectiveStartDate)
+  ) {
+    return 'Effective start date must be a valid date.'
+  }
+  if (
+    rawValues.effectiveEndDate.trim() !== '' &&
+    !isValidDateOnlyInput(rawValues.effectiveEndDate)
+  ) {
+    return 'Effective end date must be a valid date.'
+  }
+  if (rawValues.deliveryStart.trim() !== '' && !isValidDateOnlyInput(rawValues.deliveryStart)) {
+    return 'Delivery start must be a valid date.'
+  }
+  if (rawValues.deliveryEnd.trim() !== '' && !isValidDateOnlyInput(rawValues.deliveryEnd)) {
+    return 'Delivery end must be a valid date.'
+  }
   if (rawValues.priceInput.trim() !== '' && values.price === null) {
     return 'Price Differential must be a valid number.'
   }
@@ -358,6 +445,20 @@ function validateTradeValues(values: NormalizedTradeValues, rawValues: TradeEdit
     values.volume === null
   ) {
     return 'Volume is required for single-leg trades.'
+  }
+  if (
+    values.effectiveStartDate !== null &&
+    values.effectiveEndDate !== null &&
+    values.effectiveEndDate < values.effectiveStartDate
+  ) {
+    return 'Effective end date must be on or after effective start date.'
+  }
+  if (
+    values.deliveryStart !== null &&
+    values.deliveryEnd !== null &&
+    values.deliveryEnd < values.deliveryStart
+  ) {
+    return 'Delivery end must be on or after delivery start.'
   }
 
   if (!tradeStructureSupportsLegs(values.tradeStructure)) {
@@ -431,6 +532,15 @@ function normalizeOptionalDateTimeInput(value: string): string | null {
   return parsedValue.toISOString()
 }
 
+function normalizeOptionalDateInput(value: string): string | null {
+  const trimmedValue = value.trim()
+  if (!trimmedValue) {
+    return null
+  }
+
+  return trimmedValue
+}
+
 function normalizeExistingExecutionTimestamp(value: string | null): string | null {
   if (!value) {
     return null
@@ -442,6 +552,27 @@ function normalizeExistingExecutionTimestamp(value: string | null): string | nul
   }
 
   return parsedValue.toISOString()
+}
+
+function isValidDateOnlyInput(value: string): boolean {
+  const trimmedValue = value.trim()
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmedValue)
+  if (!match) {
+    return false
+  }
+
+  const [, yearSegment, monthSegment, daySegment] = match
+  const year = Number(yearSegment)
+  const month = Number(monthSegment)
+  const day = Number(daySegment)
+  const parsedValue = new Date(Date.UTC(year, month - 1, day))
+
+  return (
+    !Number.isNaN(parsedValue.getTime()) &&
+    parsedValue.getUTCFullYear() === year &&
+    parsedValue.getUTCMonth() === month - 1 &&
+    parsedValue.getUTCDate() === day
+  )
 }
 
 function valuesEqual(

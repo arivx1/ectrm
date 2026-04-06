@@ -4538,6 +4538,60 @@
   word-break: break-word;
 }
 
+.shipment-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.shipment-card-head,
+.shipment-card-actions,
+.shipment-kpi-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.shipment-card-copy,
+.shipment-kpi-stack {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.shipment-card-copy p,
+.shipment-card-actions span,
+.shipment-kpi-row span,
+.shipment-blocker-list {
+  margin: 0;
+  color: #66717c;
+}
+
+.shipment-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.shipment-blocker-list {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 1.1rem;
+}
+
+.shipment-kpi-row {
+  padding: 0.85rem 0;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.shipment-kpi-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.shipment-kpi-row strong {
+  color: #13293d;
+}
+
 @media (max-width: 1200px) {
   .hero-tape {
     grid-template-columns: repeat(2, minmax(0, 1fr));

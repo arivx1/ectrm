@@ -48,6 +48,38 @@ export function formatDate(value: string | null | undefined): string {
   }).format(date)
 }
 
+export function formatDateOnly(value: string | null | undefined): string {
+  if (!value) {
+    return '—'
+  }
+
+  const trimmedValue = value.trim()
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmedValue)
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+    if (!Number.isNaN(date.getTime())) {
+      return new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }).format(date)
+    }
+  }
+
+  const date = new Date(trimmedValue)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date)
+}
+
 export function formatCommodityClass(value: string): string {
   return value.replaceAll('_', ' ')
 }

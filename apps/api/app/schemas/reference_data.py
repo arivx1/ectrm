@@ -178,6 +178,7 @@ class CounterpartyCreate(ReferenceDataCreate):
     legal_entity_name: Optional[str] = Field(None, min_length=1, max_length=200)
     counterparty_type: str = Field(..., min_length=1, max_length=50)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    credit_status: Optional[str] = Field(None, min_length=1, max_length=50)
 
 
 class CounterpartyUpdate(ReferenceDataUpdate):
@@ -185,6 +186,7 @@ class CounterpartyUpdate(ReferenceDataUpdate):
     legal_entity_name: Optional[str] = Field(None, min_length=1, max_length=200)
     counterparty_type: Optional[str] = Field(None, min_length=1, max_length=50)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    credit_status: Optional[str] = Field(None, min_length=1, max_length=50)
 
 
 class CounterpartyStatusUpdate(ReferenceDataStatusUpdate):
@@ -196,6 +198,7 @@ class CounterpartyOut(ReferenceDataOut):
     legal_entity_name: Optional[str]
     counterparty_type: str
     country_code: Optional[str]
+    credit_status: Optional[str]
 
 
 class CounterpartyStandardsOut(BaseModel):

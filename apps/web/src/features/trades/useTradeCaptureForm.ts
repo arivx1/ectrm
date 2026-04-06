@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import type {
   CounterpartyRecord,
+  CurrencyRecord,
   EventRow,
+  LocationRecord,
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
@@ -28,6 +30,8 @@ export function useTradeCaptureForm(
   activeCounterparties: CounterpartyRecord[],
   activePortfolios: PortfolioRecord[],
   activeUnits: UnitRecord[],
+  activeCurrencies: CurrencyRecord[],
+  activeLocations: LocationRecord[],
 ) {
   const [tradeIdInput, setTradeIdInput] = useState('')
   const [tradeNatureInput, setTradeNatureInput] = useState<string>(tradeFormDefaults.nature)
@@ -43,8 +47,16 @@ export function useTradeCaptureForm(
   const [externalTradeIdInput, setExternalTradeIdInput] = useState<string>(tradeHeaderDefaults.external_trade_id)
   const [sourceSystemInput] = useState<string>(defaultTradeSourceSystem)
   const [executionTimestampInput, setExecutionTimestampInput] = useState<string>(tradeHeaderDefaults.execution_timestamp)
+  const [tradeDateInput, setTradeDateInput] = useState<string>(tradeHeaderDefaults.trade_date)
+  const [effectiveStartDateInput, setEffectiveStartDateInput] = useState<string>(tradeHeaderDefaults.effective_start_date)
+  const [effectiveEndDateInput, setEffectiveEndDateInput] = useState<string>(tradeHeaderDefaults.effective_end_date)
   const [qualitySpecInput, setQualitySpecInput] = useState<string>(tradeHeaderDefaults.quality_spec)
   const [unitInput, setUnitInput] = useState<string>(tradeHeaderDefaults.unit_of_measure)
+  const [tradeCurrencyInput, setTradeCurrencyInput] = useState<string>(tradeHeaderDefaults.trade_currency_code)
+  const [locationInput, setLocationInput] = useState<string>(tradeHeaderDefaults.location_code)
+  const [deliveryStartInput, setDeliveryStartInput] = useState<string>(tradeHeaderDefaults.delivery_start)
+  const [deliveryEndInput, setDeliveryEndInput] = useState<string>(tradeHeaderDefaults.delivery_end)
+  const [priceUnitInput, setPriceUnitInput] = useState<string>(tradeHeaderDefaults.price_unit_code)
   const [portfolioInput, setPortfolioInput] = useState<string>(tradeHeaderDefaults.portfolio)
   const [counterpartyInput, setCounterpartyInput] = useState<string>(tradeHeaderDefaults.counterparty)
   const [pricingStatusInput, setPricingStatusInput] = useState<string>(tradeHeaderDefaults.pricing_status)
@@ -96,6 +108,12 @@ export function useTradeCaptureForm(
   const resolvedCounterpartyInput = activeCounterparties.some((counterparty) => counterparty.code === counterpartyInput)
     ? counterpartyInput
     : ''
+  const resolvedTradeCurrencyInput = activeCurrencies.some((currency) => currency.code === tradeCurrencyInput)
+    ? tradeCurrencyInput
+    : ''
+  const resolvedLocationInput = activeLocations.some((location) => location.code === locationInput)
+    ? locationInput
+    : ''
 
   const resolvedPriceIndexInput =
     !pricingTypeRequiresPriceIndex(pricingTypeInput)
@@ -104,6 +122,9 @@ export function useTradeCaptureForm(
         ? priceIndexInput
         : createPriceIndexOptions[0]?.code || ''
   const resolvedUnitInput = createUnitOptions.some((unit) => unit.code === unitInput) ? unitInput : ''
+  const resolvedPriceUnitInput = createUnitOptions.some((unit) => unit.code === priceUnitInput)
+    ? priceUnitInput
+    : ''
 
   function updateDraftLeg(index: number, field: keyof TradeLegDraft, value: string) {
     setCreateLegs((current) =>
@@ -168,8 +189,16 @@ export function useTradeCaptureForm(
     setVolumeInput(selectedTrade.volume?.toString() ?? tradeFormDefaults.volume)
     setExternalTradeIdInput('')
     setExecutionTimestampInput(tradeHeaderDefaults.execution_timestamp)
+    setTradeDateInput(tradeHeaderDefaults.trade_date)
+    setEffectiveStartDateInput(selectedTrade.effective_start_date ?? tradeHeaderDefaults.effective_start_date)
+    setEffectiveEndDateInput(selectedTrade.effective_end_date ?? tradeHeaderDefaults.effective_end_date)
     setQualitySpecInput(selectedTrade.quality_spec ?? tradeHeaderDefaults.quality_spec)
     setUnitInput(selectedTrade.unit_of_measure ?? tradeHeaderDefaults.unit_of_measure)
+    setTradeCurrencyInput(selectedTrade.trade_currency_code ?? tradeHeaderDefaults.trade_currency_code)
+    setLocationInput(selectedTrade.location_code ?? tradeHeaderDefaults.location_code)
+    setDeliveryStartInput(selectedTrade.delivery_start ?? tradeHeaderDefaults.delivery_start)
+    setDeliveryEndInput(selectedTrade.delivery_end ?? tradeHeaderDefaults.delivery_end)
+    setPriceUnitInput(selectedTrade.price_unit_code ?? tradeHeaderDefaults.price_unit_code)
     setPortfolioInput(selectedTrade.portfolio ?? tradeHeaderDefaults.portfolio)
     setCounterpartyInput(selectedTrade.counterparty ?? tradeHeaderDefaults.counterparty)
     setPricingStatusInput(selectedTrade.pricing_status ?? tradeHeaderDefaults.pricing_status)
@@ -193,8 +222,16 @@ export function useTradeCaptureForm(
     setVolumeInput(tradeFormDefaults.volume)
     setExternalTradeIdInput(tradeHeaderDefaults.external_trade_id)
     setExecutionTimestampInput(tradeHeaderDefaults.execution_timestamp)
+    setTradeDateInput(tradeHeaderDefaults.trade_date)
+    setEffectiveStartDateInput(tradeHeaderDefaults.effective_start_date)
+    setEffectiveEndDateInput(tradeHeaderDefaults.effective_end_date)
     setQualitySpecInput(tradeHeaderDefaults.quality_spec)
     setUnitInput(tradeHeaderDefaults.unit_of_measure)
+    setTradeCurrencyInput(tradeHeaderDefaults.trade_currency_code)
+    setLocationInput(tradeHeaderDefaults.location_code)
+    setDeliveryStartInput(tradeHeaderDefaults.delivery_start)
+    setDeliveryEndInput(tradeHeaderDefaults.delivery_end)
+    setPriceUnitInput(tradeHeaderDefaults.price_unit_code)
     setPortfolioInput(tradeHeaderDefaults.portfolio)
     setCounterpartyInput(tradeHeaderDefaults.counterparty)
     setPricingStatusInput(tradeHeaderDefaults.pricing_status)
@@ -232,10 +269,28 @@ export function useTradeCaptureForm(
     sourceSystemInput,
     executionTimestampInput,
     setExecutionTimestampInput,
+    tradeDateInput,
+    setTradeDateInput,
+    effectiveStartDateInput,
+    setEffectiveStartDateInput,
+    effectiveEndDateInput,
+    setEffectiveEndDateInput,
     qualitySpecInput,
     setQualitySpecInput,
     unitInput: resolvedUnitInput,
     setUnitInput,
+    tradeCurrencyInput: resolvedTradeCurrencyInput,
+    setTradeCurrencyInput,
+    createCurrencyOptions: activeCurrencies,
+    locationInput: resolvedLocationInput,
+    setLocationInput,
+    createLocationOptions: activeLocations,
+    deliveryStartInput,
+    setDeliveryStartInput,
+    deliveryEndInput,
+    setDeliveryEndInput,
+    priceUnitInput: resolvedPriceUnitInput,
+    setPriceUnitInput,
     portfolioInput: resolvedPortfolioInput,
     setPortfolioInput,
     counterpartyInput: resolvedCounterpartyInput,

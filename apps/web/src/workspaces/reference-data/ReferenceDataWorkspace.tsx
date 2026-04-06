@@ -485,12 +485,13 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
       referenceDirectory = (
         <DataSheet
           label="Counterparties"
-          description="Browse commercial party records in a compact sheet while keeping activation and maintenance controls in the side panel."
+          description="Browse commercial party records and credit posture in a compact sheet while keeping activation and maintenance controls in the side panel."
           columns={[
             { id: 'code', label: 'Code', width: '10rem', renderCell: (counterparty) => counterparty.code },
             { id: 'name', label: 'Name', width: '18rem', renderCell: (counterparty) => counterparty.name },
             { id: 'type', label: 'Type', width: '10rem', renderCell: (counterparty) => counterparty.counterparty_type },
             { id: 'country', label: 'Country', width: '8rem', renderCell: (counterparty) => counterparty.country_code ?? '—' },
+            { id: 'credit', label: 'Credit', width: '10rem', renderCell: (counterparty) => counterparty.credit_status ?? '—' },
             statusColumn<(typeof filteredCounterparties)[number]>(),
           ]}
           rows={filteredCounterparties}
@@ -1568,6 +1569,11 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               </label>
 
               <label className="field">
+                <span>Credit Status</span>
+                <input className="control" value={counterpartyForm.credit_status} onChange={(event) => setCounterpartyForm((current) => ({ ...current, credit_status: event.target.value }))} disabled={savingReference} />
+              </label>
+
+              <label className="field">
                 <span>Description</span>
                 <textarea className="control control-textarea" value={counterpartyForm.description} onChange={(event) => setCounterpartyForm((current) => ({ ...current, description: event.target.value }))} disabled={savingReference} />
               </label>
@@ -1590,6 +1596,10 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 <div className="detail-row">
                   <span>Country</span>
                   <strong>{selectedCounterparty.country_code ?? '—'}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Credit Status</span>
+                  <strong>{selectedCounterparty.credit_status ?? '—'}</strong>
                 </div>
                 <div className="detail-row">
                   <span>Updated</span>

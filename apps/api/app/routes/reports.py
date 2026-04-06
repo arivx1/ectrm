@@ -4,12 +4,18 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reports.services.pnl_history import build_pnl_history_report
 from apps.api.app.domains.reports.services.overview import (
     build_activity_summary,
     build_exposure_summary,
     build_reporting_overview,
 )
-from apps.api.app.schemas.report import ActivitySummaryRow, ExposureSummaryRow, ReportingOverview
+from apps.api.app.schemas.report import (
+    ActivitySummaryRow,
+    ExposureSummaryRow,
+    PnlHistoryReport,
+    ReportingOverview,
+)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -27,3 +33,8 @@ def get_activity_summary(db: Session = Depends(get_db)) -> list[ActivitySummaryR
 @router.get("/overview", response_model=ReportingOverview)
 def get_reporting_overview(db: Session = Depends(get_db)) -> ReportingOverview:
     return ReportingOverview(**build_reporting_overview(db))
+
+
+@router.get("/pnl-history", response_model=PnlHistoryReport)
+def get_pnl_history(db: Session = Depends(get_db)) -> PnlHistoryReport:
+    return PnlHistoryReport(**build_pnl_history_report(db))

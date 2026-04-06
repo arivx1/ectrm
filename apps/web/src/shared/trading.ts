@@ -1,7 +1,7 @@
 import type { TradeHeaderDraft, TradeLegDraft } from './models'
 
 export const tradeAggregateType = 'trade'
-export const currentTradeEventSchemaVersion = 3
+export const currentTradeEventSchemaVersion = 4
 export const defaultTradeSourceSystem = 'ETRM'
 export const defaultTradeExecutionTime = '00:00'
 
@@ -47,8 +47,16 @@ export const tradeHeaderDefaults: TradeHeaderDraft = {
   external_trade_id: '',
   source_system: '',
   execution_timestamp: '',
+  trade_date: '',
+  effective_start_date: '',
+  effective_end_date: '',
   quality_spec: '',
   unit_of_measure: '',
+  trade_currency_code: '',
+  location_code: '',
+  delivery_start: '',
+  delivery_end: '',
+  price_unit_code: '',
   portfolio: '',
   counterparty: '',
   pricing_status: tradeFormDefaults.pricingStatus,
