@@ -56,6 +56,29 @@ class TradeCreditApprovalDecisionOut(BaseModel):
     decided_by: str
 
 
+class TradeCreditExceptionOut(BaseModel):
+    exception_id: int
+    trade_id: str
+    workflow_item_id: int
+    approval_decision_id: Optional[int]
+    status: str
+    limit_currency_code: str
+    approved_limit_amount: Optional[float]
+    approved_projected_exposure_amount: float
+    approved_excess_amount: Optional[float]
+    approval_comment: str
+    approved_at: datetime
+    approved_by: str
+    expires_at: datetime
+    released_at: Optional[datetime]
+    released_by: Optional[str]
+    released_reason: Optional[str]
+    current_projected_exposure_amount: Optional[float]
+    remaining_headroom_amount: Optional[float]
+    revalidation_required: bool
+    revalidation_reason: Optional[str]
+
+
 class TradeWorkflowItemOut(BaseModel):
     item_id: int
     trade_id: str
@@ -83,6 +106,7 @@ class TradeWorkflowItemOut(BaseModel):
     trade_date: Optional[date]
     delivery_start: Optional[date]
     delivery_end: Optional[date]
+    active_credit_exception: Optional[TradeCreditExceptionOut] = None
     credit_decision_history: list[TradeCreditApprovalDecisionOut] = Field(default_factory=list)
 
 

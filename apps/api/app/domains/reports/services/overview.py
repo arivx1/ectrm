@@ -15,7 +15,7 @@ def build_exposure_summary(db: Session) -> list[dict]:
         commodity: count
         for commodity, count in db.execute(
             select(Trade.commodity, func.count())
-            .where(Trade.status != "CANCELLED")
+            .where(Trade.status == "ACTIVE")
             .group_by(Trade.commodity)
         ).all()
     }
@@ -52,7 +52,7 @@ def build_reporting_overview(db: Session) -> dict:
     exposure = build_exposure_summary(db)
     activity = build_activity_summary(db)
     active_trade_count = db.execute(
-        select(func.count()).select_from(Trade).where(Trade.status != "CANCELLED")
+        select(func.count()).select_from(Trade).where(Trade.status == "ACTIVE")
     ).scalar_one()
     gross_net_volume = sum((Decimal(str(row["net_volume"])) for row in exposure), start=Decimal("0"))
     return {

@@ -224,6 +224,52 @@ class OptionExposuresRebuildScriptTests(unittest.TestCase):
         )
         self._assert_rebuild_matches_live_option_exposures([])
 
+    def test_rebuild_removes_option_exposure_after_assignment(self) -> None:
+        self._append_trade_event(
+            trade_id="T-OPTION-ASSIGN-1",
+            event_type="TradeCreated",
+            seconds_after_base=1,
+            payload={
+                "instrument_type": "OPTION",
+                "trade_nature": "FINANCIAL",
+                "trade_structure": "SINGLE",
+                "trade_side": "SELL",
+                "book": "CRUDE_PHYS",
+                "commodity_class": "CRUDE_OIL",
+                "commodity": "WTI",
+                "pricing_type": "FIXED",
+                "price": 2.25,
+                "volume": 7,
+                "option_type": "PUT",
+                "option_style": "AMERICAN",
+                "option_strike_price": 74,
+                "option_expiration_date": "2026-06-30",
+            },
+        )
+        self._assert_rebuild_matches_live_option_exposures(
+            [
+                {
+                    "trade_id": "T-OPTION-ASSIGN-1",
+                    "book": "CRUDE_PHYS",
+                    "commodity": "WTI",
+                    "option_type": "PUT",
+                    "trade_side": "SELL",
+                    "contract_volume": 7.0,
+                    "premium_cashflow": -15.75,
+                    "underlying_equivalent_volume": 7.0,
+                    "option_expiration_date": "2026-06-30",
+                }
+            ]
+        )
+
+        self._append_trade_event(
+            trade_id="T-OPTION-ASSIGN-1",
+            event_type="OptionAssigned",
+            seconds_after_base=2,
+            payload={},
+        )
+        self._assert_rebuild_matches_live_option_exposures([])
+
 
 if __name__ == "__main__":
     unittest.main()

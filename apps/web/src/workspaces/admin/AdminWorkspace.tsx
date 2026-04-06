@@ -5,6 +5,7 @@ import type {
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 import { formatDateOnly } from '../../shared/format'
+import { tradeStatusIsActive } from '../../shared/trading'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
@@ -443,7 +444,7 @@ export function AdminWorkspace({
         key: 'ui-action',
         title: 'Operator action',
         detail: selectedTrade
-          ? `${selectedTrade.status === 'CANCELLED' ? 'Cancel' : 'Capture or amend'} ${selectedTrade.trade_id} in the workspace`
+          ? `${tradeStatusIsActive(selectedTrade.status) ? 'Capture, amend, or close' : 'Review'} ${selectedTrade.trade_id} in the workspace`
           : 'Select or create a trade to inspect the flow',
         meta: selectedTrade
           ? [`Book ${selectedTrade.book}`, formatCommodityClass(selectedTrade.commodity_class), selectedTrade.commodity]

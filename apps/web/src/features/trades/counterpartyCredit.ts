@@ -30,6 +30,8 @@ export type CounterpartyCreditPolicyPreview = {
 
 const TRADABLE_COUNTERPARTY_CREDIT_STATUSES = new Set(['APPROVED'])
 
+import { tradeStatusIsActive } from '../../shared/trading'
+
 function normalizeOptionalUppercase(value: string | null | undefined): string | null {
   const normalized = value?.trim().toUpperCase()
   return normalized || null
@@ -134,7 +136,7 @@ export function buildCounterpartyCreditPolicyPreview(args: {
 
   const currentExposureAmount = args.trades.reduce((sum, trade) => {
     if (
-      trade.status === 'CANCELLED' ||
+      !tradeStatusIsActive(trade.status) ||
       trade.counterparty !== counterpartyCode ||
       (args.tradeId && trade.trade_id === args.tradeId)
     ) {

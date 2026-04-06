@@ -57,7 +57,7 @@ def evaluate_counterparty_credit_policy(
     trade_input: CounterpartyCreditTradeInput,
 ) -> dict[str, object] | None:
     counterparty_code = trade_input.counterparty_code
-    if counterparty_code is None or trade_input.status == "CANCELLED":
+    if counterparty_code is None or str(trade_input.status or "ACTIVE").strip().upper() != "ACTIVE":
         return None
 
     profile = db.execute(
@@ -86,7 +86,7 @@ def evaluate_counterparty_credit_policy(
         }
 
     active_trade_stmt = select(Trade).where(
-        Trade.status != "CANCELLED",
+        Trade.status == "ACTIVE",
         Trade.counterparty == counterparty_code,
     )
     if trade_input.trade_id is not None:
@@ -166,7 +166,7 @@ def build_counterparty_credit_report(
     }
     active_trades = db.execute(
         select(Trade).where(
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
             Trade.counterparty.is_not(None),
         )
     ).scalars().all()

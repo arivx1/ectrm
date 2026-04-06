@@ -27,6 +27,7 @@ from apps.api.app.models.reference_price_index_source import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
+from apps.api.app.models.trade_credit_exception import TradeCreditException
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
@@ -66,6 +67,7 @@ __all__ = [
     "ReferenceUnit",
     "Trade",
     "TradeCreditApprovalDecision",
+    "TradeCreditException",
     "TradeInvoice",
     "TradePayment",
     "TradeWorkflowItem",

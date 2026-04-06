@@ -1,7 +1,7 @@
 import type { TradeHeaderDraft, TradeLegDraft, TradeWorkflowItemRecord } from './models'
 
 export const tradeAggregateType = 'trade'
-export const currentTradeEventSchemaVersion = 5
+export const currentTradeEventSchemaVersion = 6
 export const defaultTradeSourceSystem = 'ETRM'
 export const defaultTradeExecutionTime = '00:00'
 
@@ -32,6 +32,7 @@ export const confirmationStatusOptions = ['PENDING', 'SENT', 'CONFIRMED', 'DISPU
 export const nominationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'SCHEDULED', 'NOMINATED', 'COMPLETED'] as const
 export const allocationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'PARTIALLY_ALLOCATED', 'ALLOCATED', 'COMPLETED'] as const
 export const creditApprovalStatusOptions = ['PENDING_REVIEW', 'APPROVED', 'NOT_REQUIRED', 'REJECTED'] as const
+export const optionSettlementStatusOptions = ['PENDING', 'BOOKED', 'NOT_REQUIRED'] as const
 export const invoiceStatusOptions = ['NOT_REQUIRED', 'PENDING', 'ISSUED', 'APPROVED', 'DISPUTED'] as const
 export const paymentStatusOptions = ['NOT_REQUIRED', 'PENDING', 'DUE', 'PAID', 'OVERDUE'] as const
 export const settlementStatusOptions = ['PENDING', 'INVOICED', 'PARTIALLY_SETTLED', 'SETTLED', 'DISPUTED'] as const
@@ -39,7 +40,22 @@ export const settlementStatusOptions = ['PENDING', 'INVOICED', 'PARTIALLY_SETTLE
 export const tradeStatusValues = {
   active: 'ACTIVE',
   cancelled: 'CANCELLED',
+  exercised: 'EXERCISED',
+  expired: 'EXPIRED',
+  assigned: 'ASSIGNED',
 } as const
+
+export const optionLifecycleEventTypes = ['OptionExercised', 'OptionExpired', 'OptionAssigned'] as const
+
+export type OptionLifecycleEventType = (typeof optionLifecycleEventTypes)[number]
+
+export function tradeStatusIsActive(status: string | null | undefined): boolean {
+  return (status ?? tradeStatusValues.active).trim().toUpperCase() === tradeStatusValues.active
+}
+
+export function tradeStatusIsClosed(status: string | null | undefined): boolean {
+  return !tradeStatusIsActive(status)
+}
 
 export type TradeCreditHoldSummary = {
   credit_approval_status: string

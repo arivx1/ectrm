@@ -359,7 +359,7 @@ def _build_weather_exposures(
         commodity_code: count
         for commodity_code, count in db.execute(
             select(Trade.commodity, func.count())
-            .where(Trade.status != "CANCELLED")
+            .where(Trade.status == "ACTIVE")
             .group_by(Trade.commodity)
         ).all()
     }

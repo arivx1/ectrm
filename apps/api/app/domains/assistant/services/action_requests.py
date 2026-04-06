@@ -11,7 +11,11 @@ from apps.api.app.domains.assistant.services.action_runtime import AssistantActi
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
-from apps.api.app.routes.events import sync_positions_for_trade_change, trade_snapshot
+from apps.api.app.routes.events import (
+    sync_option_exposures_for_trade_change,
+    sync_positions_for_trade_change,
+    trade_snapshot,
+)
 from apps.api.app.schemas.assistant import AssistantActionRequestOut
 
 
@@ -215,8 +219,8 @@ def _execute_cancel_trade_action(
     trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
     if trade is None:
         raise AssistantActionRequestError(f"Trade {trade_id} was not found.")
-    if str(trade.status).upper() == "CANCELLED":
-        raise AssistantActionRequestError(f"Trade {trade_id} is already cancelled.")
+    if str(trade.status or "ACTIVE").strip().upper() != "ACTIVE":
+        raise AssistantActionRequestError(f"Trade {trade_id} is already closed as {trade.status}.")
 
     before = trade_snapshot(db, trade)
     event = Event(
@@ -244,6 +248,7 @@ def _execute_cancel_trade_action(
     trade.last_event_id = event.event_id
     after = trade_snapshot(db, trade)
     sync_positions_for_trade_change(db, before, after, decided_at)
+    sync_option_exposures_for_trade_change(db, before, after, decided_at)
 
     return {
         "event_id": event.event_id,

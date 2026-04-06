@@ -5,6 +5,7 @@ import type {
   ExposureSummaryRow,
   PnlHistoryReport,
   ReportingOverview,
+  SettlementExceptionReport,
   SettlementAgingReport,
 } from '../../shared/models'
 
@@ -65,6 +66,12 @@ export async function loadSettlementAgingReport(apiBase: string): Promise<Settle
 
 export async function loadCashForecastReport(apiBase: string): Promise<CashForecastReport> {
   return fetchJson<CashForecastReport>(`${apiBase}/reports/cash-forecast`, {
+    cache: 'no-store',
+  })
+}
+
+export async function loadSettlementExceptionReport(apiBase: string): Promise<SettlementExceptionReport> {
+  return fetchJson<SettlementExceptionReport>(`${apiBase}/reports/settlement-exceptions`, {
     cache: 'no-store',
   })
 }

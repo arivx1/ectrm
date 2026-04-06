@@ -17,6 +17,9 @@ CASH_FORECAST_BASIS = (
     "Expected cash is derived from outstanding invoice balances due on or before the forecast horizon. "
     "Received cash is derived from payment receipts recorded in the settlement ledger."
 )
+DISPUTED_INVOICE_EXCEPTION = "DISPUTED_INVOICE"
+SHORT_PAY_EXCEPTION = "SHORT_PAY"
+OVERDUE_PAYMENT_EXCEPTION = "OVERDUE_PAYMENT"
 
 
 def _as_of_datetime(as_of: date | None) -> datetime:
@@ -41,6 +44,65 @@ def _outstanding_amount_for_invoice(
     if invoice.status == InvoiceStatus.NOT_REQUIRED.value:
         return ZERO
     return max(_to_decimal(invoice.invoice_amount), ZERO)
+
+
+def _total_paid_amount_for_invoice(
+    payments_by_invoice_id: dict[int, list[TradePaymentOut]],
+    *,
+    invoice_id: int,
+) -> Decimal:
+    return sum(
+        (
+            _to_decimal(payment.payment_amount)
+            for payment in payments_by_invoice_id.get(invoice_id, [])
+            if payment.status == PaymentStatus.PAID.value
+        ),
+        start=ZERO,
+    )
+
+
+def _last_received_at_for_invoice(
+    payments_by_invoice_id: dict[int, list[TradePaymentOut]],
+    *,
+    invoice_id: int,
+) -> datetime | None:
+    received_values = [
+        payment.received_at
+        for payment in payments_by_invoice_id.get(invoice_id, [])
+        if payment.received_at is not None and payment.status == PaymentStatus.PAID.value
+    ]
+    return max(received_values) if received_values else None
+
+
+def _next_due_at_for_invoice(
+    invoice: TradeInvoiceOut,
+    payments_by_invoice_id: dict[int, list[TradePaymentOut]],
+) -> datetime:
+    unpaid_due_dates = [
+        payment.due_at
+        for payment in payments_by_invoice_id.get(invoice.invoice_id, [])
+        if payment.status not in {PaymentStatus.PAID.value, PaymentStatus.NOT_REQUIRED.value}
+    ]
+    if unpaid_due_dates:
+        return min(unpaid_due_dates)
+    return invoice.due_at
+
+
+def _owner_for_exception(
+    invoice: TradeInvoiceOut,
+    payments_by_invoice_id: dict[int, list[TradePaymentOut]],
+    *,
+    exception_type: str,
+) -> str | None:
+    if exception_type == DISPUTED_INVOICE_EXCEPTION:
+        return invoice.workflow_owner
+
+    payment_owners = [
+        payment.workflow_owner
+        for payment in payments_by_invoice_id.get(invoice.invoice_id, [])
+        if payment.workflow_owner
+    ]
+    return payment_owners[0] if payment_owners else invoice.workflow_owner
 
 
 def _days_past_due(*, reference_date: date, due_date: date) -> int:
@@ -177,6 +239,27 @@ class _CashForecastPointAggregate:
             "received_amount": float(self.received_amount),
             "expected_invoice_count": self.expected_invoice_count,
             "received_payment_count": self.received_payment_count,
+        }
+
+
+@dataclass
+class _ExceptionAggregate:
+    exception_count: int = 0
+    total_outstanding_amount: Decimal = ZERO
+    trade_ids: set[str] = field(default_factory=set)
+
+    def add_row(self, *, trade_id: str, outstanding_amount: Decimal) -> None:
+        self.exception_count += 1
+        self.total_outstanding_amount += outstanding_amount
+        self.trade_ids.add(trade_id)
+
+    def to_summary(self, *, exception_type: str, currency_code: str) -> dict[str, object]:
+        return {
+            "exception_type": exception_type,
+            "currency_code": currency_code,
+            "exception_count": self.exception_count,
+            "affected_trade_count": len(self.trade_ids),
+            "total_outstanding_amount": float(self.total_outstanding_amount),
         }
 
 
@@ -350,4 +433,168 @@ def build_cash_forecast_report(
         "row_count": len(points),
         "currency_summaries": currency_summaries,
         "points": points,
+    }
+
+
+def build_settlement_exception_report(
+    db: Session,
+    *,
+    as_of: date | None = None,
+) -> dict[str, object]:
+    generated_at = _as_of_datetime(as_of)
+    reference_date = generated_at.date()
+    invoices = list_trade_invoices(db, now=generated_at)
+    payments = list_trade_payments(db, now=generated_at)
+
+    payments_by_invoice_id: dict[int, list[TradePaymentOut]] = defaultdict(list)
+    for payment in payments:
+        payments_by_invoice_id[payment.invoice_id].append(payment)
+
+    rows: list[dict[str, object]] = []
+    aggregates: dict[tuple[str, str], _ExceptionAggregate] = {}
+    blocked_count = 0
+    warning_count = 0
+
+    def add_exception_row(
+        *,
+        exception_type: str,
+        severity: str,
+        invoice: TradeInvoiceOut,
+        due_at: datetime | None,
+        last_received_at: datetime | None,
+        total_paid_amount: Decimal,
+        outstanding_amount: Decimal,
+        days_past_due: int,
+        summary: str,
+    ) -> None:
+        nonlocal blocked_count, warning_count
+        if severity == "blocked":
+            blocked_count += 1
+        else:
+            warning_count += 1
+
+        aggregates.setdefault((exception_type, invoice.invoice_currency_code), _ExceptionAggregate()).add_row(
+            trade_id=invoice.trade_id,
+            outstanding_amount=outstanding_amount,
+        )
+        rows.append(
+            {
+                "exception_type": exception_type,
+                "severity": severity,
+                "trade_id": invoice.trade_id,
+                "invoice_id": invoice.invoice_id,
+                "invoice_number": invoice.invoice_number,
+                "counterparty_code": invoice.counterparty,
+                "book": invoice.book,
+                "commodity": invoice.commodity,
+                "currency_code": invoice.invoice_currency_code,
+                "invoice_status": invoice.status,
+                "payment_status": invoice.payment_status,
+                "settlement_status": invoice.settlement_status,
+                "owner": _owner_for_exception(
+                    invoice,
+                    payments_by_invoice_id,
+                    exception_type=exception_type,
+                ),
+                "due_at": due_at,
+                "last_received_at": last_received_at,
+                "invoice_amount": float(invoice.invoice_amount),
+                "total_paid_amount": float(total_paid_amount),
+                "outstanding_amount": float(outstanding_amount),
+                "days_past_due": days_past_due,
+                "summary": summary,
+            }
+        )
+
+    for invoice in invoices:
+        outstanding_amount = _outstanding_amount_for_invoice(invoice, payments_by_invoice_id)
+        total_paid_amount = _total_paid_amount_for_invoice(
+            payments_by_invoice_id,
+            invoice_id=invoice.invoice_id,
+        )
+        last_received_at = _last_received_at_for_invoice(
+            payments_by_invoice_id,
+            invoice_id=invoice.invoice_id,
+        )
+        next_due_at = _next_due_at_for_invoice(invoice, payments_by_invoice_id)
+        days_past_due = _days_past_due(reference_date=reference_date, due_date=next_due_at.date())
+
+        if invoice.status == InvoiceStatus.DISPUTED.value:
+            add_exception_row(
+                exception_type=DISPUTED_INVOICE_EXCEPTION,
+                severity="blocked",
+                invoice=invoice,
+                due_at=next_due_at,
+                last_received_at=last_received_at,
+                total_paid_amount=total_paid_amount,
+                outstanding_amount=outstanding_amount,
+                days_past_due=days_past_due,
+                summary=invoice.dispute_reason or "Invoice is disputed and needs operator resolution.",
+            )
+
+        if total_paid_amount > ZERO and outstanding_amount > ZERO:
+            add_exception_row(
+                exception_type=SHORT_PAY_EXCEPTION,
+                severity="blocked" if days_past_due > 0 else "in-progress",
+                invoice=invoice,
+                due_at=next_due_at,
+                last_received_at=last_received_at,
+                total_paid_amount=total_paid_amount,
+                outstanding_amount=outstanding_amount,
+                days_past_due=days_past_due,
+                summary=(
+                    f"Received {invoice.invoice_currency_code} {total_paid_amount:.2f} "
+                    f"against {invoice.invoice_currency_code} {Decimal(str(invoice.invoice_amount)):.2f}; "
+                    f"{invoice.invoice_currency_code} {outstanding_amount:.2f} remains open."
+                ),
+            )
+
+        if outstanding_amount > ZERO and days_past_due > 0:
+            add_exception_row(
+                exception_type=OVERDUE_PAYMENT_EXCEPTION,
+                severity="blocked",
+                invoice=invoice,
+                due_at=next_due_at,
+                last_received_at=last_received_at,
+                total_paid_amount=total_paid_amount,
+                outstanding_amount=outstanding_amount,
+                days_past_due=days_past_due,
+                summary=(
+                    f"Outstanding cash is {days_past_due} day{'s' if days_past_due != 1 else ''} past due; "
+                    f"{invoice.invoice_currency_code} {outstanding_amount:.2f} remains uncollected."
+                ),
+            )
+
+    rows.sort(
+        key=lambda row: (
+            0 if row["severity"] == "blocked" else 1,
+            -int(row["days_past_due"]),
+            -float(row["outstanding_amount"]),
+            str(row["counterparty_code"] or ""),
+            str(row["trade_id"]),
+            str(row["exception_type"]),
+        )
+    )
+
+    summaries = [
+        aggregate.to_summary(exception_type=exception_type, currency_code=currency_code)
+        for (exception_type, currency_code), aggregate in aggregates.items()
+    ]
+    summaries.sort(
+        key=lambda row: (
+            -int(row["exception_count"]),
+            -float(row["total_outstanding_amount"]),
+            str(row["exception_type"]),
+            str(row["currency_code"]),
+        )
+    )
+
+    return {
+        "generated_at": generated_at,
+        "as_of": reference_date,
+        "row_count": len(rows),
+        "blocked_count": blocked_count,
+        "warning_count": warning_count,
+        "summaries": summaries,
+        "rows": rows,
     }

@@ -58,7 +58,7 @@ def main() -> None:
         now = datetime.now(timezone.utc)
 
         for t in trades:
-            if t.status == "CANCELLED":
+            if str(t.status or "ACTIVE").strip().upper() != "ACTIVE":
                 continue
             if str(getattr(t, "instrument_type", "LINEAR") or "LINEAR").strip().upper() == "OPTION":
                 continue

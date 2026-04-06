@@ -23,6 +23,14 @@ class TradeSide(StrEnum):
     SELL = "SELL"
 
 
+class TradeStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    CANCELLED = "CANCELLED"
+    EXERCISED = "EXERCISED"
+    EXPIRED = "EXPIRED"
+    ASSIGNED = "ASSIGNED"
+
+
 class OptionType(StrEnum):
     CALL = "CALL"
     PUT = "PUT"
@@ -101,6 +109,12 @@ class CreditApprovalStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class OptionSettlementStatus(StrEnum):
+    PENDING = "PENDING"
+    BOOKED = "BOOKED"
+    NOT_REQUIRED = "NOT_REQUIRED"
+
+
 class TradeWorkflowType(StrEnum):
     CONFIRMATION = "CONFIRMATION"
     NOMINATION = "NOMINATION"
@@ -108,6 +122,7 @@ class TradeWorkflowType(StrEnum):
     INVOICE = "INVOICE"
     PAYMENT = "PAYMENT"
     CREDIT_APPROVAL = "CREDIT_APPROVAL"
+    OPTION_SETTLEMENT = "OPTION_SETTLEMENT"
 
 
 class TransportMode(StrEnum):

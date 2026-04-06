@@ -17,6 +17,6 @@ export const tradeTooltipCopy = {
     'Bootstrap checks hit an error. Review the banner and API health lines below to see which dependency needs attention.',
   activeTrade:
     'This trade is still live and contributes to the active exposure views.',
-  cancelledTrade:
-    'This trade has been cancelled and is excluded from open-trade exposure counts.',
+  closedTrade:
+    'This trade is closed and excluded from open-trade exposure counts, option exposure, and active workflow summaries.',
 } as const

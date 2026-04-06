@@ -23,6 +23,7 @@ from apps.api.app.shared.enums import (
     TradeInstrumentType,
     TradeNature,
     TradeSide,
+    TradeStatus,
     TradeStructure,
 )
 
@@ -76,6 +77,11 @@ COMMODITY_CLASS_BY_CODE = {
 
 LEGACY_COMMODITY_CODE_BY_VALUE = {
     "CRUDE": "WTI",
+}
+OPTION_LIFECYCLE_EVENT_TO_STATUS = {
+    "OptionExercised": TradeStatus.EXERCISED.value,
+    "OptionExpired": TradeStatus.EXPIRED.value,
+    "OptionAssigned": TradeStatus.ASSIGNED.value,
 }
 
 
@@ -131,6 +137,12 @@ def normalize_trade_side(value):
     normalized = str(value or TradeSide.BUY.value).strip().upper()
     valid_values = {trade_side.value for trade_side in TradeSide}
     return normalized if normalized in valid_values else TradeSide.BUY.value
+
+
+def normalize_trade_status(value, default=TradeStatus.ACTIVE.value):
+    normalized = str(value or default).strip().upper()
+    valid_values = {trade_status.value for trade_status in TradeStatus}
+    return normalized if normalized in valid_values else default
 
 
 def normalize_option_type(value):
@@ -477,7 +489,7 @@ def main() -> None:
                             valid_values={settlement_status.value for settlement_status in SettlementStatus},
                         ),
                         "trader_user": normalize_optional_text(payload.get("trader_user")),
-                        "status": payload.get("status") or "ACTIVE",
+                        "status": normalize_trade_status(payload.get("status")),
                         "last_event_id": e.event_id,
                     }
                 else:
@@ -632,7 +644,7 @@ def main() -> None:
                     if "trader_user" in payload:
                         existing["trader_user"] = normalize_optional_text(payload.get("trader_user"))
                     if payload.get("status") is not None:
-                        existing["status"] = payload.get("status")
+                        existing["status"] = normalize_trade_status(payload.get("status"))
                     validate_date_range(
                         existing.get("effective_start_date"),
                         existing.get("effective_end_date"),
@@ -836,7 +848,7 @@ def main() -> None:
                 if "trader_user" in payload:
                     existing["trader_user"] = normalize_optional_text(payload.get("trader_user"))
                 if payload.get("status") is not None:
-                    existing["status"] = payload.get("status")
+                    existing["status"] = normalize_trade_status(payload.get("status"))
                 validate_date_range(
                     existing.get("effective_start_date"),
                     existing.get("effective_end_date"),
@@ -894,7 +906,22 @@ def main() -> None:
 
                 existing["updated_at"] = now
                 existing["book"] = normalize_book(existing.get("book"))
-                existing["status"] = "CANCELLED"
+                existing["status"] = TradeStatus.CANCELLED.value
+                existing["last_event_id"] = e.event_id
+
+            elif e.event_type in OPTION_LIFECYCLE_EVENT_TO_STATUS:
+                existing = trade_state.get(trade_id)
+
+                if existing is None:
+                    print(f"Skipping {e.event_type} for missing trade: {trade_id}")
+                    continue
+
+                if existing.get("instrument_type", TradeInstrumentType.LINEAR.value) != TradeInstrumentType.OPTION.value:
+                    print(f"Skipping {e.event_type} for non-option trade: {trade_id}")
+                    continue
+
+                existing["updated_at"] = now
+                existing["status"] = OPTION_LIFECYCLE_EVENT_TO_STATUS[e.event_type]
                 existing["last_event_id"] = e.event_id
 
         print(f"Writing {len(trade_state)} trades to projection...")

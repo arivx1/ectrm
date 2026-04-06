@@ -384,6 +384,149 @@ class TradesRebuildScriptTests(unittest.TestCase):
         self.assertEqual(trade.book, "POWER_BOOK")
         self.assertIsNone(trade.portfolio)
 
+    def test_rebuild_preserves_option_lifecycle_closeout_statuses(self) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Event(
+                        event_id="event-opt-exercise-create",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-EXERCISED-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        recorded_at=self.now,
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "instrument_type": "OPTION",
+                            "trade_nature": "FINANCIAL",
+                            "trade_structure": "SINGLE",
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 3.5,
+                            "volume": 10,
+                            "option_type": "CALL",
+                            "option_style": "AMERICAN",
+                            "option_strike_price": 81,
+                            "option_expiration_date": "2026-06-30",
+                        },
+                    ),
+                    Event(
+                        event_id="event-opt-exercise-close",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-EXERCISED-1",
+                        event_type="OptionExercised",
+                        occurred_at=datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={},
+                    ),
+                    Event(
+                        event_id="event-opt-expired-create",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-EXPIRED-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        recorded_at=self.now,
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "instrument_type": "OPTION",
+                            "trade_nature": "FINANCIAL",
+                            "trade_structure": "SINGLE",
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 2.2,
+                            "volume": 4,
+                            "option_type": "PUT",
+                            "option_style": "AMERICAN",
+                            "option_strike_price": 74,
+                            "option_expiration_date": "2026-03-19",
+                        },
+                    ),
+                    Event(
+                        event_id="event-opt-expired-close",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-EXPIRED-1",
+                        event_type="OptionExpired",
+                        occurred_at=datetime(2026, 3, 19, 18, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 19, 18, 0, tzinfo=timezone.utc),
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={},
+                    ),
+                    Event(
+                        event_id="event-opt-assigned-create",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-ASSIGNED-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        recorded_at=self.now,
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "instrument_type": "OPTION",
+                            "trade_nature": "FINANCIAL",
+                            "trade_structure": "SINGLE",
+                            "trade_side": "SELL",
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 1.8,
+                            "volume": 5,
+                            "option_type": "CALL",
+                            "option_style": "AMERICAN",
+                            "option_strike_price": 83,
+                            "option_expiration_date": "2026-06-30",
+                        },
+                    ),
+                    Event(
+                        event_id="event-opt-assigned-close",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-ASSIGNED-1",
+                        event_type="OptionAssigned",
+                        occurred_at=datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc),
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={},
+                    ),
+                ]
+            )
+            session.commit()
+
+        with patch.object(rebuild_trades_projection, "SessionLocal", self.SessionLocal):
+            rebuild_trades_projection.main()
+
+        with self.SessionLocal() as session:
+            exercised_trade = session.query(Trade).filter(Trade.trade_id == "T-OPT-EXERCISED-1").one()
+            expired_trade = session.query(Trade).filter(Trade.trade_id == "T-OPT-EXPIRED-1").one()
+            assigned_trade = session.query(Trade).filter(Trade.trade_id == "T-OPT-ASSIGNED-1").one()
+
+        self.assertEqual(exercised_trade.status, "EXERCISED")
+        self.assertEqual(expired_trade.status, "EXPIRED")
+        self.assertEqual(assigned_trade.status, "ASSIGNED")
+
     def test_rebuild_rejects_invalid_trade_header_status_values(self) -> None:
         with self.SessionLocal() as session:
             session.add(

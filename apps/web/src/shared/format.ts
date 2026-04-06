@@ -111,5 +111,5 @@ export function formatCommodityClass(value: string): string {
 }
 
 export function statusTone(status: string): 'active' | 'cancelled' {
-  return status === 'CANCELLED' ? 'cancelled' : 'active'
+  return status.trim().toUpperCase() === 'ACTIVE' ? 'active' : 'cancelled'
 }

@@ -283,16 +283,13 @@ def _render_reference_inventory(db: Session) -> list[str]:
 
 def _render_transaction_inventory(db: Session) -> list[str]:
     total_trades = _safe_count(db, Trade)
-    cancelled_trades = _safe_count_where(db, Trade, Trade.status == "CANCELLED")
-    active_trades = None
-    if total_trades is not None and cancelled_trades is not None:
-        active_trades = total_trades - cancelled_trades
+    active_trades = _safe_count_where(db, Trade, Trade.status == "ACTIVE")
 
     trade_line = _format_counts(
         "Trades",
         total=total_trades,
         active=active_trades,
-        cancelled=cancelled_trades,
+        cancelled=None,
     )
     return [
         _format_simple_count("Events", _safe_count(db, Event)),

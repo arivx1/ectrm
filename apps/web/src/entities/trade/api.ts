@@ -1,10 +1,14 @@
 import { postJson } from '../../shared/api'
 import { buildMutationHeaders, getMutationContext } from '../../shared/mutation'
-import { currentTradeEventSchemaVersion, tradeAggregateType } from '../../shared/trading'
+import {
+  currentTradeEventSchemaVersion,
+  type OptionLifecycleEventType,
+  tradeAggregateType,
+} from '../../shared/trading'
 
 type TradeEventRequest = {
   aggregate_id: string
-  event_type: 'TradeCreated' | 'TradeAmended' | 'TradeCancelled'
+  event_type: 'TradeCreated' | 'TradeAmended' | 'TradeCancelled' | OptionLifecycleEventType
   payload: Record<string, unknown>
 }
 

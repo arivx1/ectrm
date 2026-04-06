@@ -199,7 +199,7 @@ def _invoice_row(
         )
         .where(
             TradeInvoice.id == invoice_id,
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
         )
     ).first()
 
@@ -248,7 +248,7 @@ def list_trade_invoices(
             (TradeWorkflowItem.trade_id == TradeInvoice.trade_id)
             & (TradeWorkflowItem.workflow_type == TradeWorkflowType.INVOICE.value),
         )
-        .where(Trade.status != "CANCELLED")
+        .where(Trade.status == "ACTIVE")
         .order_by(TradeInvoice.due_at.asc(), TradeInvoice.updated_at.desc(), TradeInvoice.id.desc())
     )
     if trade_id:
@@ -273,7 +273,7 @@ def issue_trade_invoice(
 ) -> TradeInvoiceOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     trade = db.execute(
-        select(Trade).where(Trade.trade_id == trade_id, Trade.status != "CANCELLED")
+        select(Trade).where(Trade.trade_id == trade_id, Trade.status == "ACTIVE")
     ).scalars().first()
     if trade is None:
         raise LookupError(f"Trade '{trade_id}' was not found.")

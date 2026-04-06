@@ -266,7 +266,7 @@ def list_delivery_obligations_for_operations(db: Session, *, now: Optional[datet
         select(Trade)
         .where(
             Trade.trade_nature == "PHYSICAL",
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
         )
         .order_by(Trade.updated_at.desc(), Trade.trade_id.desc())
     ).scalars().all()

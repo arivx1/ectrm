@@ -141,7 +141,7 @@ def _rebuild_positions(db: Session) -> int:
     rows = db.execute(
         select(TradeLeg.commodity_code, TradeLeg.side, TradeLeg.quantity, TradeLeg.updated_at)
         .join(Trade, Trade.trade_id == TradeLeg.trade_id)
-        .where(Trade.status != "CANCELLED")
+        .where(Trade.status == "ACTIVE")
     ).all()
 
     for commodity_code, side, quantity, updated_at in rows:

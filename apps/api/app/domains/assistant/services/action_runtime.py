@@ -63,11 +63,11 @@ def plan_action_requests(
             proposals=(),
             warnings=(f"Trade {trade_id} was not found, so no approval request was staged.",),
         )
-    if str(trade.status).upper() == "CANCELLED":
+    if str(trade.status or "ACTIVE").strip().upper() != "ACTIVE":
         return AssistantActionRuntimeResult(
             sections=(),
             proposals=(),
-            warnings=(f"Trade {trade_id} is already cancelled, so no approval request was staged.",),
+            warnings=(f"Trade {trade_id} is already closed as {trade.status}, so no approval request was staged.",),
         )
 
     proposal = AssistantActionProposal(
@@ -75,7 +75,7 @@ def plan_action_requests(
         summary=f"Cancel trade {trade_id}",
         description=(
             f"Create a TradeCancelled event for {trade_id}. "
-            "If approved, the application will mark the trade as cancelled and recalculate positions."
+            "If approved, the application will mark the trade as cancelled and recalculate trade projections."
         ),
         payload={"trade_id": trade_id},
     )

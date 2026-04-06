@@ -9,6 +9,7 @@ import {
   creditApprovalStatusOptions,
   invoiceStatusOptions,
   nominationStatusOptions,
+  optionSettlementStatusOptions,
   paymentStatusOptions,
 } from '../../shared/trading'
 
@@ -36,6 +37,7 @@ const WORKFLOW_STATUS_OPTIONS = {
   NOMINATION: nominationStatusOptions,
   ALLOCATION: allocationStatusOptions,
   CREDIT_APPROVAL: creditApprovalStatusOptions,
+  OPTION_SETTLEMENT: optionSettlementStatusOptions,
   INVOICE: invoiceStatusOptions,
   PAYMENT: paymentStatusOptions,
 } as const
@@ -122,6 +124,9 @@ function workflowSummary(
   item: TradeWorkflowItemRecord,
   formatDateOnly: WorkflowQueueEditorProps['formatDateOnly'],
 ): string {
+  if (item.workflow_type === 'OPTION_SETTLEMENT') {
+    return item.notes?.trim() || 'Book the resulting underlying trade or mark the handoff not required.'
+  }
   if (item.delivery_start || item.delivery_end) {
     return `Delivery ${formatDateOnly(item.delivery_start)} to ${formatDateOnly(item.delivery_end)}`
   }
@@ -307,7 +312,11 @@ export function WorkflowQueueEditor({
                     className="control control-textarea"
                     value={draft.notes}
                     onChange={(event) => updateDraft(item.item_id, { notes: event.target.value })}
-                    placeholder="Add an operational handoff note or settlement comment."
+                    placeholder={
+                      item.workflow_type === 'OPTION_SETTLEMENT'
+                        ? 'Track the resulting underlying booking or settlement handoff.'
+                        : 'Add an operational handoff note or settlement comment.'
+                    }
                     rows={2}
                     disabled={savingItemId === item.item_id}
                   />
@@ -346,6 +355,24 @@ export function WorkflowQueueEditor({
                       </div>
                     </article>
                   ))}
+                </div>
+              ) : null}
+              {item.active_credit_exception ? (
+                <div className="shipment-card-meta">
+                  <span className="entity-chip entity-chip-soft">
+                    Exception expires {formatDateOnly(item.active_credit_exception.expires_at)}
+                  </span>
+                  <span className="entity-chip entity-chip-soft">
+                    Headroom{' '}
+                    {item.active_credit_exception.remaining_headroom_amount !== null
+                      ? `${item.active_credit_exception.limit_currency_code} ${formatSnapshotNumber(item.active_credit_exception.remaining_headroom_amount, 2)}`
+                      : '—'}
+                  </span>
+                  <span className={`entity-chip entity-chip-soft`}>
+                    {item.active_credit_exception.revalidation_required
+                      ? `Revalidate ${decisionLabel(item.active_credit_exception.revalidation_reason ?? 'REQUIRED')}`
+                      : 'Within approved envelope'}
+                  </span>
                 </div>
               ) : null}
               <div className="shipment-card-actions workflow-item-actions">

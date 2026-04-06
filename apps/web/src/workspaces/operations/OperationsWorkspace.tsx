@@ -71,6 +71,21 @@ export function OperationsWorkspace({
   const blockedWorkflowItems = openOperationsWorkItems.filter(
     (item) => item.credit_hold_active || item.is_overdue || item.status === 'DISPUTED' || item.status === 'PENDING_REVIEW',
   ).length
+  const activeCreditExceptions = operationsWorkItems
+    .filter(
+      (item) =>
+        item.workflow_type === 'CREDIT_APPROVAL' &&
+        item.active_credit_exception &&
+        !item.active_credit_exception.released_at,
+    )
+    .sort((left, right) => {
+      const leftExpiry = Date.parse(left.active_credit_exception?.expires_at ?? '')
+      const rightExpiry = Date.parse(right.active_credit_exception?.expires_at ?? '')
+      if (!Number.isNaN(leftExpiry) && !Number.isNaN(rightExpiry) && leftExpiry !== rightExpiry) {
+        return leftExpiry - rightExpiry
+      }
+      return left.trade_id.localeCompare(right.trade_id)
+    })
   const modeCoverage = ['LOGISTICS', 'NETWORK_FLOW', 'POWER_SCHEDULE']
     .map((modeFamily) => ({
       modeFamily,
@@ -97,7 +112,7 @@ export function OperationsWorkspace({
             id: 'operations-snapshot',
             eyebrow: 'Workflow',
             title: 'Operations Snapshot',
-            description: 'Operational control counts that sit closer to the trader and scheduler loop than raw telemetry alone.',
+            description: 'Operational control counts that sit closer to the trader, scheduler, and exercised-option handoff loop than raw telemetry alone.',
             span: 'full',
             availableSpans: ['full', 'wide'],
             content:
@@ -106,7 +121,7 @@ export function OperationsWorkspace({
                   <article className="dashboard-report-card">
                     <span>Open Workflow</span>
                     <strong>{formatNumber(openOperationsWorkItems.length, 0)}</strong>
-                    <p>Confirmation, nomination, and allocation tasks still open on the live book.</p>
+                    <p>Confirmation, nomination, allocation, and option settlement tasks still open on the live book.</p>
                   </article>
                   <article className="dashboard-report-card">
                     <span>Unassigned</span>
@@ -123,11 +138,16 @@ export function OperationsWorkspace({
                     <strong>{formatNumber(Math.max(blockedDeliveries.length, blockedWorkflowItems), 0)}</strong>
                     <p>Either the delivery projection or the workflow queue is currently carrying an execution blocker.</p>
                   </article>
+                  <article className="dashboard-report-card">
+                    <span>Active Credit Exceptions</span>
+                    <strong>{formatNumber(activeCreditExceptions.length, 0)}</strong>
+                    <p>Trades running under an approved credit envelope that still need expiry and headroom monitoring.</p>
+                  </article>
                 </div>
               ) : (
                 <div className="empty-state">
                   <strong>No operational queue</strong>
-                  <p>Create active physical trades to populate the operations workspace.</p>
+                  <p>Create active physical trades or close options through exercise and assignment to populate the operations workspace.</p>
                 </div>
               ),
           },
@@ -135,7 +155,7 @@ export function OperationsWorkspace({
             id: 'operations-queue',
             eyebrow: 'Critical Path',
             title: openOperationsWorkItems.length > 0 ? 'Operational Work Queue' : 'No open work queue',
-            description: 'Editable queue cards for confirmation, nomination, and allocation follow-up across the active physical book.',
+            description: 'Editable queue cards for confirmation, nomination, allocation, and exercised-option settlement follow-up across the book.',
             span: 'full',
             availableSpans: ['full', 'wide'],
             content: openOperationsWorkItems.length > 0 ? (
@@ -155,6 +175,75 @@ export function OperationsWorkspace({
               <div className="empty-state">
                 <strong>No active delivery work</strong>
                 <p>The work queue will appear once delivery obligations exist.</p>
+              </div>
+            ),
+          },
+          {
+            id: 'operations-credit-exceptions',
+            eyebrow: 'Credit',
+            title: activeCreditExceptions.length > 0 ? 'Active Credit Exceptions' : 'No active credit exceptions',
+            description: 'Approved exception envelopes that are still live on the book, including remaining headroom and expiry timing.',
+            span: 'full',
+            availableSpans: ['full', 'wide', 'half'],
+            content: activeCreditExceptions.length > 0 ? (
+              <div className="position-list">
+                {activeCreditExceptions.map((item) => {
+                  const exception = item.active_credit_exception
+                  if (!exception) {
+                    return null
+                  }
+                  return (
+                    <article key={`credit-exception-${item.item_id}`} className="position-card shipment-card">
+                      <div className="shipment-card-head">
+                        <div className="shipment-card-copy">
+                          <strong>{item.trade_id}</strong>
+                          <span>
+                            {item.commodity} • {item.counterparty ?? 'Counterparty TBD'} • {item.book}
+                          </span>
+                        </div>
+                        <span className={`status-pill status-pill-${exception.revalidation_required ? 'blocked' : 'active'}`}>
+                          {exception.revalidation_required ? 'REVIEW AGAIN' : 'WITHIN ENVELOPE'}
+                        </span>
+                      </div>
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">
+                          Expires {formatDateOnly(exception.expires_at)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          Ceiling {exception.limit_currency_code} {formatNumber(exception.approved_projected_exposure_amount, 2)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          Headroom{' '}
+                          {exception.remaining_headroom_amount !== null
+                            ? `${exception.limit_currency_code} ${formatNumber(exception.remaining_headroom_amount, 2)}`
+                            : '—'}
+                        </span>
+                      </div>
+                      <div className="shipment-card-copy">
+                        <p>{exception.approval_comment}</p>
+                        <p>
+                          Approved by {exception.approved_by} on {formatDate(exception.approved_at)}.
+                        </p>
+                        {exception.revalidation_required ? (
+                          <p className="field-error">
+                            Revalidation reason: {exception.revalidation_reason?.replaceAll('_', ' ') ?? 'Credit review required'}.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="shipment-card-actions">
+                        <span>{formatCommodityClass(item.commodity_class)}</span>
+                        <button type="button" className="button button-ghost" onClick={() => onOpenTrade(item.trade_id)}>
+                          Open Trade
+                        </button>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No live exception envelopes</strong>
+                <p>Approved credit exceptions will appear here until they are revalidated, cleared, or expire.</p>
               </div>
             ),
           },

@@ -151,7 +151,7 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
                     },
                     "status": {
                         "type": "string",
-                        "description": "Optional exact trade status filter, such as ACTIVE or CANCELLED.",
+                        "description": "Optional exact trade status filter, such as ACTIVE, CANCELLED, EXERCISED, EXPIRED, or ASSIGNED.",
                     },
                     "book": {
                         "type": "string",

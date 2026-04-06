@@ -113,6 +113,8 @@ import {
   tradeInstrumentTypeOptions,
   tradeNatureOptions,
   tradeSideOptions,
+  type OptionLifecycleEventType,
+  tradeStatusIsActive,
   tradeStatusValues,
   tradeStructureOptions,
 } from './shared/trading'
@@ -298,6 +300,8 @@ export default function App() {
 
   const [amending, setAmending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [optionLifecycleSubmittingEvent, setOptionLifecycleSubmittingEvent] =
+    useState<OptionLifecycleEventType | null>(null)
 
   function handleRoadmapPublished() {
     setRoadmapRefreshVersion((current) => current + 1)
@@ -346,6 +350,7 @@ export default function App() {
     )
     const nextTrades = (tradesJson as Trade[]).map((trade) => ({
       ...trade,
+      active_credit_exception: creditApprovalItemsByTradeId.get(trade.trade_id)?.active_credit_exception ?? null,
       ...buildTradeCreditHoldSummary(creditApprovalItemsByTradeId.get(trade.trade_id)),
     }))
     const nextEvents = eventsJson as EventRow[]
@@ -354,6 +359,7 @@ export default function App() {
     const nextDeliveries = deliveriesJson as DeliveryRecord[]
     const nextTradeWorkflowItems = rawTradeWorkflowItems.map((item) => ({
       ...item,
+      active_credit_exception: creditApprovalItemsByTradeId.get(item.trade_id)?.active_credit_exception ?? null,
       ...buildTradeCreditHoldSummary(creditApprovalItemsByTradeId.get(item.trade_id)),
     }))
     const nextTradeInvoices = invoicesJson as TradeInvoiceRecord[]
@@ -687,7 +693,7 @@ export default function App() {
   }, [currentView, selectedTradeId, trades])
 
   const activeTrades = useMemo(
-    () => trades.filter((trade) => trade.status !== tradeStatusValues.cancelled),
+    () => trades.filter((trade) => tradeStatusIsActive(trade.status)),
     [trades],
   )
 
@@ -1198,6 +1204,13 @@ export default function App() {
     return `This appends a TradeCancelled event and removes ${selectedTrade.trade_side ?? 'BUY'} ${formatNumber(Math.abs(selectedTrade.volume), 0)} ${selectedTrade.commodity} from active exposure in ${selectedTrade.book}.`
   }, [selectedTrade])
 
+  const amendmentLockedReason = useMemo(() => {
+    if (!selectedTrade || tradeStatusIsActive(selectedTrade.status)) {
+      return ''
+    }
+    return `Trade ${selectedTrade.trade_id} is already closed as ${selectedTrade.status} and can no longer be amended or cancelled.`
+  }, [selectedTrade])
+
   const referenceState = useReferenceDataController({
     apiBase: appConfig.apiBase,
     reloadData: loadData,
@@ -1636,8 +1649,12 @@ export default function App() {
     setError('')
     setAmendError('')
 
-    if (!selectedTradeId) {
+    if (!selectedTradeId || !selectedTrade) {
       setAmendError('Select a trade first.')
+      return
+    }
+    if (!tradeStatusIsActive(selectedTrade.status)) {
+      setAmendError(`Trade ${selectedTrade.trade_id} is already closed as ${selectedTrade.status}.`)
       return
     }
 
@@ -1664,6 +1681,55 @@ export default function App() {
       setAmendError(err instanceof Error ? err.message : 'Cancel trade failed.')
     } finally {
       setCancelling(false)
+    }
+  }
+
+  async function handleOptionLifecycleEvent(eventType: OptionLifecycleEventType) {
+    setError('')
+    setAmendError('')
+
+    if (!selectedTradeId || !selectedTrade) {
+      setAmendError('Select an option trade first.')
+      return
+    }
+    if (selectedTrade.instrument_type !== 'OPTION') {
+      setAmendError(`Trade ${selectedTrade.trade_id} is not an option trade.`)
+      return
+    }
+    if (!tradeStatusIsActive(selectedTrade.status)) {
+      setAmendError(`Trade ${selectedTrade.trade_id} is already closed as ${selectedTrade.status}.`)
+      return
+    }
+
+    const nextStatusByEvent: Record<OptionLifecycleEventType, string> = {
+      OptionExercised: tradeStatusValues.exercised,
+      OptionExpired: tradeStatusValues.expired,
+      OptionAssigned: tradeStatusValues.assigned,
+    }
+
+    setOptionLifecycleSubmittingEvent(eventType)
+
+    try {
+      await submitTradeEvent(appConfig.apiBase, {
+        aggregate_id: selectedTradeId,
+        event_type: eventType,
+        payload: {
+          status: nextStatusByEvent[eventType],
+        },
+      })
+
+      await loadData()
+      setInspectorTab('overview')
+      setAmendError('')
+    } catch (err) {
+      const defaultMessageByEvent: Record<OptionLifecycleEventType, string> = {
+        OptionExercised: 'Exercise option failed.',
+        OptionExpired: 'Expire option failed.',
+        OptionAssigned: 'Assign option failed.',
+      }
+      setAmendError(err instanceof Error ? err.message : defaultMessageByEvent[eventType])
+    } finally {
+      setOptionLifecycleSubmittingEvent(null)
     }
   }
 
@@ -1943,11 +2009,11 @@ export default function App() {
               <span className="eyebrow">Selected Trade</span>
               {selectedTrade ? (
                 <Tooltip
-                  content={
-                    selectedTrade.status === tradeStatusValues.cancelled
-                      ? tradeTooltipCopy.cancelledTrade
-                      : tradeTooltipCopy.activeTrade
-                  }
+	                  content={
+	                    tradeStatusIsActive(selectedTrade.status)
+	                      ? tradeTooltipCopy.activeTrade
+	                      : tradeTooltipCopy.closedTrade
+	                  }
                   focusable
                 >
                   <span className={`status-pill status-pill-${statusTone(selectedTrade.status)} tooltip-trigger-hint`}>
@@ -2125,8 +2191,11 @@ export default function App() {
             handleDuplicateTrade={handleDuplicateTrade}
             handleAmendTrade={handleAmendTrade}
             handleCancelTrade={handleCancelTrade}
+            handleOptionLifecycleEvent={handleOptionLifecycleEvent}
+            optionLifecycleSubmittingEvent={optionLifecycleSubmittingEvent}
             amendmentPreviewFields={amendmentPreview.changedFields}
             cancelImpactSummary={cancelImpactSummary}
+            amendmentLockedReason={amendmentLockedReason}
             amendExternalTradeIdInput={amendExternalTradeIdInput}
             setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
             amendSourceSystemInput={amendSourceSystemInput}
@@ -2356,6 +2425,9 @@ export default function App() {
             formatNumber={formatNumber}
             formatMoney={formatMoney}
             formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            onOpenSettlement={() => navigateToView('settlement')}
+            onOpenTrade={navigateToTrade}
           />
         )}
 

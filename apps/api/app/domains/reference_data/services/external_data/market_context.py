@@ -133,7 +133,7 @@ def _select_price_index_candidates(
         for row in db.execute(
             select(Trade.price_index_code, func.count())
             .where(
-                Trade.status != "CANCELLED",
+                Trade.status == "ACTIVE",
                 Trade.price_index_code.is_not(None),
             )
             .group_by(Trade.price_index_code)

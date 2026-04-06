@@ -290,7 +290,7 @@ def ensure_book_not_in_active_use(db: Session, code: str) -> None:
     active_trade_count = db.execute(
         select(func.count()).select_from(Trade).where(
             Trade.book == code,
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
         )
     ).scalar_one()
     if active_trade_count:
@@ -304,7 +304,7 @@ def ensure_commodity_not_in_active_use(db: Session, code: str) -> None:
     active_trade_count = db.execute(
         select(func.count()).select_from(Trade).where(
             Trade.commodity == code,
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
         )
     ).scalar_one()
     if active_trade_count:
@@ -452,7 +452,7 @@ def ensure_price_index_not_in_active_use(db: Session, code: str) -> None:
     active_trade_count = db.execute(
         select(func.count()).select_from(Trade).where(
             Trade.price_index_code == code,
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
         )
     ).scalar_one()
     if active_trade_count:

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_credit_approver_role
@@ -17,6 +18,18 @@ from apps.api.app.domains.reports.services.counterparty_credit import (
 from apps.api.app.domains.operations.services.trade_credit_hold import (
     DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES,
 )
+from apps.api.app.domains.operations.services.trade_credit_exceptions import (
+    build_active_trade_credit_exception_lookup,
+)
+from apps.api.app.domains.operations.services.trade_credit_exceptions import (
+    create_trade_credit_exception,
+)
+from apps.api.app.domains.operations.services.trade_credit_exceptions import (
+    invalidate_active_trade_credit_exceptions,
+)
+from apps.api.app.domains.operations.services.trade_credit_freshness import (
+    assert_trade_credit_approval_freshness,
+)
 from apps.api.app.domains.operations.services.trade_credit_hold import (
     format_trade_credit_hold_message,
 )
@@ -25,14 +38,20 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.operations import TradeCreditApprovalDecisionOut
+from apps.api.app.schemas.operations import TradeCreditExceptionOut
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.shared.enums import AllocationStatus
 from apps.api.app.shared.enums import ConfirmationStatus
 from apps.api.app.shared.enums import CreditApprovalStatus
 from apps.api.app.shared.enums import InvoiceStatus
 from apps.api.app.shared.enums import NominationStatus
+from apps.api.app.shared.enums import OptionSettlementStatus
+from apps.api.app.shared.enums import OptionType
 from apps.api.app.shared.enums import PaymentStatus
 from apps.api.app.shared.enums import SettlementStatus
+from apps.api.app.shared.enums import TradeInstrumentType
+from apps.api.app.shared.enums import TradeSide
+from apps.api.app.shared.enums import TradeStatus
 from apps.api.app.shared.enums import TradeWorkflowType
 
 SYSTEM_WORKFLOW_ACTOR = "system.workflow"
@@ -42,6 +61,7 @@ WORKFLOW_TYPE_TO_QUEUE: dict[str, str] = {
     TradeWorkflowType.NOMINATION.value: "operations",
     TradeWorkflowType.ALLOCATION.value: "operations",
     TradeWorkflowType.CREDIT_APPROVAL.value: "operations",
+    TradeWorkflowType.OPTION_SETTLEMENT.value: "operations",
     TradeWorkflowType.INVOICE.value: "settlement",
     TradeWorkflowType.PAYMENT.value: "settlement",
 }
@@ -60,6 +80,9 @@ WORKFLOW_ALLOWED_STATUS_VALUES: dict[str, tuple[str, ...]] = {
     TradeWorkflowType.ALLOCATION.value: tuple(status.value for status in AllocationStatus),
     TradeWorkflowType.CREDIT_APPROVAL.value: tuple(
         status.value for status in CreditApprovalStatus
+    ),
+    TradeWorkflowType.OPTION_SETTLEMENT.value: tuple(
+        status.value for status in OptionSettlementStatus
     ),
     TradeWorkflowType.INVOICE.value: tuple(status.value for status in InvoiceStatus),
     TradeWorkflowType.PAYMENT.value: tuple(status.value for status in PaymentStatus),
@@ -88,6 +111,10 @@ WORKFLOW_CLOSED_STATUS_VALUES: dict[str, set[str]] = {
         CreditApprovalStatus.NOT_REQUIRED.value,
         CreditApprovalStatus.REJECTED.value,
     },
+    TradeWorkflowType.OPTION_SETTLEMENT.value: {
+        OptionSettlementStatus.BOOKED.value,
+        OptionSettlementStatus.NOT_REQUIRED.value,
+    },
 }
 
 AUTOMATED_WORKFLOW_TYPES: tuple[str, ...] = (
@@ -102,6 +129,10 @@ _UNSET = object()
 CREDIT_APPROVAL_DECISION_STATUS_VALUES = {
     CreditApprovalStatus.APPROVED.value,
     CreditApprovalStatus.REJECTED.value,
+}
+OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES = {
+    TradeStatus.EXERCISED.value,
+    TradeStatus.ASSIGNED.value,
 }
 
 
@@ -124,9 +155,78 @@ def _normalize_optional_text(value: object | None) -> str | None:
     return normalized or None
 
 
+def _normalize_code(value: object | None) -> str:
+    return str(value or "").strip().upper()
+
+
+def _format_decimal(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = format(Decimal(str(value)), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
 def _credit_workflow_status_change_allowed(*, actor_id: str, actor_role: str | None) -> bool:
     normalized_actor_id = str(actor_id or "").strip().lower()
     return normalized_actor_id.startswith("system.") or is_credit_approver_role(actor_role)
+
+
+def _credit_exception_release_reason_for_status(status: str) -> str:
+    if status == CreditApprovalStatus.PENDING_REVIEW.value:
+        return "Credit exception was reopened for fresh review."
+    if status == CreditApprovalStatus.REJECTED.value:
+        return "Credit exception was closed because credit rejected the trade."
+    if status == CreditApprovalStatus.NOT_REQUIRED.value:
+        return "Credit exception was cleared because the trade no longer requires an exception."
+    return "Credit exception was closed."
+
+
+def _trade_supports_workflow_type(trade: Trade, workflow_type: str) -> bool:
+    normalized_type = normalize_workflow_type(workflow_type)
+    trade_status = _normalize_code(trade.status)
+    if normalized_type == TradeWorkflowType.OPTION_SETTLEMENT.value:
+        return (
+            _normalize_code(trade.instrument_type) == TradeInstrumentType.OPTION.value
+            and trade_status in OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES
+        )
+    return trade_status == TradeStatus.ACTIVE.value
+
+
+def _resulting_underlying_side_for_option_settlement(trade: Trade) -> str | None:
+    trade_status = _normalize_code(trade.status)
+    option_type = _normalize_code(trade.option_type)
+    if trade_status == TradeStatus.EXERCISED.value:
+        if option_type == OptionType.CALL.value:
+            return TradeSide.BUY.value
+        if option_type == OptionType.PUT.value:
+            return TradeSide.SELL.value
+    if trade_status == TradeStatus.ASSIGNED.value:
+        if option_type == OptionType.CALL.value:
+            return TradeSide.SELL.value
+        if option_type == OptionType.PUT.value:
+            return TradeSide.BUY.value
+    return None
+
+
+def _default_option_settlement_notes(trade: Trade) -> str:
+    lifecycle_label = _normalize_code(trade.status).replace("_", " ").title()
+    resulting_side = _resulting_underlying_side_for_option_settlement(trade) or "BOOK"
+    quantity_text = _format_decimal(trade.volume) or "unknown"
+    quantity_unit = _normalize_optional_text(trade.unit_of_measure)
+    quantity_label = f"{quantity_text} {quantity_unit}".strip()
+    strike_text = _format_decimal(trade.option_strike_price)
+    strike_suffix_parts = [value for value in [trade.trade_currency_code, trade.price_unit_code] if value]
+    strike_suffix = f" {'/'.join(strike_suffix_parts)}" if strike_suffix_parts else ""
+
+    note = (
+        f"{lifecycle_label} option requires booking resulting {resulting_side} "
+        f"{trade.commodity} {quantity_label}."
+    )
+    if strike_text is not None:
+        note = f"{note} Strike {strike_text}{strike_suffix}."
+    return f"{note} Mark BOOKED once the downstream underlying handoff is captured."
 
 
 def _build_credit_approval_breach_snapshot(
@@ -235,9 +335,8 @@ def _append_credit_approval_decision(
     decision_comment: str,
     actor_id: str,
     decided_at: datetime,
-) -> None:
-    db.add(
-        TradeCreditApprovalDecision(
+) -> TradeCreditApprovalDecision:
+    record = TradeCreditApprovalDecision(
             trade_id=trade.trade_id,
             workflow_item_id=workflow_item.id,
             decision=decision,
@@ -250,8 +349,9 @@ def _append_credit_approval_decision(
             decided_at=decided_at,
             decided_by=actor_id,
         )
-    )
+    db.add(record)
     db.flush()
+    return record
 
 
 def workflow_queue_for_type(workflow_type: str) -> str:
@@ -320,6 +420,14 @@ def _default_due_at_for_trade(trade: Trade, workflow_type: str) -> Optional[date
         return _at_midday_utc(payment_anchor + timedelta(days=5))
     if normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value:
         return _at_midday_utc(trade_anchor + timedelta(days=1))
+    if normalized_type == TradeWorkflowType.OPTION_SETTLEMENT.value:
+        settlement_anchor = (
+            _coerce_utc(trade.updated_at)
+            or _coerce_utc(trade.execution_timestamp)
+            or _coerce_utc(trade.created_at)
+        )
+        anchor_date = settlement_anchor.date() if settlement_anchor is not None else trade_anchor
+        return _at_midday_utc(anchor_date + timedelta(days=1))
     return None
 
 
@@ -349,7 +457,7 @@ def synchronize_trade_workflow_items(
     actor_id: str = SYSTEM_WORKFLOW_ACTOR,
     now: Optional[datetime] = None,
 ) -> None:
-    if trade.status == "CANCELLED":
+    if str(trade.status or "ACTIVE").strip().upper() != "ACTIVE":
         return
 
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
@@ -404,12 +512,55 @@ def synchronize_active_trade_workflow_items(
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     trades = db.execute(
         select(Trade)
-        .where(Trade.status != "CANCELLED")
+        .where(Trade.status == "ACTIVE")
         .order_by(Trade.updated_at.desc(), Trade.trade_id.desc())
     ).scalars().all()
 
     for trade in trades:
         synchronize_trade_workflow_items(db, trade, actor_id=actor_id, now=reference_time)
+
+
+def synchronize_option_settlement_workflow_items(
+    db: Session,
+    *,
+    actor_id: str = SYSTEM_WORKFLOW_ACTOR,
+    now: Optional[datetime] = None,
+) -> None:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    trades = db.execute(
+        select(Trade)
+        .where(
+            Trade.instrument_type == TradeInstrumentType.OPTION.value,
+            Trade.status.in_(tuple(OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES)),
+        )
+        .order_by(Trade.updated_at.desc(), Trade.trade_id.desc())
+    ).scalars().all()
+
+    for trade in trades:
+        item = db.execute(
+            select(TradeWorkflowItem).where(
+                TradeWorkflowItem.trade_id == trade.trade_id,
+                TradeWorkflowItem.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value,
+            )
+        ).scalars().first()
+        if item is not None:
+            continue
+        item_timestamp = _coerce_utc(trade.updated_at) or reference_time
+        db.add(
+            TradeWorkflowItem(
+                trade_id=trade.trade_id,
+                workflow_type=TradeWorkflowType.OPTION_SETTLEMENT.value,
+                status=OptionSettlementStatus.PENDING.value,
+                owner=None,
+                due_at=_default_due_at_for_trade(trade, TradeWorkflowType.OPTION_SETTLEMENT.value),
+                notes=_default_option_settlement_notes(trade),
+                created_at=item_timestamp,
+                created_by=actor_id,
+                updated_at=item_timestamp,
+                updated_by=actor_id,
+                version=1,
+            )
+        )
 
 
 def rollup_trade_workflow_statuses(
@@ -551,6 +702,7 @@ def _to_out(
     trade: Trade,
     *,
     now: Optional[datetime] = None,
+    active_credit_exception: TradeCreditExceptionOut | None = None,
     credit_decision_history: list[TradeCreditApprovalDecisionOut] | None = None,
 ) -> TradeWorkflowItemOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
@@ -587,6 +739,7 @@ def _to_out(
         trade_date=trade.trade_date,
         delivery_start=trade.delivery_start,
         delivery_end=trade.delivery_end,
+        active_credit_exception=active_credit_exception,
         credit_decision_history=credit_decision_history or [],
     )
 
@@ -605,12 +758,21 @@ def list_trade_workflow_items(
         raise ValueError("Queue must be one of: operations, settlement.")
 
     synchronize_active_trade_workflow_items(db, now=reference_time)
+    synchronize_option_settlement_workflow_items(db, now=reference_time)
     db.flush()
 
     stmt = (
         select(TradeWorkflowItem, Trade)
         .join(Trade, Trade.trade_id == TradeWorkflowItem.trade_id)
-        .where(Trade.status != "CANCELLED")
+        .where(
+            or_(
+                Trade.status == TradeStatus.ACTIVE.value,
+                and_(
+                    TradeWorkflowItem.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value,
+                    Trade.status.in_(tuple(OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES)),
+                ),
+            )
+        )
     )
     if trade_id:
         stmt = stmt.where(TradeWorkflowItem.trade_id == trade_id)
@@ -624,11 +786,17 @@ def list_trade_workflow_items(
             if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value
         ],
     )
+    active_credit_exception_by_trade_id = build_active_trade_credit_exception_lookup(
+        db,
+        trades=[trade for _item, trade in rows],
+        now=reference_time,
+    )
     items = [
         _to_out(
             item,
             trade,
             now=reference_time,
+            active_credit_exception=active_credit_exception_by_trade_id.get(trade.trade_id),
             credit_decision_history=credit_decision_history_by_item_id.get(item.id, []),
         )
         for item, trade in rows
@@ -658,13 +826,16 @@ def create_trade_workflow_item(
     normalized_type = normalize_workflow_type(workflow_type)
     db.flush()
 
-    trade = db.execute(
-        select(Trade).where(Trade.trade_id == trade_id, Trade.status != "CANCELLED")
-    ).scalars().first()
-    if trade is None:
+    trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
+    if trade is None or not _trade_supports_workflow_type(trade, normalized_type):
+        if normalized_type == TradeWorkflowType.OPTION_SETTLEMENT.value:
+            raise LookupError(
+                f"Trade '{trade_id}' does not have an exercised or assigned option settlement to manage."
+            )
         raise LookupError(f"Trade '{trade_id}' was not found.")
 
-    synchronize_trade_workflow_items(db, trade, actor_id=actor_id, now=reference_time)
+    if _normalize_code(trade.status) == TradeStatus.ACTIVE.value:
+        synchronize_trade_workflow_items(db, trade, actor_id=actor_id, now=reference_time)
     db.flush()
 
     item = db.execute(
@@ -680,11 +851,15 @@ def create_trade_workflow_item(
             normalized_status = workflow_status_from_trade(trade, normalized_type)
         elif normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value:
             normalized_status = CreditApprovalStatus.PENDING_REVIEW.value
+        elif normalized_type == TradeWorkflowType.OPTION_SETTLEMENT.value:
+            normalized_status = OptionSettlementStatus.PENDING.value
         else:
             raise LookupError(
                 f"Workflow item for trade '{trade_id}' and type '{normalized_type}' was not found."
             )
         normalized_notes = _normalize_optional_text(notes)
+        if normalized_type == TradeWorkflowType.OPTION_SETTLEMENT.value and not normalized_notes:
+            normalized_notes = _default_option_settlement_notes(trade)
         if (
             enforce_credit_authorization
             and normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value
@@ -700,6 +875,12 @@ def create_trade_workflow_item(
         ):
             if not normalized_notes:
                 raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
+            if normalized_status == CreditApprovalStatus.APPROVED.value:
+                assert_trade_credit_approval_freshness(
+                    db,
+                    trade=trade,
+                    as_of=reference_time,
+                )
 
         item = TradeWorkflowItem(
             trade_id=trade_id,
@@ -719,7 +900,7 @@ def create_trade_workflow_item(
         db.add(item)
         db.flush()
         if normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value and normalized_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES:
-            _append_credit_approval_decision(
+            decision_record = _append_credit_approval_decision(
                 db,
                 trade=trade,
                 workflow_item=item,
@@ -728,6 +909,17 @@ def create_trade_workflow_item(
                 actor_id=actor_id,
                 decided_at=reference_time,
             )
+            if normalized_status == CreditApprovalStatus.APPROVED.value:
+                create_trade_credit_exception(
+                    db,
+                    trade_id=trade.trade_id,
+                    workflow_item_id=item.id,
+                    approval_decision_id=decision_record.id,
+                    approval_snapshot=dict(decision_record.breach_snapshot or {}),
+                    approved_at=reference_time,
+                    approved_by=actor_id,
+                    approval_comment=item.notes or "",
+                )
         workflow_items = db.execute(
             select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == trade_id)
         ).scalars().all()
@@ -737,6 +929,11 @@ def create_trade_workflow_item(
             item,
             trade,
             now=reference_time,
+            active_credit_exception=build_active_trade_credit_exception_lookup(
+                db,
+                trades=[trade],
+                now=reference_time,
+            ).get(trade.trade_id),
             credit_decision_history=_credit_decision_history_by_workflow_item_id(
                 db,
                 workflow_item_ids=[item.id],
@@ -764,6 +961,16 @@ def create_trade_workflow_item(
                 and not (item.notes or "").strip()
             ):
                 raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
+        if (
+            normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value
+            and normalized_status == CreditApprovalStatus.APPROVED.value
+            and normalized_status != item.status
+        ):
+            assert_trade_credit_approval_freshness(
+                db,
+                trade=trade,
+                as_of=reference_time,
+            )
         requested_status = normalized_status
         if item.status != normalized_status:
             item.status = normalized_status
@@ -789,12 +996,26 @@ def create_trade_workflow_item(
         item.updated_by = actor_id
         item.version += 1
     if (
+        normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value
+        and requested_status is not None
+        and previous_status == CreditApprovalStatus.APPROVED.value
+        and requested_status != CreditApprovalStatus.APPROVED.value
+    ):
+        invalidate_active_trade_credit_exceptions(
+            db,
+            trade_id=trade.trade_id,
+            released_at=reference_time,
+            released_by=actor_id,
+            released_reason=_credit_exception_release_reason_for_status(requested_status),
+            status=requested_status,
+        )
+    if (
         requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES
         and item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value
         and previous_status != requested_status
         and item.status == requested_status
     ):
-        _append_credit_approval_decision(
+        decision_record = _append_credit_approval_decision(
             db,
             trade=trade,
             workflow_item=item,
@@ -803,6 +1024,17 @@ def create_trade_workflow_item(
             actor_id=actor_id,
             decided_at=reference_time,
         )
+        if requested_status == CreditApprovalStatus.APPROVED.value:
+            create_trade_credit_exception(
+                db,
+                trade_id=trade.trade_id,
+                workflow_item_id=item.id,
+                approval_decision_id=decision_record.id,
+                approval_snapshot=dict(decision_record.breach_snapshot or {}),
+                approved_at=reference_time,
+                approved_by=actor_id,
+                approval_comment=item.notes or "",
+            )
 
     workflow_items = db.execute(
         select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == trade_id)
@@ -813,6 +1045,11 @@ def create_trade_workflow_item(
         item,
         trade,
         now=reference_time,
+        active_credit_exception=build_active_trade_credit_exception_lookup(
+            db,
+            trades=[trade],
+            now=reference_time,
+        ).get(trade.trade_id),
         credit_decision_history=_credit_decision_history_by_workflow_item_id(
             db,
             workflow_item_ids=[item.id],
@@ -835,7 +1072,13 @@ def update_trade_workflow_item(
         .join(Trade, Trade.trade_id == TradeWorkflowItem.trade_id)
         .where(
             TradeWorkflowItem.id == item_id,
-            Trade.status != "CANCELLED",
+            or_(
+                Trade.status == TradeStatus.ACTIVE.value,
+                and_(
+                    TradeWorkflowItem.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value,
+                    Trade.status.in_(tuple(OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES)),
+                ),
+            ),
         )
     ).first()
     if row is None:
@@ -858,6 +1101,12 @@ def update_trade_workflow_item(
                 )
             if requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES and not next_notes:
                 raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
+            if requested_status == CreditApprovalStatus.APPROVED.value:
+                assert_trade_credit_approval_freshness(
+                    db,
+                    trade=trade,
+                    as_of=reference_time,
+                )
 
     if item.workflow_type in DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES and "status" in changes:
         requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
@@ -903,10 +1152,24 @@ def update_trade_workflow_item(
         item.version += 1
         if (
             item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value
+            and requested_status is not None
+            and previous_status == CreditApprovalStatus.APPROVED.value
+            and requested_status != CreditApprovalStatus.APPROVED.value
+        ):
+            invalidate_active_trade_credit_exceptions(
+                db,
+                trade_id=trade.trade_id,
+                released_at=reference_time,
+                released_by=actor_id,
+                released_reason=_credit_exception_release_reason_for_status(requested_status),
+                status=requested_status,
+            )
+        if (
+            item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value
             and requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES
             and previous_status != requested_status
         ):
-            _append_credit_approval_decision(
+            decision_record = _append_credit_approval_decision(
                 db,
                 trade=trade,
                 workflow_item=item,
@@ -915,6 +1178,17 @@ def update_trade_workflow_item(
                 actor_id=actor_id,
                 decided_at=reference_time,
             )
+            if requested_status == CreditApprovalStatus.APPROVED.value:
+                create_trade_credit_exception(
+                    db,
+                    trade_id=trade.trade_id,
+                    workflow_item_id=item.id,
+                    approval_decision_id=decision_record.id,
+                    approval_snapshot=dict(decision_record.breach_snapshot or {}),
+                    approved_at=reference_time,
+                    approved_by=actor_id,
+                    approval_comment=item.notes or "",
+                )
 
     workflow_items = db.execute(
         select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == item.trade_id)
@@ -925,6 +1199,11 @@ def update_trade_workflow_item(
         item,
         trade,
         now=reference_time,
+        active_credit_exception=build_active_trade_credit_exception_lookup(
+            db,
+            trades=[trade],
+            now=reference_time,
+        ).get(trade.trade_id),
         credit_decision_history=_credit_decision_history_by_workflow_item_id(
             db,
             workflow_item_ids=[item.id],

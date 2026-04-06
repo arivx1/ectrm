@@ -343,3 +343,74 @@ class ReportsApiTests(unittest.TestCase):
         response = self.client.get("/reports/cash-forecast?horizon_days=0")
         self.assertEqual(response.status_code, 422)
         self.assertIn("horizon_days must be greater than zero", response.json()["detail"])
+
+    def test_settlement_exception_report_surfaces_disputes_short_pays_and_overdues(self) -> None:
+        self._seed_trade(trade_id="T-EX-1", counterparty="BP_TRADING", book="CRUDE_PHYS", invoice_status="DISPUTED")
+        self._seed_trade(
+            trade_id="T-EX-2",
+            counterparty="SHELL_TRADING",
+            book="CRUDE_PHYS",
+            payment_status="PENDING",
+            settlement_status="PARTIALLY_SETTLED",
+        )
+        self._seed_trade(trade_id="T-EX-3", counterparty="VITOL", book="DISTILLATES")
+
+        self._seed_invoice(
+            trade_id="T-EX-1",
+            invoice_number="INV-EX-1",
+            invoice_amount=700,
+            due_at=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            status="DISPUTED",
+        )
+        short_pay_invoice_id = self._seed_invoice(
+            trade_id="T-EX-2",
+            invoice_number="INV-EX-2",
+            invoice_amount=1000,
+            due_at=datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc),
+            status="APPROVED",
+        )
+        self._seed_payment(
+            trade_id="T-EX-2",
+            invoice_id=short_pay_invoice_id,
+            payment_amount=400,
+            due_at=datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc),
+            status="PAID",
+            received_at=datetime(2026, 4, 5, 17, 0, tzinfo=timezone.utc),
+        )
+        self._seed_invoice(
+            trade_id="T-EX-3",
+            invoice_number="INV-EX-3",
+            invoice_amount=300,
+            due_at=datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc),
+            status="ISSUED",
+        )
+
+        response = self.client.get("/reports/settlement-exceptions?as_of=2026-04-06")
+        self.assertEqual(response.status_code, 200)
+
+        body = response.json()
+        self.assertEqual(body["row_count"], 4)
+        self.assertEqual(body["blocked_count"], 3)
+        self.assertEqual(body["warning_count"], 1)
+
+        summaries = {row["exception_type"]: row for row in body["summaries"]}
+        self.assertEqual(summaries["DISPUTED_INVOICE"]["exception_count"], 1)
+        self.assertEqual(summaries["SHORT_PAY"]["exception_count"], 1)
+        self.assertEqual(summaries["OVERDUE_PAYMENT"]["exception_count"], 2)
+
+        dispute_rows = [row for row in body["rows"] if row["exception_type"] == "DISPUTED_INVOICE"]
+        self.assertEqual(len(dispute_rows), 1)
+        self.assertEqual(dispute_rows[0]["trade_id"], "T-EX-1")
+        self.assertEqual(dispute_rows[0]["severity"], "blocked")
+
+        short_pay_rows = [row for row in body["rows"] if row["exception_type"] == "SHORT_PAY"]
+        self.assertEqual(len(short_pay_rows), 1)
+        self.assertEqual(short_pay_rows[0]["trade_id"], "T-EX-2")
+        self.assertEqual(short_pay_rows[0]["severity"], "in-progress")
+        self.assertEqual(short_pay_rows[0]["total_paid_amount"], 400.0)
+        self.assertEqual(short_pay_rows[0]["outstanding_amount"], 600.0)
+
+        overdue_rows = [row for row in body["rows"] if row["exception_type"] == "OVERDUE_PAYMENT"]
+        self.assertEqual(len(overdue_rows), 2)
+        overdue_trade_ids = {row["trade_id"] for row in overdue_rows}
+        self.assertEqual(overdue_trade_ids, {"T-EX-1", "T-EX-3"})

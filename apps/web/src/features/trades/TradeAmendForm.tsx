@@ -46,6 +46,7 @@ type TradeAmendFormProps = {
   selectedTradeId: string
   amendmentPreviewFields: string[]
   cancelImpactSummary: string
+  amendmentLockedReason: string
   amendTradeNatureInput: string
   setAmendTradeNatureInput: (value: string) => void
   amendTradeStructureInput: string
@@ -164,6 +165,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     selectedTradeId,
     amendmentPreviewFields,
     cancelImpactSummary,
+    amendmentLockedReason,
     amendTradeNatureInput,
     setAmendTradeNatureInput,
     amendTradeStructureInput,
@@ -818,10 +820,19 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
       )}
 
       <div className="stack-actions">
-        <button type="submit" className="button button-primary" disabled={amending || cancelling || amendmentPreviewFields.length === 0}>
+        <button
+          type="submit"
+          className="button button-primary"
+          disabled={amending || cancelling || amendmentPreviewFields.length === 0 || amendmentLockedReason !== ''}
+        >
           {amending ? 'Applying...' : amendmentPreviewFields.length > 0 ? `Apply ${amendmentPreviewFields.length} Change${amendmentPreviewFields.length === 1 ? '' : 's'}` : 'Apply Amendment'}
         </button>
-        <button type="button" className="button button-secondary" onClick={() => setCancelReviewOpen((current) => !current)} disabled={amending || cancelling}>
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={() => setCancelReviewOpen((current) => !current)}
+          disabled={amending || cancelling || amendmentLockedReason !== ''}
+        >
           {cancelReviewOpen ? 'Close Cancel Review' : 'Review Cancel'}
         </button>
       </div>
@@ -837,7 +848,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
               value={cancelReason}
               onChange={(event) => setCancelReason(event.target.value)}
               placeholder="Explain why this trade should be cancelled."
-              disabled={amending || cancelling}
+              disabled={amending || cancelling || amendmentLockedReason !== ''}
             />
           </label>
           <div className="stack-actions">
@@ -845,11 +856,16 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
               type="button"
               className="button button-danger"
               onClick={() => handleCancelTrade(cancelReason)}
-              disabled={amending || cancelling || cancelReason.trim() === ''}
+              disabled={amending || cancelling || cancelReason.trim() === '' || amendmentLockedReason !== ''}
             >
               {cancelling ? 'Cancelling...' : 'Confirm Cancel'}
             </button>
-            <button type="button" className="button button-ghost" onClick={() => setCancelReviewOpen(false)} disabled={amending || cancelling}>
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => setCancelReviewOpen(false)}
+              disabled={amending || cancelling || amendmentLockedReason !== ''}
+            >
               Keep Trade Active
             </button>
           </div>
@@ -857,7 +873,9 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
       )}
 
       <p className={`form-note ${amendError ? 'form-note-error' : ''}`}>
-        {amendError || 'Amendments now submit only changed fields, SWAP headers stay aligned to Leg 1 instead of duplicating leg economics, and option tickets keep premium plus strike and expiry on the trade header.'}
+        {amendError ||
+          amendmentLockedReason ||
+          'Amendments now submit only changed fields, SWAP headers stay aligned to Leg 1 instead of duplicating leg economics, and option tickets keep premium plus strike and expiry on the trade header.'}
       </p>
     </form>
   )

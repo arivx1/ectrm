@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 if not hasattr(enum, "StrEnum"):
     class _CompatStrEnum(str, enum.Enum):
@@ -20,8 +20,14 @@ from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.external_data_run import ExternalDataRun
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
+from apps.api.app.models.reference_counterparty_external_credit_snapshot import (
+    ReferenceCounterpartyExternalCreditSnapshot,
+)
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
+from apps.api.app.models.trade_credit_exception import TradeCreditException
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
@@ -69,8 +75,12 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeCreditApprovalDecision).delete()
+            session.query(TradeCreditException).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
+            session.query(ReferenceCounterpartyExternalCreditSnapshot).delete()
+            session.query(ReferenceCounterpartyCreditProfile).delete()
+            session.query(ExternalDataRun).delete()
             session.query(UserSession).delete()
             session.query(UserAccount).delete()
             session.commit()
@@ -121,6 +131,17 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self,
         *,
         trade_id: str,
+        instrument_type: str = "LINEAR",
+        trade_nature: str = "PHYSICAL",
+        trade_side: str = "BUY",
+        option_type: str | None = None,
+        option_style: str | None = None,
+        option_strike_price: float | None = None,
+        option_expiration_date: date | None = None,
+        price: float = 79.25,
+        volume: float = 1000,
+        unit_of_measure: str = "BBL",
+        status: str = "ACTIVE",
         confirmation_status: str = "PENDING",
         nomination_status: str = "PENDING",
         allocation_status: str = "PENDING",
@@ -141,15 +162,20 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                     effective_start_date=date(2026, 4, 7),
                     effective_end_date=date(2026, 4, 9),
                     quality_spec=None,
-                    unit_of_measure="BBL",
+                    unit_of_measure=unit_of_measure,
                     trade_currency_code="USD",
                     location_code="CUSHING",
                     delivery_start=date(2026, 4, 7),
                     delivery_end=date(2026, 4, 9),
                     price_unit_code="BBL",
-                    trade_nature="PHYSICAL",
+                    instrument_type=instrument_type,
+                    option_type=option_type,
+                    option_style=option_style,
+                    option_strike_price=option_strike_price,
+                    option_expiration_date=option_expiration_date,
+                    trade_nature=trade_nature,
                     trade_structure="SINGLE",
-                    trade_side="BUY",
+                    trade_side=trade_side,
                     book="CRUDE_PHYS",
                     portfolio="PROMPT",
                     counterparty="SHELL_TRADING",
@@ -161,13 +187,13 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                     nomination_status=nomination_status,
                     allocation_status=allocation_status,
                     price_index_code=None,
-                    price=79.25,
-                    volume=1000,
+                    price=price,
+                    volume=volume,
                     invoice_status=invoice_status,
                     payment_status=payment_status,
                     settlement_status=settlement_status,
                     trader_user="trader.alpha",
-                    status="ACTIVE",
+                    status=status,
                     last_event_id=f"evt-{trade_id.lower()}",
                 )
             )
@@ -198,6 +224,81 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             )
             session.commit()
 
+    def _seed_counterparty_credit_profile(
+        self,
+        *,
+        limit_amount: float = 1000,
+        breach_action: str = "REQUIRE_APPROVAL",
+        limit_currency_code: str = "USD",
+        review_due_at: date | None = None,
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                ReferenceCounterpartyCreditProfile(
+                    counterparty_code="SHELL_TRADING",
+                    credit_rating="BBB",
+                    review_due_at=review_due_at or (self.now.date() + timedelta(days=14)),
+                    limit_currency_code=limit_currency_code,
+                    limit_amount=limit_amount,
+                    breach_action=breach_action,
+                    notes="Test credit profile",
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_counterparty_external_credit_snapshot(
+        self,
+        *,
+        as_of_date: date | None = None,
+        provider: str = "DNB",
+    ) -> None:
+        with self.SessionLocal() as session:
+            run = ExternalDataRun(
+                provider=provider,
+                job_name="counterparty_credit_import",
+                status="SUCCEEDED",
+                started_at=self.now,
+                finished_at=self.now,
+                requested_by="credit-admin",
+                series_count=1,
+                observation_count=1,
+                error_summary=None,
+                created_at=self.now,
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                ReferenceCounterpartyExternalCreditSnapshot(
+                    counterparty_code="SHELL_TRADING",
+                    provider=provider,
+                    source_entity_id="123456789",
+                    source_entity_name="Shell Trading",
+                    match_basis="DUNS",
+                    matched_identifier_value="123456789",
+                    as_of_date=as_of_date or self.now.date(),
+                    rating_scale="DNB Rating",
+                    rating_value="4A1",
+                    rating_outlook="Stable",
+                    credit_score=80,
+                    probability_of_default=0.02,
+                    recommended_limit_currency_code="USD",
+                    recommended_limit_amount=2500000,
+                    commentary="Fresh vendor snapshot",
+                    downloaded_at=self.now,
+                    run_id=run.id,
+                    raw_payload={"rating": "4A1"},
+                    created_at=self.now,
+                    updated_at=self.now,
+                    version=1,
+                )
+            )
+            session.commit()
+
     def test_work_items_list_backfills_trade_rows_and_filters_by_queue(self) -> None:
         self._seed_trade(trade_id="T-OPS-1")
 
@@ -223,6 +324,67 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             self.assertEqual(session.query(TradeWorkflowItem).count(), 5)
+
+    def test_work_items_list_backfills_option_settlement_for_closed_exercised_option(self) -> None:
+        self._seed_trade(
+            trade_id="T-OPTION-OPS-1",
+            instrument_type="OPTION",
+            trade_nature="FINANCIAL",
+            trade_side="BUY",
+            option_type="CALL",
+            option_style="AMERICAN",
+            option_strike_price=81,
+            option_expiration_date=date(2026, 6, 30),
+            price=3.5,
+            volume=10,
+            status="EXERCISED",
+        )
+
+        response = self.client.get("/operations/work-items?queue=operations")
+        self.assertEqual(response.status_code, 200)
+        items = [item for item in response.json() if item["trade_id"] == "T-OPTION-OPS-1"]
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["workflow_type"], "OPTION_SETTLEMENT")
+        self.assertEqual(items[0]["status"], "PENDING")
+        self.assertEqual(items[0]["queue"], "operations")
+        self.assertEqual(items[0]["due_at"][:10], "2026-04-06")
+        self.assertIn("resulting BUY WTI 10 BBL", items[0]["notes"])
+        self.assertIn("Strike 81 USD/BBL", items[0]["notes"])
+
+    def test_work_item_patch_allows_option_settlement_updates_on_closed_option_trade(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(
+            trade_id="T-OPTION-OPS-2",
+            instrument_type="OPTION",
+            trade_nature="FINANCIAL",
+            trade_side="SELL",
+            option_type="PUT",
+            option_style="AMERICAN",
+            option_strike_price=74,
+            option_expiration_date=date(2026, 6, 30),
+            price=2.25,
+            volume=7,
+            status="ASSIGNED",
+        )
+
+        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        self.assertEqual(queue_response.status_code, 200)
+        option_item = next(
+            item
+            for item in queue_response.json()
+            if item["trade_id"] == "T-OPTION-OPS-2" and item["workflow_type"] == "OPTION_SETTLEMENT"
+        )
+
+        patch_response = self.client.patch(
+            f"/operations/work-items/{option_item['item_id']}",
+            json={"status": "BOOKED", "owner": "ops_admin", "notes": "Underlying trade booked on the physical desk."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["status"], "BOOKED")
+        self.assertEqual(patch_response.json()["owner"], "ops_admin")
+        self.assertEqual(patch_response.json()["notes"], "Underlying trade booked on the physical desk.")
 
     def test_work_item_patch_rolls_up_trade_statuses(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -268,6 +430,8 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
 
     def test_credit_approval_actions_require_comment_and_release_lifecycle_hold(self) -> None:
         admin_token = self._bootstrap_admin()
+        self._seed_counterparty_credit_profile()
+        self._seed_counterparty_external_credit_snapshot()
         self._seed_trade(trade_id="T-CREDIT-OPS-1")
         self._seed_credit_approval_item(
             trade_id="T-CREDIT-OPS-1",
@@ -310,6 +474,11 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(approve_response.status_code, 200)
         self.assertEqual(approve_response.json()["status"], "APPROVED")
         self.assertEqual(len(approve_response.json()["credit_decision_history"]), 1)
+        self.assertIsNotNone(approve_response.json()["active_credit_exception"])
+        self.assertEqual(
+            approve_response.json()["active_credit_exception"]["approved_projected_exposure_amount"],
+            79250.0,
+        )
 
         release_response = self.client.patch(
             f"/operations/work-items/{work_items['CONFIRMATION']['item_id']}",
@@ -321,6 +490,8 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
 
     def test_credit_approval_requires_credit_authorized_role_and_records_decision_history(self) -> None:
         self._bootstrap_admin()
+        self._seed_counterparty_credit_profile()
+        self._seed_counterparty_external_credit_snapshot()
         self._create_user(
             user_id="plain_trader",
             email="plain-trader@example.com",
@@ -373,13 +544,90 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(decision["trade_id"], "T-CREDIT-ROLE-1")
         self.assertEqual(decision["workflow_item_id"], work_item["item_id"])
         self.assertEqual(decision["breach_snapshot"]["trade_id"], "T-CREDIT-ROLE-1")
-        self.assertEqual(decision["breach_snapshot"]["comparison_reason"], "no_credit_profile")
+        self.assertEqual(decision["breach_snapshot"]["comparison_reason"], "comparable")
+        self.assertIsNotNone(approved_payload["active_credit_exception"])
+        self.assertEqual(
+            approved_payload["active_credit_exception"]["status"],
+            "ACTIVE",
+        )
+        self.assertEqual(
+            approved_payload["active_credit_exception"]["approved_by"],
+            "credit_approver",
+        )
 
         with self.SessionLocal() as session:
             decisions = session.query(TradeCreditApprovalDecision).all()
+            exceptions = session.query(TradeCreditException).all()
             self.assertEqual(len(decisions), 1)
+            self.assertEqual(len(exceptions), 1)
             self.assertEqual(decisions[0].decided_by, "credit_approver")
             self.assertEqual(decisions[0].decision_comment, "Approved after documented credit review.")
+            self.assertEqual(exceptions[0].approved_by, "credit_approver")
+            self.assertEqual(float(exceptions[0].approved_projected_exposure_amount), 79250.0)
+
+    def test_credit_approval_blocks_when_internal_review_is_overdue(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_counterparty_credit_profile(review_due_at=self.now.date() - timedelta(days=1))
+        self._seed_counterparty_external_credit_snapshot()
+        self._seed_trade(trade_id="T-CREDIT-STALE-REVIEW")
+        self._seed_credit_approval_item(
+            trade_id="T-CREDIT-STALE-REVIEW",
+            notes="Exposure breach opened for review.",
+        )
+
+        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        self.assertEqual(queue_response.status_code, 200)
+        work_item = next(
+            item
+            for item in queue_response.json()
+            if item["trade_id"] == "T-CREDIT-STALE-REVIEW" and item["workflow_type"] == "CREDIT_APPROVAL"
+        )
+
+        response = self.client.patch(
+            f"/operations/work-items/{work_item['item_id']}",
+            json={"status": "APPROVED", "notes": "Attempted approval with overdue review."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("overdue", response.text.lower())
+        self.assertIn("review", response.text.lower())
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(TradeCreditApprovalDecision).count(), 0)
+            self.assertEqual(session.query(TradeCreditException).count(), 0)
+
+    def test_credit_approval_blocks_when_external_snapshot_is_stale(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_counterparty_credit_profile()
+        self._seed_counterparty_external_credit_snapshot(
+            as_of_date=self.now.date() - timedelta(days=31)
+        )
+        self._seed_trade(trade_id="T-CREDIT-STALE-SNAPSHOT")
+        self._seed_credit_approval_item(
+            trade_id="T-CREDIT-STALE-SNAPSHOT",
+            notes="Exposure breach opened for review.",
+        )
+
+        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        self.assertEqual(queue_response.status_code, 200)
+        work_item = next(
+            item
+            for item in queue_response.json()
+            if item["trade_id"] == "T-CREDIT-STALE-SNAPSHOT" and item["workflow_type"] == "CREDIT_APPROVAL"
+        )
+
+        response = self.client.patch(
+            f"/operations/work-items/{work_item['item_id']}",
+            json={"status": "APPROVED", "notes": "Attempted approval with stale vendor data."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("external credit snapshot", response.text.lower())
+        self.assertIn("30-day freshness limit", response.text)
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(TradeCreditApprovalDecision).count(), 0)
+            self.assertEqual(session.query(TradeCreditException).count(), 0)
 
     def test_work_item_mutations_require_authentication(self) -> None:
         self._seed_trade(trade_id="T-AUTH-1")

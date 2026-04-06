@@ -42,6 +42,7 @@ export type Trade = {
   trader_user: string | null
   status: string
   last_event_id: string
+  active_credit_exception?: TradeCreditExceptionRecord | null
   credit_approval_status?: string
   credit_hold_active?: boolean
   credit_hold_reason?: string | null
@@ -180,11 +181,41 @@ export type TradeCreditApprovalDecisionRecord = {
   decided_by: string
 }
 
+export type TradeCreditExceptionRecord = {
+  exception_id: number
+  trade_id: string
+  workflow_item_id: number
+  approval_decision_id: number | null
+  status: string
+  limit_currency_code: string
+  approved_limit_amount: number | null
+  approved_projected_exposure_amount: number
+  approved_excess_amount: number | null
+  approval_comment: string
+  approved_at: string
+  approved_by: string
+  expires_at: string
+  released_at: string | null
+  released_by: string | null
+  released_reason: string | null
+  current_projected_exposure_amount: number | null
+  remaining_headroom_amount: number | null
+  revalidation_required: boolean
+  revalidation_reason: string | null
+}
+
 export type TradeWorkflowItemRecord = {
   item_id: number
   trade_id: string
   queue: 'operations' | 'settlement'
-  workflow_type: 'CONFIRMATION' | 'NOMINATION' | 'ALLOCATION' | 'INVOICE' | 'PAYMENT' | 'CREDIT_APPROVAL'
+  workflow_type:
+    | 'CONFIRMATION'
+    | 'NOMINATION'
+    | 'ALLOCATION'
+    | 'INVOICE'
+    | 'PAYMENT'
+    | 'CREDIT_APPROVAL'
+    | 'OPTION_SETTLEMENT'
   status: string
   owner: string | null
   due_at: string | null
@@ -207,6 +238,7 @@ export type TradeWorkflowItemRecord = {
   trade_date: string | null
   delivery_start: string | null
   delivery_end: string | null
+  active_credit_exception?: TradeCreditExceptionRecord | null
   credit_decision_history: TradeCreditApprovalDecisionRecord[]
   credit_approval_status?: string
   credit_hold_active?: boolean
@@ -599,6 +631,31 @@ export type PnlHistorySummary = {
   unrealized_trade_count: number
 }
 
+export type PnlTradeValuation = {
+  trade_id: string
+  book: string | null
+  commodity_class: string | null
+  instrument_type: string
+  trade_structure: string
+  trade_side: string | null
+  settlement_status: string
+  pnl_bucket: string
+  pricing_type: string
+  pricing_source: string
+  fixed_price: number | null
+  price_index_code: string | null
+  market_price: number | null
+  effective_mark: number | null
+  quantity: number | null
+  direction: number
+  trade_currency_code: string | null
+  price_unit_code: string | null
+  pnl_contribution: number | null
+  valuation_status: string
+  valuation_status_reason: string | null
+  included_in_totals: boolean
+}
+
 export type PnlHistoryReport = {
   generated_at: string
   basis: string
@@ -606,6 +663,7 @@ export type PnlHistoryReport = {
   point_count: number
   points: PnlHistoryPoint[]
   summary: PnlHistorySummary
+  valuations: PnlTradeValuation[]
 }
 
 export type SettlementAgingCurrencySummary = {
@@ -678,6 +736,47 @@ export type CashForecastReport = {
   row_count: number
   currency_summaries: CashForecastCurrencySummary[]
   points: CashForecastPoint[]
+}
+
+export type SettlementExceptionSummary = {
+  exception_type: string
+  currency_code: string
+  exception_count: number
+  affected_trade_count: number
+  total_outstanding_amount: number
+}
+
+export type SettlementExceptionRow = {
+  exception_type: string
+  severity: 'blocked' | 'in-progress'
+  trade_id: string
+  invoice_id: number
+  invoice_number: string
+  counterparty_code: string | null
+  book: string
+  commodity: string
+  currency_code: string
+  invoice_status: string
+  payment_status: string
+  settlement_status: string
+  owner: string | null
+  due_at: string | null
+  last_received_at: string | null
+  invoice_amount: number
+  total_paid_amount: number
+  outstanding_amount: number
+  days_past_due: number
+  summary: string
+}
+
+export type SettlementExceptionReport = {
+  generated_at: string
+  as_of: string
+  row_count: number
+  blocked_count: number
+  warning_count: number
+  summaries: SettlementExceptionSummary[]
+  rows: SettlementExceptionRow[]
 }
 
 export type PriceIndexObservationRecord = {

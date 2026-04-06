@@ -196,7 +196,7 @@ def _payment_row(
         )
         .where(
             TradePayment.id == payment_id,
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
         )
     ).first()
 
@@ -324,7 +324,7 @@ def list_trade_payments(
             (TradeWorkflowItem.trade_id == TradePayment.trade_id)
             & (TradeWorkflowItem.workflow_type == TradeWorkflowType.PAYMENT.value),
         )
-        .where(Trade.status != "CANCELLED")
+        .where(Trade.status == "ACTIVE")
         .order_by(Trade.trade_id.asc(), TradePayment.due_at.asc(), TradePayment.id.asc())
     )
     if trade_id:
@@ -370,7 +370,7 @@ def create_trade_payment(
         .join(Trade, Trade.trade_id == TradeInvoice.trade_id)
         .where(
             TradeInvoice.id == invoice_id,
-            Trade.status != "CANCELLED",
+            Trade.status == "ACTIVE",
         )
     ).first()
     if row is None:

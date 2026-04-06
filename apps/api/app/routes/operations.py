@@ -205,7 +205,7 @@ def get_system_overview(request: Request, db: Session = Depends(get_db)) -> Syst
         select(func.count()).select_from(UserAccount).where(UserAccount.is_active.is_(True))
     ).scalar_one()
     open_trade_count = db.execute(
-        select(func.count()).select_from(Trade).where(Trade.status != "CANCELLED")
+        select(func.count()).select_from(Trade).where(Trade.status == "ACTIVE")
     ).scalar_one()
     events_last_hour = db.execute(
         select(func.count()).select_from(Event).where(Event.recorded_at >= recent_window_start)

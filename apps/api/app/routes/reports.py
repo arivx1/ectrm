@@ -17,6 +17,7 @@ from apps.api.app.domains.reports.services.overview import (
 )
 from apps.api.app.domains.reports.services.settlement import (
     build_cash_forecast_report,
+    build_settlement_exception_report,
     build_settlement_aging_report,
 )
 from apps.api.app.schemas.report import (
@@ -26,6 +27,7 @@ from apps.api.app.schemas.report import (
     ExposureSummaryRow,
     PnlHistoryReport,
     ReportingOverview,
+    SettlementExceptionReport,
     SettlementAgingReport,
 )
 
@@ -106,3 +108,16 @@ def get_cash_forecast(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+
+@router.get("/settlement-exceptions", response_model=SettlementExceptionReport)
+def get_settlement_exceptions(
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> SettlementExceptionReport:
+    return SettlementExceptionReport(
+        **build_settlement_exception_report(
+            db,
+            as_of=as_of,
+        )
+    )

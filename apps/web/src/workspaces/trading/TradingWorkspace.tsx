@@ -1,7 +1,7 @@
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
-import type { TradeWorkflowItemRecord } from '../../shared/models'
+import type { TradeCreditExceptionRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   calculateDaysToExpiration,
@@ -12,7 +12,11 @@ import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
-import { tradeInstrumentUsesOptionFields } from '../../shared/trading'
+import {
+  type OptionLifecycleEventType,
+  tradeInstrumentUsesOptionFields,
+  tradeStatusIsActive,
+} from '../../shared/trading'
 
 type Trade = {
   trade_id: string
@@ -56,6 +60,7 @@ type Trade = {
   trader_user: string | null
   status: string
   updated_at: string
+  active_credit_exception?: TradeCreditExceptionRecord | null
   credit_approval_status?: string
   credit_hold_active?: boolean
   credit_hold_reason?: string | null
@@ -133,6 +138,11 @@ function creditDecisionExposureSummary(decision: TradeWorkflowItemRecord['credit
   return comparisonReason ? `Snapshot basis: ${comparisonReason.replaceAll('_', ' ')}.` : null
 }
 
+function creditExceptionReasonLabel(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  return normalized ? normalized.replaceAll('_', ' ') : null
+}
+
 type TradingWorkspaceProps = {
   authSession: StoredAuthSession | null
   tradeCaptureFormProps: TradeCaptureFormProps
@@ -147,8 +157,11 @@ type TradingWorkspaceProps = {
   handleDuplicateTrade: () => void
   handleAmendTrade: (event: React.FormEvent) => void
   handleCancelTrade: (reason: string) => void
+  handleOptionLifecycleEvent: (eventType: OptionLifecycleEventType) => void
+  optionLifecycleSubmittingEvent: OptionLifecycleEventType | null
   amendmentPreviewFields: string[]
   cancelImpactSummary: string
+  amendmentLockedReason: string
   amendExternalTradeIdInput: string
   setAmendExternalTradeIdInput: (value: string) => void
   amendSourceSystemInput: string
@@ -280,8 +293,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     handleDuplicateTrade,
     handleAmendTrade,
     handleCancelTrade,
+    handleOptionLifecycleEvent,
+    optionLifecycleSubmittingEvent,
     amendmentPreviewFields,
     cancelImpactSummary,
+    amendmentLockedReason,
     amendExternalTradeIdInput,
     setAmendExternalTradeIdInput,
     amendSourceSystemInput,
@@ -400,6 +416,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   const selectedTradeIsOption = selectedTrade
     ? tradeInstrumentUsesOptionFields(selectedTrade.instrument_type)
     : false
+  const selectedTradeIsActive = selectedTrade ? tradeStatusIsActive(selectedTrade.status) : false
   const selectedTradePriceLabel = selectedTradeIsOption ? 'Premium' : 'Price'
   const selectedTradeVolumeLabel = selectedTradeIsOption ? 'Contracts' : 'Volume'
   const selectedTradePremiumCashflow = selectedTrade
@@ -415,9 +432,40 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   const selectedTradeDaysToExpiration = selectedTrade
     ? calculateDaysToExpiration(selectedTrade.option_expiration_date)
     : null
+  const canExpireOption =
+    selectedTradeIsOption &&
+    selectedTradeIsActive &&
+    selectedTradeDaysToExpiration !== null &&
+    selectedTradeDaysToExpiration <= 0
+  const canExerciseOption =
+    selectedTradeIsOption &&
+    selectedTradeIsActive &&
+    selectedTrade?.trade_side === 'BUY' &&
+    selectedTradeDaysToExpiration !== null &&
+    ((selectedTrade.option_style ?? 'AMERICAN') === 'EUROPEAN'
+      ? selectedTradeDaysToExpiration === 0
+      : selectedTradeDaysToExpiration >= 0)
+  const canAssignOption =
+    selectedTradeIsOption &&
+    selectedTradeIsActive &&
+    selectedTrade?.trade_side === 'SELL' &&
+    selectedTradeDaysToExpiration !== null &&
+    ((selectedTrade.option_style ?? 'AMERICAN') === 'EUROPEAN'
+      ? selectedTradeDaysToExpiration === 0
+      : selectedTradeDaysToExpiration >= 0)
+  const optionLifecycleGuidance = selectedTradeIsOption
+    ? (selectedTrade?.option_style ?? 'AMERICAN') === 'EUROPEAN'
+      ? 'European options can only be exercised or assigned on expiration day. Expiry can be recorded once the expiration date is reached.'
+      : 'American options can be exercised or assigned any time up to expiration. Expiry can be recorded once the expiration date is reached.'
+    : ''
   const selectedTradeCreditWorkflowItem = selectedTrade
     ? tradeWorkflowItems.find(
         (item) => item.trade_id === selectedTrade.trade_id && item.workflow_type === 'CREDIT_APPROVAL',
+      ) ?? null
+    : null
+  const selectedTradeOptionSettlementItem = selectedTrade
+    ? tradeWorkflowItems.find(
+        (item) => item.trade_id === selectedTrade.trade_id && item.workflow_type === 'OPTION_SETTLEMENT',
       ) ?? null
     : null
 
@@ -483,7 +531,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
       label: 'Status',
       width: '10rem',
       renderCell: (trade) => (
-        <Tooltip content={trade.status === 'CANCELLED' ? tradeTooltipCopy.cancelledTrade : tradeTooltipCopy.activeTrade}>
+        <Tooltip content={tradeStatusIsActive(trade.status) ? tradeTooltipCopy.activeTrade : tradeTooltipCopy.closedTrade}>
           <span className={`status-pill status-pill-${statusTone(trade.status)} tooltip-trigger-hint`}>{trade.status}</span>
         </Tooltip>
       ),
@@ -541,6 +589,37 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   <button type="button" className="button button-secondary" onClick={handleDuplicateTrade}>
                     Duplicate Into Form
                   </button>
+                  {selectedTradeIsOption && selectedTradeIsActive ? (
+                    <>
+                      {selectedTrade.trade_side === 'BUY' ? (
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => handleOptionLifecycleEvent('OptionExercised')}
+                          disabled={!canExerciseOption || optionLifecycleSubmittingEvent !== null}
+                        >
+                          {optionLifecycleSubmittingEvent === 'OptionExercised' ? 'Exercising...' : 'Exercise Option'}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => handleOptionLifecycleEvent('OptionAssigned')}
+                          disabled={!canAssignOption || optionLifecycleSubmittingEvent !== null}
+                        >
+                          {optionLifecycleSubmittingEvent === 'OptionAssigned' ? 'Assigning...' : 'Assign Option'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => handleOptionLifecycleEvent('OptionExpired')}
+                        disabled={!canExpireOption || optionLifecycleSubmittingEvent !== null}
+                      >
+                        {optionLifecycleSubmittingEvent === 'OptionExpired' ? 'Expiring...' : 'Expire Option'}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               )}
 
@@ -561,6 +640,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         Credit {creditApprovalLabel(selectedTrade.credit_approval_status)}
                       </span>
                     ) : null}
+                    {selectedTrade.active_credit_exception ? (
+                      <span className="entity-chip entity-chip-soft">
+                        Exception to {formatDateOnly(selectedTrade.active_credit_exception.expires_at)}
+                      </span>
+                    ) : null}
                     <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
                     <span className="entity-chip entity-chip-soft">Confirmation {selectedTrade.confirmation_status}</span>
                     <span className="entity-chip entity-chip-soft">Nomination {selectedTrade.nomination_status}</span>
@@ -570,6 +654,25 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   {selectedTrade.credit_hold_active ? (
                     <p className="field-error">
                       {selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}
+                    </p>
+                  ) : null}
+                  {selectedTrade.active_credit_exception?.revalidation_required ? (
+                    <p className="field-error">
+                      Credit exception needs fresh review: {creditExceptionReasonLabel(selectedTrade.active_credit_exception.revalidation_reason) ?? 'revalidation required'}.
+                    </p>
+                  ) : null}
+                  {selectedTradeIsOption ? (
+                    <p className="form-note">
+                      {selectedTradeIsActive ? optionLifecycleGuidance : `This option is already closed as ${selectedTrade.status}.`}
+                    </p>
+                  ) : null}
+                  {selectedTradeOptionSettlementItem ? (
+                    <p className="form-note">
+                      Operations workflow: {selectedTradeOptionSettlementItem.status.replaceAll('_', ' ')}
+                      {selectedTradeOptionSettlementItem.due_at
+                        ? ` due ${formatDateOnly(selectedTradeOptionSettlementItem.due_at)}.`
+                        : '.'}{' '}
+                      {selectedTradeOptionSettlementItem.notes ?? 'Book the resulting underlying handoff from this lifecycle event.'}
                     </p>
                   ) : null}
 
@@ -688,6 +791,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   </div>
                   {selectedTradeIsOption && (
                     <div className="detail-row">
+                      <span>Option Lifecycle</span>
+                      <strong>{selectedTrade.status}</strong>
+                    </div>
+                  )}
+                  {selectedTradeOptionSettlementItem && (
+                    <div className="detail-row">
+                      <span>Option Settlement Workflow</span>
+                      <strong>{selectedTradeOptionSettlementItem.status}</strong>
+                    </div>
+                  )}
+                  {selectedTradeIsOption && (
+                    <div className="detail-row">
                       <span>Option Type</span>
                       <strong>{selectedTrade.option_type ?? '—'}</strong>
                     </div>
@@ -792,6 +907,41 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                       <strong>{selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}</strong>
                     </div>
                   ) : null}
+                  {selectedTrade.active_credit_exception ? (
+                    <>
+                      <div className="detail-row">
+                        <span>Credit Exception Expires</span>
+                        <strong>{formatDate(selectedTrade.active_credit_exception.expires_at)}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Approved Exception Ceiling</span>
+                        <strong>
+                          {selectedTrade.active_credit_exception.limit_currency_code}{' '}
+                          {formatNumber(selectedTrade.active_credit_exception.approved_projected_exposure_amount, 2)}
+                        </strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Remaining Exception Headroom</span>
+                        <strong>
+                          {selectedTrade.active_credit_exception.remaining_headroom_amount !== null
+                            ? `${selectedTrade.active_credit_exception.limit_currency_code} ${formatNumber(selectedTrade.active_credit_exception.remaining_headroom_amount, 2)}`
+                            : '—'}
+                        </strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Exception Approved By</span>
+                        <strong>{selectedTrade.active_credit_exception.approved_by}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Exception Revalidation</span>
+                        <strong>
+                          {selectedTrade.active_credit_exception.revalidation_required
+                            ? creditExceptionReasonLabel(selectedTrade.active_credit_exception.revalidation_reason) ?? 'REQUIRED'
+                            : 'WITHIN APPROVED ENVELOPE'}
+                        </strong>
+                      </div>
+                    </>
+                  ) : null}
                   {selectedTradeCreditWorkflowItem?.credit_decision_history.length ? (
                     <div className="stack">
                       <span className="eyebrow">Credit Decisions</span>
@@ -853,6 +1003,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   selectedTradeId={selectedTrade.trade_id}
                   amendmentPreviewFields={amendmentPreviewFields}
                   cancelImpactSummary={cancelImpactSummary}
+                  amendmentLockedReason={amendmentLockedReason}
                   amendExternalTradeIdInput={amendExternalTradeIdInput}
                   setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
                   amendSourceSystemInput={amendSourceSystemInput}

@@ -19,6 +19,15 @@ from apps.api.app.domains.operations.services.trade_credit_hold import (
     format_trade_credit_hold_message,
 )
 from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
+from apps.api.app.domains.operations.services.trade_credit_exceptions import (
+    assess_trade_credit_exception,
+)
+from apps.api.app.domains.operations.services.trade_credit_exceptions import (
+    get_active_trade_credit_exception,
+)
+from apps.api.app.domains.operations.services.trade_credit_exceptions import (
+    invalidate_active_trade_credit_exceptions,
+)
 from apps.api.app.domains.operations.services.settlement_payments import trade_has_payment_records
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
@@ -53,6 +62,7 @@ from apps.api.app.shared.enums import (
     CreditApprovalStatus,
     InvoiceStatus,
     NominationStatus,
+    OptionSettlementStatus,
     OptionStyle,
     OptionType,
     PaymentStatus,
@@ -62,6 +72,7 @@ from apps.api.app.shared.enums import (
     TradeInstrumentType,
     TradeNature,
     TradeSide,
+    TradeStatus,
     TradeStructure,
     TradeWorkflowType,
 )
@@ -70,6 +81,12 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 ZERO = Decimal("0")
 DEFAULT_SOURCE_SYSTEM = "ETRM"
+OPTION_LIFECYCLE_EVENT_TO_STATUS = {
+    "OptionExercised": TradeStatus.EXERCISED.value,
+    "OptionExpired": TradeStatus.EXPIRED.value,
+    "OptionAssigned": TradeStatus.ASSIGNED.value,
+}
+OPTION_LIFECYCLE_EVENT_TYPES = set(OPTION_LIFECYCLE_EVENT_TO_STATUS)
 CREDIT_HOLD_FIELD_LABELS = {
     "confirmation_status": "confirmation",
     "nomination_status": "nomination",
@@ -78,6 +95,28 @@ CREDIT_HOLD_FIELD_LABELS = {
     "payment_status": "payment",
     "settlement_status": "settlement",
 }
+
+
+def normalize_trade_status(
+    value: object | None,
+    *,
+    default: str = TradeStatus.ACTIVE.value,
+) -> str:
+    normalized = str(value or default).strip().upper()
+    valid_values = {trade_status.value for trade_status in TradeStatus}
+    if normalized not in valid_values:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Trade status '{normalized}' is invalid. Expected one of: "
+                f"{', '.join(sorted(valid_values))}"
+            ),
+        )
+    return normalized
+
+
+def trade_status_is_active(value: object | None) -> bool:
+    return normalize_trade_status(value) == TradeStatus.ACTIVE.value
 
 
 def trade_snapshot(db: Session, trade: Trade | None) -> dict[str, object] | None:
@@ -140,7 +179,7 @@ def active_volume_by_commodity(trade: dict[str, object] | None) -> dict[str, Dec
     )
     if (
         trade is None
-        or trade.get("status") == "CANCELLED"
+        or not trade_status_is_active(trade.get("status"))
         or instrument_type == TradeInstrumentType.OPTION.value
     ):
         return {}
@@ -563,7 +602,83 @@ def validate_option_fields(
         normalized_option_style or OptionStyle.AMERICAN.value,
         normalized_option_strike_price,
         normalized_option_expiration_date,
+    )
+
+
+def validate_option_lifecycle_transition(
+    trade: Trade,
+    *,
+    event_type: str,
+    occurred_at: datetime,
+) -> str:
+    if normalize_instrument_type(trade.instrument_type) != TradeInstrumentType.OPTION.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{event_type} can only be recorded for OPTION trades",
         )
+
+    current_status = normalize_trade_status(trade.status)
+    if current_status != TradeStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Trade {trade.trade_id} is already closed as {current_status} and cannot record "
+                f"{event_type}"
+            ),
+        )
+
+    if trade.option_expiration_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Trade {trade.trade_id} is missing option_expiration_date",
+        )
+
+    effective_event_date = occurred_at.date()
+    expiration_date = trade.option_expiration_date
+    option_style = normalize_option_style(trade.option_style) or OptionStyle.AMERICAN.value
+    trade_side = normalize_trade_side(trade.trade_side)
+
+    if event_type == "OptionExpired":
+        if effective_event_date < expiration_date:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"OptionExpired cannot be recorded before expiration date "
+                    f"{expiration_date.isoformat()}"
+                ),
+            )
+        return OPTION_LIFECYCLE_EVENT_TO_STATUS[event_type]
+
+    if event_type == "OptionExercised" and trade_side != TradeSide.BUY.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only BUY option trades can be exercised. Use OptionAssigned for short options.",
+        )
+    if event_type == "OptionAssigned" and trade_side != TradeSide.SELL.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only SELL option trades can be assigned. Use OptionExercised for long options.",
+        )
+
+    if option_style == OptionStyle.EUROPEAN.value:
+        if effective_event_date != expiration_date:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"{event_type} can only be recorded on expiration date "
+                    f"{expiration_date.isoformat()} for EUROPEAN options"
+                ),
+            )
+    elif effective_event_date > expiration_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{event_type} must be recorded on or before expiration date "
+                f"{expiration_date.isoformat()} for {option_style} options"
+            ),
+        )
+
+    return OPTION_LIFECYCLE_EVENT_TO_STATUS[event_type]
 
 
 def reject_invoice_projection_override(
@@ -718,6 +833,39 @@ def _requested_credit_hold_blocked_fields(
     return blocked_fields
 
 
+def _format_credit_exception_revalidation_message(
+    *,
+    revalidation_reason: str | None,
+    approved_exception,
+    current_projected_exposure_amount: float | None,
+    remaining_headroom_amount: float | None,
+) -> str:
+    normalized_reason = str(revalidation_reason or "").strip().upper()
+    if normalized_reason == "EXCEPTION_EXPIRED":
+        expires_at = approved_exception.expires_at.date().isoformat() if approved_exception.expires_at is not None else "the configured expiry date"
+        return f"The approved credit exception expired on {expires_at} and must be refreshed."
+    if normalized_reason == "EXCEEDS_APPROVED_EXCEPTION":
+        currency_code = approved_exception.limit_currency_code
+        approved_projected_exposure = float(approved_exception.approved_projected_exposure_amount)
+        if current_projected_exposure_amount is not None:
+            overrun = current_projected_exposure_amount - approved_projected_exposure
+            return (
+                "The amended trade now exceeds the previously approved credit exception envelope: "
+                f"projected exposure {currency_code} {current_projected_exposure_amount:,.2f} versus approved "
+                f"exception ceiling {currency_code} {approved_projected_exposure:,.2f} "
+                f"({currency_code} {overrun:,.2f} above the approved envelope)."
+            )
+        return "The amended trade now exceeds the previously approved credit exception envelope."
+    if normalized_reason == "LIMIT_CURRENCY_CHANGED":
+        return "The current credit policy comparison basis changed, so the previous approved exception can no longer be relied on."
+    if normalized_reason in {"NO_POLICY_CONTEXT", "NOT_COMPARABLE", "CURRENCY_MISMATCH", "MISSING_TRADE_MEASUREMENTS"}:
+        return "The amended trade can no longer be compared reliably to the approved credit exception envelope and must be re-reviewed."
+    if remaining_headroom_amount is not None and remaining_headroom_amount < 0:
+        currency_code = approved_exception.limit_currency_code
+        return f"The amended trade is {currency_code} {abs(remaining_headroom_amount):,.2f} outside the approved exception envelope."
+    return "The amended trade must be re-reviewed against credit because the prior exception no longer covers the new projected exposure."
+
+
 def _sync_credit_approval_workflow_item(
     db: Session,
     *,
@@ -739,10 +887,53 @@ def _sync_credit_approval_workflow_item(
         and policy_result.get("breach_action") == "REQUIRE_APPROVAL"
     )
     if requires_approval:
-        if existing_item is not None and existing_item.status in {
-            CreditApprovalStatus.APPROVED.value,
-            CreditApprovalStatus.REJECTED.value,
-        }:
+        if existing_item is not None and existing_item.status == CreditApprovalStatus.APPROVED.value:
+            active_exception = get_active_trade_credit_exception(db, trade_id=trade.trade_id)
+            if active_exception is not None:
+                exception_assessment = assess_trade_credit_exception(
+                    exception=active_exception,
+                    trade=trade,
+                    db=db,
+                    now=now,
+                    policy_result=policy_result,
+                )
+                if not exception_assessment.revalidation_required:
+                    return
+                revalidation_message = _format_credit_exception_revalidation_message(
+                    revalidation_reason=exception_assessment.revalidation_reason,
+                    approved_exception=active_exception,
+                    current_projected_exposure_amount=exception_assessment.current_projected_exposure_amount,
+                    remaining_headroom_amount=exception_assessment.remaining_headroom_amount,
+                )
+                invalidate_active_trade_credit_exceptions(
+                    db,
+                    trade_id=trade.trade_id,
+                    released_at=now,
+                    released_by=actor_id,
+                    released_reason=revalidation_message,
+                    status=CreditApprovalStatus.PENDING_REVIEW.value,
+                )
+            else:
+                revalidation_message = (
+                    "The prior credit approval has no active exception envelope on file, so the amended trade must be re-reviewed."
+                )
+
+            notes = (
+                f"{_format_counterparty_credit_limit_message(policy_result)} "
+                f"{revalidation_message} Trade booking remains in place, but credit approval must be refreshed before the exception can be relied on again."
+            )
+            create_trade_workflow_item(
+                db,
+                trade_id=trade.trade_id,
+                workflow_type=TradeWorkflowType.CREDIT_APPROVAL.value,
+                actor_id=actor_id,
+                enforce_credit_authorization=False,
+                status=CreditApprovalStatus.PENDING_REVIEW.value,
+                notes=notes,
+                now=now,
+            )
+            return
+        if existing_item is not None and existing_item.status == CreditApprovalStatus.REJECTED.value:
             return
         notes = (
             f"{_format_counterparty_credit_limit_message(policy_result)} "
@@ -1143,7 +1334,12 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
         db.add(e)
         db.flush()
 
-        if e.aggregate_type == "trade" and e.event_type in {"TradeCreated", "TradeAmended", "TradeCancelled"}:
+        if e.aggregate_type == "trade" and e.event_type in {
+            "TradeCreated",
+            "TradeAmended",
+            "TradeCancelled",
+            *OPTION_LIFECYCLE_EVENT_TYPES,
+        }:
             payload_data = e.payload or {}
             existing = db.execute(
                 select(Trade).where(Trade.trade_id == e.aggregate_id)
@@ -1152,7 +1348,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
 
             if e.event_type == "TradeCreated" and existing is not None:
                 raise HTTPException(status_code=409, detail="Trade already exists")
-            if e.event_type in {"TradeAmended", "TradeCancelled"} and existing is None:
+            if e.event_type in {"TradeAmended", "TradeCancelled", *OPTION_LIFECYCLE_EVENT_TYPES} and existing is None:
                 raise HTTPException(status_code=404, detail="Trade not found")
 
             if e.event_type == "TradeCreated":
@@ -1322,6 +1518,13 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                         ),
                     )
 
+                requested_trade_status = normalize_trade_status(payload_data.get("status"))
+                if requested_trade_status != TradeStatus.ACTIVE.value:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Trades must be created with ACTIVE status",
+                    )
+
                 existing = Trade(
                     trade_id=e.aggregate_id,
                     external_trade_id=external_trade_id,
@@ -1364,7 +1567,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     payment_status=payment_status,
                     settlement_status=settlement_status,
                     trader_user=trader_user,
-                    status="ACTIVE",
+                    status=requested_trade_status,
                     last_event_id=e.event_id,
                 )
                 db.add(existing)
@@ -1409,6 +1612,17 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 )
 
             elif e.event_type == "TradeAmended" and existing is not None:
+                if (
+                    normalize_instrument_type(existing.instrument_type) == TradeInstrumentType.OPTION.value
+                    and not trade_status_is_active(existing.status)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Trade {existing.trade_id} is already closed as "
+                            f"{normalize_trade_status(existing.status)} and cannot be amended"
+                        ),
+                    )
                 existing.updated_at = recorded_at
                 reject_invoice_projection_override(db, trade_id=existing.trade_id, payload_data=payload_data)
                 credit_hold_state = get_trade_credit_hold_state(db, trade_id=existing.trade_id)
@@ -1627,7 +1841,16 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 if "trader_user" in payload_data:
                     existing.trader_user = normalize_optional_text(payload_data.get("trader_user"))
                 if "status" in payload_data and payload_data["status"] is not None:
-                    existing.status = payload_data["status"]
+                    next_status = normalize_trade_status(payload_data["status"])
+                    if next_status != TradeStatus.ACTIVE.value:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=(
+                                "Use TradeCancelled, OptionExercised, OptionExpired, or "
+                                "OptionAssigned events to close a trade"
+                            ),
+                        )
+                    existing.status = next_status
 
                 option_type_value = existing.option_type
                 if "option_type" in payload_data:
@@ -1749,9 +1972,39 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                 )
 
             elif e.event_type == "TradeCancelled" and existing is not None:
+                if not trade_status_is_active(existing.status):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Trade {existing.trade_id} is already closed as "
+                            f"{normalize_trade_status(existing.status)} and cannot be cancelled"
+                        ),
+                    )
                 existing.updated_at = recorded_at
-                existing.status = "CANCELLED"
+                existing.status = TradeStatus.CANCELLED.value
                 existing.last_event_id = e.event_id
+
+            elif e.event_type in OPTION_LIFECYCLE_EVENT_TYPES and existing is not None:
+                existing.updated_at = recorded_at
+                existing.status = validate_option_lifecycle_transition(
+                    existing,
+                    event_type=e.event_type,
+                    occurred_at=e.occurred_at,
+                )
+                existing.last_event_id = e.event_id
+                if existing.status in {
+                    TradeStatus.EXERCISED.value,
+                    TradeStatus.ASSIGNED.value,
+                }:
+                    create_trade_workflow_item(
+                        db,
+                        trade_id=existing.trade_id,
+                        workflow_type=TradeWorkflowType.OPTION_SETTLEMENT.value,
+                        actor_id=e.actor_id or "system.event",
+                        enforce_credit_authorization=False,
+                        status=OptionSettlementStatus.PENDING.value,
+                        now=recorded_at,
+                    )
 
             after = trade_snapshot(db, existing)
             sync_positions_for_trade_change(db, before, after, recorded_at)

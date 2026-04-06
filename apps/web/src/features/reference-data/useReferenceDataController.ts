@@ -19,6 +19,7 @@ import type {
   UnitRecord,
 } from '../../shared/models'
 import { getMutationContext } from '../../shared/mutation'
+import { tradeStatusIsActive } from '../../shared/trading'
 import { emptyBookForm, useReferenceDataWorkspace } from './useReferenceDataWorkspace'
 
 function sameText(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -352,7 +353,7 @@ export function useReferenceDataController({
     for (const trade of trades) {
       const current = usage.get(trade.book) ?? { activeTrades: 0, totalTrades: 0 }
       current.totalTrades += 1
-      if (trade.status !== 'CANCELLED') {
+      if (tradeStatusIsActive(trade.status)) {
         current.activeTrades += 1
       }
       usage.set(trade.book, current)
@@ -365,7 +366,7 @@ export function useReferenceDataController({
     for (const trade of trades) {
       const current = usage.get(trade.commodity) ?? { activeTrades: 0, totalTrades: 0 }
       current.totalTrades += 1
-      if (trade.status !== 'CANCELLED') {
+      if (tradeStatusIsActive(trade.status)) {
         current.activeTrades += 1
       }
       usage.set(trade.commodity, current)
@@ -379,7 +380,7 @@ export function useReferenceDataController({
       if (!trade.price_index_code) continue
       const current = usage.get(trade.price_index_code) ?? { activeTrades: 0, totalTrades: 0 }
       current.totalTrades += 1
-      if (trade.status !== 'CANCELLED') {
+      if (tradeStatusIsActive(trade.status)) {
         current.activeTrades += 1
       }
       usage.set(trade.price_index_code, current)

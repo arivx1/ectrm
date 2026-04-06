@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.trade import Trade
-from apps.api.app.shared.enums import OptionType, TradeInstrumentType, TradeSide
+from apps.api.app.shared.enums import OptionType, TradeInstrumentType, TradeSide, TradeStatus
 
 ZERO = Decimal("0")
 
@@ -79,8 +79,8 @@ def build_option_exposure_snapshot(
         trade.get("instrument_type"),
         default=TradeInstrumentType.LINEAR.value,
     )
-    status = _normalize_code(trade.get("status"), default="ACTIVE")
-    if instrument_type != TradeInstrumentType.OPTION.value or status == "CANCELLED":
+    status = _normalize_code(trade.get("status"), default=TradeStatus.ACTIVE.value)
+    if instrument_type != TradeInstrumentType.OPTION.value or status != TradeStatus.ACTIVE.value:
         return None
 
     trade_id = str(trade.get("trade_id") or "").strip()
