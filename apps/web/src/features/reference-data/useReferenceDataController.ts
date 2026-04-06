@@ -14,7 +14,7 @@ import type {
   UnitRecord,
 } from '../../shared/models'
 import { getMutationContext } from '../../shared/mutation'
-import { useReferenceDataWorkspace } from './useReferenceDataWorkspace'
+import { emptyBookForm, useReferenceDataWorkspace } from './useReferenceDataWorkspace'
 
 function sameText(left: string | null | undefined, right: string | null | undefined): boolean {
   return (left ?? '').trim() === (right ?? '').trim()
@@ -24,8 +24,28 @@ type BookSheetField = 'name' | 'description'
 
 type BookSheetRow = ReferenceRecord & {
   description: string
+  sheet_mode: 'create' | 'update'
   sheet_dirty: boolean
   sheet_error: string
+}
+
+type BookPasteIssue = {
+  row_number: number
+  code: string | null
+  message: string
+}
+
+type BookPasteSummary = {
+  total_rows: number
+  staged_rows: number
+  new_rows: number
+  updated_rows: number
+  invalid_rows: number
+  unchanged_rows: number
+  blocked_rows: number
+  issues: BookPasteIssue[]
+  used_header: boolean
+  delimiter: 'tab' | 'comma'
 }
 
 function buildBookForm(record: ReferenceRecord): BookForm {
@@ -33,6 +53,96 @@ function buildBookForm(record: ReferenceRecord): BookForm {
     code: record.code,
     name: record.name,
     description: record.description ?? '',
+  }
+}
+
+function normalizePasteHeader(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function parseDelimitedLine(line: string, delimiter: '\t' | ','): string[] {
+  const values: string[] = []
+  let current = ''
+  let inQuotes = false
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index]
+    if (character === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"'
+        index += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+      continue
+    }
+
+    if (character === delimiter && !inQuotes) {
+      values.push(current)
+      current = ''
+      continue
+    }
+
+    current += character
+  }
+
+  values.push(current)
+  return values
+}
+
+function parsePastedGrid(input: string): { rows: string[][]; delimiter: 'tab' | 'comma' } {
+  const normalized = input.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = normalized
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0)
+
+  const delimiter: '\t' | ',' = lines.some((line) => line.includes('\t')) ? '\t' : ','
+  return {
+    rows: lines.map((line) => parseDelimitedLine(line, delimiter)),
+    delimiter: delimiter === '\t' ? 'tab' : 'comma',
+  }
+}
+
+function resolveBookPasteMapping(rows: string[][]):
+  | { codeIndex: number; nameIndex: number; descriptionIndex: number; startIndex: number; usedHeader: boolean }
+  | { error: string } {
+  if (rows.length === 0) {
+    return { error: 'Paste at least one row containing Code and Name.' }
+  }
+
+  const firstRowHeaders = rows[0].map(normalizePasteHeader)
+  const codeHeaderIndex = firstRowHeaders.findIndex((value) => value === 'code' || value === 'bookcode' || value === 'book')
+  const nameHeaderIndex = firstRowHeaders.findIndex((value) => value === 'name' || value === 'bookname')
+  const descriptionHeaderIndex = firstRowHeaders.findIndex(
+    (value) => value === 'description' || value === 'desc' || value === 'details' || value === 'notes',
+  )
+
+  const usedHeader = codeHeaderIndex >= 0 || nameHeaderIndex >= 0 || descriptionHeaderIndex >= 0
+  if (usedHeader) {
+    if (codeHeaderIndex < 0 || nameHeaderIndex < 0) {
+      return { error: 'Header rows must include Code and Name columns. Description is optional.' }
+    }
+
+    return {
+      codeIndex: codeHeaderIndex,
+      nameIndex: nameHeaderIndex,
+      descriptionIndex: descriptionHeaderIndex,
+      startIndex: 1,
+      usedHeader: true,
+    }
+  }
+
+  if ((rows[0]?.length ?? 0) < 2) {
+    return { error: 'Paste Code and Name columns, with optional Description as the third column.' }
+  }
+
+  return {
+    codeIndex: 0,
+    nameIndex: 1,
+    descriptionIndex: 2,
+    startIndex: 0,
+    usedHeader: false,
   }
 }
 
@@ -82,6 +192,8 @@ export function useReferenceDataController({
   const [savingReference, setSavingReference] = useState(false)
   const [bookSheetDrafts, setBookSheetDrafts] = useState<Record<string, BookForm>>({})
   const [bookSheetApplyErrors, setBookSheetApplyErrors] = useState<Record<string, string>>({})
+  const [bookPasteInput, setBookPasteInput] = useState('')
+  const [bookPasteSummary, setBookPasteSummary] = useState<BookPasteSummary | null>(null)
 
   const workspace = useReferenceDataWorkspace({
     books,
@@ -102,6 +214,9 @@ export function useReferenceDataController({
   })
 
   const {
+    referenceSearch,
+    selectedBookCode,
+    setSelectedBookCode,
     filteredBooks,
     bookForm,
     setBookForm,
@@ -110,6 +225,7 @@ export function useReferenceDataController({
     currencyForm,
     unitForm,
     locationForm,
+    setBookFormMode,
     bookFormMode,
     commodityFormMode,
     priceIndexFormMode,
@@ -247,15 +363,24 @@ export function useReferenceDataController({
     : null
 
   function resolveBookSheetForm(code: string): BookForm | null {
+    const draft = bookSheetDrafts[code]
+    if (draft) {
+      return draft
+    }
+
     const record = books.find((book) => book.code === code)
     if (!record) {
       return null
     }
 
-    return bookSheetDrafts[code] ?? buildBookForm(record)
+    return buildBookForm(record)
   }
 
-  function validateBookSheetForm(candidate: Pick<BookForm, 'name'>): string {
+  function validateBookSheetForm(candidate: BookForm): string {
+    if (!candidate.code.trim()) {
+      return 'Code is required.'
+    }
+
     if (!candidate.name.trim()) {
       return 'Name is required.'
     }
@@ -264,19 +389,46 @@ export function useReferenceDataController({
   }
 
   const bookSheetRows = useMemo<BookSheetRow[]>(
-    () =>
-      filteredBooks.map((book) => {
+    () => {
+      const query = referenceSearch.trim().toLowerCase()
+      const existingRows = filteredBooks.map((book) => {
         const draft = bookSheetDrafts[book.code]
         const rowForm = draft ?? buildBookForm(book)
         return {
           ...book,
           name: rowForm.name,
           description: rowForm.description,
+          sheet_mode: 'update' as const,
           sheet_dirty: draft !== undefined,
           sheet_error: validateBookSheetForm(rowForm) || bookSheetApplyErrors[book.code] || '',
         }
-      }),
-    [bookSheetApplyErrors, bookSheetDrafts, filteredBooks],
+      })
+      const createdRows = Object.values(bookSheetDrafts)
+        .filter((draft) => !books.some((book) => book.code === draft.code))
+        .filter((draft) => {
+          if (!query) {
+            return true
+          }
+
+          return (
+            draft.code.toLowerCase().includes(query) ||
+            draft.name.toLowerCase().includes(query) ||
+            draft.description.toLowerCase().includes(query)
+          )
+        })
+        .map((draft) => ({
+          code: draft.code,
+          name: draft.name,
+          description: draft.description,
+          is_active: true,
+          sheet_mode: 'create' as const,
+          sheet_dirty: true,
+          sheet_error: validateBookSheetForm(draft) || bookSheetApplyErrors[draft.code] || '',
+        }))
+
+      return [...createdRows, ...existingRows]
+    },
+    [bookSheetApplyErrors, bookSheetDrafts, books, filteredBooks, referenceSearch],
   )
 
   const bookSheetDirtyCount = useMemo(
@@ -286,8 +438,8 @@ export function useReferenceDataController({
 
   const bookSheetInvalidCount = useMemo(
     () =>
-      Object.values(bookSheetDrafts).filter((draft) => Boolean(validateBookSheetForm(draft))).length,
-    [bookSheetDrafts],
+      Object.values(bookSheetDrafts).filter((draft) => Boolean(validateBookSheetForm(draft) || bookSheetApplyErrors[draft.code])).length,
+    [bookSheetApplyErrors, bookSheetDrafts],
   )
 
   const bookFieldErrors = useMemo(() => {
@@ -621,7 +773,8 @@ export function useReferenceDataController({
 
   function updateBookSheetField(code: string, field: BookSheetField, value: string) {
     const record = books.find((book) => book.code === code)
-    if (!record) {
+    const currentDraft = resolveBookSheetForm(code)
+    if (!currentDraft) {
       return
     }
 
@@ -636,16 +789,12 @@ export function useReferenceDataController({
       return next
     })
 
-    const currentDraft = resolveBookSheetForm(code)
-    if (!currentDraft) {
-      return
-    }
-
     const nextDraft = {
       ...currentDraft,
       [field]: value,
     }
     const hasChanges =
+      !record ||
       !sameText(nextDraft.name, record.name) ||
       !sameText(nextDraft.description, record.description)
 
@@ -666,15 +815,17 @@ export function useReferenceDataController({
 
   function resetBookSheetRow(code: string) {
     const record = books.find((book) => book.code === code)
-    if (!record) {
-      return
-    }
-
     resetReferenceMessages()
     clearBookSheetDraft(code)
 
-    if (selectedBook?.code === code && bookFormMode === 'edit') {
+    if (record && selectedBook?.code === code && bookFormMode === 'edit') {
       setBookForm(buildBookForm(record))
+      return
+    }
+
+    if (!record && selectedBookCode === code && bookFormMode === 'create') {
+      setSelectedBookCode(null)
+      setBookForm(emptyBookForm())
     }
   }
 
@@ -685,7 +836,143 @@ export function useReferenceDataController({
 
     if (selectedBook && bookFormMode === 'edit') {
       setBookForm(buildBookForm(selectedBook))
+      return
     }
+
+    if (selectedBookCode && !selectedBook && bookFormMode === 'create') {
+      setSelectedBookCode(null)
+      setBookForm(emptyBookForm())
+    }
+  }
+
+  function clearBookPasteState() {
+    setBookPasteInput('')
+    setBookPasteSummary(null)
+  }
+
+  function stageBooksFromPaste(input: string) {
+    const trimmedInput = input.trim()
+    resetReferenceMessages()
+
+    if (!trimmedInput) {
+      setReferenceActionError('Paste Code and Name rows first, then stage them into the books grid.')
+      setReferenceActionSuccess('')
+      setBookPasteSummary(null)
+      return
+    }
+
+    const { rows, delimiter } = parsePastedGrid(trimmedInput)
+    const mapping = resolveBookPasteMapping(rows)
+    if ('error' in mapping) {
+      setReferenceActionError(mapping.error)
+      setReferenceActionSuccess('')
+      setBookPasteSummary(null)
+      return
+    }
+
+    const nextDrafts = { ...bookSheetDrafts }
+    const nextApplyErrors = { ...bookSheetApplyErrors }
+    const issues: BookPasteIssue[] = []
+    let stagedRows = 0
+    let newRows = 0
+    let updatedRows = 0
+    let invalidRows = 0
+    let unchangedRows = 0
+    let blockedRows = 0
+
+    for (let rowIndex = mapping.startIndex; rowIndex < rows.length; rowIndex += 1) {
+      const cells = rows[rowIndex]
+      const displayRowNumber = rowIndex + 1
+      const rawCode = (cells[mapping.codeIndex] ?? '').trim()
+      const rawName = (cells[mapping.nameIndex] ?? '').trim()
+      const rawDescription =
+        mapping.descriptionIndex >= 0 ? (cells[mapping.descriptionIndex] ?? '').trim() : null
+
+      if (!rawCode) {
+        issues.push({ row_number: displayRowNumber, code: null, message: 'Missing Code.' })
+        blockedRows += 1
+        continue
+      }
+
+      const code = rawCode.toUpperCase()
+      const record = books.find((book) => book.code === code)
+      const nextDraft = {
+        code,
+        name: rawName,
+        description: rawDescription ?? (nextDrafts[code]?.description ?? record?.description ?? ''),
+      }
+
+      const hasChanges =
+        !record ||
+        !sameText(nextDraft.name, record.name) ||
+        !sameText(nextDraft.description, record.description)
+      if (!hasChanges) {
+        delete nextDrafts[code]
+        delete nextApplyErrors[code]
+        unchangedRows += 1
+        continue
+      }
+
+      nextDrafts[code] = nextDraft
+      if (record) {
+        updatedRows += 1
+      } else {
+        newRows += 1
+      }
+      const validationError = validateBookSheetForm(nextDraft)
+      if (validationError) {
+        nextApplyErrors[code] = validationError
+        invalidRows += 1
+      } else {
+        delete nextApplyErrors[code]
+      }
+
+      stagedRows += 1
+    }
+
+    setBookSheetDrafts(nextDrafts)
+    setBookSheetApplyErrors(nextApplyErrors)
+    setBookPasteSummary({
+      total_rows: rows.length - mapping.startIndex,
+      staged_rows: stagedRows,
+      new_rows: newRows,
+      updated_rows: updatedRows,
+      invalid_rows: invalidRows,
+      unchanged_rows: unchangedRows,
+      blocked_rows: blockedRows,
+      issues,
+      used_header: mapping.usedHeader,
+      delimiter,
+    })
+
+    if (selectedBook && bookFormMode === 'edit') {
+      const selectedDraft = nextDrafts[selectedBook.code]
+      setBookForm(selectedDraft ?? buildBookForm(selectedBook))
+    } else if (selectedBookCode && !selectedBook && bookFormMode === 'create') {
+      const selectedDraft = nextDrafts[selectedBookCode]
+      if (selectedDraft) {
+        setBookForm(selectedDraft)
+      }
+    }
+
+    if (stagedRows > 0) {
+      setReferenceActionSuccess(`Staged ${stagedRows} pasted book row${stagedRows === 1 ? '' : 's'}.`)
+      if (blockedRows > 0 || invalidRows > 0) {
+        setReferenceActionError(
+          `${blockedRows + invalidRows} pasted row${blockedRows + invalidRows === 1 ? '' : 's'} need attention before apply.`,
+        )
+      }
+      return
+    }
+
+    if (unchangedRows > 0 && blockedRows === 0) {
+      setReferenceActionSuccess(`Paste matched ${unchangedRows} existing book row${unchangedRows === 1 ? '' : 's'} but added no new staged changes.`)
+      setReferenceActionError('')
+      return
+    }
+
+    setReferenceActionError('No pasted rows were staged. Review the import summary and adjust the pasted data.')
+    setReferenceActionSuccess('')
   }
 
   async function applyBookSheetChanges(targetCodes?: string[]) {
@@ -707,6 +994,7 @@ export function useReferenceDataController({
     const nextApplyErrors = { ...bookSheetApplyErrors }
     const actorId = currentActorId()
     let successCount = 0
+    const successfulDrafts: Record<string, BookForm> = {}
 
     try {
       for (const code of dirtyCodes) {
@@ -722,16 +1010,32 @@ export function useReferenceDataController({
         }
 
         try {
-          await submitReferenceMutation(
-            apiBase,
-            `/reference/books/${code}`,
-            'PUT',
-            {
-              name: draft.name.trim(),
-              description: draft.description.trim() || null,
-              updated_by: actorId,
-            },
-          )
+          const existingRecord = books.find((book) => book.code === code)
+          if (existingRecord) {
+            await submitReferenceMutation(
+              apiBase,
+              `/reference/books/${code}`,
+              'PUT',
+              {
+                name: draft.name.trim(),
+                description: draft.description.trim() || null,
+                updated_by: actorId,
+              },
+            )
+          } else {
+            await submitReferenceMutation(
+              apiBase,
+              '/reference/books',
+              'POST',
+              {
+                code,
+                name: draft.name.trim(),
+                description: draft.description.trim() || null,
+                created_by: actorId,
+              },
+            )
+          }
+          successfulDrafts[code] = draft
           delete nextDrafts[code]
           delete nextApplyErrors[code]
           successCount += 1
@@ -745,6 +1049,11 @@ export function useReferenceDataController({
 
       if (successCount > 0) {
         await reloadData()
+        if (selectedBookCode && successfulDrafts[selectedBookCode]) {
+          setSelectedBookCode(selectedBookCode)
+          setBookFormMode('edit')
+          setBookForm(successfulDrafts[selectedBookCode])
+        }
       }
 
       const failureCount = Object.keys(nextApplyErrors).filter((code) => dirtyCodes.includes(code)).length
@@ -786,14 +1095,27 @@ export function useReferenceDataController({
   }
 
   function startCreateBook() {
-    beginReferenceAction(startCreateBookBase)
+    beginReferenceAction(() => {
+      setSelectedBookCode(null)
+      startCreateBookBase()
+    })
   }
 
   function startEditBook(code: string) {
     beginReferenceAction(() => {
-      startEditBookBase(code)
       const draft = resolveBookSheetForm(code)
+      const record = books.find((book) => book.code === code)
+      if (record) {
+        startEditBookBase(code)
+        if (draft) {
+          setBookForm(draft)
+        }
+        return
+      }
+
       if (draft) {
+        setSelectedBookCode(code)
+        setBookFormMode('create')
         setBookForm(draft)
       }
     })
@@ -864,12 +1186,16 @@ export function useReferenceDataController({
 
     if (bookFormMode === 'create') {
       const code = bookForm.code.trim().toUpperCase()
+      const stagedDraftCode = selectedBookCode && !selectedBook ? selectedBookCode : null
       await submitReference(
         '/reference/books',
         'POST',
         { code, name: bookForm.name.trim(), description: bookForm.description.trim() || null, created_by: currentActorId() },
         `Book ${code} created.`,
       )
+      if (stagedDraftCode) {
+        clearBookSheetDraft(stagedDraftCode)
+      }
       startEditBookBase(code)
     } else if (selectedBook) {
       await submitReference(
@@ -1269,6 +1595,9 @@ export function useReferenceDataController({
     selectedCurrencyUsage,
     selectedUnitUsage,
     selectedLocationUsage,
+    bookPasteInput,
+    setBookPasteInput,
+    bookPasteSummary,
     bookSheetRows,
     bookSheetDirtyCount,
     bookSheetInvalidCount,
@@ -1287,6 +1616,8 @@ export function useReferenceDataController({
     startCreateBook,
     startEditBook,
     updateBookSheetField,
+    stageBooksFromPaste,
+    clearBookPasteState,
     applyBookSheetChanges,
     resetBookSheetRow,
     resetAllBookSheetChanges,

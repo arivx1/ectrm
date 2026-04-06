@@ -1,3 +1,31 @@
+export class ApiError extends Error {
+  status: number
+  correlationId: string | null
+
+  constructor(message: string, init?: { status?: number; correlationId?: string | null }) {
+    super(formatApiErrorMessage(message, init?.correlationId))
+    this.name = 'ApiError'
+    this.status = init?.status ?? 0
+    this.correlationId = init?.correlationId?.trim() || null
+  }
+}
+
+function formatApiErrorMessage(message: string, correlationId?: string | null): string {
+  const normalizedMessage = message.trim() || 'Request failed.'
+  const normalizedCorrelationId = correlationId?.trim()
+
+  if (!normalizedCorrelationId) {
+    return normalizedMessage
+  }
+
+  const suffix = `Correlation ID: ${normalizedCorrelationId}`
+  if (normalizedMessage.includes(suffix)) {
+    return normalizedMessage
+  }
+
+  return `${normalizedMessage} ${suffix}`
+}
+
 function resolveLoopbackFallbackUrls(url: string): string[] {
   if (typeof window === 'undefined') {
     return []
@@ -50,6 +78,34 @@ async function fetchWithApiFallback(url: string, init?: RequestInit): Promise<Re
   }
 }
 
+export function getResponseCorrelationId(response: Pick<Response, 'headers'>): string | null {
+  const headerValue = response.headers.get('x-correlation-id')
+  return headerValue?.trim() || null
+}
+
+function extractPayloadCorrelationId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null
+  }
+
+  const candidate = payload as {
+    correlation_id?: unknown
+    error?: {
+      correlation_id?: unknown
+    }
+  }
+
+  if (typeof candidate.correlation_id === 'string' && candidate.correlation_id.trim()) {
+    return candidate.correlation_id
+  }
+
+  if (typeof candidate.error?.correlation_id === 'string' && candidate.error.correlation_id.trim()) {
+    return candidate.error.correlation_id
+  }
+
+  return null
+}
+
 function extractApiErrorMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') {
     return null
@@ -90,27 +146,62 @@ function extractApiErrorMessage(payload: unknown): string | null {
   return null
 }
 
-export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetchWithApiFallback(url, init)
-  if (!response.ok) {
-    const text = await response.text()
-    if (text) {
-      let payload: unknown = null
+export function createApiError(
+  message: string,
+  init?: { status?: number; correlationId?: string | null },
+): ApiError {
+  return new ApiError(message, init)
+}
 
-      try {
-        payload = JSON.parse(text)
-      } catch {
-        // Fall back to the raw response body when it is not valid JSON.
-      }
+export async function buildApiError(response: Response): Promise<ApiError> {
+  const responseCorrelationId = getResponseCorrelationId(response)
+  const text = await response.text()
+  if (text) {
+    let payload: unknown = null
 
-      const errorMessage = extractApiErrorMessage(payload)
-      if (errorMessage) {
-        throw new Error(errorMessage)
-      }
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      // Fall back to the raw response body when it is not valid JSON.
     }
 
-    throw new Error(text || `Request failed: ${response.status}`)
+    const errorMessage = extractApiErrorMessage(payload)
+    const payloadCorrelationId = extractPayloadCorrelationId(payload)
+    const correlationId = responseCorrelationId || payloadCorrelationId
+    if (errorMessage) {
+      return createApiError(errorMessage, {
+        status: response.status,
+        correlationId,
+      })
+    }
+
+    return createApiError(text, {
+      status: response.status,
+      correlationId,
+    })
   }
+
+  return createApiError(`Request failed: ${response.status}`, {
+    status: response.status,
+    correlationId: responseCorrelationId,
+  })
+}
+
+export async function requestOk(url: string, init?: RequestInit): Promise<Response> {
+  const response = await fetchWithApiFallback(url, init)
+  if (!response.ok) {
+    throw await buildApiError(response)
+  }
+
+  return response
+}
+
+export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await requestOk(url, init)
+  if (response.status === 204 || response.status === 205) {
+    return undefined as T
+  }
+
   return response.json() as Promise<T>
 }
 

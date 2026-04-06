@@ -6,6 +6,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from typing import Optional
 
 import httpx
@@ -14,6 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.core.logging import get_logger, log_outbound_request
 from apps.api.app.core.request_context import get_request_identity
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
@@ -28,6 +30,7 @@ GOD_LOGIN_PASSWORD = "admin"
 GOD_LOGIN_EMAIL = "admin@local.invalid"
 GOD_LOGIN_DISPLAY_NAME = "Admin"
 GOD_LOGIN_UPDATED_BY = "god-login"
+logger = get_logger(__name__)
 
 
 class AuthError(RuntimeError):
@@ -471,9 +474,19 @@ def verify_google_identity(id_token: str, *, http_client: httpx.Client | None = 
 
     owns_client = http_client is None
     client = http_client or httpx.Client(timeout=config.timeout_seconds)
+    started_at = perf_counter()
     try:
         response = client.get(config.tokeninfo_url, params={"id_token": normalized_token})
     except httpx.HTTPError as exc:
+        log_outbound_request(
+            logger,
+            provider="GOOGLE_AUTH",
+            method="GET",
+            url=config.tokeninfo_url,
+            status_code=getattr(getattr(exc, "response", None), "status_code", None),
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error=exc.__class__.__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Google authentication is temporarily unavailable.",
@@ -483,6 +496,15 @@ def verify_google_identity(id_token: str, *, http_client: httpx.Client | None = 
             client.close()
 
     if response.status_code != status.HTTP_200_OK:
+        log_outbound_request(
+            logger,
+            provider="GOOGLE_AUTH",
+            method="GET",
+            url=config.tokeninfo_url,
+            status_code=response.status_code,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error="unexpected_status",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Google token is invalid or has expired.",
@@ -491,6 +513,15 @@ def verify_google_identity(id_token: str, *, http_client: httpx.Client | None = 
     try:
         payload = response.json()
     except ValueError as exc:
+        log_outbound_request(
+            logger,
+            provider="GOOGLE_AUTH",
+            method="GET",
+            url=config.tokeninfo_url,
+            status_code=response.status_code,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error="invalid_json_response",
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Google authentication returned an unexpected response.",
@@ -502,12 +533,30 @@ def verify_google_identity(id_token: str, *, http_client: httpx.Client | None = 
     email = _normalize_google_claim_text(payload.get("email"), lowercase=True)
 
     if audience != config.client_id or issuer not in GOOGLE_AUTH_ISSUERS or subject is None or email is None:
+        log_outbound_request(
+            logger,
+            provider="GOOGLE_AUTH",
+            method="GET",
+            url=config.tokeninfo_url,
+            status_code=response.status_code,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error="invalid_claims",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Google token is invalid or has expired.",
         )
 
     if not _google_claim_is_true(payload.get("email_verified")):
+        log_outbound_request(
+            logger,
+            provider="GOOGLE_AUTH",
+            method="GET",
+            url=config.tokeninfo_url,
+            status_code=response.status_code,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error="email_unverified",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Google account email must be verified before signing in.",
@@ -515,11 +564,28 @@ def verify_google_identity(id_token: str, *, http_client: httpx.Client | None = 
 
     expiration = _parse_google_unix_timestamp(payload.get("exp"))
     if expiration is None or expiration <= int(datetime.now(timezone.utc).timestamp()):
+        log_outbound_request(
+            logger,
+            provider="GOOGLE_AUTH",
+            method="GET",
+            url=config.tokeninfo_url,
+            status_code=response.status_code,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error="token_expired",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Google token is invalid or has expired.",
         )
 
+    log_outbound_request(
+        logger,
+        provider="GOOGLE_AUTH",
+        method="GET",
+        url=config.tokeninfo_url,
+        status_code=response.status_code,
+        duration_ms=(perf_counter() - started_at) * 1000,
+    )
     display_name = _normalize_google_claim_text(payload.get("name"))
     return GoogleIdentity(
         subject=subject,

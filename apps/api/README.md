@@ -29,7 +29,7 @@ operations with session-based access control.
 - `/reference/*`: books, commodities, price indices, currencies, units,
   locations, counterparties, and portfolios
 - `/reports/*`: exposure and activity summaries
-- `/admin/*`: seed data, external-data runs, EIA/FRED/CFTC/Kalshi sync, trading source admin,
+- `/admin/*`: seed data, external-data runs and sync status, EIA/FRED/CFTC/CAISO/ERCOT/Kalshi sync, trading source admin,
   assistant-agent administration, and assistant run audit listings
 - `/users`: user account administration
 
@@ -101,6 +101,12 @@ Rebuild the position projection:
 PYTHONPATH=. python apps/api/scripts/rebuild_positions_projection.py
 ```
 
+Run one scheduler cycle for market data:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/run_market_data_scheduler.py --max-cycles 1
+```
+
 ## Configuration
 
 Example settings live in `apps/api/.env.example`.
@@ -108,6 +114,7 @@ Example settings live in `apps/api/.env.example`.
 The most important settings are:
 
 - `DATABASE_URL`: PostgreSQL connection string
+- `ECTRM_API_LOG_LEVEL`: backend log verbosity for request and error logging
 - `CORS_ALLOW_ORIGINS`: allowed web origins
 - `BOOTSTRAP_ADMIN_TOKEN`: enables first-admin creation through the API
 - `GOOGLE_AUTH_ENABLED`, `GOOGLE_AUTH_CLIENT_ID`: expose Google sign-in in the
@@ -134,6 +141,14 @@ The most important settings are:
   and Gemini respectively
 - `EIA_API_KEY`: unlocks external EIA sync
 - `FRED_API_KEY`: unlocks external FRED sync
+- `CAISO_BASE_URL`: points at the CAISO OASIS current hub-price page used for public power sync
+- `ERCOT_BASE_URL`: points at the ERCOT real-time settlement point display page used for public power sync
+- `EIA_SYNC_INTERVAL_MINUTES`, `FRED_SYNC_INTERVAL_MINUTES`, `CFTC_SYNC_INTERVAL_MINUTES`, `CAISO_SYNC_INTERVAL_MINUTES`, `ERCOT_SYNC_INTERVAL_MINUTES`: scheduler cadence targets and freshness guidance for market-data providers
+
+Failed API responses include an `x-correlation-id` response header. Auth and
+unhandled-error payloads also include the same correlation ID in the JSON body,
+and the web client now surfaces that ID in error banners so operators can match
+a visible failure to the backend request log quickly.
 - `KALSHI_BASE_URL`: points at the Kalshi REST API for public market data
 
 ## Implementation Shape
@@ -180,8 +195,9 @@ configured market, which fits the existing per-day observation model.
 2. Use `provider="KALSHI"` and set `series_id` to the Kalshi market ticker.
 3. Optionally set `dataset_code` to the Kalshi series ticker. If omitted, the
    sync infers it from the market ticker prefix.
-4. Leave `transform_rule` blank to default to `field:price.close`, or provide
-   another candlestick field such as `field:price.mean` or `field:volume`.
+4. Leave `transform_rule` blank to default to `field:price.close_dollars`, or
+   provide another candlestick field such as `field:price.mean_dollars` or
+   `field:volume_fp`.
 5. Run the sync with `POST /admin/external-data/kalshi/sync` or the helper
    script below.
 

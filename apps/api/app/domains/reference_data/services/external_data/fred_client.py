@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from apps.api.app.config import settings
+from apps.api.app.core.logging import get_logger, log_outbound_request, resolve_http_status_code
 
 
 class FREDClientError(RuntimeError):
     pass
+
+
+logger = get_logger(__name__)
 
 
 class FREDClient:
@@ -45,13 +50,40 @@ class FREDClient:
             params["observation_start"] = observation_start
 
         url = f"{self.base_url}/series/observations?{urlencode(params)}"
+        started_at = perf_counter()
         try:
             with urlopen(url, timeout=self.timeout_seconds) as response:
                 payload = json.loads(response.read().decode("utf-8"))
+                log_outbound_request(
+                    logger,
+                    provider="FRED",
+                    method="GET",
+                    url=url,
+                    status_code=resolve_http_status_code(response),
+                    duration_ms=(perf_counter() - started_at) * 1000,
+                )
         except HTTPError as exc:
+            log_outbound_request(
+                logger,
+                provider="FRED",
+                method="GET",
+                url=url,
+                status_code=exc.code,
+                duration_ms=(perf_counter() - started_at) * 1000,
+                error=exc.reason or "http_error",
+            )
             message = exc.read().decode("utf-8", errors="replace")
             raise FREDClientError(f"FRED request failed with HTTP {exc.code}: {message}") from exc
         except URLError as exc:
+            log_outbound_request(
+                logger,
+                provider="FRED",
+                method="GET",
+                url=url,
+                status_code=None,
+                duration_ms=(perf_counter() - started_at) * 1000,
+                error=exc.reason,
+            )
             raise FREDClientError(f"FRED request failed: {exc.reason}") from exc
 
         if "error_code" in payload:

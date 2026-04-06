@@ -64,11 +64,28 @@ class Settings(BaseSettings):
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    EIA_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
+    EIA_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
+    EIA_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
     FRED_API_KEY: str = ""
     FRED_BASE_URL: str = "https://api.stlouisfed.org/fred"
     FRED_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    FRED_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
+    FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
+    FRED_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
     CFTC_BASE_URL: str = "https://publicreporting.cftc.gov"
     CFTC_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    CFTC_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=5, le=10080)
+    CFTC_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=60, ge=1, le=3650)
+    CFTC_SYNC_SUCCESS_SLA_HOURS: int = Field(default=192, ge=1, le=336)
+    CAISO_BASE_URL: str = "https://oasis.caiso.com/oasisapi"
+    CAISO_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    CAISO_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=1440)
+    CAISO_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
+    ERCOT_BASE_URL: str = "https://www.ercot.com/content/cdr/html"
+    ERCOT_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    ERCOT_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=1440)
+    ERCOT_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
     KALSHI_BASE_URL: str = "https://api.elections.kalshi.com/trade-api/v2"
     KALSHI_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
     KALSHI_DEFAULT_LOOKBACK_DAYS: int = Field(default=90, ge=1, le=3650)

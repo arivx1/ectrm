@@ -1,4 +1,4 @@
-import { fetchJson, postJson } from '../../shared/api'
+import { fetchJson, postJson, requestOk } from '../../shared/api'
 import { buildMutationHeaders } from '../../shared/mutation'
 
 export type AuthenticatedUser = {
@@ -68,13 +68,8 @@ export async function logoutCurrentSession(apiBase: string): Promise<void> {
 }
 
 export async function sendSessionHeartbeat(apiBase: string): Promise<void> {
-  const response = await fetch(`${apiBase}/auth/heartbeat`, {
+  await requestOk(`${apiBase}/auth/heartbeat`, {
     method: 'POST',
     headers: buildMutationHeaders(),
   })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text || `Request failed: ${response.status}`)
-  }
 }

@@ -29,7 +29,14 @@ def normalize_kalshi_candlesticks(
         if published_at is None:
             continue
 
-        value = evaluate_transform_rule(definition.transform_rule or "field:price.close", row, default_field="price.close")
+        value = evaluate_transform_rule(
+            definition.transform_rule or "field:price.close_dollars",
+            row,
+            default_field="price.close_dollars",
+        )
+        if value is None:
+            # Historical docs sometimes show price.close without the _dollars suffix.
+            value = evaluate_transform_rule(definition.transform_rule or "field:price.close", row, default_field="price.close")
         if value is None:
             continue
 

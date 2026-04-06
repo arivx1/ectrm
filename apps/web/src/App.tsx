@@ -41,6 +41,7 @@ import {
   type CurrencyRecord,
   type EventRow,
   type ExternalDataRunRecord,
+  type ExternalDataSyncStatusRecord,
   type InspectorTab,
   type LocationRecord,
   type LocationStandards,
@@ -180,6 +181,7 @@ export default function App() {
   const [counterparties, setCounterparties] = useState<CounterpartyRecord[]>([])
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
+  const [externalDataSyncStatus, setExternalDataSyncStatus] = useState<ExternalDataSyncStatusRecord | null>(null)
   const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
   const [error, setError] = useState<string>('')
@@ -198,6 +200,7 @@ export default function App() {
   const [selectedTradeEvents, setSelectedTradeEvents] = useState<EventRow[]>([])
   const [eventFilter, setEventFilter] = useState('ALL')
   const [externalDataSyncing, setExternalDataSyncing] = useState(false)
+  const [externalDataSyncingProvider, setExternalDataSyncingProvider] = useState<string | null>(null)
   const [tradingSourcesSyncing, setTradingSourcesSyncing] = useState(false)
   const [weatherSyncing, setWeatherSyncing] = useState(false)
   const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => getStoredAuthSession())
@@ -228,6 +231,7 @@ export default function App() {
       counterparties: counterpartiesJson,
       portfolios: portfoliosJson,
       externalDataRuns: externalDataRunsJson,
+      externalDataSyncStatus: externalDataSyncStatusJson,
       tradingSources: tradingSourcesJson,
       weatherSyncStatus: weatherSyncStatusJson,
     } = await loadWorkspaceBootstrap(appConfig.apiBase, {
@@ -249,6 +253,7 @@ export default function App() {
     const nextCounterparties = counterpartiesJson as CounterpartyRecord[]
     const nextPortfolios = portfoliosJson as PortfolioRecord[]
     const nextExternalDataRuns = externalDataRunsJson as ExternalDataRunRecord[]
+    const nextExternalDataSyncStatus = externalDataSyncStatusJson as ExternalDataSyncStatusRecord | null
     const nextTradingSources = tradingSourcesJson as TradingSourceRecord[]
     const nextWeatherSyncStatus = weatherSyncStatusJson as WeatherSyncStatusRecord | null
 
@@ -266,6 +271,7 @@ export default function App() {
     setCounterparties(nextCounterparties)
     setPortfolios(nextPortfolios)
     setExternalDataRuns(nextExternalDataRuns)
+    setExternalDataSyncStatus(nextExternalDataSyncStatus)
     setTradingSources(nextTradingSources)
     setWeatherSyncStatus(nextWeatherSyncStatus)
     setReferenceDataLoading(false)
@@ -857,13 +863,21 @@ export default function App() {
     return rows
   }
 
-  async function handleRunEiaSync() {
+  async function handleRunExternalDataSync(provider: 'EIA' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT') {
     setExternalDataSyncing(true)
+    setExternalDataSyncingProvider(provider)
     setExternalDataError('')
     setExternalDataSuccess('')
     try {
       const { actorId } = getMutationContext()
-      const response = await fetch(`${appConfig.apiBase}/admin/external-data/eia/sync`, {
+      const routeByProvider: Record<typeof provider, string> = {
+        EIA: 'eia',
+        FRED: 'fred',
+        CFTC: 'cftc',
+        CAISO: 'caiso',
+        ERCOT: 'ercot',
+      }
+      const response = await fetch(`${appConfig.apiBase}/admin/external-data/${routeByProvider[provider]}/sync`, {
         method: 'POST',
         headers: buildMutationHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ requested_by: actorId }),
@@ -871,18 +885,19 @@ export default function App() {
 
       if (!response.ok) {
         const text = await response.text()
-        throw new Error(text || 'Failed to run EIA sync.')
+        throw new Error(text || `Failed to run ${provider} sync.`)
       }
 
       const payload = (await response.json()) as ExternalDataRunRecord
       await loadData()
       setExternalDataSuccess(
-        `EIA sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.observation_count} observations.`,
+        `${provider} sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.observation_count} observations.`,
       )
     } catch (err) {
-      setExternalDataError(err instanceof Error ? err.message : 'Failed to run EIA sync.')
+      setExternalDataError(err instanceof Error ? err.message : `Failed to run ${provider} sync.`)
     } finally {
       setExternalDataSyncing(false)
+      setExternalDataSyncingProvider(null)
     }
   }
 
@@ -1622,9 +1637,11 @@ export default function App() {
             activeCommodities={activeCommodities}
             priceIndices={priceIndices}
             externalDataRuns={externalDataRuns}
+            externalDataSyncStatus={externalDataSyncStatus}
             tradingSources={tradingSources}
             weatherSyncStatus={weatherSyncStatus}
             externalDataSyncing={externalDataSyncing}
+            externalDataSyncingProvider={externalDataSyncingProvider}
             externalDataError={externalDataError}
             externalDataSuccess={externalDataSuccess}
             tradingSourcesSyncing={tradingSourcesSyncing}
@@ -1633,7 +1650,7 @@ export default function App() {
             weatherSyncing={weatherSyncing}
             weatherSyncError={weatherSyncError}
             weatherSyncSuccess={weatherSyncSuccess}
-            onRunEiaSync={handleRunEiaSync}
+            onRunExternalDataSync={handleRunExternalDataSync}
             onRunNwsWeatherSync={handleRunNwsWeatherSync}
             onSeedTradingSources={handleSeedTradingSources}
             onRefreshData={loadData}

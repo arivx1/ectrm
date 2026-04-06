@@ -8,16 +8,21 @@ from urllib.parse import parse_qs
 from urllib.parse import urlsplit
 from unittest.mock import patch
 
+from apps.api.app.core.logging import configure_logging
 from apps.api.app.domains.weather.services.external_data.nws_client import NWSClient
 from apps.api.app.domains.weather.services.external_data.nws_client import NWSClientError
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict) -> None:
+    def __init__(self, payload: dict, *, status_code: int = 200) -> None:
         self._buffer = io.BytesIO(json.dumps(payload).encode("utf-8"))
+        self.status = status_code
 
     def read(self) -> bytes:
         return self._buffer.read()
+
+    def getcode(self) -> int:
+        return self.status
 
     def __enter__(self):
         return self
@@ -27,6 +32,17 @@ class _FakeResponse:
 
 
 class NWSClientTests(unittest.TestCase):
+    def _swap_log_stream(self) -> tuple[io.StringIO, object, object]:
+        logger = configure_logging()
+        handler = next(
+            handler
+            for handler in logger.handlers
+            if getattr(handler, "_ectrm_handler", False)
+        )
+        stream = io.StringIO()
+        original_stream = handler.setStream(stream)
+        return stream, handler, original_stream
+
     def test_get_point_builds_expected_request(self) -> None:
         captured: dict[str, object] = {}
 
@@ -90,6 +106,43 @@ class NWSClientTests(unittest.TestCase):
             client = NWSClient(user_agent="ECTRM Test (ops@example.com)")
             with self.assertRaisesRegex(NWSClientError, "boom"):
                 client.get_point(latitude=39.7456, longitude=-97.0892)
+
+    def test_client_logs_outbound_success(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            with patch(
+                "apps.api.app.domains.weather.services.external_data.nws_client.urlopen",
+                return_value=_FakeResponse({"properties": {"gridId": "TOP"}}, status_code=200),
+            ):
+                client = NWSClient(
+                    user_agent="ECTRM Test (ops@example.com)",
+                    base_url="https://api.weather.gov",
+                )
+                client.get_point(latitude=39.7456, longitude=-97.0892)
+        finally:
+            handler.setStream(original_stream)
+
+        output = stream.getvalue()
+        self.assertIn("Outbound request completed provider=NWS method=GET", output)
+        self.assertIn("target=https://api.weather.gov/points/39.7456,-97.0892", output)
+        self.assertIn("status_code=200", output)
+
+    def test_client_logs_outbound_failure(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            with patch(
+                "apps.api.app.domains.weather.services.external_data.nws_client.urlopen",
+                side_effect=URLError("boom"),
+            ):
+                client = NWSClient(user_agent="ECTRM Test (ops@example.com)")
+                with self.assertRaisesRegex(NWSClientError, "boom"):
+                    client.get_point(latitude=39.7456, longitude=-97.0892)
+        finally:
+            handler.setStream(original_stream)
+
+        output = stream.getvalue()
+        self.assertIn("Outbound request failed provider=NWS method=GET", output)
+        self.assertIn("error=boom", output)
 
 
 if __name__ == "__main__":

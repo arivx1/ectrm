@@ -74,6 +74,7 @@ On startup the app pulls a workspace bootstrap package that includes:
 If the current session has admin access, it also loads:
 
 - external data runs
+- external data sync status
 - trading sources
 
 ## Authentication Behavior

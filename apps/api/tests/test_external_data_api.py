@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -15,8 +15,10 @@ from apps.api.app.models.external_series_definition import ExternalSeriesDefinit
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 from apps.api.app.routes.external_data import (
     create_external_series_definition,
+    get_external_data_sync_status,
     get_latest_external_series_observation,
     get_external_data_run,
     get_market_context,
@@ -25,9 +27,11 @@ from apps.api.app.routes.external_data import (
     list_external_series_observations,
     list_price_index_observations,
     list_external_data_runs,
+    trigger_caiso_sync,
     trigger_kalshi_sync,
     trigger_cftc_sync,
     trigger_eia_sync,
+    trigger_ercot_sync,
     trigger_fred_sync,
     update_external_series_definition,
 )
@@ -60,6 +64,7 @@ class ExternalDataApiTests(unittest.TestCase):
             session.query(ExternalSeriesDefinition).delete()
             session.query(PriceIndexObservation).delete()
             session.query(ExternalDataRun).delete()
+            session.query(ReferencePriceIndexSource).delete()
             session.query(ReferencePriceIndex).delete()
             session.commit()
 
@@ -189,6 +194,26 @@ class ExternalDataApiTests(unittest.TestCase):
                         updated_by="system",
                         version=1,
                     ),
+                    ExternalSeriesDefinition(
+                        code="CAISO_NP15_RT5M",
+                        provider="CAISO",
+                        dataset_code=None,
+                        series_id="NP15",
+                        name="CAISO NP15 Real-Time 5-Minute Hub LMP",
+                        category="power",
+                        frequency="daily",
+                        unit_code="USD_MWH",
+                        source_url="https://oasis.caiso.com/oasisapi/prc_hub_lmp/PRC_HUB_LMP.html",
+                        description="Test CAISO series",
+                        query_params={"hub": "NP15"},
+                        transform_rule="field:lmp",
+                        is_active=True,
+                        created_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
                     ExternalSeriesObservation(
                         id=1,
                         series_code="FRED_DGS10",
@@ -222,6 +247,23 @@ class ExternalDataApiTests(unittest.TestCase):
                         raw_payload={"id": "abc-2", "report_date_as_yyyy_mm_dd": "2026-03-31T00:00:00.000"},
                         created_at=datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc),
                         updated_at=datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc),
+                    ),
+                    ExternalSeriesObservation(
+                        id=3,
+                        series_code="CAISO_NP15_RT5M",
+                        observation_date=date(2026, 4, 5),
+                        value=Decimal("28.450000"),
+                        unit_code="USD_MWH",
+                        source_provider="CAISO",
+                        source_series_id="NP15",
+                        source_frequency="5MIN",
+                        source_published_at=None,
+                        source_revision="2026-04-05:HE17:I03",
+                        downloaded_at=datetime(2026, 4, 5, 17, 15, tzinfo=timezone.utc),
+                        run_id=2,
+                        raw_payload={"trade_date": "2026-04-05", "hour": 17, "interval": 3, "hub": "NP15", "lmp": "28.45"},
+                        created_at=datetime(2026, 4, 5, 17, 15, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 4, 5, 17, 15, tzinfo=timezone.utc),
                     ),
                 ]
             )
@@ -293,10 +335,13 @@ class ExternalDataApiTests(unittest.TestCase):
 
         self.assertEqual(len(payload.price_indices), 1)
         self.assertEqual(payload.price_indices[0].price_index_code, "WTI_CUSHING_D")
+        self.assertEqual(len(payload.power), 1)
+        self.assertEqual(payload.power[0].series_code, "CAISO_NP15_RT5M")
         self.assertEqual(len(payload.macro), 1)
         self.assertEqual(payload.macro[0].series_code, "FRED_DGS10")
         self.assertEqual(len(payload.positioning), 1)
         self.assertEqual(payload.positioning[0].series_code, "CFTC_WTI_MM_NET")
+        self.assertGreaterEqual(len(payload.freshness), 5)
 
     def test_get_market_context_filters_positioning_by_commodity(self) -> None:
         self._seed_rows()
@@ -305,8 +350,230 @@ class ExternalDataApiTests(unittest.TestCase):
 
         self.assertEqual(payload.commodity, "HH")
         self.assertEqual(payload.price_indices, [])
+        self.assertEqual(len(payload.power), 1)
         self.assertEqual(len(payload.macro), 1)
         self.assertEqual(payload.positioning, [])
+
+    def test_get_external_data_sync_status_reports_provider_health(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    ReferencePriceIndex(
+                        code="WTI_CUSHING_D",
+                        name="WTI Cushing Spot Daily",
+                        commodity_code="WTI",
+                        currency_code="USD",
+                        unit_code="BBL",
+                        provider="EIA",
+                        market="CUSHING",
+                        location_code=None,
+                        calendar_code=None,
+                        description="Test",
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="system",
+                        updated_at=now,
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ReferencePriceIndexSource(
+                        id=10,
+                        price_index_code="WTI_CUSHING_D",
+                        provider="EIA",
+                        dataset_code=None,
+                        series_id="PET.RWTC.D",
+                        frequency="daily",
+                        source_unit="BBL",
+                        source_currency_code="USD",
+                        transform_rule=None,
+                        is_active=True,
+                        created_at=now,
+                        created_by="system",
+                        updated_at=now,
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
+                        code="FRED_DGS10",
+                        provider="FRED",
+                        dataset_code=None,
+                        series_id="DGS10",
+                        name="10-Year Treasury",
+                        category="macro",
+                        frequency="daily",
+                        unit_code="PCT",
+                        source_url=None,
+                        description=None,
+                        query_params=None,
+                        transform_rule="field:value",
+                        is_active=True,
+                        created_at=now,
+                        created_by="system",
+                        updated_at=now,
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
+                        code="CFTC_WTI_MM_NET",
+                        provider="CFTC",
+                        dataset_code="72hh-3qpy",
+                        series_id="067651",
+                        name="WTI Positioning",
+                        category="positioning",
+                        frequency="weekly",
+                        unit_code="CONTRACTS",
+                        source_url=None,
+                        description=None,
+                        query_params=None,
+                        transform_rule="field:open_interest_all",
+                        is_active=True,
+                        created_at=now,
+                        created_by="system",
+                        updated_at=now,
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalSeriesDefinition(
+                        code="CAISO_NP15_RT5M",
+                        provider="CAISO",
+                        dataset_code=None,
+                        series_id="NP15",
+                        name="NP15",
+                        category="power",
+                        frequency="daily",
+                        unit_code="USD_MWH",
+                        source_url=None,
+                        description=None,
+                        query_params=None,
+                        transform_rule="field:lmp",
+                        is_active=True,
+                        created_at=now,
+                        created_by="system",
+                        updated_at=now,
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ExternalDataRun(
+                        id=10,
+                        provider="EIA",
+                        job_name="sync_eia_price_data",
+                        status="SUCCEEDED",
+                        started_at=now - timedelta(hours=3),
+                        finished_at=now - timedelta(hours=3) + timedelta(minutes=5),
+                        requested_by="scheduler",
+                        series_count=1,
+                        observation_count=1,
+                        error_summary=None,
+                        created_at=now - timedelta(hours=3),
+                    ),
+                    ExternalDataRun(
+                        id=11,
+                        provider="FRED",
+                        job_name="sync_fred_series",
+                        status="SUCCEEDED",
+                        started_at=now - timedelta(hours=4),
+                        finished_at=now - timedelta(hours=4) + timedelta(minutes=1),
+                        requested_by="scheduler",
+                        series_count=1,
+                        observation_count=1,
+                        error_summary=None,
+                        created_at=now - timedelta(hours=4),
+                    ),
+                    ExternalDataRun(
+                        id=12,
+                        provider="CFTC",
+                        job_name="sync_cftc_series",
+                        status="FAILED",
+                        started_at=now - timedelta(hours=2),
+                        finished_at=now - timedelta(hours=2) + timedelta(minutes=1),
+                        requested_by="scheduler",
+                        series_count=1,
+                        observation_count=0,
+                        error_summary="boom",
+                        created_at=now - timedelta(hours=2),
+                    ),
+                    ExternalDataRun(
+                        id=13,
+                        provider="CAISO",
+                        job_name="sync_caiso_power_series",
+                        status="SUCCEEDED",
+                        started_at=now - timedelta(minutes=10),
+                        finished_at=now - timedelta(minutes=9),
+                        requested_by="scheduler",
+                        series_count=1,
+                        observation_count=1,
+                        error_summary=None,
+                        created_at=now - timedelta(minutes=10),
+                    ),
+                    PriceIndexObservation(
+                        id=10,
+                        price_index_code="WTI_CUSHING_D",
+                        observation_date=now.date(),
+                        value=Decimal("65.000000"),
+                        unit_code="BBL",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="PET.RWTC.D",
+                        source_frequency="DAILY",
+                        source_published_at=now - timedelta(hours=3),
+                        source_revision="rev-1",
+                        downloaded_at=now - timedelta(hours=3),
+                        run_id=10,
+                        raw_payload={},
+                        created_at=now - timedelta(hours=3),
+                        updated_at=now - timedelta(hours=3),
+                    ),
+                    ExternalSeriesObservation(
+                        id=10,
+                        series_code="FRED_DGS10",
+                        observation_date=now.date(),
+                        value=Decimal("4.100000"),
+                        unit_code="PCT",
+                        source_provider="FRED",
+                        source_series_id="DGS10",
+                        source_frequency="DAILY",
+                        source_published_at=None,
+                        source_revision="rev-2",
+                        downloaded_at=now - timedelta(hours=4),
+                        run_id=11,
+                        raw_payload={},
+                        created_at=now - timedelta(hours=4),
+                        updated_at=now - timedelta(hours=4),
+                    ),
+                    ExternalSeriesObservation(
+                        id=11,
+                        series_code="CAISO_NP15_RT5M",
+                        observation_date=now.date(),
+                        value=Decimal("23.000000"),
+                        unit_code="USD_MWH",
+                        source_provider="CAISO",
+                        source_series_id="NP15",
+                        source_frequency="5MIN",
+                        source_published_at=None,
+                        source_revision="rev-3",
+                        downloaded_at=now - timedelta(minutes=10),
+                        run_id=13,
+                        raw_payload={},
+                        created_at=now - timedelta(minutes=10),
+                        updated_at=now - timedelta(minutes=10),
+                    ),
+                ]
+            )
+            session.commit()
+            payload = get_external_data_sync_status(db=session)
+
+        providers = {row.provider: row for row in payload.providers}
+        self.assertEqual(payload.provider_count, 5)
+        self.assertEqual(providers["EIA"].health_status, "healthy")
+        self.assertEqual(providers["FRED"].health_status, "healthy")
+        self.assertEqual(providers["CFTC"].health_status, "failed")
+        self.assertEqual(providers["CAISO"].health_status, "healthy")
+        self.assertEqual(providers["ERCOT"].health_status, "unknown")
+        self.assertFalse(providers["CAISO"].due_for_sync)
+        self.assertEqual(providers["CFTC"].error_summary, "boom")
 
     def test_trigger_eia_sync_returns_run_payload(self) -> None:
         self._seed_rows()
@@ -362,6 +629,42 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
 
+    def test_trigger_caiso_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_caiso_series", return_value=expected_run) as sync_mock:
+                payload = trigger_caiso_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="CAISO_NP15_RT5M",
+                        lookback_days=1,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
+    def test_trigger_ercot_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_ercot_series", return_value=expected_run) as sync_mock:
+                payload = trigger_ercot_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="ERCOT_HB_HOUSTON_RT15M",
+                        lookback_days=1,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
     def test_trigger_kalshi_sync_returns_run_payload(self) -> None:
         self._seed_rows()
         with self.SessionLocal() as session:
@@ -406,7 +709,7 @@ class ExternalDataApiTests(unittest.TestCase):
 
         self.assertEqual(payload.code, "KALSHI_FED_2026_RATE_CUT")
         self.assertEqual(payload.provider, "KALSHI")
-        self.assertEqual(payload.transform_rule, "field:price.close")
+        self.assertEqual(payload.transform_rule, "field:price.close_dollars")
         self.assertIsNotNone(stored)
         self.assertEqual(stored.created_by, "anthony")
 
@@ -426,7 +729,7 @@ class ExternalDataApiTests(unittest.TestCase):
                     source_url="https://kalshi.com",
                     description="Before",
                     query_params=None,
-                    transform_rule="field:price.close",
+                    transform_rule="field:price.close_dollars",
                     is_active=True,
                     created_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
                     created_by="system",

@@ -68,7 +68,7 @@ class KalshiSyncTests(unittest.TestCase):
                     source_url="https://kalshi.com",
                     description="Test Kalshi market",
                     query_params=None,
-                    transform_rule="field:price.close",
+                    transform_rule="field:price.close_dollars",
                     is_active=True,
                     created_at=now,
                     created_by="test-user",
@@ -88,12 +88,12 @@ class KalshiSyncTests(unittest.TestCase):
                     "candlesticks": [
                         {
                             "end_period_ts": int(datetime(2026, 4, 2, 23, 59, tzinfo=timezone.utc).timestamp()),
-                            "price": {"close": "0.4100"},
+                            "price": {"close_dollars": "0.4100"},
                             "volume": "10.00",
                         },
                         {
                             "end_period_ts": int(datetime(2026, 4, 3, 23, 59, tzinfo=timezone.utc).timestamp()),
-                            "price": {"close": "0.4350"},
+                            "price": {"close_dollars": "0.4350"},
                             "volume": "12.00",
                         },
                     ],
@@ -154,7 +154,7 @@ class KalshiSyncTests(unittest.TestCase):
                     source_revision="1775260740",
                     downloaded_at=datetime(2026, 4, 4, 0, 5, tzinfo=timezone.utc),
                     run_id=1,
-                    raw_payload={"price": {"close": "0.4350"}},
+                    raw_payload={"price": {"close_dollars": "0.4350"}},
                     created_at=datetime(2026, 4, 4, 0, 5, tzinfo=timezone.utc),
                     updated_at=datetime(2026, 4, 4, 0, 5, tzinfo=timezone.utc),
                 )

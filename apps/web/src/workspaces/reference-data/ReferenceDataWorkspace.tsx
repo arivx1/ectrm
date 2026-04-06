@@ -94,9 +94,14 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     bookSheetRows,
     bookSheetDirtyCount,
     bookSheetInvalidCount,
+    bookPasteInput,
+    setBookPasteInput,
+    bookPasteSummary,
     selectedBookCode,
     startEditBook,
     updateBookSheetField,
+    stageBooksFromPaste,
+    clearBookPasteState,
     applyBookSheetChanges,
     resetBookSheetRow,
     resetAllBookSheetChanges,
@@ -226,51 +231,134 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
   switch (referenceTab) {
     case 'books':
       referenceDirectory = (
-        <DataSheet
-          label="Books"
-          description="Stage book updates directly in the grid, then apply them through the normal reference-data write path once the highlighted rows look clean."
-          columns={[
-            { id: 'code', label: 'Code', width: '8rem', renderCell: (book) => book.code },
-            {
-              id: 'name',
-              label: 'Name',
-              width: '18rem',
-              editable: {
-                value: (book) => book.name,
-                onChange: (book, value) => updateBookSheetField(book.code, 'name', value),
-                isDirty: (book) => book.sheet_dirty,
-                error: (book) => book.sheet_error,
+        <div className="stack">
+          <section className="reference-paste-card">
+            <div className="reference-paste-head">
+              <div>
+                <span className="eyebrow">Paste From Spreadsheet</span>
+                <h4>Books Import Staging</h4>
+              </div>
+              <div className="chip-row">
+                <span className="entity-chip entity-chip-soft">Code</span>
+                <span className="entity-chip entity-chip-soft">Name</span>
+                <span className="entity-chip entity-chip-soft">Description optional</span>
+              </div>
+            </div>
+            <p>
+              Paste rows from Excel or Sheets using either a `Code / Name / Description` header row or that column order without headers.
+              Unknown codes become staged new books, while existing codes stage as updates.
+            </p>
+            <textarea
+              className="control control-textarea reference-paste-textarea"
+              value={bookPasteInput}
+              onChange={(event) => setBookPasteInput(event.target.value)}
+              placeholder={'Code\tName\tDescription\nCRUDE01\tPrimary Crude Book\tWest desk prompt barrel book'}
+              spellCheck={false}
+            />
+            <div className="toolbar">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => stageBooksFromPaste(bookPasteInput)}
+                disabled={savingReference || !bookPasteInput.trim()}
+              >
+                Stage Pasted Rows
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={clearBookPasteState}
+                disabled={savingReference || (!bookPasteInput.trim() && !bookPasteSummary)}
+              >
+                Clear Paste
+              </button>
+            </div>
+            {bookPasteSummary && (
+              <div className="reference-paste-summary">
+                <div className="chip-row">
+                  <span className="entity-chip entity-chip-soft">{bookPasteSummary.total_rows} pasted</span>
+                  <span className="entity-chip entity-chip-soft">{bookPasteSummary.staged_rows} staged</span>
+                  <span className="entity-chip entity-chip-soft">{bookPasteSummary.new_rows} new</span>
+                  <span className="entity-chip entity-chip-soft">
+                    {bookPasteSummary.updated_rows} update{bookPasteSummary.updated_rows === 1 ? '' : 's'}
+                  </span>
+                  <span className={`entity-chip ${bookPasteSummary.invalid_rows > 0 ? '' : 'entity-chip-soft'}`}>
+                    {bookPasteSummary.invalid_rows} invalid
+                  </span>
+                  <span className={`entity-chip ${bookPasteSummary.blocked_rows > 0 ? '' : 'entity-chip-soft'}`}>
+                    {bookPasteSummary.blocked_rows} blocked
+                  </span>
+                  <span className="entity-chip entity-chip-soft">{bookPasteSummary.unchanged_rows} unchanged</span>
+                  <span className="entity-chip entity-chip-soft">
+                    {bookPasteSummary.used_header ? 'Header row used' : 'No header row'}
+                  </span>
+                </div>
+                {bookPasteSummary.issues.length > 0 && (
+                  <div className="reference-paste-issues">
+                    <strong>Import issues</strong>
+                    <ul>
+                      {bookPasteSummary.issues.slice(0, 6).map((issue) => (
+                        <li key={`${issue.row_number}:${issue.code ?? 'none'}:${issue.message}`}>
+                          Row {issue.row_number}
+                          {issue.code ? ` (${issue.code})` : ''}: {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                    {bookPasteSummary.issues.length > 6 && (
+                      <p>{bookPasteSummary.issues.length - 6} additional issue{bookPasteSummary.issues.length - 6 === 1 ? '' : 's'} are hidden from this summary.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <DataSheet
+            label="Books"
+            description="Stage book updates and pasted new books directly in the grid, then apply them through the normal reference-data write path once the highlighted rows look clean."
+            columns={[
+              { id: 'code', label: 'Code', width: '8rem', renderCell: (book) => book.code },
+              {
+                id: 'name',
+                label: 'Name',
+                width: '18rem',
+                editable: {
+                  value: (book) => book.name,
+                  onChange: (book, value) => updateBookSheetField(book.code, 'name', value),
+                  isDirty: (book) => book.sheet_dirty,
+                  error: (book) => book.sheet_error,
+                },
               },
-            },
-            {
-              id: 'description',
-              label: 'Description',
-              width: '20rem',
-              editable: {
-                value: (book) => book.description,
-                onChange: (book, value) => updateBookSheetField(book.code, 'description', value),
-                isDirty: (book) => book.sheet_dirty,
+              {
+                id: 'description',
+                label: 'Description',
+                width: '20rem',
+                editable: {
+                  value: (book) => book.description,
+                  onChange: (book, value) => updateBookSheetField(book.code, 'description', value),
+                  isDirty: (book) => book.sheet_dirty,
+                },
               },
-            },
-            statusColumn<(typeof bookSheetRows)[number]>(),
-            {
-              id: 'draft-state',
-              label: 'Draft State',
-              width: '11rem',
-              renderCell: (book) => (
-                <span className={`entity-chip ${book.sheet_error ? '' : 'entity-chip-soft'}`}>
-                  {book.sheet_error ? 'Needs attention' : book.sheet_dirty ? 'Staged' : 'Saved'}
-                </span>
-              ),
-            },
-          ]}
-          rows={bookSheetRows}
-          getRowId={(book) => book.code}
-          getRowLabel={(book) => `${book.code} ${book.name}`}
-          selectedRowId={selectedBookCode}
-          onSelectRow={(book) => startEditBook(book.code)}
-          emptyMessage="No books match the current filter."
-        />
+              statusColumn<(typeof bookSheetRows)[number]>(),
+              {
+                id: 'draft-state',
+                label: 'Draft State',
+                width: '11rem',
+                renderCell: (book) => (
+                  <span className={`entity-chip ${book.sheet_error ? '' : 'entity-chip-soft'}`}>
+                    {book.sheet_error ? 'Needs attention' : book.sheet_mode === 'create' ? 'New' : book.sheet_dirty ? 'Staged' : 'Saved'}
+                  </span>
+                ),
+              },
+            ]}
+            rows={bookSheetRows}
+            getRowId={(book) => book.code}
+            getRowLabel={(book) => `${book.code} ${book.name}`}
+            selectedRowId={selectedBookCode}
+            onSelectRow={(book) => startEditBook(book.code)}
+            emptyMessage="No books match the current filter."
+          />
+        </div>
       )
       break
     case 'commodities':

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
 from apps.api.app.core.request_context import get_request_identity
 
@@ -19,6 +22,23 @@ def _normalize_log_value(value: object | None) -> object:
     if value in (None, ""):
         return "-"
     return value
+
+
+def _normalize_duration_ms(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.2f}"
+
+
+def _summarize_log_error(error: object | None) -> str:
+    if error in (None, ""):
+        return "-"
+    message = str(error).strip()
+    if not message:
+        return "-"
+    if len(message) > 240:
+        return f"{message[:237]}..."
+    return message
 
 
 class RequestContextFilter(logging.Filter):
@@ -56,6 +76,78 @@ def configure_logging() -> logging.Logger:
 
     logger.propagate = False
     return logger
+
+
+def sanitize_outbound_target(url: str) -> str:
+    normalized_url = (url or "").strip()
+    if not normalized_url:
+        return "-"
+
+    split = urlsplit(normalized_url)
+    if not split.scheme and not split.netloc:
+        return normalized_url.split("?", maxsplit=1)[0] or "-"
+
+    return urlunsplit(
+        (
+            split.scheme,
+            split.netloc,
+            split.path or "/",
+            "",
+            "",
+        )
+    )
+
+
+def resolve_http_status_code(response: Any) -> int | None:
+    status_code = getattr(response, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+
+    status = getattr(response, "status", None)
+    if isinstance(status, int):
+        return status
+
+    getcode = getattr(response, "getcode", None)
+    if callable(getcode):
+        try:
+            resolved = getcode()
+        except TypeError:
+            resolved = None
+        if isinstance(resolved, int):
+            return resolved
+
+    return None
+
+
+def log_outbound_request(
+    logger: logging.Logger,
+    *,
+    provider: str,
+    method: str,
+    url: str,
+    status_code: int | None,
+    duration_ms: float | None,
+    error: object | None = None,
+) -> None:
+    message = (
+        "Outbound request failed provider=%s method=%s target=%s status_code=%s duration_ms=%s error=%s"
+        if error is not None
+        else "Outbound request completed provider=%s method=%s target=%s status_code=%s duration_ms=%s"
+    )
+    args: tuple[object, ...] = (
+        provider,
+        (method or "").strip().upper() or "-",
+        sanitize_outbound_target(url),
+        status_code if status_code is not None else "-",
+        _normalize_duration_ms(duration_ms),
+    )
+
+    if error is None:
+        logger.info(message, *args)
+        return
+
+    log_method = logger.error if status_code is None or status_code >= 500 else logger.warning
+    log_method(message, *args, _summarize_log_error(error))
 
 
 def get_logger(name: str | None = None) -> logging.Logger:

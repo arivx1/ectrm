@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl
@@ -11,12 +12,16 @@ from urllib.request import Request
 from urllib.request import urlopen
 
 from apps.api.app.config import settings
+from apps.api.app.core.logging import get_logger, log_outbound_request, resolve_http_status_code
 
 GEOJSON_ACCEPT_HEADER = "application/geo+json"
 
 
 class NWSClientError(RuntimeError):
     pass
+
+
+logger = get_logger(__name__)
 
 
 class NWSClient:
@@ -49,13 +54,40 @@ class NWSClient:
                 "Accept": GEOJSON_ACCEPT_HEADER,
             },
         )
+        started_at = perf_counter()
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 payload = json.loads(response.read().decode("utf-8"))
+                log_outbound_request(
+                    logger,
+                    provider="NWS",
+                    method="GET",
+                    url=request.full_url,
+                    status_code=resolve_http_status_code(response),
+                    duration_ms=(perf_counter() - started_at) * 1000,
+                )
         except HTTPError as exc:
+            log_outbound_request(
+                logger,
+                provider="NWS",
+                method="GET",
+                url=request.full_url,
+                status_code=exc.code,
+                duration_ms=(perf_counter() - started_at) * 1000,
+                error=exc.reason or "http_error",
+            )
             message = exc.read().decode("utf-8", errors="replace")
             raise NWSClientError(f"NWS request failed with HTTP {exc.code}: {message}") from exc
         except URLError as exc:
+            log_outbound_request(
+                logger,
+                provider="NWS",
+                method="GET",
+                url=request.full_url,
+                status_code=None,
+                duration_ms=(perf_counter() - started_at) * 1000,
+                error=exc.reason,
+            )
             raise NWSClientError(f"NWS request failed: {exc.reason}") from exc
 
         if not isinstance(payload, dict):

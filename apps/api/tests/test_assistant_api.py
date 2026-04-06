@@ -285,7 +285,14 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(create_response.json()["status"], "DRAFT")
         self.assertEqual(
             create_response.json()["allowed_tools"],
-            ["get_trade_by_id", "list_trades", "list_trade_events", "list_positions", "search_reference_data"],
+            [
+                "get_trade_by_id",
+                "list_trades",
+                "list_trade_events",
+                "list_positions",
+                "search_reference_data",
+                "get_market_context",
+            ],
         )
 
         public_listing = self.client.get("/assistant/agents")
@@ -315,7 +322,14 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(updated_payload["version"], 2)
         self.assertEqual(
             updated_payload["allowed_tools"],
-            ["get_trade_by_id", "list_trades", "list_trade_events", "list_positions", "search_reference_data"],
+            [
+                "get_trade_by_id",
+                "list_trades",
+                "list_trade_events",
+                "list_positions",
+                "search_reference_data",
+                "get_market_context",
+            ],
         )
 
         admin_listing = self.client.get(
@@ -783,7 +797,7 @@ class AssistantApiTests(unittest.TestCase):
 
         request_payload = captured_request["payload"]
         assert isinstance(request_payload, dict)
-        self.assertNotIn("Live tool results:", request_payload["input"][0]["content"][0]["text"])
+        self.assertNotIn("Live tool results:", request_payload["instructions"])
 
     def test_assistant_prompt_skips_live_tools_when_disabled(self) -> None:
         token = self._create_session_token()

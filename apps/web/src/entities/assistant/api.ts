@@ -1,4 +1,11 @@
-import { fetchJson, postJson, putJson } from '../../shared/api'
+import {
+  createApiError,
+  fetchJson,
+  getResponseCorrelationId,
+  postJson,
+  putJson,
+  requestOk,
+} from '../../shared/api'
 import { buildMutationHeaders, getMutationContext } from '../../shared/mutation'
 import type {
   AssistantActionRequest,
@@ -155,7 +162,7 @@ export async function streamAssistantResponse(
     onEvent: (event: AssistantStreamEvent) => void
   },
 ): Promise<void> {
-  const response = await fetch(`${apiBase}/assistant/respond/stream`, {
+  const response = await requestOk(`${apiBase}/assistant/respond/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -163,18 +170,29 @@ export async function streamAssistantResponse(
     },
     body: JSON.stringify(payload),
   })
-
-  if (!response.ok) {
-    throw await buildApiError(response)
-  }
+  const correlationId = getResponseCorrelationId(response)
 
   if (!response.body) {
-    throw new Error('Assistant stream returned no body.')
+    throw createApiError('Assistant stream returned no body.', {
+      status: response.status,
+      correlationId,
+    })
   }
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+
+  function raiseStreamError(event: AssistantStreamEvent): never {
+    const detail =
+      typeof event.data.detail === 'string'
+        ? event.data.detail
+        : 'Assistant stream failed.'
+    throw createApiError(detail, {
+      status: response.status,
+      correlationId,
+    })
+  }
 
   while (true) {
     const { value, done } = await reader.read()
@@ -186,6 +204,9 @@ export async function streamAssistantResponse(
       buffer = buffer.slice(boundaryIndex + 2)
       const parsedEvent = parseAssistantStreamEvent(rawEvent)
       if (parsedEvent) {
+        if (parsedEvent.event === 'error') {
+          raiseStreamError(parsedEvent)
+        }
         init.onEvent(parsedEvent)
       }
       boundaryIndex = buffer.indexOf('\n\n')
@@ -198,6 +219,9 @@ export async function streamAssistantResponse(
 
   const trailingEvent = parseAssistantStreamEvent(buffer.trim())
   if (trailingEvent) {
+    if (trailingEvent.event === 'error') {
+      raiseStreamError(trailingEvent)
+    }
     init.onEvent(trailingEvent)
   }
 }
@@ -212,41 +236,6 @@ export async function previewAssistantPromptContext(
     payload as unknown as Record<string, unknown>,
     { headers: init?.headers },
   )
-}
-
-async function buildApiError(response: Response): Promise<Error> {
-  const text = await response.text()
-  if (text) {
-    let payload:
-      | {
-          detail?: unknown
-          error?: {
-            message?: unknown
-          }
-        }
-      | null = null
-
-    try {
-      payload = JSON.parse(text) as {
-        detail?: unknown
-        error?: {
-          message?: unknown
-        }
-      }
-    } catch {
-      // Fall back to the raw response body when it is not valid JSON.
-    }
-
-    if (typeof payload?.detail === 'string' && payload.detail.trim()) {
-      return new Error(payload.detail)
-    }
-
-    if (typeof payload?.error?.message === 'string' && payload.error.message.trim()) {
-      return new Error(payload.error.message)
-    }
-  }
-
-  return new Error(text || `Request failed: ${response.status}`)
 }
 
 function parseAssistantStreamEvent(rawEvent: string): AssistantStreamEvent | null {

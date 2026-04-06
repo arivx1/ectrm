@@ -168,6 +168,37 @@ export type ExternalDataRunRecord = {
   created_at: string
 }
 
+export type ExternalDataProviderStatusRecord = {
+  provider: string
+  label: string
+  category: string
+  health_status: string
+  latest_run_status: string
+  success_sla_hours: number
+  scheduler_interval_minutes: number
+  active_series_count: number
+  due_for_sync: boolean
+  last_run_at: string | null
+  last_success_at: string | null
+  latest_observation_at: string | null
+  observation_age_hours: number | null
+  error_summary: string | null
+  latest_run: ExternalDataRunRecord | null
+  latest_success: ExternalDataRunRecord | null
+}
+
+export type ExternalDataSyncStatusRecord = {
+  generated_at: string
+  health_status: string
+  provider_count: number
+  healthy_provider_count: number
+  stale_provider_count: number
+  failed_provider_count: number
+  running_provider_count: number
+  unknown_provider_count: number
+  providers: ExternalDataProviderStatusRecord[]
+}
+
 export type PriceIndexObservationRecord = {
   id: number
   price_index_code: string

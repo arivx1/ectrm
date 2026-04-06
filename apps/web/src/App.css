@@ -2204,6 +2204,62 @@
   background: rgba(248, 250, 249, 0.9);
 }
 
+.reference-paste-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.1rem;
+  background: rgba(248, 250, 249, 0.9);
+}
+
+.reference-paste-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.reference-paste-head h4 {
+  margin: 0.28rem 0 0;
+  color: #13293d;
+  font-size: 1.02rem;
+}
+
+.reference-paste-card > p,
+.reference-paste-summary p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.5;
+}
+
+.reference-paste-textarea {
+  min-height: 8.25rem;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 0.9rem;
+}
+
+.reference-paste-summary {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.reference-paste-issues {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.reference-paste-issues strong {
+  color: #13293d;
+}
+
+.reference-paste-issues ul {
+  margin: 0;
+  padding-left: 1rem;
+  color: #66717c;
+  line-height: 1.5;
+}
+
 .reference-usage-card p {
   margin: 0.45rem 0 0;
   color: #66717c;
@@ -3334,6 +3390,7 @@
   .section-head,
   .section-head-control,
   .tile-layout-toolbar-head,
+  .reference-paste-head,
   .workspace-tile-head,
   .timeline-head,
   .system-subhead,

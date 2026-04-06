@@ -1,4 +1,4 @@
-import { fetchJson, putJson } from '../../shared/api'
+import { fetchJson, putJson, requestOk } from '../../shared/api'
 import type {
   PersonalizableWorkspaceId,
   WorkspaceLayoutDefinition,
@@ -36,13 +36,8 @@ export async function resetPersonalWorkspaceLayout(
   accessToken: string,
   workspaceId: PersonalizableWorkspaceId,
 ): Promise<void> {
-  const response = await fetch(`${apiBase}/layout-definitions/${workspaceId}`, {
+  await requestOk(`${apiBase}/layout-definitions/${workspaceId}`, {
     method: 'DELETE',
     headers: authorizationHeaders(accessToken),
   })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text || `Request failed: ${response.status}`)
-  }
 }

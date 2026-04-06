@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Iterable, cast
 
 import httpx
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.core.logging import get_logger, log_outbound_request
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptEnvelope
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
 from apps.api.app.domains.assistant.services.tools import (
@@ -44,6 +46,7 @@ PROVIDER_SETUP_ENV_VARS: dict[AssistantProvider, str] = {
 }
 
 VALID_PROVIDERS: tuple[AssistantProvider, ...] = ("openai", "anthropic", "google")
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -869,21 +872,49 @@ async def _post_json(
     payload: dict[str, Any],
     provider_label: str,
 ) -> dict[str, Any]:
+    started_at = perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.ASSISTANT_TIMEOUT_SECONDS) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.HTTPError as exc:
+        log_outbound_request(
+            logger,
+            provider=provider_label,
+            method="POST",
+            url=url,
+            status_code=getattr(getattr(exc, "response", None), "status_code", None),
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error=exc.__class__.__name__,
+        )
         raise AssistantServiceError(
             status_code=502,
             detail=f"{provider_label} request failed: {exc}",
         ) from exc
 
     if response.is_error:
+        detail = _extract_provider_error_message(provider_label, response)
+        log_outbound_request(
+            logger,
+            provider=provider_label,
+            method="POST",
+            url=url,
+            status_code=response.status_code,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error=detail,
+        )
         raise AssistantServiceError(
             status_code=502 if response.status_code >= 500 else 400,
-            detail=_extract_provider_error_message(provider_label, response),
+            detail=detail,
         )
 
+    log_outbound_request(
+        logger,
+        provider=provider_label,
+        method="POST",
+        url=url,
+        status_code=response.status_code,
+        duration_ms=(perf_counter() - started_at) * 1000,
+    )
     return cast(dict[str, Any], response.json())
 
 

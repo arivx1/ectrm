@@ -11,6 +11,7 @@ from apps.api.app.models.external_series_observation import ExternalSeriesObserv
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
+from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 
 DEFAULT_MARKET_CONTEXT_LIMIT = 5
 MAX_MARKET_CONTEXT_LIMIT = 10
@@ -37,6 +38,7 @@ def build_market_context(
         "generated_at": datetime.now(timezone.utc),
         "commodity": normalized_commodity,
         "price_indices": _load_price_index_context(db, commodity=normalized_commodity, limit=normalized_limit),
+        "power": _load_external_series_context(db, category="power", limit=normalized_limit),
         "macro": _load_external_series_context(db, category="macro", limit=normalized_limit),
         "positioning": _load_external_series_context(
             db,
@@ -44,6 +46,7 @@ def build_market_context(
             commodity=normalized_commodity,
             limit=normalized_limit,
         ),
+        "freshness": _load_freshness_context(db),
     }
 
 
@@ -213,6 +216,25 @@ def _load_external_series_context(
         if len(items) >= limit:
             break
     return items
+
+
+def _load_freshness_context(db: Session) -> list[dict[str, Any]]:
+    status = build_external_data_sync_status(db)
+    return [
+        {
+            "provider": row["provider"],
+            "label": row["label"],
+            "category": row["category"],
+            "health_status": row["health_status"],
+            "latest_run_status": row["latest_run_status"],
+            "due_for_sync": row["due_for_sync"],
+            "last_success_at": row["last_success_at"],
+            "latest_observation_at": row["latest_observation_at"],
+            "observation_age_hours": row["observation_age_hours"],
+            "error_summary": row["error_summary"],
+        }
+        for row in status["providers"]
+    ]
 
 
 def _latest_external_series_observation(db: Session, series_code: str) -> Optional[ExternalSeriesObservation]:

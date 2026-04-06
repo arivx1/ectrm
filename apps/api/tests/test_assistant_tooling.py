@@ -127,6 +127,21 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             session.add(
+                ExternalDataRun(
+                    id=2,
+                    provider="CAISO",
+                    job_name="sync_caiso_power_series",
+                    status="SUCCEEDED",
+                    started_at=datetime(2026, 3, 17, 12, 10, tzinfo=timezone.utc),
+                    finished_at=datetime(2026, 3, 17, 12, 11, tzinfo=timezone.utc),
+                    requested_by="system",
+                    series_count=1,
+                    observation_count=1,
+                    error_summary=None,
+                    created_at=datetime(2026, 3, 17, 12, 10, tzinfo=timezone.utc),
+                )
+            )
+            session.add(
                 PriceIndexObservation(
                     id=1,
                     price_index_code="WTI_CUSHING_D",
@@ -188,6 +203,26 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                         updated_by="system",
                         version=1,
                     ),
+                    ExternalSeriesDefinition(
+                        code="CAISO_NP15_RT5M",
+                        provider="CAISO",
+                        dataset_code=None,
+                        series_id="NP15",
+                        name="CAISO NP15 Real-Time 5-Minute Hub LMP",
+                        category="power",
+                        frequency="daily",
+                        unit_code="USD_MWH",
+                        source_url="https://oasis.caiso.com/oasisapi/prc_hub_lmp/PRC_HUB_LMP.html",
+                        description="Power test series",
+                        query_params={"hub": "NP15"},
+                        transform_rule="field:lmp",
+                        is_active=True,
+                        created_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
                     ExternalSeriesObservation(
                         id=1,
                         series_code="FRED_DGS10",
@@ -222,6 +257,23 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                         created_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
                         updated_at=datetime(2026, 3, 17, 18, 0, tzinfo=timezone.utc),
                     ),
+                    ExternalSeriesObservation(
+                        id=3,
+                        series_code="CAISO_NP15_RT5M",
+                        observation_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
+                        value=29.4,
+                        unit_code="USD_MWH",
+                        source_provider="CAISO",
+                        source_series_id="NP15",
+                        source_frequency="5MIN",
+                        source_published_at=None,
+                        source_revision="2026-03-17:HE12:I03",
+                        downloaded_at=datetime(2026, 3, 17, 18, 5, tzinfo=timezone.utc),
+                        run_id=2,
+                        raw_payload={"trade_date": "2026-03-17", "hour": 12, "interval": 3, "hub": "NP15", "lmp": "29.4"},
+                        created_at=datetime(2026, 3, 17, 18, 5, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 17, 18, 5, tzinfo=timezone.utc),
+                    ),
                 ]
             )
             session.commit()
@@ -255,6 +307,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trace.tool_name, "get_market_context")
         self.assertEqual(result.output["commodity"], "WTI")
         self.assertEqual(result.output["price_indices"][0]["price_index_code"], "WTI_CUSHING_D")
+        self.assertEqual(result.output["power"][0]["series_code"], "CAISO_NP15_RT5M")
         self.assertEqual(result.output["macro"][0]["series_code"], "FRED_DGS10")
         self.assertEqual(result.output["positioning"][0]["series_code"], "CFTC_WTI_MM_NET")
 

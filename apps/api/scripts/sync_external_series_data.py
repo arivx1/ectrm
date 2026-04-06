@@ -13,15 +13,17 @@ if REPO_ROOT not in sys.path:
 
 from apps.api.app.db.engine import SessionLocal
 from apps.api.app.domains.reference_data.services.external_data import (
+    sync_caiso_series,
     sync_cftc_series,
     sync_fred_series,
     sync_kalshi_series,
+    sync_ercot_series,
 )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync generic external time-series datasets into local storage.")
-    parser.add_argument("--provider", dest="provider", choices=("fred", "cftc", "kalshi"), required=True)
+    parser.add_argument("--provider", dest="provider", choices=("fred", "cftc", "caiso", "ercot", "kalshi"), required=True)
     parser.add_argument("--series-code", dest="series_code")
     parser.add_argument("--lookback-days", dest="lookback_days", type=int)
     parser.add_argument("--requested-by", dest="requested_by")
@@ -38,6 +40,20 @@ def main() -> int:
             )
         elif args.provider == "cftc":
             run = sync_cftc_series(
+                db,
+                series_code=args.series_code,
+                lookback_days=args.lookback_days,
+                requested_by=args.requested_by,
+            )
+        elif args.provider == "caiso":
+            run = sync_caiso_series(
+                db,
+                series_code=args.series_code,
+                lookback_days=args.lookback_days,
+                requested_by=args.requested_by,
+            )
+        elif args.provider == "ercot":
+            run = sync_ercot_series(
                 db,
                 series_code=args.series_code,
                 lookback_days=args.lookback_days,

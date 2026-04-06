@@ -12,19 +12,24 @@ from apps.api.app.core.auth import resolve_audit_actor_id
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import (
+    sync_caiso_series,
     sync_cftc_series,
     sync_eia_series,
+    sync_ercot_series,
     sync_fred_series,
     sync_kalshi_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
+from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.schemas.external_data import (
     EIASyncRequest,
+    ExternalDataProviderStatusOut,
     ExternalDataRunOut,
+    ExternalDataSyncStatusOut,
     ExternalSeriesDefinitionUpsertRequest,
     ExternalSeriesDefinitionOut,
     ExternalSeriesObservationOut,
@@ -61,6 +66,18 @@ def get_external_data_run(run_id: int, db: Session = Depends(get_db)) -> Externa
     return _to_run_out(row)
 
 
+@admin_router.get("/status", response_model=ExternalDataSyncStatusOut)
+def get_external_data_sync_status(
+    db: Session = Depends(get_db),
+) -> ExternalDataSyncStatusOut:
+    payload = build_external_data_sync_status(db)
+    provider_rows = payload.pop("providers")
+    return ExternalDataSyncStatusOut(
+        **payload,
+        providers=[_to_external_data_provider_status_out(row) for row in provider_rows],
+    )
+
+
 @admin_router.post("/eia/sync", response_model=ExternalDataRunOut)
 def trigger_eia_sync(payload: EIASyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
     actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
@@ -90,6 +107,30 @@ def trigger_fred_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(
 def trigger_cftc_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
     actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
     run = sync_cftc_series(
+        db,
+        series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/caiso/sync", response_model=ExternalDataRunOut)
+def trigger_caiso_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_caiso_series(
+        db,
+        series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/ercot/sync", response_model=ExternalDataRunOut)
+def trigger_ercot_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_ercot_series(
         db,
         series_code=payload.series_code,
         lookback_days=payload.lookback_days,
@@ -352,6 +393,29 @@ def _to_external_series_observation_out(row: ExternalSeriesObservation) -> Exter
     )
 
 
+def _to_external_data_provider_status_out(row: dict) -> ExternalDataProviderStatusOut:
+    latest_run = row.get("latest_run")
+    latest_success = row.get("latest_success")
+    return ExternalDataProviderStatusOut(
+        provider=str(row["provider"]),
+        label=str(row["label"]),
+        category=str(row["category"]),
+        health_status=str(row["health_status"]),
+        latest_run_status=str(row["latest_run_status"]),
+        success_sla_hours=int(row["success_sla_hours"]),
+        scheduler_interval_minutes=int(row["scheduler_interval_minutes"]),
+        active_series_count=int(row["active_series_count"]),
+        due_for_sync=bool(row["due_for_sync"]),
+        last_run_at=row.get("last_run_at"),
+        last_success_at=row.get("last_success_at"),
+        latest_observation_at=row.get("latest_observation_at"),
+        observation_age_hours=row.get("observation_age_hours"),
+        error_summary=row.get("error_summary"),
+        latest_run=_to_run_out(latest_run) if latest_run is not None else None,
+        latest_success=_to_run_out(latest_success) if latest_success is not None else None,
+    )
+
+
 def _to_observation_out(row: PriceIndexObservation) -> PriceIndexObservationOut:
     return PriceIndexObservationOut(
         id=row.id,
@@ -383,7 +447,7 @@ def _normalize_definition_payload(payload: ExternalSeriesDefinitionUpsertRequest
         if frequency not in {"daily", "day"}:
             raise HTTPException(status_code=400, detail="Kalshi definitions currently support daily candlesticks only")
         if not transform_rule:
-            transform_rule = "field:price.close"
+            transform_rule = "field:price.close_dollars"
         if not transform_rule.startswith("field:"):
             raise HTTPException(status_code=400, detail="Kalshi definitions require a field: transform rule")
         if not dataset_code and "-" not in series_id:

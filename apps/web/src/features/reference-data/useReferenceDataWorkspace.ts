@@ -110,8 +110,12 @@ export function emptyPortfolioForm(defaultBookCode = ''): PortfolioForm {
   }
 }
 
-function resolveSelectedCode<T extends { code: string }>(selectedCode: string | null, records: T[]): string | null {
-  if (selectedCode && records.some((record) => record.code === selectedCode)) {
+function resolveSelectedCode<T extends { code: string }>(
+  selectedCode: string | null,
+  records: T[],
+  options?: { preserveMissingSelection?: boolean },
+): string | null {
+  if (selectedCode !== null && (options?.preserveMissingSelection || records.some((record) => record.code === selectedCode))) {
     return selectedCode
   }
 
@@ -182,7 +186,7 @@ export function useReferenceDataWorkspace({
   const [counterpartyFormMode, setCounterpartyFormMode] = useState<'create' | 'edit'>('create')
   const [portfolioFormMode, setPortfolioFormMode] = useState<'create' | 'edit'>('create')
 
-  const resolvedSelectedBookCode = resolveSelectedCode(selectedBookCode, books)
+  const resolvedSelectedBookCode = resolveSelectedCode(selectedBookCode, books, { preserveMissingSelection: true })
   const resolvedSelectedCommodityCode = resolveSelectedCode(selectedCommodityCode, commodities)
   const resolvedSelectedPriceIndexCode = resolveSelectedCode(selectedPriceIndexCode, priceIndices)
   const resolvedSelectedCurrencyCode = resolveSelectedCode(selectedCurrencyCode, currencies)

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { WeatherSyncStatusRecord } from '../../shared/models'
+import type { ExternalDataSyncStatusRecord, WeatherSyncStatusRecord } from '../../shared/models'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
@@ -65,6 +65,8 @@ type TradingSourceRecord = {
   last_reviewed_at: string
 }
 
+type ExternalDataProviderStatusRecord = ExternalDataSyncStatusRecord['providers'][number]
+
 type SchemaEntityKey =
   | 'events'
   | 'trades'
@@ -86,9 +88,11 @@ type AdminWorkspaceProps = {
   activeCommodities: ReferenceRecord[]
   priceIndices: PriceIndexRecord[]
   externalDataRuns: ExternalDataRunRecord[]
+  externalDataSyncStatus: ExternalDataSyncStatusRecord | null
   tradingSources: TradingSourceRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
   externalDataSyncing: boolean
+  externalDataSyncingProvider: string | null
   externalDataError: string
   externalDataSuccess: string
   tradingSourcesSyncing: boolean
@@ -97,7 +101,7 @@ type AdminWorkspaceProps = {
   weatherSyncing: boolean
   weatherSyncError: string
   weatherSyncSuccess: string
-  onRunEiaSync: () => Promise<void>
+  onRunExternalDataSync: (provider: 'EIA' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT') => Promise<void>
   onRunNwsWeatherSync: () => Promise<void>
   onSeedTradingSources: () => Promise<void>
   onRefreshData: () => Promise<void>
@@ -294,6 +298,21 @@ function formatAgeHours(value: number | null | undefined): string {
   return `${days.toFixed(days >= 10 ? 0 : 1)}d old`
 }
 
+function marketDataCategoryLabel(value: string): string {
+  switch (value) {
+    case 'price':
+      return 'Prices'
+    case 'power':
+      return 'Power'
+    case 'macro':
+      return 'Macro'
+    case 'positioning':
+      return 'Positioning'
+    default:
+      return value
+  }
+}
+
 export function AdminWorkspace({
   authSession,
   onOpenSettings,
@@ -307,9 +326,11 @@ export function AdminWorkspace({
   activeCommodities,
   priceIndices,
   externalDataRuns,
+  externalDataSyncStatus,
   tradingSources,
   weatherSyncStatus,
   externalDataSyncing,
+  externalDataSyncingProvider,
   externalDataError,
   externalDataSuccess,
   tradingSourcesSyncing,
@@ -318,7 +339,7 @@ export function AdminWorkspace({
   weatherSyncing,
   weatherSyncError,
   weatherSyncSuccess,
-  onRunEiaSync,
+  onRunExternalDataSync,
   onRunNwsWeatherSync,
   onSeedTradingSources,
   onRefreshData,
@@ -488,9 +509,34 @@ export function AdminWorkspace({
     ],
   )
 
-  const eiaRuns = useMemo(() => externalDataRuns.filter((run) => run.provider === 'EIA'), [externalDataRuns])
-
-  const latestEiaRun = useMemo(() => eiaRuns[0] ?? null, [eiaRuns])
+  const marketDataProviders = externalDataSyncStatus?.providers ?? []
+  const marketDataProviderCodes = useMemo(
+    () => new Set(marketDataProviders.map((provider) => provider.provider)),
+    [marketDataProviders],
+  )
+  const marketDataRuns = useMemo(
+    () => externalDataRuns.filter((run) => marketDataProviderCodes.has(run.provider)),
+    [externalDataRuns, marketDataProviderCodes],
+  )
+  const latestMarketDataRun = useMemo(() => marketDataRuns[0] ?? null, [marketDataRuns])
+  const latestFreshMarketDataProvider = useMemo(() => {
+    const healthyProviders = marketDataProviders.filter((provider) => provider.latest_observation_at)
+    return (
+      [...healthyProviders].sort((left, right) => {
+        const leftTime = new Date(left.latest_observation_at ?? '').getTime()
+        const rightTime = new Date(right.latest_observation_at ?? '').getTime()
+        return rightTime - leftTime
+      })[0] ?? null
+    )
+  }, [marketDataProviders])
+  const marketDataPowerProviders = useMemo(
+    () => marketDataProviders.filter((provider) => provider.category === 'power'),
+    [marketDataProviders],
+  )
+  const marketDataAttentionCount =
+    (externalDataSyncStatus?.stale_provider_count ?? 0) +
+    (externalDataSyncStatus?.failed_provider_count ?? 0) +
+    (externalDataSyncStatus?.unknown_provider_count ?? 0)
 
   const weatherLocations = weatherSyncStatus?.locations ?? []
   const latestNwsRun = weatherSyncStatus?.latest_run ?? null
@@ -666,35 +712,85 @@ export function AdminWorkspace({
           <div className="admin-sync-head">
             <div>
               <span className="eyebrow">External Data</span>
-              <h3>EIA Sync Control</h3>
+              <h3>Market Data Health</h3>
             </div>
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => void onRunEiaSync()}
-              disabled={externalDataSyncing}
-            >
-              {externalDataSyncing ? 'Running Sync...' : 'Run EIA Sync'}
-            </button>
+            <div className="admin-sync-head-actions">
+              {externalDataSyncStatus ? (
+                <span className={`status-pill status-pill-${weatherHealthTone(externalDataSyncStatus.health_status)}`}>
+                  {weatherHealthLabel(externalDataSyncStatus.health_status)}
+                </span>
+              ) : null}
+              <button type="button" className="button button-secondary" onClick={() => void onRefreshData()}>
+                Refresh
+              </button>
+            </div>
           </div>
-          <p>Trigger the seeded EIA benchmark refresh and inspect recent ingestion runs directly from the admin workspace.</p>
+          <p>Watch price, macro, positioning, and power feeds together, then trigger a targeted provider sync when freshness starts to drift.</p>
 
           <div className="admin-sync-status-grid">
             <article className="admin-card">
               <AdminCardTitle
-                label="Latest Run"
-                tooltip="Shows the most recent EIA ingestion attempt and whether it completed successfully."
+                label="Coverage"
+                tooltip="How many tracked market-data providers are currently healthy versus stale, failed, or still uninitialized."
               />
-              <p>{latestEiaRun ? `${latestEiaRun.status} across ${latestEiaRun.series_count} series` : 'No EIA sync has been recorded yet.'}</p>
-              <span>{latestEiaRun ? formatDate(latestEiaRun.finished_at ?? latestEiaRun.started_at) : 'Awaiting first sync'}</span>
+              <p>
+                {externalDataSyncStatus
+                  ? `${externalDataSyncStatus.healthy_provider_count} of ${externalDataSyncStatus.provider_count} providers are healthy.`
+                  : 'Market-data sync status has not been loaded yet.'}
+              </p>
+              <span>
+                {externalDataSyncStatus
+                  ? `${externalDataSyncStatus.failed_provider_count} failed · ${externalDataSyncStatus.stale_provider_count} stale · ${externalDataSyncStatus.unknown_provider_count} unknown`
+                  : 'Awaiting first status snapshot'}
+              </span>
             </article>
             <article className="admin-card">
               <AdminCardTitle
-                label="Rows Written"
-                tooltip="Observation count written by the most recent EIA ingestion run."
+                label="Power Footprint"
+                tooltip="How many power providers are currently tracked inside the market-data freshness surface."
               />
-              <p>{latestEiaRun ? `${latestEiaRun.observation_count} observations written in the latest run.` : 'No observations loaded yet.'}</p>
-              <span>{latestEiaRun ? `Requested by ${latestEiaRun.requested_by ?? 'system'}` : 'No operator recorded'}</span>
+              <p>
+                {marketDataPowerProviders.length > 0
+                  ? `${marketDataPowerProviders.length} power providers are wired into the live sync registry.`
+                  : 'No power providers are registered yet.'}
+              </p>
+              <span>
+                {marketDataPowerProviders.length > 0
+                  ? marketDataPowerProviders.map((provider) => provider.provider).join(' · ')
+                  : 'Seed a power provider to activate this surface'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Attention Queue"
+                tooltip="Providers needing operator attention because they are stale, failed, or still missing a first successful load."
+              />
+              <p>
+                {externalDataSyncStatus
+                  ? `${marketDataAttentionCount} providers currently need attention.`
+                  : 'Provider attention status is not available yet.'}
+              </p>
+              <span>
+                {externalDataSyncStatus
+                  ? `${externalDataSyncStatus.running_provider_count} running · ${marketDataProviders.filter((provider) => provider.due_for_sync).length} due for sync`
+                  : 'No scheduler state loaded'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Latest Healthy Data"
+                tooltip="Newest successfully ingested market-data observation currently available across the tracked providers."
+              />
+              <p>
+                {latestFreshMarketDataProvider?.latest_observation_at
+                  ? `${latestFreshMarketDataProvider.label} last landed ${formatDate(latestFreshMarketDataProvider.latest_observation_at)}.`
+                  : 'No provider has published a stored observation yet.'}
+              </p>
+              <span>
+                {latestMarketDataRun
+                  ? `Latest run #${latestMarketDataRun.id} ${latestMarketDataRun.provider} ${latestMarketDataRun.status.toLowerCase()}`
+                  : 'Awaiting first sync'}
+              </span>
             </article>
           </div>
 
@@ -702,15 +798,57 @@ export function AdminWorkspace({
           {externalDataSuccess ? <div className="feedback-banner feedback-banner-success">{externalDataSuccess}</div> : null}
 
           <div className="admin-run-list">
-            {eiaRuns.length === 0 ? (
+            {marketDataProviders.length === 0 ? (
               <div className="detail-row">
-                <span>No sync history loaded.</span>
+                <span>No market-data provider status is loaded yet.</span>
               </div>
             ) : (
-              eiaRuns.map((run) => (
+              marketDataProviders.map((provider: ExternalDataProviderStatusRecord) => (
+                <article key={provider.provider} className="admin-run-row admin-weather-row">
+                  <div>
+                    <strong>{provider.label}</strong>
+                    <p>
+                      {provider.provider} · {marketDataCategoryLabel(provider.category)} · {provider.active_series_count} active series
+                    </p>
+                    <div className="admin-weather-row-detail">
+                      <span>{provider.latest_observation_at ? `Latest data ${formatDate(provider.latest_observation_at)}` : 'No stored observation yet'}</span>
+                      <span>{provider.observation_age_hours != null ? formatAgeHours(provider.observation_age_hours) : 'Freshness unknown'}</span>
+                      <span>{provider.due_for_sync ? 'Due for sync' : `Cadence ${cadenceLabel(provider.scheduler_interval_minutes)}`}</span>
+                    </div>
+                    {provider.error_summary ? <p>{provider.error_summary}</p> : null}
+                  </div>
+                  <div className="admin-run-meta">
+                    <span className={`status-pill status-pill-${weatherHealthTone(provider.health_status)}`}>
+                      {weatherHealthLabel(provider.health_status)}
+                    </span>
+                    <span>{provider.last_success_at ? `Last success ${formatDate(provider.last_success_at)}` : 'No successful run yet'}</span>
+                    <span>{provider.latest_run ? `Run #${provider.latest_run.id} ${provider.latest_run.status}` : 'No run history yet'}</span>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void onRunExternalDataSync(provider.provider as 'EIA' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT')}
+                      disabled={externalDataSyncing}
+                    >
+                      {externalDataSyncingProvider === provider.provider ? 'Running Sync...' : `Run ${provider.provider}`}
+                    </button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+
+          <div className="admin-run-list">
+            {marketDataRuns.length === 0 ? (
+              <div className="detail-row">
+                <span>No market-data sync runs are loaded yet.</span>
+              </div>
+            ) : (
+              marketDataRuns.slice(0, 8).map((run) => (
                 <article key={run.id} className="admin-run-row">
                   <div>
-                    <strong>{run.provider} run #{run.id}</strong>
+                    <strong>
+                      {run.provider} run #{run.id}
+                    </strong>
                     <p>
                       {run.status} · {run.series_count} series · {run.observation_count} observations
                     </p>

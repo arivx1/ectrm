@@ -1,6 +1,11 @@
 import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
-import type { AssistantRuntimeSettings, LocationStandards, WeatherSyncStatusRecord } from '../../shared/models'
+import type {
+  AssistantRuntimeSettings,
+  ExternalDataSyncStatusRecord,
+  LocationStandards,
+  WeatherSyncStatusRecord,
+} from '../../shared/models'
 
 export type WorkspaceBootstrap = {
   health: { status?: string }
@@ -17,6 +22,7 @@ export type WorkspaceBootstrap = {
   counterparties: unknown[]
   portfolios: unknown[]
   externalDataRuns: unknown[]
+  externalDataSyncStatus: ExternalDataSyncStatusRecord | null
   tradingSources: unknown[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
 }
@@ -125,15 +131,21 @@ export async function loadWorkspaceBootstrap(
   ])
 
   let externalDataRuns: unknown[] = []
+  let externalDataSyncStatus: ExternalDataSyncStatusRecord | null = null
   let tradingSources: unknown[] = []
   let weatherSyncStatus: WeatherSyncStatusRecord | null = null
 
   if (options?.adminHeaders) {
-    const [externalDataRunsResult, tradingSourcesResult, weatherSyncStatusResult] = await Promise.allSettled([
+    const [externalDataRunsResult, externalDataSyncStatusResult, tradingSourcesResult, weatherSyncStatusResult] =
+      await Promise.allSettled([
       fetchJson<unknown[]>(
         `${apiBase}${withLimit('/admin/external-data/runs', bootstrapQueryLimits.externalDataRuns)}`,
         { headers: options.adminHeaders },
       ),
+      fetchJson<ExternalDataSyncStatusRecord>(`${apiBase}/admin/external-data/status`, {
+        headers: options.adminHeaders,
+        cache: 'no-store',
+      }),
       fetchJson<unknown[]>(
         `${apiBase}${withLimit('/admin/trading-sources', bootstrapQueryLimits.tradingSources)}`,
         { headers: options.adminHeaders },
@@ -146,6 +158,10 @@ export async function loadWorkspaceBootstrap(
 
     if (externalDataRunsResult.status === 'fulfilled') {
       externalDataRuns = externalDataRunsResult.value
+    }
+
+    if (externalDataSyncStatusResult.status === 'fulfilled') {
+      externalDataSyncStatus = externalDataSyncStatusResult.value
     }
 
     if (tradingSourcesResult.status === 'fulfilled') {
@@ -172,6 +188,7 @@ export async function loadWorkspaceBootstrap(
     counterparties,
     portfolios,
     externalDataRuns,
+    externalDataSyncStatus,
     tradingSources,
     weatherSyncStatus,
   }

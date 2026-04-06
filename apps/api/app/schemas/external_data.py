@@ -88,6 +88,37 @@ class ExternalSeriesObservationOut(BaseModel):
     updated_at: datetime
 
 
+class ExternalDataProviderStatusOut(BaseModel):
+    provider: str
+    label: str
+    category: str
+    health_status: str
+    latest_run_status: str
+    success_sla_hours: int
+    scheduler_interval_minutes: int
+    active_series_count: int
+    due_for_sync: bool
+    last_run_at: Optional[datetime]
+    last_success_at: Optional[datetime]
+    latest_observation_at: Optional[datetime]
+    observation_age_hours: Optional[float]
+    error_summary: Optional[str]
+    latest_run: Optional[ExternalDataRunOut]
+    latest_success: Optional[ExternalDataRunOut]
+
+
+class ExternalDataSyncStatusOut(BaseModel):
+    generated_at: datetime
+    health_status: str
+    provider_count: int
+    healthy_provider_count: int
+    stale_provider_count: int
+    failed_provider_count: int
+    running_provider_count: int
+    unknown_provider_count: int
+    providers: list[ExternalDataProviderStatusOut]
+
+
 class MarketContextPriceOut(BaseModel):
     price_index_code: str
     name: str
@@ -115,12 +146,27 @@ class MarketContextSeriesOut(BaseModel):
     downloaded_at: datetime
 
 
+class MarketContextFreshnessOut(BaseModel):
+    provider: str
+    label: str
+    category: str
+    health_status: str
+    latest_run_status: str
+    due_for_sync: bool
+    last_success_at: Optional[datetime]
+    latest_observation_at: Optional[datetime]
+    observation_age_hours: Optional[float]
+    error_summary: Optional[str]
+
+
 class MarketContextOut(BaseModel):
     generated_at: datetime
     commodity: Optional[str]
     price_indices: list[MarketContextPriceOut]
+    power: list[MarketContextSeriesOut]
     macro: list[MarketContextSeriesOut]
     positioning: list[MarketContextSeriesOut]
+    freshness: list[MarketContextFreshnessOut]
 
 
 class PriceIndexObservationOut(BaseModel):

@@ -441,22 +441,32 @@ def _get_market_context(db: Session, arguments: dict[str, Any]) -> AssistantTool
     limit = _normalize_market_context_limit(arguments.get("limit"), default=5)
     payload = build_market_context(db, commodity=commodity, limit=limit)
     price_count = len(payload["price_indices"])
+    power_count = len(payload["power"])
     macro_count = len(payload["macro"])
     positioning_count = len(payload["positioning"])
+    stale_or_failed_count = sum(
+        1
+        for row in payload["freshness"]
+        if row["health_status"] in {"stale", "failed", "unknown"}
+    )
     if commodity:
         summary = (
             f"Loaded market context for {commodity}: {price_count} price index row(s), "
-            f"{macro_count} macro row(s), and {positioning_count} positioning row(s)."
+            f"{power_count} power row(s), {macro_count} macro row(s), and "
+            f"{positioning_count} positioning row(s)."
         )
     else:
         summary = (
             f"Loaded market context: {price_count} price index row(s), "
-            f"{macro_count} macro row(s), and {positioning_count} positioning row(s)."
+            f"{power_count} power row(s), {macro_count} macro row(s), and "
+            f"{positioning_count} positioning row(s)."
         )
+    if stale_or_failed_count:
+        summary += f" Freshness watch on {stale_or_failed_count} provider(s)."
     return AssistantToolExecutionResult(
         output=payload,
         summary=summary,
-        record_count=price_count + macro_count + positioning_count,
+        record_count=price_count + power_count + macro_count + positioning_count,
     )
 
 
