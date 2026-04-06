@@ -4,6 +4,7 @@ import { submitReferenceMutation } from '../../entities/reference-data/api'
 import type {
   BookForm,
   CounterpartyRecord,
+  CounterpartyStandards,
   CurrencyRecord,
   LocationRecord,
   LocationStandards,
@@ -164,6 +165,7 @@ type UseReferenceDataControllerArgs = {
   activeUnits: UnitRecord[]
   activeLocations: LocationRecord[]
   locationStandards: LocationStandards
+  counterpartyStandards: CounterpartyStandards
   commodityClassOrder: readonly string[]
 }
 
@@ -185,6 +187,7 @@ export function useReferenceDataController({
   activeUnits,
   activeLocations,
   locationStandards,
+  counterpartyStandards,
   commodityClassOrder,
 }: UseReferenceDataControllerArgs) {
   const [referenceActionError, setReferenceActionError] = useState('')
@@ -210,6 +213,7 @@ export function useReferenceDataController({
     activeUnits,
     activeLocations,
     locationStandards,
+    counterpartyStandards,
     commodityClassOrder,
   })
 
@@ -1585,6 +1589,7 @@ export function useReferenceDataController({
     activeCurrencies,
     activeLocations,
     locationStandards,
+    counterpartyStandards,
     commodityClassOrder,
     referenceActionError,
     referenceActionSuccess,

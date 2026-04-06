@@ -126,6 +126,41 @@ class RunMarketDataSchedulerScriptTests(unittest.TestCase):
         self.assertTrue(session.closed)
         self.assertIn("boom", buffer.getvalue())
 
+    def test_main_runs_kalshi_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "KALSHI", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_kalshi_series",
+            return_value=SimpleNamespace(
+                id=13,
+                status="SUCCEEDED",
+                series_count=5,
+                observation_count=203,
+                error_summary=None,
+            ),
+        ) as kalshi_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "kalshi",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        kalshi_mock.assert_called_once()
+        self.assertIn("KALSHI scheduler run", buffer.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

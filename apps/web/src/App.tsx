@@ -36,7 +36,9 @@ import {
 } from './features/trades/tradeEventPayloads'
 import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import {
+  DEFAULT_COUNTERPARTY_STANDARDS,
   DEFAULT_LOCATION_STANDARDS,
+  type CounterpartyStandards,
   type CounterpartyRecord,
   type CurrencyRecord,
   type EventRow,
@@ -178,6 +180,9 @@ export default function App() {
   const [units, setUnits] = useState<UnitRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
   const [locationStandards, setLocationStandards] = useState<LocationStandards>(DEFAULT_LOCATION_STANDARDS)
+  const [counterpartyStandards, setCounterpartyStandards] = useState<CounterpartyStandards>(
+    DEFAULT_COUNTERPARTY_STANDARDS,
+  )
   const [counterparties, setCounterparties] = useState<CounterpartyRecord[]>([])
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
@@ -229,6 +234,7 @@ export default function App() {
       locations: locationsJson,
       locationStandards: locationStandardsJson,
       counterparties: counterpartiesJson,
+      counterpartyStandards: counterpartyStandardsJson,
       portfolios: portfoliosJson,
       externalDataRuns: externalDataRunsJson,
       externalDataSyncStatus: externalDataSyncStatusJson,
@@ -251,6 +257,7 @@ export default function App() {
     const nextLocations = locationsJson as LocationRecord[]
     const nextLocationStandards = locationStandardsJson as LocationStandards
     const nextCounterparties = counterpartiesJson as CounterpartyRecord[]
+    const nextCounterpartyStandards = counterpartyStandardsJson as CounterpartyStandards
     const nextPortfolios = portfoliosJson as PortfolioRecord[]
     const nextExternalDataRuns = externalDataRunsJson as ExternalDataRunRecord[]
     const nextExternalDataSyncStatus = externalDataSyncStatusJson as ExternalDataSyncStatusRecord | null
@@ -269,6 +276,7 @@ export default function App() {
     setLocations(nextLocations)
     setLocationStandards(nextLocationStandards)
     setCounterparties(nextCounterparties)
+    setCounterpartyStandards(nextCounterpartyStandards)
     setPortfolios(nextPortfolios)
     setExternalDataRuns(nextExternalDataRuns)
     setExternalDataSyncStatus(nextExternalDataSyncStatus)
@@ -842,6 +850,7 @@ export default function App() {
     activeUnits,
     activeLocations,
     locationStandards,
+    counterpartyStandards,
     commodityClassOrder,
   })
 

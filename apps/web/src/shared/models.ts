@@ -148,6 +148,16 @@ export type CounterpartyRecord = ReferenceRecord & {
   country_code?: string | null
 }
 
+export type CounterpartyStandards = {
+  default_counterparty_type: string
+  counterparty_types: string[]
+}
+
+export const DEFAULT_COUNTERPARTY_STANDARDS: CounterpartyStandards = {
+  default_counterparty_type: 'SUPPLIER',
+  counterparty_types: ['BANK', 'BROKER', 'END_USER', 'MAJOR', 'MARKETER', 'MIDSTREAM', 'PRODUCER', 'REFINER', 'SUPPLIER', 'TRADER', 'UTILITY'],
+}
+
 export type PortfolioRecord = ReferenceRecord & {
   book_code: string
   owner?: string | null

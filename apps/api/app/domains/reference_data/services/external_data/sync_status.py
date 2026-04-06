@@ -152,6 +152,15 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "success_sla_hours": settings.ERCOT_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.ERCOT_SYNC_INTERVAL_MINUTES,
         },
+        {
+            "provider": "KALSHI",
+            "label": "Kalshi Macro Sync",
+            "category": "macro",
+            "observation_kind": "series",
+            "series_kind": "series",
+            "success_sla_hours": settings.KALSHI_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.KALSHI_SYNC_INTERVAL_MINUTES,
+        },
     )
 
 

@@ -341,7 +341,7 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.macro[0].series_code, "FRED_DGS10")
         self.assertEqual(len(payload.positioning), 1)
         self.assertEqual(payload.positioning[0].series_code, "CFTC_WTI_MM_NET")
-        self.assertGreaterEqual(len(payload.freshness), 5)
+        self.assertGreaterEqual(len(payload.freshness), 6)
 
     def test_get_market_context_filters_positioning_by_commodity(self) -> None:
         self._seed_rows()
@@ -456,6 +456,26 @@ class ExternalDataApiTests(unittest.TestCase):
                         updated_by="system",
                         version=1,
                     ),
+                    ExternalSeriesDefinition(
+                        code="KALSHI_FED_27APR_T350",
+                        provider="KALSHI",
+                        dataset_code="KXFED",
+                        series_id="KXFED-27APR-T3.50",
+                        name="Fed Apr 2027 Above 3.50%",
+                        category="macro",
+                        frequency="daily",
+                        unit_code="PROB",
+                        source_url=None,
+                        description=None,
+                        query_params=None,
+                        transform_rule="field:price.close_dollars",
+                        is_active=True,
+                        created_at=now,
+                        created_by="system",
+                        updated_at=now,
+                        updated_by="system",
+                        version=1,
+                    ),
                     ExternalDataRun(
                         id=10,
                         provider="EIA",
@@ -507,6 +527,19 @@ class ExternalDataApiTests(unittest.TestCase):
                         observation_count=1,
                         error_summary=None,
                         created_at=now - timedelta(minutes=10),
+                    ),
+                    ExternalDataRun(
+                        id=14,
+                        provider="KALSHI",
+                        job_name="sync_kalshi_series",
+                        status="SUCCEEDED",
+                        started_at=now - timedelta(hours=1),
+                        finished_at=now - timedelta(hours=1) + timedelta(minutes=2),
+                        requested_by="scheduler",
+                        series_count=1,
+                        observation_count=1,
+                        error_summary=None,
+                        created_at=now - timedelta(hours=1),
                     ),
                     PriceIndexObservation(
                         id=10,
@@ -560,19 +593,38 @@ class ExternalDataApiTests(unittest.TestCase):
                         created_at=now - timedelta(minutes=10),
                         updated_at=now - timedelta(minutes=10),
                     ),
+                    ExternalSeriesObservation(
+                        id=12,
+                        series_code="KALSHI_FED_27APR_T350",
+                        observation_date=now.date(),
+                        value=Decimal("0.420000"),
+                        unit_code="PROB",
+                        source_provider="KALSHI",
+                        source_series_id="KXFED-27APR-T3.50",
+                        source_frequency="DAILY",
+                        source_published_at=now - timedelta(hours=1),
+                        source_revision="rev-kalshi",
+                        downloaded_at=now - timedelta(hours=1),
+                        run_id=14,
+                        raw_payload={},
+                        created_at=now - timedelta(hours=1),
+                        updated_at=now - timedelta(hours=1),
+                    ),
                 ]
             )
             session.commit()
             payload = get_external_data_sync_status(db=session)
 
         providers = {row.provider: row for row in payload.providers}
-        self.assertEqual(payload.provider_count, 5)
+        self.assertEqual(payload.provider_count, 6)
         self.assertEqual(providers["EIA"].health_status, "healthy")
         self.assertEqual(providers["FRED"].health_status, "healthy")
         self.assertEqual(providers["CFTC"].health_status, "failed")
         self.assertEqual(providers["CAISO"].health_status, "healthy")
         self.assertEqual(providers["ERCOT"].health_status, "unknown")
+        self.assertEqual(providers["KALSHI"].health_status, "healthy")
         self.assertFalse(providers["CAISO"].due_for_sync)
+        self.assertFalse(providers["KALSHI"].due_for_sync)
         self.assertEqual(providers["CFTC"].error_summary, "boom")
 
     def test_trigger_eia_sync_returns_run_payload(self) -> None:

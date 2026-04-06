@@ -6,6 +6,7 @@ import type {
   CommodityForm,
   CounterpartyForm,
   CounterpartyRecord,
+  CounterpartyStandards,
   CurrencyForm,
   CurrencyRecord,
   LocationForm,
@@ -20,7 +21,10 @@ import type {
   UnitForm,
   UnitRecord,
 } from '../../shared/models'
-import { DEFAULT_LOCATION_STANDARDS as defaultLocationStandards } from '../../shared/models'
+import {
+  DEFAULT_COUNTERPARTY_STANDARDS as defaultCounterpartyStandards,
+  DEFAULT_LOCATION_STANDARDS as defaultLocationStandards,
+} from '../../shared/models'
 
 export function emptyBookForm(): BookForm {
   return { code: '', name: '', description: '' }
@@ -87,13 +91,15 @@ export function emptyLocationForm(locationStandards: LocationStandards = default
   }
 }
 
-export function emptyCounterpartyForm(): CounterpartyForm {
+export function emptyCounterpartyForm(
+  counterpartyStandards: CounterpartyStandards = defaultCounterpartyStandards,
+): CounterpartyForm {
   return {
     code: '',
     name: '',
     short_name: '',
     legal_entity_name: '',
-    counterparty_type: 'SUPPLIER',
+    counterparty_type: counterpartyStandards.default_counterparty_type,
     country_code: '',
     description: '',
   }
@@ -137,6 +143,7 @@ type UseReferenceDataWorkspaceArgs = {
   activeUnits: UnitRecord[]
   activeLocations: LocationRecord[]
   locationStandards: LocationStandards
+  counterpartyStandards: CounterpartyStandards
   commodityClassOrder: readonly string[]
 }
 
@@ -155,6 +162,7 @@ export function useReferenceDataWorkspace({
   activeUnits,
   activeLocations,
   locationStandards,
+  counterpartyStandards,
   commodityClassOrder,
 }: UseReferenceDataWorkspaceArgs) {
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>('books')
@@ -174,7 +182,7 @@ export function useReferenceDataWorkspace({
   const [currencyForm, setCurrencyForm] = useState(emptyCurrencyForm())
   const [unitForm, setUnitForm] = useState(emptyUnitForm(commodityClassOrder[0]))
   const [locationForm, setLocationForm] = useState(emptyLocationForm(locationStandards))
-  const [counterpartyForm, setCounterpartyForm] = useState(emptyCounterpartyForm())
+  const [counterpartyForm, setCounterpartyForm] = useState(emptyCounterpartyForm(counterpartyStandards))
   const [portfolioForm, setPortfolioForm] = useState(emptyPortfolioForm())
 
   const [bookFormMode, setBookFormMode] = useState<'create' | 'edit'>('create')
@@ -531,7 +539,7 @@ export function useReferenceDataWorkspace({
 
   function startCreateCounterparty() {
     setCounterpartyFormMode('create')
-    setCounterpartyForm(emptyCounterpartyForm())
+    setCounterpartyForm(emptyCounterpartyForm(counterpartyStandards))
   }
 
   function startEditCounterparty(code: string) {

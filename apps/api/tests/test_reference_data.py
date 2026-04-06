@@ -51,6 +51,8 @@ from apps.api.app.routes.reference_data import (
     create_portfolio,
     create_price_index,
     create_unit,
+    list_counterparties,
+    list_counterparty_standards,
     deactivate_currency,
     deactivate_commodity,
     deactivate_location,
@@ -1112,6 +1114,59 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertEqual(payload.code, "SHELL_TRADING")
         self.assertEqual(payload.counterparty_type, "SUPPLIER")
         self.assertEqual(payload.country_code, "US")
+
+    def test_create_counterparty_rejects_invalid_type_and_country(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "counterparty_type 'NOT_A_REAL_TYPE' is invalid"):
+                create_counterparty(
+                    CounterpartyCreate(
+                        code="BAD_CP_TYPE",
+                        name="Bad Counterparty Type",
+                        short_name="Bad Type",
+                        legal_entity_name="Bad Counterparty Type LLC",
+                        counterparty_type="not a real type",
+                        country_code="US",
+                        description="test counterparty",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "country_code 'ZZ' must be a valid ISO 3166-1 alpha-2 code"):
+                create_counterparty(
+                    CounterpartyCreate(
+                        code="BAD_CP_COUNTRY",
+                        name="Bad Counterparty Country",
+                        short_name="Bad Country",
+                        legal_entity_name="Bad Counterparty Country LLC",
+                        counterparty_type="supplier",
+                        country_code="zz",
+                        description="test counterparty",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+    def test_list_counterparty_standards_returns_controlled_taxonomy(self) -> None:
+        payload = list_counterparty_standards()
+
+        self.assertEqual(payload.default_counterparty_type, "SUPPLIER")
+        self.assertIn("SUPPLIER", payload.counterparty_types)
+        self.assertIn("END_USER", payload.counterparty_types)
+        self.assertIn("BANK", payload.counterparty_types)
+
+    def test_list_counterparties_rejects_invalid_type_filter(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "counterparty_type 'NOT_A_REAL_TYPE' is invalid"):
+                list_counterparties(
+                    q=None,
+                    counterparty_type="not a real type",
+                    is_active=None,
+                    limit=50,
+                    offset=0,
+                    db=session,
+                )
 
     def test_portfolio_requires_active_book(self) -> None:
         with self.SessionLocal() as session:

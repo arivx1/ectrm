@@ -198,6 +198,11 @@ class CounterpartyOut(ReferenceDataOut):
     country_code: Optional[str]
 
 
+class CounterpartyStandardsOut(BaseModel):
+    default_counterparty_type: str
+    counterparty_types: list[str]
+
+
 class PortfolioCreate(ReferenceDataCreate):
     book_code: str = Field(..., min_length=1, max_length=50)
     owner: Optional[str] = Field(None, min_length=1, max_length=120)

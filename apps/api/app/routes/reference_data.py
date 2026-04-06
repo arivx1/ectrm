@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reference_data.services.counterparty_standards import (
+    DEFAULT_COUNTERPARTY_TYPE,
+    list_counterparty_types,
+    normalize_counterparty_type,
+    normalize_counterparty_type_filter,
+)
 from apps.api.app.domains.reference_data.services.location_standards import (
     DEFAULT_LOCATION_KIND,
     DEFAULT_LOCATION_TYPE_BY_KIND,
@@ -53,6 +59,7 @@ from apps.api.app.schemas.reference_data import (
     CommodityUpdate,
     CounterpartyCreate,
     CounterpartyOut,
+    CounterpartyStandardsOut,
     CounterpartyStatusUpdate,
     CounterpartyUpdate,
     CurrencyCreate,
@@ -570,9 +577,9 @@ def _update_counterparty_fields(record, payload, provided_fields: set[str]) -> N
     if "legal_entity_name" in provided_fields:
         record.legal_entity_name = payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None
     if "counterparty_type" in provided_fields and payload.counterparty_type is not None:
-        record.counterparty_type = normalize_code(payload.counterparty_type)
+        record.counterparty_type = normalize_counterparty_type(payload.counterparty_type)
     if "country_code" in provided_fields:
-        record.country_code = normalize_code(payload.country_code) if payload.country_code else None
+        record.country_code = normalize_country_code(payload.country_code)
 
 
 @router.get("/counterparties", response_model=List[CounterpartyOut])
@@ -586,9 +593,19 @@ def list_counterparties(
 ) -> List[CounterpartyOut]:
     extra_filters = []
     if counterparty_type:
-        extra_filters.append(ReferenceCounterparty.counterparty_type == normalize_code(counterparty_type))
+        extra_filters.append(
+            ReferenceCounterparty.counterparty_type == normalize_counterparty_type_filter(counterparty_type)
+        )
     rows = list_reference_records(db, ReferenceCounterparty, q, is_active, limit, offset, extra_filters=extra_filters)
     return [to_out(row, CounterpartyOut) for row in rows]
+
+
+@router.get("/counterparties/standards", response_model=CounterpartyStandardsOut)
+def list_counterparty_standards() -> CounterpartyStandardsOut:
+    return CounterpartyStandardsOut(
+        default_counterparty_type=DEFAULT_COUNTERPARTY_TYPE,
+        counterparty_types=list_counterparty_types(),
+    )
 
 
 @router.post("/counterparties", response_model=CounterpartyOut, status_code=201)
@@ -606,8 +623,8 @@ def create_counterparty(payload: CounterpartyCreate, db: Session = Depends(get_d
         extra_values={
             "short_name": payload.short_name.strip() if payload.short_name is not None else None,
             "legal_entity_name": payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None,
-            "counterparty_type": normalize_code(payload.counterparty_type),
-            "country_code": normalize_code(payload.country_code) if payload.country_code else None,
+            "counterparty_type": normalize_counterparty_type(payload.counterparty_type),
+            "country_code": normalize_country_code(payload.country_code),
         },
     )
     return to_out(record, CounterpartyOut)

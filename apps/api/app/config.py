@@ -88,7 +88,9 @@ class Settings(BaseSettings):
     ERCOT_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
     KALSHI_BASE_URL: str = "https://api.elections.kalshi.com/trade-api/v2"
     KALSHI_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    KALSHI_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
     KALSHI_DEFAULT_LOOKBACK_DAYS: int = Field(default=90, ge=1, le=3650)
+    KALSHI_SYNC_SUCCESS_SLA_HOURS: int = Field(default=24, ge=1, le=336)
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

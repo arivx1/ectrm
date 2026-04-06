@@ -21,10 +21,11 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_eia_series,
     sync_ercot_series,
     sync_fred_series,
+    sync_kalshi_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 
-DEFAULT_PROVIDERS = ("EIA", "FRED", "CFTC", "CAISO", "ERCOT")
+DEFAULT_PROVIDERS = ("EIA", "FRED", "CFTC", "CAISO", "ERCOT", "KALSHI")
 
 
 def main() -> int:
@@ -33,7 +34,7 @@ def main() -> int:
         "--provider",
         dest="providers",
         action="append",
-        choices=("eia", "fred", "cftc", "caiso", "ercot"),
+        choices=("eia", "fred", "cftc", "caiso", "ercot", "kalshi"),
     )
     parser.add_argument("--poll-seconds", dest="poll_seconds", type=int, default=60)
     parser.add_argument("--requested-by", dest="requested_by", default="scheduler")
@@ -109,6 +110,12 @@ def _sync_provider(*, provider: str, requested_by: str, db):
     if provider == "ERCOT":
         return sync_ercot_series(
             db,
+            requested_by=requested_by,
+        )
+    if provider == "KALSHI":
+        return sync_kalshi_series(
+            db,
+            lookback_days=settings.KALSHI_DEFAULT_LOOKBACK_DAYS,
             requested_by=requested_by,
         )
     raise ValueError(f"Unsupported provider {provider}")

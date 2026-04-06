@@ -2,6 +2,7 @@ import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
 import type {
   AssistantRuntimeSettings,
+  CounterpartyStandards,
   ExternalDataSyncStatusRecord,
   LocationStandards,
   WeatherSyncStatusRecord,
@@ -20,6 +21,7 @@ export type WorkspaceBootstrap = {
   locations: unknown[]
   locationStandards: LocationStandards
   counterparties: unknown[]
+  counterpartyStandards: CounterpartyStandards
   portfolios: unknown[]
   externalDataRuns: unknown[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
@@ -113,6 +115,7 @@ export async function loadWorkspaceBootstrap(
     locations,
     locationStandards,
     counterparties,
+    counterpartyStandards,
     portfolios,
   ] = await Promise.all([
     fetchJson<{ status?: string }>(`${apiBase}/health`),
@@ -127,6 +130,7 @@ export async function loadWorkspaceBootstrap(
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`),
     fetchJson<LocationStandards>(`${apiBase}/reference/locations/standards`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<CounterpartyStandards>(`${apiBase}/reference/counterparties/standards`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`),
   ])
 
@@ -186,6 +190,7 @@ export async function loadWorkspaceBootstrap(
     locations,
     locationStandards,
     counterparties,
+    counterpartyStandards,
     portfolios,
     externalDataRuns,
     externalDataSyncStatus,

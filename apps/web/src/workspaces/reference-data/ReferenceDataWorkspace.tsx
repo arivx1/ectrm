@@ -155,6 +155,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
     selectablePriceIndexUnits,
     activeLocations,
     locationStandards,
+    counterpartyStandards,
     selectedCurrency,
     currencyFormMode,
     currencyForm,
@@ -1541,7 +1542,18 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 </label>
                 <label className="field">
                   <span>Type</span>
-                  <input className="control" value={counterpartyForm.counterparty_type} onChange={(event) => setCounterpartyForm((current) => ({ ...current, counterparty_type: event.target.value.toUpperCase() }))} disabled={savingReference} />
+                  <select
+                    className="control"
+                    value={counterpartyForm.counterparty_type}
+                    onChange={(event) => setCounterpartyForm((current) => ({ ...current, counterparty_type: event.target.value }))}
+                    disabled={savingReference}
+                  >
+                    {counterpartyStandards.counterparty_types.map((counterpartyType) => (
+                      <option key={counterpartyType} value={counterpartyType}>
+                        {counterpartyType}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
 
@@ -1551,7 +1563,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
               </label>
 
               <label className="field">
-                <span>Country</span>
+                <span>Country Code</span>
                 <input className="control" value={counterpartyForm.country_code} onChange={(event) => setCounterpartyForm((current) => ({ ...current, country_code: event.target.value.toUpperCase() }))} disabled={savingReference} />
               </label>
 

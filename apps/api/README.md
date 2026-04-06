@@ -107,6 +107,12 @@ Run one scheduler cycle for market data:
 PYTHONPATH=. python apps/api/scripts/run_market_data_scheduler.py --max-cycles 1
 ```
 
+Run one scheduler cycle for Kalshi only:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/run_market_data_scheduler.py --provider kalshi --max-cycles 1
+```
+
 ## Configuration
 
 Example settings live in `apps/api/.env.example`.
@@ -150,6 +156,8 @@ unhandled-error payloads also include the same correlation ID in the JSON body,
 and the web client now surfaces that ID in error banners so operators can match
 a visible failure to the backend request log quickly.
 - `KALSHI_BASE_URL`: points at the Kalshi REST API for public market data
+- `KALSHI_SYNC_INTERVAL_MINUTES`, `KALSHI_SYNC_SUCCESS_SLA_HOURS`: control
+  when Kalshi is considered due and when the sync is considered stale
 
 ## Implementation Shape
 
