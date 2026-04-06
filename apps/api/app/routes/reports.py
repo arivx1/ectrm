@@ -15,12 +15,18 @@ from apps.api.app.domains.reports.services.overview import (
     build_exposure_summary,
     build_reporting_overview,
 )
+from apps.api.app.domains.reports.services.settlement import (
+    build_cash_forecast_report,
+    build_settlement_aging_report,
+)
 from apps.api.app.schemas.report import (
     ActivitySummaryRow,
+    CashForecastReport,
     CounterpartyCreditReportRow,
     ExposureSummaryRow,
     PnlHistoryReport,
     ReportingOverview,
+    SettlementAgingReport,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -71,3 +77,32 @@ def get_pnl_history(
             date_to=date_to,
         )
     )
+
+
+@router.get("/settlement-aging", response_model=SettlementAgingReport)
+def get_settlement_aging_report(
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> SettlementAgingReport:
+    return SettlementAgingReport(**build_settlement_aging_report(db, as_of=as_of))
+
+
+@router.get("/cash-forecast", response_model=CashForecastReport)
+def get_cash_forecast(
+    as_of: date | None = Query(default=None),
+    horizon_days: int = Query(default=30),
+    db: Session = Depends(get_db),
+) -> CashForecastReport:
+    try:
+        return CashForecastReport(
+            **build_cash_forecast_report(
+                db,
+                as_of=as_of,
+                horizon_days=horizon_days,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc

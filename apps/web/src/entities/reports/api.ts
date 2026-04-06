@@ -1,9 +1,11 @@
 import { fetchJson } from '../../shared/api'
 import type {
   ActivitySummaryRow,
+  CashForecastReport,
   ExposureSummaryRow,
   PnlHistoryReport,
   ReportingOverview,
+  SettlementAgingReport,
 } from '../../shared/models'
 
 type LoadPnlHistoryReportOptions = {
@@ -51,6 +53,18 @@ export async function loadExposureSummary(apiBase: string): Promise<ExposureSumm
 
 export async function loadActivitySummary(apiBase: string): Promise<ActivitySummaryRow[]> {
   return fetchJson<ActivitySummaryRow[]>(`${apiBase}/reports/activity-summary`, {
+    cache: 'no-store',
+  })
+}
+
+export async function loadSettlementAgingReport(apiBase: string): Promise<SettlementAgingReport> {
+  return fetchJson<SettlementAgingReport>(`${apiBase}/reports/settlement-aging`, {
+    cache: 'no-store',
+  })
+}
+
+export async function loadCashForecastReport(apiBase: string): Promise<CashForecastReport> {
+  return fetchJson<CashForecastReport>(`${apiBase}/reports/cash-forecast`, {
     cache: 'no-store',
   })
 }

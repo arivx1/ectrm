@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import type { StoredAuthSession } from '../../shared/mutation'
-import type { TradeWorkflowItemRecord } from '../../shared/models'
+import type { TradeCreditApprovalDecisionRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import {
   allocationStatusOptions,
   buildTradeCreditHoldSummary,
@@ -79,6 +79,45 @@ function workflowTypeLabel(value: TradeWorkflowItemRecord['workflow_type']): str
   return value.replaceAll('_', ' ')
 }
 
+function decisionLabel(value: string): string {
+  return value.replaceAll('_', ' ')
+}
+
+function hasCreditApprovalAccess(session: StoredAuthSession | null): boolean {
+  const role = session?.user.role.trim().toUpperCase() ?? ''
+  return role === 'CREDIT_APPROVER' || role === 'OPS_ADMIN' || role === 'ADMIN'
+}
+
+function snapshotText(snapshot: Record<string, unknown>, key: string): string | null {
+  const value = snapshot[key]
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function snapshotNumber(snapshot: Record<string, unknown>, key: string): number | null {
+  const value = snapshot[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function formatSnapshotNumber(value: number, digits = 1): string {
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}
+
+function creditDecisionExposureSummary(decision: TradeCreditApprovalDecisionRecord): string | null {
+  const currency = snapshotText(decision.breach_snapshot, 'limit_currency_code')
+  const projected = snapshotNumber(decision.breach_snapshot, 'projected_exposure_amount')
+  const limit = snapshotNumber(decision.breach_snapshot, 'limit_amount')
+  const utilization = snapshotNumber(decision.breach_snapshot, 'projected_utilization_percent')
+  if (currency && projected !== null && limit !== null) {
+    const utilizationText = utilization !== null ? ` at ${formatSnapshotNumber(utilization)}% utilization` : ''
+    return `Projected ${currency} ${formatSnapshotNumber(projected, 2)} versus limit ${currency} ${formatSnapshotNumber(limit, 2)}${utilizationText}.`
+  }
+  const comparisonReason = snapshotText(decision.breach_snapshot, 'comparison_reason')
+  return comparisonReason ? `Snapshot basis: ${comparisonReason.replaceAll('_', ' ')}.` : null
+}
+
 function workflowSummary(
   item: TradeWorkflowItemRecord,
   formatDateOnly: WorkflowQueueEditorProps['formatDateOnly'],
@@ -128,6 +167,7 @@ export function WorkflowQueueEditor({
   const [drafts, setDrafts] = useState<Record<number, WorkflowDraft>>(() =>
     Object.fromEntries(items.map((item) => [item.item_id, buildDraft(item)])),
   )
+  const creditApprovalAuthorized = hasCreditApprovalAccess(authSession)
 
   function updateDraft(itemId: number, patch: Partial<WorkflowDraft>) {
     setDrafts((current) => ({
@@ -173,6 +213,13 @@ export function WorkflowQueueEditor({
               : null,
           )
           const lifecycleStatusLocked = item.workflow_type !== 'CREDIT_APPROVAL' && creditHoldSummary.credit_hold_active
+          const creditStatusLocked = item.workflow_type === 'CREDIT_APPROVAL' && !creditApprovalAuthorized
+          const creditDecisionNoteAvailable = Boolean(draft.notes.trim() || item.notes?.trim())
+          const creditDecisionCommentRequired =
+            item.workflow_type === 'CREDIT_APPROVAL' &&
+            draft.status !== item.status &&
+            (draft.status === 'APPROVED' || draft.status === 'REJECTED') &&
+            !creditDecisionNoteAvailable
           const approvePayload =
             item.workflow_type === 'CREDIT_APPROVAL'
               ? buildPayload(item, { ...draft, status: 'APPROVED' })
@@ -184,7 +231,8 @@ export function WorkflowQueueEditor({
           const saveDisabled =
             savingItemId === item.item_id ||
             !authSession ||
-            Object.keys(buildPayload(item, draft)).length === 0
+            Object.keys(buildPayload(item, draft)).length === 0 ||
+            creditDecisionCommentRequired
           const assignSelfDisabled =
             !authSession ||
             authSession.user.user_id === (item.owner ?? '') ||
@@ -224,7 +272,7 @@ export function WorkflowQueueEditor({
                     className="control control-compact"
                     value={draft.status}
                     onChange={(event) => updateDraft(item.item_id, { status: event.target.value })}
-                    disabled={savingItemId === item.item_id || lifecycleStatusLocked}
+                    disabled={savingItemId === item.item_id || lifecycleStatusLocked || creditStatusLocked}
                   >
                     {statusOptions.map((option) => (
                       <option key={option} value={option}>
@@ -270,6 +318,36 @@ export function WorkflowQueueEditor({
                   {creditHoldSummary.credit_hold_reason ?? 'Credit approval is pending review.'}
                 </p>
               ) : null}
+              {creditStatusLocked && authSession ? (
+                <p className="workflow-editor-note">
+                  Only `CREDIT_APPROVER`, `OPS_ADMIN`, or `ADMIN` sessions can change credit approval status.
+                </p>
+              ) : null}
+              {creditDecisionCommentRequired ? (
+                <p className="field-error">Approval and rejection decisions require a comment in notes.</p>
+              ) : null}
+              {item.workflow_type === 'CREDIT_APPROVAL' && item.credit_decision_history.length > 0 ? (
+                <div className="timeline">
+                  {item.credit_decision_history.map((decision) => (
+                    <article key={decision.decision_id} className="timeline-item">
+                      <div className="timeline-dot" />
+                      <div className="timeline-body">
+                        <div className="timeline-head">
+                          <strong>{decisionLabel(decision.decision)}</strong>
+                          <span>{formatDate(decision.decided_at)}</span>
+                        </div>
+                        <p>{decision.decision_comment}</p>
+                        <p>
+                          {decision.decided_by}
+                          {creditDecisionExposureSummary(decision)
+                            ? ` • ${creditDecisionExposureSummary(decision)}`
+                            : ''}
+                        </p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
               <div className="shipment-card-actions workflow-item-actions">
                 <span>Updated {formatDate(item.updated_at)}</span>
                 <div className="workflow-item-button-row">
@@ -307,12 +385,14 @@ export function WorkflowQueueEditor({
                       }}
                       disabled={
                         !authSession ||
+                        !creditApprovalAuthorized ||
                         savingItemId === item.item_id ||
                         !approvePayload ||
-                        Object.keys(approvePayload).length === 0
+                        Object.keys(approvePayload).length === 0 ||
+                        !creditDecisionNoteAvailable
                       }
                     >
-                      Approve
+                      Approve With Comment
                     </button>
                   ) : null}
                   {item.workflow_type === 'CREDIT_APPROVAL' ? (
@@ -326,10 +406,11 @@ export function WorkflowQueueEditor({
                       }}
                       disabled={
                         !authSession ||
+                        !creditApprovalAuthorized ||
                         savingItemId === item.item_id ||
                         !rejectPayload ||
                         Object.keys(rejectPayload).length === 0 ||
-                        !(draft.notes.trim() || item.notes?.trim())
+                        !creditDecisionNoteAvailable
                       }
                     >
                       Reject With Comment

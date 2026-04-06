@@ -169,6 +169,17 @@ export type DeliveryRecord = {
 
 export type ShipmentRecord = DeliveryRecord
 
+export type TradeCreditApprovalDecisionRecord = {
+  decision_id: number
+  trade_id: string
+  workflow_item_id: number
+  decision: string
+  decision_comment: string
+  breach_snapshot: Record<string, unknown>
+  decided_at: string
+  decided_by: string
+}
+
 export type TradeWorkflowItemRecord = {
   item_id: number
   trade_id: string
@@ -196,6 +207,7 @@ export type TradeWorkflowItemRecord = {
   trade_date: string | null
   delivery_start: string | null
   delivery_end: string | null
+  credit_decision_history: TradeCreditApprovalDecisionRecord[]
   credit_approval_status?: string
   credit_hold_active?: boolean
   credit_hold_reason?: string | null
@@ -594,6 +606,78 @@ export type PnlHistoryReport = {
   point_count: number
   points: PnlHistoryPoint[]
   summary: PnlHistorySummary
+}
+
+export type SettlementAgingCurrencySummary = {
+  currency_code: string
+  invoice_count: number
+  overdue_invoice_count: number
+  disputed_invoice_count: number
+  total_outstanding_amount: number
+  current_amount: number
+  past_due_1_7_amount: number
+  past_due_8_30_amount: number
+  past_due_31_plus_amount: number
+  disputed_amount: number
+}
+
+export type SettlementAgingRow = {
+  counterparty_code: string | null
+  book: string
+  currency_code: string
+  invoice_count: number
+  trade_count: number
+  overdue_invoice_count: number
+  disputed_invoice_count: number
+  total_outstanding_amount: number
+  current_amount: number
+  past_due_1_7_amount: number
+  past_due_8_30_amount: number
+  past_due_31_plus_amount: number
+  disputed_amount: number
+  oldest_due_at: string | null
+  latest_due_at: string | null
+}
+
+export type SettlementAgingReport = {
+  generated_at: string
+  as_of: string
+  row_count: number
+  invoice_count: number
+  overdue_invoice_count: number
+  disputed_invoice_count: number
+  currency_summaries: SettlementAgingCurrencySummary[]
+  rows: SettlementAgingRow[]
+}
+
+export type CashForecastCurrencySummary = {
+  currency_code: string
+  open_outstanding_amount: number
+  overdue_outstanding_amount: number
+  expected_horizon_amount: number
+  received_horizon_amount: number
+  upcoming_invoice_count: number
+  overdue_invoice_count: number
+  received_payment_count: number
+}
+
+export type CashForecastPoint = {
+  forecast_date: string
+  currency_code: string
+  expected_amount: number
+  received_amount: number
+  expected_invoice_count: number
+  received_payment_count: number
+}
+
+export type CashForecastReport = {
+  generated_at: string
+  as_of: string
+  horizon_days: number
+  basis: string
+  row_count: number
+  currency_summaries: CashForecastCurrencySummary[]
+  points: CashForecastPoint[]
 }
 
 export type PriceIndexObservationRecord = {

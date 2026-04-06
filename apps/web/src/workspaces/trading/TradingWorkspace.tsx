@@ -1,6 +1,7 @@
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
+import type { TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   calculateDaysToExpiration,
@@ -109,10 +110,34 @@ function creditApprovalLabel(value: string | undefined): string {
   return (value || 'NOT_REQUIRED').replaceAll('_', ' ')
 }
 
+function snapshotText(snapshot: Record<string, unknown>, key: string): string | null {
+  const value = snapshot[key]
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function snapshotNumber(snapshot: Record<string, unknown>, key: string): number | null {
+  const value = snapshot[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function creditDecisionExposureSummary(decision: TradeWorkflowItemRecord['credit_decision_history'][number]): string | null {
+  const currency = snapshotText(decision.breach_snapshot, 'limit_currency_code')
+  const projected = snapshotNumber(decision.breach_snapshot, 'projected_exposure_amount')
+  const limit = snapshotNumber(decision.breach_snapshot, 'limit_amount')
+  const utilization = snapshotNumber(decision.breach_snapshot, 'projected_utilization_percent')
+  if (currency && projected !== null && limit !== null) {
+    const utilizationText = utilization !== null ? ` at ${utilization.toFixed(1)}% utilization` : ''
+    return `Projected ${currency} ${projected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} versus limit ${currency} ${limit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${utilizationText}.`
+  }
+  const comparisonReason = snapshotText(decision.breach_snapshot, 'comparison_reason')
+  return comparisonReason ? `Snapshot basis: ${comparisonReason.replaceAll('_', ' ')}.` : null
+}
+
 type TradingWorkspaceProps = {
   authSession: StoredAuthSession | null
   tradeCaptureFormProps: TradeCaptureFormProps
   trades: Trade[]
+  tradeWorkflowItems: TradeWorkflowItemRecord[]
   selectedTrade: Trade | null
   selectedTradeId: string | null
   selectedTradeEvents: EventRow[]
@@ -245,6 +270,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     authSession,
     tradeCaptureFormProps,
     trades,
+    tradeWorkflowItems,
     selectedTrade,
     selectedTradeId,
     selectedTradeEvents,
@@ -388,6 +414,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     : 0
   const selectedTradeDaysToExpiration = selectedTrade
     ? calculateDaysToExpiration(selectedTrade.option_expiration_date)
+    : null
+  const selectedTradeCreditWorkflowItem = selectedTrade
+    ? tradeWorkflowItems.find(
+        (item) => item.trade_id === selectedTrade.trade_id && item.workflow_type === 'CREDIT_APPROVAL',
+      ) ?? null
     : null
 
   const tradeBoardColumns: DataSheetColumn<Trade>[] = [
@@ -759,6 +790,31 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <div className="detail-row">
                       <span>Credit Hold Reason</span>
                       <strong>{selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}</strong>
+                    </div>
+                  ) : null}
+                  {selectedTradeCreditWorkflowItem?.credit_decision_history.length ? (
+                    <div className="stack">
+                      <span className="eyebrow">Credit Decisions</span>
+                      <div className="timeline">
+                        {selectedTradeCreditWorkflowItem.credit_decision_history.map((decision) => (
+                          <article key={decision.decision_id} className="timeline-item">
+                            <div className="timeline-dot" />
+                            <div className="timeline-body">
+                              <div className="timeline-head">
+                                <strong>{creditApprovalLabel(decision.decision)}</strong>
+                                <span>{formatDate(decision.decided_at)}</span>
+                              </div>
+                              <p>{decision.decision_comment}</p>
+                              <p>
+                                {decision.decided_by}
+                                {creditDecisionExposureSummary(decision)
+                                  ? ` • ${creditDecisionExposureSummary(decision)}`
+                                  : ''}
+                              </p>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                   <div className="detail-row">

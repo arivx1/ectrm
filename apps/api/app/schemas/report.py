@@ -75,3 +75,75 @@ class PnlHistoryReport(BaseModel):
     point_count: int
     points: list[PnlHistoryPoint]
     summary: PnlHistorySummary
+
+
+class SettlementAgingCurrencySummary(BaseModel):
+    currency_code: str
+    invoice_count: int
+    overdue_invoice_count: int
+    disputed_invoice_count: int
+    total_outstanding_amount: float
+    current_amount: float
+    past_due_1_7_amount: float
+    past_due_8_30_amount: float
+    past_due_31_plus_amount: float
+    disputed_amount: float
+
+
+class SettlementAgingRow(BaseModel):
+    counterparty_code: str | None
+    book: str
+    currency_code: str
+    invoice_count: int
+    trade_count: int
+    overdue_invoice_count: int
+    disputed_invoice_count: int
+    total_outstanding_amount: float
+    current_amount: float
+    past_due_1_7_amount: float
+    past_due_8_30_amount: float
+    past_due_31_plus_amount: float
+    disputed_amount: float
+    oldest_due_at: datetime | None
+    latest_due_at: datetime | None
+
+
+class SettlementAgingReport(BaseModel):
+    generated_at: datetime
+    as_of: date
+    row_count: int
+    invoice_count: int
+    overdue_invoice_count: int
+    disputed_invoice_count: int
+    currency_summaries: list[SettlementAgingCurrencySummary]
+    rows: list[SettlementAgingRow]
+
+
+class CashForecastCurrencySummary(BaseModel):
+    currency_code: str
+    open_outstanding_amount: float
+    overdue_outstanding_amount: float
+    expected_horizon_amount: float
+    received_horizon_amount: float
+    upcoming_invoice_count: int
+    overdue_invoice_count: int
+    received_payment_count: int
+
+
+class CashForecastPoint(BaseModel):
+    forecast_date: date
+    currency_code: str
+    expected_amount: float
+    received_amount: float
+    expected_invoice_count: int
+    received_payment_count: int
+
+
+class CashForecastReport(BaseModel):
+    generated_at: datetime
+    as_of: date
+    horizon_days: int
+    basis: str
+    row_count: int
+    currency_summaries: list[CashForecastCurrencySummary]
+    points: list[CashForecastPoint]

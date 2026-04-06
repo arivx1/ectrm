@@ -2,18 +2,22 @@ import { useEffect, useState } from 'react'
 
 import {
   loadActivitySummary,
+  loadCashForecastReport,
   loadExposureSummary,
   loadPnlHistoryReport,
   loadReportingOverview,
+  loadSettlementAgingReport,
 } from '../../entities/reports/api'
 import { appConfig } from '../../shared/config'
 import { formatCurrencyAmount } from '../../shared/format'
 import type {
   ActivitySummaryRow,
+  CashForecastReport,
   CounterpartyCreditReportRow,
   ExposureSummaryRow,
   PnlHistoryReport,
   ReportingOverview,
+  SettlementAgingReport,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
@@ -46,6 +50,8 @@ export function ReportsWorkspace({
   const [exposureSummary, setExposureSummary] = useState<ExposureSummaryRow[]>([])
   const [activitySummary, setActivitySummary] = useState<ActivitySummaryRow[]>([])
   const [pnlHistory, setPnlHistory] = useState<PnlHistoryReport | null>(null)
+  const [settlementAging, setSettlementAging] = useState<SettlementAgingReport | null>(null)
+  const [cashForecast, setCashForecast] = useState<CashForecastReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -57,11 +63,20 @@ export function ReportsWorkspace({
       setError('')
 
       try {
-        const [nextOverview, nextExposureSummary, nextActivitySummary, nextPnlHistory] = await Promise.all([
+        const [
+          nextOverview,
+          nextExposureSummary,
+          nextActivitySummary,
+          nextPnlHistory,
+          nextSettlementAging,
+          nextCashForecast,
+        ] = await Promise.all([
           loadReportingOverview(appConfig.apiBase),
           loadExposureSummary(appConfig.apiBase),
           loadActivitySummary(appConfig.apiBase),
           loadPnlHistoryReport(appConfig.apiBase),
+          loadSettlementAgingReport(appConfig.apiBase),
+          loadCashForecastReport(appConfig.apiBase),
         ])
 
         if (cancelled) {
@@ -72,6 +87,8 @@ export function ReportsWorkspace({
         setExposureSummary(nextExposureSummary)
         setActivitySummary(nextActivitySummary)
         setPnlHistory(nextPnlHistory)
+        setSettlementAging(nextSettlementAging)
+        setCashForecast(nextCashForecast)
       } catch (nextError) {
         if (!cancelled) {
           setError(nextError instanceof Error ? nextError.message : 'Unable to load report data.')
@@ -99,6 +116,11 @@ export function ReportsWorkspace({
     }
     return right.active_trade_count - left.active_trade_count
   })
+
+  const agingCurrencySummaries = settlementAging?.currency_summaries ?? []
+  const agingRows = settlementAging?.rows ?? []
+  const cashCurrencySummaries = cashForecast?.currency_summaries ?? []
+  const cashPoints = cashForecast?.points ?? []
 
   return (
     <TileLayout
@@ -217,6 +239,146 @@ export function ReportsWorkspace({
             <div className="empty-state">
               <strong>No activity report yet</strong>
               <p>Event reporting will appear once lifecycle events have been captured.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'reports-settlement-aging',
+          eyebrow: 'Settlement',
+          title: 'Settlement Aging',
+          description: 'Open invoice exposure grouped into current and past-due buckets, with disputed cash called out instead of staying buried in the settlement queue.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: loading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : error ? (
+            reportErrorState(error)
+          ) : settlementAging && agingCurrencySummaries.length > 0 ? (
+            <>
+              <div className="dashboard-report-grid">
+                {agingCurrencySummaries.map((summary) => (
+                  <article key={summary.currency_code} className="dashboard-report-card">
+                    <span>{summary.currency_code} Open</span>
+                    <strong>{formatCurrencyAmount(summary.total_outstanding_amount, summary.currency_code)}</strong>
+                    <p>
+                      Current {formatCurrencyAmount(summary.current_amount, summary.currency_code)} • 1-7{' '}
+                      {formatCurrencyAmount(summary.past_due_1_7_amount, summary.currency_code)} • 8-30{' '}
+                      {formatCurrencyAmount(summary.past_due_8_30_amount, summary.currency_code)} • 31+{' '}
+                      {formatCurrencyAmount(summary.past_due_31_plus_amount, summary.currency_code)}
+                    </p>
+                  </article>
+                ))}
+              </div>
+              <div className="position-list">
+                {agingRows.slice(0, 8).map((row) => (
+                  <article
+                    key={`${row.counterparty_code ?? 'UNSPECIFIED'}-${row.book}-${row.currency_code}`}
+                    className="position-card shipment-card"
+                  >
+                    <div className="shipment-card-head">
+                      <div className="shipment-card-copy">
+                        <strong>{row.counterparty_code ?? 'Counterparty TBD'}</strong>
+                        <span>
+                          {row.book} • {row.trade_count} trade{row.trade_count === 1 ? '' : 's'} • {row.invoice_count} invoice
+                          {row.invoice_count === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <span className={`status-pill status-pill-${row.overdue_invoice_count > 0 || row.disputed_invoice_count > 0 ? 'blocked' : 'active'}`}>
+                        {formatCurrencyAmount(row.total_outstanding_amount, row.currency_code)}
+                      </span>
+                    </div>
+                    <div className="shipment-card-meta">
+                      <span className="entity-chip entity-chip-soft">
+                        Current {formatCurrencyAmount(row.current_amount, row.currency_code)}
+                      </span>
+                      <span className="entity-chip entity-chip-soft">
+                        1-7 {formatCurrencyAmount(row.past_due_1_7_amount, row.currency_code)}
+                      </span>
+                      <span className="entity-chip entity-chip-soft">
+                        8-30 {formatCurrencyAmount(row.past_due_8_30_amount, row.currency_code)}
+                      </span>
+                      <span className="entity-chip entity-chip-soft">
+                        31+ {formatCurrencyAmount(row.past_due_31_plus_amount, row.currency_code)}
+                      </span>
+                      {row.disputed_amount > 0 ? (
+                        <span className="entity-chip entity-chip-soft">
+                          Disputed {formatCurrencyAmount(row.disputed_amount, row.currency_code)}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="shipment-card-copy">
+                      <p>
+                        {row.overdue_invoice_count} overdue • {row.disputed_invoice_count} disputed • Oldest due{' '}
+                        {formatDate(row.oldest_due_at)}
+                      </p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <strong>No settlement aging yet</strong>
+              <p>Open invoices will populate aging once the settlement ledger starts carrying unpaid cash exposure.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'reports-cash-forecast',
+          eyebrow: 'Cash',
+          title: 'Cash Forecast',
+          description: 'Expected receipts from open invoices versus actual settlement receipts, using the live ledger instead of desk-side spreadsheets.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: loading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : error ? (
+            reportErrorState(error)
+          ) : cashForecast && cashCurrencySummaries.length > 0 ? (
+            <>
+              <div className="dashboard-report-grid">
+                {cashCurrencySummaries.map((summary) => (
+                  <article key={summary.currency_code} className="dashboard-report-card">
+                    <span>{summary.currency_code} Horizon</span>
+                    <strong>{formatCurrencyAmount(summary.expected_horizon_amount, summary.currency_code)}</strong>
+                    <p>
+                      Open {formatCurrencyAmount(summary.open_outstanding_amount, summary.currency_code)} • Overdue{' '}
+                      {formatCurrencyAmount(summary.overdue_outstanding_amount, summary.currency_code)} • Received{' '}
+                      {formatCurrencyAmount(summary.received_horizon_amount, summary.currency_code)}
+                    </p>
+                  </article>
+                ))}
+              </div>
+              <div className="position-list">
+                {cashPoints.slice(0, 12).map((point) => (
+                  <article key={`${point.forecast_date}-${point.currency_code}`} className="position-card">
+                    <div>
+                      <strong>{formatDate(point.forecast_date)}</strong>
+                      <span>
+                        {point.currency_code} • {point.expected_invoice_count} due • {point.received_payment_count} received
+                      </span>
+                    </div>
+                    <div className="position-value">
+                      <b>{formatCurrencyAmount(point.expected_amount, point.currency_code)}</b>
+                      <span>Expected</span>
+                    </div>
+                    <div className="shipment-card-copy">
+                      <p>Received {formatCurrencyAmount(point.received_amount, point.currency_code)}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <strong>No cash forecast yet</strong>
+              <p>Cash forecast points will appear once invoice due dates or payment receipts have been recorded.</p>
             </div>
           ),
         },

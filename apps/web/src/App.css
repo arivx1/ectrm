@@ -2942,8 +2942,7 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 248, 249, 0.84));
 }
 
-.pnl-trend-topbar,
-.pnl-trend-axis {
+.pnl-trend-topbar {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
@@ -3049,11 +3048,6 @@
   color: #51606d;
 }
 
-.pnl-trend-axis span {
-  font-size: 0.8rem;
-  color: #66717c;
-}
-
 .pnl-trend-filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
@@ -3082,6 +3076,97 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+.pnl-trend-figure {
+  display: grid;
+  grid-template-columns: minmax(4.8rem, auto) minmax(0, 1fr);
+  gap: 0.95rem;
+  align-items: stretch;
+}
+
+.pnl-trend-y-axis {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.6rem;
+}
+
+.pnl-trend-y-axis-label {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6b7783;
+}
+
+.pnl-trend-y-scale {
+  position: relative;
+  height: 9.25rem;
+}
+
+.pnl-trend-y-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  color: #66717c;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.pnl-trend-plot {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.pnl-trend-chart-frame {
+  position: relative;
+  cursor: crosshair;
+}
+
+.pnl-trend-tooltip {
+  position: absolute;
+  top: 0.4rem;
+  z-index: 2;
+  display: grid;
+  gap: 0.18rem;
+  min-width: 11rem;
+  max-width: 15rem;
+  padding: 0.6rem 0.72rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 30px rgba(19, 41, 61, 0.14);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.pnl-trend-tooltip.is-left {
+  transform: none;
+}
+
+.pnl-trend-tooltip.is-right {
+  transform: translateX(-100%);
+}
+
+.pnl-trend-tooltip span {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b7783;
+}
+
+.pnl-trend-tooltip strong {
+  color: #13293d;
+  font-size: 1rem;
+  letter-spacing: -0.03em;
+}
+
+.pnl-trend-tooltip small {
+  color: #66717c;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
 .pnl-trend-chart {
   height: 9.25rem;
 }
@@ -3098,6 +3183,53 @@
   stroke: rgba(19, 41, 61, 0.18);
   stroke-width: 1.35;
   stroke-dasharray: 4 5;
+}
+
+.pnl-trend-grid-line {
+  stroke: rgba(19, 41, 61, 0.08);
+  stroke-width: 1;
+}
+
+.pnl-trend-grid-line-vertical {
+  stroke-dasharray: 3 6;
+}
+
+.pnl-trend-hover-line {
+  stroke: rgba(18, 124, 108, 0.28);
+  stroke-width: 1.1;
+  stroke-dasharray: 4 4;
+}
+
+.pnl-trend-hover-line-horizontal {
+  stroke-dasharray: 3 5;
+}
+
+.pnl-trend-hover-dot {
+  filter: drop-shadow(0 0 10px rgba(18, 124, 108, 0.28));
+}
+
+.pnl-trend-x-axis {
+  position: relative;
+  height: 1.25rem;
+}
+
+.pnl-trend-x-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: #66717c;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.pnl-trend-x-tick.is-start {
+  transform: none;
+  text-align: left;
+}
+
+.pnl-trend-x-tick.is-end {
+  transform: translateX(-100%);
+  text-align: right;
 }
 
 .pnl-trend-sparse-state {
@@ -3173,6 +3305,31 @@
 @media (max-width: 960px) {
   .pnl-trend-toolbar {
     justify-content: flex-start;
+  }
+
+  .pnl-trend-figure {
+    grid-template-columns: 1fr;
+  }
+
+  .pnl-trend-y-axis {
+    grid-template-rows: auto auto;
+  }
+
+  .pnl-trend-tooltip {
+    min-width: 10rem;
+    max-width: 12rem;
+  }
+
+  .pnl-trend-y-scale {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    height: auto;
+  }
+
+  .pnl-trend-y-tick {
+    position: static;
+    transform: none;
   }
 
   .pnl-trend-sparse-state {
@@ -4637,18 +4794,21 @@
 
 .pnl-trend-copy span,
 .pnl-trend-copy p,
-.pnl-trend-axis span,
 .pnl-trend-note,
 .pnl-trend-stat-card span,
 .pnl-trend-stat-card p,
 .pnl-trend-sparse-copy span,
 .pnl-trend-sparse-copy p,
-.pnl-trend-sparse-visual small {
+.pnl-trend-sparse-visual small,
+.pnl-trend-y-axis-label,
+.pnl-trend-y-tick,
+.pnl-trend-x-tick {
   color: var(--terminal-muted);
 }
 
 .pnl-trend-stat-card strong,
-.pnl-trend-sparse-copy strong {
+.pnl-trend-sparse-copy strong,
+.pnl-trend-tooltip strong {
   color: var(--terminal-text);
 }
 
@@ -4682,8 +4842,27 @@
   background: linear-gradient(180deg, rgba(8, 15, 24, 0.98), rgba(12, 24, 37, 0.78));
 }
 
+.pnl-trend-tooltip {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.98));
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
+}
+
+.pnl-trend-tooltip span,
+.pnl-trend-tooltip small {
+  color: var(--terminal-muted);
+}
+
 .pnl-trend-zero-line {
   stroke: rgba(126, 154, 184, 0.22);
+}
+
+.pnl-trend-grid-line {
+  stroke: rgba(126, 154, 184, 0.1);
+}
+
+.pnl-trend-hover-line {
+  stroke: rgba(61, 214, 160, 0.32);
 }
 
 .pnl-trend-sparse-dot {

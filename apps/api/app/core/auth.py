@@ -24,6 +24,7 @@ from apps.api.app.schemas._validation import normalize_required_text
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 390000
 ADMIN_ROLES = frozenset({"OPS_ADMIN", "ADMIN"})
+CREDIT_APPROVER_ROLES = frozenset({"CREDIT_APPROVER"})
 GOOGLE_AUTH_ISSUERS = frozenset({"accounts.google.com", "https://accounts.google.com"})
 GOD_LOGIN_USER_ID = "admin"
 GOD_LOGIN_PASSWORD = "admin"
@@ -71,6 +72,10 @@ class GoogleIdentity:
     subject: str
     email: str
     display_name: str
+
+
+def normalize_role(value: Optional[str]) -> str:
+    return (value or "").strip().upper()
 
 
 def _coerce_utc(value: datetime) -> datetime:
@@ -366,7 +371,12 @@ def resolve_session_principal(db: Session, authorization_header: Optional[str]) 
 
 
 def is_admin_role(role: Optional[str]) -> bool:
-    return (role or "").strip().upper() in ADMIN_ROLES
+    return normalize_role(role) in ADMIN_ROLES
+
+
+def is_credit_approver_role(role: Optional[str]) -> bool:
+    normalized_role = normalize_role(role)
+    return normalized_role in ADMIN_ROLES or normalized_role in CREDIT_APPROVER_ROLES
 
 
 def resolve_audit_actor_id(payload_actor_id: Optional[str], *, required: bool = True) -> Optional[str]:

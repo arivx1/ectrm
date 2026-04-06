@@ -7,6 +7,10 @@ export type ChartPoint = {
   y: number
 }
 
+function clampFraction(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
 function chartBounds(values: number[]) {
   const drawableWidth = CHART_WIDTH - CHART_PADDING * 2
   const drawableHeight = CHART_HEIGHT - CHART_PADDING * 2
@@ -40,18 +44,27 @@ export function projectChartY(value: number, values: number[], clamp = false): n
   return Math.min(CHART_HEIGHT - CHART_PADDING, Math.max(CHART_PADDING, rawY))
 }
 
-export function buildChartPoints(values: number[]): ChartPoint[] {
+export function projectChartX(fraction: number): number {
+  const drawableWidth = CHART_WIDTH - CHART_PADDING * 2
+  return CHART_PADDING + drawableWidth * clampFraction(fraction)
+}
+
+export function buildChartPoints(values: number[], xFractions?: number[]): ChartPoint[] {
   if (values.length === 0) {
     return []
   }
 
+  const normalizedFractions =
+    xFractions && xFractions.length === values.length
+      ? xFractions.map((fraction) => clampFraction(fraction))
+      : values.map((_, index) => (values.length === 1 ? 0.5 : index / (values.length - 1)))
   const { drawableWidth } = chartBounds(values)
 
   return values.map((value, index) => {
     const x =
-      values.length === 1
+      values.length === 1 && !xFractions
         ? CHART_WIDTH / 2
-        : CHART_PADDING + (drawableWidth * index) / (values.length - 1)
+        : CHART_PADDING + drawableWidth * normalizedFractions[index]
 
     return {
       x,

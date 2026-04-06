@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import { loadPnlHistoryReport } from '../../entities/reports/api'
 import { appConfig } from '../../shared/config'
@@ -14,6 +14,7 @@ import {
   buildAreaPath,
   buildChartPoints,
   buildLinePath,
+  projectChartX,
   projectChartY,
 } from './chartUtils'
 
@@ -92,6 +93,12 @@ function tradeDirection(trade: TradeRecord): number {
 }
 
 type TrendTone = 'up' | 'down' | 'flat'
+type PnlAxisTick = {
+  key: string
+  label: string
+  fraction?: number
+  y?: number
+}
 
 function parseReportDate(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -179,44 +186,300 @@ function formatDateWindowLabel(start: string | null | undefined, end: string | n
   return 'All available history'
 }
 
+const COMPACT_CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+
+const WHOLE_CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 0,
+})
+
+function formatAxisMoneyLabel(value: number): string {
+  if (Math.abs(value) >= 1000) {
+    return COMPACT_CURRENCY_FORMATTER.format(value)
+  }
+
+  return WHOLE_CURRENCY_FORMATTER.format(value)
+}
+
+function uniqueRoundedValues(values: number[]): number[] {
+  const unique: number[] = []
+
+  for (const value of values) {
+    if (unique.some((candidate) => Math.abs(candidate - value) < 0.01)) {
+      continue
+    }
+
+    unique.push(value)
+  }
+
+  return unique
+}
+
+function buildPnlYAxisTicks(values: number[]): PnlAxisTick[] {
+  if (values.length === 0) {
+    return []
+  }
+
+  const minValue = Math.min(...values)
+  const maxValue = Math.max(...values)
+  const candidateValues =
+    minValue === maxValue
+      ? [maxValue]
+      : minValue < 0 && maxValue > 0
+        ? [maxValue, 0, minValue]
+        : [maxValue, maxValue - (maxValue - minValue) / 2, minValue]
+
+  return uniqueRoundedValues(candidateValues).map((value) => ({
+    key: `y-${value}`,
+    label: formatAxisMoneyLabel(value),
+    y: projectChartY(value, values, true),
+  }))
+}
+
+function buildPnlPointFractions(points: PnlHistoryPoint[]): number[] | null {
+  if (points.length === 0) {
+    return null
+  }
+
+  const timestamps = points.map((point) => parseReportDate(point.date)?.getTime() ?? null)
+  if (timestamps.some((timestamp) => timestamp === null)) {
+    return null
+  }
+
+  const startTimestamp = timestamps[0] as number
+  const endTimestamp = timestamps[timestamps.length - 1] as number
+  if (startTimestamp === endTimestamp) {
+    return points.map(() => 0.5)
+  }
+
+  return timestamps.map((timestamp) => ((timestamp as number) - startTimestamp) / (endTimestamp - startTimestamp))
+}
+
+function buildPnlXAxisTicks(points: PnlHistoryPoint[]): PnlAxisTick[] {
+  if (points.length === 0) {
+    return []
+  }
+
+  const firstDate = parseReportDate(points[0].date)
+  const lastDate = parseReportDate(points[points.length - 1].date)
+  if (!firstDate || !lastDate) {
+    return []
+  }
+
+  const firstTimestamp = firstDate.getTime()
+  const lastTimestamp = lastDate.getTime()
+  if (firstTimestamp === lastTimestamp) {
+    return [
+      {
+        key: `x-${points[0].date}`,
+        label: formatReportDateLabel(points[0].date),
+        fraction: 0.5,
+      },
+    ]
+  }
+
+  const daySpan = Math.max(1, Math.round((lastTimestamp - firstTimestamp) / 86_400_000))
+  const desiredTickCount = daySpan <= 6 ? daySpan + 1 : daySpan <= 20 ? 5 : 6
+  const seenDateKeys = new Set<string>()
+  const ticks: PnlAxisTick[] = []
+
+  for (let index = 0; index < desiredTickCount; index += 1) {
+    const fraction = desiredTickCount === 1 ? 0.5 : index / (desiredTickCount - 1)
+    const dayOffset = Math.round(daySpan * fraction)
+    const tickDate = addDays(firstDate, dayOffset)
+    const tickDateKey = formatDateInputValue(tickDate)
+    if (seenDateKeys.has(tickDateKey)) {
+      continue
+    }
+
+    seenDateKeys.add(tickDateKey)
+    ticks.push({
+      key: `x-${tickDateKey}`,
+      label: formatReportDateLabel(tickDateKey),
+      fraction: (tickDate.getTime() - firstTimestamp) / (lastTimestamp - firstTimestamp),
+    })
+  }
+
+  return ticks
+}
+
 function PnlTrendChart({
   points,
   tone,
+  formatMoney,
 }: {
   points: PnlHistoryPoint[]
   tone: TrendTone
+  formatMoney: (value: number | null) => string
 }) {
   const values = points.map((point) => point.total_pnl)
-  const chartPoints = buildChartPoints(values)
+  const xFractions = buildPnlPointFractions(points) ?? undefined
+  const chartPoints = buildChartPoints(values, xFractions)
   const linePath = buildLinePath(chartPoints)
   const baselineY = projectChartY(0, values, true)
   const areaPath = buildAreaPath(chartPoints, baselineY)
   const lastPoint = chartPoints[chartPoints.length - 1]
+  const yTicks = buildPnlYAxisTicks(values)
+  const xTicks = buildPnlXAxisTicks(points)
   const firstLabel = points[0] ? formatReportDateLabel(points[0].date) : null
   const lastLabel = points[points.length - 1] ? formatReportDateLabel(points[points.length - 1].date) : null
+  const [activePointIndex, setActivePointIndex] = useState<number | null>(null)
+  const activePoint = activePointIndex === null ? null : points[activePointIndex] ?? null
+  const activeChartPoint = activePointIndex === null ? null : chartPoints[activePointIndex] ?? null
+  const visiblePoint = activeChartPoint ?? lastPoint
+  const tooltipAnchorClass =
+    activeChartPoint === null
+      ? ''
+      : activeChartPoint.x >= CHART_WIDTH - 72
+        ? 'is-right'
+        : activeChartPoint.x <= 72
+          ? 'is-left'
+          : ''
+
+  function updateActivePoint(event: ReactPointerEvent<HTMLDivElement>): void {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (bounds.width <= 0 || chartPoints.length === 0) {
+      return
+    }
+
+    const pointerX = ((event.clientX - bounds.left) / bounds.width) * CHART_WIDTH
+    let nearestIndex = 0
+    let nearestDistance = Math.abs(chartPoints[0].x - pointerX)
+
+    for (let index = 1; index < chartPoints.length; index += 1) {
+      const distance = Math.abs(chartPoints[index].x - pointerX)
+      if (distance < nearestDistance) {
+        nearestIndex = index
+        nearestDistance = distance
+      }
+    }
+
+    setActivePointIndex(nearestIndex)
+  }
 
   return (
-    <div className={`market-price-chart market-price-chart-${tone} pnl-trend-chart`}>
-      <svg
-        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        role="img"
-        aria-label={
-          firstLabel && lastLabel
-            ? `Desk P and L trend from ${firstLabel} to ${lastLabel}`
-            : 'Desk P and L trend'
-        }
-      >
-        <line
-          className="pnl-trend-zero-line"
-          x1={CHART_PADDING}
-          x2={CHART_WIDTH - CHART_PADDING}
-          y1={baselineY}
-          y2={baselineY}
-        />
-        <path className="market-price-chart-area pnl-trend-area" d={areaPath} />
-        <path className="market-price-chart-line" d={linePath} />
-        {lastPoint && <circle className="market-price-chart-dot" cx={lastPoint.x} cy={lastPoint.y} r="4" />}
-      </svg>
+    <div className="pnl-trend-figure">
+      <div className="pnl-trend-y-axis" aria-hidden="true">
+        <span className="pnl-trend-y-axis-label">P&amp;L (USD)</span>
+        <div className="pnl-trend-y-scale">
+          {yTicks.map((tick) => (
+            <span
+              key={tick.key}
+              className="pnl-trend-y-tick"
+              style={{ top: `${((tick.y ?? 0) / CHART_HEIGHT) * 100}%` }}
+            >
+              {tick.label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="pnl-trend-plot">
+        <div
+          className="pnl-trend-chart-frame"
+          onPointerMove={updateActivePoint}
+          onPointerLeave={() => setActivePointIndex(null)}
+        >
+          {activePoint && activeChartPoint ? (
+            <div
+              className={`pnl-trend-tooltip ${tooltipAnchorClass}`.trim()}
+              style={{ left: `${(activeChartPoint.x / CHART_WIDTH) * 100}%` }}
+            >
+              <span>{formatReportDateLabel(activePoint.date)}</span>
+              <strong>{formatMoney(activePoint.total_pnl)}</strong>
+              <small>
+                Realized {formatMoney(activePoint.realized_pnl)} • Open {formatMoney(activePoint.unrealized_pnl)}
+              </small>
+            </div>
+          ) : null}
+
+          <div className={`market-price-chart market-price-chart-${tone} pnl-trend-chart`}>
+            <svg
+              viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+              role="img"
+              aria-label={
+                firstLabel && lastLabel
+                  ? `Desk P and L trend from ${firstLabel} to ${lastLabel}`
+                  : 'Desk P and L trend'
+              }
+            >
+              {yTicks.map((tick) => (
+                <line
+                  key={tick.key}
+                  className="pnl-trend-grid-line"
+                  x1={CHART_PADDING}
+                  x2={CHART_WIDTH - CHART_PADDING}
+                  y1={tick.y ?? 0}
+                  y2={tick.y ?? 0}
+                />
+              ))}
+              {xTicks.map((tick) => (
+                <line
+                  key={tick.key}
+                  className="pnl-trend-grid-line pnl-trend-grid-line-vertical"
+                  x1={projectChartX(tick.fraction ?? 0)}
+                  x2={projectChartX(tick.fraction ?? 0)}
+                  y1={CHART_PADDING}
+                  y2={CHART_HEIGHT - CHART_PADDING}
+                />
+              ))}
+              <line
+                className="pnl-trend-zero-line"
+                x1={CHART_PADDING}
+                x2={CHART_WIDTH - CHART_PADDING}
+                y1={baselineY}
+                y2={baselineY}
+              />
+              <path className="market-price-chart-area pnl-trend-area" d={areaPath} />
+              <path className="market-price-chart-line" d={linePath} />
+              {activeChartPoint ? (
+                <>
+                  <line
+                    className="pnl-trend-hover-line"
+                    x1={activeChartPoint.x}
+                    x2={activeChartPoint.x}
+                    y1={CHART_PADDING}
+                    y2={CHART_HEIGHT - CHART_PADDING}
+                  />
+                  <line
+                    className="pnl-trend-hover-line pnl-trend-hover-line-horizontal"
+                    x1={CHART_PADDING}
+                    x2={CHART_WIDTH - CHART_PADDING}
+                    y1={activeChartPoint.y}
+                    y2={activeChartPoint.y}
+                  />
+                </>
+              ) : null}
+              {visiblePoint && (
+                <circle
+                  className={`market-price-chart-dot ${activeChartPoint ? 'pnl-trend-hover-dot' : ''}`.trim()}
+                  cx={visiblePoint.x}
+                  cy={visiblePoint.y}
+                  r={activeChartPoint ? '4.8' : '4'}
+                />
+              )}
+            </svg>
+          </div>
+        </div>
+
+        <div className="pnl-trend-x-axis" aria-hidden="true">
+          {xTicks.map((tick, index) => (
+            <span
+              key={tick.key}
+              className={`pnl-trend-x-tick ${index === 0 ? 'is-start' : ''} ${index === xTicks.length - 1 ? 'is-end' : ''}`.trim()}
+              style={{ left: `${(tick.fraction ?? 0.5) * 100}%` }}
+            >
+              {tick.label}
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -726,12 +989,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
 
                   {hasComparableTrend ? (
                     <div className="pnl-trend-chart-shell">
-                      <PnlTrendChart points={pnlTrendPoints} tone={pnlTrendTone} />
-
-                      <div className="pnl-trend-axis">
-                        <span>{pnlTrendStart ? formatReportDateLabel(pnlTrendStart.date) : 'Start'}</span>
-                        <span>{pnlTrendEnd ? formatReportDateLabel(pnlTrendEnd.date) : 'Latest'}</span>
-                      </div>
+                      <PnlTrendChart points={pnlTrendPoints} tone={pnlTrendTone} formatMoney={formatMoney} />
                     </div>
                   ) : singlePoint ? (
                     <div className="pnl-trend-sparse-state">

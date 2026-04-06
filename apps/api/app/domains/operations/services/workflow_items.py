@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.auth import is_credit_approver_role
+from apps.api.app.domains.reports.services.counterparty_credit import (
+    CounterpartyCreditTradeInput,
+)
+from apps.api.app.domains.reports.services.counterparty_credit import (
+    evaluate_counterparty_credit_policy,
+)
 from apps.api.app.domains.operations.services.trade_credit_hold import (
     DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES,
 )
@@ -14,7 +22,9 @@ from apps.api.app.domains.operations.services.trade_credit_hold import (
 )
 from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.schemas.operations import TradeCreditApprovalDecisionOut
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.shared.enums import AllocationStatus
 from apps.api.app.shared.enums import ConfirmationStatus
@@ -89,6 +99,10 @@ AUTOMATED_WORKFLOW_TYPES: tuple[str, ...] = (
 )
 
 _UNSET = object()
+CREDIT_APPROVAL_DECISION_STATUS_VALUES = {
+    CreditApprovalStatus.APPROVED.value,
+    CreditApprovalStatus.REJECTED.value,
+}
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -108,6 +122,136 @@ def _at_midday_utc(value: date | None) -> Optional[datetime]:
 def _normalize_optional_text(value: object | None) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
+
+
+def _credit_workflow_status_change_allowed(*, actor_id: str, actor_role: str | None) -> bool:
+    normalized_actor_id = str(actor_id or "").strip().lower()
+    return normalized_actor_id.startswith("system.") or is_credit_approver_role(actor_role)
+
+
+def _build_credit_approval_breach_snapshot(
+    db: Session,
+    *,
+    trade: Trade,
+    captured_at: datetime,
+) -> dict[str, object]:
+    policy_result = evaluate_counterparty_credit_policy(
+        db,
+        trade_input=CounterpartyCreditTradeInput(
+            trade_id=trade.trade_id,
+            counterparty_code=trade.counterparty,
+            trade_currency_code=trade.trade_currency_code,
+            price=trade.price,
+            volume=trade.volume,
+            status=trade.status,
+        ),
+    )
+
+    snapshot: dict[str, object] = {
+        "captured_at": captured_at.isoformat(),
+        "trade_id": trade.trade_id,
+        "trade_status": trade.status,
+        "counterparty_code": trade.counterparty,
+        "trade_currency_code": trade.trade_currency_code,
+        "price": float(trade.price) if trade.price is not None else None,
+        "volume": float(trade.volume) if trade.volume is not None else None,
+    }
+    if policy_result is None:
+        snapshot.update(
+            {
+                "breach_action": None,
+                "limit_currency_code": None,
+                "limit_amount": None,
+                "current_exposure_amount": None,
+                "projected_trade_exposure_amount": None,
+                "projected_exposure_amount": None,
+                "projected_utilization_percent": None,
+                "limit_breached": False,
+                "comparable": False,
+                "comparison_reason": "no_credit_profile",
+            }
+        )
+        return snapshot
+
+    snapshot.update(
+        {
+            "breach_action": policy_result.get("breach_action"),
+            "limit_currency_code": policy_result.get("limit_currency_code"),
+            "limit_amount": policy_result.get("limit_amount"),
+            "current_exposure_amount": policy_result.get("current_exposure_amount"),
+            "projected_trade_exposure_amount": policy_result.get("projected_trade_exposure_amount"),
+            "projected_exposure_amount": policy_result.get("projected_exposure_amount"),
+            "projected_utilization_percent": policy_result.get("projected_utilization_percent"),
+            "limit_breached": bool(policy_result.get("limit_breached")),
+            "comparable": bool(policy_result.get("comparable")),
+            "comparison_reason": policy_result.get("comparison_reason"),
+        }
+    )
+    return snapshot
+
+
+def _decision_to_out(record: TradeCreditApprovalDecision) -> TradeCreditApprovalDecisionOut:
+    return TradeCreditApprovalDecisionOut(
+        decision_id=record.id,
+        trade_id=record.trade_id,
+        workflow_item_id=record.workflow_item_id,
+        decision=record.decision,
+        decision_comment=record.decision_comment,
+        breach_snapshot=dict(record.breach_snapshot or {}),
+        decided_at=record.decided_at,
+        decided_by=record.decided_by,
+    )
+
+
+def _credit_decision_history_by_workflow_item_id(
+    db: Session,
+    *,
+    workflow_item_ids: list[int],
+) -> dict[int, list[TradeCreditApprovalDecisionOut]]:
+    if not workflow_item_ids:
+        return {}
+
+    rows = db.execute(
+        select(TradeCreditApprovalDecision)
+        .where(TradeCreditApprovalDecision.workflow_item_id.in_(workflow_item_ids))
+        .order_by(
+            TradeCreditApprovalDecision.decided_at.desc(),
+            TradeCreditApprovalDecision.id.desc(),
+        )
+    ).scalars().all()
+
+    decisions_by_item_id: dict[int, list[TradeCreditApprovalDecisionOut]] = defaultdict(list)
+    for row in rows:
+        decisions_by_item_id[row.workflow_item_id].append(_decision_to_out(row))
+    return decisions_by_item_id
+
+
+def _append_credit_approval_decision(
+    db: Session,
+    *,
+    trade: Trade,
+    workflow_item: TradeWorkflowItem,
+    decision: str,
+    decision_comment: str,
+    actor_id: str,
+    decided_at: datetime,
+) -> None:
+    db.add(
+        TradeCreditApprovalDecision(
+            trade_id=trade.trade_id,
+            workflow_item_id=workflow_item.id,
+            decision=decision,
+            decision_comment=decision_comment,
+            breach_snapshot=_build_credit_approval_breach_snapshot(
+                db,
+                trade=trade,
+                captured_at=decided_at,
+            ),
+            decided_at=decided_at,
+            decided_by=actor_id,
+        )
+    )
+    db.flush()
 
 
 def workflow_queue_for_type(workflow_type: str) -> str:
@@ -402,7 +546,13 @@ def _workflow_attention_rank(item: TradeWorkflowItemOut) -> tuple[int, datetime,
     return (priority, due_at, updated_at, item.trade_id, item.workflow_type)
 
 
-def _to_out(item: TradeWorkflowItem, trade: Trade, *, now: Optional[datetime] = None) -> TradeWorkflowItemOut:
+def _to_out(
+    item: TradeWorkflowItem,
+    trade: Trade,
+    *,
+    now: Optional[datetime] = None,
+    credit_decision_history: list[TradeCreditApprovalDecisionOut] | None = None,
+) -> TradeWorkflowItemOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     created_at = _coerce_utc(item.created_at) or reference_time
     updated_at = _coerce_utc(item.updated_at) or reference_time
@@ -437,6 +587,7 @@ def _to_out(item: TradeWorkflowItem, trade: Trade, *, now: Optional[datetime] = 
         trade_date=trade.trade_date,
         delivery_start=trade.delivery_start,
         delivery_end=trade.delivery_end,
+        credit_decision_history=credit_decision_history or [],
     )
 
 
@@ -465,7 +616,23 @@ def list_trade_workflow_items(
         stmt = stmt.where(TradeWorkflowItem.trade_id == trade_id)
 
     rows = db.execute(stmt).all()
-    items = [_to_out(item, trade, now=reference_time) for item, trade in rows]
+    credit_decision_history_by_item_id = _credit_decision_history_by_workflow_item_id(
+        db,
+        workflow_item_ids=[
+            item.id
+            for item, _trade in rows
+            if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value
+        ],
+    )
+    items = [
+        _to_out(
+            item,
+            trade,
+            now=reference_time,
+            credit_decision_history=credit_decision_history_by_item_id.get(item.id, []),
+        )
+        for item, trade in rows
+    ]
     if normalized_queue is not None:
         items = [item for item in items if item.queue == normalized_queue]
     if not include_closed:
@@ -479,6 +646,8 @@ def create_trade_workflow_item(
     trade_id: str,
     workflow_type: str,
     actor_id: str,
+    actor_role: str | None = None,
+    enforce_credit_authorization: bool = True,
     status: object | None = None,
     owner: object | None = None,
     due_at: datetime | None = None,
@@ -515,6 +684,22 @@ def create_trade_workflow_item(
             raise LookupError(
                 f"Workflow item for trade '{trade_id}' and type '{normalized_type}' was not found."
             )
+        normalized_notes = _normalize_optional_text(notes)
+        if (
+            enforce_credit_authorization
+            and normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value
+            and normalized_status != CreditApprovalStatus.PENDING_REVIEW.value
+        ):
+            if not _credit_workflow_status_change_allowed(actor_id=actor_id, actor_role=actor_role):
+                raise PermissionError(
+                    "Only CREDIT_APPROVER, OPS_ADMIN, or ADMIN sessions can change credit approval workflow status."
+                )
+        if (
+            normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value
+            and normalized_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES
+        ):
+            if not normalized_notes:
+                raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
 
         item = TradeWorkflowItem(
             trade_id=trade_id,
@@ -524,7 +709,7 @@ def create_trade_workflow_item(
             due_at=normalize_workflow_due_at(due_at)
             if due_at is not None
             else _default_due_at_for_trade(trade, normalized_type),
-            notes=_normalize_optional_text(notes),
+            notes=normalized_notes,
             created_at=reference_time,
             created_by=actor_id,
             updated_at=reference_time,
@@ -533,16 +718,53 @@ def create_trade_workflow_item(
         )
         db.add(item)
         db.flush()
+        if normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value and normalized_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES:
+            _append_credit_approval_decision(
+                db,
+                trade=trade,
+                workflow_item=item,
+                decision=normalized_status,
+                decision_comment=item.notes or "",
+                actor_id=actor_id,
+                decided_at=reference_time,
+            )
         workflow_items = db.execute(
             select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == trade_id)
         ).scalars().all()
         rollup_trade_workflow_statuses(trade, workflow_items, now=reference_time)
         db.flush()
-        return _to_out(item, trade, now=reference_time)
+        return _to_out(
+            item,
+            trade,
+            now=reference_time,
+            credit_decision_history=_credit_decision_history_by_workflow_item_id(
+                db,
+                workflow_item_ids=[item.id],
+            ).get(item.id, []),
+        )
 
     changed = False
+    previous_status = item.status
+    requested_status: str | None = None
     if status is not None:
         normalized_status = normalize_workflow_status(normalized_type, status)
+        if (
+            enforce_credit_authorization
+            and normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value
+            and normalized_status != item.status
+        ):
+            normalized_notes = _normalize_optional_text(notes)
+            if not _credit_workflow_status_change_allowed(actor_id=actor_id, actor_role=actor_role):
+                raise PermissionError(
+                    "Only CREDIT_APPROVER, OPS_ADMIN, or ADMIN sessions can change credit approval workflow status."
+                )
+            if (
+                normalized_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES
+                and not normalized_notes
+                and not (item.notes or "").strip()
+            ):
+                raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
+        requested_status = normalized_status
         if item.status != normalized_status:
             item.status = normalized_status
             changed = True
@@ -566,13 +788,36 @@ def create_trade_workflow_item(
         item.updated_at = reference_time
         item.updated_by = actor_id
         item.version += 1
+    if (
+        requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES
+        and item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value
+        and previous_status != requested_status
+        and item.status == requested_status
+    ):
+        _append_credit_approval_decision(
+            db,
+            trade=trade,
+            workflow_item=item,
+            decision=requested_status,
+            decision_comment=item.notes or "",
+            actor_id=actor_id,
+            decided_at=reference_time,
+        )
 
     workflow_items = db.execute(
         select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == trade_id)
     ).scalars().all()
     rollup_trade_workflow_statuses(trade, workflow_items, now=reference_time)
     db.flush()
-    return _to_out(item, trade, now=reference_time)
+    return _to_out(
+        item,
+        trade,
+        now=reference_time,
+        credit_decision_history=_credit_decision_history_by_workflow_item_id(
+            db,
+            workflow_item_ids=[item.id],
+        ).get(item.id, []),
+    )
 
 
 def update_trade_workflow_item(
@@ -580,6 +825,7 @@ def update_trade_workflow_item(
     *,
     item_id: int,
     actor_id: str,
+    actor_role: str | None,
     changes: dict[str, object | None],
     now: Optional[datetime] = None,
 ) -> TradeWorkflowItemOut:
@@ -597,14 +843,21 @@ def update_trade_workflow_item(
 
     item, trade = row
     changed = False
+    previous_status = item.status
+    requested_status: str | None = None
 
     if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value and "status" in changes:
         requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
         next_notes = item.notes
         if "notes" in changes:
             next_notes = _normalize_optional_text(changes.get("notes"))
-        if requested_status == CreditApprovalStatus.REJECTED.value and not next_notes:
-            raise ValueError("Rejecting a credit approval item requires an audit comment in notes.")
+        if requested_status != item.status:
+            if not _credit_workflow_status_change_allowed(actor_id=actor_id, actor_role=actor_role):
+                raise PermissionError(
+                    "Only CREDIT_APPROVER, OPS_ADMIN, or ADMIN sessions can change credit approval workflow status."
+                )
+            if requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES and not next_notes:
+                raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
 
     if item.workflow_type in DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES and "status" in changes:
         requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
@@ -648,10 +901,32 @@ def update_trade_workflow_item(
         item.updated_at = reference_time
         item.updated_by = actor_id
         item.version += 1
+        if (
+            item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value
+            and requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES
+            and previous_status != requested_status
+        ):
+            _append_credit_approval_decision(
+                db,
+                trade=trade,
+                workflow_item=item,
+                decision=requested_status,
+                decision_comment=item.notes or "",
+                actor_id=actor_id,
+                decided_at=reference_time,
+            )
 
     workflow_items = db.execute(
         select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == item.trade_id)
     ).scalars().all()
     rollup_trade_workflow_statuses(trade, workflow_items, now=reference_time)
     db.flush()
-    return _to_out(item, trade, now=reference_time)
+    return _to_out(
+        item,
+        trade,
+        now=reference_time,
+        credit_decision_history=_credit_decision_history_by_workflow_item_id(
+            db,
+            workflow_item_ids=[item.id],
+        ).get(item.id, []),
+    )

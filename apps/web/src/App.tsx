@@ -2115,6 +2115,7 @@ export default function App() {
             authSession={authSession}
             tradeCaptureFormProps={tradeCaptureFormProps}
             trades={trades}
+            tradeWorkflowItems={tradeWorkflowItems}
             selectedTrade={selectedTrade}
             selectedTradeId={selectedTradeId}
             selectedTradeEvents={selectedTradeEvents}

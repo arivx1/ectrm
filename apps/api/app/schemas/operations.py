@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DependencyHealthOut(BaseModel):
@@ -45,6 +45,17 @@ class SystemOverviewOut(BaseModel):
     dependencies: list[DependencyHealthOut]
 
 
+class TradeCreditApprovalDecisionOut(BaseModel):
+    decision_id: int
+    trade_id: str
+    workflow_item_id: int
+    decision: str
+    decision_comment: str
+    breach_snapshot: dict[str, object] = Field(default_factory=dict)
+    decided_at: datetime
+    decided_by: str
+
+
 class TradeWorkflowItemOut(BaseModel):
     item_id: int
     trade_id: str
@@ -72,6 +83,7 @@ class TradeWorkflowItemOut(BaseModel):
     trade_date: Optional[date]
     delivery_start: Optional[date]
     delivery_end: Optional[date]
+    credit_decision_history: list[TradeCreditApprovalDecisionOut] = Field(default_factory=list)
 
 
 class TradeWorkflowItemCreate(BaseModel):

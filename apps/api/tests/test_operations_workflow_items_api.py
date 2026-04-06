@@ -21,6 +21,7 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
@@ -67,6 +68,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
+            session.query(TradeCreditApprovalDecision).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
             session.query(UserSession).delete()
@@ -292,6 +294,14 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(reject_without_comment_response.status_code, 422)
         self.assertIn("audit comment", reject_without_comment_response.text.lower())
 
+        approve_without_comment_response = self.client.patch(
+            f"/operations/work-items/{work_items['CREDIT_APPROVAL']['item_id']}",
+            json={"status": "APPROVED", "notes": None},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(approve_without_comment_response.status_code, 422)
+        self.assertIn("audit comment", approve_without_comment_response.text.lower())
+
         approve_response = self.client.patch(
             f"/operations/work-items/{work_items['CREDIT_APPROVAL']['item_id']}",
             json={"status": "APPROVED", "notes": "Approved by credit duty officer."},
@@ -299,6 +309,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         )
         self.assertEqual(approve_response.status_code, 200)
         self.assertEqual(approve_response.json()["status"], "APPROVED")
+        self.assertEqual(len(approve_response.json()["credit_decision_history"]), 1)
 
         release_response = self.client.patch(
             f"/operations/work-items/{work_items['CONFIRMATION']['item_id']}",
@@ -307,6 +318,68 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         )
         self.assertEqual(release_response.status_code, 200)
         self.assertEqual(release_response.json()["status"], "CONFIRMED")
+
+    def test_credit_approval_requires_credit_authorized_role_and_records_decision_history(self) -> None:
+        self._bootstrap_admin()
+        self._create_user(
+            user_id="plain_trader",
+            email="plain-trader@example.com",
+            display_name="Plain Trader",
+            role="TRADER",
+        )
+        self._create_user(
+            user_id="credit_approver",
+            email="credit-approver@example.com",
+            display_name="Credit Approver",
+            role="CREDIT_APPROVER",
+        )
+        trader_token = self._login(identifier="plain_trader", password="supersecret2")
+        credit_token = self._login(identifier="credit_approver", password="supersecret2")
+        self._seed_trade(trade_id="T-CREDIT-ROLE-1")
+        self._seed_credit_approval_item(
+            trade_id="T-CREDIT-ROLE-1",
+            notes="Exposure breach opened for review.",
+        )
+
+        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        self.assertEqual(queue_response.status_code, 200)
+        work_item = next(
+            item
+            for item in queue_response.json()
+            if item["trade_id"] == "T-CREDIT-ROLE-1" and item["workflow_type"] == "CREDIT_APPROVAL"
+        )
+
+        unauthorized_response = self.client.patch(
+            f"/operations/work-items/{work_item['item_id']}",
+            json={"status": "APPROVED", "notes": "Desk attempted to release the hold."},
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(unauthorized_response.status_code, 403)
+        self.assertIn("credit_approver", unauthorized_response.text.lower())
+
+        approved_response = self.client.patch(
+            f"/operations/work-items/{work_item['item_id']}",
+            json={"status": "APPROVED", "notes": "Approved after documented credit review."},
+            headers={"Authorization": f"Bearer {credit_token}"},
+        )
+        self.assertEqual(approved_response.status_code, 200)
+        approved_payload = approved_response.json()
+        self.assertEqual(approved_payload["status"], "APPROVED")
+        self.assertEqual(len(approved_payload["credit_decision_history"]), 1)
+        decision = approved_payload["credit_decision_history"][0]
+        self.assertEqual(decision["decision"], "APPROVED")
+        self.assertEqual(decision["decision_comment"], "Approved after documented credit review.")
+        self.assertEqual(decision["decided_by"], "credit_approver")
+        self.assertEqual(decision["trade_id"], "T-CREDIT-ROLE-1")
+        self.assertEqual(decision["workflow_item_id"], work_item["item_id"])
+        self.assertEqual(decision["breach_snapshot"]["trade_id"], "T-CREDIT-ROLE-1")
+        self.assertEqual(decision["breach_snapshot"]["comparison_reason"], "no_credit_profile")
+
+        with self.SessionLocal() as session:
+            decisions = session.query(TradeCreditApprovalDecision).all()
+            self.assertEqual(len(decisions), 1)
+            self.assertEqual(decisions[0].decided_by, "credit_approver")
+            self.assertEqual(decisions[0].decision_comment, "Approved after documented credit review.")
 
     def test_work_item_mutations_require_authentication(self) -> None:
         self._seed_trade(trade_id="T-AUTH-1")

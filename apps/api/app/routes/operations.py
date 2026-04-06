@@ -136,6 +136,10 @@ def _require_authenticated_actor(request: Request) -> str:
     return actor_id
 
 
+def _authenticated_actor_role(request: Request) -> str | None:
+    return getattr(request.state, "actor_role", None)
+
+
 def _provided_fields(payload: TradeWorkflowItemUpdate) -> set[str]:
     if hasattr(payload, "model_fields_set"):
         return set(payload.model_fields_set)
@@ -267,6 +271,7 @@ def post_work_item(
             trade_id=payload.trade_id,
             workflow_type=payload.workflow_type,
             actor_id=actor_id,
+            actor_role=_authenticated_actor_role(request),
             status=payload.status,
             owner=payload.owner,
             due_at=payload.due_at,
@@ -277,6 +282,9 @@ def post_work_item(
     except LookupError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
@@ -307,6 +315,7 @@ def patch_work_item(
             db,
             item_id=item_id,
             actor_id=actor_id,
+            actor_role=_authenticated_actor_role(request),
             changes=changes,
         )
         db.commit()
@@ -314,6 +323,9 @@ def patch_work_item(
     except LookupError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
