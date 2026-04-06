@@ -80,7 +80,7 @@ class AdminSeedApiTests(unittest.TestCase):
 
             self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
             self.assertEqual(payload.entity_counts["commodities"], 11)
-            self.assertEqual(payload.entity_counts["locations"], 14)
+            self.assertEqual(payload.entity_counts["locations"], 514)
             self.assertEqual(payload.entity_counts["counterparties"], 16)
             self.assertEqual(payload.entity_counts["price_indices"], 7)
             self.assertEqual(payload.entity_counts["price_index_sources"], 6)
@@ -106,9 +106,13 @@ class AdminSeedApiTests(unittest.TestCase):
                 }.issuperset(
                     {
                         "ARA",
+                        "CONTINENT_NA",
+                        "COUNTRY_US",
                         "CUSHING",
                         "ERCOT_NORTH",
                         "MIDLAND",
+                        "SUBDIVISION_US_TX",
+                        "SUBDIVISION_ZA_GP",
                         "WAHA",
                     }
                 )
@@ -126,6 +130,20 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(usgc.location_kind, "REGION")
             self.assertEqual(usgc.city, "New Orleans")
             self.assertEqual(usgc.continent_code, "NA")
+            country_us = session.get(ReferenceLocation, "COUNTRY_US")
+            subdivision_us_tx = session.get(ReferenceLocation, "SUBDIVISION_US_TX")
+            subdivision_ca_ab = session.get(ReferenceLocation, "SUBDIVISION_CA_AB")
+            self.assertIsNotNone(country_us)
+            self.assertIsNotNone(subdivision_us_tx)
+            self.assertIsNotNone(subdivision_ca_ab)
+            assert country_us is not None
+            assert subdivision_us_tx is not None
+            assert subdivision_ca_ab is not None
+            self.assertEqual(country_us.parent_location_code, "CONTINENT_NA")
+            self.assertEqual(country_us.location_type, "COUNTRY")
+            self.assertEqual(subdivision_us_tx.parent_location_code, "COUNTRY_US")
+            self.assertEqual(subdivision_us_tx.location_type, "STATE")
+            self.assertEqual(subdivision_ca_ab.location_type, "PROVINCE")
             self.assertTrue(
                 {
                     row.code

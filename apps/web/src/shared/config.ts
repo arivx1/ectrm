@@ -126,7 +126,7 @@ export const bootstrapQueryLimits = Object.freeze({
   referenceData: resolvePositiveIntSetting(
     REFERENCE_DATA_LIMIT_OVERRIDE_STORAGE_KEY,
     'VITE_BOOTSTRAP_REFERENCE_LIMIT',
-    500,
+    1000,
   ),
   externalDataRuns: resolvePositiveIntSetting(
     EXTERNAL_DATA_RUNS_LIMIT_OVERRIDE_STORAGE_KEY,

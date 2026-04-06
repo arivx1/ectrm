@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.reference_data.services.location_seed_catalog import (
+    build_standardized_location_rows,
+)
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
@@ -62,7 +65,7 @@ UNIT_ROWS = [
     {"code": "MWH", "name": "Megawatt Hour", "commodity_class": "POWER", "dimension": "POWER", "base_unit_code": None, "conversion_factor": None, "precision": 3, "description": "Power quantity unit."},
 ]
 
-LOCATION_ROWS = [
+CURATED_LOCATION_ROWS = [
     {
         "code": "CUSHING",
         "name": "Cushing Hub",
@@ -291,6 +294,8 @@ LOCATION_ROWS = [
         "description": "Southern California power hub used in CAISO trading.",
     },
 ]
+
+LOCATION_ROWS = CURATED_LOCATION_ROWS + build_standardized_location_rows()
 
 COUNTERPARTY_ROWS = [
     {
