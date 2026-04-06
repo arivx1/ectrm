@@ -15,12 +15,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
+from apps.api.app.models.user_account import UserAccount
+from apps.api.app.models.user_session import UserSession
 
 
 class ReportsApiTests(unittest.TestCase):
@@ -57,10 +61,42 @@ class ReportsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.now = datetime(2026, 4, 6, 18, 0, tzinfo=timezone.utc)
         with self.SessionLocal() as session:
+            session.query(ReportPreset).delete()
+            session.query(UserSession).delete()
+            session.query(UserAccount).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(Trade).delete()
             session.commit()
+
+    def _create_user_session(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        display_name: str,
+        role: str = "TRADER",
+    ) -> str:
+        with self.SessionLocal() as session:
+            user = UserAccount(
+                user_id=user_id,
+                email=email,
+                display_name=display_name,
+                role=role,
+                password_hash=hash_password("supersecret1"),
+                is_active=True,
+                last_login_at=self.now,
+                created_at=self.now,
+                created_by="test",
+                updated_at=self.now,
+                updated_by="test",
+                version=1,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            _, token = create_user_session(session, user)
+            return token
 
     def _seed_trade(
         self,
@@ -414,3 +450,214 @@ class ReportsApiTests(unittest.TestCase):
         self.assertEqual(len(overdue_rows), 2)
         overdue_trade_ids = {row["trade_id"] for row in overdue_rows}
         self.assertEqual(overdue_trade_ids, {"T-EX-1", "T-EX-3"})
+
+    def test_settlement_reports_support_server_side_filters_and_filter_options(self) -> None:
+        self._seed_trade(trade_id="T-FLT-1", counterparty="SHELL_TRADING", book="CRUDE_PHYS")
+        self._seed_trade(
+            trade_id="T-FLT-2",
+            counterparty="VITOL",
+            book="DISTILLATES",
+            trade_currency_code="EUR",
+        )
+        self._seed_trade(trade_id="T-FLT-3", counterparty="BP_TRADING", book="CRUDE_PHYS", invoice_status="DISPUTED")
+
+        self._seed_invoice(
+            trade_id="T-FLT-1",
+            invoice_number="INV-FLT-1",
+            invoice_amount=1000,
+            due_at=datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc),
+            status="ISSUED",
+        )
+        self._seed_invoice(
+            trade_id="T-FLT-2",
+            invoice_number="INV-FLT-2",
+            invoice_amount=200,
+            due_at=datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc),
+            status="ISSUED",
+            invoice_currency_code="EUR",
+        )
+        short_pay_invoice_id = self._seed_invoice(
+            trade_id="T-FLT-3",
+            invoice_number="INV-FLT-3",
+            invoice_amount=600,
+            due_at=datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc),
+            status="DISPUTED",
+        )
+        self._seed_payment(
+            trade_id="T-FLT-3",
+            invoice_id=short_pay_invoice_id,
+            payment_amount=250,
+            due_at=datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc),
+            status="PAID",
+            received_at=datetime(2026, 4, 5, 13, 0, tzinfo=timezone.utc),
+        )
+
+        aging_response = self.client.get("/reports/settlement-aging?as_of=2026-04-06&book=DISTILLATES&currency=EUR")
+        self.assertEqual(aging_response.status_code, 200)
+        aging_body = aging_response.json()
+        self.assertEqual(aging_body["row_count"], 1)
+        self.assertEqual(aging_body["invoice_count"], 1)
+        self.assertEqual(aging_body["rows"][0]["counterparty_code"], "VITOL")
+        self.assertEqual(aging_body["currency_summaries"][0]["currency_code"], "EUR")
+
+        forecast_response = self.client.get("/reports/cash-forecast?as_of=2026-04-06&horizon_days=7&counterparty=VITOL&currency=EUR")
+        self.assertEqual(forecast_response.status_code, 200)
+        forecast_body = forecast_response.json()
+        self.assertEqual(forecast_body["row_count"], 1)
+        self.assertEqual(len(forecast_body["currency_summaries"]), 1)
+        self.assertEqual(forecast_body["currency_summaries"][0]["currency_code"], "EUR")
+        self.assertEqual(forecast_body["points"][0]["currency_code"], "EUR")
+
+        exception_response = self.client.get(
+            "/reports/settlement-exceptions?as_of=2026-04-06&counterparty=BP_TRADING&exception_type=SHORT_PAY&severity=in-progress"
+        )
+        self.assertEqual(exception_response.status_code, 200)
+        exception_body = exception_response.json()
+        self.assertEqual(exception_body["row_count"], 1)
+        self.assertEqual(exception_body["rows"][0]["trade_id"], "T-FLT-3")
+        self.assertEqual(exception_body["rows"][0]["exception_type"], "SHORT_PAY")
+
+        filter_options_response = self.client.get("/reports/settlement-filter-options?as_of=2026-04-06")
+        self.assertEqual(filter_options_response.status_code, 200)
+        filter_options = filter_options_response.json()
+        self.assertEqual(filter_options["books"], ["CRUDE_PHYS", "DISTILLATES"])
+        self.assertEqual(filter_options["counterparties"], ["BP_TRADING", "SHELL_TRADING", "VITOL"])
+        self.assertEqual(filter_options["currencies"], ["EUR", "USD"])
+        self.assertEqual(
+            filter_options["exception_types"],
+            ["DISPUTED_INVOICE", "SHORT_PAY", "OVERDUE_PAYMENT"],
+        )
+        self.assertEqual(filter_options["severities"], ["blocked", "in-progress"])
+
+    def test_settlement_presets_are_scoped_to_user_and_shared_scope(self) -> None:
+        response = self.client.get("/reports/settlement-presets")
+        self.assertEqual(response.status_code, 401)
+
+        alpha_token = self._create_user_session(
+            user_id="trader_alpha",
+            email="alpha@example.com",
+            display_name="Trader Alpha",
+        )
+        beta_token = self._create_user_session(
+            user_id="trader_beta",
+            email="beta@example.com",
+            display_name="Trader Beta",
+        )
+
+        alpha_personal = self.client.post(
+            "/reports/settlement-presets",
+            json={
+                "name": "Midwest cash watch",
+                "scope": "PERSONAL",
+                "filters": {
+                    "book": "CRUDE_PHYS",
+                    "currency": "USD",
+                },
+            },
+            headers={"Authorization": f"Bearer {alpha_token}"},
+        )
+        self.assertEqual(alpha_personal.status_code, 201)
+        self.assertEqual(alpha_personal.json()["scope"], "PERSONAL")
+
+        alpha_shared = self.client.post(
+            "/reports/settlement-presets",
+            json={
+                "name": "Desk blocked cash",
+                "scope": "SHARED",
+                "filters": {
+                    "exception_type": "OVERDUE_PAYMENT",
+                    "severity": "blocked",
+                },
+            },
+            headers={"Authorization": f"Bearer {alpha_token}"},
+        )
+        self.assertEqual(alpha_shared.status_code, 201)
+        shared_preset_id = alpha_shared.json()["preset_id"]
+        self.assertTrue(alpha_shared.json()["can_edit"])
+
+        beta_personal = self.client.post(
+            "/reports/settlement-presets",
+            json={
+                "name": "Midwest cash watch",
+                "scope": "PERSONAL",
+                "filters": {
+                    "counterparty": "VITOL",
+                    "currency": "EUR",
+                },
+            },
+            headers={"Authorization": f"Bearer {beta_token}"},
+        )
+        self.assertEqual(beta_personal.status_code, 201)
+
+        alpha_duplicate = self.client.post(
+            "/reports/settlement-presets",
+            json={
+                "name": "Desk blocked cash",
+                "scope": "SHARED",
+                "filters": {},
+            },
+            headers={"Authorization": f"Bearer {alpha_token}"},
+        )
+        self.assertEqual(alpha_duplicate.status_code, 409)
+
+        alpha_list = self.client.get(
+            "/reports/settlement-presets",
+            headers={"Authorization": f"Bearer {alpha_token}"},
+        )
+        self.assertEqual(alpha_list.status_code, 200)
+        alpha_names = {row["name"] for row in alpha_list.json()}
+        self.assertEqual(alpha_names, {"Midwest cash watch", "Desk blocked cash"})
+
+        beta_list = self.client.get(
+            "/reports/settlement-presets",
+            headers={"Authorization": f"Bearer {beta_token}"},
+        )
+        self.assertEqual(beta_list.status_code, 200)
+        beta_rows = beta_list.json()
+        beta_names = {row["name"] for row in beta_rows}
+        self.assertEqual(beta_names, {"Midwest cash watch", "Desk blocked cash"})
+        shared_row = next(row for row in beta_rows if row["name"] == "Desk blocked cash")
+        self.assertFalse(shared_row["can_edit"])
+
+        beta_update_shared = self.client.patch(
+            f"/reports/settlement-presets/{shared_preset_id}",
+            json={"name": "Desk blocked cash v2"},
+            headers={"Authorization": f"Bearer {beta_token}"},
+        )
+        self.assertEqual(beta_update_shared.status_code, 403)
+
+        alpha_update_shared = self.client.patch(
+            f"/reports/settlement-presets/{shared_preset_id}",
+            json={
+                "name": "Desk blocked cash v2",
+                "filters": {
+                    "exception_type": "OVERDUE_PAYMENT",
+                    "severity": "blocked",
+                    "currency": "USD",
+                },
+            },
+            headers={"Authorization": f"Bearer {alpha_token}"},
+        )
+        self.assertEqual(alpha_update_shared.status_code, 200)
+        self.assertEqual(alpha_update_shared.json()["name"], "Desk blocked cash v2")
+        self.assertEqual(alpha_update_shared.json()["filters"]["currency"], "USD")
+
+        beta_delete_shared = self.client.delete(
+            f"/reports/settlement-presets/{shared_preset_id}",
+            headers={"Authorization": f"Bearer {beta_token}"},
+        )
+        self.assertEqual(beta_delete_shared.status_code, 403)
+
+        alpha_delete_shared = self.client.delete(
+            f"/reports/settlement-presets/{shared_preset_id}",
+            headers={"Authorization": f"Bearer {alpha_token}"},
+        )
+        self.assertEqual(alpha_delete_shared.status_code, 204)
+
+        beta_list_after_delete = self.client.get(
+            "/reports/settlement-presets",
+            headers={"Authorization": f"Bearer {beta_token}"},
+        )
+        self.assertEqual(beta_list_after_delete.status_code, 200)
+        beta_names_after_delete = {row["name"] for row in beta_list_after_delete.json()}
+        self.assertEqual(beta_names_after_delete, {"Midwest cash watch"})

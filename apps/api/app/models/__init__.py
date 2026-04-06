@@ -10,6 +10,7 @@ from apps.api.app.models.layout_definition import LayoutDefinition
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.roadmap_document import RoadmapDocument
 from apps.api.app.models.roadmap_document_revision import RoadmapDocumentRevision
 from apps.api.app.models.reference_book import ReferenceBook
@@ -52,6 +53,7 @@ __all__ = [
     "OptionExposure",
     "Position",
     "PriceIndexObservation",
+    "ReportPreset",
     "RoadmapDocument",
     "RoadmapDocumentRevision",
     "ReferenceBook",

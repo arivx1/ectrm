@@ -181,6 +181,17 @@ export type TradeCreditApprovalDecisionRecord = {
   decided_by: string
 }
 
+export type TradeCreditApprovalFreshnessRecord = {
+  trade_id: string
+  counterparty_code: string | null
+  review_due_at: string | null
+  latest_external_snapshot_provider: string | null
+  latest_external_snapshot_as_of_date: string | null
+  latest_external_snapshot_age_days: number | null
+  approval_blocked: boolean
+  blocking_reasons: string[]
+}
+
 export type TradeCreditExceptionRecord = {
   exception_id: number
   trade_id: string
@@ -238,6 +249,7 @@ export type TradeWorkflowItemRecord = {
   trade_date: string | null
   delivery_start: string | null
   delivery_end: string | null
+  credit_approval_freshness?: TradeCreditApprovalFreshnessRecord | null
   active_credit_exception?: TradeCreditExceptionRecord | null
   credit_decision_history: TradeCreditApprovalDecisionRecord[]
   credit_approval_status?: string
@@ -777,6 +789,36 @@ export type SettlementExceptionReport = {
   warning_count: number
   summaries: SettlementExceptionSummary[]
   rows: SettlementExceptionRow[]
+}
+
+export type SettlementReportFilters = {
+  book?: string
+  counterparty?: string
+  currency?: string
+  exception_type?: string
+  severity?: 'blocked' | 'in-progress'
+}
+
+export type SettlementReportFilterOptions = {
+  books: string[]
+  counterparties: string[]
+  currencies: string[]
+  exception_types: string[]
+  severities: Array<'blocked' | 'in-progress'>
+}
+
+export type SettlementReportPresetRecord = {
+  preset_id: number
+  preset_key: 'settlement'
+  name: string
+  scope: 'PERSONAL' | 'SHARED'
+  filters: SettlementReportFilters
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
 }
 
 export type PriceIndexObservationRecord = {

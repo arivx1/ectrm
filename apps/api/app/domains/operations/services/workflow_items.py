@@ -30,6 +30,9 @@ from apps.api.app.domains.operations.services.trade_credit_exceptions import (
 from apps.api.app.domains.operations.services.trade_credit_freshness import (
     assert_trade_credit_approval_freshness,
 )
+from apps.api.app.domains.operations.services.trade_credit_freshness import (
+    build_trade_credit_approval_freshness_lookup,
+)
 from apps.api.app.domains.operations.services.trade_credit_hold import (
     format_trade_credit_hold_message,
 )
@@ -38,6 +41,7 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.operations import TradeCreditApprovalDecisionOut
+from apps.api.app.schemas.operations import TradeCreditApprovalFreshnessOut
 from apps.api.app.schemas.operations import TradeCreditExceptionOut
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.shared.enums import AllocationStatus
@@ -702,6 +706,7 @@ def _to_out(
     trade: Trade,
     *,
     now: Optional[datetime] = None,
+    credit_approval_freshness: TradeCreditApprovalFreshnessOut | None = None,
     active_credit_exception: TradeCreditExceptionOut | None = None,
     credit_decision_history: list[TradeCreditApprovalDecisionOut] | None = None,
 ) -> TradeWorkflowItemOut:
@@ -739,6 +744,7 @@ def _to_out(
         trade_date=trade.trade_date,
         delivery_start=trade.delivery_start,
         delivery_end=trade.delivery_end,
+        credit_approval_freshness=credit_approval_freshness,
         active_credit_exception=active_credit_exception,
         credit_decision_history=credit_decision_history or [],
     )
@@ -791,11 +797,17 @@ def list_trade_workflow_items(
         trades=[trade for _item, trade in rows],
         now=reference_time,
     )
+    credit_approval_freshness_by_trade_id = build_trade_credit_approval_freshness_lookup(
+        db,
+        trades=[trade for item, trade in rows if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value],
+        as_of=reference_time,
+    )
     items = [
         _to_out(
             item,
             trade,
             now=reference_time,
+            credit_approval_freshness=credit_approval_freshness_by_trade_id.get(trade.trade_id),
             active_credit_exception=active_credit_exception_by_trade_id.get(trade.trade_id),
             credit_decision_history=credit_decision_history_by_item_id.get(item.id, []),
         )
@@ -929,6 +941,11 @@ def create_trade_workflow_item(
             item,
             trade,
             now=reference_time,
+            credit_approval_freshness=build_trade_credit_approval_freshness_lookup(
+                db,
+                trades=[trade],
+                as_of=reference_time,
+            ).get(trade.trade_id),
             active_credit_exception=build_active_trade_credit_exception_lookup(
                 db,
                 trades=[trade],
@@ -1045,6 +1062,11 @@ def create_trade_workflow_item(
         item,
         trade,
         now=reference_time,
+        credit_approval_freshness=build_trade_credit_approval_freshness_lookup(
+            db,
+            trades=[trade],
+            as_of=reference_time,
+        ).get(trade.trade_id),
         active_credit_exception=build_active_trade_credit_exception_lookup(
             db,
             trades=[trade],
@@ -1199,6 +1221,11 @@ def update_trade_workflow_item(
         item,
         trade,
         now=reference_time,
+        credit_approval_freshness=build_trade_credit_approval_freshness_lookup(
+            db,
+            trades=[trade],
+            as_of=reference_time,
+        ).get(trade.trade_id),
         active_credit_exception=build_active_trade_credit_exception_lookup(
             db,
             trades=[trade],

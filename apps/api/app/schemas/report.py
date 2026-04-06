@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from apps.api.app.schemas._validation import normalize_required_text
 
 
 class ExposureSummaryRow(BaseModel):
@@ -214,3 +217,130 @@ class SettlementExceptionReport(BaseModel):
     warning_count: int
     summaries: list[SettlementExceptionSummary]
     rows: list[SettlementExceptionRow]
+
+
+SettlementReportPresetScope = Literal["PERSONAL", "SHARED"]
+SettlementReportPresetKey = Literal["settlement"]
+SETTLEMENT_REPORT_EXCEPTION_TYPES = frozenset(
+    {
+        "DISPUTED_INVOICE",
+        "SHORT_PAY",
+        "OVERDUE_PAYMENT",
+    }
+)
+SETTLEMENT_REPORT_EXCEPTION_SEVERITIES = frozenset({"blocked", "in-progress"})
+
+
+def _normalize_optional_report_filter(value: str | None, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalize_required_text(normalized, field_name=field_name)
+
+
+class SettlementReportFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    book: str | None = None
+    counterparty: str | None = None
+    currency: str | None = None
+    exception_type: str | None = None
+    severity: str | None = None
+
+    @field_validator("book")
+    @classmethod
+    def normalize_book(cls, value: str | None) -> str | None:
+        return _normalize_optional_report_filter(value, field_name="book")
+
+    @field_validator("counterparty")
+    @classmethod
+    def normalize_counterparty(cls, value: str | None) -> str | None:
+        return _normalize_optional_report_filter(value, field_name="counterparty")
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str | None) -> str | None:
+        normalized = _normalize_optional_report_filter(value, field_name="currency")
+        return normalized.upper() if normalized else None
+
+    @field_validator("exception_type")
+    @classmethod
+    def normalize_exception_type(cls, value: str | None) -> str | None:
+        normalized = _normalize_optional_report_filter(value, field_name="exception_type")
+        if normalized is None:
+            return None
+
+        normalized = normalized.upper()
+        if normalized not in SETTLEMENT_REPORT_EXCEPTION_TYPES:
+            raise ValueError(
+                "exception_type must be one of: "
+                + ", ".join(sorted(SETTLEMENT_REPORT_EXCEPTION_TYPES))
+            )
+        return normalized
+
+    @field_validator("severity")
+    @classmethod
+    def normalize_severity(cls, value: str | None) -> str | None:
+        normalized = _normalize_optional_report_filter(value, field_name="severity")
+        if normalized is None:
+            return None
+
+        normalized = normalized.lower()
+        if normalized not in SETTLEMENT_REPORT_EXCEPTION_SEVERITIES:
+            raise ValueError(
+                "severity must be one of: "
+                + ", ".join(sorted(SETTLEMENT_REPORT_EXCEPTION_SEVERITIES))
+            )
+        return normalized
+
+
+class SettlementReportFilterOptions(BaseModel):
+    books: list[str]
+    counterparties: list[str]
+    currencies: list[str]
+    exception_types: list[str]
+    severities: list[str]
+
+
+class SettlementReportPresetCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=120)
+    scope: SettlementReportPresetScope = "PERSONAL"
+    filters: SettlementReportFilters = Field(default_factory=SettlementReportFilters)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="name")
+
+
+class SettlementReportPresetUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    scope: SettlementReportPresetScope | None = None
+    filters: SettlementReportFilters | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_required_text(value, field_name="name")
+
+
+class SettlementReportPresetOut(BaseModel):
+    preset_id: int
+    preset_key: SettlementReportPresetKey
+    name: str
+    scope: SettlementReportPresetScope
+    filters: SettlementReportFilters
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool

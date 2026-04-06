@@ -4,6 +4,7 @@ import type { StoredAuthSession } from '../../shared/mutation'
 import type { TradeCreditApprovalDecisionRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import {
   allocationStatusOptions,
+  buildCreditApprovalFreshnessBlockerSummary,
   buildTradeCreditHoldSummary,
   confirmationStatusOptions,
   creditApprovalStatusOptions,
@@ -225,6 +226,14 @@ export function WorkflowQueueEditor({
             draft.status !== item.status &&
             (draft.status === 'APPROVED' || draft.status === 'REJECTED') &&
             !creditDecisionNoteAvailable
+          const creditApprovalFreshnessSummary = buildCreditApprovalFreshnessBlockerSummary(
+            item.credit_approval_freshness,
+          )
+          const creditApprovalFreshnessBlocked =
+            item.workflow_type === 'CREDIT_APPROVAL' &&
+            draft.status === 'APPROVED' &&
+            draft.status !== item.status &&
+            Boolean(item.credit_approval_freshness?.approval_blocked)
           const approvePayload =
             item.workflow_type === 'CREDIT_APPROVAL'
               ? buildPayload(item, { ...draft, status: 'APPROVED' })
@@ -237,7 +246,8 @@ export function WorkflowQueueEditor({
             savingItemId === item.item_id ||
             !authSession ||
             Object.keys(buildPayload(item, draft)).length === 0 ||
-            creditDecisionCommentRequired
+            creditDecisionCommentRequired ||
+            creditApprovalFreshnessBlocked
           const assignSelfDisabled =
             !authSession ||
             authSession.user.user_id === (item.owner ?? '') ||
@@ -270,6 +280,23 @@ export function WorkflowQueueEditor({
               <div className="shipment-card-copy">
                 <p>{workflowSummary(item, formatDateOnly)}</p>
               </div>
+              {item.workflow_type === 'CREDIT_APPROVAL' && item.credit_approval_freshness ? (
+                <div className="shipment-card-meta">
+                  <span className="entity-chip entity-chip-soft">
+                    Review due {formatDateOnly(item.credit_approval_freshness.review_due_at)}
+                  </span>
+                  <span className="entity-chip entity-chip-soft">
+                    {item.credit_approval_freshness.latest_external_snapshot_provider
+                      ? `${item.credit_approval_freshness.latest_external_snapshot_provider} as of ${formatDateOnly(item.credit_approval_freshness.latest_external_snapshot_as_of_date)}`
+                      : 'No external credit snapshot'}
+                  </span>
+                  <span className="entity-chip entity-chip-soft">
+                    {item.credit_approval_freshness.latest_external_snapshot_age_days !== null
+                      ? `${item.credit_approval_freshness.latest_external_snapshot_age_days} days old`
+                      : 'Snapshot age unavailable'}
+                  </span>
+                </div>
+              ) : null}
               <div className="workflow-item-grid">
                 <label className="field">
                   <span>Status</span>
@@ -332,8 +359,18 @@ export function WorkflowQueueEditor({
                   Only `CREDIT_APPROVER`, `OPS_ADMIN`, or `ADMIN` sessions can change credit approval status.
                 </p>
               ) : null}
+              {item.workflow_type === 'CREDIT_APPROVAL' && creditApprovalFreshnessSummary ? (
+                <p className="field-error">
+                  Credit approval is blocked until fresh credit data is loaded: {creditApprovalFreshnessSummary}
+                </p>
+              ) : null}
               {creditDecisionCommentRequired ? (
                 <p className="field-error">Approval and rejection decisions require a comment in notes.</p>
+              ) : null}
+              {creditApprovalFreshnessBlocked ? (
+                <p className="field-error">
+                  Status cannot be saved as APPROVED until the stale credit blockers above are cleared.
+                </p>
               ) : null}
               {item.workflow_type === 'CREDIT_APPROVAL' && item.credit_decision_history.length > 0 ? (
                 <div className="timeline">
@@ -416,7 +453,8 @@ export function WorkflowQueueEditor({
                         savingItemId === item.item_id ||
                         !approvePayload ||
                         Object.keys(approvePayload).length === 0 ||
-                        !creditDecisionNoteAvailable
+                        !creditDecisionNoteAvailable ||
+                        Boolean(item.credit_approval_freshness?.approval_blocked)
                       }
                     >
                       Approve With Comment

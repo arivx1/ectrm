@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import {
+  createSettlementReportPreset,
+  deleteSettlementReportPreset,
   loadActivitySummary,
   loadCashForecastReport,
   loadExposureSummary,
@@ -8,6 +10,9 @@ import {
   loadReportingOverview,
   loadSettlementAgingReport,
   loadSettlementExceptionReport,
+  loadSettlementReportFilterOptions,
+  loadSettlementReportPresets,
+  updateSettlementReportPreset,
 } from '../../entities/reports/api'
 import { appConfig } from '../../shared/config'
 import { formatCurrencyAmount } from '../../shared/format'
@@ -18,12 +23,11 @@ import type {
   ExposureSummaryRow,
   PnlHistoryReport,
   ReportingOverview,
-  SettlementAgingCurrencySummary,
+  SettlementReportFilterOptions,
+  SettlementReportFilters as ApiSettlementReportFilters,
+  SettlementReportPresetRecord,
   SettlementAgingReport,
-  SettlementAgingRow,
   SettlementExceptionReport,
-  SettlementExceptionRow,
-  SettlementExceptionSummary,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
@@ -48,8 +52,13 @@ type SettlementReportFilters = {
 }
 
 type SettlementReportPreset = {
+  presetId: number | null
   name: string
+  scope: 'PERSONAL' | 'SHARED'
   filters: SettlementReportFilters
+  canEdit: boolean
+  updatedAt: string | null
+  updatedBy: string | null
 }
 
 const ALL_FILTER_VALUE = 'ALL'
@@ -69,6 +78,12 @@ function normalizeSettlementReportFilters(value: unknown): SettlementReportFilte
   }
 
   const candidate = value as Record<string, unknown>
+  const rawExceptionType =
+    typeof candidate.exceptionType === 'string'
+      ? candidate.exceptionType
+      : typeof candidate.exception_type === 'string'
+        ? candidate.exception_type
+        : null
   return {
     book: typeof candidate.book === 'string' && candidate.book.trim() ? candidate.book.trim() : ALL_FILTER_VALUE,
     counterparty:
@@ -79,10 +94,7 @@ function normalizeSettlementReportFilters(value: unknown): SettlementReportFilte
       typeof candidate.currency === 'string' && candidate.currency.trim()
         ? candidate.currency.trim().toUpperCase()
         : ALL_FILTER_VALUE,
-    exceptionType:
-      typeof candidate.exceptionType === 'string' && candidate.exceptionType.trim()
-        ? candidate.exceptionType.trim().toUpperCase()
-        : ALL_FILTER_VALUE,
+    exceptionType: rawExceptionType && rawExceptionType.trim() ? rawExceptionType.trim().toUpperCase() : ALL_FILTER_VALUE,
     severity:
       typeof candidate.severity === 'string' && candidate.severity.trim()
         ? candidate.severity.trim().toLowerCase()
@@ -139,8 +151,28 @@ function readStoredSettlementReportPresets(): SettlementReportPreset[] {
         }
 
         return {
+          presetId:
+            typeof candidate.presetId === 'number'
+              ? candidate.presetId
+              : typeof candidate.preset_id === 'number'
+                ? candidate.preset_id
+                : null,
           name,
+          scope: candidate.scope === 'SHARED' ? 'SHARED' : 'PERSONAL',
           filters: normalizeSettlementReportFilters(candidate.filters),
+          canEdit: candidate.canEdit === false || candidate.can_edit === false ? false : true,
+          updatedAt:
+            typeof candidate.updatedAt === 'string'
+              ? candidate.updatedAt
+              : typeof candidate.updated_at === 'string'
+                ? candidate.updated_at
+                : null,
+          updatedBy:
+            typeof candidate.updatedBy === 'string'
+              ? candidate.updatedBy
+              : typeof candidate.updated_by === 'string'
+                ? candidate.updated_by
+                : null,
         } satisfies SettlementReportPreset
       })
       .filter((row): row is SettlementReportPreset => Boolean(row))
@@ -155,6 +187,47 @@ function writeStoredSettlementReportPresets(presets: SettlementReportPreset[]) {
   }
 
   window.localStorage.setItem(REPORT_PRESET_STORAGE_KEY, JSON.stringify(presets))
+}
+
+function toApiSettlementReportFilters(filters: SettlementReportFilters): ApiSettlementReportFilters {
+  return {
+    book: filters.book !== ALL_FILTER_VALUE ? filters.book : undefined,
+    counterparty: filters.counterparty !== ALL_FILTER_VALUE ? filters.counterparty : undefined,
+    currency: filters.currency !== ALL_FILTER_VALUE ? filters.currency : undefined,
+    exception_type: filters.exceptionType !== ALL_FILTER_VALUE ? filters.exceptionType : undefined,
+    severity: filters.severity !== ALL_FILTER_VALUE ? (filters.severity as 'blocked' | 'in-progress') : undefined,
+  }
+}
+
+function fromApiSettlementReportFilters(filters: ApiSettlementReportFilters | null | undefined): SettlementReportFilters {
+  return {
+    book: filters?.book ?? ALL_FILTER_VALUE,
+    counterparty: filters?.counterparty ?? ALL_FILTER_VALUE,
+    currency: filters?.currency ?? ALL_FILTER_VALUE,
+    exceptionType: filters?.exception_type ?? ALL_FILTER_VALUE,
+    severity: filters?.severity ?? ALL_FILTER_VALUE,
+  }
+}
+
+function fromApiSettlementReportPreset(record: SettlementReportPresetRecord): SettlementReportPreset {
+  return {
+    presetId: record.preset_id,
+    name: record.name,
+    scope: record.scope,
+    filters: fromApiSettlementReportFilters(record.filters),
+    canEdit: record.can_edit,
+    updatedAt: record.updated_at,
+    updatedBy: record.updated_by,
+  }
+}
+
+function sortSettlementReportPresets(presets: SettlementReportPreset[]): SettlementReportPreset[] {
+  return [...presets].sort((left, right) => {
+    if (left.scope !== right.scope) {
+      return left.scope === 'SHARED' ? -1 : 1
+    }
+    return left.name.localeCompare(right.name)
+  })
 }
 
 function filtersEqual(left: SettlementReportFilters, right: SettlementReportFilters): boolean {
@@ -202,82 +275,6 @@ function sanitizeFilters(
         ? ALL_FILTER_VALUE
         : filters.severity,
   }
-}
-
-function aggregateAgingCurrencySummaries(rows: SettlementAgingRow[]): SettlementAgingCurrencySummary[] {
-  const summaries = new Map<string, SettlementAgingCurrencySummary>()
-
-  rows.forEach((row) => {
-    const current = summaries.get(row.currency_code) ?? {
-      currency_code: row.currency_code,
-      invoice_count: 0,
-      overdue_invoice_count: 0,
-      disputed_invoice_count: 0,
-      total_outstanding_amount: 0,
-      current_amount: 0,
-      past_due_1_7_amount: 0,
-      past_due_8_30_amount: 0,
-      past_due_31_plus_amount: 0,
-      disputed_amount: 0,
-    }
-
-    current.invoice_count += row.invoice_count
-    current.overdue_invoice_count += row.overdue_invoice_count
-    current.disputed_invoice_count += row.disputed_invoice_count
-    current.total_outstanding_amount += row.total_outstanding_amount
-    current.current_amount += row.current_amount
-    current.past_due_1_7_amount += row.past_due_1_7_amount
-    current.past_due_8_30_amount += row.past_due_8_30_amount
-    current.past_due_31_plus_amount += row.past_due_31_plus_amount
-    current.disputed_amount += row.disputed_amount
-    summaries.set(row.currency_code, current)
-  })
-
-  return [...summaries.values()].sort(
-    (left, right) =>
-      right.total_outstanding_amount - left.total_outstanding_amount ||
-      left.currency_code.localeCompare(right.currency_code),
-  )
-}
-
-function aggregateExceptionSummaries(rows: SettlementExceptionRow[]): SettlementExceptionSummary[] {
-  const summaries = new Map<string, SettlementExceptionSummary>()
-
-  rows.forEach((row) => {
-    const key = `${row.exception_type}:${row.currency_code}`
-    const current = summaries.get(key) ?? {
-      exception_type: row.exception_type,
-      currency_code: row.currency_code,
-      exception_count: 0,
-      affected_trade_count: 0,
-      total_outstanding_amount: 0,
-    }
-
-    current.exception_count += 1
-    current.total_outstanding_amount += row.outstanding_amount
-    summaries.set(key, current)
-  })
-
-  const tradeIdsByKey = new Map<string, Set<string>>()
-  rows.forEach((row) => {
-    const key = `${row.exception_type}:${row.currency_code}`
-    const bucket = tradeIdsByKey.get(key) ?? new Set<string>()
-    bucket.add(row.trade_id)
-    tradeIdsByKey.set(key, bucket)
-  })
-
-  return [...summaries.entries()]
-    .map(([key, row]) => ({
-      ...row,
-      affected_trade_count: tradeIdsByKey.get(key)?.size ?? 0,
-    }))
-    .sort(
-      (left, right) =>
-        right.exception_count - left.exception_count ||
-        right.total_outstanding_amount - left.total_outstanding_amount ||
-        left.exception_type.localeCompare(right.exception_type) ||
-        left.currency_code.localeCompare(right.currency_code),
-    )
 }
 
 function toCsvCell(value: string | number | boolean | null | undefined): string {
@@ -332,19 +329,26 @@ export function ReportsWorkspace({
   const [settlementAging, setSettlementAging] = useState<SettlementAgingReport | null>(null)
   const [cashForecast, setCashForecast] = useState<CashForecastReport | null>(null)
   const [settlementExceptions, setSettlementExceptions] = useState<SettlementExceptionReport | null>(null)
+  const [settlementFilterOptions, setSettlementFilterOptions] = useState<SettlementReportFilterOptions | null>(null)
   const [settlementFilters, setSettlementFilters] = useState<SettlementReportFilters>(() =>
     readStoredSettlementReportFilters(),
   )
-  const [savedPresets, setSavedPresets] = useState<SettlementReportPreset[]>(() => readStoredSettlementReportPresets())
+  const [savedPresets, setSavedPresets] = useState<SettlementReportPreset[]>(() =>
+    sortSettlementReportPresets(readStoredSettlementReportPresets()),
+  )
   const [presetNameInput, setPresetNameInput] = useState('')
+  const [presetScopeInput, setPresetScopeInput] = useState<'PERSONAL' | 'SHARED'>('PERSONAL')
   const [presetError, setPresetError] = useState('')
+  const [presetBusy, setPresetBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [settlementLoading, setSettlementLoading] = useState(true)
+  const [settlementError, setSettlementError] = useState('')
 
   useEffect(() => {
     let cancelled = false
 
-    async function loadReports() {
+    async function loadBaseReports() {
       setLoading(true)
       setError('')
 
@@ -354,17 +358,11 @@ export function ReportsWorkspace({
           nextExposureSummary,
           nextActivitySummary,
           nextPnlHistory,
-          nextSettlementAging,
-          nextCashForecast,
-          nextSettlementExceptions,
         ] = await Promise.all([
           loadReportingOverview(appConfig.apiBase),
           loadExposureSummary(appConfig.apiBase),
           loadActivitySummary(appConfig.apiBase),
           loadPnlHistoryReport(appConfig.apiBase),
-          loadSettlementAgingReport(appConfig.apiBase),
-          loadCashForecastReport(appConfig.apiBase),
-          loadSettlementExceptionReport(appConfig.apiBase),
         ])
 
         if (cancelled) {
@@ -375,9 +373,6 @@ export function ReportsWorkspace({
         setExposureSummary(nextExposureSummary)
         setActivitySummary(nextActivitySummary)
         setPnlHistory(nextPnlHistory)
-        setSettlementAging(nextSettlementAging)
-        setCashForecast(nextCashForecast)
-        setSettlementExceptions(nextSettlementExceptions)
       } catch (nextError) {
         if (!cancelled) {
           setError(nextError instanceof Error ? nextError.message : 'Unable to load report data.')
@@ -389,7 +384,30 @@ export function ReportsWorkspace({
       }
     }
 
-    void loadReports()
+    void loadBaseReports()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadFilterOptions() {
+      try {
+        const nextFilterOptions = await loadSettlementReportFilterOptions(appConfig.apiBase)
+        if (!cancelled) {
+          setSettlementFilterOptions(nextFilterOptions)
+        }
+      } catch {
+        if (!cancelled) {
+          setSettlementFilterOptions(null)
+        }
+      }
+    }
+
+    void loadFilterOptions()
 
     return () => {
       cancelled = true
@@ -401,8 +419,41 @@ export function ReportsWorkspace({
   }, [settlementFilters])
 
   useEffect(() => {
-    writeStoredSettlementReportPresets(savedPresets)
-  }, [savedPresets])
+    if (!authSession) {
+      writeStoredSettlementReportPresets(savedPresets)
+    }
+  }, [authSession, savedPresets])
+
+  useEffect(() => {
+    if (!authSession) {
+      setSavedPresets(sortSettlementReportPresets(readStoredSettlementReportPresets()))
+      return
+    }
+
+    const accessToken = authSession.accessToken
+    let cancelled = false
+
+    async function loadPresets() {
+      setPresetError('')
+      try {
+        const nextPresets = await loadSettlementReportPresets(appConfig.apiBase, accessToken)
+        if (!cancelled) {
+          setSavedPresets(sortSettlementReportPresets(nextPresets.map(fromApiSettlementReportPreset)))
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setSavedPresets([])
+          setPresetError(nextError instanceof Error ? nextError.message : 'Unable to load settlement presets.')
+        }
+      }
+    }
+
+    void loadPresets()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authSession])
 
   const rankedCounterparties = useMemo(() => {
     return [...counterpartyCreditReport].sort((left, right) => {
@@ -416,18 +467,58 @@ export function ReportsWorkspace({
     })
   }, [counterpartyCreditReport])
 
-  const agingRows = useMemo(() => settlementAging?.rows ?? [], [settlementAging])
-  const cashCurrencySummaries = useMemo(
-    () => cashForecast?.currency_summaries ?? [],
-    [cashForecast],
-  )
-  const cashPoints = useMemo(() => cashForecast?.points ?? [], [cashForecast])
-  const exceptionRows = useMemo(
-    () => settlementExceptions?.rows ?? [],
-    [settlementExceptions],
+  const apiSettlementFilters = useMemo(
+    () => toApiSettlementReportFilters(settlementFilters),
+    [settlementFilters],
   )
 
-  const filterOptions = useMemo(() => {
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSettlementReports() {
+      setSettlementLoading(true)
+      setSettlementError('')
+
+      try {
+        const [nextSettlementAging, nextCashForecast, nextSettlementExceptions] = await Promise.all([
+          loadSettlementAgingReport(appConfig.apiBase, apiSettlementFilters),
+          loadCashForecastReport(appConfig.apiBase, apiSettlementFilters),
+          loadSettlementExceptionReport(appConfig.apiBase, apiSettlementFilters),
+        ])
+
+        if (cancelled) {
+          return
+        }
+
+        setSettlementAging(nextSettlementAging)
+        setCashForecast(nextCashForecast)
+        setSettlementExceptions(nextSettlementExceptions)
+      } catch (nextError) {
+        if (!cancelled) {
+          setSettlementError(nextError instanceof Error ? nextError.message : 'Unable to load settlement reports.')
+        }
+      } finally {
+        if (!cancelled) {
+          setSettlementLoading(false)
+        }
+      }
+    }
+
+    void loadSettlementReports()
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiSettlementFilters])
+
+  const agingRows = useMemo(() => settlementAging?.rows ?? [], [settlementAging])
+  const agingCurrencySummaries = useMemo(() => settlementAging?.currency_summaries ?? [], [settlementAging])
+  const cashCurrencySummaries = useMemo(() => cashForecast?.currency_summaries ?? [], [cashForecast])
+  const cashPoints = useMemo(() => cashForecast?.points ?? [], [cashForecast])
+  const exceptionSummaries = useMemo(() => settlementExceptions?.summaries ?? [], [settlementExceptions])
+  const exceptionRows = useMemo(() => settlementExceptions?.rows ?? [], [settlementExceptions])
+
+  const fallbackFilterOptions = useMemo(() => {
     return {
       books: uniqueSorted([...agingRows.map((row) => row.book), ...exceptionRows.map((row) => row.book)]),
       counterparties: uniqueSorted([
@@ -445,6 +536,36 @@ export function ReportsWorkspace({
     }
   }, [agingRows, cashCurrencySummaries, cashPoints, exceptionRows])
 
+  const filterOptions = useMemo(() => {
+    return {
+      books: uniqueSorted([
+        ...(settlementFilterOptions?.books ?? []),
+        ...fallbackFilterOptions.books,
+        settlementFilters.book !== ALL_FILTER_VALUE ? settlementFilters.book : null,
+      ]),
+      counterparties: uniqueSorted([
+        ...(settlementFilterOptions?.counterparties ?? []),
+        ...fallbackFilterOptions.counterparties,
+        settlementFilters.counterparty !== ALL_FILTER_VALUE ? settlementFilters.counterparty : null,
+      ]),
+      currencies: uniqueSorted([
+        ...(settlementFilterOptions?.currencies ?? []),
+        ...fallbackFilterOptions.currencies,
+        settlementFilters.currency !== ALL_FILTER_VALUE ? settlementFilters.currency : null,
+      ]),
+      exceptionTypes: uniqueSorted([
+        ...(settlementFilterOptions?.exception_types ?? []),
+        ...fallbackFilterOptions.exceptionTypes,
+        settlementFilters.exceptionType !== ALL_FILTER_VALUE ? settlementFilters.exceptionType : null,
+      ]),
+      severities: uniqueSorted([
+        ...(settlementFilterOptions?.severities ?? []),
+        ...fallbackFilterOptions.severities,
+        settlementFilters.severity !== ALL_FILTER_VALUE ? settlementFilters.severity : null,
+      ]),
+    }
+  }, [fallbackFilterOptions, settlementFilterOptions, settlementFilters])
+
   useEffect(() => {
     setSettlementFilters((current) => {
       const next = sanitizeFilters(current, filterOptions)
@@ -452,87 +573,22 @@ export function ReportsWorkspace({
     })
   }, [filterOptions])
 
-  const activePresetName = useMemo(() => {
-    return savedPresets.find((preset) => filtersEqual(preset.filters, settlementFilters))?.name ?? null
+  const activePreset = useMemo(() => {
+    return savedPresets.find((preset) => filtersEqual(preset.filters, settlementFilters)) ?? null
   }, [savedPresets, settlementFilters])
+  const activePresetName = activePreset?.name ?? null
 
-  const filteredAgingRows = useMemo(() => {
-    return agingRows.filter((row) => {
-      if (settlementFilters.book !== ALL_FILTER_VALUE && row.book !== settlementFilters.book) {
-        return false
-      }
-      if (
-        settlementFilters.counterparty !== ALL_FILTER_VALUE &&
-        (row.counterparty_code ?? '') !== settlementFilters.counterparty
-      ) {
-        return false
-      }
-      if (settlementFilters.currency !== ALL_FILTER_VALUE && row.currency_code !== settlementFilters.currency) {
-        return false
-      }
-      return true
-    })
-  }, [agingRows, settlementFilters])
-
-  const filteredAgingCurrencySummaries = useMemo(
-    () => aggregateAgingCurrencySummaries(filteredAgingRows),
-    [filteredAgingRows],
-  )
-
-  const filteredCashCurrencySummaries = useMemo(() => {
-    if (settlementFilters.currency === ALL_FILTER_VALUE) {
-      return cashCurrencySummaries
+  useEffect(() => {
+    if (!activePreset) {
+      return
     }
-    return cashCurrencySummaries.filter((row) => row.currency_code === settlementFilters.currency)
-  }, [cashCurrencySummaries, settlementFilters.currency])
 
-  const filteredCashPoints = useMemo(() => {
-    if (settlementFilters.currency === ALL_FILTER_VALUE) {
-      return cashPoints
-    }
-    return cashPoints.filter((row) => row.currency_code === settlementFilters.currency)
-  }, [cashPoints, settlementFilters.currency])
+    setPresetScopeInput(activePreset.scope)
+    setPresetNameInput((current) => (current.trim() ? current : activePreset.name))
+  }, [activePreset])
 
-  const filteredExceptionRows = useMemo(() => {
-    return exceptionRows.filter((row) => {
-      if (settlementFilters.book !== ALL_FILTER_VALUE && row.book !== settlementFilters.book) {
-        return false
-      }
-      if (
-        settlementFilters.counterparty !== ALL_FILTER_VALUE &&
-        (row.counterparty_code ?? '') !== settlementFilters.counterparty
-      ) {
-        return false
-      }
-      if (settlementFilters.currency !== ALL_FILTER_VALUE && row.currency_code !== settlementFilters.currency) {
-        return false
-      }
-      if (
-        settlementFilters.exceptionType !== ALL_FILTER_VALUE &&
-        row.exception_type !== settlementFilters.exceptionType
-      ) {
-        return false
-      }
-      if (settlementFilters.severity !== ALL_FILTER_VALUE && row.severity !== settlementFilters.severity) {
-        return false
-      }
-      return true
-    })
-  }, [exceptionRows, settlementFilters])
-
-  const filteredExceptionSummaries = useMemo(
-    () => aggregateExceptionSummaries(filteredExceptionRows),
-    [filteredExceptionRows],
-  )
-
-  const filteredBlockedExceptionCount = useMemo(
-    () => filteredExceptionRows.filter((row) => row.severity === 'blocked').length,
-    [filteredExceptionRows],
-  )
-  const filteredWarningExceptionCount = useMemo(
-    () => filteredExceptionRows.filter((row) => row.severity === 'in-progress').length,
-    [filteredExceptionRows],
-  )
+  const blockedExceptionCount = settlementExceptions?.blocked_count ?? 0
+  const warningExceptionCount = settlementExceptions?.warning_count ?? 0
 
   const settlementFilterActive = useMemo(() => {
     return Object.values(settlementFilters).some((value) => value !== ALL_FILTER_VALUE)
@@ -573,40 +629,123 @@ export function ReportsWorkspace({
   function applyPreset(preset: SettlementReportPreset) {
     setSettlementFilters(preset.filters)
     setPresetNameInput(preset.name)
+    setPresetScopeInput(preset.scope)
     setPresetError('')
   }
 
-  function handleSavePreset() {
+  async function handleSavePreset() {
     const presetName = presetNameInput.trim()
     if (!presetName) {
       setPresetError('Preset name is required.')
       return
     }
 
-    const nextPreset: SettlementReportPreset = {
-      name: presetName,
-      filters: settlementFilters,
-    }
-
-    setSavedPresets((current) => {
-      const remaining = current.filter((preset) => preset.name.toLowerCase() !== presetName.toLowerCase())
-      return [nextPreset, ...remaining]
-    })
-    setPresetError('')
-  }
-
-  function handleDeleteActivePreset() {
-    if (!activePresetName) {
+    if (
+      authSession &&
+      activePreset &&
+      !activePreset.canEdit &&
+      activePreset.name.toLowerCase() === presetName.toLowerCase() &&
+      activePreset.scope === presetScopeInput
+    ) {
+      setPresetError('Shared presets can only be updated by their owner. Choose another name or save it as Personal.')
       return
     }
 
-    setSavedPresets((current) => current.filter((preset) => preset.name !== activePresetName))
-    setPresetNameInput('')
-    setPresetError('')
+    const nextPreset: SettlementReportPreset = {
+      presetId: activePreset?.name.toLowerCase() === presetName.toLowerCase() && activePreset.scope === presetScopeInput
+        ? activePreset.presetId
+        : null,
+      name: presetName,
+      scope: presetScopeInput,
+      filters: settlementFilters,
+      canEdit: true,
+      updatedAt: null,
+      updatedBy: authSession?.user.user_id ?? null,
+    }
+
+    setPresetBusy(true)
+    try {
+      if (!authSession) {
+        setSavedPresets((current) => {
+          const remaining = current.filter(
+            (preset) =>
+              !(
+                preset.name.toLowerCase() === presetName.toLowerCase() &&
+                preset.scope === presetScopeInput
+              ),
+          )
+          return sortSettlementReportPresets([nextPreset, ...remaining])
+        })
+        setPresetError('')
+        return
+      }
+
+      const existingEditablePreset = savedPresets.find(
+        (preset) =>
+          preset.canEdit &&
+          preset.name.toLowerCase() === presetName.toLowerCase() &&
+          preset.scope === presetScopeInput &&
+          preset.presetId !== null,
+      )
+
+      const responsePreset =
+        existingEditablePreset?.presetId !== undefined && existingEditablePreset?.presetId !== null
+          ? await updateSettlementReportPreset(appConfig.apiBase, authSession.accessToken, existingEditablePreset.presetId, {
+              name: presetName,
+              scope: presetScopeInput,
+              filters: toApiSettlementReportFilters(settlementFilters),
+            })
+          : await createSettlementReportPreset(appConfig.apiBase, authSession.accessToken, {
+              name: presetName,
+              scope: presetScopeInput,
+              filters: toApiSettlementReportFilters(settlementFilters),
+            })
+
+      const normalizedPreset = fromApiSettlementReportPreset(responsePreset)
+      setSavedPresets((current) =>
+        sortSettlementReportPresets([
+          normalizedPreset,
+          ...current.filter((preset) => preset.presetId !== normalizedPreset.presetId),
+        ]),
+      )
+      setPresetError('')
+    } catch (nextError) {
+      setPresetError(nextError instanceof Error ? nextError.message : 'Unable to save the settlement preset.')
+    } finally {
+      setPresetBusy(false)
+    }
+  }
+
+  async function handleDeleteActivePreset() {
+    if (!activePreset || !activePreset.canEdit) {
+      return
+    }
+
+    setPresetBusy(true)
+    try {
+      if (authSession && activePreset.presetId !== null) {
+        await deleteSettlementReportPreset(appConfig.apiBase, authSession.accessToken, activePreset.presetId)
+      }
+
+      setSavedPresets((current) =>
+        current.filter((preset) => {
+          if (activePreset.presetId !== null) {
+            return preset.presetId !== activePreset.presetId
+          }
+          return !(preset.name === activePreset.name && preset.scope === activePreset.scope)
+        }),
+      )
+      setPresetNameInput('')
+      setPresetError('')
+    } catch (nextError) {
+      setPresetError(nextError instanceof Error ? nextError.message : 'Unable to delete the settlement preset.')
+    } finally {
+      setPresetBusy(false)
+    }
   }
 
   function handleExportSettlementAging() {
-    if (!settlementAging || filteredAgingRows.length === 0) {
+    if (!settlementAging || agingRows.length === 0) {
       return
     }
 
@@ -629,7 +768,7 @@ export function ReportsWorkspace({
         'oldest_due_at',
         'latest_due_at',
       ],
-      filteredAgingRows.map((row) => [
+      agingRows.map((row) => [
         row.counterparty_code,
         row.book,
         row.currency_code,
@@ -650,7 +789,7 @@ export function ReportsWorkspace({
   }
 
   function handleExportCashForecast() {
-    if (!cashForecast || filteredCashPoints.length === 0) {
+    if (!cashForecast || cashPoints.length === 0) {
       return
     }
 
@@ -664,7 +803,7 @@ export function ReportsWorkspace({
         'expected_invoice_count',
         'received_payment_count',
       ],
-      filteredCashPoints.map((point) => [
+      cashPoints.map((point) => [
         point.forecast_date,
         point.currency_code,
         point.expected_amount,
@@ -676,7 +815,7 @@ export function ReportsWorkspace({
   }
 
   function handleExportSettlementExceptions() {
-    if (!settlementExceptions || filteredExceptionRows.length === 0) {
+    if (!settlementExceptions || exceptionRows.length === 0) {
       return
     }
 
@@ -704,7 +843,7 @@ export function ReportsWorkspace({
         'days_past_due',
         'summary',
       ],
-      filteredExceptionRows.map((row) => [
+      exceptionRows.map((row) => [
         row.exception_type,
         row.severity,
         row.trade_id,
@@ -863,20 +1002,21 @@ export function ReportsWorkspace({
                   <span>Settlement Filters</span>
                   <p>
                     Currency applies across aging, forecast, and exceptions. Book, counterparty, exception type, and
-                    severity narrow the aging board and watchlist. The current lens persists in this browser.
+                    severity narrow the server-side settlement reports. Signed-in users save presets to the shared API;
+                    signed-out sessions fall back to this browser only.
                   </p>
                 </div>
                 <div className="pnl-trend-toolbar">
                   <button type="button" className="button button-ghost pnl-trend-reset-button" onClick={resetSettlementFilters}>
                     Reset Filters
                   </button>
-                  {activePresetName ? (
-                    <button type="button" className="button button-ghost" onClick={handleDeleteActivePreset}>
+                  {activePreset?.canEdit ? (
+                    <button type="button" className="button button-ghost" onClick={() => void handleDeleteActivePreset()} disabled={presetBusy}>
                       Delete Active Preset
                     </button>
                   ) : null}
-                  <button type="button" className="button button-secondary" onClick={handleSavePreset}>
-                    Save Preset
+                  <button type="button" className="button button-secondary" onClick={() => void handleSavePreset()} disabled={presetBusy}>
+                    {presetBusy ? 'Saving...' : 'Save Preset'}
                   </button>
                 </div>
               </div>
@@ -970,16 +1110,32 @@ export function ReportsWorkspace({
                     placeholder="Midwest cash watch"
                   />
                 </label>
+                <label className="field">
+                  <span>Preset Scope</span>
+                  <select
+                    className="control"
+                    value={presetScopeInput}
+                    onChange={(event) => setPresetScopeInput(event.target.value as 'PERSONAL' | 'SHARED')}
+                  >
+                    <option value="PERSONAL">My Preset</option>
+                    <option value="SHARED">Shared with Desk</option>
+                  </select>
+                </label>
               </div>
               {presetError ? <p className="field-error">{presetError}</p> : null}
               <div className="shipment-card-actions pnl-trend-active-filters">
                 <span>
-                  Showing {formatNumber(filteredAgingRows.length, 0)} aging rows, {formatNumber(filteredCashPoints.length, 0)} cash forecast
-                  point{filteredCashPoints.length === 1 ? '' : 's'}, and {formatNumber(filteredExceptionRows.length, 0)} settlement exception
-                  {filteredExceptionRows.length === 1 ? '' : 's'}.
+                  Showing {formatNumber(agingRows.length, 0)} aging rows, {formatNumber(cashPoints.length, 0)} cash forecast
+                  point{cashPoints.length === 1 ? '' : 's'}, and {formatNumber(exceptionRows.length, 0)} settlement exception
+                  {exceptionRows.length === 1 ? '' : 's'}.
                 </span>
                 <div className="shipment-card-meta">
                   {activePresetName ? <span className="entity-chip entity-chip-soft">Preset {activePresetName}</span> : null}
+                  {activePreset ? (
+                    <span className="entity-chip entity-chip-soft">
+                      {activePreset.scope === 'SHARED' ? 'Shared preset' : 'Personal preset'}
+                    </span>
+                  ) : null}
                   {settlementFilterActive ? (
                     settlementFilterChips.map((chip) => (
                       <span key={chip} className="entity-chip entity-chip-soft">
@@ -995,12 +1151,22 @@ export function ReportsWorkspace({
                 <div className="pnl-trend-presets">
                   {savedPresets.map((preset) => (
                     <button
-                      key={preset.name}
+                      key={preset.presetId ?? `${preset.scope}-${preset.name}`}
                       type="button"
-                      className={`tab-pill ${activePresetName === preset.name ? 'is-active' : ''}`}
+                      className={`tab-pill ${
+                        activePreset &&
+                        (
+                          (activePreset.presetId !== null && activePreset.presetId === preset.presetId) ||
+                          (activePreset.presetId === null &&
+                            activePreset.name === preset.name &&
+                            activePreset.scope === preset.scope)
+                        )
+                          ? 'is-active'
+                          : ''
+                      }`}
                       onClick={() => applyPreset(preset)}
                     >
-                      {preset.name}
+                      {preset.scope === 'SHARED' ? `${preset.name} - Shared` : preset.name}
                     </button>
                   ))}
                 </div>
@@ -1017,19 +1183,19 @@ export function ReportsWorkspace({
           description: 'Open invoice exposure grouped into current and past-due buckets, with disputed cash called out instead of staying buried in the settlement queue.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: loading ? (
+          content: settlementLoading ? (
             <div className="skeleton-stack">
               <div className="skeleton-block" />
               <div className="skeleton-block" />
             </div>
-          ) : error ? (
-            reportErrorState(error)
-          ) : settlementAging && filteredAgingCurrencySummaries.length > 0 ? (
+          ) : settlementError ? (
+            reportErrorState(settlementError)
+          ) : settlementAging && agingCurrencySummaries.length > 0 ? (
             <>
               <div className="shipment-card-actions">
                 <span>
-                  {formatNumber(filteredAgingRows.reduce((sum, row) => sum + row.invoice_count, 0), 0)} open invoice
-                  {filteredAgingRows.reduce((sum, row) => sum + row.invoice_count, 0) === 1 ? '' : 's'} as of {formatDateOnly(settlementAging.as_of)}
+                  {formatNumber(agingRows.reduce((sum, row) => sum + row.invoice_count, 0), 0)} open invoice
+                  {agingRows.reduce((sum, row) => sum + row.invoice_count, 0) === 1 ? '' : 's'} as of {formatDateOnly(settlementAging.as_of)}
                 </span>
                 <div className="shipment-card-meta">
                   <button type="button" className="button button-ghost" onClick={onOpenSettlement}>
@@ -1041,7 +1207,7 @@ export function ReportsWorkspace({
                 </div>
               </div>
               <div className="dashboard-report-grid">
-                {filteredAgingCurrencySummaries.map((summary) => (
+                {agingCurrencySummaries.map((summary) => (
                   <article key={summary.currency_code} className="dashboard-report-card">
                     <span>{summary.currency_code} Open</span>
                     <strong>{formatCurrencyAmount(summary.total_outstanding_amount, summary.currency_code)}</strong>
@@ -1055,7 +1221,7 @@ export function ReportsWorkspace({
                 ))}
               </div>
               <div className="position-list">
-                {filteredAgingRows.slice(0, 8).map((row) => (
+                {agingRows.slice(0, 8).map((row) => (
                   <article
                     key={`${row.counterparty_code ?? 'UNSPECIFIED'}-${row.book}-${row.currency_code}`}
                     className="position-card shipment-card"
@@ -1119,14 +1285,14 @@ export function ReportsWorkspace({
           description: 'Expected receipts from open invoices versus actual settlement receipts, using the live ledger instead of desk-side spreadsheets.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: loading ? (
+          content: settlementLoading ? (
             <div className="skeleton-stack">
               <div className="skeleton-block" />
               <div className="skeleton-block" />
             </div>
-          ) : error ? (
-            reportErrorState(error)
-          ) : cashForecast && filteredCashCurrencySummaries.length > 0 ? (
+          ) : settlementError ? (
+            reportErrorState(settlementError)
+          ) : cashForecast && cashCurrencySummaries.length > 0 ? (
             <>
               <div className="shipment-card-actions">
                 <span>
@@ -1142,7 +1308,7 @@ export function ReportsWorkspace({
                 </div>
               </div>
               <div className="dashboard-report-grid">
-                {filteredCashCurrencySummaries.map((summary) => (
+                {cashCurrencySummaries.map((summary) => (
                   <article key={summary.currency_code} className="dashboard-report-card">
                     <span>{summary.currency_code} Horizon</span>
                     <strong>{formatCurrencyAmount(summary.expected_horizon_amount, summary.currency_code)}</strong>
@@ -1155,7 +1321,7 @@ export function ReportsWorkspace({
                 ))}
               </div>
               <div className="position-list">
-                {filteredCashPoints.slice(0, 12).map((point) => (
+                {cashPoints.slice(0, 12).map((point) => (
                   <article key={`${point.forecast_date}-${point.currency_code}`} className="position-card">
                     <div>
                       <strong>{formatDate(point.forecast_date)}</strong>
@@ -1176,10 +1342,10 @@ export function ReportsWorkspace({
             </>
           ) : (
             <div className="empty-state">
-              <strong>{settlementFilters.currency !== ALL_FILTER_VALUE ? 'No forecast rows match the current currency lens' : 'No cash forecast yet'}</strong>
+              <strong>{settlementFilterActive ? 'No cash forecast rows match the current lens' : 'No cash forecast yet'}</strong>
               <p>
-                {settlementFilters.currency !== ALL_FILTER_VALUE
-                  ? 'Cash forecast filters only respond to currency today. Pick another currency or reset the settlement lens.'
+                {settlementFilterActive
+                  ? 'Reset the settlement lens or choose a broader preset to restore the cash outlook.'
                   : 'Cash forecast points will appear once invoice due dates or payment receipts have been recorded.'}
               </p>
             </div>
@@ -1192,19 +1358,19 @@ export function ReportsWorkspace({
           description: 'A single queue for disputed invoices, short pays, and overdue cash so operators can work what actually needs intervention.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: loading ? (
+          content: settlementLoading ? (
             <div className="skeleton-stack">
               <div className="skeleton-block" />
               <div className="skeleton-block" />
             </div>
-          ) : error ? (
-            reportErrorState(error)
-          ) : settlementExceptions && filteredExceptionRows.length > 0 ? (
+          ) : settlementError ? (
+            reportErrorState(settlementError)
+          ) : settlementExceptions && exceptionRows.length > 0 ? (
             <>
               <div className="shipment-card-actions">
                 <span>
-                  {formatNumber(filteredBlockedExceptionCount, 0)} blocked • {formatNumber(filteredWarningExceptionCount, 0)} in-progress
-                  exception{filteredExceptionRows.length === 1 ? '' : 's'}.
+                  {formatNumber(blockedExceptionCount, 0)} blocked • {formatNumber(warningExceptionCount, 0)} in-progress
+                  exception{exceptionRows.length === 1 ? '' : 's'}.
                 </span>
                 <div className="shipment-card-meta">
                   <button type="button" className="button button-ghost" onClick={onOpenSettlement}>
@@ -1216,7 +1382,7 @@ export function ReportsWorkspace({
                 </div>
               </div>
               <div className="dashboard-report-grid">
-                {filteredExceptionSummaries.map((summary) => (
+                {exceptionSummaries.map((summary) => (
                   <article key={`${summary.exception_type}-${summary.currency_code}`} className="dashboard-report-card">
                     <span>
                       {summary.exception_type.replaceAll('_', ' ')} • {summary.currency_code}
@@ -1230,7 +1396,7 @@ export function ReportsWorkspace({
                 ))}
               </div>
               <div className="position-list">
-                {filteredExceptionRows.slice(0, 10).map((row) => (
+                {exceptionRows.slice(0, 10).map((row) => (
                   <article key={`${row.exception_type}-${row.invoice_id}-${row.trade_id}`} className="position-card shipment-card">
                     <div className="shipment-card-head">
                       <div className="shipment-card-copy">

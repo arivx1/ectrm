@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from typing import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from apps.api.app.models.reference_counterparty_external_credit_snapshot import 
     ReferenceCounterpartyExternalCreditSnapshot,
 )
 from apps.api.app.models.trade import Trade
+from apps.api.app.schemas.operations import TradeCreditApprovalFreshnessOut
 
 DEFAULT_EXTERNAL_CREDIT_SNAPSHOT_MAX_AGE_DAYS = 30
 
@@ -128,3 +130,91 @@ def assert_trade_credit_approval_freshness(
         f"has stale or incomplete credit data: {'; '.join(assessment.blocking_reasons)}. "
         "Refresh the governed review date and import a current external credit snapshot before approving the exception."
     )
+
+
+def build_trade_credit_approval_freshness_lookup(
+    db: Session,
+    *,
+    trades: Iterable[Trade],
+    as_of: datetime | date | None = None,
+    external_snapshot_max_age_days: int = DEFAULT_EXTERNAL_CREDIT_SNAPSHOT_MAX_AGE_DAYS,
+) -> dict[str, TradeCreditApprovalFreshnessOut]:
+    trade_records = [trade for trade in trades if trade.trade_id]
+    if not trade_records:
+        return {}
+
+    reference_date = _coerce_reference_date(as_of)
+    counterparty_codes = tuple(
+        dict.fromkeys(
+            str(trade.counterparty or "").strip().upper()
+            for trade in trade_records
+            if str(trade.counterparty or "").strip()
+        )
+    )
+
+    profiles_by_counterparty: dict[str, ReferenceCounterpartyCreditProfile] = {}
+    latest_snapshot_by_counterparty: dict[str, ReferenceCounterpartyExternalCreditSnapshot] = {}
+    if counterparty_codes:
+        profiles_by_counterparty = {
+            row.counterparty_code: row
+            for row in db.execute(
+                select(ReferenceCounterpartyCreditProfile).where(
+                    ReferenceCounterpartyCreditProfile.counterparty_code.in_(counterparty_codes)
+                )
+            ).scalars().all()
+        }
+        snapshot_rows = db.execute(
+            select(ReferenceCounterpartyExternalCreditSnapshot)
+            .where(ReferenceCounterpartyExternalCreditSnapshot.counterparty_code.in_(counterparty_codes))
+            .order_by(
+                ReferenceCounterpartyExternalCreditSnapshot.counterparty_code.asc(),
+                ReferenceCounterpartyExternalCreditSnapshot.as_of_date.desc(),
+                ReferenceCounterpartyExternalCreditSnapshot.downloaded_at.desc(),
+                ReferenceCounterpartyExternalCreditSnapshot.id.desc(),
+            )
+        ).scalars().all()
+        for row in snapshot_rows:
+            latest_snapshot_by_counterparty.setdefault(row.counterparty_code, row)
+
+    out: dict[str, TradeCreditApprovalFreshnessOut] = {}
+    for trade in trade_records:
+        counterparty_code = str(trade.counterparty or "").strip().upper() or None
+        blocking_reasons: list[str] = []
+        profile = profiles_by_counterparty.get(counterparty_code or "")
+        latest_snapshot = latest_snapshot_by_counterparty.get(counterparty_code or "")
+
+        if counterparty_code is None:
+            blocking_reasons.append("the trade has no counterparty assigned")
+        elif profile is None:
+            blocking_reasons.append("no governed credit profile is on file for the counterparty")
+        elif profile.review_due_at is None:
+            blocking_reasons.append("the governed credit profile has no review due date")
+        elif profile.review_due_at < reference_date:
+            blocking_reasons.append(
+                f"the governed credit review became overdue on {profile.review_due_at.isoformat()}"
+            )
+
+        latest_snapshot_age_days = None
+        if counterparty_code is not None and latest_snapshot is None:
+            blocking_reasons.append("no external credit snapshot is on file for the counterparty")
+        elif latest_snapshot is not None:
+            latest_snapshot_age_days = max(0, (reference_date - latest_snapshot.as_of_date).days)
+            if latest_snapshot_age_days > external_snapshot_max_age_days:
+                blocking_reasons.append(
+                    "the latest external credit snapshot "
+                    f"({latest_snapshot.provider} as of {latest_snapshot.as_of_date.isoformat()}) is "
+                    f"{latest_snapshot_age_days} days old, exceeding the "
+                    f"{external_snapshot_max_age_days}-day freshness limit"
+                )
+
+        out[trade.trade_id] = TradeCreditApprovalFreshnessOut(
+            trade_id=trade.trade_id,
+            counterparty_code=counterparty_code,
+            review_due_at=profile.review_due_at if profile is not None else None,
+            latest_external_snapshot_provider=latest_snapshot.provider if latest_snapshot is not None else None,
+            latest_external_snapshot_as_of_date=latest_snapshot.as_of_date if latest_snapshot is not None else None,
+            latest_external_snapshot_age_days=latest_snapshot_age_days,
+            approval_blocked=bool(blocking_reasons),
+            blocking_reasons=blocking_reasons,
+        )
+    return out

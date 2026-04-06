@@ -1,4 +1,9 @@
-import type { TradeHeaderDraft, TradeLegDraft, TradeWorkflowItemRecord } from './models'
+import type {
+  TradeCreditApprovalFreshnessRecord,
+  TradeHeaderDraft,
+  TradeLegDraft,
+  TradeWorkflowItemRecord,
+} from './models'
 
 export const tradeAggregateType = 'trade'
 export const currentTradeEventSchemaVersion = 6
@@ -90,6 +95,17 @@ export function buildTradeCreditHoldSummary(
     credit_hold_active: false,
     credit_hold_reason: null,
   }
+}
+
+export function buildCreditApprovalFreshnessBlockerSummary(
+  freshness?: Pick<TradeCreditApprovalFreshnessRecord, 'approval_blocked' | 'blocking_reasons'> | null,
+): string | null {
+  if (!freshness?.approval_blocked || freshness.blocking_reasons.length === 0) {
+    return null
+  }
+
+  const summary = freshness.blocking_reasons.join('; ').trim()
+  return summary ? `${summary.charAt(0).toUpperCase()}${summary.slice(1)}` : null
 }
 
 export const tradeFormDefaults = {

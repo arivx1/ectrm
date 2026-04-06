@@ -109,6 +109,38 @@ def _days_past_due(*, reference_date: date, due_date: date) -> int:
     return max((reference_date - due_date).days, 0)
 
 
+def _matches_common_filters(
+    *,
+    book_value: str | None,
+    counterparty_value: str | None,
+    currency_value: str | None,
+    book: str | None,
+    counterparty: str | None,
+    currency: str | None,
+) -> bool:
+    if book is not None and (book_value or "") != book:
+        return False
+    if counterparty is not None and (counterparty_value or "") != counterparty:
+        return False
+    if currency is not None and (currency_value or "") != currency:
+        return False
+    return True
+
+
+def _matches_exception_filters(
+    *,
+    exception_type_value: str,
+    severity_value: str,
+    exception_type: str | None,
+    severity: str | None,
+) -> bool:
+    if exception_type is not None and exception_type_value != exception_type:
+        return False
+    if severity is not None and severity_value != severity:
+        return False
+    return True
+
+
 def _aging_bucket(days_past_due: int) -> str:
     if days_past_due <= 0:
         return "current_amount"
@@ -267,6 +299,9 @@ def build_settlement_aging_report(
     db: Session,
     *,
     as_of: date | None = None,
+    book: str | None = None,
+    counterparty: str | None = None,
+    currency: str | None = None,
 ) -> dict[str, object]:
     generated_at = _as_of_datetime(as_of)
     reference_date = generated_at.date()
@@ -284,6 +319,16 @@ def build_settlement_aging_report(
     disputed_invoice_count = 0
 
     for invoice in invoices:
+        if not _matches_common_filters(
+            book_value=invoice.book,
+            counterparty_value=invoice.counterparty,
+            currency_value=invoice.invoice_currency_code,
+            book=book,
+            counterparty=counterparty,
+            currency=currency,
+        ):
+            continue
+
         outstanding_amount = _outstanding_amount_for_invoice(invoice, payments_by_invoice_id)
         if outstanding_amount <= ZERO:
             continue
@@ -350,6 +395,9 @@ def build_cash_forecast_report(
     *,
     as_of: date | None = None,
     horizon_days: int = 30,
+    book: str | None = None,
+    counterparty: str | None = None,
+    currency: str | None = None,
 ) -> dict[str, object]:
     if horizon_days <= 0:
         raise ValueError("horizon_days must be greater than zero.")
@@ -371,6 +419,16 @@ def build_cash_forecast_report(
     point_aggregates: dict[tuple[date, str], _CashForecastPointAggregate] = {}
 
     for invoice in invoices:
+        if not _matches_common_filters(
+            book_value=invoice.book,
+            counterparty_value=invoice.counterparty,
+            currency_value=invoice.invoice_currency_code,
+            book=book,
+            counterparty=counterparty,
+            currency=currency,
+        ):
+            continue
+
         outstanding_amount = _outstanding_amount_for_invoice(invoice, payments_by_invoice_id)
         if outstanding_amount <= ZERO:
             continue
@@ -391,6 +449,16 @@ def build_cash_forecast_report(
             point.expected_invoice_count += 1
 
     for payment in payments:
+        if not _matches_common_filters(
+            book_value=payment.book,
+            counterparty_value=payment.counterparty,
+            currency_value=payment.payment_currency_code,
+            book=book,
+            counterparty=counterparty,
+            currency=currency,
+        ):
+            continue
+
         if payment.status != PaymentStatus.PAID.value or payment.received_at is None:
             continue
 
@@ -440,6 +508,11 @@ def build_settlement_exception_report(
     db: Session,
     *,
     as_of: date | None = None,
+    book: str | None = None,
+    counterparty: str | None = None,
+    currency: str | None = None,
+    exception_type_filter: str | None = None,
+    severity_filter: str | None = None,
 ) -> dict[str, object]:
     generated_at = _as_of_datetime(as_of)
     reference_date = generated_at.date()
@@ -468,6 +541,24 @@ def build_settlement_exception_report(
         summary: str,
     ) -> None:
         nonlocal blocked_count, warning_count
+        if not _matches_common_filters(
+            book_value=invoice.book,
+            counterparty_value=invoice.counterparty,
+            currency_value=invoice.invoice_currency_code,
+            book=book,
+            counterparty=counterparty,
+            currency=currency,
+        ):
+            return
+
+        if not _matches_exception_filters(
+            exception_type_value=exception_type,
+            severity_value=severity,
+            exception_type=exception_type_filter,
+            severity=severity_filter,
+        ):
+            return
+
         if severity == "blocked":
             blocked_count += 1
         else:
@@ -597,4 +688,36 @@ def build_settlement_exception_report(
         "warning_count": warning_count,
         "summaries": summaries,
         "rows": rows,
+    }
+
+
+def build_settlement_filter_options(
+    db: Session,
+    *,
+    as_of: date | None = None,
+) -> dict[str, object]:
+    generated_at = _as_of_datetime(as_of)
+    invoices = list_trade_invoices(db, now=generated_at)
+    payments = list_trade_payments(db, now=generated_at)
+
+    books = sorted({invoice.book for invoice in invoices} | {payment.book for payment in payments})
+    counterparties = sorted(
+        {invoice.counterparty for invoice in invoices if invoice.counterparty}
+        | {payment.counterparty for payment in payments if payment.counterparty}
+    )
+    currencies = sorted(
+        {invoice.invoice_currency_code for invoice in invoices}
+        | {payment.payment_currency_code for payment in payments}
+    )
+
+    return {
+        "books": books,
+        "counterparties": counterparties,
+        "currencies": currencies,
+        "exception_types": [
+            DISPUTED_INVOICE_EXCEPTION,
+            SHORT_PAY_EXCEPTION,
+            OVERDUE_PAYMENT_EXCEPTION,
+        ],
+        "severities": ["blocked", "in-progress"],
     }

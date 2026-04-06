@@ -13,6 +13,7 @@ import { TileLayout } from '../../shared/ui/TileLayout'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import {
+  buildCreditApprovalFreshnessBlockerSummary,
   type OptionLifecycleEventType,
   tradeInstrumentUsesOptionFields,
   tradeStatusIsActive,
@@ -463,6 +464,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
         (item) => item.trade_id === selectedTrade.trade_id && item.workflow_type === 'CREDIT_APPROVAL',
       ) ?? null
     : null
+  const selectedTradeCreditFreshness = selectedTradeCreditWorkflowItem?.credit_approval_freshness ?? null
+  const selectedTradeCreditFreshnessSummary = buildCreditApprovalFreshnessBlockerSummary(
+    selectedTradeCreditFreshness,
+  )
   const selectedTradeOptionSettlementItem = selectedTrade
     ? tradeWorkflowItems.find(
         (item) => item.trade_id === selectedTrade.trade_id && item.workflow_type === 'OPTION_SETTLEMENT',
@@ -645,6 +650,9 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         Exception to {formatDateOnly(selectedTrade.active_credit_exception.expires_at)}
                       </span>
                     ) : null}
+                    {selectedTradeCreditFreshness?.approval_blocked ? (
+                      <span className="status-pill status-pill-blocked">Stale Credit Data</span>
+                    ) : null}
                     <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
                     <span className="entity-chip entity-chip-soft">Confirmation {selectedTrade.confirmation_status}</span>
                     <span className="entity-chip entity-chip-soft">Nomination {selectedTrade.nomination_status}</span>
@@ -659,6 +667,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   {selectedTrade.active_credit_exception?.revalidation_required ? (
                     <p className="field-error">
                       Credit exception needs fresh review: {creditExceptionReasonLabel(selectedTrade.active_credit_exception.revalidation_reason) ?? 'revalidation required'}.
+                    </p>
+                  ) : null}
+                  {selectedTradeCreditFreshnessSummary ? (
+                    <p className="field-error">
+                      Credit approval is blocked until fresh credit data is loaded: {selectedTradeCreditFreshnessSummary}
                     </p>
                   ) : null}
                   {selectedTradeIsOption ? (
@@ -906,6 +919,44 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                       <span>Credit Hold Reason</span>
                       <strong>{selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}</strong>
                     </div>
+                  ) : null}
+                  {selectedTradeCreditFreshness ? (
+                    <>
+                      <div className="detail-row">
+                        <span>Credit Review Due</span>
+                        <strong>{formatDateOnly(selectedTradeCreditFreshness.review_due_at)}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Latest External Snapshot</span>
+                        <strong>
+                          {selectedTradeCreditFreshness.latest_external_snapshot_provider
+                            ? `${selectedTradeCreditFreshness.latest_external_snapshot_provider} · ${formatDateOnly(selectedTradeCreditFreshness.latest_external_snapshot_as_of_date)}`
+                            : '—'}
+                        </strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Snapshot Age</span>
+                        <strong>
+                          {selectedTradeCreditFreshness.latest_external_snapshot_age_days !== null
+                            ? `${selectedTradeCreditFreshness.latest_external_snapshot_age_days} days`
+                            : '—'}
+                        </strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Approval Freshness</span>
+                        <strong>
+                          {selectedTradeCreditFreshness.approval_blocked
+                            ? 'BLOCKED'
+                            : 'CURRENT'}
+                        </strong>
+                      </div>
+                      {selectedTradeCreditFreshnessSummary ? (
+                        <div className="detail-row">
+                          <span>Freshness Blocker</span>
+                          <strong>{selectedTradeCreditFreshnessSummary}</strong>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                   {selectedTrade.active_credit_exception ? (
                     <>

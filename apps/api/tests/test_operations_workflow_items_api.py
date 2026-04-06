@@ -441,6 +441,10 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
         self.assertEqual(queue_response.status_code, 200)
         work_items = {item["workflow_type"]: item for item in queue_response.json() if item["trade_id"] == "T-CREDIT-OPS-1"}
+        self.assertEqual(
+            work_items["CREDIT_APPROVAL"]["credit_approval_freshness"]["approval_blocked"],
+            False,
+        )
 
         blocked_response = self.client.patch(
             f"/operations/work-items/{work_items['CONFIRMATION']['item_id']}",
@@ -519,6 +523,11 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             for item in queue_response.json()
             if item["trade_id"] == "T-CREDIT-ROLE-1" and item["workflow_type"] == "CREDIT_APPROVAL"
         )
+        self.assertEqual(work_item["credit_approval_freshness"]["approval_blocked"], False)
+        self.assertEqual(
+            work_item["credit_approval_freshness"]["latest_external_snapshot_provider"],
+            "DNB",
+        )
 
         unauthorized_response = self.client.patch(
             f"/operations/work-items/{work_item['item_id']}",
@@ -582,6 +591,11 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             for item in queue_response.json()
             if item["trade_id"] == "T-CREDIT-STALE-REVIEW" and item["workflow_type"] == "CREDIT_APPROVAL"
         )
+        self.assertEqual(work_item["credit_approval_freshness"]["approval_blocked"], True)
+        self.assertIn(
+            "overdue",
+            " ".join(work_item["credit_approval_freshness"]["blocking_reasons"]).lower(),
+        )
 
         response = self.client.patch(
             f"/operations/work-items/{work_item['item_id']}",
@@ -614,6 +628,11 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             item
             for item in queue_response.json()
             if item["trade_id"] == "T-CREDIT-STALE-SNAPSHOT" and item["workflow_type"] == "CREDIT_APPROVAL"
+        )
+        self.assertEqual(work_item["credit_approval_freshness"]["approval_blocked"], True)
+        self.assertIn(
+            "freshness limit",
+            " ".join(work_item["credit_approval_freshness"]["blocking_reasons"]).lower(),
         )
 
         response = self.client.patch(

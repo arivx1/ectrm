@@ -56,6 +56,17 @@ class TradeCreditApprovalDecisionOut(BaseModel):
     decided_by: str
 
 
+class TradeCreditApprovalFreshnessOut(BaseModel):
+    trade_id: str
+    counterparty_code: Optional[str]
+    review_due_at: Optional[date]
+    latest_external_snapshot_provider: Optional[str]
+    latest_external_snapshot_as_of_date: Optional[date]
+    latest_external_snapshot_age_days: Optional[int]
+    approval_blocked: bool
+    blocking_reasons: list[str] = Field(default_factory=list)
+
+
 class TradeCreditExceptionOut(BaseModel):
     exception_id: int
     trade_id: str
@@ -106,6 +117,7 @@ class TradeWorkflowItemOut(BaseModel):
     trade_date: Optional[date]
     delivery_start: Optional[date]
     delivery_end: Optional[date]
+    credit_approval_freshness: Optional[TradeCreditApprovalFreshnessOut] = None
     active_credit_exception: Optional[TradeCreditExceptionOut] = None
     credit_decision_history: list[TradeCreditApprovalDecisionOut] = Field(default_factory=list)
 
