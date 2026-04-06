@@ -37,6 +37,47 @@ read-only data tools to the model runtime. If the provider requests those
 tools, the API executes them server-side and returns a tool-call trace so the
 UI can show which live data lookups were actually used.
 
+## Live Data Inventory Reference
+
+The runtime `Live Data Inventory` prompt section is generated from database
+counts in
+`apps/api/app/domains/assistant/services/prompt_context.py`.
+
+Treat the snapshot below as the maintained reference for the current database
+shape. Update it whenever schema changes, seed data changes, or sync changes
+alter the persisted inventory or expected record counts.
+
+Reference and master data:
+
+- Books: 6 active / 6 total
+- Commodities: 41 active / 41 total
+- Counterparties: 16 active / 16 total
+- Portfolios: 7 active / 7 total
+- Price indices: 8 active / 8 total
+- Currencies: 4 active / 4 total
+- Units: 6 active / 6 total
+- Locations: 14 active / 14 total
+
+Transactional and projection data:
+
+- Events: 8
+- Trades: 6 total / 5 active / 1 cancelled
+- Positions: 4
+
+External and world data:
+
+- Price observations: 17649
+- External data runs: 10
+- Weather locations: 6
+- Weather observations: 511
+- Weather forecast periods: 2032
+
+Governance and knowledge data:
+
+- Users: 3 active / 3 total
+- Trading sources: 48
+- Roadmap documents: 0
+
 ## Managed Prompt Profiles
 
 Assistant agents are the first prompt-management surface.

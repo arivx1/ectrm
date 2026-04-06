@@ -242,6 +242,15 @@ export function AssistantWorkspace({
     selectedTradeEvents,
   })
 
+  function clearConversationSelection() {
+    setSelectedConversationId(null)
+    setSelectedConversation(null)
+    setConversationDetailError('')
+    setConversationDetailLoading(false)
+    setMessages([])
+    setSubmitError('')
+  }
+
   async function refreshConversationHistory(preferredConversationId: number | null = null) {
     if (!authSession) {
       setRecentConversations([])
@@ -276,7 +285,7 @@ export function AssistantWorkspace({
         ) {
           return current
         }
-        return conversationPayload[0]?.conversation_id ?? null
+        return null
       })
     } catch (error) {
       setRecentConversations([])
@@ -313,7 +322,7 @@ export function AssistantWorkspace({
         if (current && runPayload.some((run) => run.run_id === current)) {
           return current
         }
-        return runPayload[0]?.run_id ?? null
+        return null
       })
     } catch (error) {
       setRecentRuns([])
@@ -819,6 +828,15 @@ export function AssistantWorkspace({
   const selectedRunSummary = recentRuns.find((run) => run.run_id === selectedRunId) ?? null
   const assistantReady = Boolean(runtimeSettings?.enabled && authSession && selectedProviderDetails?.enabled)
   const previewText = renderPromptPreview(promptPreview)
+  const activeConversationTitle =
+    selectedConversation?.title ?? selectedConversationSummary?.title ?? 'New chat draft'
+  const activeConversationStatus = selectedConversation
+    ? `Continuing conversation #${selectedConversation.conversation_id}. Last updated ${formatTraceTimestamp(selectedConversation.updated_at)}.`
+    : selectedConversationSummary
+      ? `Conversation #${selectedConversationSummary.conversation_id} is selected. Last updated ${formatTraceTimestamp(selectedConversationSummary.updated_at)}.`
+      : messages.length > 0
+        ? 'No saved thread is selected. Sending now will create a brand-new chat.'
+        : 'Choose a saved chat from the sidebar or send a first prompt to start a new one.'
 
   return (
     <div className="workspace-grid assistant-grid">
@@ -954,13 +972,30 @@ export function AssistantWorkspace({
             </p>
           </div>
 
+          <div className="assistant-conversation-banner">
+            <div className="assistant-sidebar-block">
+              <strong>{activeConversationTitle}</strong>
+              <small>{activeConversationStatus}</small>
+            </div>
+            {selectedConversationId !== null || messages.length > 0 ? (
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={clearConversationSelection}
+                disabled={submitting}
+              >
+                {selectedConversationId !== null ? 'Leave chat' : 'Clear draft'}
+              </button>
+            ) : null}
+          </div>
+
           <div className="assistant-chat-log">
             {messages.length === 0 ? (
               <div className="empty-state assistant-empty-state">
-                <strong>No conversation yet</strong>
+                <strong>No chat selected</strong>
                 <p>
-                  Choose a provider and optional agent, review the prompt preview, and send a first
-                  request when you are ready.
+                  Reopen a stored conversation from the sidebar or send a first request here to
+                  begin a separate chat.
                 </p>
               </div>
             ) : (
@@ -1215,19 +1250,14 @@ export function AssistantWorkspace({
 
         <div className="assistant-sidebar-block">
           <div className="assistant-provider-head">
-            <strong>Recent conversations</strong>
+            <strong>Chat threads</strong>
             <button
               type="button"
               className="button button-ghost"
-              onClick={() => {
-                setSelectedConversationId(null)
-                setSelectedConversation(null)
-                setConversationDetailError('')
-                setMessages([])
-              }}
+              onClick={clearConversationSelection}
               disabled={submitting}
             >
-              New conversation
+              Start new chat
             </button>
           </div>
           <p>
@@ -1246,7 +1276,10 @@ export function AssistantWorkspace({
                   key={conversation.conversation_id}
                   type="button"
                   className={`assistant-run-card ${selectedConversationId === conversation.conversation_id ? 'is-selected' : ''}`}
-                  onClick={() => setSelectedConversationId(conversation.conversation_id)}
+                  onClick={() => {
+                    setSubmitError('')
+                    setSelectedConversationId(conversation.conversation_id)
+                  }}
                   disabled={submitting}
                 >
                   <div className="assistant-provider-head">
@@ -1260,7 +1293,10 @@ export function AssistantWorkspace({
                       conversation.latest_assistant_message ??
                       'Stored assistant conversation.'}
                   </p>
-                  <small>{summarizeConversationCard(conversation)}</small>
+                  <small>
+                    {summarizeConversationCard(conversation)} · Updated{' '}
+                    {formatTraceTimestamp(conversation.updated_at)}
+                  </small>
                 </button>
               ))}
             </div>
@@ -1274,7 +1310,7 @@ export function AssistantWorkspace({
                   ? `Inspecting conversation #${selectedConversation.conversation_id}.`
                   : selectedConversationSummary
                     ? `Conversation #${selectedConversationSummary.conversation_id} is selected.`
-                    : 'Start a new conversation or reopen a stored one.'}
+                    : 'No chat is active. Selecting one reopens it; otherwise your next send starts a new thread.'}
           </small>
         </div>
 

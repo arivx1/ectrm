@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.reference_data.services.counterparty_seed_catalog import (
+    build_real_counterparty_rows,
+)
 from apps.api.app.domains.reference_data.services.location_seed_catalog import (
     build_standardized_location_rows,
 )
@@ -297,7 +300,7 @@ CURATED_LOCATION_ROWS = [
 
 LOCATION_ROWS = CURATED_LOCATION_ROWS + build_standardized_location_rows()
 
-COUNTERPARTY_ROWS = [
+CURATED_COUNTERPARTY_ROWS = [
     {
         "code": "BP",
         "name": "BP",
@@ -443,6 +446,8 @@ COUNTERPARTY_ROWS = [
         "description": "Refining and products marketing counterparty.",
     },
 ]
+
+COUNTERPARTY_ROWS = CURATED_COUNTERPARTY_ROWS + build_real_counterparty_rows()
 
 PORTFOLIO_ROWS = [
     {"code": "REFINERY_FEEDSTOCK", "name": "Refinery Feedstock", "book_code": "DEMO_CRUDE", "owner": "Refinery Supply Desk", "strategy": "Physical feedstock coverage", "trader_persona": "Feedstock Procurer", "risk_archetype": "CONSUMPTION_HEDGE", "description": "Asset-backed crude procurement portfolio."},

@@ -81,7 +81,7 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
             self.assertEqual(payload.entity_counts["commodities"], 11)
             self.assertEqual(payload.entity_counts["locations"], 514)
-            self.assertEqual(payload.entity_counts["counterparties"], 16)
+            self.assertEqual(payload.entity_counts["counterparties"], 516)
             self.assertEqual(payload.entity_counts["price_indices"], 7)
             self.assertEqual(payload.entity_counts["price_index_sources"], 6)
             self.assertEqual(
@@ -150,15 +150,37 @@ class AdminSeedApiTests(unittest.TestCase):
                     for row in session.query(ReferenceCounterparty).all()
                 }.issuperset(
                     {
+                        "AAPL",
                         "BP",
                         "CHEVRON",
+                        "COP",
                         "CONSTELLATION",
+                        "DUK",
+                        "ENGIE",
+                        "JPM",
                         "MERCURIA",
+                        "RWE",
                         "TRAFIGURA",
                         "VALERO",
                     }
                 )
             )
+            apple = session.get(ReferenceCounterparty, "AAPL")
+            duke = session.get(ReferenceCounterparty, "DUK")
+            engie = session.get(ReferenceCounterparty, "ENGIE")
+            jpm = session.get(ReferenceCounterparty, "JPM")
+            self.assertIsNotNone(apple)
+            self.assertIsNotNone(duke)
+            self.assertIsNotNone(engie)
+            self.assertIsNotNone(jpm)
+            assert apple is not None
+            assert duke is not None
+            assert engie is not None
+            assert jpm is not None
+            self.assertEqual(apple.counterparty_type, "END_USER")
+            self.assertEqual(duke.counterparty_type, "UTILITY")
+            self.assertEqual(engie.country_code, "FR")
+            self.assertEqual(jpm.counterparty_type, "BANK")
 
     def test_transaction_seed_supports_add_replace_and_delete(self) -> None:
         with self.SessionLocal() as session:

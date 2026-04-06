@@ -182,6 +182,8 @@ def _build_data_semantics_section() -> AssistantPromptSection:
 
 
 def _build_data_inventory_section(db: Session) -> AssistantPromptSection:
+    # Keep this runtime inventory structure aligned with the maintained
+    # reference snapshot in docs/engineering/ai-workflow.md.
     reference_lines = _render_reference_inventory(db)
     transaction_lines = _render_transaction_inventory(db)
     external_lines = _render_external_inventory(db)
