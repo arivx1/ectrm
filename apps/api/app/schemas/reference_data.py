@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from apps.api.app.domains.reference_data.services.counterparty_standards import (
+    DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION,
     DEFAULT_COUNTERPARTY_CREDIT_STATUS,
 )
 
@@ -210,6 +211,37 @@ class CounterpartyStandardsOut(BaseModel):
     counterparty_types: list[str]
     default_counterparty_credit_status: str
     counterparty_credit_statuses: list[str]
+    default_counterparty_credit_breach_action: str
+    counterparty_credit_breach_actions: list[str]
+
+
+class CounterpartyCreditProfileUpsert(BaseModel):
+    credit_rating: Optional[str] = Field(None, min_length=1, max_length=80)
+    review_due_at: Optional[date] = None
+    limit_currency_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    limit_amount: Optional[float] = Field(None, gt=0)
+    breach_action: Optional[str] = Field(
+        default=DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION,
+        min_length=1,
+        max_length=50,
+    )
+    notes: Optional[str] = None
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CounterpartyCreditProfileOut(BaseModel):
+    counterparty_code: str
+    credit_rating: Optional[str]
+    review_due_at: Optional[date]
+    limit_currency_code: Optional[str]
+    limit_amount: Optional[float]
+    breach_action: str
+    notes: Optional[str]
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
 
 
 class PortfolioCreate(ReferenceDataCreate):

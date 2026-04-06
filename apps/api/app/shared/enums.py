@@ -77,3 +77,32 @@ class PaymentStatus(StrEnum):
     DUE = "DUE"
     PAID = "PAID"
     OVERDUE = "OVERDUE"
+
+
+class TransportMode(StrEnum):
+    UNSPECIFIED = "UNSPECIFIED"
+    TRUCK = "TRUCK"
+    RAIL = "RAIL"
+    BARGE = "BARGE"
+    VESSEL = "VESSEL"
+    PIPELINE = "PIPELINE"
+    POWER_GRID = "POWER_GRID"
+    STORAGE = "STORAGE"
+
+
+class TransportModeSource(StrEnum):
+    EXPLICIT = "EXPLICIT"
+    DERIVED = "DERIVED"
+    UNSPECIFIED = "UNSPECIFIED"
+
+
+class DeliveryModeFamily(StrEnum):
+    LOGISTICS = "LOGISTICS"
+    NETWORK_FLOW = "NETWORK_FLOW"
+    POWER_SCHEDULE = "POWER_SCHEDULE"
+
+
+class DeliveryProfile(StrEnum):
+    LOAD_DISCHARGE_WINDOW = "LOAD_DISCHARGE_WINDOW"
+    FLOW_WINDOW = "FLOW_WINDOW"
+    INTERVAL_SCHEDULE = "INTERVAL_SCHEDULE"

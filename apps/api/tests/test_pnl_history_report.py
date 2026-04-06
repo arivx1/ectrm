@@ -370,6 +370,145 @@ class PnlHistoryReportTests(unittest.TestCase):
             ],
         )
 
+    def test_filters_limit_report_by_book_commodity_class_and_date_window(self) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Event(
+                        event_id="evt-filter-1",
+                        aggregate_type="trade",
+                        aggregate_id="T-CRUDE",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 1, 8, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "price": 2.0,
+                            "volume": 100.0,
+                            "settlement_status": "PENDING",
+                        },
+                    ),
+                    Event(
+                        event_id="evt-filter-2",
+                        aggregate_type="trade",
+                        aggregate_id="T-POWER",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 3, 2, 8, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 2, 8, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "trade_side": "BUY",
+                            "book": "POWER_WEST",
+                            "commodity_class": "POWER",
+                            "price": 5.0,
+                            "volume": 4.0,
+                            "settlement_status": "PENDING",
+                        },
+                    ),
+                ]
+            )
+            session.commit()
+
+            report = build_pnl_history_report(
+                session,
+                as_of=date(2026, 3, 4),
+                book="power_west",
+                commodity_class="power",
+                date_from=date(2026, 3, 2),
+                date_to=date(2026, 3, 3),
+            )
+
+        self.assertEqual(report["point_count"], 2)
+        self.assertEqual(
+            report["points"],
+            [
+                {
+                    "date": date(2026, 3, 2),
+                    "total_pnl": 20.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 20.0,
+                    "priced_trade_count": 1,
+                    "realized_trade_count": 0,
+                    "unrealized_trade_count": 1,
+                },
+                {
+                    "date": date(2026, 3, 3),
+                    "total_pnl": 20.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 20.0,
+                    "priced_trade_count": 1,
+                    "realized_trade_count": 0,
+                    "unrealized_trade_count": 1,
+                },
+            ],
+        )
+        self.assertEqual(
+            report["summary"],
+            {
+                "total_pnl": 20.0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 20.0,
+                "priced_trade_count": 1,
+                "realized_trade_count": 0,
+                "unrealized_trade_count": 1,
+            },
+        )
+
+    def test_date_window_before_first_trade_returns_empty_report(self) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                Event(
+                    event_id="evt-window-1",
+                    aggregate_type="trade",
+                    aggregate_id="T-LATE",
+                    event_type="TradeCreated",
+                    occurred_at=datetime(2026, 3, 10, 8, 0, tzinfo=timezone.utc),
+                    recorded_at=datetime(2026, 3, 10, 8, 1, tzinfo=timezone.utc),
+                    actor_id="ops",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={
+                        "trade_side": "BUY",
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "price": 4.0,
+                        "volume": 5.0,
+                        "settlement_status": "PENDING",
+                    },
+                )
+            )
+            session.commit()
+
+            report = build_pnl_history_report(
+                session,
+                date_from=date(2026, 3, 1),
+                date_to=date(2026, 3, 5),
+            )
+
+        self.assertEqual(report["point_count"], 0)
+        self.assertEqual(report["points"], [])
+        self.assertEqual(
+            report["summary"],
+            {
+                "total_pnl": 0.0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0,
+                "priced_trade_count": 0,
+                "realized_trade_count": 0,
+                "unrealized_trade_count": 0,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

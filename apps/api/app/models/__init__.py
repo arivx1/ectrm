@@ -14,6 +14,7 @@ from apps.api.app.models.roadmap_document_revision import RoadmapDocumentRevisio
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
@@ -46,6 +47,7 @@ __all__ = [
     "ReferenceBook",
     "ReferenceCommodity",
     "ReferenceCounterparty",
+    "ReferenceCounterpartyCreditProfile",
     "ReferenceCurrency",
     "ReferenceLocation",
     "ReferencePortfolio",

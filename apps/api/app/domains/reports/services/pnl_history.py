@@ -161,6 +161,17 @@ def _serialize_pnl_snapshot(snapshot: PnlSnapshot) -> dict[str, float | int]:
     }
 
 
+def _empty_pnl_history_report(generated_at: datetime) -> dict[str, Any]:
+    return {
+        "generated_at": generated_at,
+        "basis": TRADE_PNL_BASIS,
+        "methodology": TRADE_PNL_METHODOLOGY,
+        "point_count": 0,
+        "points": [],
+        "summary": _serialize_pnl_snapshot(PnlSnapshot()),
+    }
+
+
 def _normalize_filter_code(value: str | None) -> str | None:
     normalized = str(value or "").strip().upper()
     return normalized or None
@@ -323,14 +334,7 @@ def build_pnl_history_report(
         legacy_starts_by_date.setdefault(anchor_date, []).append(_legacy_trade_state(row))
 
     if not start_dates:
-        return {
-            "generated_at": generated_at,
-            "basis": TRADE_PNL_BASIS,
-            "methodology": TRADE_PNL_METHODOLOGY,
-            "point_count": 0,
-            "points": [],
-            "summary": _serialize_pnl_snapshot(PnlSnapshot()),
-        }
+        return _empty_pnl_history_report(generated_at)
 
     daily_mark_updates = _load_daily_mark_updates(
         db,
@@ -340,7 +344,10 @@ def build_pnl_history_report(
 
     start_date = min(start_dates)
     if end_date < start_date:
-        end_date = start_date
+        return _empty_pnl_history_report(generated_at)
+
+    if window_start_date and window_start_date > end_date:
+        return _empty_pnl_history_report(generated_at)
 
     current_date = start_date
     active_states: dict[str, dict[str, Any]] = {}

@@ -9,7 +9,7 @@ import {
 } from './workspaces/docs/DocumentationWorkspace'
 import { EventsWorkspace } from './workspaces/events/EventsWorkspace'
 import { PositionsWorkspace } from './workspaces/positions/PositionsWorkspace'
-import { ShipmentWorkspace } from './workspaces/shipments/ShipmentWorkspace'
+import { DeliveryWorkspace } from './workspaces/shipments/ShipmentWorkspace'
 import { ReferenceDataWorkspace } from './workspaces/reference-data/ReferenceDataWorkspace'
 import { AssistantWorkspace } from './workspaces/assistant/AssistantWorkspace'
 import { SettingsWorkspace } from './workspaces/settings/SettingsWorkspace'
@@ -50,7 +50,7 @@ import {
   type LocationRecord,
   type LocationStandards,
   type PositionRow,
-  type ShipmentRecord,
+  type DeliveryRecord,
   type PortfolioRecord,
   type PriceIndexRecord,
   type ReferenceRecord,
@@ -70,7 +70,12 @@ import {
 } from './shared/format'
 import { classForCommodity } from './shared/reference'
 import {
+  allocationStatusOptions,
   commodityClassOrder,
+  confirmationStatusOptions,
+  invoiceStatusOptions,
+  nominationStatusOptions,
+  paymentStatusOptions,
   pricingTypeOptions,
   pricingStatusOptions,
   settlementStatusOptions,
@@ -88,7 +93,7 @@ const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
   { key: 'trades', label: 'Trades', kicker: 'Blotter' },
   { key: 'events', label: 'Events', kicker: 'Tape' },
   { key: 'positions', label: 'Positions', kicker: 'Risk' },
-  { key: 'shipments', label: 'Shipments', kicker: 'Logistics' },
+  { key: 'shipments', label: 'Deliveries', kicker: 'Execution' },
   { key: 'reference', label: 'Reference Data', kicker: 'Master' },
   { key: 'admin', label: 'Admin', kicker: 'Ops' },
   { key: 'settings', label: 'Settings', kicker: 'Config' },
@@ -184,7 +189,7 @@ export default function App() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [events, setEvents] = useState<EventRow[]>([])
   const [positions, setPositions] = useState<PositionRow[]>([])
-  const [shipments, setShipments] = useState<ShipmentRecord[]>([])
+  const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
   const [books, setBooks] = useState<ReferenceRecord[]>([])
   const [commodities, setCommodities] = useState<ReferenceRecord[]>([])
   const [priceIndices, setPriceIndices] = useState<PriceIndexRecord[]>([])
@@ -238,7 +243,7 @@ export default function App() {
       trades: tradesJson,
       events: eventsJson,
       positions: positionsJson,
-      shipments: shipmentsJson,
+      deliveries: deliveriesJson,
       books: booksJson,
       commodities: commoditiesJson,
       priceIndices: priceIndicesJson,
@@ -262,7 +267,7 @@ export default function App() {
     const nextTrades = tradesJson as Trade[]
     const nextEvents = eventsJson as EventRow[]
     const nextPositions = positionsJson as PositionRow[]
-    const nextShipments = shipmentsJson as ShipmentRecord[]
+    const nextDeliveries = deliveriesJson as DeliveryRecord[]
     const nextBooks = booksJson as ReferenceRecord[]
     const nextCommodities = commoditiesJson as ReferenceRecord[]
     const nextPriceIndices = priceIndicesJson as PriceIndexRecord[]
@@ -282,7 +287,7 @@ export default function App() {
     setTrades(nextTrades)
     setEvents(nextEvents)
     setPositions(nextPositions)
-    setShipments(nextShipments)
+    setDeliveries(nextDeliveries)
     setBooks(nextBooks)
     setCommodities(nextCommodities)
     setPriceIndices(nextPriceIndices)
@@ -807,12 +812,22 @@ export default function App() {
     setAmendPricingTypeInput,
     amendPricingStatusInput,
     setAmendPricingStatusInput,
+    amendConfirmationStatusInput,
+    setAmendConfirmationStatusInput,
+    amendNominationStatusInput,
+    setAmendNominationStatusInput,
+    amendAllocationStatusInput,
+    setAmendAllocationStatusInput,
     amendPriceIndexInput,
     setAmendPriceIndexInput,
     amendPriceInput,
     setAmendPriceInput,
     amendVolumeInput,
     setAmendVolumeInput,
+    amendInvoiceStatusInput,
+    setAmendInvoiceStatusInput,
+    amendPaymentStatusInput,
+    setAmendPaymentStatusInput,
     amendSettlementStatusInput,
     setAmendSettlementStatusInput,
     amendTraderUserInput,
@@ -863,9 +878,14 @@ export default function App() {
       commodity: amendCommodityInput,
       pricingType: amendPricingTypeInput,
       pricingStatus: amendPricingStatusInput,
+      confirmationStatus: amendConfirmationStatusInput,
+      nominationStatus: amendNominationStatusInput,
+      allocationStatus: amendAllocationStatusInput,
       priceIndexCode: amendPriceIndexInput,
       priceInput: amendPriceInput,
       volumeInput: amendVolumeInput,
+      invoiceStatus: amendInvoiceStatusInput,
+      paymentStatus: amendPaymentStatusInput,
       settlementStatus: amendSettlementStatusInput,
       traderUser: amendTraderUserInput,
       legs: amendLegs,
@@ -1188,9 +1208,14 @@ export default function App() {
       commodity: amendCommodityInput,
       pricingType: amendPricingTypeInput,
       pricingStatus: amendPricingStatusInput,
+      confirmationStatus: amendConfirmationStatusInput,
+      nominationStatus: amendNominationStatusInput,
+      allocationStatus: amendAllocationStatusInput,
       priceIndexCode: amendPriceIndexInput,
       priceInput: amendPriceInput,
       volumeInput: amendVolumeInput,
+      invoiceStatus: amendInvoiceStatusInput,
+      paymentStatus: amendPaymentStatusInput,
       settlementStatus: amendSettlementStatusInput,
       traderUser: amendTraderUserInput,
       legs: amendLegs,
@@ -1348,7 +1373,7 @@ export default function App() {
     trades: 'Trade blotter and ticket entry',
     events: 'Lifecycle tape and chronology',
     positions: 'Risk buckets and net exposure',
-    shipments: 'Logistics queue and shipment readiness',
+    shipments: 'Cross-mode delivery obligations and execution readiness',
     reference: 'Reference master and mappings',
     admin: 'Operational controls and governance',
     settings: 'Runtime profile and access',
@@ -1362,7 +1387,7 @@ export default function App() {
     events: 'Read the system as a tape instead of a log table, then narrow to the trade that needs attention.',
     positions: 'Scan class-level risk first, then drop straight into the exact commodity rows carrying exposure.',
     shipments:
-      'Work the physical queue from an operations surface that highlights blockers, readiness, and direct drill-through back to the source trade.',
+      'Manage logistics moves, pipeline flows, and power schedules from one delivery surface that shows mode-specific blockers without forcing them into the same workflow.',
     reference: 'Manage books, commodities, and price references from a denser master-data surface built for operators.',
     admin: 'Watch the platform as a governed system: controls, provenance, approvals, and model visibility in one place.',
     settings: 'Adjust runtime behavior, stored credentials, and client overrides without leaving the trading console.',
@@ -1788,11 +1813,12 @@ export default function App() {
         )}
 
         {currentView === 'shipments' && (
-          <ShipmentWorkspace
+          <DeliveryWorkspace
             authSession={authSession}
-            shipments={shipments}
+            deliveries={deliveries}
             formatCommodityClass={formatCommodityClass}
             formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
             formatNumber={formatNumber}
             onOpenTrade={navigateToTrade}
           />

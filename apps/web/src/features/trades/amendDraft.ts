@@ -40,9 +40,14 @@ export type AmendDraft = {
   commodityInput: string
   pricingTypeInput: string
   pricingStatusInput: string
+  confirmationStatusInput: string
+  nominationStatusInput: string
+  allocationStatusInput: string
   priceIndexInput: string
   priceInput: string
   volumeInput: string
+  invoiceStatusInput: string
+  paymentStatusInput: string
   settlementStatusInput: string
   traderUserInput: string
   legs: TradeLegDraft[]
@@ -86,9 +91,17 @@ export function buildAmendDraft(
       commodityInput: selectedTrade.commodity ?? '',
       pricingTypeInput: selectedTrade.pricing_type ?? tradeFormDefaults.pricingType,
       pricingStatusInput: selectedTrade.pricing_status ?? tradeHeaderDefaults.pricing_status,
+      confirmationStatusInput:
+        selectedTrade.confirmation_status ?? tradeHeaderDefaults.confirmation_status,
+      nominationStatusInput:
+        selectedTrade.nomination_status ?? tradeHeaderDefaults.nomination_status,
+      allocationStatusInput:
+        selectedTrade.allocation_status ?? tradeHeaderDefaults.allocation_status,
       priceIndexInput: selectedTrade.price_index_code ?? '',
       priceInput: selectedTrade.price?.toString() ?? '',
       volumeInput: selectedTrade.volume?.toString() ?? '',
+      invoiceStatusInput: selectedTrade.invoice_status ?? tradeHeaderDefaults.invoice_status,
+      paymentStatusInput: selectedTrade.payment_status ?? tradeHeaderDefaults.payment_status,
       settlementStatusInput: selectedTrade.settlement_status ?? tradeHeaderDefaults.settlement_status,
       traderUserInput: selectedTrade.trader_user ?? tradeHeaderDefaults.trader_user,
       legs:
@@ -134,9 +147,14 @@ export function buildAmendDraft(
     commodityInput: '',
     pricingTypeInput: tradeFormDefaults.pricingType,
     pricingStatusInput: tradeHeaderDefaults.pricing_status,
+    confirmationStatusInput: tradeHeaderDefaults.confirmation_status,
+    nominationStatusInput: tradeHeaderDefaults.nomination_status,
+    allocationStatusInput: tradeHeaderDefaults.allocation_status,
     priceIndexInput: '',
     priceInput: '',
     volumeInput: '',
+    invoiceStatusInput: tradeHeaderDefaults.invoice_status,
+    paymentStatusInput: tradeHeaderDefaults.payment_status,
     settlementStatusInput: tradeHeaderDefaults.settlement_status,
     traderUserInput: tradeHeaderDefaults.trader_user,
     legs: buildDefaultTradeLegs(makeLegDraft),

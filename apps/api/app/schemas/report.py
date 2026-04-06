@@ -26,6 +26,29 @@ class ReportingOverview(BaseModel):
     activity: list[ActivitySummaryRow]
 
 
+class CounterpartyCreditReportRow(BaseModel):
+    counterparty_code: str
+    counterparty_name: str
+    counterparty_type: str
+    credit_status: str
+    active_trade_count: int
+    exposure_currency_code: str | None
+    exposure_amount: float | None
+    in_exposure_currency_trade_count: int
+    priced_trade_count: int
+    unpriced_trade_count: int
+    out_of_scope_trade_count: int
+    limit_currency_code: str | None
+    limit_amount: float | None
+    limit_utilization_percent: float | None
+    limit_breached: bool
+    credit_rating: str | None
+    review_due_at: date | None
+    review_is_due: bool
+    breach_action: str
+    latest_trade_updated_at: datetime | None
+
+
 class PnlHistoryPoint(BaseModel):
     date: date
     total_pnl: float

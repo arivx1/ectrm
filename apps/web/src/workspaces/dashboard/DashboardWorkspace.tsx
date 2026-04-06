@@ -156,8 +156,8 @@ function PnlTrendChart({
         role="img"
         aria-label={
           firstLabel && lastLabel
-            ? `Cumulative P and L proxy trend from ${firstLabel} to ${lastLabel}`
-            : 'Cumulative P and L proxy trend'
+            ? `Desk P and L trend from ${firstLabel} to ${lastLabel}`
+            : 'Desk P and L trend'
         }
       >
         <line
@@ -191,9 +191,35 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const [pnlHistoryReport, setPnlHistoryReport] = useState<PnlHistoryReport | null>(null)
   const [pnlHistoryLoading, setPnlHistoryLoading] = useState(true)
   const [pnlHistoryError, setPnlHistoryError] = useState('')
+  const [selectedBookFilter, setSelectedBookFilter] = useState('')
+  const [selectedCommodityClassFilter, setSelectedCommodityClassFilter] = useState('')
+  const [dateFromFilter, setDateFromFilter] = useState('')
+  const [dateToFilter, setDateToFilter] = useState('')
+
+  const bookFilterOptions = useMemo(
+    () => [...new Set(activeTrades.map((trade) => trade.book).filter((value) => value.trim() !== ''))].sort(),
+    [activeTrades],
+  )
+  const commodityClassFilterOptions = useMemo(
+    () =>
+      [...new Set(activeTrades.map((trade) => trade.commodity_class).filter((value) => value.trim() !== ''))].sort(),
+    [activeTrades],
+  )
+  const pnlFilterError =
+    dateFromFilter && dateToFilter && dateFromFilter > dateToFilter
+      ? 'Start date must be on or before end date.'
+      : ''
+  const hasActivePnlFilters = Boolean(
+    selectedBookFilter || selectedCommodityClassFilter || dateFromFilter || dateToFilter,
+  )
 
   useEffect(() => {
     if (appLoading) {
+      return
+    }
+
+    if (pnlFilterError) {
+      setPnlHistoryLoading(false)
       return
     }
 
@@ -204,7 +230,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       setPnlHistoryError('')
 
       try {
-        const nextReport = await loadPnlHistoryReport(appConfig.apiBase)
+        const nextReport = await loadPnlHistoryReport(appConfig.apiBase, {
+          book: selectedBookFilter || undefined,
+          commodityClass: selectedCommodityClassFilter || undefined,
+          dateFrom: dateFromFilter || undefined,
+          dateTo: dateToFilter || undefined,
+        })
         if (!cancelled) {
           setPnlHistoryReport(nextReport)
         }
@@ -225,7 +256,16 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     return () => {
       cancelled = true
     }
-  }, [appLoading, activeTrades, events])
+  }, [
+    appLoading,
+    activeTrades,
+    events,
+    selectedBookFilter,
+    selectedCommodityClassFilter,
+    dateFromFilter,
+    dateToFilter,
+    pnlFilterError,
+  ])
 
   const exposureByClass = useMemo(() => {
     const unitsByCommodity = new Map<string, Set<string>>()
@@ -283,13 +323,14 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     () => activeTrades.filter((trade) => trade.price !== null && trade.volume !== null).length,
     [activeTrades],
   )
-  const pnlTrendPoints = pnlHistoryReport?.points ?? []
+  const effectivePnlHistoryReport = pnlFilterError ? null : pnlHistoryReport
+  const pnlTrendPoints = effectivePnlHistoryReport?.points ?? []
   const pnlTrendStart = pnlTrendPoints[0] ?? null
   const pnlTrendEnd = pnlTrendPoints[pnlTrendPoints.length - 1] ?? null
   const pnlTrendWindowChange =
     pnlTrendStart && pnlTrendEnd ? pnlTrendEnd.total_pnl - pnlTrendStart.total_pnl : 0
   const pnlTrendTone = trendTone(pnlTrendStart?.total_pnl ?? null, pnlTrendEnd?.total_pnl ?? null)
-  const reportSummary = pnlHistoryReport?.summary ?? null
+  const reportSummary = effectivePnlHistoryReport?.summary ?? null
   const currentPnlProxy = reportSummary?.total_pnl ?? markedPnlProxy
   const currentPricedTradeCount = reportSummary?.priced_trade_count ?? pricedTradeCount
 
@@ -385,7 +426,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                   <div className="skeleton-block" />
                   <div className="skeleton-block" />
                 </div>
-              ) : pnlTrendPoints.length > 0 ? (
+              ) : (
                 <section className="pnl-trend-panel">
                   <div className="pnl-trend-head">
                     <div className="pnl-trend-copy">
@@ -406,26 +447,105 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                     </div>
                   </div>
 
-                  <PnlTrendChart points={pnlTrendPoints} tone={pnlTrendTone} />
+                  <div className="pnl-trend-filter-grid">
+                    <label className="field">
+                      <span>Book</span>
+                      <select
+                        className="control"
+                        value={selectedBookFilter}
+                        onChange={(event) => setSelectedBookFilter(event.target.value)}
+                      >
+                        <option value="">All books</option>
+                        {bookFilterOptions.map((book) => (
+                          <option key={book} value={book}>
+                            {book}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <div className="pnl-trend-axis">
-                    <span>{pnlTrendStart ? formatReportDateLabel(pnlTrendStart.date) : 'Start'}</span>
-                    <span>{pnlTrendEnd ? formatReportDateLabel(pnlTrendEnd.date) : 'Latest'}</span>
+                    <label className="field">
+                      <span>Commodity Class</span>
+                      <select
+                        className="control"
+                        value={selectedCommodityClassFilter}
+                        onChange={(event) => setSelectedCommodityClassFilter(event.target.value)}
+                      >
+                        <option value="">All classes</option>
+                        {commodityClassFilterOptions.map((commodityClass) => (
+                          <option key={commodityClass} value={commodityClass}>
+                            {formatCommodityClass(commodityClass)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field">
+                      <span>Start Date</span>
+                      <input
+                        className="control"
+                        type="date"
+                        value={dateFromFilter}
+                        onChange={(event) => setDateFromFilter(event.target.value)}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>End Date</span>
+                      <input
+                        className="control"
+                        type="date"
+                        value={dateToFilter}
+                        onChange={(event) => setDateToFilter(event.target.value)}
+                      />
+                    </label>
                   </div>
 
-                  <p className="pnl-trend-note">{pnlHistoryReport?.methodology}</p>
+                  <div className="pnl-trend-filter-actions">
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => {
+                        setSelectedBookFilter('')
+                        setSelectedCommodityClassFilter('')
+                        setDateFromFilter('')
+                        setDateToFilter('')
+                      }}
+                    >
+                      Reset Filters
+                    </button>
+                  </div>
+
+                  {pnlFilterError ? <small className="field-error">{pnlFilterError}</small> : null}
+
+                  {pnlTrendPoints.length > 0 ? (
+                    <>
+                      <PnlTrendChart points={pnlTrendPoints} tone={pnlTrendTone} />
+
+                      <div className="pnl-trend-axis">
+                        <span>{pnlTrendStart ? formatReportDateLabel(pnlTrendStart.date) : 'Start'}</span>
+                        <span>{pnlTrendEnd ? formatReportDateLabel(pnlTrendEnd.date) : 'Latest'}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="empty-state">
+                      <strong>No P&amp;L trend yet</strong>
+                      <p>
+                        {pnlFilterError
+                          ? pnlFilterError
+                          : pnlHistoryError
+                          ? pnlHistoryError
+                          : activeTrades.length > 0
+                          ? hasActivePnlFilters
+                            ? 'No active trades matched the current report filters yet.'
+                            : 'Price the active trades to populate the P&L history.'
+                          : 'Create active trades to start building the desk P&L history.'}
+                      </p>
+                    </div>
+                  )}
+
+                  <p className="pnl-trend-note">{effectivePnlHistoryReport?.methodology ?? 'Mark-to-market methodology updates as filters load.'}</p>
                 </section>
-              ) : (
-                <div className="empty-state">
-                  <strong>No P&amp;L trend yet</strong>
-                  <p>
-                    {pnlHistoryError
-                      ? pnlHistoryError
-                      : activeTrades.length > 0
-                      ? 'Price the active trades to start plotting the desk P&L proxy over time.'
-                      : 'Create active trades to start building the desk P&L proxy curve.'}
-                  </p>
-                </div>
               )}
 
               <div className="dashboard-report-grid">

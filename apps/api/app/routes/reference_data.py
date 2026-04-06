@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import List, Optional, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.auth import resolve_audit_actor_id
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.counterparty_standards import (
+    DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION,
     DEFAULT_COUNTERPARTY_CREDIT_STATUS,
     DEFAULT_COUNTERPARTY_TYPE,
+    list_counterparty_credit_breach_actions,
     list_counterparty_credit_statuses,
     list_counterparty_types,
+    normalize_counterparty_credit_breach_action,
     normalize_counterparty_credit_status,
     normalize_counterparty_type,
     normalize_counterparty_type_filter,
@@ -45,6 +50,7 @@ from apps.api.app.domains.reference_data.services.records import (
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
@@ -61,6 +67,8 @@ from apps.api.app.schemas.reference_data import (
     CommodityStatusUpdate,
     CommodityUpdate,
     CounterpartyCreate,
+    CounterpartyCreditProfileOut,
+    CounterpartyCreditProfileUpsert,
     CounterpartyOut,
     CounterpartyStandardsOut,
     CounterpartyStatusUpdate,
@@ -577,15 +585,107 @@ def activate_commodity(
 
 def _update_counterparty_fields(record, payload, provided_fields: set[str]) -> None:
     if "short_name" in provided_fields:
-        record.short_name = payload.short_name.strip() if payload.short_name is not None else None
+        record.short_name = _clean_optional_text(payload.short_name)
     if "legal_entity_name" in provided_fields:
-        record.legal_entity_name = payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None
+        record.legal_entity_name = _clean_optional_text(payload.legal_entity_name)
     if "counterparty_type" in provided_fields and payload.counterparty_type is not None:
         record.counterparty_type = normalize_counterparty_type(payload.counterparty_type)
     if "country_code" in provided_fields:
         record.country_code = normalize_country_code(payload.country_code)
     if "credit_status" in provided_fields:
         record.credit_status = normalize_counterparty_credit_status(payload.credit_status)
+
+
+def _to_counterparty_credit_profile_out(
+    record: ReferenceCounterpartyCreditProfile,
+) -> CounterpartyCreditProfileOut:
+    return CounterpartyCreditProfileOut(
+        counterparty_code=record.counterparty_code,
+        credit_rating=record.credit_rating,
+        review_due_at=record.review_due_at,
+        limit_currency_code=record.limit_currency_code,
+        limit_amount=float(record.limit_amount) if record.limit_amount is not None else None,
+        breach_action=record.breach_action,
+        notes=record.notes,
+        created_at=record.created_at,
+        created_by=record.created_by,
+        updated_at=record.updated_at,
+        updated_by=record.updated_by,
+        version=record.version,
+    )
+
+
+def _resolve_counterparty_credit_profile_values(
+    db: Session,
+    payload: CounterpartyCreditProfileUpsert,
+    *,
+    existing_record: ReferenceCounterpartyCreditProfile | None = None,
+) -> dict[str, object]:
+    provided_fields = payload.model_fields_set
+    credit_rating = (
+        _clean_optional_text(payload.credit_rating)
+        if "credit_rating" in provided_fields
+        else existing_record.credit_rating if existing_record is not None else None
+    )
+    review_due_at = (
+        payload.review_due_at
+        if "review_due_at" in provided_fields
+        else existing_record.review_due_at if existing_record is not None else None
+    )
+    limit_currency_code = (
+        _clean_optional_code(payload.limit_currency_code)
+        if "limit_currency_code" in provided_fields
+        else existing_record.limit_currency_code if existing_record is not None else None
+    )
+    limit_amount = (
+        payload.limit_amount
+        if "limit_amount" in provided_fields
+        else float(existing_record.limit_amount) if existing_record and existing_record.limit_amount is not None else None
+    )
+    breach_action = normalize_counterparty_credit_breach_action(
+        payload.breach_action
+        if "breach_action" in provided_fields
+        else existing_record.breach_action if existing_record is not None else DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION
+    )
+    notes = (
+        _clean_optional_text(payload.notes)
+        if "notes" in provided_fields
+        else existing_record.notes if existing_record is not None else None
+    )
+
+    if (limit_currency_code is None) != (limit_amount is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="limit_currency_code and limit_amount must be provided together",
+        )
+
+    if limit_amount is not None and limit_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="limit_amount must be greater than 0",
+        )
+
+    if limit_currency_code is not None:
+        currency = db.execute(
+            select(ReferenceCurrency).where(
+                ReferenceCurrency.code == limit_currency_code,
+                ReferenceCurrency.is_active.is_(True),
+            )
+        ).scalars().first()
+        if currency is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Limit currency '{limit_currency_code}' must be an active currency",
+            )
+
+    return {
+        "credit_rating": credit_rating,
+        "review_due_at": review_due_at,
+        "limit_currency_code": limit_currency_code,
+        "limit_amount": limit_amount,
+        "breach_action": breach_action,
+        "notes": notes,
+    }
 
 
 @router.get("/counterparties", response_model=List[CounterpartyOut])
@@ -613,7 +713,24 @@ def list_counterparty_standards() -> CounterpartyStandardsOut:
         counterparty_types=list_counterparty_types(),
         default_counterparty_credit_status=DEFAULT_COUNTERPARTY_CREDIT_STATUS,
         counterparty_credit_statuses=list_counterparty_credit_statuses(),
+        default_counterparty_credit_breach_action=DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION,
+        counterparty_credit_breach_actions=list_counterparty_credit_breach_actions(),
     )
+
+
+@router.get("/counterparties/credit-profiles", response_model=List[CounterpartyCreditProfileOut])
+def list_counterparty_credit_profiles(
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> List[CounterpartyCreditProfileOut]:
+    rows = db.execute(
+        select(ReferenceCounterpartyCreditProfile)
+        .order_by(ReferenceCounterpartyCreditProfile.counterparty_code.asc())
+        .limit(limit)
+        .offset(offset)
+    ).scalars().all()
+    return [_to_counterparty_credit_profile_out(row) for row in rows]
 
 
 @router.post("/counterparties", response_model=CounterpartyOut, status_code=201)
@@ -637,6 +754,50 @@ def create_counterparty(payload: CounterpartyCreate, db: Session = Depends(get_d
         },
     )
     return to_out(record, CounterpartyOut)
+
+
+@router.put("/counterparties/{code}/credit-profile", response_model=CounterpartyCreditProfileOut)
+def upsert_counterparty_credit_profile(
+    code: str,
+    payload: CounterpartyCreditProfileUpsert,
+    db: Session = Depends(get_db),
+) -> CounterpartyCreditProfileOut:
+    normalized_code = normalize_code(code)
+    get_reference_record(db, ReferenceCounterparty, normalized_code)
+    record = db.execute(
+        select(ReferenceCounterpartyCreditProfile).where(
+            ReferenceCounterpartyCreditProfile.counterparty_code == normalized_code
+        )
+    ).scalars().first()
+    next_values = _resolve_counterparty_credit_profile_values(
+        db,
+        payload,
+        existing_record=record,
+    )
+    now = datetime.now(timezone.utc)
+    actor_id = resolve_audit_actor_id(payload.updated_by)
+
+    if record is None:
+        record = ReferenceCounterpartyCreditProfile(
+            counterparty_code=normalized_code,
+            created_at=now,
+            created_by=actor_id,
+            updated_at=now,
+            updated_by=actor_id,
+            version=1,
+            **next_values,
+        )
+        db.add(record)
+    else:
+        for field_name, value in next_values.items():
+            setattr(record, field_name, value)
+        record.updated_at = now
+        record.updated_by = actor_id
+        record.version += 1
+
+    db.commit()
+    db.refresh(record)
+    return _to_counterparty_credit_profile_out(record)
 
 
 @router.get("/counterparties/{code}", response_model=CounterpartyOut)

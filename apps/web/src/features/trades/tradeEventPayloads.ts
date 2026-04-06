@@ -34,9 +34,14 @@ export type TradeEditorValues = {
   commodity: string
   pricingType: string
   pricingStatus: string
+  confirmationStatus?: string
+  nominationStatus?: string
+  allocationStatus?: string
   priceIndexCode: string
   priceInput: string
   volumeInput: string
+  invoiceStatus?: string
+  paymentStatus?: string
   settlementStatus: string
   traderUser: string
   legs: TradeLegDraft[]
@@ -75,9 +80,14 @@ type NormalizedTradeValues = {
   commodity: string
   pricingType: string
   pricingStatus: string
+  confirmationStatus: string | null
+  nominationStatus: string | null
+  allocationStatus: string | null
   priceIndexCode: string | null
   price: number | null
   volume: number | null
+  invoiceStatus: string | null
+  paymentStatus: string | null
   settlementStatus: string
   traderUser: string | null
   legs: NormalizedTradeLeg[]
@@ -119,9 +129,14 @@ const TRADE_FIELD_LABELS = {
   commodity: 'Commodity',
   pricing_type: 'Pricing Type',
   pricing_status: 'Pricing Status',
+  confirmation_status: 'Confirmation',
+  nomination_status: 'Nomination',
+  allocation_status: 'Allocation',
   price_index_code: 'Price Index',
   price: 'Price Differential',
   volume: 'Volume',
+  invoice_status: 'Invoice',
+  payment_status: 'Payment',
   settlement_status: 'Settlement Status',
   trader_user: 'Trader User',
   legs: 'Swap Legs',
@@ -276,9 +291,32 @@ function buildTradeAmendment(
   compareField(payload, changedFields, 'commodity', values.commodity, selectedTrade.commodity)
   compareField(payload, changedFields, 'pricing_type', values.pricingType, selectedTrade.pricing_type)
   compareField(payload, changedFields, 'pricing_status', values.pricingStatus, selectedTrade.pricing_status)
+  compareField(
+    payload,
+    changedFields,
+    'confirmation_status',
+    values.confirmationStatus,
+    selectedTrade.confirmation_status,
+  )
+  compareField(
+    payload,
+    changedFields,
+    'nomination_status',
+    values.nominationStatus,
+    selectedTrade.nomination_status,
+  )
+  compareField(
+    payload,
+    changedFields,
+    'allocation_status',
+    values.allocationStatus,
+    selectedTrade.allocation_status,
+  )
   compareField(payload, changedFields, 'price_index_code', values.priceIndexCode, selectedTrade.price_index_code)
   compareField(payload, changedFields, 'price', values.price, selectedTrade.price)
   compareField(payload, changedFields, 'volume', values.volume, selectedTrade.volume)
+  compareField(payload, changedFields, 'invoice_status', values.invoiceStatus, selectedTrade.invoice_status)
+  compareField(payload, changedFields, 'payment_status', values.paymentStatus, selectedTrade.payment_status)
   compareField(payload, changedFields, 'settlement_status', values.settlementStatus, selectedTrade.settlement_status)
   compareField(payload, changedFields, 'trader_user', values.traderUser, selectedTrade.trader_user)
 
@@ -321,8 +359,13 @@ function buildTradePayload(values: NormalizedTradeValues): Record<string, unknow
     commodity: values.commodity,
     pricing_type: values.pricingType,
     pricing_status: values.pricingStatus,
+    confirmation_status: values.confirmationStatus,
+    nomination_status: values.nominationStatus,
+    allocation_status: values.allocationStatus,
     price: values.price,
     volume: values.volume,
+    invoice_status: values.invoiceStatus,
+    payment_status: values.paymentStatus,
     settlement_status: values.settlementStatus,
     trader_user: values.traderUser,
   }
@@ -385,9 +428,14 @@ function normalizeTradeValues(values: TradeEditorValues): NormalizedTradeValues 
     commodity: legsDriveTrade ? (primaryLeg?.commodity ?? values.commodity.trim()) : values.commodity.trim(),
     pricingType: values.pricingType,
     pricingStatus: values.pricingStatus,
+    confirmationStatus: normalizeOptionalUppercaseText(values.confirmationStatus ?? ''),
+    nominationStatus: normalizeOptionalUppercaseText(values.nominationStatus ?? ''),
+    allocationStatus: normalizeOptionalUppercaseText(values.allocationStatus ?? ''),
     priceIndexCode: normalizeOptionalUppercaseText(values.priceIndexCode),
     price: parseRequiredNumber(values.priceInput),
     volume: legsDriveTrade ? null : parseRequiredNumber(values.volumeInput),
+    invoiceStatus: normalizeOptionalUppercaseText(values.invoiceStatus ?? ''),
+    paymentStatus: normalizeOptionalUppercaseText(values.paymentStatus ?? ''),
     settlementStatus: values.settlementStatus,
     traderUser: normalizeOptionalText(values.traderUser),
     legs: normalizedLegs,

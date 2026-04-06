@@ -6,6 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reports.services.counterparty_credit import (
+    build_counterparty_credit_report,
+)
 from apps.api.app.domains.reports.services.pnl_history import build_pnl_history_report
 from apps.api.app.domains.reports.services.overview import (
     build_activity_summary,
@@ -14,6 +17,7 @@ from apps.api.app.domains.reports.services.overview import (
 )
 from apps.api.app.schemas.report import (
     ActivitySummaryRow,
+    CounterpartyCreditReportRow,
     ExposureSummaryRow,
     PnlHistoryReport,
     ReportingOverview,
@@ -35,6 +39,13 @@ def get_activity_summary(db: Session = Depends(get_db)) -> list[ActivitySummaryR
 @router.get("/overview", response_model=ReportingOverview)
 def get_reporting_overview(db: Session = Depends(get_db)) -> ReportingOverview:
     return ReportingOverview(**build_reporting_overview(db))
+
+
+@router.get("/counterparty-credit", response_model=list[CounterpartyCreditReportRow])
+def get_counterparty_credit_report(
+    db: Session = Depends(get_db),
+) -> list[CounterpartyCreditReportRow]:
+    return [CounterpartyCreditReportRow(**row) for row in build_counterparty_credit_report(db)]
 
 
 @router.get("/pnl-history", response_model=PnlHistoryReport)

@@ -24,8 +24,13 @@ export const tradeNatureOptions = ['PHYSICAL', 'FINANCIAL'] as const
 export const tradeStructureOptions = ['SINGLE', 'SWAP'] as const
 export const tradeSideOptions = ['BUY', 'SELL'] as const
 export const pricingTypeOptions = ['FIXED', 'INDEX', 'FORMULA', 'HYBRID'] as const
-export const pricingStatusOptions = ['PENDING', 'PRICED'] as const
-export const settlementStatusOptions = ['PENDING', 'SETTLED'] as const
+export const pricingStatusOptions = ['PENDING', 'PARTIALLY_PRICED', 'PRICED', 'DISPUTED'] as const
+export const confirmationStatusOptions = ['PENDING', 'SENT', 'CONFIRMED', 'DISPUTED'] as const
+export const nominationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'SCHEDULED', 'NOMINATED', 'COMPLETED'] as const
+export const allocationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'PARTIALLY_ALLOCATED', 'ALLOCATED', 'COMPLETED'] as const
+export const invoiceStatusOptions = ['NOT_REQUIRED', 'PENDING', 'ISSUED', 'APPROVED', 'DISPUTED'] as const
+export const paymentStatusOptions = ['NOT_REQUIRED', 'PENDING', 'DUE', 'PAID', 'OVERDUE'] as const
+export const settlementStatusOptions = ['PENDING', 'INVOICED', 'PARTIALLY_SETTLED', 'SETTLED', 'DISPUTED'] as const
 
 export const tradeStatusValues = {
   active: 'ACTIVE',
@@ -60,6 +65,11 @@ export const tradeHeaderDefaults: TradeHeaderDraft = {
   portfolio: '',
   counterparty: '',
   pricing_status: tradeFormDefaults.pricingStatus,
+  confirmation_status: confirmationStatusOptions[0],
+  nomination_status: nominationStatusOptions[1],
+  allocation_status: allocationStatusOptions[1],
+  invoice_status: invoiceStatusOptions[1],
+  payment_status: paymentStatusOptions[1],
   settlement_status: tradeFormDefaults.settlementStatus,
   trader_user: '',
 }

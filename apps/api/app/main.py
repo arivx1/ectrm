@@ -35,6 +35,7 @@ from apps.api.app.routes.assistant import admin_router as assistant_admin_router
 from apps.api.app.routes.assistant import router as assistant_router
 from apps.api.app.routes.auth import router as auth_router
 from apps.api.app.routes.admin_data import admin_router as admin_data_router
+from apps.api.app.routes.deliveries import router as deliveries_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
 from apps.api.app.routes.external_data import router as external_data_router
 from apps.api.app.routes.events import router as events_router
@@ -87,6 +88,7 @@ app.include_router(assistant_router)
 app.include_router(assistant_admin_router)
 app.include_router(trades_router)
 app.include_router(positions_router)
+app.include_router(deliveries_router)
 app.include_router(shipments_router)
 app.include_router(roadmap_router)
 app.include_router(roadmap_admin_router)

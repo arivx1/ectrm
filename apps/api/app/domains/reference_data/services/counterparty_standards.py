@@ -29,6 +29,13 @@ COUNTERPARTY_CREDIT_STATUS_ORDER = (
 COUNTERPARTY_CREDIT_STATUSES = frozenset(COUNTERPARTY_CREDIT_STATUS_ORDER)
 DEFAULT_COUNTERPARTY_CREDIT_STATUS = "APPROVED"
 TRADABLE_COUNTERPARTY_CREDIT_STATUSES = frozenset({"APPROVED"})
+COUNTERPARTY_CREDIT_BREACH_ACTION_ORDER = (
+    "WARN",
+    "REQUIRE_APPROVAL",
+    "BLOCK",
+)
+COUNTERPARTY_CREDIT_BREACH_ACTIONS = frozenset(COUNTERPARTY_CREDIT_BREACH_ACTION_ORDER)
+DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION = "REQUIRE_APPROVAL"
 _STANDARD_CODE_PATTERN = re.compile(r"[^A-Z0-9]+")
 
 
@@ -69,6 +76,20 @@ def normalize_counterparty_credit_status(value: str | None) -> str:
 
 def list_counterparty_credit_statuses() -> list[str]:
     return list(COUNTERPARTY_CREDIT_STATUS_ORDER)
+
+
+def normalize_counterparty_credit_breach_action(value: str | None) -> str:
+    normalized = _normalize_standard_code(value or DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION)
+    if normalized not in COUNTERPARTY_CREDIT_BREACH_ACTIONS:
+        allowed_list = ", ".join(COUNTERPARTY_CREDIT_BREACH_ACTION_ORDER)
+        raise _validation_error(
+            f"breach_action '{normalized}' is invalid. Allowed values: {allowed_list}"
+        )
+    return normalized
+
+
+def list_counterparty_credit_breach_actions() -> list[str]:
+    return list(COUNTERPARTY_CREDIT_BREACH_ACTION_ORDER)
 
 
 def counterparty_credit_status_allows_trading(value: str | None) -> bool:

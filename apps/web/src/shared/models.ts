@@ -25,9 +25,14 @@ export type Trade = {
   commodity: string
   pricing_type: string
   pricing_status: string
+  confirmation_status: string
+  nomination_status: string
+  allocation_status: string
   price_index_code: string | null
   price: number | null
   volume: number | null
+  invoice_status: string
+  payment_status: string
   settlement_status: string
   trader_user: string | null
   status: string
@@ -59,6 +64,11 @@ export type TradeHeaderDraft = {
   portfolio: string
   counterparty: string
   pricing_status: string
+  confirmation_status: string
+  nomination_status: string
+  allocation_status: string
+  invoice_status: string
+  payment_status: string
   settlement_status: string
   trader_user: string
 }
@@ -83,12 +93,25 @@ export type PositionRow = {
   updated_at: string
 }
 
-export type ShipmentRecord = {
-  shipment_id: string
+export type DeliveryRecord = {
+  delivery_id: string
   trade_id: string
+  leg_no: number | null
   external_trade_id: string | null
   status: 'BLOCKED' | 'IN_PROGRESS' | 'READY' | 'COMPLETED'
   direction: string
+  mode_family: 'LOGISTICS' | 'NETWORK_FLOW' | 'POWER_SCHEDULE'
+  transport_mode:
+    | 'UNSPECIFIED'
+    | 'TRUCK'
+    | 'RAIL'
+    | 'BARGE'
+    | 'VESSEL'
+    | 'PIPELINE'
+    | 'POWER_GRID'
+    | 'STORAGE'
+  transport_mode_source: 'EXPLICIT' | 'DERIVED' | 'UNSPECIFIED'
+  delivery_profile: 'LOAD_DISCHARGE_WINDOW' | 'FLOW_WINDOW' | 'INTERVAL_SCHEDULE'
   book: string
   portfolio: string | null
   counterparty: string | null
@@ -96,14 +119,26 @@ export type ShipmentRecord = {
   commodity: string
   volume: number | null
   unit_of_measure: string | null
+  trade_currency_code: string | null
+  price_unit_code: string | null
+  location_code: string | null
+  delivery_start: string | null
+  delivery_end: string | null
   booked_at: string
   last_updated_at: string
   age_days: number
   pricing_status: string
+  confirmation_status: string
+  nomination_status: string
+  allocation_status: string
+  invoice_status: string
+  payment_status: string
   settlement_status: string
   blocker_count: number
   blockers: string[]
 }
+
+export type ShipmentRecord = DeliveryRecord
 
 export type ReferenceRecord = {
   code: string

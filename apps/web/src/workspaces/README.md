@@ -5,7 +5,7 @@ Top-level product areas should live here:
 - guide
 - dashboard
 - trading
-- shipments
+- deliveries
 - risk
 - operations
 - settlement

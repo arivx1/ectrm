@@ -2989,6 +2989,21 @@
   color: #66717c;
 }
 
+.pnl-trend-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.85rem;
+}
+
+.pnl-trend-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pnl-trend-filter-actions .button {
+  width: fit-content;
+}
+
 .pnl-trend-chart {
   height: 11rem;
 }
