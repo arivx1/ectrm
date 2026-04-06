@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reference_data.services.counterparty_standards import (
+    counterparty_credit_status_allows_trading,
+    normalize_counterparty_credit_status,
+)
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
@@ -433,6 +437,18 @@ def require_active_counterparty(db: Session, counterparty_code: object | None) -
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Counterparty '{normalized_counterparty_code}' is not active in reference data",
+        )
+    if not counterparty_credit_status_allows_trading(reference_counterparty.credit_status):
+        normalized_credit_status = normalize_counterparty_credit_status(
+            reference_counterparty.credit_status
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Counterparty '{normalized_counterparty_code}' is not tradable because "
+                f"credit status is '{normalized_credit_status}'. Set it to APPROVED before "
+                f"booking or amending trades."
+            ),
         )
 
     return normalized_counterparty_code
@@ -1102,6 +1118,11 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     existing.counterparty = require_active_counterparty(
                         db,
                         payload_data.get("counterparty"),
+                    )
+                else:
+                    existing.counterparty = require_active_counterparty(
+                        db,
+                        existing.counterparty,
                     )
                 if "portfolio" in payload_data or "book" in payload_data:
                     existing.portfolio = require_active_portfolio(

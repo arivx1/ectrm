@@ -56,6 +56,10 @@ type PortfolioRecord = ReferenceRecord & {
   book_code: string
 }
 
+type CounterpartyRecord = ReferenceRecord & {
+  credit_status?: string | null
+}
+
 type TradeLegDraft = {
   leg_no: number
   side: string
@@ -124,6 +128,7 @@ type TradingWorkspaceProps = {
   setAmendDeliveryEndInput: (value: string) => void
   amendPriceUnitInput: string
   setAmendPriceUnitInput: (value: string) => void
+  amendPriceUnitOptions: ReferenceRecord[]
   amendBookInput: string
   setAmendBookInput: (value: string) => void
   amendBookOptions: ReferenceRecord[]
@@ -132,7 +137,7 @@ type TradingWorkspaceProps = {
   amendPortfolioOptions: PortfolioRecord[]
   amendCounterpartyInput: string
   setAmendCounterpartyInput: (value: string) => void
-  amendCounterpartyOptions: ReferenceRecord[]
+  amendCounterpartyOptions: CounterpartyRecord[]
   amendCommodityClassInput: string
   setAmendCommodityClassInput: (value: string) => void
   commodityClassOptions: string[]
@@ -226,6 +231,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     setAmendDeliveryEndInput,
     amendPriceUnitInput,
     setAmendPriceUnitInput,
+    amendPriceUnitOptions,
     amendBookInput,
     setAmendBookInput,
     amendBookOptions,
@@ -625,6 +631,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   setAmendDeliveryEndInput={setAmendDeliveryEndInput}
                   amendPriceUnitInput={amendPriceUnitInput}
                   setAmendPriceUnitInput={setAmendPriceUnitInput}
+                  amendPriceUnitOptions={amendPriceUnitOptions}
                   amendTradeNatureInput={amendTradeNatureInput}
                   setAmendTradeNatureInput={setAmendTradeNatureInput}
                   amendTradeStructureInput={amendTradeStructureInput}

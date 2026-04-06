@@ -821,6 +821,110 @@ class ReferenceDataApiTests(unittest.TestCase):
                     db=session,
                 )
 
+    def test_trade_create_rejects_non_tradable_counterparty_credit_status(self) -> None:
+        self._create_commodity("WTI")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            create_counterparty(
+                CounterpartyCreate(
+                    code="SHELL_TRADING",
+                    name="Shell Trading",
+                    counterparty_type="supplier",
+                    credit_status="blocked",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+            with self.assertRaisesRegex(Exception, "credit status is 'BLOCKED'"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CREDIT-1",
+                        event_type="TradeCreated",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={
+                            "book": "CRUDE_PHYS",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "counterparty": "SHELL_TRADING",
+                            "pricing_type": "FIXED",
+                            "trade_side": "BUY",
+                            "price": 80,
+                            "volume": 1000,
+                        },
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+    def test_trade_amend_rejects_existing_counterparty_that_becomes_non_tradable(self) -> None:
+        self._create_commodity("WTI")
+        self._create_book("CRUDE_PHYS", is_active=True)
+
+        with self.SessionLocal() as session:
+            create_counterparty(
+                CounterpartyCreate(
+                    code="SHELL_TRADING",
+                    name="Shell Trading",
+                    counterparty_type="supplier",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-CREDIT-2",
+                    event_type="TradeCreated",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "counterparty": "SHELL_TRADING",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "price": 80,
+                        "volume": 1000,
+                    },
+                    schema_version=1,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            update_counterparty(
+                "SHELL_TRADING",
+                CounterpartyUpdate(
+                    credit_status="on hold",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+
+            with self.assertRaisesRegex(Exception, "credit status is 'ON_HOLD'"):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CREDIT-2",
+                        event_type="TradeAmended",
+                        occurred_at=datetime.now(timezone.utc),
+                        actor_id="test-user",
+                        payload={"price": 81},
+                        schema_version=1,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
     def test_trade_amend_persists_extended_header_fields(self) -> None:
         self._create_commodity("WTI")
         self._create_book("CRUDE_PHYS", is_active=True)
@@ -1117,7 +1221,7 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertEqual(payload.code, "SHELL_TRADING")
         self.assertEqual(payload.counterparty_type, "SUPPLIER")
         self.assertEqual(payload.country_code, "US")
-        self.assertEqual(payload.credit_status, "approved")
+        self.assertEqual(payload.credit_status, "APPROVED")
 
     def test_update_counterparty_allows_credit_status_changes(self) -> None:
         with self.SessionLocal() as session:
@@ -1145,7 +1249,7 @@ class ReferenceDataApiTests(unittest.TestCase):
                 db=session,
             )
 
-        self.assertEqual(payload.credit_status, "review required")
+        self.assertEqual(payload.credit_status, "REVIEW_REQUIRED")
 
     def test_create_counterparty_rejects_invalid_type_and_country(self) -> None:
         with self.SessionLocal() as session:
@@ -1158,6 +1262,23 @@ class ReferenceDataApiTests(unittest.TestCase):
                         legal_entity_name="Bad Counterparty Type LLC",
                         counterparty_type="not a real type",
                         country_code="US",
+                        description="test counterparty",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "credit_status 'PENDING_REVIEW' is invalid"):
+                create_counterparty(
+                    CounterpartyCreate(
+                        code="BAD_CP_CREDIT",
+                        name="Bad Counterparty Credit",
+                        short_name="Bad Credit",
+                        legal_entity_name="Bad Counterparty Credit LLC",
+                        counterparty_type="supplier",
+                        country_code="US",
+                        credit_status="pending review",
                         description="test counterparty",
                         created_by="test-user",
                     ),
@@ -1187,6 +1308,11 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertIn("SUPPLIER", payload.counterparty_types)
         self.assertIn("END_USER", payload.counterparty_types)
         self.assertIn("BANK", payload.counterparty_types)
+        self.assertEqual(payload.default_counterparty_credit_status, "APPROVED")
+        self.assertEqual(
+            payload.counterparty_credit_statuses,
+            ["APPROVED", "REVIEW_REQUIRED", "ON_HOLD", "BLOCKED"],
+        )
 
     def test_list_counterparties_rejects_invalid_type_filter(self) -> None:
         with self.SessionLocal() as session:

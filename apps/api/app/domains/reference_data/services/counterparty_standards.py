@@ -20,6 +20,15 @@ COUNTERPARTY_TYPES = frozenset(
     }
 )
 DEFAULT_COUNTERPARTY_TYPE = "SUPPLIER"
+COUNTERPARTY_CREDIT_STATUS_ORDER = (
+    "APPROVED",
+    "REVIEW_REQUIRED",
+    "ON_HOLD",
+    "BLOCKED",
+)
+COUNTERPARTY_CREDIT_STATUSES = frozenset(COUNTERPARTY_CREDIT_STATUS_ORDER)
+DEFAULT_COUNTERPARTY_CREDIT_STATUS = "APPROVED"
+TRADABLE_COUNTERPARTY_CREDIT_STATUSES = frozenset({"APPROVED"})
 _STANDARD_CODE_PATTERN = re.compile(r"[^A-Z0-9]+")
 
 
@@ -46,6 +55,24 @@ def normalize_counterparty_type(value: str) -> str:
 
 def normalize_counterparty_type_filter(value: str) -> str:
     return normalize_counterparty_type(value)
+
+
+def normalize_counterparty_credit_status(value: str | None) -> str:
+    normalized = _normalize_standard_code(value or DEFAULT_COUNTERPARTY_CREDIT_STATUS)
+    if normalized not in COUNTERPARTY_CREDIT_STATUSES:
+        allowed_list = ", ".join(COUNTERPARTY_CREDIT_STATUS_ORDER)
+        raise _validation_error(
+            f"credit_status '{normalized}' is invalid. Allowed values: {allowed_list}"
+        )
+    return normalized
+
+
+def list_counterparty_credit_statuses() -> list[str]:
+    return list(COUNTERPARTY_CREDIT_STATUS_ORDER)
+
+
+def counterparty_credit_status_allows_trading(value: str | None) -> bool:
+    return normalize_counterparty_credit_status(value) in TRADABLE_COUNTERPARTY_CREDIT_STATUSES
 
 
 def list_counterparty_types() -> list[str]:

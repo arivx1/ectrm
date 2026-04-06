@@ -108,6 +108,17 @@ export function useTradeAmendForm(
       'Current inactive or missing unit',
     )
   }, [activeUnits, draft.unitInput, resolvedCommodityClassInput])
+  const amendPriceUnitOptions = useMemo(() => {
+    const matchingUnits = activeUnits.filter(
+      (unit) => !unit.commodity_class || unit.commodity_class === resolvedCommodityClassInput,
+    )
+    return ensureCurrentOption(
+      matchingUnits.length > 0 ? matchingUnits : activeUnits,
+      draft.priceUnitInput,
+      resolvedCommodityClassInput,
+      'Current inactive or missing price unit',
+    )
+  }, [activeUnits, draft.priceUnitInput, resolvedCommodityClassInput])
 
   const amendCounterpartyOptions = useMemo(
     () =>
@@ -153,7 +164,7 @@ export function useTradeAmendForm(
         ? draft.priceIndexInput
         : amendPriceIndexOptions[0]?.code || ''
   const resolvedUnitInput = amendUnitOptions.some((unit) => unit.code === draft.unitInput) ? draft.unitInput : ''
-  const resolvedPriceUnitInput = amendUnitOptions.some((unit) => unit.code === draft.priceUnitInput)
+  const resolvedPriceUnitInput = amendPriceUnitOptions.some((unit) => unit.code === draft.priceUnitInput)
     ? draft.priceUnitInput
     : ''
   const resolvedTradeCurrencyInput = amendCurrencyOptions.some(
@@ -240,6 +251,7 @@ export function useTradeAmendForm(
     setAmendDeliveryEndInput: (value: string) => setDraftField('deliveryEndInput', value),
     amendPriceUnitInput: resolvedPriceUnitInput,
     setAmendPriceUnitInput: (value: string) => setDraftField('priceUnitInput', value),
+    amendPriceUnitOptions,
     amendTradeNatureInput: draft.tradeNatureInput,
     setAmendTradeNatureInput: (value: string) => setDraftField('tradeNatureInput', value),
     amendTradeStructureInput: draft.tradeStructureInput,

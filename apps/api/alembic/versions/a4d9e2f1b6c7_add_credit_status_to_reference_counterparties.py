@@ -16,7 +16,12 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "reference_counterparties",
-        sa.Column("credit_status", sa.String(length=50), nullable=True),
+        sa.Column(
+            "credit_status",
+            sa.String(length=50),
+            nullable=False,
+            server_default="APPROVED",
+        ),
     )
 
 

@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.counterparty_standards import (
+    DEFAULT_COUNTERPARTY_CREDIT_STATUS,
     DEFAULT_COUNTERPARTY_TYPE,
+    list_counterparty_credit_statuses,
     list_counterparty_types,
+    normalize_counterparty_credit_status,
     normalize_counterparty_type,
     normalize_counterparty_type_filter,
 )
@@ -582,7 +585,7 @@ def _update_counterparty_fields(record, payload, provided_fields: set[str]) -> N
     if "country_code" in provided_fields:
         record.country_code = normalize_country_code(payload.country_code)
     if "credit_status" in provided_fields:
-        record.credit_status = _clean_optional_text(payload.credit_status)
+        record.credit_status = normalize_counterparty_credit_status(payload.credit_status)
 
 
 @router.get("/counterparties", response_model=List[CounterpartyOut])
@@ -608,6 +611,8 @@ def list_counterparty_standards() -> CounterpartyStandardsOut:
     return CounterpartyStandardsOut(
         default_counterparty_type=DEFAULT_COUNTERPARTY_TYPE,
         counterparty_types=list_counterparty_types(),
+        default_counterparty_credit_status=DEFAULT_COUNTERPARTY_CREDIT_STATUS,
+        counterparty_credit_statuses=list_counterparty_credit_statuses(),
     )
 
 
@@ -628,7 +633,7 @@ def create_counterparty(payload: CounterpartyCreate, db: Session = Depends(get_d
             "legal_entity_name": payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None,
             "counterparty_type": normalize_counterparty_type(payload.counterparty_type),
             "country_code": normalize_country_code(payload.country_code),
-            "credit_status": _clean_optional_text(payload.credit_status),
+            "credit_status": normalize_counterparty_credit_status(payload.credit_status),
         },
     )
     return to_out(record, CounterpartyOut)

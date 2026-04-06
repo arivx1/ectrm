@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from apps.api.app.domains.reports.services.pnl_history import build_pnl_history_report
 from apps.api.app.models.event import Base, Event
+from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.trade import Trade
 
 
@@ -31,6 +32,7 @@ class PnlHistoryReportTests(unittest.TestCase):
     def setUp(self) -> None:
         with self.SessionLocal() as session:
             session.query(Event).delete()
+            session.query(PriceIndexObservation).delete()
             session.query(Trade).delete()
             session.commit()
 
@@ -209,6 +211,161 @@ class PnlHistoryReportTests(unittest.TestCase):
                     "priced_trade_count": 1,
                     "realized_trade_count": 1,
                     "unrealized_trade_count": 0,
+                },
+            ],
+        )
+
+    def test_index_and_hybrid_trades_use_latest_available_market_marks(self) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Event(
+                        event_id="evt-mtm-1",
+                        aggregate_type="trade",
+                        aggregate_id="T-HYBRID",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 3, 1, 9, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 1, 9, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "trade_side": "BUY",
+                            "pricing_type": "HYBRID",
+                            "price_index_code": "USGC_DIESEL_SPOT_D",
+                            "price": 1.5,
+                            "volume": 10.0,
+                            "settlement_status": "PENDING",
+                        },
+                    ),
+                    Event(
+                        event_id="evt-mtm-2",
+                        aggregate_type="trade",
+                        aggregate_id="T-INDEX",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 3, 1, 10, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 1, 10, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "trade_side": "SELL",
+                            "pricing_type": "INDEX",
+                            "price_index_code": "GASOLINE_US_REG_W",
+                            "price": None,
+                            "volume": 4.0,
+                            "settlement_status": "PENDING",
+                        },
+                    ),
+                    PriceIndexObservation(
+                        id=100,
+                        price_index_code="GASOLINE_US_REG_W",
+                        observation_date=date(2026, 3, 1),
+                        value=3.0,
+                        unit_code="GAL",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="GAS",
+                        source_frequency="WEEKLY",
+                        source_published_at=None,
+                        source_revision=None,
+                        downloaded_at=datetime(2026, 3, 1, 17, 0, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload=None,
+                        created_at=datetime(2026, 3, 1, 17, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 1, 17, 0, tzinfo=timezone.utc),
+                    ),
+                    PriceIndexObservation(
+                        id=101,
+                        price_index_code="USGC_DIESEL_SPOT_D",
+                        observation_date=date(2026, 3, 2),
+                        value=5.0,
+                        unit_code="GAL",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="DSL",
+                        source_frequency="DAILY",
+                        source_published_at=None,
+                        source_revision=None,
+                        downloaded_at=datetime(2026, 3, 2, 17, 0, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload=None,
+                        created_at=datetime(2026, 3, 2, 17, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 2, 17, 0, tzinfo=timezone.utc),
+                    ),
+                    PriceIndexObservation(
+                        id=102,
+                        price_index_code="USGC_DIESEL_SPOT_D",
+                        observation_date=date(2026, 3, 3),
+                        value=6.0,
+                        unit_code="GAL",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="DSL",
+                        source_frequency="DAILY",
+                        source_published_at=None,
+                        source_revision=None,
+                        downloaded_at=datetime(2026, 3, 3, 17, 0, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload=None,
+                        created_at=datetime(2026, 3, 3, 17, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 3, 17, 0, tzinfo=timezone.utc),
+                    ),
+                    PriceIndexObservation(
+                        id=103,
+                        price_index_code="GASOLINE_US_REG_W",
+                        observation_date=date(2026, 3, 3),
+                        value=4.0,
+                        unit_code="GAL",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="GAS",
+                        source_frequency="WEEKLY",
+                        source_published_at=None,
+                        source_revision=None,
+                        downloaded_at=datetime(2026, 3, 3, 17, 0, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload=None,
+                        created_at=datetime(2026, 3, 3, 17, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 3, 17, 0, tzinfo=timezone.utc),
+                    ),
+                ]
+            )
+            session.commit()
+
+            report = build_pnl_history_report(session, as_of=date(2026, 3, 3))
+
+        self.assertEqual(
+            report["points"],
+            [
+                {
+                    "date": date(2026, 3, 1),
+                    "total_pnl": -12.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": -12.0,
+                    "priced_trade_count": 1,
+                    "realized_trade_count": 0,
+                    "unrealized_trade_count": 1,
+                },
+                {
+                    "date": date(2026, 3, 2),
+                    "total_pnl": 53.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 53.0,
+                    "priced_trade_count": 2,
+                    "realized_trade_count": 0,
+                    "unrealized_trade_count": 2,
+                },
+                {
+                    "date": date(2026, 3, 3),
+                    "total_pnl": 59.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 59.0,
+                    "priced_trade_count": 2,
+                    "realized_trade_count": 0,
+                    "unrealized_trade_count": 2,
                 },
             ],
         )

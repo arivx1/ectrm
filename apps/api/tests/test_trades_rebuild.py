@@ -21,6 +21,8 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_currency import ReferenceCurrency
+from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
@@ -61,6 +63,8 @@ class TradesRebuildScriptTests(unittest.TestCase):
             session.query(Trade).delete()
             session.query(Event).delete()
             session.query(ReferenceUnit).delete()
+            session.query(ReferenceLocation).delete()
+            session.query(ReferenceCurrency).delete()
             session.query(ReferencePortfolio).delete()
             session.query(ReferenceCounterparty).delete()
             session.query(ReferenceCommodity).delete()
@@ -140,6 +144,49 @@ class TradesRebuildScriptTests(unittest.TestCase):
             )
         )
         session.add(
+            ReferenceCurrency(
+                code="USD",
+                name="US Dollar",
+                symbol="$",
+                description="US Dollar",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceLocation(
+                code="CUSHING",
+                name="Cushing",
+                location_kind="POINT",
+                location_type="HUB",
+                parent_location_code=None,
+                market="PHYSICAL",
+                city="Cushing",
+                subdivision_code="OK",
+                country_code="US",
+                continent_code="NA",
+                latitude=None,
+                longitude=None,
+                region="Midcontinent",
+                timezone="America/Chicago",
+                description="Cushing hub",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
             ReferencePortfolio(
                 code="OIL_DISCRETIONARY",
                 name="Oil Discretionary",
@@ -180,8 +227,16 @@ class TradesRebuildScriptTests(unittest.TestCase):
                         "external_trade_id": "EXT-9001",
                         "source_system": "ETRM",
                         "execution_timestamp": "2026-03-11T06:15:00-06:00",
+                        "trade_date": "2026-03-11",
+                        "effective_start_date": "2026-04-01",
+                        "effective_end_date": "2026-04-30",
                         "quality_spec": "10 PPM sulfur max",
                         "unit_of_measure": "BBL",
+                        "trade_currency_code": "USD",
+                        "location_code": "CUSHING",
+                        "delivery_start": "2026-04-01",
+                        "delivery_end": "2026-04-30",
+                        "price_unit_code": "BBL",
                         "book": "CRUDE_PHYS",
                         "portfolio": "OIL_DISCRETIONARY",
                         "counterparty": "SHELL_TRADING",
@@ -214,6 +269,8 @@ class TradesRebuildScriptTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             trade = session.query(Trade).filter(Trade.trade_id == "T-REBUILD-1").one()
+            leg = session.query(TradeLeg).filter(TradeLeg.trade_id == "T-REBUILD-1").one()
+            term = session.query(TradePriceTerm).filter(TradePriceTerm.trade_id == "T-REBUILD-1").one()
 
         self.assertEqual(trade.external_trade_id, "EXT-9001")
         self.assertEqual(trade.source_system, "ETRM")
@@ -221,14 +278,28 @@ class TradesRebuildScriptTests(unittest.TestCase):
             coerce_utc(trade.execution_timestamp),
             datetime(2026, 3, 11, 12, 15, tzinfo=timezone.utc),
         )
+        self.assertEqual(str(trade.trade_date), "2026-03-11")
+        self.assertEqual(str(trade.effective_start_date), "2026-04-01")
+        self.assertEqual(str(trade.effective_end_date), "2026-04-30")
         self.assertEqual(trade.quality_spec, "10 PPM sulfur max")
         self.assertEqual(trade.unit_of_measure, "BBL")
+        self.assertEqual(trade.trade_currency_code, "USD")
+        self.assertEqual(trade.location_code, "CUSHING")
+        self.assertEqual(str(trade.delivery_start), "2026-04-01")
+        self.assertEqual(str(trade.delivery_end), "2026-04-30")
+        self.assertEqual(trade.price_unit_code, "BBL")
         self.assertEqual(trade.book, "CRUDE_PHYS")
         self.assertEqual(trade.portfolio, "OIL_DISCRETIONARY")
         self.assertEqual(trade.counterparty, "SHELL_TRADING")
         self.assertEqual(trade.pricing_status, "PRICED")
         self.assertEqual(trade.settlement_status, "PENDING")
         self.assertEqual(trade.trader_user, "trader.alpha")
+        self.assertEqual(leg.location_code, "CUSHING")
+        self.assertEqual(leg.quantity_unit_code, "BBL")
+        self.assertEqual(str(leg.delivery_start), "2026-04-01")
+        self.assertEqual(str(leg.delivery_end), "2026-04-30")
+        self.assertEqual(term.currency_code, "USD")
+        self.assertEqual(term.price_unit_code, "BBL")
 
     def test_rebuild_clears_carried_portfolio_when_book_changes_without_replacement(self) -> None:
         with self.SessionLocal() as session:

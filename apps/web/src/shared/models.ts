@@ -190,11 +190,15 @@ export type CounterpartyRecord = ReferenceRecord & {
 export type CounterpartyStandards = {
   default_counterparty_type: string
   counterparty_types: string[]
+  default_counterparty_credit_status: string
+  counterparty_credit_statuses: string[]
 }
 
 export const DEFAULT_COUNTERPARTY_STANDARDS: CounterpartyStandards = {
   default_counterparty_type: 'SUPPLIER',
   counterparty_types: ['BANK', 'BROKER', 'END_USER', 'MAJOR', 'MARKETER', 'MIDSTREAM', 'PRODUCER', 'REFINER', 'SUPPLIER', 'TRADER', 'UTILITY'],
+  default_counterparty_credit_status: 'APPROVED',
+  counterparty_credit_statuses: ['APPROVED', 'REVIEW_REQUIRED', 'ON_HOLD', 'BLOCKED'],
 }
 
 export type PortfolioRecord = ReferenceRecord & {

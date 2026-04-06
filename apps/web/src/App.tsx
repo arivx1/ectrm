@@ -30,6 +30,7 @@ import {
 } from './shared/mutation'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
+import { buildCounterpartyCreditRestrictionMessage } from './features/trades/counterpartyCredit'
 import {
   buildAmendTradeSubmission,
   buildCreateTradeSubmission,
@@ -471,6 +472,17 @@ export default function App() {
   const activePortfolios = useMemo(() => portfolios.filter((portfolio) => portfolio.is_active), [portfolios])
   const hasReferenceOptions = activeBooks.length > 0 && activeCommodities.length > 0
 
+  function findCounterpartyCreditRestriction(counterpartyCode: string): string | null {
+    const normalizedCode = counterpartyCode.trim().toUpperCase()
+    if (!normalizedCode) {
+      return null
+    }
+
+    return buildCounterpartyCreditRestrictionMessage(
+      counterparties.find((counterparty) => counterparty.code === normalizedCode) ?? null,
+    )
+  }
+
   const selectedTrade = useMemo(
     () => trades.find((trade) => trade.trade_id === selectedTradeId) ?? null,
     [trades, selectedTradeId],
@@ -812,6 +824,7 @@ export default function App() {
     amendCommodityOptions,
     amendPriceIndexOptions,
     amendUnitOptions,
+    amendPriceUnitOptions,
     updateDraftLeg: updateAmendDraftLeg,
     addDraftLeg: addAmendDraftLeg,
     removeDraftLeg: removeAmendDraftLeg,
@@ -1053,6 +1066,13 @@ export default function App() {
     e.preventDefault()
     setError('')
     setCreateError('')
+
+    const counterpartyCreditRestriction = findCounterpartyCreditRestriction(counterpartyInput)
+    if (counterpartyCreditRestriction) {
+      setCreateError(counterpartyCreditRestriction)
+      return
+    }
+
     const submission = buildCreateTradeSubmission({
       tradeId: tradeIdInput,
       externalTradeId: externalTradeIdInput,
@@ -1137,6 +1157,13 @@ export default function App() {
       setAmendError('Select a trade first.')
       return
     }
+
+    const counterpartyCreditRestriction = findCounterpartyCreditRestriction(amendCounterpartyInput)
+    if (counterpartyCreditRestriction) {
+      setAmendError(counterpartyCreditRestriction)
+      return
+    }
+
     const submission = buildAmendTradeSubmission(selectedTrade, selectedTradeEvents, {
       externalTradeId: amendExternalTradeIdInput,
       sourceSystem: amendSourceSystemInput,
@@ -1679,6 +1706,7 @@ export default function App() {
             setAmendDeliveryEndInput={setAmendDeliveryEndInput}
             amendPriceUnitInput={amendPriceUnitInput}
             setAmendPriceUnitInput={setAmendPriceUnitInput}
+            amendPriceUnitOptions={amendPriceUnitOptions}
             amendBookInput={amendBookInput}
             setAmendBookInput={setAmendBookInput}
             amendBookOptions={amendBookOptions}

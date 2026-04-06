@@ -21,6 +21,8 @@ from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_currency import ReferenceCurrency
+from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
@@ -57,6 +59,8 @@ class TradeEventWorkflowTests(unittest.TestCase):
             session.query(Event).delete()
             session.query(ReferencePriceIndex).delete()
             session.query(ReferenceUnit).delete()
+            session.query(ReferenceLocation).delete()
+            session.query(ReferenceCurrency).delete()
             session.query(ReferencePortfolio).delete()
             session.query(ReferenceCounterparty).delete()
             session.query(ReferenceCommodity).delete()
@@ -178,6 +182,49 @@ class TradeEventWorkflowTests(unittest.TestCase):
             )
         )
         session.add(
+            ReferenceCurrency(
+                code="USD",
+                name="US Dollar",
+                symbol="$",
+                description="US Dollar",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceLocation(
+                code="CUSHING",
+                name="Cushing",
+                location_kind="POINT",
+                location_type="HUB",
+                parent_location_code=None,
+                market="PHYSICAL",
+                city="Cushing",
+                subdivision_code="OK",
+                country_code="US",
+                continent_code="NA",
+                latitude=None,
+                longitude=None,
+                region="Midcontinent",
+                timezone="America/Chicago",
+                description="Cushing hub",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="test-user",
+                updated_at=self.now,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
             ReferencePriceIndex(
                 code="WTI_M1",
                 name="WTI M1",
@@ -263,6 +310,77 @@ class TradeEventWorkflowTests(unittest.TestCase):
         self.assertEqual(trade.source_system, "ETRM")
         self.assertEqual(trade.quality_spec, "10 PPM sulfur max")
         self.assertEqual(trade.unit_of_measure, "BBL")
+
+    def test_trade_commercial_terms_persist_to_projection_legs_and_price_terms(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-COMM-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "price": 79.25,
+                        "volume": 125,
+                        "unit_of_measure": "BBL",
+                        "trade_currency_code": "USD",
+                        "price_unit_code": "BBL",
+                        "location_code": "CUSHING",
+                        "trade_date": "2026-03-19",
+                        "effective_start_date": "2026-04-01",
+                        "effective_end_date": "2026-04-30",
+                        "delivery_start": "2026-04-01",
+                        "delivery_end": "2026-04-30",
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-COMM-1",
+                    event_type="TradeAmended",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "trade_currency_code": "USD",
+                        "price_unit_code": "BBL",
+                        "location_code": "CUSHING",
+                        "delivery_start": "2026-04-05",
+                        "delivery_end": "2026-05-01",
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            trade = session.query(Trade).filter(Trade.trade_id == "T-COMM-1").one()
+            leg = session.query(TradeLeg).filter(TradeLeg.trade_id == "T-COMM-1").one()
+            term = session.query(TradePriceTerm).filter(TradePriceTerm.trade_id == "T-COMM-1").one()
+
+        self.assertEqual(str(trade.trade_date), "2026-03-19")
+        self.assertEqual(str(trade.effective_start_date), "2026-04-01")
+        self.assertEqual(str(trade.effective_end_date), "2026-04-30")
+        self.assertEqual(trade.trade_currency_code, "USD")
+        self.assertEqual(trade.price_unit_code, "BBL")
+        self.assertEqual(trade.location_code, "CUSHING")
+        self.assertEqual(str(trade.delivery_start), "2026-04-05")
+        self.assertEqual(str(trade.delivery_end), "2026-05-01")
+        self.assertEqual(leg.location_code, "CUSHING")
+        self.assertEqual(leg.quantity_unit_code, "BBL")
+        self.assertEqual(str(leg.delivery_start), "2026-04-05")
+        self.assertEqual(str(leg.delivery_end), "2026-05-01")
+        self.assertEqual(term.currency_code, "USD")
+        self.assertEqual(term.price_unit_code, "BBL")
 
     def test_swap_trade_can_omit_top_level_volume_when_legs_are_present(self) -> None:
         with self.SessionLocal() as session:

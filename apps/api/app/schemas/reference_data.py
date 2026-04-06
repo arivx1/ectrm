@@ -5,6 +5,10 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from apps.api.app.domains.reference_data.services.counterparty_standards import (
+    DEFAULT_COUNTERPARTY_CREDIT_STATUS,
+)
+
 
 class ReferenceDataBase(BaseModel):
     code: str = Field(..., min_length=1, max_length=50)
@@ -178,7 +182,7 @@ class CounterpartyCreate(ReferenceDataCreate):
     legal_entity_name: Optional[str] = Field(None, min_length=1, max_length=200)
     counterparty_type: str = Field(..., min_length=1, max_length=50)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
-    credit_status: Optional[str] = Field(None, min_length=1, max_length=50)
+    credit_status: str = Field(default=DEFAULT_COUNTERPARTY_CREDIT_STATUS, min_length=1, max_length=50)
 
 
 class CounterpartyUpdate(ReferenceDataUpdate):
@@ -198,12 +202,14 @@ class CounterpartyOut(ReferenceDataOut):
     legal_entity_name: Optional[str]
     counterparty_type: str
     country_code: Optional[str]
-    credit_status: Optional[str]
+    credit_status: str
 
 
 class CounterpartyStandardsOut(BaseModel):
     default_counterparty_type: str
     counterparty_types: list[str]
+    default_counterparty_credit_status: str
+    counterparty_credit_statuses: list[str]
 
 
 class PortfolioCreate(ReferenceDataCreate):

@@ -1,4 +1,8 @@
 import { TradeLegEditor } from './TradeLegEditor'
+import {
+  buildCounterpartyCreditRestrictionMessage,
+  formatCounterpartyOptionLabel,
+} from './counterpartyCredit'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
 import { FieldLabel } from '../../shared/ui/Tooltip'
@@ -18,6 +22,10 @@ type ReferenceRecord = {
 
 type PortfolioRecord = ReferenceRecord & {
   book_code: string
+}
+
+type CounterpartyRecord = ReferenceRecord & {
+  credit_status?: string | null
 }
 
 type TradeLegDraft = {
@@ -79,7 +87,7 @@ type TradeCaptureFormProps = {
   createPortfolioOptions: PortfolioRecord[]
   counterpartyInput: string
   setCounterpartyInput: (value: string) => void
-  createCounterpartyOptions: ReferenceRecord[]
+  createCounterpartyOptions: CounterpartyRecord[]
   tradeCurrencyInput: string
   setTradeCurrencyInput: (value: string) => void
   createCurrencyOptions: ReferenceRecord[]
@@ -205,6 +213,9 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
   const { date: executionDateInput, time: executionTimeInput } = splitLocalDateTimeInput(executionTimestampInput)
   const qualitySpecOptions = getQualitySpecOptionsForCommodity(commodityInput)
   const qualitySpecListId = qualitySpecOptions.length > 0 ? 'trade-quality-spec-options' : undefined
+  const selectedCounterparty =
+    createCounterpartyOptions.find((counterparty) => counterparty.code === counterpartyInput) ?? null
+  const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
 
   return (
     <>
@@ -338,11 +349,19 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             <option value="">No counterparty</option>
             {createCounterpartyOptions.map((counterparty) => (
               <option key={counterparty.code} value={counterparty.code}>
-                {counterparty.name}
+                {formatCounterpartyOptionLabel(counterparty)}
               </option>
             ))}
           </select>
         </label>
+        {counterpartyCreditWarning && (
+          <div className="field field-wide">
+            <div className="feedback-banner feedback-banner-error trade-structure-note">
+              <strong>Counterparty blocked for trading</strong>
+              <p>{counterpartyCreditWarning}</p>
+            </div>
+          </div>
+        )}
         <label className="field">
           <span>Book</span>
           <select

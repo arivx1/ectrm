@@ -1,5 +1,9 @@
 import { useState } from 'react'
 
+import {
+  buildCounterpartyCreditRestrictionMessage,
+  formatCounterpartyOptionLabel,
+} from './counterpartyCredit'
 import { TradeLegEditor } from './TradeLegEditor'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
@@ -20,6 +24,10 @@ type ReferenceRecord = {
 
 type PortfolioRecord = ReferenceRecord & {
   book_code: string
+}
+
+type CounterpartyRecord = ReferenceRecord & {
+  credit_status?: string | null
 }
 
 type TradeLegDraft = {
@@ -83,7 +91,7 @@ type TradeAmendFormProps = {
   amendPortfolioOptions: PortfolioRecord[]
   amendCounterpartyInput: string
   setAmendCounterpartyInput: (value: string) => void
-  amendCounterpartyOptions: ReferenceRecord[]
+  amendCounterpartyOptions: CounterpartyRecord[]
   amendTradeCurrencyInput: string
   setAmendTradeCurrencyInput: (value: string) => void
   amendCurrencyOptions: ReferenceRecord[]
@@ -96,6 +104,7 @@ type TradeAmendFormProps = {
   setAmendDeliveryEndInput: (value: string) => void
   amendPriceUnitInput: string
   setAmendPriceUnitInput: (value: string) => void
+  amendPriceUnitOptions: ReferenceRecord[]
   amendSettlementStatusInput: string
   setAmendSettlementStatusInput: (value: string) => void
   amendTraderUserInput: string
@@ -184,6 +193,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     setAmendDeliveryEndInput,
     amendPriceUnitInput,
     setAmendPriceUnitInput,
+    amendPriceUnitOptions,
     amendSettlementStatusInput,
     setAmendSettlementStatusInput,
     amendTraderUserInput,
@@ -210,6 +220,9 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
   const { date: executionDateInput, time: executionTimeInput } = splitLocalDateTimeInput(amendExecutionTimestampInput)
   const qualitySpecOptions = getQualitySpecOptionsForCommodity(amendCommodityInput)
   const qualitySpecListId = qualitySpecOptions.length > 0 ? `trade-quality-spec-options-${selectedTradeId}` : undefined
+  const selectedCounterparty =
+    amendCounterpartyOptions.find((counterparty) => counterparty.code === amendCounterpartyInput) ?? null
+  const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
 
   return (
     <form key={selectedTradeId} className="stack-form" onSubmit={onSubmit}>
@@ -317,11 +330,19 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             <option value="">No counterparty</option>
             {amendCounterpartyOptions.map((counterparty) => (
               <option key={counterparty.code} value={counterparty.code}>
-                {counterparty.name}
+                {formatCounterpartyOptionLabel(counterparty)}
               </option>
             ))}
           </select>
         </label>
+        {counterpartyCreditWarning && (
+          <div className="field field-wide">
+            <div className="feedback-banner feedback-banner-error trade-structure-note">
+              <strong>Counterparty blocked for trading</strong>
+              <p>{counterpartyCreditWarning}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mini-grid">
@@ -438,7 +459,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             disabled={amending || cancelling}
           >
             <option value="">No price unit</option>
-            {amendUnitOptions.map((unit) => (
+            {amendPriceUnitOptions.map((unit) => (
               <option key={unit.code} value={unit.code}>
                 {unit.code} · {unit.name}
               </option>

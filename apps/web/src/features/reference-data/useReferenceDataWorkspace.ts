@@ -101,7 +101,7 @@ export function emptyCounterpartyForm(
     legal_entity_name: '',
     counterparty_type: counterpartyStandards.default_counterparty_type,
     country_code: '',
-    credit_status: '',
+    credit_status: counterpartyStandards.default_counterparty_credit_status,
     description: '',
   }
 }
@@ -558,7 +558,7 @@ export function useReferenceDataWorkspace({
       legal_entity_name: record.legal_entity_name ?? '',
       counterparty_type: record.counterparty_type,
       country_code: record.country_code ?? '',
-      credit_status: record.credit_status ?? '',
+      credit_status: record.credit_status ?? counterpartyStandards.default_counterparty_credit_status,
       description: record.description ?? '',
     })
   }

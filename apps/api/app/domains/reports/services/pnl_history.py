@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.event import Event
+from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.trade import Trade
 
 ZERO = Decimal("0")
@@ -16,11 +17,14 @@ NEGATIVE_ONE = Decimal("-1")
 POSITIVE_ONE = Decimal("1")
 REALIZED_STATUS = "SETTLED"
 CANCELLED_STATUS = "CANCELLED"
-TRADE_PNL_BASIS = "trade_event_history_proxy"
+DEFAULT_PRICING_TYPE = "FIXED"
+TRADE_PNL_BASIS = "trade_event_history_mark_to_market"
 TRADE_PNL_METHODOLOGY = (
-    "Event-sourced daily history derived from stored price differentials times volume. "
-    "Settlement changes move priced trades between realized and unrealized buckets, "
-    "and unpriced trades are excluded."
+    "Event-sourced daily history valued from stored trade price terms and the latest available "
+    "price-index observation for each day. FIXED uses the stored price differential, INDEX uses "
+    "the market observation, HYBRID uses market observation plus differential, settlement changes "
+    "move priced trades between realized and unrealized buckets, and trades remain unpriced until "
+    "required market observations exist."
 )
 
 
@@ -38,6 +42,8 @@ def _empty_trade_state(trade_id: str) -> dict[str, Any]:
     return {
         "trade_id": trade_id,
         "status": "ACTIVE",
+        "pricing_type": DEFAULT_PRICING_TYPE,
+        "price_index_code": None,
         "trade_side": None,
         "price": None,
         "volume": None,
@@ -57,19 +63,48 @@ def _trade_direction(state: dict[str, Any]) -> Decimal:
     return POSITIVE_ONE
 
 
-def _pnl_snapshot_for_state(state: dict[str, Any] | None) -> PnlSnapshot:
+def _mark_to_market_price(
+    state: dict[str, Any],
+    latest_marks: dict[str, Decimal],
+) -> Decimal | None:
+    pricing_type = str(state.get("pricing_type") or DEFAULT_PRICING_TYPE).strip().upper()
+    stored_price = state.get("price")
+    price_index_code = str(state.get("price_index_code") or "").strip().upper()
+    market_price = latest_marks.get(price_index_code) if price_index_code else None
+
+    if pricing_type == "FIXED":
+        return Decimal(str(stored_price)) if stored_price is not None else None
+
+    if pricing_type == "INDEX":
+        return market_price
+
+    if pricing_type == "HYBRID":
+        if stored_price is None or market_price is None:
+            return None
+        return market_price + Decimal(str(stored_price))
+
+    if stored_price is not None:
+        return Decimal(str(stored_price))
+
+    return market_price
+
+
+def _pnl_snapshot_for_state(
+    state: dict[str, Any] | None,
+    latest_marks: dict[str, Decimal],
+) -> PnlSnapshot:
     if state is None:
         return PnlSnapshot()
 
     if str(state.get("status") or "ACTIVE").strip().upper() == CANCELLED_STATUS:
         return PnlSnapshot()
 
-    price = state.get("price")
     volume = state.get("volume")
-    if price is None or volume is None:
+    mark_to_market_price = _mark_to_market_price(state, latest_marks)
+    if mark_to_market_price is None or volume is None:
         return PnlSnapshot()
 
-    contribution = Decimal(str(price)) * abs(Decimal(str(volume))) * _trade_direction(state)
+    contribution = mark_to_market_price * abs(Decimal(str(volume))) * _trade_direction(state)
     settlement_status = str(state.get("settlement_status") or "PENDING").strip().upper()
     if settlement_status == REALIZED_STATUS:
         return PnlSnapshot(
@@ -129,6 +164,8 @@ def _apply_trade_event(current: dict[str, Any] | None, event: Event) -> dict[str
 
     if event.event_type == "TradeCreated":
         next_state = _empty_trade_state(event.aggregate_id)
+        next_state["pricing_type"] = payload.get("pricing_type") or DEFAULT_PRICING_TYPE
+        next_state["price_index_code"] = payload.get("price_index_code")
         next_state["trade_side"] = payload.get("trade_side")
         next_state["price"] = payload.get("price")
         next_state["volume"] = payload.get("volume")
@@ -139,7 +176,7 @@ def _apply_trade_event(current: dict[str, Any] | None, event: Event) -> dict[str
     next_state = dict(current or _empty_trade_state(event.aggregate_id))
 
     if event.event_type == "TradeAmended":
-        for field_name in ("trade_side", "price", "volume", "settlement_status", "status"):
+        for field_name in ("pricing_type", "price_index_code", "trade_side", "price", "volume", "settlement_status", "status"):
             if field_name in payload:
                 next_state[field_name] = payload[field_name]
         return next_state
@@ -155,11 +192,43 @@ def _legacy_trade_state(row: Trade) -> dict[str, Any]:
     return {
         "trade_id": row.trade_id,
         "status": row.status,
+        "pricing_type": row.pricing_type,
+        "price_index_code": row.price_index_code,
         "trade_side": row.trade_side,
         "price": row.price,
         "volume": row.volume,
         "settlement_status": row.settlement_status,
     }
+
+
+def _load_daily_mark_updates(
+    db: Session,
+    *,
+    price_index_codes: set[str],
+    end_date: date,
+) -> dict[date, dict[str, Decimal]]:
+    if not price_index_codes:
+        return {}
+
+    rows = db.execute(
+        select(PriceIndexObservation)
+        .where(
+            PriceIndexObservation.price_index_code.in_(sorted(price_index_codes)),
+            PriceIndexObservation.observation_date <= end_date,
+        )
+        .order_by(
+            PriceIndexObservation.observation_date.asc(),
+            PriceIndexObservation.downloaded_at.asc(),
+            PriceIndexObservation.id.asc(),
+        )
+    ).scalars().all()
+
+    by_date: dict[date, dict[str, Decimal]] = {}
+    for row in rows:
+        daily_marks = by_date.setdefault(row.observation_date, {})
+        daily_marks[row.price_index_code] = Decimal(str(row.value))
+
+    return by_date
 
 
 def build_pnl_history_report(db: Session, *, as_of: date | None = None) -> dict[str, Any]:
@@ -175,39 +244,38 @@ def build_pnl_history_report(db: Session, *, as_of: date | None = None) -> dict[
         .order_by(Event.occurred_at.asc(), Event.recorded_at.asc(), Event.event_id.asc())
     ).scalars().all()
 
-    state_by_trade: dict[str, dict[str, Any]] = {}
+    relevant_price_index_codes: set[str] = set()
+    events_by_date: dict[date, list[Event]] = {}
     trade_ids_with_events: set[str] = set()
-    daily_deltas: dict[date, PnlSnapshot] = {}
 
     for row in rows:
         trade_ids_with_events.add(row.aggregate_id)
-
-        before_state = state_by_trade.get(row.aggregate_id)
-        before_snapshot = _pnl_snapshot_for_state(before_state)
-        after_state = _apply_trade_event(before_state, row)
-        after_snapshot = _pnl_snapshot_for_state(after_state)
-        state_by_trade[row.aggregate_id] = after_state
-
-        event_date = row.occurred_at.date()
-        delta = _subtract_pnl_snapshots(after_snapshot, before_snapshot)
-        daily_deltas[event_date] = _add_pnl_snapshots(daily_deltas.get(event_date, PnlSnapshot()), delta)
+        events_by_date.setdefault(row.occurred_at.date(), []).append(row)
+        event_price_index_code = str((row.payload or {}).get("price_index_code") or "").strip().upper()
+        if event_price_index_code:
+            relevant_price_index_codes.add(event_price_index_code)
 
     legacy_rows = db.execute(
         select(Trade)
         .where(Trade.status != CANCELLED_STATUS)
         .order_by(Trade.created_at.asc(), Trade.trade_id.asc())
     ).scalars().all()
+    legacy_starts_by_date: dict[date, list[dict[str, Any]]] = {}
+    start_dates: list[date] = list(events_by_date.keys())
 
     for row in legacy_rows:
+        anchor = row.execution_timestamp or row.created_at or generated_at
+        anchor_date = anchor.date()
+        start_dates.append(anchor_date)
+        if row.price_index_code:
+            relevant_price_index_codes.add(row.price_index_code.strip().upper())
+
         if row.trade_id in trade_ids_with_events:
             continue
 
-        anchor = row.execution_timestamp or row.created_at or generated_at
-        anchor_date = anchor.date()
-        snapshot = _pnl_snapshot_for_state(_legacy_trade_state(row))
-        daily_deltas[anchor_date] = _add_pnl_snapshots(daily_deltas.get(anchor_date, PnlSnapshot()), snapshot)
+        legacy_starts_by_date.setdefault(anchor_date, []).append(_legacy_trade_state(row))
 
-    if not daily_deltas:
+    if not start_dates:
         return {
             "generated_at": generated_at,
             "basis": TRADE_PNL_BASIS,
@@ -217,19 +285,42 @@ def build_pnl_history_report(db: Session, *, as_of: date | None = None) -> dict[
             "summary": _serialize_pnl_snapshot(PnlSnapshot()),
         }
 
-    start_date = min(daily_deltas)
+    daily_mark_updates = _load_daily_mark_updates(
+        db,
+        price_index_codes=relevant_price_index_codes,
+        end_date=end_date,
+    )
+
+    start_date = min(start_dates)
     if end_date < start_date:
         end_date = start_date
 
     current_date = start_date
-    running = PnlSnapshot()
+    active_states: dict[str, dict[str, Any]] = {}
+    latest_marks: dict[str, Decimal] = {}
+    latest_snapshot = PnlSnapshot()
     points: list[dict[str, Any]] = []
     while current_date <= end_date:
-        running = _add_pnl_snapshots(running, daily_deltas.get(current_date, PnlSnapshot()))
+        latest_marks.update(daily_mark_updates.get(current_date, {}))
+
+        for state in legacy_starts_by_date.get(current_date, []):
+            active_states[state["trade_id"]] = dict(state)
+
+        for row in events_by_date.get(current_date, []):
+            current_state = active_states.get(row.aggregate_id)
+            active_states[row.aggregate_id] = _apply_trade_event(current_state, row)
+
+        latest_snapshot = PnlSnapshot()
+        for state in active_states.values():
+            latest_snapshot = _add_pnl_snapshots(
+                latest_snapshot,
+                _pnl_snapshot_for_state(state, latest_marks),
+            )
+
         points.append(
             {
                 "date": current_date,
-                **_serialize_pnl_snapshot(running),
+                **_serialize_pnl_snapshot(latest_snapshot),
             }
         )
         current_date += timedelta(days=1)
@@ -240,5 +331,5 @@ def build_pnl_history_report(db: Session, *, as_of: date | None = None) -> dict[
         "methodology": TRADE_PNL_METHODOLOGY,
         "point_count": len(points),
         "points": points,
-        "summary": _serialize_pnl_snapshot(running),
+        "summary": _serialize_pnl_snapshot(latest_snapshot),
     }

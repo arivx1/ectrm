@@ -491,7 +491,13 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
             { id: 'name', label: 'Name', width: '18rem', renderCell: (counterparty) => counterparty.name },
             { id: 'type', label: 'Type', width: '10rem', renderCell: (counterparty) => counterparty.counterparty_type },
             { id: 'country', label: 'Country', width: '8rem', renderCell: (counterparty) => counterparty.country_code ?? '—' },
-            { id: 'credit', label: 'Credit', width: '10rem', renderCell: (counterparty) => counterparty.credit_status ?? '—' },
+            {
+              id: 'credit',
+              label: 'Credit',
+              width: '10rem',
+              renderCell: (counterparty) =>
+                counterparty.credit_status ?? counterpartyStandards.default_counterparty_credit_status,
+            },
             statusColumn<(typeof filteredCounterparties)[number]>(),
           ]}
           rows={filteredCounterparties}
@@ -1570,7 +1576,18 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
 
               <label className="field">
                 <span>Credit Status</span>
-                <input className="control" value={counterpartyForm.credit_status} onChange={(event) => setCounterpartyForm((current) => ({ ...current, credit_status: event.target.value }))} disabled={savingReference} />
+                <select
+                  className="control"
+                  value={counterpartyForm.credit_status}
+                  onChange={(event) => setCounterpartyForm((current) => ({ ...current, credit_status: event.target.value }))}
+                  disabled={savingReference}
+                >
+                  {counterpartyStandards.counterparty_credit_statuses.map((creditStatus) => (
+                    <option key={creditStatus} value={creditStatus}>
+                      {creditStatus}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="field">
@@ -1599,7 +1616,7 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
                 </div>
                 <div className="detail-row">
                   <span>Credit Status</span>
-                  <strong>{selectedCounterparty.credit_status ?? '—'}</strong>
+                  <strong>{selectedCounterparty.credit_status ?? counterpartyStandards.default_counterparty_credit_status}</strong>
                 </div>
                 <div className="detail-row">
                   <span>Updated</span>

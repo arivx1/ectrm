@@ -434,7 +434,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                   <strong>{formatMoney(currentPnlProxy)}</strong>
                   <p>
                     Based on {currentPricedTradeCount} priced trade{currentPricedTradeCount === 1 ? '' : 's'} from the
-                    reporting service using stored price differentials and settlement history.
+                    reporting service using market marks, stored price differentials, and settlement history.
                   </p>
                 </article>
                 <article className="dashboard-report-card">
