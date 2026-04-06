@@ -72,9 +72,9 @@ function deliveryNarrative(delivery: DeliveryRecord): string {
       return 'Grid schedule inputs are lined up and the delivery window is operationally ready.'
     }
     if (delivery.status === 'BLOCKED') {
-      return 'The power schedule still has control gaps before the delivery window can be trusted.'
+      return 'The power schedule still has confirmation, scheduling, or control gaps before the delivery window can be trusted.'
     }
-    return 'The power schedule exists, but pricing or downstream controls are still progressing.'
+    return 'The power schedule exists, but pricing, invoicing, or downstream controls are still progressing.'
   }
 
   if (delivery.mode_family === 'NETWORK_FLOW') {
@@ -82,16 +82,16 @@ function deliveryNarrative(delivery: DeliveryRecord): string {
       return 'Flow details are consistent enough for pipeline-style operational handling.'
     }
     if (delivery.status === 'BLOCKED') {
-      return 'The network flow is missing required operational controls or scheduling context.'
+      return 'The network flow is missing required operational controls, confirmation, or scheduling context.'
     }
-    return 'The network delivery is active, with readiness still converging.'
+    return 'The network delivery is active, with readiness and downstream settlement workflow still converging.'
   }
 
   if (delivery.transport_mode === 'UNSPECIFIED') {
-    return 'The delivery is logistics-shaped, but the exact transport mode still needs to be captured.'
+    return 'The delivery is logistics-shaped, but the exact transport mode and downstream workflow still need to be captured.'
   }
 
-  return 'The delivery is structured as a discrete logistics movement with explicit mode context.'
+  return 'The delivery is structured as a discrete logistics movement with explicit mode context and visible post-trade workflow.'
 }
 
 function tradeReferenceLabel(delivery: DeliveryRecord): string {
@@ -111,13 +111,19 @@ export function DeliveryWorkspace({
   const blockedDeliveries = deliveries.filter((delivery) => delivery.status === 'BLOCKED')
   const readyDeliveries = deliveries.filter((delivery) => delivery.status === 'READY')
   const inProgressDeliveries = deliveries.filter((delivery) => delivery.status === 'IN_PROGRESS')
-  const completedDeliveries = deliveries.filter((delivery) => delivery.status === 'COMPLETED')
   const logisticsDeliveries = deliveries.filter((delivery) => delivery.mode_family === 'LOGISTICS')
   const networkDeliveries = deliveries.filter((delivery) => delivery.mode_family === 'NETWORK_FLOW')
   const powerDeliveries = deliveries.filter((delivery) => delivery.mode_family === 'POWER_SCHEDULE')
   const pricingPendingOpen = openDeliveries.filter((delivery) => delivery.pricing_status !== 'PRICED').length
+  const confirmationPendingOpen = openDeliveries.filter((delivery) => delivery.confirmation_status !== 'CONFIRMED').length
+  const nominationPendingOpen = openDeliveries.filter(
+    (delivery) => !['NOT_REQUIRED', 'SCHEDULED', 'NOMINATED', 'COMPLETED'].includes(delivery.nomination_status),
+  ).length
+  const invoicePendingOpen = openDeliveries.filter(
+    (delivery) => !['NOT_REQUIRED', 'ISSUED', 'APPROVED'].includes(delivery.invoice_status),
+  ).length
+  const overduePayments = openDeliveries.filter((delivery) => delivery.payment_status === 'OVERDUE').length
   const explicitModeMissing = logisticsDeliveries.filter((delivery) => delivery.transport_mode === 'UNSPECIFIED').length
-  const openVolume = openDeliveries.reduce((sum, delivery) => sum + Math.abs(delivery.volume ?? 0), 0)
   const nearestWindow = openDeliveries.reduce<DeliveryRecord | null>((earliest, delivery) => {
     if (!delivery.delivery_start) {
       return earliest
@@ -145,7 +151,7 @@ export function DeliveryWorkspace({
           eyebrow: 'Readiness',
           title: 'Cross-Mode Delivery Board',
           description:
-            'A generalized operational surface for discrete logistics, network flows, and scheduled power delivery obligations.',
+            'A generalized post-trade surface for discrete logistics, network flows, and scheduled power delivery obligations.',
           span: 'full',
           availableSpans: ['full', 'wide'],
           content:
@@ -184,7 +190,7 @@ export function DeliveryWorkspace({
           eyebrow: 'Pipeline',
           title: nearestWindow ? `${tradeReferenceLabel(nearestWindow)} has the nearest open window` : 'Pipeline Health',
           description:
-            'A compact pulse on readiness, pricing, and the remaining places where the model still needs more explicit transport detail.',
+            'A compact pulse on readiness, pricing, post-trade workflow, and the remaining places where the model still needs more explicit transport detail.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
           content:
@@ -207,6 +213,22 @@ export function DeliveryWorkspace({
                   <strong>{formatNumber(pricingPendingOpen, 0)}</strong>
                 </div>
                 <div className="shipment-kpi-row">
+                  <span>Confirmation Pending</span>
+                  <strong>{formatNumber(confirmationPendingOpen, 0)}</strong>
+                </div>
+                <div className="shipment-kpi-row">
+                  <span>Nomination Open</span>
+                  <strong>{formatNumber(nominationPendingOpen, 0)}</strong>
+                </div>
+                <div className="shipment-kpi-row">
+                  <span>Invoice Pending</span>
+                  <strong>{formatNumber(invoicePendingOpen, 0)}</strong>
+                </div>
+                <div className="shipment-kpi-row">
+                  <span>Overdue Payments</span>
+                  <strong>{formatNumber(overduePayments, 0)}</strong>
+                </div>
+                <div className="shipment-kpi-row">
                   <span>Mode TBD</span>
                   <strong>{formatNumber(explicitModeMissing, 0)}</strong>
                 </div>
@@ -227,7 +249,7 @@ export function DeliveryWorkspace({
           eyebrow: 'Attention',
           title: blockedDeliveries.length > 0 ? 'Operational Blockers' : 'No blockers in queue',
           description:
-            'The fastest way to see which obligations are waiting on transport mode, scheduling, or control completeness.',
+            'The fastest way to see which obligations are waiting on transport mode, confirmation, scheduling, allocation, or control completeness.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
           content:
@@ -301,6 +323,11 @@ export function DeliveryWorkspace({
                       </span>
                       <span className="entity-chip entity-chip-soft">{formatDeliveryProfile(delivery.delivery_profile)}</span>
                       <span className="entity-chip entity-chip-soft">Pricing {delivery.pricing_status}</span>
+                      <span className="entity-chip entity-chip-soft">Confirmation {delivery.confirmation_status}</span>
+                      <span className="entity-chip entity-chip-soft">Nomination {delivery.nomination_status}</span>
+                      <span className="entity-chip entity-chip-soft">Allocation {delivery.allocation_status}</span>
+                      <span className="entity-chip entity-chip-soft">Invoice {delivery.invoice_status}</span>
+                      <span className="entity-chip entity-chip-soft">Payment {delivery.payment_status}</span>
                       <span className="entity-chip entity-chip-soft">Settlement {delivery.settlement_status}</span>
                     </div>
 

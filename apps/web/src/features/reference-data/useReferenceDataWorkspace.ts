@@ -101,6 +101,9 @@ export function emptyCounterpartyForm(
     legal_entity_name: '',
     counterparty_type: counterpartyStandards.default_counterparty_type,
     country_code: '',
+    lei_code: '',
+    duns_number: '',
+    ticker_symbol: '',
     credit_status: counterpartyStandards.default_counterparty_credit_status,
     description: '',
   }
@@ -341,8 +344,12 @@ export function useReferenceDataWorkspace({
         counterparty.code.toLowerCase().includes(query) ||
         counterparty.name.toLowerCase().includes(query) ||
         (counterparty.short_name ?? '').toLowerCase().includes(query) ||
+        (counterparty.legal_entity_name ?? '').toLowerCase().includes(query) ||
         counterparty.counterparty_type.toLowerCase().includes(query) ||
         (counterparty.country_code ?? '').toLowerCase().includes(query) ||
+        (counterparty.lei_code ?? '').toLowerCase().includes(query) ||
+        (counterparty.duns_number ?? '').toLowerCase().includes(query) ||
+        (counterparty.ticker_symbol ?? '').toLowerCase().includes(query) ||
         (counterparty.credit_status ?? '').toLowerCase().includes(query) ||
         (counterparty.description ?? '').toLowerCase().includes(query)
       )
@@ -558,6 +565,9 @@ export function useReferenceDataWorkspace({
       legal_entity_name: record.legal_entity_name ?? '',
       counterparty_type: record.counterparty_type,
       country_code: record.country_code ?? '',
+      lei_code: record.lei_code ?? '',
+      duns_number: record.duns_number ?? '',
+      ticker_symbol: record.ticker_symbol ?? '',
       credit_status: record.credit_status ?? counterpartyStandards.default_counterparty_credit_status,
       description: record.description ?? '',
     })

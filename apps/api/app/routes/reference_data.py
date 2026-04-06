@@ -51,6 +51,9 @@ from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
+from apps.api.app.models.reference_counterparty_external_credit_snapshot import (
+    ReferenceCounterpartyExternalCreditSnapshot,
+)
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
@@ -69,6 +72,7 @@ from apps.api.app.schemas.reference_data import (
     CounterpartyCreate,
     CounterpartyCreditProfileOut,
     CounterpartyCreditProfileUpsert,
+    CounterpartyExternalCreditSnapshotOut,
     CounterpartyOut,
     CounterpartyStandardsOut,
     CounterpartyStatusUpdate,
@@ -121,6 +125,21 @@ def _clean_optional_text(value: Optional[str]) -> Optional[str]:
 def _clean_optional_code(value: Optional[str]) -> Optional[str]:
     cleaned = _clean_optional_text(value)
     return normalize_code(cleaned) if cleaned is not None else None
+
+
+def _normalize_lei_code(value: Optional[str]) -> Optional[str]:
+    return _clean_optional_code(value)
+
+
+def _normalize_duns_number(value: Optional[str]) -> Optional[str]:
+    cleaned = _clean_optional_text(value)
+    if cleaned is None:
+        return None
+    return cleaned.replace("-", "").replace(" ", "")
+
+
+def _normalize_ticker_symbol(value: Optional[str]) -> Optional[str]:
+    return _clean_optional_code(value)
 
 
 def _normalize_location_parent_code(
@@ -223,6 +242,9 @@ def to_out(record: ModelT, schema_cls):
         payload["legal_entity_name"] = record.legal_entity_name
         payload["counterparty_type"] = record.counterparty_type
         payload["country_code"] = record.country_code
+        payload["lei_code"] = record.lei_code
+        payload["duns_number"] = record.duns_number
+        payload["ticker_symbol"] = record.ticker_symbol
         payload["credit_status"] = record.credit_status
     if isinstance(record, ReferenceCurrency):
         payload["symbol"] = record.symbol
@@ -592,6 +614,12 @@ def _update_counterparty_fields(record, payload, provided_fields: set[str]) -> N
         record.counterparty_type = normalize_counterparty_type(payload.counterparty_type)
     if "country_code" in provided_fields:
         record.country_code = normalize_country_code(payload.country_code)
+    if "lei_code" in provided_fields:
+        record.lei_code = _normalize_lei_code(payload.lei_code)
+    if "duns_number" in provided_fields:
+        record.duns_number = _normalize_duns_number(payload.duns_number)
+    if "ticker_symbol" in provided_fields:
+        record.ticker_symbol = _normalize_ticker_symbol(payload.ticker_symbol)
     if "credit_status" in provided_fields:
         record.credit_status = normalize_counterparty_credit_status(payload.credit_status)
 
@@ -611,6 +639,38 @@ def _to_counterparty_credit_profile_out(
         created_by=record.created_by,
         updated_at=record.updated_at,
         updated_by=record.updated_by,
+        version=record.version,
+    )
+
+
+def _to_counterparty_external_credit_snapshot_out(
+    record: ReferenceCounterpartyExternalCreditSnapshot,
+) -> CounterpartyExternalCreditSnapshotOut:
+    return CounterpartyExternalCreditSnapshotOut(
+        id=record.id,
+        counterparty_code=record.counterparty_code,
+        provider=record.provider,
+        source_entity_id=record.source_entity_id,
+        source_entity_name=record.source_entity_name,
+        match_basis=record.match_basis,
+        matched_identifier_value=record.matched_identifier_value,
+        as_of_date=record.as_of_date,
+        rating_scale=record.rating_scale,
+        rating_value=record.rating_value,
+        rating_outlook=record.rating_outlook,
+        credit_score=float(record.credit_score) if record.credit_score is not None else None,
+        probability_of_default=float(record.probability_of_default)
+        if record.probability_of_default is not None
+        else None,
+        recommended_limit_currency_code=record.recommended_limit_currency_code,
+        recommended_limit_amount=float(record.recommended_limit_amount)
+        if record.recommended_limit_amount is not None
+        else None,
+        commentary=record.commentary,
+        downloaded_at=record.downloaded_at,
+        run_id=record.run_id,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
         version=record.version,
     )
 
@@ -733,6 +793,42 @@ def list_counterparty_credit_profiles(
     return [_to_counterparty_credit_profile_out(row) for row in rows]
 
 
+@router.get(
+    "/counterparties/external-credit-snapshots",
+    response_model=List[CounterpartyExternalCreditSnapshotOut],
+)
+def list_counterparty_external_credit_snapshots(
+    counterparty_code: Optional[str] = None,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> List[CounterpartyExternalCreditSnapshotOut]:
+    stmt = select(ReferenceCounterpartyExternalCreditSnapshot).order_by(
+        ReferenceCounterpartyExternalCreditSnapshot.counterparty_code.asc(),
+        ReferenceCounterpartyExternalCreditSnapshot.provider.asc(),
+        ReferenceCounterpartyExternalCreditSnapshot.as_of_date.desc(),
+        ReferenceCounterpartyExternalCreditSnapshot.downloaded_at.desc(),
+        ReferenceCounterpartyExternalCreditSnapshot.id.desc(),
+    )
+    if counterparty_code:
+        stmt = stmt.where(
+            ReferenceCounterpartyExternalCreditSnapshot.counterparty_code == normalize_code(counterparty_code)
+        )
+
+    rows = db.execute(stmt).scalars().all()
+    latest_rows: list[ReferenceCounterpartyExternalCreditSnapshot] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (row.counterparty_code, row.provider)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        latest_rows.append(row)
+
+    windowed_rows = latest_rows[offset : offset + limit]
+    return [_to_counterparty_external_credit_snapshot_out(row) for row in windowed_rows]
+
+
 @router.post("/counterparties", response_model=CounterpartyOut, status_code=201)
 def create_counterparty(payload: CounterpartyCreate, db: Session = Depends(get_db)) -> CounterpartyOut:
     existing = db.execute(
@@ -750,6 +846,9 @@ def create_counterparty(payload: CounterpartyCreate, db: Session = Depends(get_d
             "legal_entity_name": payload.legal_entity_name.strip() if payload.legal_entity_name is not None else None,
             "counterparty_type": normalize_counterparty_type(payload.counterparty_type),
             "country_code": normalize_country_code(payload.country_code),
+            "lei_code": _normalize_lei_code(payload.lei_code),
+            "duns_number": _normalize_duns_number(payload.duns_number),
+            "ticker_symbol": _normalize_ticker_symbol(payload.ticker_symbol),
             "credit_status": normalize_counterparty_credit_status(payload.credit_status),
         },
     )

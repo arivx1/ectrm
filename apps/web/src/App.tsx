@@ -8,7 +8,12 @@ import {
   type DocumentationDocumentKey,
 } from './workspaces/docs/DocumentationWorkspace'
 import { EventsWorkspace } from './workspaces/events/EventsWorkspace'
+import { OperationsWorkspace } from './workspaces/operations/OperationsWorkspace'
 import { PositionsWorkspace } from './workspaces/positions/PositionsWorkspace'
+import { ReportsWorkspace } from './workspaces/reports/ReportsWorkspace'
+import { RiskWorkspace } from './workspaces/risk/RiskWorkspace'
+import { SchedulingWorkspace } from './workspaces/scheduling/SchedulingWorkspace'
+import { SettlementWorkspace } from './workspaces/settlement/SettlementWorkspace'
 import { DeliveryWorkspace } from './workspaces/shipments/ShipmentWorkspace'
 import { ReferenceDataWorkspace } from './workspaces/reference-data/ReferenceDataWorkspace'
 import { AssistantWorkspace } from './workspaces/assistant/AssistantWorkspace'
@@ -38,6 +43,9 @@ import {
 } from './features/trades/tradeEventPayloads'
 import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import {
+  type CounterpartyCreditProfileRecord,
+  type CounterpartyCreditReportRow,
+  type CounterpartyExternalCreditSnapshotRecord,
   DEFAULT_COUNTERPARTY_STANDARDS,
   DEFAULT_LOCATION_STANDARDS,
   type CounterpartyStandards,
@@ -90,10 +98,15 @@ import { Tooltip } from './shared/ui/Tooltip'
 const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
   { key: 'dashboard', label: 'Dashboard', kicker: 'Desk' },
   { key: 'guide', label: 'Guide', kicker: 'Playbook' },
-  { key: 'trades', label: 'Trades', kicker: 'Blotter' },
+  { key: 'trades', label: 'Trading', kicker: 'Blotter' },
   { key: 'events', label: 'Events', kicker: 'Tape' },
+  { key: 'risk', label: 'Risk', kicker: 'Exposure' },
   { key: 'positions', label: 'Positions', kicker: 'Risk' },
   { key: 'shipments', label: 'Deliveries', kicker: 'Execution' },
+  { key: 'scheduling', label: 'Scheduling', kicker: 'Scheduler' },
+  { key: 'operations', label: 'Operations', kicker: 'Control' },
+  { key: 'settlement', label: 'Settlement', kicker: 'Cash' },
+  { key: 'reports', label: 'Reports', kicker: 'Analytics' },
   { key: 'reference', label: 'Reference Data', kicker: 'Master' },
   { key: 'admin', label: 'Admin', kicker: 'Ops' },
   { key: 'settings', label: 'Settings', kicker: 'Config' },
@@ -201,6 +214,9 @@ export default function App() {
     DEFAULT_COUNTERPARTY_STANDARDS,
   )
   const [counterparties, setCounterparties] = useState<CounterpartyRecord[]>([])
+  const [counterpartyCreditProfiles, setCounterpartyCreditProfiles] = useState<CounterpartyCreditProfileRecord[]>([])
+  const [counterpartyExternalCreditSnapshots, setCounterpartyExternalCreditSnapshots] = useState<CounterpartyExternalCreditSnapshotRecord[]>([])
+  const [counterpartyCreditReport, setCounterpartyCreditReport] = useState<CounterpartyCreditReportRow[]>([])
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
   const [externalDataSyncStatus, setExternalDataSyncStatus] = useState<ExternalDataSyncStatusRecord | null>(null)
@@ -212,6 +228,11 @@ export default function App() {
   const [referenceDataError, setReferenceDataError] = useState<string>('')
   const [externalDataError, setExternalDataError] = useState<string>('')
   const [externalDataSuccess, setExternalDataSuccess] = useState<string>('')
+  const [counterpartyCreditImportProvider, setCounterpartyCreditImportProvider] = useState('DNB')
+  const [counterpartyCreditImportDraft, setCounterpartyCreditImportDraft] = useState('')
+  const [counterpartyCreditImporting, setCounterpartyCreditImporting] = useState(false)
+  const [counterpartyCreditImportError, setCounterpartyCreditImportError] = useState('')
+  const [counterpartyCreditImportSuccess, setCounterpartyCreditImportSuccess] = useState('')
   const [tradingSourcesError, setTradingSourcesError] = useState<string>('')
   const [tradingSourcesSuccess, setTradingSourcesSuccess] = useState<string>('')
   const [weatherSyncError, setWeatherSyncError] = useState<string>('')
@@ -252,6 +273,9 @@ export default function App() {
       locations: locationsJson,
       locationStandards: locationStandardsJson,
       counterparties: counterpartiesJson,
+      counterpartyCreditProfiles: counterpartyCreditProfilesJson,
+      counterpartyExternalCreditSnapshots: counterpartyExternalCreditSnapshotsJson,
+      counterpartyCreditReport: counterpartyCreditReportJson,
       counterpartyStandards: counterpartyStandardsJson,
       portfolios: portfoliosJson,
       externalDataRuns: externalDataRunsJson,
@@ -276,6 +300,10 @@ export default function App() {
     const nextLocations = locationsJson as LocationRecord[]
     const nextLocationStandards = locationStandardsJson as LocationStandards
     const nextCounterparties = counterpartiesJson as CounterpartyRecord[]
+    const nextCounterpartyCreditProfiles = counterpartyCreditProfilesJson as CounterpartyCreditProfileRecord[]
+    const nextCounterpartyExternalCreditSnapshots =
+      counterpartyExternalCreditSnapshotsJson as CounterpartyExternalCreditSnapshotRecord[]
+    const nextCounterpartyCreditReport = counterpartyCreditReportJson as CounterpartyCreditReportRow[]
     const nextCounterpartyStandards = counterpartyStandardsJson as CounterpartyStandards
     const nextPortfolios = portfoliosJson as PortfolioRecord[]
     const nextExternalDataRuns = externalDataRunsJson as ExternalDataRunRecord[]
@@ -296,6 +324,9 @@ export default function App() {
     setLocations(nextLocations)
     setLocationStandards(nextLocationStandards)
     setCounterparties(nextCounterparties)
+    setCounterpartyCreditProfiles(nextCounterpartyCreditProfiles)
+    setCounterpartyExternalCreditSnapshots(nextCounterpartyExternalCreditSnapshots)
+    setCounterpartyCreditReport(nextCounterpartyCreditReport)
     setCounterpartyStandards(nextCounterpartyStandards)
     setPortfolios(nextPortfolios)
     setExternalDataRuns(nextExternalDataRuns)
@@ -891,9 +922,11 @@ export default function App() {
       legs: amendLegs,
     })
   }, [
+    amendAllocationStatusInput,
     amendBookInput,
     amendCommodityClassInput,
     amendCommodityInput,
+    amendConfirmationStatusInput,
     amendCounterpartyInput,
     amendDeliveryEndInput,
     amendDeliveryStartInput,
@@ -901,7 +934,10 @@ export default function App() {
     amendEffectiveStartDateInput,
     amendExecutionTimestampInput,
     amendExternalTradeIdInput,
+    amendInvoiceStatusInput,
     amendLocationInput,
+    amendNominationStatusInput,
+    amendPaymentStatusInput,
     amendPriceUnitInput,
     amendQualitySpecInput,
     amendLegs,
@@ -951,6 +987,9 @@ export default function App() {
     units,
     locations,
     counterparties,
+    counterpartyCreditProfiles,
+    counterpartyExternalCreditSnapshots,
+    counterpartyCreditReport,
     portfolios,
     activeBooks,
     activeCommodities,
@@ -1019,6 +1058,71 @@ export default function App() {
     } finally {
       setExternalDataSyncing(false)
       setExternalDataSyncingProvider(null)
+    }
+  }
+
+  async function handleImportCounterpartyCreditSnapshots() {
+    const provider = counterpartyCreditImportProvider.trim().toUpperCase()
+    if (!provider) {
+      setCounterpartyCreditImportError('Provider is required before importing counterparty credit snapshots.')
+      setCounterpartyCreditImportSuccess('')
+      return
+    }
+
+    const draft = counterpartyCreditImportDraft.trim()
+    if (!draft) {
+      setCounterpartyCreditImportError('Paste a JSON array of snapshot rows before importing.')
+      setCounterpartyCreditImportSuccess('')
+      return
+    }
+
+    let snapshots: unknown
+    try {
+      snapshots = JSON.parse(draft)
+    } catch {
+      setCounterpartyCreditImportError('Snapshot payload must be valid JSON.')
+      setCounterpartyCreditImportSuccess('')
+      return
+    }
+
+    if (!Array.isArray(snapshots) || snapshots.length === 0) {
+      setCounterpartyCreditImportError('Snapshot payload must be a non-empty JSON array.')
+      setCounterpartyCreditImportSuccess('')
+      return
+    }
+
+    setCounterpartyCreditImporting(true)
+    setCounterpartyCreditImportError('')
+    setCounterpartyCreditImportSuccess('')
+    try {
+      const { actorId } = getMutationContext()
+      const payload = await postJson<ExternalDataRunRecord>(
+        `${appConfig.apiBase}/admin/external-data/counterparty-credit/import`,
+        {
+          provider,
+          snapshots,
+          requested_by: actorId,
+        },
+        { headers: buildMutationHeaders() },
+      )
+
+      await loadData()
+      if (payload.status === 'FAILED') {
+        setCounterpartyCreditImportError(
+          payload.error_summary || `${provider} counterparty credit import run ${payload.id} failed.`,
+        )
+        return
+      }
+
+      setCounterpartyCreditImportSuccess(
+        `${provider} counterparty credit import run ${payload.id} loaded ${payload.observation_count} snapshot${payload.observation_count === 1 ? '' : 's'}.`,
+      )
+    } catch (err) {
+      setCounterpartyCreditImportError(
+        err instanceof Error ? err.message : 'Failed to import counterparty credit snapshots.',
+      )
+    } finally {
+      setCounterpartyCreditImporting(false)
     }
   }
 
@@ -1372,8 +1476,13 @@ export default function App() {
     guide: 'Playbooks inside the console',
     trades: 'Trade blotter and ticket entry',
     events: 'Lifecycle tape and chronology',
+    risk: 'Exposure concentration and pricing quality',
     positions: 'Risk buckets and net exposure',
     shipments: 'Cross-mode delivery obligations and execution readiness',
+    scheduling: 'Scheduler board and delivery window readiness',
+    operations: 'Operational control and workflow coverage',
+    settlement: 'Invoice, payment, and settlement control',
+    reports: 'Desk reporting and analyst outputs',
     reference: 'Reference master and mappings',
     admin: 'Operational controls and governance',
     settings: 'Runtime profile and access',
@@ -1385,9 +1494,18 @@ export default function App() {
     guide: 'Keep the operating model close to the product so onboarding, runbooks, and design notes stay in flow.',
     trades: 'Enter tickets, inspect the active trade, and run lifecycle actions without losing the blotter context.',
     events: 'Read the system as a tape instead of a log table, then narrow to the trade that needs attention.',
+    risk: 'Focus the desk on concentration, unpriced exposure, and the books carrying the most open risk.',
     positions: 'Scan class-level risk first, then drop straight into the exact commodity rows carrying exposure.',
     shipments:
       'Manage logistics moves, pipeline flows, and power schedules from one delivery surface that shows mode-specific blockers without forcing them into the same workflow.',
+    scheduling:
+      'Give commodity schedulers a dedicated screen for open windows, nomination readiness, and blocker clearing instead of burying that work in generalized delivery queues.',
+    operations:
+      'Run the operational control loop from workflow queues, delivery blockers, and live platform health on one surface.',
+    settlement:
+      'Keep invoice, payment, and settlement aging visible so post-trade cash workflow is no longer buried in raw trade rows.',
+    reports:
+      'Read the desk through report outputs instead of endpoints: exposure, activity, P&L, and counterparty credit in one place.',
     reference: 'Manage books, commodities, and price references from a denser master-data surface built for operators.',
     admin: 'Watch the platform as a governed system: controls, provenance, approvals, and model visibility in one place.',
     settings: 'Adjust runtime behavior, stored credentials, and client overrides without leaving the trading console.',
@@ -1757,6 +1875,12 @@ export default function App() {
             setAmendPricingTypeInput={setAmendPricingTypeInput}
             amendPricingStatusInput={amendPricingStatusInput}
             setAmendPricingStatusInput={setAmendPricingStatusInput}
+            amendConfirmationStatusInput={amendConfirmationStatusInput}
+            setAmendConfirmationStatusInput={setAmendConfirmationStatusInput}
+            amendNominationStatusInput={amendNominationStatusInput}
+            setAmendNominationStatusInput={setAmendNominationStatusInput}
+            amendAllocationStatusInput={amendAllocationStatusInput}
+            setAmendAllocationStatusInput={setAmendAllocationStatusInput}
             amendPriceIndexInput={amendPriceIndexInput}
             setAmendPriceIndexInput={setAmendPriceIndexInput}
             amendPriceIndexOptions={amendPriceIndexOptions}
@@ -1764,6 +1888,10 @@ export default function App() {
             setAmendPriceInput={setAmendPriceInput}
             amendVolumeInput={amendVolumeInput}
             setAmendVolumeInput={setAmendVolumeInput}
+            amendInvoiceStatusInput={amendInvoiceStatusInput}
+            setAmendInvoiceStatusInput={setAmendInvoiceStatusInput}
+            amendPaymentStatusInput={amendPaymentStatusInput}
+            setAmendPaymentStatusInput={setAmendPaymentStatusInput}
             amendSettlementStatusInput={amendSettlementStatusInput}
             setAmendSettlementStatusInput={setAmendSettlementStatusInput}
             amendTraderUserInput={amendTraderUserInput}
@@ -1781,6 +1909,11 @@ export default function App() {
             tradeSideOptions={tradeSideOptions}
             pricingTypeOptions={pricingTypeOptions}
             pricingStatusOptions={pricingStatusOptions}
+            confirmationStatusOptions={confirmationStatusOptions}
+            nominationStatusOptions={nominationStatusOptions}
+            allocationStatusOptions={allocationStatusOptions}
+            invoiceStatusOptions={invoiceStatusOptions}
+            paymentStatusOptions={paymentStatusOptions}
             settlementStatusOptions={settlementStatusOptions}
             formatCommodityClass={formatCommodityClass}
             formatMoney={formatMoney}
@@ -1798,6 +1931,20 @@ export default function App() {
             setEventFilter={setEventFilter}
             filteredEvents={filteredEvents}
             formatDate={formatDate}
+          />
+        )}
+
+        {currentView === 'risk' && (
+          <RiskWorkspace
+            authSession={authSession}
+            activeTrades={activeTrades}
+            positionsByClass={positionsByClass}
+            positionsWithClass={positionsWithClass}
+            formatCommodityClass={formatCommodityClass}
+            formatNumber={formatNumber}
+            formatMoney={formatMoney}
+            formatDate={formatDate}
+            onOpenTrade={navigateToTrade}
           />
         )}
 
@@ -1821,6 +1968,53 @@ export default function App() {
             formatDateOnly={formatDateOnly}
             formatNumber={formatNumber}
             onOpenTrade={navigateToTrade}
+          />
+        )}
+
+        {currentView === 'scheduling' && (
+          <SchedulingWorkspace
+            authSession={authSession}
+            deliveries={deliveries}
+            formatCommodityClass={formatCommodityClass}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            onOpenTrade={navigateToTrade}
+          />
+        )}
+
+        {currentView === 'operations' && (
+          <OperationsWorkspace
+            authSession={authSession}
+            deliveries={deliveries}
+            externalDataSyncStatus={externalDataSyncStatus}
+            weatherSyncStatus={weatherSyncStatus}
+            tradingSources={tradingSources}
+            formatCommodityClass={formatCommodityClass}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+            onOpenTrade={navigateToTrade}
+          />
+        )}
+
+        {currentView === 'settlement' && (
+          <SettlementWorkspace
+            authSession={authSession}
+            activeTrades={activeTrades}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            onOpenTrade={navigateToTrade}
+          />
+        )}
+
+        {currentView === 'reports' && (
+          <ReportsWorkspace
+            authSession={authSession}
+            counterpartyCreditReport={counterpartyCreditReport}
+            formatNumber={formatNumber}
+            formatMoney={formatMoney}
+            formatDate={formatDate}
           />
         )}
 
@@ -1853,6 +2047,11 @@ export default function App() {
             externalDataSyncingProvider={externalDataSyncingProvider}
             externalDataError={externalDataError}
             externalDataSuccess={externalDataSuccess}
+            counterpartyCreditImportProvider={counterpartyCreditImportProvider}
+            counterpartyCreditImportDraft={counterpartyCreditImportDraft}
+            counterpartyCreditImporting={counterpartyCreditImporting}
+            counterpartyCreditImportError={counterpartyCreditImportError}
+            counterpartyCreditImportSuccess={counterpartyCreditImportSuccess}
             tradingSourcesSyncing={tradingSourcesSyncing}
             tradingSourcesError={tradingSourcesError}
             tradingSourcesSuccess={tradingSourcesSuccess}
@@ -1860,6 +2059,9 @@ export default function App() {
             weatherSyncError={weatherSyncError}
             weatherSyncSuccess={weatherSyncSuccess}
             onRunExternalDataSync={handleRunExternalDataSync}
+            onCounterpartyCreditImportProviderChange={setCounterpartyCreditImportProvider}
+            onCounterpartyCreditImportDraftChange={setCounterpartyCreditImportDraft}
+            onImportCounterpartyCreditSnapshots={handleImportCounterpartyCreditSnapshots}
             onRunNwsWeatherSync={handleRunNwsWeatherSync}
             onSeedTradingSources={handleSeedTradingSources}
             onRefreshData={loadData}

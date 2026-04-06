@@ -6,6 +6,7 @@ Top-level product areas should live here:
 - dashboard
 - trading
 - deliveries
+- scheduling
 - risk
 - operations
 - settlement

@@ -219,7 +219,72 @@ export type CounterpartyRecord = ReferenceRecord & {
   legal_entity_name?: string | null
   counterparty_type: string
   country_code?: string | null
+  lei_code?: string | null
+  duns_number?: string | null
+  ticker_symbol?: string | null
   credit_status?: string | null
+}
+
+export type CounterpartyCreditProfileRecord = {
+  counterparty_code: string
+  credit_rating?: string | null
+  review_due_at?: string | null
+  limit_currency_code?: string | null
+  limit_amount?: number | null
+  breach_action: string
+  notes?: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type CounterpartyExternalCreditSnapshotRecord = {
+  id: number
+  counterparty_code: string
+  provider: string
+  source_entity_id?: string | null
+  source_entity_name?: string | null
+  match_basis?: string | null
+  matched_identifier_value?: string | null
+  as_of_date: string
+  rating_scale?: string | null
+  rating_value?: string | null
+  rating_outlook?: string | null
+  credit_score?: number | null
+  probability_of_default?: number | null
+  recommended_limit_currency_code?: string | null
+  recommended_limit_amount?: number | null
+  commentary?: string | null
+  downloaded_at: string
+  run_id: number
+  created_at: string
+  updated_at: string
+  version: number
+}
+
+export type CounterpartyCreditReportRow = {
+  counterparty_code: string
+  counterparty_name: string
+  counterparty_type: string
+  credit_status: string
+  active_trade_count: number
+  exposure_currency_code?: string | null
+  exposure_amount?: number | null
+  in_exposure_currency_trade_count: number
+  priced_trade_count: number
+  unpriced_trade_count: number
+  out_of_scope_trade_count: number
+  limit_currency_code?: string | null
+  limit_amount?: number | null
+  limit_utilization_percent?: number | null
+  limit_breached: boolean
+  credit_rating?: string | null
+  review_due_at?: string | null
+  review_is_due: boolean
+  breach_action: string
+  latest_trade_updated_at?: string | null
 }
 
 export type CounterpartyStandards = {
@@ -227,6 +292,8 @@ export type CounterpartyStandards = {
   counterparty_types: string[]
   default_counterparty_credit_status: string
   counterparty_credit_statuses: string[]
+  default_counterparty_credit_breach_action: string
+  counterparty_credit_breach_actions: string[]
 }
 
 export const DEFAULT_COUNTERPARTY_STANDARDS: CounterpartyStandards = {
@@ -234,6 +301,8 @@ export const DEFAULT_COUNTERPARTY_STANDARDS: CounterpartyStandards = {
   counterparty_types: ['BANK', 'BROKER', 'END_USER', 'MAJOR', 'MARKETER', 'MIDSTREAM', 'PRODUCER', 'REFINER', 'SUPPLIER', 'TRADER', 'UTILITY'],
   default_counterparty_credit_status: 'APPROVED',
   counterparty_credit_statuses: ['APPROVED', 'REVIEW_REQUIRED', 'ON_HOLD', 'BLOCKED'],
+  default_counterparty_credit_breach_action: 'REQUIRE_APPROVAL',
+  counterparty_credit_breach_actions: ['WARN', 'REQUIRE_APPROVAL', 'BLOCK'],
 }
 
 export type PortfolioRecord = ReferenceRecord & {
@@ -285,6 +354,27 @@ export type ExternalDataSyncStatusRecord = {
   running_provider_count: number
   unknown_provider_count: number
   providers: ExternalDataProviderStatusRecord[]
+}
+
+export type ExposureSummaryRow = {
+  commodity: string
+  net_volume: number
+  active_trade_count: number
+  updated_at: string
+}
+
+export type ActivitySummaryRow = {
+  event_type: string
+  event_count: number
+  last_occurred_at: string
+}
+
+export type ReportingOverview = {
+  active_trade_count: number
+  tracked_commodity_count: number
+  gross_net_volume: number
+  exposure: ExposureSummaryRow[]
+  activity: ActivitySummaryRow[]
 }
 
 export type PnlHistoryPoint = {
@@ -685,8 +775,13 @@ export type ViewKey =
   | 'guide'
   | 'trades'
   | 'events'
+  | 'risk'
   | 'positions'
   | 'shipments'
+  | 'scheduling'
+  | 'operations'
+  | 'settlement'
+  | 'reports'
   | 'reference'
   | 'admin'
   | 'settings'
@@ -771,8 +866,20 @@ export type CounterpartyForm = {
   legal_entity_name: string
   counterparty_type: string
   country_code: string
+  lei_code: string
+  duns_number: string
+  ticker_symbol: string
   credit_status: string
   description: string
+}
+
+export type CounterpartyCreditProfileForm = {
+  credit_rating: string
+  review_due_at: string
+  limit_currency_code: string
+  limit_amount: string
+  breach_action: string
+  notes: string
 }
 
 export type PortfolioForm = {

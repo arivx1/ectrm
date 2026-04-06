@@ -2,6 +2,9 @@ import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
 import type {
   AssistantRuntimeSettings,
+  CounterpartyCreditProfileRecord,
+  CounterpartyCreditReportRow,
+  CounterpartyExternalCreditSnapshotRecord,
   CounterpartyStandards,
   ExternalDataSyncStatusRecord,
   LocationStandards,
@@ -22,6 +25,9 @@ export type WorkspaceBootstrap = {
   locations: unknown[]
   locationStandards: LocationStandards
   counterparties: unknown[]
+  counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
+  counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
+  counterpartyCreditReport: CounterpartyCreditReportRow[]
   counterpartyStandards: CounterpartyStandards
   portfolios: unknown[]
   externalDataRuns: unknown[]
@@ -117,6 +123,9 @@ export async function loadWorkspaceBootstrap(
     locations,
     locationStandards,
     counterparties,
+    counterpartyCreditProfiles,
+    counterpartyExternalCreditSnapshots,
+    counterpartyCreditReport,
     counterpartyStandards,
     portfolios,
   ] = await Promise.all([
@@ -133,6 +142,15 @@ export async function loadWorkspaceBootstrap(
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`),
     fetchJson<LocationStandards>(`${apiBase}/reference/locations/standards`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`),
+    fetchJson<CounterpartyCreditProfileRecord[]>(
+      `${apiBase}${withLimit('/reference/counterparties/credit-profiles', bootstrapQueryLimits.referenceData)}`,
+    ),
+    fetchJson<CounterpartyExternalCreditSnapshotRecord[]>(
+      `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', bootstrapQueryLimits.referenceData)}`,
+    ),
+    fetchJson<CounterpartyCreditReportRow[]>(`${apiBase}/reports/counterparty-credit`, {
+      cache: 'no-store',
+    }),
     fetchJson<CounterpartyStandards>(`${apiBase}/reference/counterparties/standards`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`),
   ])
@@ -194,6 +212,9 @@ export async function loadWorkspaceBootstrap(
     locations,
     locationStandards,
     counterparties,
+    counterpartyCreditProfiles,
+    counterpartyExternalCreditSnapshots,
+    counterpartyCreditReport,
     counterpartyStandards,
     portfolios,
     externalDataRuns,

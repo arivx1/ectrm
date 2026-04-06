@@ -96,6 +96,11 @@ type AdminWorkspaceProps = {
   externalDataSyncingProvider: string | null
   externalDataError: string
   externalDataSuccess: string
+  counterpartyCreditImportProvider: string
+  counterpartyCreditImportDraft: string
+  counterpartyCreditImporting: boolean
+  counterpartyCreditImportError: string
+  counterpartyCreditImportSuccess: string
   tradingSourcesSyncing: boolean
   tradingSourcesError: string
   tradingSourcesSuccess: string
@@ -103,6 +108,9 @@ type AdminWorkspaceProps = {
   weatherSyncError: string
   weatherSyncSuccess: string
   onRunExternalDataSync: (provider: ExternalDataSyncProvider) => Promise<void>
+  onCounterpartyCreditImportProviderChange: (value: string) => void
+  onCounterpartyCreditImportDraftChange: (value: string) => void
+  onImportCounterpartyCreditSnapshots: () => Promise<void>
   onRunNwsWeatherSync: () => Promise<void>
   onSeedTradingSources: () => Promise<void>
   onRefreshData: () => Promise<void>
@@ -336,6 +344,11 @@ export function AdminWorkspace({
   externalDataSyncingProvider,
   externalDataError,
   externalDataSuccess,
+  counterpartyCreditImportProvider,
+  counterpartyCreditImportDraft,
+  counterpartyCreditImporting,
+  counterpartyCreditImportError,
+  counterpartyCreditImportSuccess,
   tradingSourcesSyncing,
   tradingSourcesError,
   tradingSourcesSuccess,
@@ -343,6 +356,9 @@ export function AdminWorkspace({
   weatherSyncError,
   weatherSyncSuccess,
   onRunExternalDataSync,
+  onCounterpartyCreditImportProviderChange,
+  onCounterpartyCreditImportDraftChange,
+  onImportCounterpartyCreditSnapshots,
   onRunNwsWeatherSync,
   onSeedTradingSources,
   onRefreshData,
@@ -540,6 +556,14 @@ export function AdminWorkspace({
     (externalDataSyncStatus?.stale_provider_count ?? 0) +
     (externalDataSyncStatus?.failed_provider_count ?? 0) +
     (externalDataSyncStatus?.unknown_provider_count ?? 0)
+  const counterpartyCreditImportRuns = useMemo(
+    () => externalDataRuns.filter((run) => run.job_name === 'import_counterparty_credit_snapshots'),
+    [externalDataRuns],
+  )
+  const latestCounterpartyCreditImportRun = useMemo(
+    () => counterpartyCreditImportRuns[0] ?? null,
+    [counterpartyCreditImportRuns],
+  )
 
   const weatherLocations = weatherSyncStatus?.locations ?? []
   const latestNwsRun = weatherSyncStatus?.latest_run ?? null
@@ -855,6 +879,130 @@ export function AdminWorkspace({
                     <p>
                       {run.status} · {run.series_count} series · {run.observation_count} observations
                     </p>
+                  </div>
+                  <div className="admin-run-meta">
+                    <span>{formatDate(run.finished_at ?? run.started_at)}</span>
+                    <span>{run.requested_by ?? 'system'}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="admin-sync-panel">
+          <div className="admin-sync-head">
+            <div>
+              <span className="eyebrow">Credit Operations</span>
+              <h3>Counterparty Credit Imports</h3>
+            </div>
+            <div className="admin-sync-head-actions">
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void onImportCounterpartyCreditSnapshots()}
+                disabled={counterpartyCreditImporting}
+              >
+                {counterpartyCreditImporting ? 'Importing Credit Snapshots...' : 'Import Credit Snapshots'}
+              </button>
+            </div>
+          </div>
+          <p>Paste a provider-tagged JSON snapshot batch from D&B, Creditsafe, S&P, Fitch, Moody’s, or an internal adapter and store it as an auditable external credit run.</p>
+
+          <div className="admin-sync-status-grid">
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Latest Import"
+                tooltip="Most recent counterparty credit import recorded in the external data run log."
+              />
+              <p>
+                {latestCounterpartyCreditImportRun
+                  ? `${latestCounterpartyCreditImportRun.provider} run #${latestCounterpartyCreditImportRun.id} ${latestCounterpartyCreditImportRun.status.toLowerCase()} with ${latestCounterpartyCreditImportRun.observation_count} snapshots.`
+                  : 'No counterparty credit import has been recorded yet.'}
+              </p>
+              <span>
+                {latestCounterpartyCreditImportRun
+                  ? formatDate(latestCounterpartyCreditImportRun.finished_at ?? latestCounterpartyCreditImportRun.started_at)
+                  : 'Awaiting first import'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Run History"
+                tooltip="Recent counterparty credit import runs, regardless of provider."
+              />
+              <p>
+                {counterpartyCreditImportRuns.length > 0
+                  ? `${counterpartyCreditImportRuns.length} import run${counterpartyCreditImportRuns.length === 1 ? '' : 's'} are currently loaded in the admin workspace.`
+                  : 'Run history will populate after the first batch import.'}
+              </p>
+              <span>
+                {counterpartyCreditImportRuns.length > 0
+                  ? counterpartyCreditImportRuns.slice(0, 3).map((run) => run.provider).join(' · ')
+                  : 'No providers imported yet'}
+              </span>
+            </article>
+          </div>
+
+          {counterpartyCreditImportError ? <div className="feedback-banner feedback-banner-error">{counterpartyCreditImportError}</div> : null}
+          {counterpartyCreditImportSuccess ? <div className="feedback-banner feedback-banner-success">{counterpartyCreditImportSuccess}</div> : null}
+
+          <div className="stack-form">
+            <div className="mini-grid">
+              <label className="field">
+                <span>Provider</span>
+                <input
+                  className="control"
+                  value={counterpartyCreditImportProvider}
+                  onChange={(event) => onCounterpartyCreditImportProviderChange(event.target.value.toUpperCase())}
+                  disabled={counterpartyCreditImporting}
+                />
+              </label>
+            </div>
+
+            <label className="field">
+              <span>Snapshots JSON Array</span>
+              <textarea
+                className="control control-textarea"
+                value={counterpartyCreditImportDraft}
+                onChange={(event) => onCounterpartyCreditImportDraftChange(event.target.value)}
+                disabled={counterpartyCreditImporting}
+                placeholder={`[
+  {
+    "counterparty_code": "ACME",
+    "source_entity_id": "123456789",
+    "match_basis": "DUNS",
+    "matched_identifier_value": "123456789",
+    "as_of_date": "2026-04-05",
+    "rating_value": "3A2",
+    "rating_outlook": "STABLE",
+    "credit_score": 81.5,
+    "probability_of_default": 0.0142,
+    "recommended_limit_currency_code": "USD",
+    "recommended_limit_amount": 2500000,
+    "commentary": "Imported from vendor file"
+  }
+]`}
+              />
+            </label>
+          </div>
+
+          <div className="admin-run-list">
+            {counterpartyCreditImportRuns.length === 0 ? (
+              <div className="detail-row">
+                <span>No counterparty credit import runs are loaded yet.</span>
+              </div>
+            ) : (
+              counterpartyCreditImportRuns.slice(0, 8).map((run) => (
+                <article key={run.id} className="admin-run-row">
+                  <div>
+                    <strong>
+                      {run.provider} import #{run.id}
+                    </strong>
+                    <p>
+                      {run.status} · {run.series_count} counterparties · {run.observation_count} snapshots
+                    </p>
+                    {run.error_summary ? <span>{run.error_summary}</span> : null}
                   </div>
                   <div className="admin-run-meta">
                     <span>{formatDate(run.finished_at ?? run.started_at)}</span>

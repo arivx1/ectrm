@@ -1,6 +1,18 @@
 import type { ViewKey } from './models'
 
-export type PersonalizableWorkspaceId = Extract<ViewKey, 'dashboard' | 'trades' | 'events' | 'positions' | 'shipments'>
+export type PersonalizableWorkspaceId = Extract<
+  ViewKey,
+  | 'dashboard'
+  | 'trades'
+  | 'events'
+  | 'risk'
+  | 'positions'
+  | 'shipments'
+  | 'scheduling'
+  | 'operations'
+  | 'settlement'
+  | 'reports'
+>
 export type WorkspaceTileSpan = 'full' | 'wide' | 'half' | 'side'
 
 export type WorkspaceLayoutState = {

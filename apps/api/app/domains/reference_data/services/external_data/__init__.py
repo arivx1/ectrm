@@ -2,6 +2,9 @@
 
 from apps.api.app.domains.reference_data.services.external_data.caiso_sync import sync_caiso_series
 from apps.api.app.domains.reference_data.services.external_data.cftc_sync import sync_cftc_series
+from apps.api.app.domains.reference_data.services.external_data.counterparty_credit_import import (
+    import_counterparty_credit_snapshots,
+)
 from apps.api.app.domains.reference_data.services.external_data.eia_fundamentals_sync import (
     sync_eia_fundamental_series,
 )
@@ -13,6 +16,7 @@ from apps.api.app.domains.reference_data.services.external_data.kalshi_sync impo
 __all__ = [
     "sync_caiso_series",
     "sync_cftc_series",
+    "import_counterparty_credit_snapshots",
     "sync_eia_fundamental_series",
     "sync_eia_series",
     "sync_ercot_series",

@@ -244,7 +244,12 @@ class TradesRebuildScriptTests(unittest.TestCase):
                         "commodity": "WTI",
                         "pricing_type": "FIXED",
                         "pricing_status": "PRICED",
-                        "settlement_status": "PENDING",
+                        "confirmation_status": "CONFIRMED",
+                        "nomination_status": "COMPLETED",
+                        "allocation_status": "COMPLETED",
+                        "invoice_status": "APPROVED",
+                        "payment_status": "PAID",
+                        "settlement_status": "SETTLED",
                         "trader_user": "trader.alpha",
                         "trade_side": "BUY",
                         "price": 81,
@@ -292,7 +297,12 @@ class TradesRebuildScriptTests(unittest.TestCase):
         self.assertEqual(trade.portfolio, "OIL_DISCRETIONARY")
         self.assertEqual(trade.counterparty, "SHELL_TRADING")
         self.assertEqual(trade.pricing_status, "PRICED")
-        self.assertEqual(trade.settlement_status, "PENDING")
+        self.assertEqual(trade.confirmation_status, "CONFIRMED")
+        self.assertEqual(trade.nomination_status, "COMPLETED")
+        self.assertEqual(trade.allocation_status, "COMPLETED")
+        self.assertEqual(trade.invoice_status, "APPROVED")
+        self.assertEqual(trade.payment_status, "PAID")
+        self.assertEqual(trade.settlement_status, "SETTLED")
         self.assertEqual(trade.trader_user, "trader.alpha")
         self.assertEqual(leg.location_code, "CUSHING")
         self.assertEqual(leg.quantity_unit_code, "BBL")

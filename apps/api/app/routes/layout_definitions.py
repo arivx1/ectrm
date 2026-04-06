@@ -26,6 +26,12 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
         "events-breakdown": ("full", "wide", "half", "side"),
         "events-stream": ("full", "wide", "half"),
     },
+    "risk": {
+        "risk-summary": ("full", "wide"),
+        "risk-exposure": ("full", "wide", "half"),
+        "risk-pricing": ("full", "wide", "half"),
+        "risk-books": ("full", "wide"),
+    },
     "positions": {
         "positions-summary": ("full", "wide"),
         "positions-by-class": ("full", "wide", "half"),
@@ -37,10 +43,35 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
         "shipment-blockers": ("full", "wide", "half"),
         "shipment-queue": ("full", "wide"),
     },
+    "scheduling": {
+        "scheduling-board": ("full", "wide"),
+        "scheduling-attention": ("full", "wide"),
+        "scheduling-lanes": ("full", "wide", "half"),
+        "scheduling-windows": ("full", "wide", "half"),
+        "scheduling-handoffs": ("full", "wide", "half"),
+    },
     "trades": {
         "create-trade": ("full", "wide"),
         "trade-inspector": ("wide", "half", "side"),
         "trade-board": ("full", "wide"),
+    },
+    "operations": {
+        "operations-snapshot": ("full", "wide"),
+        "operations-queue": ("full", "wide"),
+        "operations-coverage": ("full", "wide", "half"),
+        "operations-feeds": ("full", "wide", "half"),
+    },
+    "settlement": {
+        "settlement-summary": ("full", "wide"),
+        "settlement-status": ("full", "wide", "half"),
+        "settlement-disputes": ("full", "wide", "half"),
+        "settlement-queue": ("full", "wide"),
+    },
+    "reports": {
+        "reports-overview": ("full", "wide"),
+        "reports-exposure": ("full", "wide", "half"),
+        "reports-activity": ("full", "wide", "half"),
+        "reports-credit": ("full", "wide"),
     },
 }
 WORKSPACE_TILE_IDS: dict[str, tuple[str, ...]] = {

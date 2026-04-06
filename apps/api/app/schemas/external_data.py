@@ -35,6 +35,31 @@ class ExternalSeriesSyncRequest(BaseModel):
     requested_by: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
+class CounterpartyCreditSnapshotImport(BaseModel):
+    counterparty_code: str = Field(min_length=1, max_length=50)
+    source_entity_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    source_entity_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    match_basis: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    matched_identifier_value: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    as_of_date: date
+    rating_scale: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    rating_value: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    rating_outlook: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    credit_score: Optional[float] = Field(default=None, ge=0)
+    probability_of_default: Optional[float] = Field(default=None, ge=0, le=1)
+    recommended_limit_currency_code: Optional[str] = Field(default=None, min_length=1, max_length=20)
+    recommended_limit_amount: Optional[float] = Field(default=None, gt=0)
+    commentary: Optional[str] = None
+    downloaded_at: Optional[datetime] = None
+    raw_payload: Optional[dict[str, Any]] = None
+
+
+class CounterpartyCreditImportRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=50)
+    snapshots: list[CounterpartyCreditSnapshotImport] = Field(min_length=1)
+    requested_by: Optional[str] = Field(default=None, min_length=1, max_length=128)
+
+
 class ExternalSeriesDefinitionUpsertRequest(BaseModel):
     code: str = Field(min_length=1, max_length=80)
     provider: str = Field(min_length=1, max_length=50)

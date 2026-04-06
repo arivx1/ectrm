@@ -14,9 +14,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.domains.operations.services.shipments import list_delivery_obligations_for_operations
 from apps.api.app.models import Base, Trade
 from apps.api.app.models.trade_leg import TradeLeg
-from apps.api.app.routes.deliveries import list_deliveries
 
 
 class DeliveriesApiTests(unittest.TestCase):
@@ -324,7 +324,10 @@ class DeliveriesApiTests(unittest.TestCase):
 
     def test_list_deliveries_builds_cross_mode_delivery_obligations(self) -> None:
         with self.SessionLocal() as session:
-            payload = list_deliveries(db=session)
+            payload = list_delivery_obligations_for_operations(
+                db=session,
+                now=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            )
 
         self.assertEqual(
             [delivery.delivery_id for delivery in payload],
@@ -339,6 +342,10 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(logistics.direction, "INBOUND")
         self.assertEqual(logistics.status, "BLOCKED")
         self.assertEqual(logistics.location_code, "CUSHING")
+        self.assertEqual(logistics.confirmation_status, "CONFIRMED")
+        self.assertEqual(logistics.nomination_status, "NOT_REQUIRED")
+        self.assertEqual(logistics.invoice_status, "PENDING")
+        self.assertEqual(logistics.payment_status, "PENDING")
         self.assertIn("Explicit transport mode is missing for discrete logistics delivery.", logistics.blockers)
 
         power = payload[1]
@@ -349,6 +356,7 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(power.status, "IN_PROGRESS")
         self.assertEqual(power.location_code, "PJM_WEST")
         self.assertEqual(power.price_unit_code, "MWH")
+        self.assertEqual(power.nomination_status, "SCHEDULED")
         self.assertEqual(power.blockers, [])
 
         gas = payload[2]
@@ -359,6 +367,11 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(gas.direction, "OUTBOUND")
         self.assertEqual(gas.status, "READY")
         self.assertEqual(gas.volume, 10000.0)
+        self.assertEqual(gas.confirmation_status, "CONFIRMED")
+        self.assertEqual(gas.nomination_status, "NOMINATED")
+        self.assertEqual(gas.allocation_status, "ALLOCATED")
+        self.assertEqual(gas.invoice_status, "PENDING")
+        self.assertEqual(gas.payment_status, "PENDING")
 
         swap_leg_one = payload[3]
         swap_leg_two = payload[4]
@@ -367,6 +380,7 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(swap_leg_one.location_code, "HENRY_HUB")
         self.assertEqual(swap_leg_one.direction, "INBOUND")
         self.assertEqual(swap_leg_one.status, "READY")
+        self.assertEqual(swap_leg_one.confirmation_status, "CONFIRMED")
         self.assertEqual(swap_leg_two.leg_no, 2)
         self.assertEqual(swap_leg_two.location_code, "CHICAGO_CITYGATE")
         self.assertEqual(swap_leg_two.direction, "OUTBOUND")

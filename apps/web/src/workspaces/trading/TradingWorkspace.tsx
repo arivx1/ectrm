@@ -30,9 +30,14 @@ type Trade = {
   commodity: string
   pricing_type: string
   pricing_status: string
+  confirmation_status: string
+  nomination_status: string
+  allocation_status: string
   price_index_code: string | null
   price: number | null
   volume: number | null
+  invoice_status: string
+  payment_status: string
   execution_timestamp: string | null
   settlement_status: string
   trader_user: string | null
@@ -154,6 +159,12 @@ type TradingWorkspaceProps = {
   setAmendPricingTypeInput: (value: string) => void
   amendPricingStatusInput: string
   setAmendPricingStatusInput: (value: string) => void
+  amendConfirmationStatusInput: string
+  setAmendConfirmationStatusInput: (value: string) => void
+  amendNominationStatusInput: string
+  setAmendNominationStatusInput: (value: string) => void
+  amendAllocationStatusInput: string
+  setAmendAllocationStatusInput: (value: string) => void
   amendPriceIndexInput: string
   setAmendPriceIndexInput: (value: string) => void
   amendPriceIndexOptions: ReferenceRecord[]
@@ -161,6 +172,10 @@ type TradingWorkspaceProps = {
   setAmendPriceInput: (value: string) => void
   amendVolumeInput: string
   setAmendVolumeInput: (value: string) => void
+  amendInvoiceStatusInput: string
+  setAmendInvoiceStatusInput: (value: string) => void
+  amendPaymentStatusInput: string
+  setAmendPaymentStatusInput: (value: string) => void
   amendSettlementStatusInput: string
   setAmendSettlementStatusInput: (value: string) => void
   amendTraderUserInput: string
@@ -178,6 +193,11 @@ type TradingWorkspaceProps = {
   tradeSideOptions: readonly string[]
   pricingTypeOptions: readonly string[]
   pricingStatusOptions: readonly string[]
+  confirmationStatusOptions: readonly string[]
+  nominationStatusOptions: readonly string[]
+  allocationStatusOptions: readonly string[]
+  invoiceStatusOptions: readonly string[]
+  paymentStatusOptions: readonly string[]
   settlementStatusOptions: readonly string[]
   formatCommodityClass: (value: string) => string
   formatMoney: (value: number | null) => string
@@ -257,6 +277,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     setAmendPricingTypeInput,
     amendPricingStatusInput,
     setAmendPricingStatusInput,
+    amendConfirmationStatusInput,
+    setAmendConfirmationStatusInput,
+    amendNominationStatusInput,
+    setAmendNominationStatusInput,
+    amendAllocationStatusInput,
+    setAmendAllocationStatusInput,
     amendPriceIndexInput,
     setAmendPriceIndexInput,
     amendPriceIndexOptions,
@@ -264,6 +290,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     setAmendPriceInput,
     amendVolumeInput,
     setAmendVolumeInput,
+    amendInvoiceStatusInput,
+    setAmendInvoiceStatusInput,
+    amendPaymentStatusInput,
+    setAmendPaymentStatusInput,
     amendSettlementStatusInput,
     setAmendSettlementStatusInput,
     amendTraderUserInput,
@@ -281,6 +311,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     tradeSideOptions,
     pricingTypeOptions,
     pricingStatusOptions,
+    confirmationStatusOptions,
+    nominationStatusOptions,
+    allocationStatusOptions,
+    invoiceStatusOptions,
+    paymentStatusOptions,
     settlementStatusOptions,
     formatCommodityClass,
     formatMoney,
@@ -407,7 +442,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   <div className="trade-inspector-pill-row">
                     <span className={`status-pill status-pill-${statusTone(selectedTrade.status)}`}>{selectedTrade.status}</span>
                     <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
+                    <span className="entity-chip entity-chip-soft">Confirmation {selectedTrade.confirmation_status}</span>
+                    <span className="entity-chip entity-chip-soft">Nomination {selectedTrade.nomination_status}</span>
                     <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
+                    <span className="entity-chip entity-chip-soft">Payment {selectedTrade.payment_status}</span>
                   </div>
 
                   <div className="trade-inspector-summary-grid">
@@ -552,6 +590,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <strong>{selectedTrade.pricing_status}</strong>
                   </div>
                   <div className="detail-row">
+                    <span>Confirmation Status</span>
+                    <strong>{selectedTrade.confirmation_status}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Nomination Status</span>
+                    <strong>{selectedTrade.nomination_status}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Allocation Status</span>
+                    <strong>{selectedTrade.allocation_status}</strong>
+                  </div>
+                  <div className="detail-row">
                     <span>Price Index</span>
                     <strong>{selectedTrade.price_index_code ?? '—'}</strong>
                   </div>
@@ -562,6 +612,14 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   <div className="detail-row">
                     <span>Volume</span>
                     <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Invoice Status</span>
+                    <strong>{selectedTrade.invoice_status}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Payment Status</span>
+                    <strong>{selectedTrade.payment_status}</strong>
                   </div>
                   <div className="detail-row">
                     <span>Settlement Status</span>
@@ -657,6 +715,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   setAmendPricingTypeInput={setAmendPricingTypeInput}
                   amendPricingStatusInput={amendPricingStatusInput}
                   setAmendPricingStatusInput={setAmendPricingStatusInput}
+                  amendConfirmationStatusInput={amendConfirmationStatusInput}
+                  setAmendConfirmationStatusInput={setAmendConfirmationStatusInput}
+                  amendNominationStatusInput={amendNominationStatusInput}
+                  setAmendNominationStatusInput={setAmendNominationStatusInput}
+                  amendAllocationStatusInput={amendAllocationStatusInput}
+                  setAmendAllocationStatusInput={setAmendAllocationStatusInput}
                   amendPriceIndexInput={amendPriceIndexInput}
                   setAmendPriceIndexInput={setAmendPriceIndexInput}
                   amendPriceIndexOptions={amendPriceIndexOptions}
@@ -664,6 +728,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   setAmendPriceInput={setAmendPriceInput}
                   amendVolumeInput={amendVolumeInput}
                   setAmendVolumeInput={setAmendVolumeInput}
+                  amendInvoiceStatusInput={amendInvoiceStatusInput}
+                  setAmendInvoiceStatusInput={setAmendInvoiceStatusInput}
+                  amendPaymentStatusInput={amendPaymentStatusInput}
+                  setAmendPaymentStatusInput={setAmendPaymentStatusInput}
                   amendSettlementStatusInput={amendSettlementStatusInput}
                   setAmendSettlementStatusInput={setAmendSettlementStatusInput}
                   amendTraderUserInput={amendTraderUserInput}
@@ -681,6 +749,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   tradeSideOptions={tradeSideOptions}
                   pricingTypeOptions={pricingTypeOptions}
                   pricingStatusOptions={pricingStatusOptions}
+                  confirmationStatusOptions={confirmationStatusOptions}
+                  nominationStatusOptions={nominationStatusOptions}
+                  allocationStatusOptions={allocationStatusOptions}
+                  invoiceStatusOptions={invoiceStatusOptions}
+                  paymentStatusOptions={paymentStatusOptions}
                   settlementStatusOptions={settlementStatusOptions}
                   formatCommodityClass={formatCommodityClass}
                 />

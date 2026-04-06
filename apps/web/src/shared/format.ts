@@ -30,6 +30,32 @@ export function formatMoney(value: number | null): string {
   }).format(value)
 }
 
+export function formatCurrencyAmount(
+  value: number | null,
+  currencyCode: string | null | undefined,
+  digits = 2,
+): string {
+  if (value === null) {
+    return '—'
+  }
+
+  const normalizedCurrencyCode = currencyCode?.trim().toUpperCase()
+  if (!normalizedCurrencyCode) {
+    return formatNumber(value, digits)
+  }
+
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: normalizedCurrencyCode,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: digits,
+    }).format(value)
+  } catch {
+    return `${normalizedCurrencyCode} ${formatNumber(value, digits)}`
+  }
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return '—'

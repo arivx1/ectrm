@@ -1,5 +1,10 @@
 import { fetchJson } from '../../shared/api'
-import type { PnlHistoryReport } from '../../shared/models'
+import type {
+  ActivitySummaryRow,
+  ExposureSummaryRow,
+  PnlHistoryReport,
+  ReportingOverview,
+} from '../../shared/models'
 
 type LoadPnlHistoryReportOptions = {
   book?: string
@@ -28,6 +33,24 @@ export async function loadPnlHistoryReport(
 
   const queryString = params.toString()
   return fetchJson<PnlHistoryReport>(`${apiBase}/reports/pnl-history${queryString ? `?${queryString}` : ''}`, {
+    cache: 'no-store',
+  })
+}
+
+export async function loadReportingOverview(apiBase: string): Promise<ReportingOverview> {
+  return fetchJson<ReportingOverview>(`${apiBase}/reports/overview`, {
+    cache: 'no-store',
+  })
+}
+
+export async function loadExposureSummary(apiBase: string): Promise<ExposureSummaryRow[]> {
+  return fetchJson<ExposureSummaryRow[]>(`${apiBase}/reports/exposure-summary`, {
+    cache: 'no-store',
+  })
+}
+
+export async function loadActivitySummary(apiBase: string): Promise<ActivitySummaryRow[]> {
+  return fetchJson<ActivitySummaryRow[]>(`${apiBase}/reports/activity-summary`, {
     cache: 'no-store',
   })
 }

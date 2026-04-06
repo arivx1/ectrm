@@ -12,6 +12,7 @@ from apps.api.app.core.auth import resolve_audit_actor_id
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import (
+    import_counterparty_credit_snapshots,
     sync_caiso_series,
     sync_cftc_series,
     sync_eia_fundamental_series,
@@ -27,6 +28,7 @@ from apps.api.app.models.external_series_definition import ExternalSeriesDefinit
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.schemas.external_data import (
+    CounterpartyCreditImportRequest,
     EIASyncRequest,
     ExternalDataProviderStatusOut,
     ExternalDataRunOut,
@@ -162,6 +164,21 @@ def trigger_kalshi_sync(payload: ExternalSeriesSyncRequest, db: Session = Depend
         db,
         series_code=payload.series_code,
         lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/counterparty-credit/import", response_model=ExternalDataRunOut)
+def trigger_counterparty_credit_import(
+    payload: CounterpartyCreditImportRequest,
+    db: Session = Depends(get_db),
+) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = import_counterparty_credit_snapshots(
+        db,
+        provider=payload.provider,
+        snapshots=payload.snapshots,
         requested_by=actor_id,
     )
     return _to_run_out(run)

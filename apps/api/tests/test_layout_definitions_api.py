@@ -213,6 +213,29 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(save_shipments.json()["workspace_id"], "shipments")
         self.assertEqual(save_shipments.json()["spans"], shipments_payload["spans"])
 
+        scheduling_payload = {
+            "order": [
+                "scheduling-board",
+                "scheduling-attention",
+                "scheduling-lanes",
+                "scheduling-windows",
+                "scheduling-handoffs",
+            ],
+            "hidden": ["scheduling-windows"],
+            "spans": {
+                "scheduling-attention": "wide",
+                "scheduling-handoffs": "half",
+            },
+        }
+        save_scheduling = self.client.put(
+            "/layout-definitions/scheduling",
+            json=scheduling_payload,
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(save_scheduling.status_code, 200)
+        self.assertEqual(save_scheduling.json()["workspace_id"], "scheduling")
+        self.assertEqual(save_scheduling.json()["spans"], scheduling_payload["spans"])
+
         events_payload = {
             "order": ["events-controls", "events-breakdown", "events-stream"],
             "hidden": [],
@@ -228,6 +251,23 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         )
         self.assertEqual(save_events.status_code, 200)
         self.assertEqual(save_events.json()["spans"], events_payload["spans"])
+
+        risk_payload = {
+            "order": ["risk-summary", "risk-exposure", "risk-pricing", "risk-books"],
+            "hidden": ["risk-books"],
+            "spans": {
+                "risk-exposure": "wide",
+                "risk-pricing": "wide",
+            },
+        }
+        save_risk = self.client.put(
+            "/layout-definitions/risk",
+            json=risk_payload,
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(save_risk.status_code, 200)
+        self.assertEqual(save_risk.json()["workspace_id"], "risk")
+        self.assertEqual(save_risk.json()["spans"], risk_payload["spans"])
 
         admin_trades = self.client.get(
             "/layout-definitions/trades",
@@ -250,12 +290,26 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(get_shipments.status_code, 200)
         self.assertEqual(get_shipments.json()["order"], shipments_payload["order"])
 
+        get_scheduling = self.client.get(
+            "/layout-definitions/scheduling",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(get_scheduling.status_code, 200)
+        self.assertEqual(get_scheduling.json()["order"], scheduling_payload["order"])
+
         get_events = self.client.get(
             "/layout-definitions/events",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(get_events.status_code, 200)
         self.assertEqual(get_events.json()["order"], events_payload["order"])
+
+        get_risk = self.client.get(
+            "/layout-definitions/risk",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(get_risk.status_code, 200)
+        self.assertEqual(get_risk.json()["order"], risk_payload["order"])
 
         update_dashboard = self.client.put(
             "/layout-definitions/dashboard",

@@ -183,6 +183,9 @@ class CounterpartyCreate(ReferenceDataCreate):
     legal_entity_name: Optional[str] = Field(None, min_length=1, max_length=200)
     counterparty_type: str = Field(..., min_length=1, max_length=50)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    lei_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    duns_number: Optional[str] = Field(None, min_length=1, max_length=20)
+    ticker_symbol: Optional[str] = Field(None, min_length=1, max_length=32)
     credit_status: str = Field(default=DEFAULT_COUNTERPARTY_CREDIT_STATUS, min_length=1, max_length=50)
 
 
@@ -191,6 +194,9 @@ class CounterpartyUpdate(ReferenceDataUpdate):
     legal_entity_name: Optional[str] = Field(None, min_length=1, max_length=200)
     counterparty_type: Optional[str] = Field(None, min_length=1, max_length=50)
     country_code: Optional[str] = Field(None, min_length=1, max_length=10)
+    lei_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    duns_number: Optional[str] = Field(None, min_length=1, max_length=20)
+    ticker_symbol: Optional[str] = Field(None, min_length=1, max_length=32)
     credit_status: Optional[str] = Field(None, min_length=1, max_length=50)
 
 
@@ -203,6 +209,9 @@ class CounterpartyOut(ReferenceDataOut):
     legal_entity_name: Optional[str]
     counterparty_type: str
     country_code: Optional[str]
+    lei_code: Optional[str]
+    duns_number: Optional[str]
+    ticker_symbol: Optional[str]
     credit_status: str
 
 
@@ -241,6 +250,30 @@ class CounterpartyCreditProfileOut(BaseModel):
     created_by: str
     updated_at: datetime
     updated_by: str
+    version: int
+
+
+class CounterpartyExternalCreditSnapshotOut(BaseModel):
+    id: int
+    counterparty_code: str
+    provider: str
+    source_entity_id: Optional[str]
+    source_entity_name: Optional[str]
+    match_basis: Optional[str]
+    matched_identifier_value: Optional[str]
+    as_of_date: date
+    rating_scale: Optional[str]
+    rating_value: Optional[str]
+    rating_outlook: Optional[str]
+    credit_score: Optional[float]
+    probability_of_default: Optional[float]
+    recommended_limit_currency_code: Optional[str]
+    recommended_limit_amount: Optional[float]
+    commentary: Optional[str]
+    downloaded_at: datetime
+    run_id: int
+    created_at: datetime
+    updated_at: datetime
     version: int
 
 

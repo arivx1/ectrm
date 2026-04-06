@@ -63,6 +63,12 @@ type TradeAmendFormProps = {
   setAmendPricingTypeInput: (value: string) => void
   amendPricingStatusInput: string
   setAmendPricingStatusInput: (value: string) => void
+  amendConfirmationStatusInput: string
+  setAmendConfirmationStatusInput: (value: string) => void
+  amendNominationStatusInput: string
+  setAmendNominationStatusInput: (value: string) => void
+  amendAllocationStatusInput: string
+  setAmendAllocationStatusInput: (value: string) => void
   amendPriceIndexInput: string
   setAmendPriceIndexInput: (value: string) => void
   amendPriceIndexOptions: ReferenceRecord[]
@@ -70,6 +76,10 @@ type TradeAmendFormProps = {
   setAmendPriceInput: (value: string) => void
   amendVolumeInput: string
   setAmendVolumeInput: (value: string) => void
+  amendInvoiceStatusInput: string
+  setAmendInvoiceStatusInput: (value: string) => void
+  amendPaymentStatusInput: string
+  setAmendPaymentStatusInput: (value: string) => void
   amendQualitySpecInput: string
   setAmendQualitySpecInput: (value: string) => void
   amendUnitInput: string
@@ -122,6 +132,11 @@ type TradeAmendFormProps = {
   tradeSideOptions: readonly string[]
   pricingTypeOptions: readonly string[]
   pricingStatusOptions: readonly string[]
+  confirmationStatusOptions: readonly string[]
+  nominationStatusOptions: readonly string[]
+  allocationStatusOptions: readonly string[]
+  invoiceStatusOptions: readonly string[]
+  paymentStatusOptions: readonly string[]
   settlementStatusOptions: readonly string[]
   formatCommodityClass: (value: string) => string
 }
@@ -152,6 +167,12 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     setAmendPricingTypeInput,
     amendPricingStatusInput,
     setAmendPricingStatusInput,
+    amendConfirmationStatusInput,
+    setAmendConfirmationStatusInput,
+    amendNominationStatusInput,
+    setAmendNominationStatusInput,
+    amendAllocationStatusInput,
+    setAmendAllocationStatusInput,
     amendPriceIndexInput,
     setAmendPriceIndexInput,
     amendPriceIndexOptions,
@@ -159,6 +180,10 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     setAmendPriceInput,
     amendVolumeInput,
     setAmendVolumeInput,
+    amendInvoiceStatusInput,
+    setAmendInvoiceStatusInput,
+    amendPaymentStatusInput,
+    setAmendPaymentStatusInput,
     amendQualitySpecInput,
     setAmendQualitySpecInput,
     amendUnitInput,
@@ -211,6 +236,11 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     tradeSideOptions,
     pricingTypeOptions,
     pricingStatusOptions,
+    confirmationStatusOptions,
+    nominationStatusOptions,
+    allocationStatusOptions,
+    invoiceStatusOptions,
+    paymentStatusOptions,
     settlementStatusOptions,
     formatCommodityClass,
   } = props
@@ -548,6 +578,84 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             <input className="control" inputMode="decimal" value={amendVolumeInput} onChange={(event) => setAmendVolumeInput(event.target.value)} />
           </label>
         )}
+      </div>
+
+      <div className="mini-grid">
+        <label className="field">
+          <span>Confirmation</span>
+          <select
+            className="control"
+            value={amendConfirmationStatusInput}
+            onChange={(event) => setAmendConfirmationStatusInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            {confirmationStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Nomination</span>
+          <select
+            className="control"
+            value={amendNominationStatusInput}
+            onChange={(event) => setAmendNominationStatusInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            {nominationStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Allocation</span>
+          <select
+            className="control"
+            value={amendAllocationStatusInput}
+            onChange={(event) => setAmendAllocationStatusInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            {allocationStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Invoice</span>
+          <select
+            className="control"
+            value={amendInvoiceStatusInput}
+            onChange={(event) => setAmendInvoiceStatusInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            {invoiceStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Payment</span>
+          <select
+            className="control"
+            value={amendPaymentStatusInput}
+            onChange={(event) => setAmendPaymentStatusInput(event.target.value)}
+            disabled={amending || cancelling}
+          >
+            {paymentStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="mini-grid">

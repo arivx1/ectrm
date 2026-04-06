@@ -382,6 +382,99 @@ class TradeEventWorkflowTests(unittest.TestCase):
         self.assertEqual(term.currency_code, "USD")
         self.assertEqual(term.price_unit_code, "BBL")
 
+    def test_trade_workflow_statuses_default_and_persist_on_amendment(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-WORKFLOW-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "trade_nature": "PHYSICAL",
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "BUY",
+                        "price": 79.25,
+                        "volume": 125,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-WORKFLOW-2",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "trade_nature": "FINANCIAL",
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "trade_side": "SELL",
+                        "price": 80.0,
+                        "volume": 100,
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            physical_trade = session.query(Trade).filter(Trade.trade_id == "T-WORKFLOW-1").one()
+            financial_trade = session.query(Trade).filter(Trade.trade_id == "T-WORKFLOW-2").one()
+
+            self.assertEqual(physical_trade.confirmation_status, "PENDING")
+            self.assertEqual(physical_trade.nomination_status, "PENDING")
+            self.assertEqual(physical_trade.allocation_status, "PENDING")
+            self.assertEqual(physical_trade.invoice_status, "PENDING")
+            self.assertEqual(physical_trade.payment_status, "PENDING")
+            self.assertEqual(financial_trade.confirmation_status, "PENDING")
+            self.assertEqual(financial_trade.nomination_status, "NOT_REQUIRED")
+            self.assertEqual(financial_trade.allocation_status, "NOT_REQUIRED")
+            self.assertEqual(financial_trade.invoice_status, "NOT_REQUIRED")
+            self.assertEqual(financial_trade.payment_status, "PENDING")
+
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-WORKFLOW-1",
+                    event_type="TradeAmended",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "pricing_status": "PARTIALLY_PRICED",
+                        "confirmation_status": "CONFIRMED",
+                        "nomination_status": "NOMINATED",
+                        "allocation_status": "ALLOCATED",
+                        "invoice_status": "ISSUED",
+                        "payment_status": "DUE",
+                        "settlement_status": "INVOICED",
+                    },
+                    schema_version=4,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            amended_trade = session.query(Trade).filter(Trade.trade_id == "T-WORKFLOW-1").one()
+
+        self.assertEqual(amended_trade.pricing_status, "PARTIALLY_PRICED")
+        self.assertEqual(amended_trade.confirmation_status, "CONFIRMED")
+        self.assertEqual(amended_trade.nomination_status, "NOMINATED")
+        self.assertEqual(amended_trade.allocation_status, "ALLOCATED")
+        self.assertEqual(amended_trade.invoice_status, "ISSUED")
+        self.assertEqual(amended_trade.payment_status, "DUE")
+        self.assertEqual(amended_trade.settlement_status, "INVOICED")
+
     def test_swap_trade_can_omit_top_level_volume_when_legs_are_present(self) -> None:
         with self.SessionLocal() as session:
             append_event(

@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { submitReferenceMutation } from '../../entities/reference-data/api'
 import type {
   BookForm,
+  CounterpartyCreditProfileForm,
+  CounterpartyCreditProfileRecord,
+  CounterpartyCreditReportRow,
+  CounterpartyExternalCreditSnapshotRecord,
   CounterpartyRecord,
   CounterpartyStandards,
   CurrencyRecord,
@@ -54,6 +58,37 @@ function buildBookForm(record: ReferenceRecord): BookForm {
     code: record.code,
     name: record.name,
     description: record.description ?? '',
+  }
+}
+
+function emptyCounterpartyCreditProfileForm(
+  counterpartyStandards: CounterpartyStandards,
+): CounterpartyCreditProfileForm {
+  return {
+    credit_rating: '',
+    review_due_at: '',
+    limit_currency_code: '',
+    limit_amount: '',
+    breach_action: counterpartyStandards.default_counterparty_credit_breach_action,
+    notes: '',
+  }
+}
+
+function buildCounterpartyCreditProfileForm(
+  profile: CounterpartyCreditProfileRecord | null,
+  counterpartyStandards: CounterpartyStandards,
+): CounterpartyCreditProfileForm {
+  if (!profile) {
+    return emptyCounterpartyCreditProfileForm(counterpartyStandards)
+  }
+
+  return {
+    credit_rating: profile.credit_rating ?? '',
+    review_due_at: profile.review_due_at ?? '',
+    limit_currency_code: profile.limit_currency_code ?? '',
+    limit_amount: profile.limit_amount != null ? String(profile.limit_amount) : '',
+    breach_action: profile.breach_action ?? counterpartyStandards.default_counterparty_credit_breach_action,
+    notes: profile.notes ?? '',
   }
 }
 
@@ -158,6 +193,9 @@ type UseReferenceDataControllerArgs = {
   units: UnitRecord[]
   locations: LocationRecord[]
   counterparties: CounterpartyRecord[]
+  counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
+  counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
+  counterpartyCreditReport: CounterpartyCreditReportRow[]
   portfolios: PortfolioRecord[]
   activeBooks: ReferenceRecord[]
   activeCommodities: ReferenceRecord[]
@@ -180,6 +218,9 @@ export function useReferenceDataController({
   units,
   locations,
   counterparties,
+  counterpartyCreditProfiles,
+  counterpartyExternalCreditSnapshots,
+  counterpartyCreditReport,
   portfolios,
   activeBooks,
   activeCommodities,
@@ -197,6 +238,9 @@ export function useReferenceDataController({
   const [bookSheetApplyErrors, setBookSheetApplyErrors] = useState<Record<string, string>>({})
   const [bookPasteInput, setBookPasteInput] = useState('')
   const [bookPasteSummary, setBookPasteSummary] = useState<BookPasteSummary | null>(null)
+  const [counterpartyCreditProfileForm, setCounterpartyCreditProfileForm] = useState<CounterpartyCreditProfileForm>(
+    emptyCounterpartyCreditProfileForm(counterpartyStandards),
+  )
 
   const workspace = useReferenceDataWorkspace({
     books,
@@ -261,6 +305,47 @@ export function useReferenceDataController({
     startCreatePortfolio: startCreatePortfolioBase,
     startEditPortfolio: startEditPortfolioBase,
   } = workspace
+
+  const counterpartyCreditProfileByCode = useMemo(
+    () =>
+      new Map(
+        counterpartyCreditProfiles.map((profile) => [
+          profile.counterparty_code,
+          profile,
+        ]),
+      ),
+    [counterpartyCreditProfiles],
+  )
+
+  const counterpartyCreditReportByCode = useMemo(
+    () =>
+      new Map(
+        counterpartyCreditReport.map((row) => [
+          row.counterparty_code,
+          row,
+        ]),
+      ),
+    [counterpartyCreditReport],
+  )
+
+  const counterpartyExternalCreditSnapshotsByCode = useMemo(() => {
+    const grouped = new Map<string, CounterpartyExternalCreditSnapshotRecord[]>()
+    for (const snapshot of counterpartyExternalCreditSnapshots) {
+      const current = grouped.get(snapshot.counterparty_code) ?? []
+      current.push(snapshot)
+      grouped.set(snapshot.counterparty_code, current)
+    }
+
+    for (const entries of grouped.values()) {
+      entries.sort((left, right) => {
+        const leftTime = new Date(left.downloaded_at).getTime()
+        const rightTime = new Date(right.downloaded_at).getTime()
+        return rightTime - leftTime
+      })
+    }
+
+    return grouped
+  }, [counterpartyExternalCreditSnapshots])
 
   const bookUsageByCode = useMemo(() => {
     const usage = new Map<string, { activeTrades: number; totalTrades: number }>()
@@ -365,6 +450,34 @@ export function useReferenceDataController({
   const selectedLocationUsage = selectedLocation
     ? locationUsageByCode.get(selectedLocation.code) ?? { activeChildren: 0, totalChildren: 0 }
     : null
+
+  const selectedCounterpartyCreditProfile = selectedCounterparty
+    ? counterpartyCreditProfileByCode.get(selectedCounterparty.code) ?? null
+    : null
+
+  const selectedCounterpartyCreditReport = selectedCounterparty
+    ? counterpartyCreditReportByCode.get(selectedCounterparty.code) ?? null
+    : null
+
+  const selectedCounterpartyExternalCreditSnapshots = selectedCounterparty
+    ? counterpartyExternalCreditSnapshotsByCode.get(selectedCounterparty.code) ?? []
+    : []
+
+  useEffect(() => {
+    if (workspace.counterpartyFormMode !== 'edit' || !selectedCounterparty) {
+      setCounterpartyCreditProfileForm(emptyCounterpartyCreditProfileForm(counterpartyStandards))
+      return
+    }
+
+    setCounterpartyCreditProfileForm(
+      buildCounterpartyCreditProfileForm(selectedCounterpartyCreditProfile, counterpartyStandards),
+    )
+  }, [
+    counterpartyStandards,
+    selectedCounterparty,
+    selectedCounterpartyCreditProfile,
+    workspace.counterpartyFormMode,
+  ])
 
   function resolveBookSheetForm(code: string): BookForm | null {
     const draft = bookSheetDrafts[code]
@@ -582,6 +695,31 @@ export function useReferenceDataController({
     locations,
   ])
 
+  const counterpartyCreditProfileFieldErrors = useMemo(() => {
+    const errors: Partial<Record<'limit_currency_code' | 'limit_amount', string>> = {}
+    const limitCurrencyCode = counterpartyCreditProfileForm.limit_currency_code.trim().toUpperCase()
+    const limitAmountText = counterpartyCreditProfileForm.limit_amount.trim()
+
+    if (limitAmountText) {
+      const parsedLimitAmount = Number(limitAmountText)
+      if (Number.isNaN(parsedLimitAmount)) {
+        errors.limit_amount = 'Limit amount must be numeric.'
+      } else if (parsedLimitAmount <= 0) {
+        errors.limit_amount = 'Limit amount must be greater than 0.'
+      }
+    }
+
+    if (limitCurrencyCode && !limitAmountText) {
+      errors.limit_amount = 'Limit amount is required when a limit currency is set.'
+    }
+
+    if (!limitCurrencyCode && limitAmountText) {
+      errors.limit_currency_code = 'Limit currency is required when a limit amount is set.'
+    }
+
+    return errors
+  }, [counterpartyCreditProfileForm.limit_amount, counterpartyCreditProfileForm.limit_currency_code])
+
   const bookFormDirty = useMemo(() => {
     if (bookFormMode === 'create') {
       return !sameText(bookForm.code, '') || !sameText(bookForm.name, '') || !sameText(bookForm.description, '')
@@ -739,6 +877,28 @@ export function useReferenceDataController({
       !sameText(locationForm.description, selectedLocation.description)
     )
   }, [locationForm, locationFormMode, locationStandards, selectedLocation])
+
+  const counterpartyCreditProfileDirty = useMemo(() => {
+    if (workspace.counterpartyFormMode !== 'edit' || !selectedCounterparty) {
+      return false
+    }
+
+    const baseline = buildCounterpartyCreditProfileForm(selectedCounterpartyCreditProfile, counterpartyStandards)
+    return (
+      !sameText(counterpartyCreditProfileForm.credit_rating, baseline.credit_rating) ||
+      !sameText(counterpartyCreditProfileForm.review_due_at, baseline.review_due_at) ||
+      !sameText(counterpartyCreditProfileForm.limit_currency_code, baseline.limit_currency_code) ||
+      !sameText(counterpartyCreditProfileForm.limit_amount, baseline.limit_amount) ||
+      !sameText(counterpartyCreditProfileForm.breach_action, baseline.breach_action) ||
+      !sameText(counterpartyCreditProfileForm.notes, baseline.notes)
+    )
+  }, [
+    counterpartyCreditProfileForm,
+    counterpartyStandards,
+    selectedCounterparty,
+    selectedCounterpartyCreditProfile,
+    workspace.counterpartyFormMode,
+  ])
 
   function resetReferenceMessages() {
     setReferenceActionError('')
@@ -1519,6 +1679,9 @@ export function useReferenceDataController({
       legal_entity_name: workspace.counterpartyForm.legal_entity_name.trim() || null,
       counterparty_type: workspace.counterpartyForm.counterparty_type.trim().toUpperCase(),
       country_code: workspace.counterpartyForm.country_code.trim().toUpperCase() || null,
+      lei_code: workspace.counterpartyForm.lei_code.trim().toUpperCase() || null,
+      duns_number: workspace.counterpartyForm.duns_number.trim() || null,
+      ticker_symbol: workspace.counterpartyForm.ticker_symbol.trim().toUpperCase() || null,
       credit_status: workspace.counterpartyForm.credit_status.trim().toUpperCase(),
       description: workspace.counterpartyForm.description.trim() || null,
     }
@@ -1542,6 +1705,43 @@ export function useReferenceDataController({
       'POST',
       { updated_by: currentActorId() },
       `Counterparty ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
+    )
+  }
+
+  async function handleSaveCounterpartyCreditProfile(e: React.FormEvent) {
+    e.preventDefault()
+    if (workspace.counterpartyFormMode !== 'edit' || !selectedCounterparty) {
+      setReferenceActionError('Save the counterparty first before maintaining its credit profile.')
+      setReferenceActionSuccess('')
+      return
+    }
+
+    const normalizedLimitAmountText = counterpartyCreditProfileForm.limit_amount.trim()
+    const normalizedLimitAmount = normalizedLimitAmountText ? Number(normalizedLimitAmountText) : null
+
+    if (
+      counterpartyCreditProfileFieldErrors.limit_currency_code ||
+      counterpartyCreditProfileFieldErrors.limit_amount ||
+      (normalizedLimitAmountText && (normalizedLimitAmount === null || Number.isNaN(normalizedLimitAmount)))
+    ) {
+      setReferenceActionError('Credit profile limits must use a valid currency and a positive numeric amount.')
+      setReferenceActionSuccess('')
+      return
+    }
+
+    await submitReference(
+      `/reference/counterparties/${selectedCounterparty.code}/credit-profile`,
+      'PUT',
+      {
+        credit_rating: counterpartyCreditProfileForm.credit_rating.trim() || null,
+        review_due_at: counterpartyCreditProfileForm.review_due_at.trim() || null,
+        limit_currency_code: counterpartyCreditProfileForm.limit_currency_code.trim().toUpperCase() || null,
+        limit_amount: normalizedLimitAmount,
+        breach_action: counterpartyCreditProfileForm.breach_action.trim().toUpperCase(),
+        notes: counterpartyCreditProfileForm.notes.trim() || null,
+        updated_by: currentActorId(),
+      },
+      `Counterparty credit profile ${selectedCounterparty.code} saved.`,
     )
   }
 
@@ -1601,6 +1801,10 @@ export function useReferenceDataController({
     selectedCurrencyUsage,
     selectedUnitUsage,
     selectedLocationUsage,
+    selectedCounterpartyCreditProfile,
+    selectedCounterpartyCreditReport,
+    selectedCounterpartyExternalCreditSnapshots,
+    counterpartyCreditReportByCode,
     bookPasteInput,
     setBookPasteInput,
     bookPasteSummary,
@@ -1613,12 +1817,16 @@ export function useReferenceDataController({
     currencyFieldErrors,
     unitFieldErrors,
     locationFieldErrors,
+    counterpartyCreditProfileFieldErrors,
     bookFormDirty,
     commodityFormDirty,
     priceIndexFormDirty,
     currencyFormDirty,
     unitFormDirty,
     locationFormDirty,
+    counterpartyCreditProfileForm,
+    setCounterpartyCreditProfileForm,
+    counterpartyCreditProfileDirty,
     startCreateBook,
     startEditBook,
     updateBookSheetField,
@@ -1655,6 +1863,7 @@ export function useReferenceDataController({
     handleToggleLocation,
     handleSaveCounterparty,
     handleToggleCounterparty,
+    handleSaveCounterpartyCreditProfile,
     handleSavePortfolio,
     handleTogglePortfolio,
   }

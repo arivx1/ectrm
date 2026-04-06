@@ -70,6 +70,19 @@ function ageInDays(value: string | null | undefined): number | null {
   return Math.floor((Date.now() - timestamp) / 86_400_000)
 }
 
+function daysUntilDate(value: string | null | undefined): number | null {
+  if (!value) {
+    return null
+  }
+
+  const timestamp = Date.parse(value)
+  if (Number.isNaN(timestamp)) {
+    return null
+  }
+
+  return Math.floor((timestamp - Date.now()) / 86_400_000)
+}
+
 function tradeDirection(trade: TradeRecord): number {
   if (typeof trade.volume === 'number' && trade.volume < 0) {
     return -1
@@ -131,6 +144,39 @@ function formatSignedMoney(value: number, formatMoney: (value: number | null) =>
   }
 
   return formattedValue
+}
+
+function countLabel(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? '' : 's'}`
+}
+
+function formatDateInputValue(value: Date): string {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function addDays(value: Date, days: number): Date {
+  const nextValue = new Date(value)
+  nextValue.setDate(nextValue.getDate() + days)
+  return nextValue
+}
+
+function formatDateWindowLabel(start: string | null | undefined, end: string | null | undefined): string {
+  if (start && end) {
+    return `${formatReportDateLabel(start)} to ${formatReportDateLabel(end)}`
+  }
+
+  if (start) {
+    return `Since ${formatReportDateLabel(start)}`
+  }
+
+  if (end) {
+    return `Through ${formatReportDateLabel(end)}`
+  }
+
+  return 'All available history'
 }
 
 function PnlTrendChart({
@@ -212,6 +258,20 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const hasActivePnlFilters = Boolean(
     selectedBookFilter || selectedCommodityClassFilter || dateFromFilter || dateToFilter,
   )
+  const datePresets = useMemo(() => {
+    const today = new Date()
+    return [
+      { id: 'ALL', label: 'All', dateFrom: '', dateTo: '' },
+      { id: '30D', label: '30D', dateFrom: formatDateInputValue(addDays(today, -29)), dateTo: formatDateInputValue(today) },
+      { id: '90D', label: '90D', dateFrom: formatDateInputValue(addDays(today, -89)), dateTo: formatDateInputValue(today) },
+      {
+        id: 'YTD',
+        label: 'YTD',
+        dateFrom: formatDateInputValue(new Date(today.getFullYear(), 0, 1)),
+        dateTo: formatDateInputValue(today),
+      },
+    ] as const
+  }, [])
 
   useEffect(() => {
     if (appLoading) {
@@ -325,6 +385,8 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   )
   const effectivePnlHistoryReport = pnlFilterError ? null : pnlHistoryReport
   const pnlTrendPoints = effectivePnlHistoryReport?.points ?? []
+  const singlePoint = pnlTrendPoints.length === 1 ? pnlTrendPoints[0] : null
+  const hasComparableTrend = pnlTrendPoints.length > 1
   const pnlTrendStart = pnlTrendPoints[0] ?? null
   const pnlTrendEnd = pnlTrendPoints[pnlTrendPoints.length - 1] ?? null
   const pnlTrendWindowChange =
@@ -333,6 +395,26 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const reportSummary = effectivePnlHistoryReport?.summary ?? null
   const currentPnlProxy = reportSummary?.total_pnl ?? markedPnlProxy
   const currentPricedTradeCount = reportSummary?.priced_trade_count ?? pricedTradeCount
+  const activeDatePreset =
+    datePresets.find((preset) => preset.dateFrom === dateFromFilter && preset.dateTo === dateToFilter)?.id ?? null
+  const visibleDateWindowLabel =
+    pnlTrendStart && pnlTrendEnd
+      ? formatDateWindowLabel(pnlTrendStart.date, pnlTrendEnd.date)
+      : formatDateWindowLabel(dateFromFilter, dateToFilter)
+  const pnlTrendSubtitle = pnlHistoryError
+    ? pnlHistoryError
+    : pnlTrendPoints.length > 0
+      ? `${countLabel(pnlTrendPoints.length, 'marked day')} across ${countLabel(currentPricedTradeCount, 'priced trade')} in view.`
+      : hasActivePnlFilters
+        ? 'No marked history matches the current filter scope yet.'
+        : activeTrades.length > 0
+          ? 'Mark-to-market daily history will fill in as priced trades and observations arrive.'
+          : 'Create active trades to start building desk P&L history.'
+  const activeFilterLabels = [
+    selectedBookFilter ? `Book · ${selectedBookFilter}` : null,
+    selectedCommodityClassFilter ? `Class · ${formatCommodityClass(selectedCommodityClassFilter)}` : null,
+    dateFromFilter || dateToFilter ? `Window · ${formatDateWindowLabel(dateFromFilter, dateToFilter)}` : null,
+  ].filter((value): value is string => Boolean(value))
 
   const grossExposure = useMemo(
     () => positionsWithClass.reduce((sum, position) => sum + Math.abs(position.net_volume), 0),
@@ -356,45 +438,119 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   )
 
   const dashboardIssues = useMemo(() => {
-    const overdueSettlement = activeTrades.filter((trade) => {
+    const confirmationBacklog = activeTrades.filter((trade) => {
       const ageDays = ageInDays(trade.execution_timestamp)
-      return ageDays !== null && ageDays >= 5 && trade.settlement_status !== 'SETTLED'
+      return ageDays !== null && ageDays >= 1 && trade.confirmation_status !== 'CONFIRMED'
+    })
+    const nominationBacklog = activeTrades.filter((trade) => {
+      const daysUntilDelivery = daysUntilDate(trade.delivery_start)
+      return (
+        trade.trade_nature === 'PHYSICAL' &&
+        daysUntilDelivery !== null &&
+        daysUntilDelivery <= 3 &&
+        !['NOT_REQUIRED', 'SCHEDULED', 'NOMINATED', 'COMPLETED'].includes(trade.nomination_status)
+      )
+    })
+    const allocationBacklog = activeTrades.filter(
+      (trade) =>
+        trade.trade_nature === 'PHYSICAL' &&
+        ['NOMINATED', 'COMPLETED'].includes(trade.nomination_status) &&
+        !['NOT_REQUIRED', 'ALLOCATED', 'COMPLETED'].includes(trade.allocation_status),
+    )
+    const invoiceBacklog = activeTrades.filter((trade) => {
+      const ageDays = ageInDays(trade.execution_timestamp)
+      return (
+        trade.trade_nature === 'PHYSICAL' &&
+        ageDays !== null &&
+        ageDays >= 5 &&
+        !['NOT_REQUIRED', 'ISSUED', 'APPROVED'].includes(trade.invoice_status)
+      )
+    })
+    const overduePayments = activeTrades.filter((trade) => {
+      if (trade.payment_status === 'OVERDUE') {
+        return true
+      }
+
+      const ageDays = ageInDays(trade.execution_timestamp)
+      return (
+        ageDays !== null &&
+        ageDays >= 10 &&
+        (
+          ['ISSUED', 'APPROVED'].includes(trade.invoice_status) ||
+          ['INVOICED', 'PARTIALLY_SETTLED'].includes(trade.settlement_status)
+        ) &&
+        !['NOT_REQUIRED', 'PAID'].includes(trade.payment_status)
+      )
     })
     const stalePricing = activeTrades.filter((trade) => {
       const ageDays = ageInDays(trade.execution_timestamp)
-      return ageDays !== null && ageDays >= 2 && trade.pricing_status === 'PENDING'
+      return ageDays !== null && ageDays >= 2 && ['PENDING', 'PARTIALLY_PRICED'].includes(trade.pricing_status)
     })
     const incompleteOperationalData = activeTrades.filter(
       (trade) =>
         !trade.execution_timestamp ||
         !trade.external_trade_id ||
         !trade.counterparty ||
-        !trade.unit_of_measure,
+        !trade.unit_of_measure ||
+        (trade.trade_nature === 'PHYSICAL' &&
+          (!trade.location_code || !trade.delivery_start || !trade.delivery_end || !trade.price_unit_code)),
     )
 
     const openIssueTradeIds = new Set(
-      [...overdueSettlement, ...stalePricing, ...incompleteOperationalData].map((trade) => trade.trade_id),
+      [
+        ...confirmationBacklog,
+        ...nominationBacklog,
+        ...allocationBacklog,
+        ...invoiceBacklog,
+        ...overduePayments,
+        ...stalePricing,
+        ...incompleteOperationalData,
+      ].map((trade) => trade.trade_id),
     )
 
     return {
       total: openIssueTradeIds.size,
       rows: [
         {
-          label: 'Overdue settlement',
-          count: overdueSettlement.length,
-          detail: 'Active trades still pending settlement 5+ days after execution.',
-          tone: overdueSettlement.length > 0 ? 'blocked' : 'active',
+          label: 'Confirmation backlog',
+          count: confirmationBacklog.length,
+          detail: 'Trades executed 1+ day ago that still are not confirmed.',
+          tone: confirmationBacklog.length > 0 ? 'blocked' : 'active',
+        },
+        {
+          label: 'Nomination backlog',
+          count: nominationBacklog.length,
+          detail: 'Physical trades nearing delivery that still need nomination or scheduling completion.',
+          tone: nominationBacklog.length > 0 ? 'blocked' : 'active',
+        },
+        {
+          label: 'Allocation backlog',
+          count: allocationBacklog.length,
+          detail: 'Nominated flows that have not reached an allocated or completed state yet.',
+          tone: allocationBacklog.length > 0 ? 'blocked' : 'active',
+        },
+        {
+          label: 'Invoice backlog',
+          count: invoiceBacklog.length,
+          detail: 'Physical trades aging 5+ days without an issued or approved invoice workflow state.',
+          tone: invoiceBacklog.length > 0 ? 'blocked' : 'active',
+        },
+        {
+          label: 'Overdue payments',
+          count: overduePayments.length,
+          detail: 'Trades with overdue payment state or aging invoices that still are not paid.',
+          tone: overduePayments.length > 0 ? 'blocked' : 'active',
         },
         {
           label: 'Stale pricing',
           count: stalePricing.length,
-          detail: 'Trades still marked PENDING pricing 2+ days after execution.',
+          detail: 'Trades still marked pending or partial pricing 2+ days after execution.',
           tone: stalePricing.length > 0 ? 'blocked' : 'active',
         },
         {
           label: 'Incomplete ops data',
           count: incompleteOperationalData.length,
-          detail: 'Active trades missing execution time, external ID, counterparty, or UOM.',
+          detail: 'Active trades missing core execution, counterparty, quantity, or physical delivery attributes.',
           tone: incompleteOperationalData.length > 0 ? 'blocked' : 'active',
         },
       ] as Array<{ label: string; count: number; detail: string; tone: 'active' | 'blocked' }>,
@@ -428,23 +584,78 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                 </div>
               ) : (
                 <section className="pnl-trend-panel">
-                  <div className="pnl-trend-head">
+                  <div className="pnl-trend-topbar">
                     <div className="pnl-trend-copy">
                       <span>P&amp;L Over Time</span>
-                      <strong>{formatMoney(pnlTrendEnd?.total_pnl ?? null)}</strong>
+                      <p>{pnlTrendSubtitle}</p>
+                    </div>
+                    <div className="pnl-trend-toolbar">
+                      <div className="pnl-trend-presets" aria-label="Date range presets">
+                        {datePresets.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            className={`tab-pill ${activeDatePreset === preset.id ? 'is-active' : ''}`}
+                            aria-pressed={activeDatePreset === preset.id}
+                            onClick={() => {
+                              setDateFromFilter(preset.dateFrom)
+                              setDateToFilter(preset.dateTo)
+                            }}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {hasActivePnlFilters ? (
+                        <button
+                          type="button"
+                          className="button button-ghost pnl-trend-reset-button"
+                          onClick={() => {
+                            setSelectedBookFilter('')
+                            setSelectedCommodityClassFilter('')
+                            setDateFromFilter('')
+                            setDateToFilter('')
+                          }}
+                        >
+                          Reset Filters
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="pnl-trend-summary-grid">
+                    <article className="pnl-trend-stat-card pnl-trend-stat-card-emphasis">
+                      <span>Total P&amp;L</span>
+                      <strong>{formatMoney(currentPnlProxy)}</strong>
+                      <p>{visibleDateWindowLabel}</p>
+                    </article>
+
+                    <article className="pnl-trend-stat-card">
+                      <span>Window Move</span>
+                      <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${hasComparableTrend ? pnlTrendTone : 'flat'}`}>
+                        {hasComparableTrend ? formatSignedMoney(pnlTrendWindowChange, formatMoney) : '—'}
+                      </strong>
                       <p>
-                        Event-sourced daily history across {reportSummary?.priced_trade_count ?? 0} priced trade
-                        {reportSummary?.priced_trade_count === 1 ? '' : 's'}.
+                        {hasComparableTrend
+                          ? visibleDateWindowLabel
+                          : singlePoint
+                            ? `${formatReportDateLabel(singlePoint.date)} is the only marked day in view.`
+                            : 'Need at least two marked days to compare a window move.'}
                       </p>
-                    </div>
-                    <div className="pnl-trend-summary">
-                      <small className={`market-price-change market-price-change-${pnlTrendTone}`}>
-                        {formatSignedMoney(pnlTrendWindowChange, formatMoney)} window move
-                      </small>
-                      <span>
-                        {reportSummary?.realized_trade_count ?? 0} realized • {reportSummary?.unrealized_trade_count ?? 0} open
-                      </span>
-                    </div>
+                    </article>
+
+                    <article className="pnl-trend-stat-card">
+                      <span>Realized P&amp;L</span>
+                      <strong>{formatMoney(reportSummary?.realized_pnl ?? 0)}</strong>
+                      <p>{countLabel(reportSummary?.realized_trade_count ?? 0, 'settled trade')}</p>
+                    </article>
+
+                    <article className="pnl-trend-stat-card">
+                      <span>Open P&amp;L</span>
+                      <strong>{formatMoney(reportSummary?.unrealized_pnl ?? 0)}</strong>
+                      <p>{countLabel(reportSummary?.unrealized_trade_count ?? 0, 'open trade')}</p>
+                    </article>
                   </div>
 
                   <div className="pnl-trend-filter-grid">
@@ -501,32 +712,44 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                     </label>
                   </div>
 
-                  <div className="pnl-trend-filter-actions">
-                    <button
-                      type="button"
-                      className="button button-ghost"
-                      onClick={() => {
-                        setSelectedBookFilter('')
-                        setSelectedCommodityClassFilter('')
-                        setDateFromFilter('')
-                        setDateToFilter('')
-                      }}
-                    >
-                      Reset Filters
-                    </button>
-                  </div>
+                  {activeFilterLabels.length > 0 ? (
+                    <div className="chip-row pnl-trend-active-filters">
+                      {activeFilterLabels.map((label) => (
+                        <span key={label} className="entity-chip entity-chip-soft">
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
 
                   {pnlFilterError ? <small className="field-error">{pnlFilterError}</small> : null}
 
-                  {pnlTrendPoints.length > 0 ? (
-                    <>
+                  {hasComparableTrend ? (
+                    <div className="pnl-trend-chart-shell">
                       <PnlTrendChart points={pnlTrendPoints} tone={pnlTrendTone} />
 
                       <div className="pnl-trend-axis">
                         <span>{pnlTrendStart ? formatReportDateLabel(pnlTrendStart.date) : 'Start'}</span>
                         <span>{pnlTrendEnd ? formatReportDateLabel(pnlTrendEnd.date) : 'Latest'}</span>
                       </div>
-                    </>
+                    </div>
+                  ) : singlePoint ? (
+                    <div className="pnl-trend-sparse-state">
+                      <div className="pnl-trend-sparse-copy">
+                        <span>Single Marked Day</span>
+                        <strong>{formatMoney(singlePoint.total_pnl)}</strong>
+                        <p>
+                          {formatReportDateLabel(singlePoint.date)} is the only marked day in the current window.
+                          Widen the date range or clear filters to reveal trend movement.
+                        </p>
+                      </div>
+
+                      <div className={`pnl-trend-sparse-visual market-price-chart-${pnlTrendTone}`}>
+                        <div className="pnl-trend-sparse-line" />
+                        <div className="pnl-trend-sparse-dot" />
+                        <small>{formatReportDateLabel(singlePoint.date)}</small>
+                      </div>
+                    </div>
                   ) : (
                     <div className="empty-state">
                       <strong>No P&amp;L trend yet</strong>
@@ -569,8 +792,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                   <span>Needs Attention</span>
                   <strong>{formatNumber(dashboardIssues.total, 0)}</strong>
                   <p>
-                    Trade-driven operational watchlist. Shipment and invoice exceptions can slot in here once those
-                    workflows are modeled in the platform.
+                    Trade-driven post-trade watchlist spanning confirmation, nomination, allocation, invoicing, and payment aging.
                   </p>
                 </article>
                 <article className="dashboard-report-card">
@@ -659,7 +881,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           id: 'operational-attention',
           eyebrow: 'Watchlist',
           title: 'Operational Attention',
-          description: 'A lightweight issue board derived from trade aging and data completeness.',
+          description: 'A lightweight post-trade issue board derived from workflow state, aging, and data completeness.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half', 'side'],
           content: appLoading ? (
@@ -683,7 +905,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           ) : (
             <div className="empty-state">
               <strong>No active operational issues</strong>
-              <p>The live trades are priced, settled, and populated well enough that nothing is currently flagged here.</p>
+              <p>The live trades are confirmed, scheduled, invoiced, and populated well enough that nothing is currently flagged here.</p>
             </div>
           ),
         },
