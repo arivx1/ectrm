@@ -47,6 +47,7 @@ from apps.api.app.routes.trades import router as trades_router
 from apps.api.app.routes.positions import router as positions_router
 from apps.api.app.routes.roadmap import admin_router as roadmap_admin_router
 from apps.api.app.routes.roadmap import router as roadmap_router
+from apps.api.app.routes.shipments import router as shipments_router
 from apps.api.app.routes.users import router as users_router
 from apps.api.app.routes.weather import admin_router as weather_admin_router
 from apps.api.app.routes.weather import router as weather_router
@@ -86,6 +87,7 @@ app.include_router(assistant_router)
 app.include_router(assistant_admin_router)
 app.include_router(trades_router)
 app.include_router(positions_router)
+app.include_router(shipments_router)
 app.include_router(roadmap_router)
 app.include_router(roadmap_admin_router)
 app.include_router(reports_router)

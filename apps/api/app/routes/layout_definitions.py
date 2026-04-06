@@ -31,6 +31,12 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
         "positions-by-class": ("full", "wide", "half"),
         "positions-detail": ("full", "wide", "half"),
     },
+    "shipments": {
+        "shipment-summary": ("full", "wide"),
+        "shipment-readiness": ("full", "wide", "half"),
+        "shipment-blockers": ("full", "wide", "half"),
+        "shipment-queue": ("full", "wide"),
+    },
     "trades": {
         "create-trade": ("full", "wide"),
         "trade-inspector": ("wide", "half", "side"),

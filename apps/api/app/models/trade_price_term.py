@@ -18,5 +18,7 @@ class TradePriceTerm(Base):
     pricing_type: Mapped[str] = mapped_column(String(20), nullable=False)
     fixed_price: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
     price_index_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    currency_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    price_unit_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

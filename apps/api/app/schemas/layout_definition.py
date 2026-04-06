@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from apps.api.app.schemas._validation import normalize_required_text
 
 
-LayoutWorkspaceId = Literal["dashboard", "trades", "events", "positions"]
+LayoutWorkspaceId = Literal["dashboard", "trades", "events", "positions", "shipments"]
 LayoutTileSpan = Literal["full", "wide", "half", "side"]
 
 

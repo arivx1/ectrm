@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.reference_data.services.counterparty_seed_catalog import (
+    build_additional_real_counterparty_rows,
+    build_energy_real_counterparty_rows,
     build_real_counterparty_rows,
 )
 from apps.api.app.domains.reference_data.services.location_seed_catalog import (
@@ -447,7 +449,12 @@ CURATED_COUNTERPARTY_ROWS = [
     },
 ]
 
-COUNTERPARTY_ROWS = CURATED_COUNTERPARTY_ROWS + build_real_counterparty_rows()
+COUNTERPARTY_ROWS = (
+    CURATED_COUNTERPARTY_ROWS
+    + build_real_counterparty_rows()
+    + build_additional_real_counterparty_rows()
+    + build_energy_real_counterparty_rows()
+)
 
 PORTFOLIO_ROWS = [
     {"code": "REFINERY_FEEDSTOCK", "name": "Refinery Feedstock", "book_code": "DEMO_CRUDE", "owner": "Refinery Supply Desk", "strategy": "Physical feedstock coverage", "trader_persona": "Feedstock Procurer", "risk_archetype": "CONSUMPTION_HEDGE", "description": "Asset-backed crude procurement portfolio."},

@@ -197,6 +197,22 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(save_positions.status_code, 200)
         self.assertEqual(save_positions.json()["spans"], positions_payload["spans"])
 
+        shipments_payload = {
+            "order": ["shipment-summary", "shipment-readiness", "shipment-blockers", "shipment-queue"],
+            "hidden": ["shipment-readiness"],
+            "spans": {
+                "shipment-blockers": "wide",
+            },
+        }
+        save_shipments = self.client.put(
+            "/layout-definitions/shipments",
+            json=shipments_payload,
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(save_shipments.status_code, 200)
+        self.assertEqual(save_shipments.json()["workspace_id"], "shipments")
+        self.assertEqual(save_shipments.json()["spans"], shipments_payload["spans"])
+
         events_payload = {
             "order": ["events-controls", "events-breakdown", "events-stream"],
             "hidden": [],
@@ -226,6 +242,13 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         )
         self.assertEqual(get_positions.status_code, 200)
         self.assertEqual(get_positions.json()["order"], positions_payload["order"])
+
+        get_shipments = self.client.get(
+            "/layout-definitions/shipments",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(get_shipments.status_code, 200)
+        self.assertEqual(get_shipments.json()["order"], shipments_payload["order"])
 
         get_events = self.client.get(
             "/layout-definitions/events",

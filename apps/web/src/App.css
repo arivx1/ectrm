@@ -736,6 +736,11 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.dashboard-snapshot-panel {
+  display: grid;
+  gap: 1rem;
+}
+
 .dashboard-report-grid {
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
 }
@@ -2926,6 +2931,82 @@
   gap: 0.95rem;
 }
 
+.pnl-trend-panel {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1.05rem 1.05rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.15rem;
+  background:
+    radial-gradient(circle at top right, rgba(18, 124, 108, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 248, 249, 0.84));
+}
+
+.pnl-trend-head,
+.pnl-trend-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.pnl-trend-copy {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 42rem;
+}
+
+.pnl-trend-copy span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6b7783;
+}
+
+.pnl-trend-copy strong {
+  color: #13293d;
+  font-size: 2rem;
+  letter-spacing: -0.04em;
+}
+
+.pnl-trend-copy p,
+.pnl-trend-note {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.55;
+}
+
+.pnl-trend-summary {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+}
+
+.pnl-trend-summary span,
+.pnl-trend-axis span {
+  font-size: 0.8rem;
+  color: #66717c;
+}
+
+.pnl-trend-chart {
+  height: 11rem;
+}
+
+.pnl-trend-area {
+  fill-opacity: 0.12;
+}
+
+.pnl-trend-chart .market-price-chart-line {
+  stroke-width: 3.2;
+}
+
+.pnl-trend-zero-line {
+  stroke: rgba(19, 41, 61, 0.18);
+  stroke-width: 1.35;
+  stroke-dasharray: 4 5;
+}
+
 .market-price-card-head,
 .market-price-meta,
 .market-price-range,
@@ -4372,6 +4453,29 @@
 .market-price-chart {
   border-color: rgba(126, 154, 184, 0.12);
   background: linear-gradient(180deg, rgba(8, 15, 24, 0.98), rgba(12, 24, 37, 0.78));
+}
+
+.pnl-trend-panel {
+  border-color: rgba(126, 154, 184, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(61, 214, 160, 0.1), transparent 32%),
+    linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.98));
+}
+
+.pnl-trend-copy span,
+.pnl-trend-copy p,
+.pnl-trend-summary span,
+.pnl-trend-axis span,
+.pnl-trend-note {
+  color: var(--terminal-muted);
+}
+
+.pnl-trend-copy strong {
+  color: var(--terminal-text);
+}
+
+.pnl-trend-zero-line {
+  stroke: rgba(126, 154, 184, 0.22);
 }
 
 .trade-inspector-summary {

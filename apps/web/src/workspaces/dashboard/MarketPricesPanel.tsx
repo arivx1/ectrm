@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { loadPriceIndexObservations } from '../../entities/market-data/api'
 import { appConfig } from '../../shared/config'
 import type { PriceIndexObservationRecord } from '../../shared/models'
+import { CHART_HEIGHT, CHART_WIDTH, buildAreaPath, buildChartPoints, buildLinePath } from './chartUtils'
 
 type DashboardTrade = {
   price_index_code: string | null
@@ -32,9 +33,6 @@ type MarketPricesTileContentProps = {
 const PRICE_HISTORY_LIMIT = 24
 const MAX_PRICE_CANDIDATES = 8
 const MAX_PRICE_CARDS = 4
-const CHART_WIDTH = 320
-const CHART_HEIGHT = 112
-const CHART_PADDING = 10
 
 function parseObservationDate(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -126,52 +124,6 @@ function changeTone(
   }
 
   return 'flat'
-}
-
-function buildChartPoints(values: number[]): Array<{ x: number; y: number }> {
-  if (values.length === 0) {
-    return []
-  }
-
-  const drawableWidth = CHART_WIDTH - CHART_PADDING * 2
-  const drawableHeight = CHART_HEIGHT - CHART_PADDING * 2
-  const minValue = Math.min(...values)
-  const maxValue = Math.max(...values)
-  const span = maxValue - minValue
-
-  return values.map((value, index) => {
-    const x =
-      values.length === 1
-        ? CHART_WIDTH / 2
-        : CHART_PADDING + (drawableWidth * index) / (values.length - 1)
-    const y =
-      span === 0
-        ? CHART_PADDING + drawableHeight / 2
-        : CHART_PADDING + ((maxValue - value) / span) * drawableHeight
-
-    return { x, y }
-  })
-}
-
-function buildLinePath(points: Array<{ x: number; y: number }>): string {
-  if (points.length === 0) {
-    return ''
-  }
-
-  return points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(' ')
-}
-
-function buildAreaPath(points: Array<{ x: number; y: number }>): string {
-  if (points.length === 0) {
-    return ''
-  }
-
-  const baseline = CHART_HEIGHT - CHART_PADDING
-  const firstPoint = points[0]
-  const lastPoint = points[points.length - 1]
-  return `${buildLinePath(points)} L ${lastPoint.x.toFixed(2)} ${baseline.toFixed(2)} L ${firstPoint.x.toFixed(2)} ${baseline.toFixed(2)} Z`
 }
 
 function selectPriceIndexCandidates(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -13,8 +13,16 @@ class TradeOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     execution_timestamp: Optional[datetime]
+    trade_date: Optional[date]
+    effective_start_date: Optional[date]
+    effective_end_date: Optional[date]
     quality_spec: Optional[str]
     unit_of_measure: Optional[str]
+    trade_currency_code: Optional[str]
+    location_code: Optional[str]
+    delivery_start: Optional[date]
+    delivery_end: Optional[date]
+    price_unit_code: Optional[str]
     trade_nature: str
     trade_structure: str
     trade_side: Optional[str]

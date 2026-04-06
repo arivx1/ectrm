@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from decimal import Decimal
 import math
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -17,6 +17,8 @@ from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_currency import ReferenceCurrency
+from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
@@ -261,6 +263,33 @@ def parse_execution_timestamp(value: object | None) -> datetime | None:
     )
 
 
+def parse_optional_date(value: object | None, *, field_name: str) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        coerced = value if value.tzinfo is None else value.astimezone(timezone.utc)
+        return coerced.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            if "T" in candidate:
+                return datetime.fromisoformat(candidate.replace("Z", "+00:00")).date()
+            return date.fromisoformat(candidate)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{field_name} must be a valid ISO-8601 date",
+            ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=f"{field_name} must be a date or ISO-8601 string",
+    )
+
+
 def normalize_optional_number(value: object | None, *, field_name: str) -> float | None:
     if value is None or value == "":
         return None
@@ -294,6 +323,20 @@ def normalize_optional_number(value: object | None, *, field_name: str) -> float
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail=f"{field_name} must be a numeric value",
     )
+
+
+def validate_date_range(
+    start_value: date | None,
+    end_value: date | None,
+    *,
+    start_field: str,
+    end_field: str,
+) -> None:
+    if start_value is not None and end_value is not None and end_value < start_value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{end_field} must be on or after {start_field}",
+        )
 
 
 def validate_trade_measurements(
@@ -480,6 +523,46 @@ def require_active_unit(db: Session, unit_code: object | None) -> str | None:
     return normalized_unit_code
 
 
+def require_active_currency(db: Session, currency_code: object | None) -> str | None:
+    normalized_currency_code = normalize_optional_text(currency_code, uppercase=True)
+    if normalized_currency_code is None:
+        return None
+
+    reference_currency = db.execute(
+        select(ReferenceCurrency).where(
+            ReferenceCurrency.code == normalized_currency_code,
+            ReferenceCurrency.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_currency is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Currency '{normalized_currency_code}' is not active in reference data",
+        )
+
+    return normalized_currency_code
+
+
+def require_active_location(db: Session, location_code: object | None) -> str | None:
+    normalized_location_code = normalize_optional_text(location_code, uppercase=True)
+    if normalized_location_code is None:
+        return None
+
+    reference_location = db.execute(
+        select(ReferenceLocation).where(
+            ReferenceLocation.code == normalized_location_code,
+            ReferenceLocation.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_location is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Location '{normalized_location_code}' is not active in reference data",
+        )
+
+    return normalized_location_code
+
+
 def validate_trade_structure_payload(
     trade_structure: str,
     trade_side: object | None,
@@ -520,6 +603,10 @@ def sync_trade_legs(
     default_commodity_class: str,
     default_commodity_code: str,
     default_volume: object | None,
+    default_location_code: str | None,
+    default_quantity_unit_code: str | None,
+    default_delivery_start: date | None,
+    default_delivery_end: date | None,
     legs_payload: list[dict[str, object]],
     timestamp: datetime,
 ) -> None:
@@ -536,7 +623,11 @@ def sync_trade_legs(
                 "side": trade_side,
                 "commodity_class": default_commodity_class,
                 "commodity_code": default_commodity_code,
+                "location_code": default_location_code,
                 "quantity": default_volume,
+                "quantity_unit_code": default_quantity_unit_code,
+                "delivery_start": default_delivery_start,
+                "delivery_end": default_delivery_end,
             }
         ]
     else:
@@ -556,13 +647,39 @@ def sync_trade_legs(
                 leg_payload.get("commodity_class", default_commodity_class),
                 leg_payload.get("commodity", default_commodity_code),
             )
+            location_code = require_active_location(
+                db,
+                leg_payload.get("location_code", default_location_code),
+            )
+            quantity_unit_code = require_active_unit(
+                db,
+                leg_payload.get("quantity_unit_code", default_quantity_unit_code),
+            )
+            delivery_start = parse_optional_date(
+                leg_payload.get("delivery_start", default_delivery_start),
+                field_name=f"Leg {leg_no} delivery_start",
+            )
+            delivery_end = parse_optional_date(
+                leg_payload.get("delivery_end", default_delivery_end),
+                field_name=f"Leg {leg_no} delivery_end",
+            )
+            validate_date_range(
+                delivery_start,
+                delivery_end,
+                start_field=f"leg {leg_no} delivery_start",
+                end_field=f"leg {leg_no} delivery_end",
+            )
             legs_to_sync.append(
                 {
                     "leg_no": leg_no,
                     "side": side,
                     "commodity_class": commodity_class,
                     "commodity_code": commodity_code,
+                    "location_code": location_code,
                     "quantity": leg_payload.get("volume", default_volume),
+                    "quantity_unit_code": quantity_unit_code,
+                    "delivery_start": delivery_start,
+                    "delivery_end": delivery_end,
                 }
             )
 
@@ -579,7 +696,11 @@ def sync_trade_legs(
                     side=leg_data["side"],
                     commodity_class=leg_data["commodity_class"],
                     commodity_code=leg_data["commodity_code"],
+                    location_code=leg_data["location_code"],
                     quantity=leg_data["quantity"],
+                    quantity_unit_code=leg_data["quantity_unit_code"],
+                    delivery_start=leg_data["delivery_start"],
+                    delivery_end=leg_data["delivery_end"],
                     created_at=timestamp,
                     updated_at=timestamp,
                 )
@@ -589,7 +710,11 @@ def sync_trade_legs(
         existing_leg.side = leg_data["side"]
         existing_leg.commodity_class = leg_data["commodity_class"]
         existing_leg.commodity_code = leg_data["commodity_code"]
+        existing_leg.location_code = leg_data["location_code"]
         existing_leg.quantity = leg_data["quantity"]
+        existing_leg.quantity_unit_code = leg_data["quantity_unit_code"]
+        existing_leg.delivery_start = leg_data["delivery_start"]
+        existing_leg.delivery_end = leg_data["delivery_end"]
         existing_leg.updated_at = timestamp
 
     for existing_leg in existing_legs:
@@ -603,6 +728,8 @@ def sync_primary_price_term(
     pricing_type: str,
     fixed_price: object | None,
     price_index_code: str | None,
+    currency_code: str | None,
+    price_unit_code: str | None,
     timestamp: datetime,
 ) -> None:
     term = db.execute(
@@ -620,6 +747,8 @@ def sync_primary_price_term(
             pricing_type=pricing_type,
             fixed_price=fixed_price,
             price_index_code=price_index_code,
+            currency_code=currency_code,
+            price_unit_code=price_unit_code,
             created_at=timestamp,
             updated_at=timestamp,
         )
@@ -629,6 +758,8 @@ def sync_primary_price_term(
     term.pricing_type = pricing_type
     term.fixed_price = fixed_price
     term.price_index_code = price_index_code
+    term.currency_code = currency_code
+    term.price_unit_code = price_unit_code
     term.updated_at = timestamp
 
 

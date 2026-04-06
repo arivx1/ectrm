@@ -1,0 +1,4502 @@
+[
+  {
+    "code": "2222_SR",
+    "name": "Saudi Aramco",
+    "short_name": "Saudi Aramco",
+    "legal_entity_name": "Saudi Aramco",
+    "counterparty_type": "MAJOR",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0857_HK",
+    "name": "PetroChina",
+    "short_name": "PetroChina",
+    "legal_entity_name": "PetroChina",
+    "counterparty_type": "MAJOR",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0883_HK",
+    "name": "CNOOC",
+    "short_name": "CNOOC",
+    "legal_entity_name": "CNOOC",
+    "counterparty_type": "MAJOR",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "IBE_MC",
+    "name": "Iberdrola",
+    "short_name": "Iberdrola",
+    "legal_entity_name": "Iberdrola",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "601088_SS",
+    "name": "China Shenhua Energy",
+    "short_name": "China Shenhua Energy",
+    "legal_entity_name": "China Shenhua Energy",
+    "counterparty_type": "MAJOR",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENR_F",
+    "name": "Siemens Energy",
+    "short_name": "Siemens Energy",
+    "legal_entity_name": "Siemens Energy",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PBR",
+    "name": "Petrobras",
+    "short_name": "Petrobras",
+    "legal_entity_name": "Petrobras",
+    "counterparty_type": "MAJOR",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENB",
+    "name": "Enbridge",
+    "short_name": "Enbridge",
+    "legal_entity_name": "Enbridge",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENEL_MI",
+    "name": "Enel",
+    "short_name": "Enel",
+    "legal_entity_name": "Enel",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EQNR",
+    "name": "Equinor",
+    "short_name": "Equinor",
+    "legal_entity_name": "Equinor",
+    "counterparty_type": "MAJOR",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600028_SS",
+    "name": "Sinopec",
+    "short_name": "Sinopec",
+    "legal_entity_name": "Sinopec",
+    "counterparty_type": "MAJOR",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CNQ",
+    "name": "Canadian Natural Resources",
+    "short_name": "Canadian Natural Resources",
+    "legal_entity_name": "Canadian Natural Resources",
+    "counterparty_type": "MAJOR",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GLCNF",
+    "name": "Glencore",
+    "short_name": "Glencore",
+    "legal_entity_name": "Glencore",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NGG",
+    "name": "National Grid",
+    "short_name": "National Grid",
+    "legal_entity_name": "National Grid",
+    "counterparty_type": "UTILITY",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENGI_PA",
+    "name": "ENGIE",
+    "short_name": "ENGIE",
+    "legal_entity_name": "ENGIE",
+    "counterparty_type": "PRODUCER",
+    "country_code": "FR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "E",
+    "name": "ENI",
+    "short_name": "ENI",
+    "legal_entity_name": "ENI",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EPD",
+    "name": "Enterprise Products",
+    "short_name": "Enterprise Products",
+    "legal_entity_name": "Enterprise Products",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SU",
+    "name": "Suncor Energy",
+    "short_name": "Suncor Energy",
+    "legal_entity_name": "Suncor Energy",
+    "counterparty_type": "MAJOR",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TAQA_AE",
+    "name": "TAQA",
+    "short_name": "TAQA",
+    "legal_entity_name": "TAQA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADNOCGAS_AE",
+    "name": "ADNOC Gas",
+    "short_name": "ADNOC Gas",
+    "legal_entity_name": "ADNOC Gas",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "AE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TRP",
+    "name": "TC Energy",
+    "short_name": "TC Energy",
+    "legal_entity_name": "TC Energy",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ET",
+    "name": "Energy Transfer LP",
+    "short_name": "Energy Transfer LP",
+    "legal_entity_name": "Energy Transfer LP",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "IMO",
+    "name": "Imperial Oil",
+    "short_name": "Imperial Oil",
+    "legal_entity_name": "Imperial Oil",
+    "counterparty_type": "MAJOR",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "373220_KS",
+    "name": "LG Energy Solution",
+    "short_name": "LG Energy Solution",
+    "legal_entity_name": "LG Energy Solution",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ROSN_ME",
+    "name": "Rosneft",
+    "short_name": "Rosneft",
+    "legal_entity_name": "Rosneft",
+    "counterparty_type": "PRODUCER",
+    "country_code": "RU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "LNG",
+    "name": "Cheniere Energy",
+    "short_name": "Cheniere Energy",
+    "legal_entity_name": "Cheniere Energy",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EOAN_DE",
+    "name": "E.ON",
+    "short_name": "E.ON",
+    "legal_entity_name": "E.ON",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MPLX",
+    "name": "MPLX",
+    "short_name": "MPLX",
+    "legal_entity_name": "MPLX",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CVE",
+    "name": "Cenovus Energy",
+    "short_name": "Cenovus Energy",
+    "legal_entity_name": "Cenovus Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CCJ",
+    "name": "Cameco",
+    "short_name": "Cameco",
+    "legal_entity_name": "Cameco",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RWE_DE",
+    "name": "RWE",
+    "short_name": "RWE",
+    "legal_entity_name": "RWE",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "LKOH_ME",
+    "name": "Lukoil",
+    "short_name": "Lukoil",
+    "legal_entity_name": "Lukoil",
+    "counterparty_type": "PRODUCER",
+    "country_code": "RU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NVTK_ME",
+    "name": "Novatek",
+    "short_name": "Novatek",
+    "legal_entity_name": "Novatek",
+    "counterparty_type": "PRODUCER",
+    "country_code": "RU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WDS",
+    "name": "Woodside Energy",
+    "short_name": "Woodside Energy",
+    "legal_entity_name": "Woodside Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ELE_MC",
+    "name": "Endesa",
+    "short_name": "Endesa",
+    "legal_entity_name": "Endesa",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SSE_L",
+    "name": "SSE",
+    "short_name": "SSE",
+    "legal_entity_name": "SSE",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PKN_WA",
+    "name": "PKN Orlen",
+    "short_name": "PKN Orlen",
+    "legal_entity_name": "PKN Orlen",
+    "counterparty_type": "MAJOR",
+    "country_code": "PL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "034020_KS",
+    "name": "Doosan Enerbility",
+    "short_name": "Doosan Enerbility",
+    "legal_entity_name": "Doosan Enerbility",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GAZP_ME",
+    "name": "Gazprom",
+    "short_name": "Gazprom",
+    "legal_entity_name": "Gazprom",
+    "counterparty_type": "PRODUCER",
+    "country_code": "RU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ONGC_NS",
+    "name": "Oil & Natural Gas",
+    "short_name": "Oil & Natural Gas",
+    "legal_entity_name": "Oil & Natural Gas",
+    "counterparty_type": "MAJOR",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BE",
+    "name": "Bloom Energy",
+    "short_name": "Bloom Energy",
+    "legal_entity_name": "Bloom Energy",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NTPC_NS",
+    "name": "NTPC Limited",
+    "short_name": "NTPC Limited",
+    "legal_entity_name": "NTPC Limited",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "300274_SZ",
+    "name": "Sungrow Power Supply",
+    "short_name": "Sungrow Power Supply",
+    "legal_entity_name": "Sungrow Power Supply",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DEWA_AE",
+    "name": "Dubai Electricity and Water Authority (DEWA)",
+    "short_name": "Dubai Electricity and Water Authority (DEWA)",
+    "legal_entity_name": "Dubai Electricity and Water Authority (DEWA)",
+    "counterparty_type": "UTILITY",
+    "country_code": "AE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VG",
+    "name": "Venture Global",
+    "short_name": "Venture Global",
+    "legal_entity_name": "Venture Global",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "1605_T",
+    "name": "Inpex",
+    "short_name": "Inpex",
+    "legal_entity_name": "Inpex",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2082_SR",
+    "name": "ACWA POWER Company",
+    "short_name": "ACWA POWER Company",
+    "legal_entity_name": "ACWA POWER Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "601898_SS",
+    "name": "China Coal Energy Company Limited",
+    "short_name": "China Coal Energy Company Limited",
+    "legal_entity_name": "China Coal Energy Company Limited",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADANIPOWER_NS",
+    "name": "Adani Power",
+    "short_name": "Adani Power",
+    "legal_entity_name": "Adani Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "003816_SZ",
+    "name": "China General Nuclear Power Group (CGN)",
+    "short_name": "China General Nuclear Power Group (CGN)",
+    "legal_entity_name": "China General Nuclear Power Group (CGN)",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EC",
+    "name": "Ecopetrol",
+    "short_name": "Ecopetrol",
+    "legal_entity_name": "Ecopetrol",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ORSTED_CO",
+    "name": "\u00d8rsted",
+    "short_name": "\u00d8rsted",
+    "legal_entity_name": "\u00d8rsted",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CQP",
+    "name": "Cheniere Energy Partners",
+    "short_name": "Cheniere Energy Partners",
+    "legal_entity_name": "Cheniere Energy Partners",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "REP_MC",
+    "name": "Repsol",
+    "short_name": "Repsol",
+    "legal_entity_name": "Repsol",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CEZ_PR",
+    "name": "\u010cEZ Group",
+    "short_name": "\u010cEZ Group",
+    "legal_entity_name": "\u010cEZ Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "COALINDIA_NS",
+    "name": "Coal India",
+    "short_name": "Coal India",
+    "legal_entity_name": "Coal India",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PTT_R_BK",
+    "name": "PTT PCL",
+    "short_name": "PTT PCL",
+    "legal_entity_name": "PTT PCL",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FTS",
+    "name": "Fortis",
+    "short_name": "Fortis",
+    "legal_entity_name": "Fortis",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VWS_CO",
+    "name": "Vestas Wind Systems",
+    "short_name": "Vestas Wind Systems",
+    "legal_entity_name": "Vestas Wind Systems",
+    "counterparty_type": "UTILITY",
+    "country_code": "DK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NTGY_MC",
+    "name": "Naturgy",
+    "short_name": "Naturgy",
+    "legal_entity_name": "Naturgy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600188_SS",
+    "name": "Yankuang Energy (Yanzhou Coal Mining)",
+    "short_name": "Yankuang Energy (Yanzhou Coal Mining)",
+    "legal_entity_name": "Yankuang Energy (Yanzhou Coal Mining)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GULF_BK",
+    "name": "Gulf Development Public Company",
+    "short_name": "Gulf Development Public Company",
+    "legal_entity_name": "Gulf Development Public Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EBK_DE",
+    "name": "EnBW Energie",
+    "short_name": "EnBW Energie",
+    "legal_entity_name": "EnBW Energie",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "601985_SS",
+    "name": "China National Nuclear Power",
+    "short_name": "China National Nuclear Power",
+    "legal_entity_name": "China National Nuclear Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PBA",
+    "name": "Pembina Pipeline",
+    "short_name": "Pembina Pipeline",
+    "legal_entity_name": "Pembina Pipeline",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AXIA3_SA",
+    "name": "AXIA Energia SA",
+    "short_name": "AXIA Energia SA",
+    "legal_entity_name": "AXIA Energia SA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OEWA_F",
+    "name": "Verbund AG",
+    "short_name": "Verbund AG",
+    "legal_entity_name": "Verbund AG",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SRG_MI",
+    "name": "Snam",
+    "short_name": "Snam",
+    "legal_entity_name": "Snam",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "H_TO",
+    "name": "Hydro One",
+    "short_name": "Hydro One",
+    "legal_entity_name": "Hydro One",
+    "counterparty_type": "UTILITY",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "5020_T",
+    "name": "ENEOS Holdings",
+    "short_name": "ENEOS Holdings",
+    "legal_entity_name": "ENEOS Holdings",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NESTE_HE",
+    "name": "Neste",
+    "short_name": "Neste",
+    "legal_entity_name": "Neste",
+    "counterparty_type": "PRODUCER",
+    "country_code": "FI",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0002_HK",
+    "name": "CLP Group",
+    "short_name": "CLP Group",
+    "legal_entity_name": "CLP Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0ZQ_F",
+    "name": "Kazatomprom",
+    "short_name": "Kazatomprom",
+    "legal_entity_name": "Kazatomprom",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "001280_SZ",
+    "name": "China National Uranium",
+    "short_name": "China National Uranium",
+    "legal_entity_name": "China National Uranium",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OMV_F",
+    "name": "OMV",
+    "short_name": "OMV",
+    "legal_entity_name": "OMV",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FORTUM_HE",
+    "name": "Fortum",
+    "short_name": "Fortum",
+    "legal_entity_name": "Fortum",
+    "counterparty_type": "PRODUCER",
+    "country_code": "FI",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TRN_MI",
+    "name": "Terna",
+    "short_name": "Terna",
+    "legal_entity_name": "Terna",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADNOCDRILL_AE",
+    "name": "ADNOC Drilling Company",
+    "short_name": "ADNOC Drilling Company",
+    "legal_entity_name": "ADNOC Drilling Company",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "AE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EDP_F",
+    "name": "EDP Group",
+    "short_name": "EDP Group",
+    "legal_entity_name": "EDP Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AKRBP_OL",
+    "name": "Aker BP",
+    "short_name": "Aker BP",
+    "legal_entity_name": "Aker BP",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BEP",
+    "name": "Brookfield Renewable Partners",
+    "short_name": "Brookfield Renewable Partners",
+    "legal_entity_name": "Brookfield Renewable Partners",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "BM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TNABY",
+    "name": "Tenaga Nasional",
+    "short_name": "Tenaga Nasional",
+    "legal_entity_name": "Tenaga Nasional",
+    "counterparty_type": "PRODUCER",
+    "country_code": "MY",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TPIA_JK",
+    "name": "Chandra Asri Petrochemical",
+    "short_name": "Chandra Asri Petrochemical",
+    "legal_entity_name": "Chandra Asri Petrochemical",
+    "counterparty_type": "REFINER",
+    "country_code": "ID",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "QG21_F",
+    "name": "Constellation Oil Services Holding",
+    "short_name": "Constellation Oil Services Holding",
+    "legal_entity_name": "Constellation Oil Services Holding",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "LU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "IOC_NS",
+    "name": "Indian Oil",
+    "short_name": "Indian Oil",
+    "legal_entity_name": "Indian Oil",
+    "counterparty_type": "REFINER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600026_SS",
+    "name": "COSCO Shipping Energy",
+    "short_name": "COSCO Shipping Energy",
+    "legal_entity_name": "COSCO Shipping Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "UN0_DE",
+    "name": "Uniper",
+    "short_name": "Uniper",
+    "legal_entity_name": "Uniper",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PTTEP_BK",
+    "name": "PTT Exploration and Production",
+    "short_name": "PTT Exploration and Production",
+    "legal_entity_name": "PTT Exploration and Production",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "YPF",
+    "name": "YPF S.A.",
+    "short_name": "YPF S.A.",
+    "legal_entity_name": "YPF S.A.",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9503_T",
+    "name": "KEPCO",
+    "short_name": "KEPCO",
+    "legal_entity_name": "KEPCO",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "601012_SS",
+    "name": "LONGi Green Energy Technology",
+    "short_name": "LONGi Green Energy Technology",
+    "legal_entity_name": "LONGi Green Energy Technology",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "5110_SR",
+    "name": "Saudi Electricity",
+    "short_name": "Saudi Electricity",
+    "legal_entity_name": "Saudi Electricity",
+    "counterparty_type": "UTILITY",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KEP",
+    "name": "Korea Electric Power",
+    "short_name": "Korea Electric Power",
+    "legal_entity_name": "Korea Electric Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "300014_SZ",
+    "name": "EVE Energy",
+    "short_name": "EVE Energy",
+    "legal_entity_name": "EVE Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "STO_AX",
+    "name": "Santos",
+    "short_name": "Santos",
+    "legal_entity_name": "Santos",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GZ5_F",
+    "name": "Galp Energia",
+    "short_name": "Galp Energia",
+    "legal_entity_name": "Galp Energia",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TOU_TO",
+    "name": "Tourmaline Oil",
+    "short_name": "Tourmaline Oil",
+    "legal_entity_name": "Tourmaline Oil",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TATN_ME",
+    "name": "Tatneft",
+    "short_name": "Tatneft",
+    "legal_entity_name": "Tatneft",
+    "counterparty_type": "PRODUCER",
+    "country_code": "RU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EDPR_LS",
+    "name": "EDP Renov\u00e1veis",
+    "short_name": "EDP Renov\u00e1veis",
+    "legal_entity_name": "EDP Renov\u00e1veis",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600905_SS",
+    "name": "China Three Gorges Renewables",
+    "short_name": "China Three Gorges Renewables",
+    "legal_entity_name": "China Three Gorges Renewables",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ELI_BR",
+    "name": "Elia Group",
+    "short_name": "Elia Group",
+    "legal_entity_name": "Elia Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0003_HK",
+    "name": "Hong Kong and China Gas",
+    "short_name": "Hong Kong and China Gas",
+    "legal_entity_name": "Hong Kong and China Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WES",
+    "name": "Western Midstream",
+    "short_name": "Western Midstream",
+    "legal_entity_name": "Western Midstream",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "6505_TW",
+    "name": "Formosa Petrochemical",
+    "short_name": "Formosa Petrochemical",
+    "legal_entity_name": "Formosa Petrochemical",
+    "counterparty_type": "REFINER",
+    "country_code": "TW",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600886_SS",
+    "name": "SDIC Power Holdings",
+    "short_name": "SDIC Power Holdings",
+    "legal_entity_name": "SDIC Power Holdings",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600011_SS",
+    "name": "Huaneng Power International",
+    "short_name": "Huaneng Power International",
+    "legal_entity_name": "Huaneng Power International",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PAA",
+    "name": "Plains All American Pipeline",
+    "short_name": "Plains All American Pipeline",
+    "legal_entity_name": "Plains All American Pipeline",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9531_T",
+    "name": "T\u014dky\u014d Gas",
+    "short_name": "T\u014dky\u014d Gas",
+    "legal_entity_name": "T\u014dky\u014d Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "H2O_RO",
+    "name": "SPEEH Hidroelectrica",
+    "short_name": "SPEEH Hidroelectrica",
+    "legal_entity_name": "SPEEH Hidroelectrica",
+    "counterparty_type": "UTILITY",
+    "country_code": "RO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADANIGREEN_NS",
+    "name": "Adani Green Energy",
+    "short_name": "Adani Green Energy",
+    "legal_entity_name": "Adani Green Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ORG_AX",
+    "name": "Origin Energy",
+    "short_name": "Origin Energy",
+    "legal_entity_name": "Origin Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "002202_SZ",
+    "name": "Goldwind Science&Technology",
+    "short_name": "Goldwind Science&Technology",
+    "legal_entity_name": "Goldwind Science&Technology",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0916_HK",
+    "name": "China Longyuan Power Group",
+    "short_name": "China Longyuan Power Group",
+    "legal_entity_name": "China Longyuan Power Group",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TATAPOWER_NS",
+    "name": "Tata Power",
+    "short_name": "Tata Power",
+    "legal_entity_name": "Tata Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WCP_TO",
+    "name": "Whitecap Resources",
+    "short_name": "Whitecap Resources",
+    "legal_entity_name": "Whitecap Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BPCL_NS",
+    "name": "Bharat Petroleum",
+    "short_name": "Bharat Petroleum",
+    "legal_entity_name": "Bharat Petroleum",
+    "counterparty_type": "REFINER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CNA_L",
+    "name": "Centrica",
+    "short_name": "Centrica",
+    "legal_entity_name": "Centrica",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADNOCDIST_AE",
+    "name": "Abu Dhabi National Oil Company (ADNOC)",
+    "short_name": "Abu Dhabi National Oil Company (ADNOC)",
+    "legal_entity_name": "Abu Dhabi National Oil Company (ADNOC)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9502_T",
+    "name": "Chubu Electric Power",
+    "short_name": "Chubu Electric Power",
+    "legal_entity_name": "Chubu Electric Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "5019_T",
+    "name": "Idemitsu Kosan",
+    "short_name": "Idemitsu Kosan",
+    "legal_entity_name": "Idemitsu Kosan",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0836_HK",
+    "name": "China Resources Power Holdings",
+    "short_name": "China Resources Power Holdings",
+    "legal_entity_name": "China Resources Power Holdings",
+    "counterparty_type": "UTILITY",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VAR_OL",
+    "name": "V\u00e5r Energi",
+    "short_name": "V\u00e5r Energi",
+    "legal_entity_name": "V\u00e5r Energi",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADANIENSOL_NS",
+    "name": "Adani Energy Solutions",
+    "short_name": "Adani Energy Solutions",
+    "legal_entity_name": "Adani Energy Solutions",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NDX1_F",
+    "name": "Nordex",
+    "short_name": "Nordex",
+    "legal_entity_name": "Nordex",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "POWERINDIA_NS",
+    "name": "Hitachi Energy India",
+    "short_name": "Hitachi Energy India",
+    "legal_entity_name": "Hitachi Energy India",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SUN",
+    "name": "Sunoco",
+    "short_name": "Sunoco",
+    "legal_entity_name": "Sunoco",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "096775_KS",
+    "name": "SK Innovation",
+    "short_name": "SK Innovation",
+    "legal_entity_name": "SK Innovation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "IG_MI",
+    "name": "Italgas",
+    "short_name": "Italgas",
+    "legal_entity_name": "Italgas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EDNR_MI",
+    "name": "Edison",
+    "short_name": "Edison",
+    "legal_entity_name": "Edison",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ARX_TO",
+    "name": "ARC Resources",
+    "short_name": "ARC Resources",
+    "legal_entity_name": "ARC Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TUPRS_IS",
+    "name": "T\u00fcrkiye Petrol Rafinerileri",
+    "short_name": "T\u00fcrkiye Petrol Rafinerileri",
+    "legal_entity_name": "T\u00fcrkiye Petrol Rafinerileri",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CPFE3_SA",
+    "name": "CPFL Energia",
+    "short_name": "CPFL Energia",
+    "legal_entity_name": "CPFL Energia",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ALA_TO",
+    "name": "AltaGas",
+    "short_name": "AltaGas",
+    "legal_entity_name": "AltaGas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600674_SS",
+    "name": "Sichuan Chuantou Energy",
+    "short_name": "Sichuan Chuantou Energy",
+    "legal_entity_name": "Sichuan Chuantou Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PRIO3_SA",
+    "name": "Prio SA (Petro Rio)",
+    "short_name": "Prio SA (Petro Rio)",
+    "legal_entity_name": "Prio SA (Petro Rio)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BKW_SW",
+    "name": "BKW AG",
+    "short_name": "BKW AG",
+    "legal_entity_name": "BKW AG",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OPCE_TA",
+    "name": "OPC Energy",
+    "short_name": "OPC Energy",
+    "legal_entity_name": "OPC Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600023_SS",
+    "name": "Zhejiang Zheneng Electric",
+    "short_name": "Zhejiang Zheneng Electric",
+    "legal_entity_name": "Zhejiang Zheneng Electric",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600438_SS",
+    "name": "Tongwei Co.,Ltd",
+    "short_name": "Tongwei Co.,Ltd",
+    "legal_entity_name": "Tongwei Co.,Ltd",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SNG_RO",
+    "name": "Romgaz",
+    "short_name": "Romgaz",
+    "legal_entity_name": "Romgaz",
+    "counterparty_type": "PRODUCER",
+    "country_code": "RO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GAIL_NS",
+    "name": "GAIL",
+    "short_name": "GAIL",
+    "legal_entity_name": "GAIL",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "601991_SS",
+    "name": "Datang International Power Generation Company",
+    "short_name": "Datang International Power Generation Company",
+    "legal_entity_name": "Datang International Power Generation Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2883_HK",
+    "name": "China Oilfield Services",
+    "short_name": "China Oilfield Services",
+    "legal_entity_name": "China Oilfield Services",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EQTL3_SA",
+    "name": "Equatorial Energia",
+    "short_name": "Equatorial Energia",
+    "legal_entity_name": "Equatorial Energia",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600803_SS",
+    "name": "ENN Natural Gas Co.,Ltd.",
+    "short_name": "ENN Natural Gas Co.,Ltd.",
+    "legal_entity_name": "ENN Natural Gas Co.,Ltd.",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENLT",
+    "name": "Enlight Renewable Energy",
+    "short_name": "Enlight Renewable Energy",
+    "legal_entity_name": "Enlight Renewable Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CU_TO",
+    "name": "Canadian Utilities",
+    "short_name": "Canadian Utilities",
+    "legal_entity_name": "Canadian Utilities",
+    "counterparty_type": "UTILITY",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SNGS_ME",
+    "name": "Surgutneftegas",
+    "short_name": "Surgutneftegas",
+    "legal_entity_name": "Surgutneftegas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "RU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MOL_BD",
+    "name": "MOL Group",
+    "short_name": "MOL Group",
+    "legal_entity_name": "MOL Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "HU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RED_MC",
+    "name": "Red El\u00e9ctrica",
+    "short_name": "Red El\u00e9ctrica",
+    "legal_entity_name": "Red El\u00e9ctrica",
+    "counterparty_type": "UTILITY",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "010950_KS",
+    "name": "S-OIL",
+    "short_name": "S-OIL",
+    "legal_entity_name": "S-OIL",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "JSWENERGY_NS",
+    "name": "JSW Energy",
+    "short_name": "JSW Energy",
+    "legal_entity_name": "JSW Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ELPC",
+    "name": "Companhia Paranaense de Energia (COPEL)",
+    "short_name": "Companhia Paranaense de Energia (COPEL)",
+    "legal_entity_name": "Companhia Paranaense de Energia (COPEL)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENELAM_SN",
+    "name": "Enel Am\u00e9ricas",
+    "short_name": "Enel Am\u00e9ricas",
+    "legal_entity_name": "Enel Am\u00e9ricas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "A2A_MI",
+    "name": "A2A",
+    "short_name": "A2A",
+    "legal_entity_name": "A2A",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2688_HK",
+    "name": "ENN Energy",
+    "short_name": "ENN Energy",
+    "legal_entity_name": "ENN Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SPM_MI",
+    "name": "Saipem",
+    "short_name": "Saipem",
+    "legal_entity_name": "Saipem",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "APA_AX",
+    "name": "APA Group",
+    "short_name": "APA Group",
+    "legal_entity_name": "APA Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NTPCGREEN_NS",
+    "name": "NTPC Green Energy",
+    "short_name": "NTPC Green Energy",
+    "legal_entity_name": "NTPC Green Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "6033_KL",
+    "name": "PetGas (Petronas Gas)",
+    "short_name": "PetGas (Petronas Gas)",
+    "legal_entity_name": "PetGas (Petronas Gas)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "MY",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KEY_TO",
+    "name": "Keyera",
+    "short_name": "Keyera",
+    "legal_entity_name": "Keyera",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OIL_NS",
+    "name": "Oil India",
+    "short_name": "Oil India",
+    "legal_entity_name": "Oil India",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OKLO",
+    "name": "Oklo",
+    "short_name": "Oklo",
+    "legal_entity_name": "Oklo",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MEZ_AX",
+    "name": "Meridian Energy",
+    "short_name": "Meridian Energy",
+    "legal_entity_name": "Meridian Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CWEN",
+    "name": "Clearway Energy",
+    "short_name": "Clearway Energy",
+    "legal_entity_name": "Clearway Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HESM",
+    "name": "Hess Midstream",
+    "short_name": "Hess Midstream",
+    "legal_entity_name": "Hess Midstream",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ANE_MC",
+    "name": "Acciona Energ\u00edas Renovables",
+    "short_name": "Acciona Energ\u00edas Renovables",
+    "legal_entity_name": "Acciona Energ\u00edas Renovables",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0135_HK",
+    "name": "Kunlun Energy Company",
+    "short_name": "Kunlun Energy Company",
+    "legal_entity_name": "Kunlun Energy Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NE",
+    "name": "Noble Corporation",
+    "short_name": "Noble Corporation",
+    "legal_entity_name": "Noble Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PPC_AT",
+    "name": "Public Power Corporation",
+    "short_name": "Public Power Corporation",
+    "legal_entity_name": "Public Power Corporation",
+    "counterparty_type": "UTILITY",
+    "country_code": "GR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SSL",
+    "name": "Sasol",
+    "short_name": "Sasol",
+    "legal_entity_name": "Sasol",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ZA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CIG",
+    "name": "Cemig",
+    "short_name": "Cemig",
+    "legal_entity_name": "Cemig",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TE_PA",
+    "name": "Technip Energies",
+    "short_name": "Technip Energies",
+    "legal_entity_name": "Technip Energies",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "FR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NXE",
+    "name": "NexGen Energy",
+    "short_name": "NexGen Energy",
+    "legal_entity_name": "NexGen Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "6742_KL",
+    "name": "YTL Power International",
+    "short_name": "YTL Power International",
+    "legal_entity_name": "YTL Power International",
+    "counterparty_type": "UTILITY",
+    "country_code": "MY",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600027_SS",
+    "name": "Huadian Power International",
+    "short_name": "Huadian Power International",
+    "legal_entity_name": "Huadian Power International",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VIST",
+    "name": "Vista Energy",
+    "short_name": "Vista Energy",
+    "legal_entity_name": "Vista Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "MX",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "YAL_AX",
+    "name": "Yancoal",
+    "short_name": "Yancoal",
+    "legal_entity_name": "Yancoal",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HINDPETRO_NS",
+    "name": "Hindustan Petroleum",
+    "short_name": "Hindustan Petroleum",
+    "legal_entity_name": "Hindustan Petroleum",
+    "counterparty_type": "REFINER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BEPC",
+    "name": "Brookfield Renewable",
+    "short_name": "Brookfield Renewable",
+    "legal_entity_name": "Brookfield Renewable",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CPX_TO",
+    "name": "Capital Power",
+    "short_name": "Capital Power",
+    "legal_entity_name": "Capital Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EGIE3_SA",
+    "name": "ENGIE Brasil",
+    "short_name": "ENGIE Brasil",
+    "legal_entity_name": "ENGIE Brasil",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2638_HK",
+    "name": "HK Electric Investments",
+    "short_name": "HK Electric Investments",
+    "legal_entity_name": "HK Electric Investments",
+    "counterparty_type": "UTILITY",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GAS_VN",
+    "name": "Petrovietnam Gas",
+    "short_name": "Petrovietnam Gas",
+    "legal_entity_name": "Petrovietnam Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "VN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SM",
+    "name": "SM Energy",
+    "short_name": "SM Energy",
+    "legal_entity_name": "SM Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TORNTPOWER_NS",
+    "name": "Torrent Power",
+    "short_name": "Torrent Power",
+    "legal_entity_name": "Torrent Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RIG",
+    "name": "Transocean",
+    "short_name": "Transocean",
+    "legal_entity_name": "Transocean",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BRPT_JK",
+    "name": "Barito Pacific",
+    "short_name": "Barito Pacific",
+    "legal_entity_name": "Barito Pacific",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ID",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SOBO",
+    "name": "South Bow",
+    "short_name": "South Bow",
+    "legal_entity_name": "South Bow",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HER_MI",
+    "name": "Hera Group",
+    "short_name": "Hera Group",
+    "legal_entity_name": "Hera Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PGE_WA",
+    "name": "PGE Polska",
+    "short_name": "PGE Polska",
+    "legal_entity_name": "PGE Polska",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "UEC",
+    "name": "Uranium Energy",
+    "short_name": "Uranium Energy",
+    "legal_entity_name": "Uranium Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SCR_TO",
+    "name": "Strathcona Resources",
+    "short_name": "Strathcona Resources",
+    "legal_entity_name": "Strathcona Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "UNTR_JK",
+    "name": "United Tractors",
+    "short_name": "United Tractors",
+    "legal_entity_name": "United Tractors",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ID",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9501_T",
+    "name": "Tokyo Electric Power Company",
+    "short_name": "Tokyo Electric Power Company",
+    "legal_entity_name": "Tokyo Electric Power Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "QGTS_QA",
+    "name": "Qatar Gas Transport Company",
+    "short_name": "Qatar Gas Transport Company",
+    "legal_entity_name": "Qatar Gas Transport Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "QA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ATGL_NS",
+    "name": "Adani Total Gas",
+    "short_name": "Adani Total Gas",
+    "legal_entity_name": "Adani Total Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DLEKG_TA",
+    "name": "Delek Group",
+    "short_name": "Delek Group",
+    "legal_entity_name": "Delek Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MWH",
+    "name": "SOLV Energy",
+    "short_name": "SOLV Energy",
+    "legal_entity_name": "SOLV Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CRC",
+    "name": "California Resources Corporation",
+    "short_name": "California Resources Corporation",
+    "legal_entity_name": "California Resources Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "UGP",
+    "name": "Ultrapar Participacoes",
+    "short_name": "Ultrapar Participacoes",
+    "legal_entity_name": "Ultrapar Participacoes",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MGY",
+    "name": "Magnolia Oil & Gas",
+    "short_name": "Magnolia Oil & Gas",
+    "legal_entity_name": "Magnolia Oil & Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HBR_L",
+    "name": "Harbour Energy",
+    "short_name": "Harbour Energy",
+    "legal_entity_name": "Harbour Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EVN_F",
+    "name": "EVN Group",
+    "short_name": "EVN Group",
+    "legal_entity_name": "EVN Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CRK",
+    "name": "Comstock Resources",
+    "short_name": "Comstock Resources",
+    "legal_entity_name": "Comstock Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENIC",
+    "name": "Enel Chile",
+    "short_name": "Enel Chile",
+    "legal_entity_name": "Enel Chile",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GLNG",
+    "name": "Golar LNG",
+    "short_name": "Golar LNG",
+    "legal_entity_name": "Golar LNG",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "BM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ACE_MI",
+    "name": "ACEA",
+    "short_name": "ACEA",
+    "legal_entity_name": "ACEA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PAGP",
+    "name": "Plains GP",
+    "short_name": "Plains GP",
+    "legal_entity_name": "Plains GP",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "1193_HK",
+    "name": "China Resources Gas Group",
+    "short_name": "China Resources Gas Group",
+    "legal_entity_name": "China Resources Gas Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ITH_L",
+    "name": "Ithaca Energy",
+    "short_name": "Ithaca Energy",
+    "legal_entity_name": "Ithaca Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "LB",
+    "name": "LandBridge",
+    "short_name": "LandBridge",
+    "legal_entity_name": "LandBridge",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TGS",
+    "name": "Transportadora de Gas del Sur",
+    "short_name": "Transportadora de Gas del Sur",
+    "legal_entity_name": "Transportadora de Gas del Sur",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ALD_AX",
+    "name": "Ampol",
+    "short_name": "Ampol",
+    "legal_entity_name": "Ampol",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DCC_L",
+    "name": "DCC plc",
+    "short_name": "DCC plc",
+    "legal_entity_name": "DCC plc",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PSK_TO",
+    "name": "PrairieSky Royalty",
+    "short_name": "PrairieSky Royalty",
+    "legal_entity_name": "PrairieSky Royalty",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CNR",
+    "name": "Core Natural Resources",
+    "short_name": "Core Natural Resources",
+    "legal_entity_name": "Core Natural Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CEN_NZ",
+    "name": "Contact Energy",
+    "short_name": "Contact Energy",
+    "legal_entity_name": "Contact Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2382_SR",
+    "name": "ADES Holding Company",
+    "short_name": "ADES Holding Company",
+    "legal_entity_name": "ADES Holding Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "688599_SS",
+    "name": "Trina Solar",
+    "short_name": "Trina Solar",
+    "legal_entity_name": "Trina Solar",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SEI",
+    "name": "Solaris Energy Infrastructure",
+    "short_name": "Solaris Energy Infrastructure",
+    "legal_entity_name": "Solaris Energy Infrastructure",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WHC_AX",
+    "name": "Whitehaven Coal",
+    "short_name": "Whitehaven Coal",
+    "legal_entity_name": "Whitehaven Coal",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENG_MC",
+    "name": "Enag\u00e1s",
+    "short_name": "Enag\u00e1s",
+    "legal_entity_name": "Enag\u00e1s",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KGS",
+    "name": "Kodiak Gas Services",
+    "short_name": "Kodiak Gas Services",
+    "legal_entity_name": "Kodiak Gas Services",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TPE_WA",
+    "name": "Tauron Polska",
+    "short_name": "Tauron Polska",
+    "legal_entity_name": "Tauron Polska",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MCY_AX",
+    "name": "Mercury NZ",
+    "short_name": "Mercury NZ",
+    "legal_entity_name": "Mercury NZ",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "0384_HK",
+    "name": "China Gas",
+    "short_name": "China Gas",
+    "legal_entity_name": "China Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2380_HK",
+    "name": "China Power International Development",
+    "short_name": "China Power International Development",
+    "legal_entity_name": "China Power International Development",
+    "counterparty_type": "UTILITY",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ACO_X_TO",
+    "name": "ATCO",
+    "short_name": "ATCO",
+    "legal_entity_name": "ATCO",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NVPT_TA",
+    "name": "Navitas Petroleum",
+    "short_name": "Navitas Petroleum",
+    "legal_entity_name": "Navitas Petroleum",
+    "counterparty_type": "REFINER",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PAM",
+    "name": "Pampa Energ\u00eda",
+    "short_name": "Pampa Energ\u00eda",
+    "legal_entity_name": "Pampa Energ\u00eda",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MOH_AT",
+    "name": "Motor Oil (Hellas) Corinth Refineries",
+    "short_name": "Motor Oil (Hellas) Corinth Refineries",
+    "legal_entity_name": "Motor Oil (Hellas) Corinth Refineries",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AQN",
+    "name": "Algonquin Power & Utilities",
+    "short_name": "Algonquin Power & Utilities",
+    "legal_entity_name": "Algonquin Power & Utilities",
+    "counterparty_type": "UTILITY",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9513_T",
+    "name": "J-POWER (Electric Power Development)",
+    "short_name": "J-POWER (Electric Power Development)",
+    "legal_entity_name": "J-POWER (Electric Power Development)",
+    "counterparty_type": "UTILITY",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CENER_BR",
+    "name": "Cenergy Holdings",
+    "short_name": "Cenergy Holdings",
+    "legal_entity_name": "Cenergy Holdings",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ABZPY",
+    "name": "Aboitiz Power",
+    "short_name": "Aboitiz Power",
+    "legal_entity_name": "Aboitiz Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "PH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AGL_AX",
+    "name": "AGL Energy",
+    "short_name": "AGL Energy",
+    "legal_entity_name": "AGL Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "LBRT",
+    "name": "Liberty Energy",
+    "short_name": "Liberty Energy",
+    "legal_entity_name": "Liberty Energy",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OR_BK",
+    "name": "PTT Oil and Retail Business",
+    "short_name": "PTT Oil and Retail Business",
+    "legal_entity_name": "PTT Oil and Retail Business",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CSE_PA_TO",
+    "name": "Capstone Infrastructure",
+    "short_name": "Capstone Infrastructure",
+    "legal_entity_name": "Capstone Infrastructure",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NPI_TO",
+    "name": "Northland Power",
+    "short_name": "Northland Power",
+    "legal_entity_name": "Northland Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "009830_KS",
+    "name": "Hanwha Solutions",
+    "short_name": "Hanwha Solutions",
+    "legal_entity_name": "Hanwha Solutions",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "600583_SS",
+    "name": "Offshore Oil Engineering Co.,Ltd",
+    "short_name": "Offshore Oil Engineering Co.,Ltd",
+    "legal_entity_name": "Offshore Oil Engineering Co.,Ltd",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "QEWS_QA",
+    "name": "Qatar Electricity & Water Company",
+    "short_name": "Qatar Electricity & Water Company",
+    "legal_entity_name": "Qatar Electricity & Water Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "QA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "UUUU",
+    "name": "Energy Fuels",
+    "short_name": "Energy Fuels",
+    "legal_entity_name": "Energy Fuels",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADRO_JK",
+    "name": "Adaro Energy",
+    "short_name": "Adaro Energy",
+    "legal_entity_name": "Adaro Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ID",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NLCINDIA_NS",
+    "name": "NLC India",
+    "short_name": "NLC India",
+    "legal_entity_name": "NLC India",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OGDC_PK",
+    "name": "Oil & Gas Development Company",
+    "short_name": "Oil & Gas Development Company",
+    "legal_entity_name": "Oil & Gas Development Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RUI_PA",
+    "name": "Rubis",
+    "short_name": "Rubis",
+    "legal_entity_name": "Rubis",
+    "counterparty_type": "PRODUCER",
+    "country_code": "FR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PETRONET_NS",
+    "name": "Petronet LNG",
+    "short_name": "Petronet LNG",
+    "legal_entity_name": "Petronet LNG",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CSAN",
+    "name": "Cosan",
+    "short_name": "Cosan",
+    "legal_entity_name": "Cosan",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PTEN",
+    "name": "Patterson-UTI Energy",
+    "short_name": "Patterson-UTI Energy",
+    "legal_entity_name": "Patterson-UTI Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TAC",
+    "name": "TransAlta",
+    "short_name": "TransAlta",
+    "legal_entity_name": "TransAlta",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GPOR",
+    "name": "Gulfport Energy",
+    "short_name": "Gulfport Energy",
+    "legal_entity_name": "Gulfport Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WOR_AX",
+    "name": "Worley",
+    "short_name": "Worley",
+    "legal_entity_name": "Worley",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DRX_L",
+    "name": "Drax Group",
+    "short_name": "Drax Group",
+    "legal_entity_name": "Drax Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "QFLS_QA",
+    "name": "Qatar Fuel Company (WOQOD)",
+    "short_name": "Qatar Fuel Company (WOQOD)",
+    "legal_entity_name": "Qatar Fuel Company (WOQOD)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "QA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "3800_HK",
+    "name": "GCL Technology",
+    "short_name": "GCL Technology",
+    "legal_entity_name": "GCL Technology",
+    "counterparty_type": "PRODUCER",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TVE_TO",
+    "name": "Tamarack Valley Energy",
+    "short_name": "Tamarack Valley Energy",
+    "legal_entity_name": "Tamarack Valley Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "1164_HK",
+    "name": "CGN Mining Company",
+    "short_name": "CGN Mining Company",
+    "legal_entity_name": "CGN Mining Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "HK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ERG_MI",
+    "name": "ERG",
+    "short_name": "ERG",
+    "legal_entity_name": "ERG",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GRE_MC",
+    "name": "Grenergy Renovables",
+    "short_name": "Grenergy Renovables",
+    "legal_entity_name": "Grenergy Renovables",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PEY_TO",
+    "name": "Peyto Exploration & Development",
+    "short_name": "Peyto Exploration & Development",
+    "legal_entity_name": "Peyto Exploration & Development",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENA_WA",
+    "name": "Enea",
+    "short_name": "Enea",
+    "legal_entity_name": "Enea",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "IRE_MI",
+    "name": "Iren",
+    "short_name": "Iren",
+    "legal_entity_name": "Iren",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CMBT",
+    "name": "CMB.TECH",
+    "short_name": "CMB.TECH",
+    "legal_entity_name": "CMB.TECH",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EE",
+    "name": "Excelerate Energy",
+    "short_name": "Excelerate Energy",
+    "legal_entity_name": "Excelerate Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ATH_TO",
+    "name": "Athabasca Oil Corporation",
+    "short_name": "Athabasca Oil Corporation",
+    "legal_entity_name": "Athabasca Oil Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OTTR",
+    "name": "Otter Tail",
+    "short_name": "Otter Tail",
+    "legal_entity_name": "Otter Tail",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GEI_TO",
+    "name": "Gibson Energy",
+    "short_name": "Gibson Energy",
+    "legal_entity_name": "Gibson Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9506_T",
+    "name": "Tohoku Electric Power",
+    "short_name": "Tohoku Electric Power",
+    "legal_entity_name": "Tohoku Electric Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "LEU",
+    "name": "Centrus Energy",
+    "short_name": "Centrus Energy",
+    "legal_entity_name": "Centrus Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SLR_MC",
+    "name": "Solaria Energ\u00eda",
+    "short_name": "Solaria Energ\u00eda",
+    "legal_entity_name": "Solaria Energ\u00eda",
+    "counterparty_type": "UTILITY",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HP",
+    "name": "Helmerich & Payne",
+    "short_name": "Helmerich & Payne",
+    "legal_entity_name": "Helmerich & Payne",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PDN_AX",
+    "name": "Paladin Energy",
+    "short_name": "Paladin Energy",
+    "legal_entity_name": "Paladin Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "4200_SR",
+    "name": "Aldrees Petroleum and Transport Services",
+    "short_name": "Aldrees Petroleum and Transport Services",
+    "legal_entity_name": "Aldrees Petroleum and Transport Services",
+    "counterparty_type": "REFINER",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENRG_TA",
+    "name": "Energix Renewable Energies",
+    "short_name": "Energix Renewable Energies",
+    "legal_entity_name": "Energix Renewable Energies",
+    "counterparty_type": "UTILITY",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TPZ_TO",
+    "name": "Topaz Energy",
+    "short_name": "Topaz Energy",
+    "legal_entity_name": "Topaz Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SES_TO",
+    "name": "Secure Energy Services",
+    "short_name": "Secure Energy Services",
+    "legal_entity_name": "Secure Energy Services",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ELPE_AT",
+    "name": "HELLENiQ ENERGY",
+    "short_name": "HELLENiQ ENERGY",
+    "legal_entity_name": "HELLENiQ ENERGY",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NHC_AX",
+    "name": "New Hope Corporation",
+    "short_name": "New Hope Corporation",
+    "legal_entity_name": "New Hope Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DNN",
+    "name": "Denison Mines",
+    "short_name": "Denison Mines",
+    "legal_entity_name": "Denison Mines",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FRMI",
+    "name": "Fermi Inc.",
+    "short_name": "Fermi Inc.",
+    "legal_entity_name": "Fermi Inc.",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BTE",
+    "name": "Baytex Energy",
+    "short_name": "Baytex Energy",
+    "legal_entity_name": "Baytex Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SMR",
+    "name": "NuScale Power",
+    "short_name": "NuScale Power",
+    "legal_entity_name": "NuScale Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EXX_JO",
+    "name": "Exxaro Resources",
+    "short_name": "Exxaro Resources",
+    "legal_entity_name": "Exxaro Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ZA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PARR",
+    "name": "Par Pacific Holdings",
+    "short_name": "Par Pacific Holdings",
+    "legal_entity_name": "Par Pacific Holdings",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "7277_KL",
+    "name": "Dialog Group",
+    "short_name": "Dialog Group",
+    "legal_entity_name": "Dialog Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "MY",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CVI",
+    "name": "CVR Energy",
+    "short_name": "CVR Energy",
+    "legal_entity_name": "CVR Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RUN",
+    "name": "Sunrun",
+    "short_name": "Sunrun",
+    "legal_entity_name": "Sunrun",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BSM",
+    "name": "Black Stone Minerals",
+    "short_name": "Black Stone Minerals",
+    "legal_entity_name": "Black Stone Minerals",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CPK",
+    "name": "Chesapeake Utilities",
+    "short_name": "Chesapeake Utilities",
+    "legal_entity_name": "Chesapeake Utilities",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OQGN_OM",
+    "name": "OQ Gas Network Company",
+    "short_name": "OQ Gas Network Company",
+    "legal_entity_name": "OQ Gas Network Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "OM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TOP_BK",
+    "name": "Thai Oil",
+    "short_name": "Thai Oil",
+    "legal_entity_name": "Thai Oil",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BKV",
+    "name": "BKV Corporation",
+    "short_name": "BKV Corporation",
+    "legal_entity_name": "BKV Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KNTK",
+    "name": "Kinetik",
+    "short_name": "Kinetik",
+    "legal_entity_name": "Kinetik",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9533_T",
+    "name": "Toho Gas",
+    "short_name": "Toho Gas",
+    "legal_entity_name": "Toho Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NOG",
+    "name": "Northern Oil and Gas",
+    "short_name": "Northern Oil and Gas",
+    "legal_entity_name": "Northern Oil and Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SEDG",
+    "name": "SolarEdge",
+    "short_name": "SolarEdge",
+    "legal_entity_name": "SolarEdge",
+    "counterparty_type": "UTILITY",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "IPCO_TO",
+    "name": "International Petroleum",
+    "short_name": "International Petroleum",
+    "legal_entity_name": "International Petroleum",
+    "counterparty_type": "REFINER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "POU_TO",
+    "name": "Paramount Resources",
+    "short_name": "Paramount Resources",
+    "legal_entity_name": "Paramount Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RENE_LS",
+    "name": "REN (Redes Energ\u00e9ticas Nacionais)",
+    "short_name": "REN (Redes Energ\u00e9ticas Nacionais)",
+    "legal_entity_name": "REN (Redes Energ\u00e9ticas Nacionais)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VEA_AX",
+    "name": "Viva Energy",
+    "short_name": "Viva Energy",
+    "legal_entity_name": "Viva Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GPSC_BK",
+    "name": "Global Power Synergy",
+    "short_name": "Global Power Synergy",
+    "legal_entity_name": "Global Power Synergy",
+    "counterparty_type": "UTILITY",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MGEE",
+    "name": "MGE Energy",
+    "short_name": "MGE Energy",
+    "legal_entity_name": "MGE Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "LEC_F",
+    "name": "LEW (Lechwerke)",
+    "short_name": "LEW (Lechwerke)",
+    "legal_entity_name": "LEW (Lechwerke)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TAEE11_SA",
+    "name": "Taesa (Transmissora Alian\u00e7a de Energia El\u00e9trica)",
+    "short_name": "Taesa (Transmissora Alian\u00e7a de Energia El\u00e9trica)",
+    "legal_entity_name": "Taesa (Transmissora Alian\u00e7a de Energia El\u00e9trica)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SDRL",
+    "name": "Seadrill",
+    "short_name": "Seadrill",
+    "legal_entity_name": "Seadrill",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "UKW_L",
+    "name": "Greencoat UK Wind",
+    "short_name": "Greencoat UK Wind",
+    "legal_entity_name": "Greencoat UK Wind",
+    "counterparty_type": "UTILITY",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "3899_HK",
+    "name": "CIMC Enric",
+    "short_name": "CIMC Enric",
+    "legal_entity_name": "CIMC Enric",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MNV6_F",
+    "name": "Mainova",
+    "short_name": "Mainova",
+    "legal_entity_name": "Mainova",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VCT_NZ",
+    "name": "Vector Limited",
+    "short_name": "Vector Limited",
+    "legal_entity_name": "Vector Limited",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BLX_TO",
+    "name": "Boralex",
+    "short_name": "Boralex",
+    "legal_entity_name": "Boralex",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DK",
+    "name": "Delek US",
+    "short_name": "Delek US",
+    "legal_entity_name": "Delek US",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DKL",
+    "name": "Delek Logistics Partners",
+    "short_name": "Delek Logistics Partners",
+    "legal_entity_name": "Delek Logistics Partners",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MARI_PK",
+    "name": "Mari Petroleum Company",
+    "short_name": "Mari Petroleum Company",
+    "legal_entity_name": "Mari Petroleum Company",
+    "counterparty_type": "REFINER",
+    "country_code": "PK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TALO",
+    "name": "Talos Energy",
+    "short_name": "Talos Energy",
+    "legal_entity_name": "Talos Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HE",
+    "name": "Hawaiian Electric Industries",
+    "short_name": "Hawaiian Electric Industries",
+    "legal_entity_name": "Hawaiian Electric Industries",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CEPU",
+    "name": "Central Puerto",
+    "short_name": "Central Puerto",
+    "legal_entity_name": "Central Puerto",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MSKE_TA",
+    "name": "Meshek Energy - Renewable Energies",
+    "short_name": "Meshek Energy - Renewable Energies",
+    "legal_entity_name": "Meshek Energy - Renewable Energies",
+    "counterparty_type": "UTILITY",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "COLBUN_SN",
+    "name": "Colb\u00fan",
+    "short_name": "Colb\u00fan",
+    "legal_entity_name": "Colb\u00fan",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TGS_OL",
+    "name": "TGS ASA",
+    "short_name": "TGS ASA",
+    "legal_entity_name": "TGS ASA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RGSI_TO",
+    "name": "Rockpoint Gas Storage",
+    "short_name": "Rockpoint Gas Storage",
+    "legal_entity_name": "Rockpoint Gas Storage",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MAU_PA",
+    "name": "Etablissements Maurel & Prom",
+    "short_name": "Etablissements Maurel & Prom",
+    "legal_entity_name": "Etablissements Maurel & Prom",
+    "counterparty_type": "PRODUCER",
+    "country_code": "FR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EFXT",
+    "name": "Enerflex",
+    "short_name": "Enerflex",
+    "legal_entity_name": "Enerflex",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FLNC",
+    "name": "Fluence Energy",
+    "short_name": "Fluence Energy",
+    "legal_entity_name": "Fluence Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MNR",
+    "name": "Mach Natural Resources LP",
+    "short_name": "Mach Natural Resources LP",
+    "legal_entity_name": "Mach Natural Resources LP",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MVV1_F",
+    "name": "MVV Energie",
+    "short_name": "MVV Energie",
+    "legal_entity_name": "MVV Energie",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GUJGASLTD_NS",
+    "name": "Gujarat Gas",
+    "short_name": "Gujarat Gas",
+    "legal_entity_name": "Gujarat Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NESR",
+    "name": "National Energy Services Reunited",
+    "short_name": "National Energy Services Reunited",
+    "legal_entity_name": "National Energy Services Reunited",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NWN",
+    "name": "NW Natural",
+    "short_name": "NW Natural",
+    "legal_entity_name": "NW Natural",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SOC",
+    "name": "Sable Offshore",
+    "short_name": "Sable Offshore",
+    "legal_entity_name": "Sable Offshore",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AKSO_OL",
+    "name": "Aker Solutions ASA",
+    "short_name": "Aker Solutions ASA",
+    "legal_entity_name": "Aker Solutions ASA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DNOW",
+    "name": "DNOW Inc.",
+    "short_name": "DNOW Inc.",
+    "legal_entity_name": "DNOW Inc.",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9504_T",
+    "name": "The Chugoku Electric Power",
+    "short_name": "The Chugoku Electric Power",
+    "legal_entity_name": "The Chugoku Electric Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SCATC_OL",
+    "name": "Scatec ASA",
+    "short_name": "Scatec ASA",
+    "legal_entity_name": "Scatec ASA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GEL",
+    "name": "Genesis Energy L.P.",
+    "short_name": "Genesis Energy L.P.",
+    "legal_entity_name": "Genesis Energy L.P.",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AKSEN_IS",
+    "name": "Aksa Energy",
+    "short_name": "Aksa Energy",
+    "legal_entity_name": "Aksa Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HWX_TO",
+    "name": "Headwater Exploration",
+    "short_name": "Headwater Exploration",
+    "legal_entity_name": "Headwater Exploration",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BW",
+    "name": "Babcock & Wilcox",
+    "short_name": "Babcock & Wilcox",
+    "legal_entity_name": "Babcock & Wilcox",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2083_SR",
+    "name": "MARAFIQ (The Power and Water Utility Company for Jubail and Yanbu)",
+    "short_name": "MARAFIQ (The Power and Water Utility Company for Jubail and Yanbu)",
+    "legal_entity_name": "MARAFIQ (The Power and Water Utility Company for Jubail and Yanbu)",
+    "counterparty_type": "UTILITY",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NEXT",
+    "name": "NextDecade Corp",
+    "short_name": "NextDecade Corp",
+    "legal_entity_name": "NextDecade Corp",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DNO_OL",
+    "name": "DNO ASA",
+    "short_name": "DNO ASA",
+    "legal_entity_name": "DNO ASA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENOG_L",
+    "name": "Energean",
+    "short_name": "Energean",
+    "legal_entity_name": "Energean",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BPT_AX",
+    "name": "Beach Energy",
+    "short_name": "Beach Energy",
+    "legal_entity_name": "Beach Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VET",
+    "name": "Vermilion Energy",
+    "short_name": "Vermilion Energy",
+    "legal_entity_name": "Vermilion Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "036460_KS",
+    "name": "Korea Gas",
+    "short_name": "Korea Gas",
+    "legal_entity_name": "Korea Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KPIL_NS",
+    "name": "alpataru Projects International",
+    "short_name": "alpataru Projects International",
+    "legal_entity_name": "alpataru Projects International",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FRU_TO",
+    "name": "Freehold Royalties",
+    "short_name": "Freehold Royalties",
+    "legal_entity_name": "Freehold Royalties",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RATCH_BK",
+    "name": "Ratch Group",
+    "short_name": "Ratch Group",
+    "legal_entity_name": "Ratch Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "YCA_L",
+    "name": "Yellow Cake plc",
+    "short_name": "Yellow Cake plc",
+    "legal_entity_name": "Yellow Cake plc",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PPL_PK",
+    "name": "Pakistan Petroleum",
+    "short_name": "Pakistan Petroleum",
+    "legal_entity_name": "Pakistan Petroleum",
+    "counterparty_type": "REFINER",
+    "country_code": "PK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PLX_VN",
+    "name": "Vietnam National Petroleum Group",
+    "short_name": "Vietnam National Petroleum Group",
+    "legal_entity_name": "Vietnam National Petroleum Group",
+    "counterparty_type": "REFINER",
+    "country_code": "VN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "336260_KS",
+    "name": "Doosan Fuel Cell",
+    "short_name": "Doosan Fuel Cell",
+    "legal_entity_name": "Doosan Fuel Cell",
+    "counterparty_type": "PRODUCER",
+    "country_code": "KR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "S92_F",
+    "name": "SMA Solar Technology",
+    "short_name": "SMA Solar Technology",
+    "legal_entity_name": "SMA Solar Technology",
+    "counterparty_type": "UTILITY",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "XPRO",
+    "name": "Expro Group",
+    "short_name": "Expro Group",
+    "legal_entity_name": "Expro Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PXT_TO",
+    "name": "Parex Resources",
+    "short_name": "Parex Resources",
+    "legal_entity_name": "Parex Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2381_SR",
+    "name": "Arabian Drilling Company",
+    "short_name": "Arabian Drilling Company",
+    "legal_entity_name": "Arabian Drilling Company",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BANPU_BK",
+    "name": "Banpu Public Company",
+    "short_name": "Banpu Public Company",
+    "legal_entity_name": "Banpu Public Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EGCO_BK",
+    "name": "Electricity Generating Public Company",
+    "short_name": "Electricity Generating Public Company",
+    "legal_entity_name": "Electricity Generating Public Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BORR",
+    "name": "Borr Drilling",
+    "short_name": "Borr Drilling",
+    "legal_entity_name": "Borr Drilling",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "BM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ELEC_PA",
+    "name": "\u00c9lectricite de Strasbourg",
+    "short_name": "\u00c9lectricite de Strasbourg",
+    "legal_entity_name": "\u00c9lectricite de Strasbourg",
+    "counterparty_type": "UTILITY",
+    "country_code": "FR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "2080_SR",
+    "name": "Gasco (National Gas and Industrialization Company)",
+    "short_name": "Gasco (National Gas and Industrialization Company)",
+    "legal_entity_name": "Gasco (National Gas and Industrialization Company)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "SA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NOFR_TA",
+    "name": "O.Y. Nofar Energy",
+    "short_name": "O.Y. Nofar Energy",
+    "legal_entity_name": "O.Y. Nofar Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KOS",
+    "name": "Kosmos Energy",
+    "short_name": "Kosmos Energy",
+    "legal_entity_name": "Kosmos Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RNW",
+    "name": "ReNew Power",
+    "short_name": "ReNew Power",
+    "legal_entity_name": "ReNew Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MINERA_SN",
+    "name": "Minera Valpara\u00edso",
+    "short_name": "Minera Valpara\u00edso",
+    "legal_entity_name": "Minera Valpara\u00edso",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ESENTIAII_MX",
+    "name": "Esentia Energy Systems",
+    "short_name": "Esentia Energy Systems",
+    "legal_entity_name": "Esentia Energy Systems",
+    "counterparty_type": "PRODUCER",
+    "country_code": "MX",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FLUX_BR",
+    "name": "Fluxys Belgium",
+    "short_name": "Fluxys Belgium",
+    "legal_entity_name": "Fluxys Belgium",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "INVX",
+    "name": "Innovex International",
+    "short_name": "Innovex International",
+    "legal_entity_name": "Innovex International",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DANA_AE",
+    "name": "Dana Gas",
+    "short_name": "Dana Gas",
+    "legal_entity_name": "Dana Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CHENNPETRO_NS",
+    "name": "Chennai Petroleum",
+    "short_name": "Chennai Petroleum",
+    "legal_entity_name": "Chennai Petroleum",
+    "counterparty_type": "REFINER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RATI_TA",
+    "name": "Ratio Energies",
+    "short_name": "Ratio Energies",
+    "legal_entity_name": "Ratio Energies",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BCP_BK",
+    "name": "Bangchak Corporation",
+    "short_name": "Bangchak Corporation",
+    "legal_entity_name": "Bangchak Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KRP",
+    "name": "Kimbell Royalty Partners",
+    "short_name": "Kimbell Royalty Partners",
+    "legal_entity_name": "Kimbell Royalty Partners",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "REHN_SW",
+    "name": "Romande Energie",
+    "short_name": "Romande Energie",
+    "legal_entity_name": "Romande Energie",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NGL",
+    "name": "NGL Energy Partners",
+    "short_name": "NGL Energy Partners",
+    "legal_entity_name": "NGL Energy Partners",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VH2_DE",
+    "name": "Friedrich Vorwerk Group",
+    "short_name": "Friedrich Vorwerk Group",
+    "legal_entity_name": "Friedrich Vorwerk Group",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RES",
+    "name": "RPC, Inc.",
+    "short_name": "RPC, Inc.",
+    "legal_entity_name": "RPC, Inc.",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GLP",
+    "name": "Global Partners LP",
+    "short_name": "Global Partners LP",
+    "legal_entity_name": "Global Partners LP",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "REX",
+    "name": "REX American Resources",
+    "short_name": "REX American Resources",
+    "legal_entity_name": "REX American Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "INOXWIND_NS",
+    "name": "Inox Wind",
+    "short_name": "Inox Wind",
+    "legal_entity_name": "Inox Wind",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "POW_VN",
+    "name": "PetroVietnam Power",
+    "short_name": "PetroVietnam Power",
+    "legal_entity_name": "PetroVietnam Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "VN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BNOR_OL",
+    "name": "BlueNord ASA",
+    "short_name": "BlueNord ASA",
+    "legal_entity_name": "BlueNord ASA",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EDN",
+    "name": "edenor",
+    "short_name": "edenor",
+    "legal_entity_name": "edenor",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SQZ_L",
+    "name": "Serica Energy",
+    "short_name": "Serica Energy",
+    "legal_entity_name": "Serica Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9505_T",
+    "name": "Hokuriku Electric Power Company",
+    "short_name": "Hokuriku Electric Power Company",
+    "legal_entity_name": "Hokuriku Electric Power Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DQ",
+    "name": "Daqo New Energy",
+    "short_name": "Daqo New Energy",
+    "legal_entity_name": "Daqo New Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HLX",
+    "name": "Helix Energy Solutions",
+    "short_name": "Helix Energy Solutions",
+    "legal_entity_name": "Helix Energy Solutions",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GNE_NZ",
+    "name": "Genesis Energy",
+    "short_name": "Genesis Energy",
+    "legal_entity_name": "Genesis Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ECNR_TA",
+    "name": "Econergy Renewable Energy",
+    "short_name": "Econergy Renewable Energy",
+    "legal_entity_name": "Econergy Renewable Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CJ_TO",
+    "name": "Cardinal Energy",
+    "short_name": "Cardinal Energy",
+    "legal_entity_name": "Cardinal Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ARN_MI",
+    "name": "Alerion Clean Power",
+    "short_name": "Alerion Clean Power",
+    "legal_entity_name": "Alerion Clean Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NEAG_SW",
+    "name": "naturenergie holding",
+    "short_name": "naturenergie holding",
+    "legal_entity_name": "naturenergie holding",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DMLP",
+    "name": "Dorchester Minerals",
+    "short_name": "Dorchester Minerals",
+    "legal_entity_name": "Dorchester Minerals",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BIR_TO",
+    "name": "Birchcliff Energy",
+    "short_name": "Birchcliff Energy",
+    "legal_entity_name": "Birchcliff Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WKC",
+    "name": "World Kinect",
+    "short_name": "World Kinect",
+    "legal_entity_name": "World Kinect",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SPH",
+    "name": "Suburban Propane Partners",
+    "short_name": "Suburban Propane Partners",
+    "legal_entity_name": "Suburban Propane Partners",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AMRC",
+    "name": "Ameresco",
+    "short_name": "Ameresco",
+    "legal_entity_name": "Ameresco",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NVGS",
+    "name": "Navigator Holdings",
+    "short_name": "Navigator Holdings",
+    "legal_entity_name": "Navigator Holdings",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "JKS",
+    "name": "Jinko Solar",
+    "short_name": "Jinko Solar",
+    "legal_entity_name": "Jinko Solar",
+    "counterparty_type": "UTILITY",
+    "country_code": "CN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KEL_TO",
+    "name": "Kelt Exploration",
+    "short_name": "Kelt Exploration",
+    "legal_entity_name": "Kelt Exploration",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DEC_L",
+    "name": "Diversified Energy",
+    "short_name": "Diversified Energy",
+    "legal_entity_name": "Diversified Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PDS",
+    "name": "Precision Drilling Corporation",
+    "short_name": "Precision Drilling Corporation",
+    "legal_entity_name": "Precision Drilling Corporation",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AAV_TO",
+    "name": "Advantage Energy",
+    "short_name": "Advantage Energy",
+    "legal_entity_name": "Advantage Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ECEA_F",
+    "name": "Electrica",
+    "short_name": "Electrica",
+    "legal_entity_name": "Electrica",
+    "counterparty_type": "UTILITY",
+    "country_code": "RO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NPKI",
+    "name": "NPK International",
+    "short_name": "NPK International",
+    "legal_entity_name": "NPK International",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TEN",
+    "name": "Tsakos Energy Navigation",
+    "short_name": "Tsakos Energy Navigation",
+    "legal_entity_name": "Tsakos Energy Navigation",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "GR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DYL_AX",
+    "name": "Deep Yellow",
+    "short_name": "Deep Yellow",
+    "legal_entity_name": "Deep Yellow",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NCH2_DE",
+    "name": "thyssenkrupp nucera",
+    "short_name": "thyssenkrupp nucera",
+    "legal_entity_name": "thyssenkrupp nucera",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NBR",
+    "name": "Nabors Industries",
+    "short_name": "Nabors Industries",
+    "legal_entity_name": "Nabors Industries",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TTI",
+    "name": "Tetra Technologies",
+    "short_name": "Tetra Technologies",
+    "legal_entity_name": "Tetra Technologies",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SHLS",
+    "name": "Shoals Technologies",
+    "short_name": "Shoals Technologies",
+    "legal_entity_name": "Shoals Technologies",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "1934_T",
+    "name": "Yurtec Corporation",
+    "short_name": "Yurtec Corporation",
+    "legal_entity_name": "Yurtec Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TE",
+    "name": "T1 Energy",
+    "short_name": "T1 Energy",
+    "legal_entity_name": "T1 Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ARRY",
+    "name": "Array Technologies",
+    "short_name": "Array Technologies",
+    "legal_entity_name": "Array Technologies",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NNE",
+    "name": "NANO Nuclear Energy",
+    "short_name": "NANO Nuclear Energy",
+    "legal_entity_name": "NANO Nuclear Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TCW_TO",
+    "name": "Trican Well Service",
+    "short_name": "Trican Well Service",
+    "legal_entity_name": "Trican Well Service",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ACDC",
+    "name": "ProFrac",
+    "short_name": "ProFrac",
+    "legal_entity_name": "ProFrac",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VUL_AX",
+    "name": "Vulcan Energy Resources",
+    "short_name": "Vulcan Energy Resources",
+    "legal_entity_name": "Vulcan Energy Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CLSC4_SA",
+    "name": "Celesc (Centrais El\u00e9tricas de Santa Catarina)",
+    "short_name": "Celesc (Centrais El\u00e9tricas de Santa Catarina)",
+    "legal_entity_name": "Celesc (Centrais El\u00e9tricas de Santa Catarina)",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DRAL_TA",
+    "name": "Dor Alon Energy In Israel",
+    "short_name": "Dor Alon Energy In Israel",
+    "legal_entity_name": "Dor Alon Energy In Israel",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VLTSA_PA",
+    "name": "Voltalia",
+    "short_name": "Voltalia",
+    "legal_entity_name": "Voltalia",
+    "counterparty_type": "PRODUCER",
+    "country_code": "FR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PEP_WA",
+    "name": "Polenergia",
+    "short_name": "Polenergia",
+    "legal_entity_name": "Polenergia",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "METC",
+    "name": "Ramaco Resources",
+    "short_name": "Ramaco Resources",
+    "legal_entity_name": "Ramaco Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SPB_TO",
+    "name": "Superior Plus",
+    "short_name": "Superior Plus",
+    "legal_entity_name": "Superior Plus",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "8097_T",
+    "name": "San-Ai Obbli",
+    "short_name": "San-Ai Obbli",
+    "legal_entity_name": "San-Ai Obbli",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "JSW_WA",
+    "name": "Jastrzebska Sp\u00f3lka Weglowa",
+    "short_name": "Jastrzebska Sp\u00f3lka Weglowa",
+    "legal_entity_name": "Jastrzebska Sp\u00f3lka Weglowa",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "MGL_NS",
+    "name": "Mahanagar Gas",
+    "short_name": "Mahanagar Gas",
+    "legal_entity_name": "Mahanagar Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RKH_L",
+    "name": "Rockhopper Exploration",
+    "short_name": "Rockhopper Exploration",
+    "legal_entity_name": "Rockhopper Exploration",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RPOWER_NS",
+    "name": "Reliance Power",
+    "short_name": "Reliance Power",
+    "legal_entity_name": "Reliance Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "XIFR",
+    "name": "XPLR Infrastructure",
+    "short_name": "XPLR Infrastructure",
+    "legal_entity_name": "XPLR Infrastructure",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VOLTAMP_NS",
+    "name": "Voltamp Transformers",
+    "short_name": "Voltamp Transformers",
+    "legal_entity_name": "Voltamp Transformers",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TBN",
+    "name": "Tamboran Resources",
+    "short_name": "Tamboran Resources",
+    "legal_entity_name": "Tamboran Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "UTL",
+    "name": "Unitil Corporation",
+    "short_name": "Unitil Corporation",
+    "legal_entity_name": "Unitil Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HTG_L",
+    "name": "Hunting PLC",
+    "short_name": "Hunting PLC",
+    "legal_entity_name": "Hunting PLC",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EXM_BR",
+    "name": "Exmar",
+    "short_name": "Exmar",
+    "legal_entity_name": "Exmar",
+    "counterparty_type": "PRODUCER",
+    "country_code": "BE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ABRJ_OM",
+    "name": "Abraj Energy Services",
+    "short_name": "Abraj Energy Services",
+    "legal_entity_name": "Abraj Energy Services",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "OM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BGRIM_BK",
+    "name": "B.Grimm Power",
+    "short_name": "B.Grimm Power",
+    "legal_entity_name": "B.Grimm Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AFK_OL",
+    "name": "Arendals Fossekompani",
+    "short_name": "Arendals Fossekompani",
+    "legal_entity_name": "Arendals Fossekompani",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NO",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HUBC_PK",
+    "name": "The Hub Power Company",
+    "short_name": "The Hub Power Company",
+    "legal_entity_name": "The Hub Power Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "PK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CSIQ",
+    "name": "Canadian Solar",
+    "short_name": "Canadian Solar",
+    "legal_entity_name": "Canadian Solar",
+    "counterparty_type": "UTILITY",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HPK",
+    "name": "HighPeak Energy",
+    "short_name": "HighPeak Energy",
+    "legal_entity_name": "HighPeak Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "1434_TW",
+    "name": "Formosa Taffeta",
+    "short_name": "Formosa Taffeta",
+    "legal_entity_name": "Formosa Taffeta",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TW",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ASC_MI",
+    "name": "Ascopiave",
+    "short_name": "Ascopiave",
+    "legal_entity_name": "Ascopiave",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "8131_T",
+    "name": "Mitsuuroko Group Holdings",
+    "short_name": "Mitsuuroko Group Holdings",
+    "legal_entity_name": "Mitsuuroko Group Holdings",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PHPC_OM",
+    "name": "Phoenix Power Company",
+    "short_name": "Phoenix Power Company",
+    "legal_entity_name": "Phoenix Power Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "OM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ERA_AX",
+    "name": "Energy Resources of Australia",
+    "short_name": "Energy Resources of Australia",
+    "legal_entity_name": "Energy Resources of Australia",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "REPX",
+    "name": "Riley Exploration Permian",
+    "short_name": "Riley Exploration Permian",
+    "legal_entity_name": "Riley Exploration Permian",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CAPL",
+    "name": "CrossAmerica Partners",
+    "short_name": "CrossAmerica Partners",
+    "legal_entity_name": "CrossAmerica Partners",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GFR",
+    "name": "Greenfire Resources",
+    "short_name": "Greenfire Resources",
+    "legal_entity_name": "Greenfire Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PNE3_DE",
+    "name": "PNE AG",
+    "short_name": "PNE AG",
+    "legal_entity_name": "PNE AG",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GRNT",
+    "name": "Granite Ridge Resources",
+    "short_name": "Granite Ridge Resources",
+    "legal_entity_name": "Granite Ridge Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADX_MC",
+    "name": "Audax Renovables",
+    "short_name": "Audax Renovables",
+    "legal_entity_name": "Audax Renovables",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "HNRG",
+    "name": "Hallador Energy Company",
+    "short_name": "Hallador Energy Company",
+    "legal_entity_name": "Hallador Energy Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WAGA_PA",
+    "name": "Waga Energy",
+    "short_name": "Waga Energy",
+    "legal_entity_name": "Waga Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "FR",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VTS",
+    "name": "Vitesse Energy",
+    "short_name": "Vitesse Energy",
+    "legal_entity_name": "Vitesse Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CHI_NZ",
+    "name": "Channel Infrastructure NZ Limited",
+    "short_name": "Channel Infrastructure NZ Limited",
+    "legal_entity_name": "Channel Infrastructure NZ Limited",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NZ",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "KEL_PK",
+    "name": "K-Electric",
+    "short_name": "K-Electric",
+    "legal_entity_name": "K-Electric",
+    "counterparty_type": "UTILITY",
+    "country_code": "PK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FEC_TO",
+    "name": "Frontera Energy",
+    "short_name": "Frontera Energy",
+    "legal_entity_name": "Frontera Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TXO",
+    "name": "TXO Partners, L.P.",
+    "short_name": "TXO Partners, L.P.",
+    "legal_entity_name": "TXO Partners, L.P.",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OIS",
+    "name": "Oil States International",
+    "short_name": "Oil States International",
+    "legal_entity_name": "Oil States International",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FET",
+    "name": "Forum Energy Technologies",
+    "short_name": "Forum Energy Technologies",
+    "legal_entity_name": "Forum Energy Technologies",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SBO_VI",
+    "name": "Schoeller-Bleckmann Oilfield Equipment",
+    "short_name": "Schoeller-Bleckmann Oilfield Equipment",
+    "legal_entity_name": "Schoeller-Bleckmann Oilfield Equipment",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "AT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "POL_PK",
+    "name": "Pakistan Oilfields Limited",
+    "short_name": "Pakistan Oilfields Limited",
+    "legal_entity_name": "Pakistan Oilfields Limited",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EGY",
+    "name": "Vaalco Energy",
+    "short_name": "Vaalco Energy",
+    "legal_entity_name": "Vaalco Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ADSE",
+    "name": "ADS-TEC Energy",
+    "short_name": "ADS-TEC Energy",
+    "legal_entity_name": "ADS-TEC Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENC_MC",
+    "name": "ENCE Energ\u00eda y Celulosa",
+    "short_name": "ENCE Energ\u00eda y Celulosa",
+    "legal_entity_name": "ENCE Energ\u00eda y Celulosa",
+    "counterparty_type": "PRODUCER",
+    "country_code": "ES",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SGY_TO",
+    "name": "Surge Energy",
+    "short_name": "Surge Energy",
+    "legal_entity_name": "Surge Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ISO_TO",
+    "name": "IsoEnergy",
+    "short_name": "IsoEnergy",
+    "legal_entity_name": "IsoEnergy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "OBE",
+    "name": "Obsidian Energy",
+    "short_name": "Obsidian Energy",
+    "legal_entity_name": "Obsidian Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ZPRS_TA",
+    "name": "Zephyrus Wing Energies",
+    "short_name": "Zephyrus Wing Energies",
+    "legal_entity_name": "Zephyrus Wing Energies",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EA_BK",
+    "name": "Energy Absolute",
+    "short_name": "Energy Absolute",
+    "legal_entity_name": "Energy Absolute",
+    "counterparty_type": "PRODUCER",
+    "country_code": "TH",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "URG",
+    "name": "Ur-Energy",
+    "short_name": "Ur-Energy",
+    "legal_entity_name": "Ur-Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SSPW_OM",
+    "name": "Sembcorp Salalah Power & Water Company",
+    "short_name": "Sembcorp Salalah Power & Water Company",
+    "legal_entity_name": "Sembcorp Salalah Power & Water Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "OM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9536_T",
+    "name": "Saibu Gas Holdings",
+    "short_name": "Saibu Gas Holdings",
+    "legal_entity_name": "Saibu Gas Holdings",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "TOT_TO",
+    "name": "Total Energy Services",
+    "short_name": "Total Energy Services",
+    "legal_entity_name": "Total Energy Services",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "SD",
+    "name": "SandRidge Energy",
+    "short_name": "SandRidge Energy",
+    "legal_entity_name": "SandRidge Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EKT_DE",
+    "name": "Energiekontor",
+    "short_name": "Energiekontor",
+    "legal_entity_name": "Energiekontor",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PSO_PK",
+    "name": "Pakistan State Oil Company",
+    "short_name": "Pakistan State Oil Company",
+    "legal_entity_name": "Pakistan State Oil Company",
+    "counterparty_type": "PRODUCER",
+    "country_code": "PK",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GEVO",
+    "name": "Gevo",
+    "short_name": "Gevo",
+    "legal_entity_name": "Gevo",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NRGV",
+    "name": "Energy Vault",
+    "short_name": "Energy Vault",
+    "legal_entity_name": "Energy Vault",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "DR0_DE",
+    "name": "Deutsche Rohstoff",
+    "short_name": "Deutsche Rohstoff",
+    "legal_entity_name": "Deutsche Rohstoff",
+    "counterparty_type": "PRODUCER",
+    "country_code": "DE",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ASPI",
+    "name": "ASP Isotopes",
+    "short_name": "ASP Isotopes",
+    "legal_entity_name": "ASP Isotopes",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "BMN_AX",
+    "name": "Bannerman Energy",
+    "short_name": "Bannerman Energy",
+    "legal_entity_name": "Bannerman Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "AU",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "EVGO",
+    "name": "EVgo",
+    "short_name": "EVgo",
+    "legal_entity_name": "EVgo",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "PTC_NS",
+    "name": "PTC India",
+    "short_name": "PTC India",
+    "legal_entity_name": "PTC India",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ITM_L",
+    "name": "ITM Power",
+    "short_name": "ITM Power",
+    "legal_entity_name": "ITM Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9519_T",
+    "name": "RENOVA, Inc.",
+    "short_name": "RENOVA, Inc.",
+    "legal_entity_name": "RENOVA, Inc.",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "FAST_AS",
+    "name": "Fastned",
+    "short_name": "Fastned",
+    "legal_entity_name": "Fastned",
+    "counterparty_type": "PRODUCER",
+    "country_code": "NL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "VOES_OM",
+    "name": "Voltamp Energy",
+    "short_name": "Voltamp Energy",
+    "legal_entity_name": "Voltamp Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "OM",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "9534_T",
+    "name": "Hokkaido Gas",
+    "short_name": "Hokkaido Gas",
+    "legal_entity_name": "Hokkaido Gas",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "ENQ_L",
+    "name": "EnQuest",
+    "short_name": "EnQuest",
+    "legal_entity_name": "EnQuest",
+    "counterparty_type": "PRODUCER",
+    "country_code": "GB",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "CFW_TO",
+    "name": "Calfrac Well Services",
+    "short_name": "Calfrac Well Services",
+    "legal_entity_name": "Calfrac Well Services",
+    "counterparty_type": "SUPPLIER",
+    "country_code": "CA",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "RTNPOWER_NS",
+    "name": "RattanIndia Power",
+    "short_name": "RattanIndia Power",
+    "legal_entity_name": "RattanIndia Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "IN",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "AC5_MI",
+    "name": "Acinque",
+    "short_name": "Acinque",
+    "legal_entity_name": "Acinque",
+    "counterparty_type": "PRODUCER",
+    "country_code": "IT",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "1407_T",
+    "name": "West Holdings",
+    "short_name": "West Holdings",
+    "legal_entity_name": "West Holdings",
+    "counterparty_type": "PRODUCER",
+    "country_code": "JP",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "WTI",
+    "name": "W&T Offshore",
+    "short_name": "W&T Offshore",
+    "legal_entity_name": "W&T Offshore",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "GPRK",
+    "name": "Geopark",
+    "short_name": "Geopark",
+    "legal_entity_name": "Geopark",
+    "counterparty_type": "PRODUCER",
+    "country_code": "CL",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  },
+  {
+    "code": "NAPESCO_KW",
+    "name": "National Petroleum Services Company",
+    "short_name": "National Petroleum Services Company",
+    "legal_entity_name": "National Petroleum Services Company",
+    "counterparty_type": "REFINER",
+    "country_code": "KW",
+    "description": "Public energy-sector counterparty ranked by market capitalization."
+  }
+]

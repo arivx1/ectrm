@@ -81,7 +81,7 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
             self.assertEqual(payload.entity_counts["commodities"], 11)
             self.assertEqual(payload.entity_counts["locations"], 514)
-            self.assertEqual(payload.entity_counts["counterparties"], 516)
+            self.assertEqual(payload.entity_counts["counterparties"], 1516)
             self.assertEqual(payload.entity_counts["price_indices"], 7)
             self.assertEqual(payload.entity_counts["price_index_sources"], 6)
             self.assertEqual(
@@ -151,14 +151,22 @@ class AdminSeedApiTests(unittest.TestCase):
                 }.issuperset(
                     {
                         "AAPL",
+                        "AA",
+                        "AAL",
+                        "AAMI",
                         "BP",
                         "CHEVRON",
+                        "2222_SR",
+                        "0857_HK",
                         "COP",
                         "CONSTELLATION",
                         "DUK",
+                        "ENB",
+                        "ENR_F",
                         "ENGIE",
                         "JPM",
                         "MERCURIA",
+                        "PBR",
                         "RWE",
                         "TRAFIGURA",
                         "VALERO",
@@ -166,19 +174,48 @@ class AdminSeedApiTests(unittest.TestCase):
                 )
             )
             apple = session.get(ReferenceCounterparty, "AAPL")
+            alcoa = session.get(ReferenceCounterparty, "AA")
+            american_airlines = session.get(ReferenceCounterparty, "AAL")
+            acadian = session.get(ReferenceCounterparty, "AAMI")
+            saudi_aramco = session.get(ReferenceCounterparty, "2222_SR")
+            petrochina = session.get(ReferenceCounterparty, "0857_HK")
             duke = session.get(ReferenceCounterparty, "DUK")
+            enbridge = session.get(ReferenceCounterparty, "ENB")
+            siemens_energy = session.get(ReferenceCounterparty, "ENR_F")
             engie = session.get(ReferenceCounterparty, "ENGIE")
             jpm = session.get(ReferenceCounterparty, "JPM")
+            self.assertIsNotNone(alcoa)
+            self.assertIsNotNone(american_airlines)
+            self.assertIsNotNone(acadian)
             self.assertIsNotNone(apple)
+            self.assertIsNotNone(saudi_aramco)
+            self.assertIsNotNone(petrochina)
             self.assertIsNotNone(duke)
+            self.assertIsNotNone(enbridge)
+            self.assertIsNotNone(siemens_energy)
             self.assertIsNotNone(engie)
             self.assertIsNotNone(jpm)
+            assert alcoa is not None
+            assert american_airlines is not None
+            assert acadian is not None
             assert apple is not None
+            assert saudi_aramco is not None
+            assert petrochina is not None
             assert duke is not None
+            assert enbridge is not None
+            assert siemens_energy is not None
             assert engie is not None
             assert jpm is not None
+            self.assertEqual(alcoa.counterparty_type, "END_USER")
+            self.assertEqual(american_airlines.counterparty_type, "END_USER")
+            self.assertEqual(acadian.counterparty_type, "BROKER")
             self.assertEqual(apple.counterparty_type, "END_USER")
+            self.assertEqual(saudi_aramco.counterparty_type, "MAJOR")
+            self.assertEqual(saudi_aramco.country_code, "SA")
+            self.assertEqual(petrochina.counterparty_type, "MAJOR")
             self.assertEqual(duke.counterparty_type, "UTILITY")
+            self.assertEqual(enbridge.counterparty_type, "MIDSTREAM")
+            self.assertEqual(siemens_energy.counterparty_type, "SUPPLIER")
             self.assertEqual(engie.country_code, "FR")
             self.assertEqual(jpm.counterparty_type, "BANK")
 

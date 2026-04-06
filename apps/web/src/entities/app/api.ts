@@ -13,6 +13,7 @@ export type WorkspaceBootstrap = {
   trades: unknown[]
   events: unknown[]
   positions: unknown[]
+  shipments: unknown[]
   books: unknown[]
   commodities: unknown[]
   priceIndices: unknown[]
@@ -107,6 +108,7 @@ export async function loadWorkspaceBootstrap(
     trades,
     events,
     positions,
+    shipments,
     books,
     commodities,
     priceIndices,
@@ -122,6 +124,7 @@ export async function loadWorkspaceBootstrap(
     fetchJson<unknown[]>(`${apiBase}/trades`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`),
     fetchJson<unknown[]>(`${apiBase}/positions`),
+    fetchJson<unknown[]>(`${apiBase}/shipments`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/commodities', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/price-indices', bootstrapQueryLimits.referenceData)}`),
@@ -182,6 +185,7 @@ export async function loadWorkspaceBootstrap(
     trades,
     events,
     positions,
+    shipments,
     books,
     commodities,
     priceIndices,

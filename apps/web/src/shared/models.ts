@@ -67,6 +67,28 @@ export type PositionRow = {
   updated_at: string
 }
 
+export type ShipmentRecord = {
+  shipment_id: string
+  trade_id: string
+  external_trade_id: string | null
+  status: 'BLOCKED' | 'IN_PROGRESS' | 'READY' | 'COMPLETED'
+  direction: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  volume: number | null
+  unit_of_measure: string | null
+  booked_at: string
+  last_updated_at: string
+  age_days: number
+  pricing_status: string
+  settlement_status: string
+  blocker_count: number
+  blockers: string[]
+}
+
 export type ReferenceRecord = {
   code: string
   name: string
@@ -580,6 +602,7 @@ export type ViewKey =
   | 'trades'
   | 'events'
   | 'positions'
+  | 'shipments'
   | 'reference'
   | 'admin'
   | 'settings'
