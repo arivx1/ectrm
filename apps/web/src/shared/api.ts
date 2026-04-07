@@ -253,3 +253,15 @@ export async function patchJson<T>(
     body: JSON.stringify(body),
   })
 }
+
+export async function postFormData<T>(
+  url: string,
+  body: FormData,
+  init?: Omit<RequestInit, 'body' | 'method'>,
+): Promise<T> {
+  return fetchJson<T>(url, {
+    ...init,
+    method: 'POST',
+    body,
+  })
+}

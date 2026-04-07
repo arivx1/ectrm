@@ -58,6 +58,7 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
     "operations": {
         "operations-snapshot": ("full", "wide"),
         "operations-queue": ("full", "wide"),
+        "operations-documents": ("full", "wide", "half"),
         "operations-coverage": ("full", "wide", "half"),
         "operations-feeds": ("full", "wide", "half"),
     },

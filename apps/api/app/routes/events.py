@@ -1602,6 +1602,7 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     existing,
                     actor_id=workflow_actor_id,
                     now=recorded_at,
+                    rollup_settlement_status="settlement_status" not in payload_data,
                 )
                 _sync_credit_approval_workflow_item(
                     db,
@@ -1962,6 +1963,10 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
                     existing,
                     actor_id=workflow_actor_id,
                     now=recorded_at,
+                    rollup_settlement_status=(
+                        "settlement_status" not in payload_data
+                        and bool({"invoice_status", "payment_status"} & set(payload_data))
+                    ),
                 )
                 _sync_credit_approval_workflow_item(
                     db,

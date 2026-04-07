@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from 'react'
 
 import {
   bootstrapAdminSession,
@@ -10,6 +10,13 @@ import {
 } from '../../entities/auth/api'
 import { loadGoogleIdentityScript } from '../../entities/auth/googleIdentity'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../entities/app/api'
+import {
+  resolveAppearancePalette,
+  type AppearancePalette,
+  type AppearanceSettings,
+  type ColorModePreference,
+  type ResolvedColorMode,
+} from '../../shared/appearance'
 import {
   appConfig,
   bootstrapQueryLimits,
@@ -23,6 +30,10 @@ import { type StoredAuthSession } from '../../shared/mutation'
 type SettingsWorkspaceProps = {
   health: string
   authSession: StoredAuthSession | null
+  appearanceSettings: AppearanceSettings
+  resolvedColorMode: ResolvedColorMode
+  onAppearanceSettingsChange: (settings: AppearanceSettings) => AppearanceSettings
+  onAppearanceSettingsReset: () => AppearanceSettings
   onSessionChange: (session: StoredAuthSession | null) => Promise<void> | void
 }
 
@@ -32,6 +43,28 @@ type FlashMessage = {
 }
 
 type AuthAction = 'login' | 'single-user' | 'bootstrap' | 'logout' | 'google' | null
+
+const COLOR_MODE_OPTIONS: Array<{
+  value: ColorModePreference
+  label: string
+  detail: string
+}> = [
+  {
+    value: 'system',
+    label: 'System',
+    detail: 'Follow the operating system preference.',
+  },
+  {
+    value: 'light',
+    label: 'Light',
+    detail: 'Always use the brighter desk treatment.',
+  },
+  {
+    value: 'dark',
+    label: 'Dark',
+    detail: 'Keep the terminal-style night treatment active.',
+  },
+]
 
 function mapSession(session: SessionResponse): StoredAuthSession {
   return {
@@ -60,6 +93,17 @@ function SettingsValueRow({
       <strong>{value}</strong>
     </div>
   )
+}
+
+function formatModeLabel(value: ColorModePreference | ResolvedColorMode): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function previewStyle(palette: AppearancePalette): CSSProperties {
+  return {
+    '--appearance-accent': palette.accent,
+    '--appearance-highlight': palette.highlight,
+  } as CSSProperties
 }
 
 function normalizePositiveInteger(value: string, label: string): string {
@@ -113,7 +157,15 @@ function formatDatabaseType(value: string | null | undefined): string {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 
-export function SettingsWorkspace({ health, authSession, onSessionChange }: SettingsWorkspaceProps) {
+export function SettingsWorkspace({
+  health,
+  authSession,
+  appearanceSettings,
+  resolvedColorMode,
+  onAppearanceSettingsChange,
+  onAppearanceSettingsReset,
+  onSessionChange,
+}: SettingsWorkspaceProps) {
   const [loginForm, setLoginForm] = useState({ identifier: '', password: '' })
   const [bootstrapForm, setBootstrapForm] = useState({
     bootstrap_token: '',
@@ -125,9 +177,11 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
   const [runtimeOverrideForm, setRuntimeOverrideForm] = useState<ClientRuntimeOverrideSnapshot>(() =>
     getClientRuntimeOverrideSnapshot(),
   )
+  const [appearanceForm, setAppearanceForm] = useState<AppearanceSettings>(() => appearanceSettings)
   const [authFlash, setAuthFlash] = useState<FlashMessage | null>(null)
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [runtimeFlash, setRuntimeFlash] = useState<FlashMessage | null>(null)
+  const [appearanceFlash, setAppearanceFlash] = useState<FlashMessage | null>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
@@ -162,6 +216,10 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    setAppearanceForm(appearanceSettings)
+  }, [appearanceSettings])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -368,11 +426,31 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
     window.location.reload()
   }
 
+  function handleSaveAppearance(event: React.FormEvent) {
+    event.preventDefault()
+    const savedSettings = onAppearanceSettingsChange(appearanceForm)
+    setAppearanceForm(savedSettings)
+    setAppearanceFlash({
+      tone: 'success',
+      message: 'Appearance saved locally for this browser. A profile-backed API can replace this storage later without changing the UI.',
+    })
+  }
+
+  function handleResetAppearance() {
+    const defaultSettings = onAppearanceSettingsReset()
+    setAppearanceForm(defaultSettings)
+    setAppearanceFlash({
+      tone: 'success',
+      message: 'Appearance reset to the default console palette for this browser.',
+    })
+  }
+
   const googleClientId = serverSettings?.google_auth.client_id?.trim() ?? ''
   const healthTone = health === 'ok' ? 'active' : 'cancelled'
   const authTone = authSession ? 'active' : 'cancelled'
   const authLoading = authAction !== null
   const runtimeOverrideCount = Object.values(runtimeOverrideForm).filter((value) => value.trim() !== '').length
+  const activePalette = resolveAppearancePalette(appearanceSettings, resolvedColorMode)
   const singleUserAuthEnabled = Boolean(serverSettings?.single_user_auth_enabled)
   const googleAuthEnabled = Boolean(serverSettings?.google_auth.enabled && googleClientId)
   const googleAutoCreateUsers = Boolean(serverSettings?.google_auth.auto_create_users)
@@ -687,6 +765,159 @@ export function SettingsWorkspace({ health, authSession, onSessionChange }: Sett
               </p>
             </div>
           )}
+        </article>
+
+        <article className="surface">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Browser Settings</span>
+              <h3>Appearance</h3>
+            </div>
+            <p>Pick how the console chooses light or dark mode, then tune the accent and highlight colors for each mode independently.</p>
+          </div>
+
+          <div className="settings-summary-grid">
+            <article className="settings-summary-card">
+              <span>Mode preference</span>
+              <strong>{formatModeLabel(appearanceSettings.colorMode)}</strong>
+              <p>{appearanceSettings.colorMode === 'system' ? 'Following the operating system preference.' : 'Pinned locally in this browser.'}</p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Active mode</span>
+              <strong>{formatModeLabel(resolvedColorMode)}</strong>
+              <p>
+                Accent {activePalette.accent.toUpperCase()} · Highlight {activePalette.highlight.toUpperCase()}
+              </p>
+            </article>
+          </div>
+
+          <form className="stack-form settings-form" onSubmit={handleSaveAppearance}>
+            <div className="appearance-mode-options" aria-label="Color mode preference">
+              {COLOR_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`appearance-mode-option ${appearanceForm.colorMode === option.value ? 'is-active' : ''}`}
+                  aria-pressed={appearanceForm.colorMode === option.value}
+                  onClick={() => {
+                    setAppearanceFlash(null)
+                    setAppearanceForm((current) => ({ ...current, colorMode: option.value }))
+                  }}
+                >
+                  <span>{option.label}</span>
+                  <strong>{option.detail}</strong>
+                </button>
+              ))}
+            </div>
+
+            <div className="appearance-palette-grid">
+              {([
+                {
+                  key: 'lightMode',
+                  label: 'Light mode',
+                  title: 'Day shift',
+                  palette: appearanceForm.lightMode,
+                },
+                {
+                  key: 'darkMode',
+                  label: 'Dark mode',
+                  title: 'Night shift',
+                  palette: appearanceForm.darkMode,
+                },
+              ] as const).map((section) => (
+                <section key={section.key} className="appearance-preview-card" style={previewStyle(section.palette)}>
+                  <div className="appearance-preview-card-head">
+                    <div>
+                      <span className="appearance-preview-label">{section.label}</span>
+                      <strong>{section.title}</strong>
+                    </div>
+                  </div>
+
+                  <div className="appearance-preview-signals">
+                    <article className="appearance-preview-signal">
+                      <span>Accent</span>
+                      <strong>{section.palette.accent.toUpperCase()}</strong>
+                    </article>
+                    <article className="appearance-preview-signal">
+                      <span>Highlight</span>
+                      <strong>{section.palette.highlight.toUpperCase()}</strong>
+                    </article>
+                  </div>
+
+                  <div className="appearance-preview-chip-row">
+                    <span className="appearance-preview-chip appearance-preview-chip-accent">Accent glow</span>
+                    <span className="appearance-preview-chip appearance-preview-chip-highlight">Focus highlight</span>
+                  </div>
+
+                  <div className="appearance-color-grid">
+                    <label className="field appearance-color-field">
+                      <span>Accent</span>
+                      <div className="appearance-color-control">
+                        <input
+                          className="appearance-color-picker"
+                          type="color"
+                          value={section.palette.accent}
+                          onChange={(event) => {
+                            setAppearanceFlash(null)
+                            setAppearanceForm((current) => ({
+                              ...current,
+                              [section.key]: {
+                                ...current[section.key],
+                                accent: event.target.value,
+                              },
+                            }))
+                          }}
+                        />
+                        <div className="appearance-color-meta">
+                          <span className="appearance-color-value">{section.palette.accent.toUpperCase()}</span>
+                          <small className="appearance-color-note">Buttons, active states, status glows</small>
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className="field appearance-color-field">
+                      <span>Highlight</span>
+                      <div className="appearance-color-control">
+                        <input
+                          className="appearance-color-picker"
+                          type="color"
+                          value={section.palette.highlight}
+                          onChange={(event) => {
+                            setAppearanceFlash(null)
+                            setAppearanceForm((current) => ({
+                              ...current,
+                              [section.key]: {
+                                ...current[section.key],
+                                highlight: event.target.value,
+                              },
+                            }))
+                          }}
+                        />
+                        <div className="appearance-color-meta">
+                          <span className="appearance-color-value">{section.palette.highlight.toUpperCase()}</span>
+                          <small className="appearance-color-note">Focus rings, secondary glow, chart accents</small>
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </section>
+              ))}
+            </div>
+
+            <div className="toolbar settings-actions">
+              <button type="submit" className="button button-primary">
+                Apply Appearance
+              </button>
+              <button type="button" className="button button-ghost" onClick={handleResetAppearance}>
+                Reset Palette
+              </button>
+            </div>
+
+            <p className={`form-note ${appearanceFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+              {appearanceFlash?.message ??
+                'Appearance settings are stored in this browser today. That gives us a solid first slice while we prepare user-profile persistence on the API.'}
+            </p>
+          </form>
         </article>
 
         <article className="surface">

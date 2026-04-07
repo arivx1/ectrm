@@ -540,7 +540,10 @@ export function AdminWorkspace({
     ],
   )
 
-  const marketDataProviders = externalDataSyncStatus?.providers ?? []
+  const marketDataProviders = useMemo(
+    () => externalDataSyncStatus?.providers ?? [],
+    [externalDataSyncStatus],
+  )
   const marketDataProviderCodes = useMemo(
     () => new Set(marketDataProviders.map((provider) => provider.provider)),
     [marketDataProviders],

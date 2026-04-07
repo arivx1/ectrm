@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { DeliveryRecord } from '../../shared/models'
@@ -91,6 +91,11 @@ const NOMINATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'SCHEDULED', 'NOMI
 const ALLOCATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'ALLOCATED', 'COMPLETED'])
 const SCHEDULING_WINDOW_HOURS = 72
 const NEXT_DAY_WINDOW_HOURS = 24
+const SCHEDULING_CLOCK_TICK_MS = 60_000
+
+function currentTimestamp(): number {
+  return Date.now()
+}
 
 function formatEnumLabel(value: string): string {
   return value.replaceAll('_', ' ')
@@ -198,8 +203,35 @@ export function SchedulingWorkspace({
 }: SchedulingWorkspaceProps) {
   const [modeFilter, setModeFilter] = useState<SchedulingModeFilter>('ALL')
   const [focusFilter, setFocusFilter] = useState<SchedulingFocusFilter>('ALL')
+  const [now, setNow] = useState<number>(() => currentTimestamp())
 
-  const now = Date.now()
+  useEffect(() => {
+    function refreshNow() {
+      setNow(currentTimestamp())
+    }
+
+    const intervalId = window.setInterval(refreshNow, SCHEDULING_CLOCK_TICK_MS)
+
+    function handleFocus() {
+      refreshNow()
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        refreshNow()
+      }
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
   const schedulingWindowMs = SCHEDULING_WINDOW_HOURS * 60 * 60 * 1000
   const openDeliveries = deliveries.filter((delivery) => delivery.status !== 'COMPLETED')
 

@@ -1,7 +1,11 @@
+import type { MouseEvent as ReactMouseEvent } from 'react'
+
+import { shouldHandleClientSideNavigation } from '../../app/navigation'
 import type { ViewKey } from '../../shared/models'
 import type { RoadmapDocumentData, RoadmapItem, RoadmapStatus } from '../../entities/roadmap/api'
 
 type RoadmapDocumentProps = {
+  getViewHref: (view: Exclude<ViewKey, 'guide'>) => string
   roadmap: RoadmapDocumentData
   onOpenView: (view: Exclude<ViewKey, 'guide'>) => void
 }
@@ -72,7 +76,7 @@ const ROADMAP_SECTION_LINKS = [
   },
 ] as const
 
-export function RoadmapDocument({ roadmap, onOpenView }: RoadmapDocumentProps) {
+export function RoadmapDocument({ roadmap, getViewHref, onOpenView }: RoadmapDocumentProps) {
   const items = roadmap.phases.flatMap((phase) => phase.items)
   const statusCounts = countStatuses(items)
   const weightedProgress = calculateCompletion(items)
@@ -80,6 +84,18 @@ export function RoadmapDocument({ roadmap, onOpenView }: RoadmapDocumentProps) {
   const nowStatusCounts = countStatuses(nowItems)
   const nextMilestone =
     roadmap.milestones.find((milestone) => deriveMilestoneStatus(resolveItems(roadmap, milestone.item_ids)) !== 'shipped') ?? null
+
+  function handleWorkspaceLinkClick(
+    event: ReactMouseEvent<HTMLAnchorElement>,
+    view: Exclude<ViewKey, 'guide'>,
+  ) {
+    if (!shouldHandleClientSideNavigation(event)) {
+      return
+    }
+
+    event.preventDefault()
+    onOpenView(view)
+  }
 
   return (
     <>
@@ -220,14 +236,14 @@ export function RoadmapDocument({ roadmap, onOpenView }: RoadmapDocumentProps) {
 
                       <div className="roadmap-link-row">
                         {item.links.map((link, index) => (
-                          <button
+                          <a
                             key={link.label}
-                            type="button"
-                            className={`button ${index === 0 ? 'button-secondary' : 'button-ghost'} roadmap-link-button`}
-                            onClick={() => onOpenView(link.view)}
+                            href={getViewHref(link.view)}
+                            className={`button button-link ${index === 0 ? 'button-secondary' : 'button-ghost'} roadmap-link-button`}
+                            onClick={(event) => handleWorkspaceLinkClick(event, link.view)}
                           >
                             {link.label}
-                          </button>
+                          </a>
                         ))}
                       </div>
                     </article>
@@ -294,14 +310,14 @@ export function RoadmapDocument({ roadmap, onOpenView }: RoadmapDocumentProps) {
 
                 <div className="roadmap-link-row">
                   {milestone.links.map((link, index) => (
-                    <button
+                    <a
                       key={link.label}
-                      type="button"
-                      className={`button ${index === 0 ? 'button-secondary' : 'button-ghost'} roadmap-link-button`}
-                      onClick={() => onOpenView(link.view)}
+                      href={getViewHref(link.view)}
+                      className={`button button-link ${index === 0 ? 'button-secondary' : 'button-ghost'} roadmap-link-button`}
+                      onClick={(event) => handleWorkspaceLinkClick(event, link.view)}
                     >
                       {link.label}
-                    </button>
+                    </a>
                   ))}
                 </div>
               </article>

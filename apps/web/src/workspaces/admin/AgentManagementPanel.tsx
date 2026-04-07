@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   createAssistantAgent,
@@ -174,49 +174,52 @@ export function AgentManagementPanel({
   const createCanUseLiveTools = createForm.capabilities.includes('READ')
   const editCanUseLiveTools = editForm.capabilities.includes('READ')
 
-  async function refreshAgents(preferredAgentId: string | null = null) {
-    if (!adminEnabled) {
-      return
-    }
-
-    const requestId = requestSequenceRef.current + 1
-    requestSequenceRef.current = requestId
-    setAgentsLoading(true)
-    setAgentsError('')
-
-    try {
-      const [nextAgents, runtimeSettings] = await Promise.all([
-        listAdminAssistantAgents(appConfig.apiBase),
-        loadAssistantRuntimeSettings(appConfig.apiBase),
-      ])
-      if (requestSequenceRef.current !== requestId) {
+  const refreshAgents = useCallback(
+    async (preferredAgentId: string | null = null) => {
+      if (!adminEnabled) {
         return
       }
-      setAgentRecords(nextAgents)
-      setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
-      setSelectedAgentId((current) => {
-        if (preferredAgentId && nextAgents.some((agent) => agent.agent_id === preferredAgentId)) {
-          return preferredAgentId
+
+      const requestId = requestSequenceRef.current + 1
+      requestSequenceRef.current = requestId
+      setAgentsLoading(true)
+      setAgentsError('')
+
+      try {
+        const [nextAgents, runtimeSettings] = await Promise.all([
+          listAdminAssistantAgents(appConfig.apiBase),
+          loadAssistantRuntimeSettings(appConfig.apiBase),
+        ])
+        if (requestSequenceRef.current !== requestId) {
+          return
         }
-        if (current && nextAgents.some((agent) => agent.agent_id === current)) {
-          return current
+        setAgentRecords(nextAgents)
+        setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
+        setSelectedAgentId((current) => {
+          if (preferredAgentId && nextAgents.some((agent) => agent.agent_id === preferredAgentId)) {
+            return preferredAgentId
+          }
+          if (current && nextAgents.some((agent) => agent.agent_id === current)) {
+            return current
+          }
+          return nextAgents[0]?.agent_id ?? null
+        })
+      } catch (error) {
+        if (requestSequenceRef.current !== requestId) {
+          return
         }
-        return nextAgents[0]?.agent_id ?? null
-      })
-    } catch (error) {
-      if (requestSequenceRef.current !== requestId) {
-        return
+        setAgentRecords([])
+        setAvailableTools([])
+        setSelectedAgentId(null)
+        setAgentsError(error instanceof Error ? error.message : 'Could not load assistant agents.')
+      } finally {
+        if (requestSequenceRef.current === requestId) {
+          setAgentsLoading(false)
+        }
       }
-      setAgentRecords([])
-      setAvailableTools([])
-      setSelectedAgentId(null)
-      setAgentsError(error instanceof Error ? error.message : 'Could not load assistant agents.')
-    } finally {
-      if (requestSequenceRef.current === requestId) {
-        setAgentsLoading(false)
-      }
-    }
-  }
+    },
+    [adminEnabled],
+  )
 
   useEffect(() => {
     requestSequenceRef.current += 1
@@ -234,7 +237,7 @@ export function AgentManagementPanel({
     }
 
     void refreshAgents()
-  }, [adminEnabled])
+  }, [adminEnabled, refreshAgents])
 
   useEffect(() => {
     if (!selectedAgent) {

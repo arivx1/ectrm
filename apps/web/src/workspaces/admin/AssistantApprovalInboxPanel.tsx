@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   approveAssistantActionRequest,
@@ -47,7 +47,7 @@ export function AssistantApprovalInboxPanel({
     [actionRequests],
   )
 
-  async function refreshActionRequests() {
+  const refreshActionRequests = useCallback(async () => {
     requestSequenceRef.current += 1
     const requestId = requestSequenceRef.current
 
@@ -81,12 +81,12 @@ export function AssistantApprovalInboxPanel({
         setLoading(false)
       }
     }
-  }
+  }, [adminEnabled])
 
   useEffect(() => {
     setFlash(null)
     void refreshActionRequests()
-  }, [adminEnabled, authSession])
+  }, [adminEnabled, authSession, refreshActionRequests])
 
   async function handleDecision(actionRequestId: number, decision: 'approve' | 'reject') {
     setFlash(null)

@@ -7,3 +7,7 @@ sqlalchemy==2.0.34
 psycopg[binary]==3.2.13
 alembic==1.13.2
 pycountry==24.6.1
+python-multipart==0.0.20
+pypdf==5.4.0
+pymupdf==1.27.2.2
+rapidocr-onnxruntime==1.4.4

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     GOOGLE_AUTH_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
     GOOGLE_AUTH_TOKENINFO_URL: str = "https://oauth2.googleapis.com/tokeninfo"
     SESSION_TTL_HOURS: int = Field(default=12, ge=1, le=168)
+    DOCUMENT_STORAGE_ROOT: Path = API_ENV_FILE.parent / ".data" / "documents"
+    DOCUMENT_MAX_UPLOAD_BYTES: int = Field(default=25 * 1024 * 1024, ge=1, le=250 * 1024 * 1024)
+    DOCUMENT_PAGE_RENDER_DPI: int = Field(default=144, ge=72, le=300)
+    DOCUMENT_OCR_ENABLED: bool = True
     ASSISTANT_ENABLED: bool = True
     ASSISTANT_DEFAULT_PROVIDER: str = "openai"
     ASSISTANT_SYSTEM_PROMPT: str = (

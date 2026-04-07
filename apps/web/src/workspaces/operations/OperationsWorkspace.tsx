@@ -9,6 +9,7 @@ import type {
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
+import { DocumentIngestionPanel } from './DocumentIngestionPanel'
 import { WorkflowQueueEditor } from './WorkflowQueueEditor'
 
 type OperationsWorkspaceProps = {
@@ -176,6 +177,20 @@ export function OperationsWorkspace({
                 <strong>No active delivery work</strong>
                 <p>The work queue will appear once delivery obligations exist.</p>
               </div>
+            ),
+          },
+          {
+            id: 'operations-documents',
+            eyebrow: 'Document Intake',
+            title: 'PDF Intake Groundwork',
+            description: 'Upload confirmations, invoices, bills of lading, and similar documents into a page-level classification and extraction scaffold.',
+            span: 'full',
+            availableSpans: ['full', 'wide', 'half'],
+            content: (
+              <DocumentIngestionPanel
+                authSession={authSession}
+                formatDate={formatDate}
+              />
             ),
           },
           {

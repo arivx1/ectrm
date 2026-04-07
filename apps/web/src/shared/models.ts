@@ -329,6 +329,112 @@ export type TradePaymentRecord = {
   settlement_status: string
 }
 
+export type DocumentExtractedFieldRecord = {
+  field_key: string
+  label: string
+  value: string
+  confidence: number | null
+  source: string
+}
+
+export type DocumentTableBlockRecord = {
+  table_index: number
+  template_key: string | null
+  title: string | null
+  columns: string[]
+  rows: Array<Record<string, string | null>>
+  header_row_detected: boolean
+  source: string
+}
+
+export type DocumentIngestionPageRecord = {
+  page_id: number
+  page_number: number
+  classification_status: string
+  extraction_status: string
+  document_kind: string
+  document_subtype: string | null
+  classification_confidence: number | null
+  classification_payload: Record<string, unknown>
+  header_fields: DocumentExtractedFieldRecord[]
+  table_blocks: DocumentTableBlockRecord[]
+  raw_text_excerpt: string | null
+  text_source: 'none' | 'pdf_text' | 'ocr'
+  preview_available: boolean
+  processing_warnings: string[]
+  processing_errors: string[]
+  review_status: string
+  review_notes: string | null
+  reviewed_at: string | null
+  reviewed_by: string | null
+  processed_at: string | null
+}
+
+export type DocumentIngestionRecord = {
+  document_id: string
+  original_filename: string
+  display_name: string
+  content_type: string
+  storage_key: string
+  sha256: string
+  size_bytes: number
+  page_count: number
+  status: string
+  classifier_version: string
+  extractor_version: string
+  analysis_summary: Record<string, unknown>
+  processing_errors: string[]
+  review_status: string
+  review_notes: string | null
+  reviewed_at: string | null
+  reviewed_by: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  pages: DocumentIngestionPageRecord[]
+}
+
+export type DocumentFieldSchemaRecord = {
+  field_key: string
+  label: string
+  description: string | null
+  value_type: string
+  required: boolean
+}
+
+export type DocumentTableColumnSchemaRecord = {
+  column_key: string
+  label: string
+  description: string | null
+  value_type: string
+  required: boolean
+}
+
+export type DocumentTableTemplateSchemaRecord = {
+  template_key: string
+  label: string
+  description: string | null
+  min_occurrences: number
+  max_occurrences: number | null
+  columns: DocumentTableColumnSchemaRecord[]
+}
+
+export type DocumentKindSchemaRecord = {
+  document_kind: string
+  label: string
+  description: string
+  review_guidance: string
+  header_fields: DocumentFieldSchemaRecord[]
+  table_templates: DocumentTableTemplateSchemaRecord[]
+}
+
+export type DocumentSchemaRegistryRecord = {
+  version: string
+  document_kinds: DocumentKindSchemaRecord[]
+}
+
 export type ReferenceRecord = {
   code: string
   name: string

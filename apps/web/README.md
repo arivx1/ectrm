@@ -33,6 +33,7 @@ Useful companion commands:
 ```bash
 npm run build
 npm run lint
+npm test
 npm run preview
 ```
 

@@ -1,49 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import './App.css'
-import { AdminWorkspace } from './workspaces/admin/AdminWorkspace'
-import { DashboardWorkspace } from './workspaces/dashboard/DashboardWorkspace'
+import './appearance.css'
 import {
-  DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
-  DocumentationWorkspace,
-  type DocumentationDocumentKey,
-} from './workspaces/docs/DocumentationWorkspace'
-import { EventsWorkspace } from './workspaces/events/EventsWorkspace'
-import { OperationsWorkspace } from './workspaces/operations/OperationsWorkspace'
-import { PositionsWorkspace } from './workspaces/positions/PositionsWorkspace'
-import { ReportsWorkspace } from './workspaces/reports/ReportsWorkspace'
-import { RiskWorkspace } from './workspaces/risk/RiskWorkspace'
-import { SchedulingWorkspace } from './workspaces/scheduling/SchedulingWorkspace'
-import { SettlementWorkspace } from './workspaces/settlement/SettlementWorkspace'
-import { DeliveryWorkspace } from './workspaces/shipments/ShipmentWorkspace'
-import { ReferenceDataWorkspace } from './workspaces/reference-data/ReferenceDataWorkspace'
-import { AssistantWorkspace } from './workspaces/assistant/AssistantWorkspace'
-import { SettingsWorkspace } from './workspaces/settings/SettingsWorkspace'
-import { TradingWorkspace } from './workspaces/trading/TradingWorkspace'
-import { loadWorkspaceBootstrap } from './entities/app/api'
-import { loadCurrentSession, sendSessionHeartbeat } from './entities/auth/api'
-import { updateTradeWorkflowItem, type UpdateTradeWorkflowItemInput } from './entities/operations/api'
+  MOBILE_NAV_MEDIA_QUERY,
+  MOBILE_NAVIGATION_PANEL_ID,
+  mobileNavigationToggleLabel,
+  shouldHandleClientSideNavigation,
+  shouldHideMobileNavigation,
+} from './app/navigation'
+import type { DocumentationDocumentKey } from './workspaces/docs/DocumentationWorkspace'
 import {
-  createTradePayment,
-  createTradeInvoice,
-  updateTradePayment,
-  updateTradeInvoice,
-  type CreateTradePaymentInput,
-  type CreateTradeInvoiceInput,
-  type UpdateTradePaymentInput,
-  type UpdateTradeInvoiceInput,
-} from './entities/settlement/api'
+  deriveWorkspaceStatus,
+  VIEW_DATA_GROUPS,
+} from './entities/app/workspaceLoading'
+import { buildMutationRefreshGroups } from './entities/app/workspaceRefresh'
+import { useAppWorkspaceData } from './entities/app/useAppWorkspaceData'
 import { submitTradeEvent } from './entities/trade/api'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
-import { ApiError, fetchJson, postJson } from './shared/api'
-import { appConfig, bootstrapQueryLimits } from './shared/config'
+import { fetchJson } from './shared/api'
 import {
-  buildMutationHeaders,
-  clearStoredAuthSession,
-  getMutationContext,
-  getStoredAuthSession,
-  saveStoredAuthSession,
-  type StoredAuthSession,
-} from './shared/mutation'
+  applyAppearanceSettingsToDocument,
+  clearAppearanceSettingsSnapshot,
+  detectSystemPrefersDark,
+  getAppearanceSettingsSnapshot,
+  resolveColorMode,
+  saveAppearanceSettingsSnapshot,
+} from './shared/appearance'
+import { appConfig, bootstrapQueryLimits } from './shared/config'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import {
@@ -57,35 +40,10 @@ import {
 } from './features/trades/tradeEventPayloads'
 import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import {
-  type CounterpartyCreditPreviewRecord,
-  type CounterpartyCreditProfileRecord,
-  type CounterpartyCreditReportRow,
-  type CounterpartyExternalCreditSnapshotRecord,
-  DEFAULT_COUNTERPARTY_STANDARDS,
-  DEFAULT_LOCATION_STANDARDS,
-  type CounterpartyStandards,
-  type CounterpartyRecord,
-  type CurrencyRecord,
   type EventRow,
-  type ExternalDataRunRecord,
-  type ExternalDataSyncStatusRecord,
   type InspectorTab,
-  type LocationRecord,
-  type LocationStandards,
-  type OptionExposureRow,
   type PositionRow,
-  type DeliveryRecord,
-  type PortfolioRecord,
-  type PriceIndexRecord,
-  type ReferenceRecord,
-  type Trade,
-  type TradeInvoiceRecord,
-  type TradePaymentRecord,
-  type TradeWorkflowItemRecord,
-  type TradingSourceRecord,
-  type UnitRecord,
   type ViewKey,
-  type WeatherSyncStatusRecord,
 } from './shared/models'
 import {
   formatCommodityClass,
@@ -98,7 +56,6 @@ import {
 import { classForCommodity } from './shared/reference'
 import {
   allocationStatusOptions,
-  buildTradeCreditHoldSummary,
   commodityClassOrder,
   confirmationStatusOptions,
   invoiceStatusOptions,
@@ -120,6 +77,82 @@ import {
 } from './shared/trading'
 import { Tooltip } from './shared/ui/Tooltip'
 
+const DocumentationWorkspace = lazy(() =>
+  import('./workspaces/docs/DocumentationWorkspace').then((module) => ({
+    default: module.DocumentationWorkspace,
+  })),
+)
+const DashboardWorkspace = lazy(() =>
+  import('./workspaces/dashboard/DashboardWorkspace').then((module) => ({
+    default: module.DashboardWorkspace,
+  })),
+)
+const TradingWorkspace = lazy(() =>
+  import('./workspaces/trading/TradingWorkspace').then((module) => ({
+    default: module.TradingWorkspace,
+  })),
+)
+const EventsWorkspace = lazy(() =>
+  import('./workspaces/events/EventsWorkspace').then((module) => ({
+    default: module.EventsWorkspace,
+  })),
+)
+const RiskWorkspace = lazy(() =>
+  import('./workspaces/risk/RiskWorkspace').then((module) => ({
+    default: module.RiskWorkspace,
+  })),
+)
+const PositionsWorkspace = lazy(() =>
+  import('./workspaces/positions/PositionsWorkspace').then((module) => ({
+    default: module.PositionsWorkspace,
+  })),
+)
+const DeliveryWorkspace = lazy(() =>
+  import('./workspaces/shipments/ShipmentWorkspace').then((module) => ({
+    default: module.DeliveryWorkspace,
+  })),
+)
+const SchedulingWorkspace = lazy(() =>
+  import('./workspaces/scheduling/SchedulingWorkspace').then((module) => ({
+    default: module.SchedulingWorkspace,
+  })),
+)
+const OperationsWorkspace = lazy(() =>
+  import('./workspaces/operations/OperationsWorkspace').then((module) => ({
+    default: module.OperationsWorkspace,
+  })),
+)
+const SettlementWorkspace = lazy(() =>
+  import('./workspaces/settlement/SettlementWorkspace').then((module) => ({
+    default: module.SettlementWorkspace,
+  })),
+)
+const ReportsWorkspace = lazy(() =>
+  import('./workspaces/reports/ReportsWorkspace').then((module) => ({
+    default: module.ReportsWorkspace,
+  })),
+)
+const ReferenceDataWorkspace = lazy(() =>
+  import('./workspaces/reference-data/ReferenceDataWorkspace').then((module) => ({
+    default: module.ReferenceDataWorkspace,
+  })),
+)
+const AdminWorkspace = lazy(() =>
+  import('./workspaces/admin/AdminWorkspace').then((module) => ({
+    default: module.AdminWorkspace,
+  })),
+)
+const SettingsWorkspace = lazy(() =>
+  import('./workspaces/settings/SettingsWorkspace').then((module) => ({
+    default: module.SettingsWorkspace,
+  })),
+)
+const AssistantWorkspace = lazy(() =>
+  import('./workspaces/assistant/AssistantWorkspace').then((module) => ({
+    default: module.AssistantWorkspace,
+  })),
+)
+
 const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
   { key: 'dashboard', label: 'Dashboard', kicker: 'Desk' },
   { key: 'guide', label: 'Guide', kicker: 'Playbook' },
@@ -138,14 +171,7 @@ const VIEWS: Array<{ key: ViewKey; label: string; kicker: string }> = [
   { key: 'assistant', label: 'Assistant', kicker: 'AI' },
 ]
 
-function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {
-  const role = session?.user.role.trim().toUpperCase() ?? ''
-  return role === 'OPS_ADMIN' || role === 'ADMIN'
-}
-
-function sessionHeaders(session: StoredAuthSession): Headers {
-  return new Headers({ Authorization: `Bearer ${session.accessToken}` })
-}
+const DEFAULT_DOCUMENTATION_DOCUMENT_KEY: DocumentationDocumentKey = 'guide'
 
 type AppRouteState = {
   view: ViewKey
@@ -215,6 +241,18 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
   return `${window.location.pathname}${search ? `?${search}` : ''}${hash}`
 }
 
+function detectMobileViewport(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  if (typeof window.matchMedia === 'function') {
+    return window.matchMedia(MOBILE_NAV_MEDIA_QUERY).matches
+  }
+
+  return window.innerWidth <= 960
+}
+
 function parseOptionalTradeNumber(value: string): number | null {
   const trimmed = value.trim()
   if (!trimmed) {
@@ -225,6 +263,45 @@ function parseOptionalTradeNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function workspaceLabel(view: ViewKey): string {
+  return VIEWS.find((entry) => entry.key === view)?.label ?? 'Workspace'
+}
+
+function WorkspaceLoadState({
+  title,
+  detail,
+}: {
+  title: string
+  detail: string
+}) {
+  return (
+    <section className="surface empty-state">
+      <strong>{title}</strong>
+      <p>{detail}</p>
+    </section>
+  )
+}
+
+function WorkspaceErrorState({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <section className="surface empty-state">
+      <strong>{title}</strong>
+      <p>{message}</p>
+      <button type="button" className="button button-secondary" onClick={onRetry}>
+        Retry workspace load
+      </button>
+    </section>
+  )
+}
+
 export default function App() {
   const initialRoute = useMemo(() => readAppRouteState(), [])
   const [currentView, setCurrentView] = useState<ViewKey>(initialRoute.view)
@@ -233,68 +310,14 @@ export default function App() {
   const [roadmapRefreshVersion, setRoadmapRefreshVersion] = useState(0)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [health, setHealth] = useState<string>('checking...')
-  const [trades, setTrades] = useState<Trade[]>([])
-  const [events, setEvents] = useState<EventRow[]>([])
-  const [positions, setPositions] = useState<PositionRow[]>([])
-  const [optionExposures, setOptionExposures] = useState<OptionExposureRow[]>([])
-  const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
-  const [tradeWorkflowItems, setTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
-  const [tradeInvoices, setTradeInvoices] = useState<TradeInvoiceRecord[]>([])
-  const [tradePayments, setTradePayments] = useState<TradePaymentRecord[]>([])
-  const [books, setBooks] = useState<ReferenceRecord[]>([])
-  const [commodities, setCommodities] = useState<ReferenceRecord[]>([])
-  const [priceIndices, setPriceIndices] = useState<PriceIndexRecord[]>([])
-  const [currencies, setCurrencies] = useState<CurrencyRecord[]>([])
-  const [units, setUnits] = useState<UnitRecord[]>([])
-  const [locations, setLocations] = useState<LocationRecord[]>([])
-  const [locationStandards, setLocationStandards] = useState<LocationStandards>(DEFAULT_LOCATION_STANDARDS)
-  const [counterpartyStandards, setCounterpartyStandards] = useState<CounterpartyStandards>(
-    DEFAULT_COUNTERPARTY_STANDARDS,
-  )
-  const [counterparties, setCounterparties] = useState<CounterpartyRecord[]>([])
-  const [counterpartyCreditProfiles, setCounterpartyCreditProfiles] = useState<CounterpartyCreditProfileRecord[]>([])
-  const [counterpartyExternalCreditSnapshots, setCounterpartyExternalCreditSnapshots] = useState<CounterpartyExternalCreditSnapshotRecord[]>([])
-  const [counterpartyCreditReport, setCounterpartyCreditReport] = useState<CounterpartyCreditReportRow[]>([])
-  const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
-  const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
-  const [externalDataSyncStatus, setExternalDataSyncStatus] = useState<ExternalDataSyncStatusRecord | null>(null)
-  const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
-  const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
-  const [workflowMutationError, setWorkflowMutationError] = useState('')
-  const [workflowMutationPendingId, setWorkflowMutationPendingId] = useState<number | null>(null)
-  const [invoiceMutationError, setInvoiceMutationError] = useState('')
-  const [invoiceMutationPendingKey, setInvoiceMutationPendingKey] = useState<string | null>(null)
-  const [paymentMutationError, setPaymentMutationError] = useState('')
-  const [paymentMutationPendingKey, setPaymentMutationPendingKey] = useState<string | null>(null)
-  const [error, setError] = useState<string>('')
+  const [isMobileViewport, setIsMobileViewport] = useState(() => detectMobileViewport())
   const [createError, setCreateError] = useState<string>('')
   const [amendError, setAmendError] = useState<string>('')
-  const [referenceDataError, setReferenceDataError] = useState<string>('')
-  const [externalDataError, setExternalDataError] = useState<string>('')
-  const [externalDataSuccess, setExternalDataSuccess] = useState<string>('')
-  const [counterpartyCreditImportDraft, setCounterpartyCreditImportDraft] = useState('')
-  const [counterpartyCreditPreview, setCounterpartyCreditPreview] = useState<CounterpartyCreditPreviewRecord | null>(null)
-  const [counterpartyCreditPreviewing, setCounterpartyCreditPreviewing] = useState(false)
-  const [counterpartyCreditPreviewError, setCounterpartyCreditPreviewError] = useState('')
-  const [counterpartyCreditPreviewSuccess, setCounterpartyCreditPreviewSuccess] = useState('')
-  const [counterpartyCreditImporting, setCounterpartyCreditImporting] = useState(false)
-  const [counterpartyCreditImportError, setCounterpartyCreditImportError] = useState('')
-  const [counterpartyCreditImportSuccess, setCounterpartyCreditImportSuccess] = useState('')
-  const [tradingSourcesError, setTradingSourcesError] = useState<string>('')
-  const [tradingSourcesSuccess, setTradingSourcesSuccess] = useState<string>('')
-  const [weatherSyncError, setWeatherSyncError] = useState<string>('')
-  const [weatherSyncSuccess, setWeatherSyncSuccess] = useState<string>('')
-  const [referenceDataLoading, setReferenceDataLoading] = useState(true)
-  const [appLoading, setAppLoading] = useState(true)
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(initialRoute.tradeId)
   const [selectedTradeEvents, setSelectedTradeEvents] = useState<EventRow[]>([])
   const [eventFilter, setEventFilter] = useState('ALL')
-  const [externalDataSyncing, setExternalDataSyncing] = useState(false)
-  const [externalDataSyncingProvider, setExternalDataSyncingProvider] = useState<string | null>(null)
-  const [tradingSourcesSyncing, setTradingSourcesSyncing] = useState(false)
-  const [weatherSyncing, setWeatherSyncing] = useState(false)
-  const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => getStoredAuthSession())
+  const [appearanceSettings, setAppearanceSettings] = useState(() => getAppearanceSettingsSnapshot())
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() => detectSystemPrefersDark())
 
   const [submitting, setSubmitting] = useState(false)
 
@@ -303,263 +326,88 @@ export default function App() {
   const [optionLifecycleSubmittingEvent, setOptionLifecycleSubmittingEvent] =
     useState<OptionLifecycleEventType | null>(null)
 
+  const {
+    authSession,
+    appLoading,
+    books,
+    commodities,
+    counterparties,
+    counterpartyCreditImportDraft,
+    counterpartyCreditImportError,
+    counterpartyCreditImporting,
+    counterpartyCreditImportSuccess,
+    counterpartyCreditPreview,
+    counterpartyCreditPreviewError,
+    counterpartyCreditPreviewing,
+    counterpartyCreditPreviewSuccess,
+    counterpartyCreditProfiles,
+    counterpartyCreditReport,
+    counterpartyExternalCreditSnapshots,
+    counterpartyStandards,
+    currencies,
+    deliveries,
+    error,
+    events,
+    externalDataError,
+    externalDataRuns,
+    externalDataSuccess,
+    externalDataSyncStatus,
+    externalDataSyncing,
+    externalDataSyncingProvider,
+    groupErrors,
+    groupLoaded,
+    groupLoading,
+    handleCounterpartyCreditImportDraftChange,
+    handleCreateTradePayment,
+    handleImportCounterpartyCreditSnapshots,
+    handleIssueTradeInvoice,
+    handlePreviewCounterpartyCreditImport,
+    handleRunExternalDataSync,
+    handleRunNwsWeatherSync,
+    handleSaveWorkflowItem,
+    handleSeedTradingSources,
+    handleSessionChange,
+    handleUpdateTradeInvoice,
+    handleUpdateTradePayment,
+    health,
+    invoiceMutationError,
+    invoiceMutationPendingKey,
+    loadData,
+    locationStandards,
+    locations,
+    optionExposures,
+    paymentMutationError,
+    paymentMutationPendingKey,
+    portfolios,
+    positions,
+    priceIndices,
+    setError,
+    tradeInvoices,
+    tradePayments,
+    tradeWorkflowItems,
+    trades,
+    tradingSources,
+    tradingSourcesError,
+    tradingSourcesSuccess,
+    tradingSourcesSyncing,
+    units,
+    weatherSyncError,
+    weatherSyncStatus,
+    weatherSyncSuccess,
+    weatherSyncing,
+    workflowMutationError,
+    workflowMutationPendingId,
+  } = useAppWorkspaceData(currentView)
+
+  const referenceDataLoading = groupLoading.reference && !groupLoaded.reference
+  const resolvedColorMode = useMemo(
+    () => resolveColorMode(appearanceSettings.colorMode, systemPrefersDark),
+    [appearanceSettings.colorMode, systemPrefersDark],
+  )
+
   function handleRoadmapPublished() {
     setRoadmapRefreshVersion((current) => current + 1)
   }
-
-  async function loadData(sessionOverride?: StoredAuthSession | null) {
-    const currentSession = sessionOverride ?? authSession
-    const {
-      health: healthJson,
-      trades: tradesJson,
-      events: eventsJson,
-      positions: positionsJson,
-      optionExposures: optionExposuresJson,
-      deliveries: deliveriesJson,
-      workItems: workItemsJson,
-      invoices: invoicesJson,
-      payments: paymentsJson,
-      books: booksJson,
-      commodities: commoditiesJson,
-      priceIndices: priceIndicesJson,
-      currencies: currenciesJson,
-      units: unitsJson,
-      locations: locationsJson,
-      locationStandards: locationStandardsJson,
-      counterparties: counterpartiesJson,
-      counterpartyCreditProfiles: counterpartyCreditProfilesJson,
-      counterpartyExternalCreditSnapshots: counterpartyExternalCreditSnapshotsJson,
-      counterpartyCreditReport: counterpartyCreditReportJson,
-      counterpartyStandards: counterpartyStandardsJson,
-      portfolios: portfoliosJson,
-      externalDataRuns: externalDataRunsJson,
-      externalDataSyncStatus: externalDataSyncStatusJson,
-      tradingSources: tradingSourcesJson,
-      weatherSyncStatus: weatherSyncStatusJson,
-    } = await loadWorkspaceBootstrap(appConfig.apiBase, {
-      adminHeaders:
-        currentSession && hasAdministrativeAccess(currentSession)
-          ? sessionHeaders(currentSession)
-          : null,
-    })
-    const rawTradeWorkflowItems = workItemsJson as TradeWorkflowItemRecord[]
-    const creditApprovalItemsByTradeId = new Map(
-      rawTradeWorkflowItems
-        .filter((item) => item.workflow_type === 'CREDIT_APPROVAL')
-        .map((item) => [item.trade_id, item] as const),
-    )
-    const nextTrades = (tradesJson as Trade[]).map((trade) => ({
-      ...trade,
-      active_credit_exception: creditApprovalItemsByTradeId.get(trade.trade_id)?.active_credit_exception ?? null,
-      ...buildTradeCreditHoldSummary(creditApprovalItemsByTradeId.get(trade.trade_id)),
-    }))
-    const nextEvents = eventsJson as EventRow[]
-    const nextPositions = positionsJson as PositionRow[]
-    const nextOptionExposures = optionExposuresJson as OptionExposureRow[]
-    const nextDeliveries = deliveriesJson as DeliveryRecord[]
-    const nextTradeWorkflowItems = rawTradeWorkflowItems.map((item) => ({
-      ...item,
-      active_credit_exception: creditApprovalItemsByTradeId.get(item.trade_id)?.active_credit_exception ?? null,
-      ...buildTradeCreditHoldSummary(creditApprovalItemsByTradeId.get(item.trade_id)),
-    }))
-    const nextTradeInvoices = invoicesJson as TradeInvoiceRecord[]
-    const nextTradePayments = paymentsJson as TradePaymentRecord[]
-    const nextBooks = booksJson as ReferenceRecord[]
-    const nextCommodities = commoditiesJson as ReferenceRecord[]
-    const nextPriceIndices = priceIndicesJson as PriceIndexRecord[]
-    const nextCurrencies = currenciesJson as CurrencyRecord[]
-    const nextUnits = unitsJson as UnitRecord[]
-    const nextLocations = locationsJson as LocationRecord[]
-    const nextLocationStandards = locationStandardsJson as LocationStandards
-    const nextCounterparties = counterpartiesJson as CounterpartyRecord[]
-    const nextCounterpartyCreditProfiles = counterpartyCreditProfilesJson as CounterpartyCreditProfileRecord[]
-    const nextCounterpartyExternalCreditSnapshots =
-      counterpartyExternalCreditSnapshotsJson as CounterpartyExternalCreditSnapshotRecord[]
-    const nextCounterpartyCreditReport = counterpartyCreditReportJson as CounterpartyCreditReportRow[]
-    const nextCounterpartyStandards = counterpartyStandardsJson as CounterpartyStandards
-    const nextPortfolios = portfoliosJson as PortfolioRecord[]
-    const nextExternalDataRuns = externalDataRunsJson as ExternalDataRunRecord[]
-    const nextExternalDataSyncStatus = externalDataSyncStatusJson as ExternalDataSyncStatusRecord | null
-    const nextTradingSources = tradingSourcesJson as TradingSourceRecord[]
-    const nextWeatherSyncStatus = weatherSyncStatusJson as WeatherSyncStatusRecord | null
-
-    setHealth(healthJson.status ?? 'unknown')
-    setTrades(nextTrades)
-    setEvents(nextEvents)
-    setPositions(nextPositions)
-    setOptionExposures(nextOptionExposures)
-    setDeliveries(nextDeliveries)
-    setTradeWorkflowItems(nextTradeWorkflowItems)
-    setTradeInvoices(nextTradeInvoices)
-    setTradePayments(nextTradePayments)
-    setBooks(nextBooks)
-    setCommodities(nextCommodities)
-    setPriceIndices(nextPriceIndices)
-    setCurrencies(nextCurrencies)
-    setUnits(nextUnits)
-    setLocations(nextLocations)
-    setLocationStandards(nextLocationStandards)
-    setCounterparties(nextCounterparties)
-    setCounterpartyCreditProfiles(nextCounterpartyCreditProfiles)
-    setCounterpartyExternalCreditSnapshots(nextCounterpartyExternalCreditSnapshots)
-    setCounterpartyCreditReport(nextCounterpartyCreditReport)
-    setCounterpartyStandards(nextCounterpartyStandards)
-    setPortfolios(nextPortfolios)
-    setExternalDataRuns(nextExternalDataRuns)
-    setExternalDataSyncStatus(nextExternalDataSyncStatus)
-    setTradingSources(nextTradingSources)
-    setWeatherSyncStatus(nextWeatherSyncStatus)
-    setReferenceDataLoading(false)
-    setAppLoading(false)
-    setError('')
-    setReferenceDataError('')
-
-    if (nextTrades.length > 0) {
-      setSelectedTradeId((current) => {
-        const stillExists = nextTrades.some((trade) => trade.trade_id === current)
-        return stillExists ? current : nextTrades[0].trade_id
-      })
-    } else {
-      setSelectedTradeId(null)
-    }
-  }
-
-  const loadDataRef = useRef(loadData)
-  loadDataRef.current = loadData
-
-  async function handleSaveWorkflowItem(itemId: number, payload: UpdateTradeWorkflowItemInput) {
-    setWorkflowMutationError('')
-    setWorkflowMutationPendingId(itemId)
-
-    try {
-      await updateTradeWorkflowItem(appConfig.apiBase, itemId, payload)
-      await loadDataRef.current()
-    } catch (error) {
-      setWorkflowMutationError(error instanceof Error ? error.message : 'Failed to update workflow item.')
-    } finally {
-      setWorkflowMutationPendingId((current) => (current === itemId ? null : current))
-    }
-  }
-
-  async function handleIssueTradeInvoice(tradeId: string, payload: CreateTradeInvoiceInput) {
-    const pendingKey = `trade:${tradeId}`
-    setInvoiceMutationError('')
-    setInvoiceMutationPendingKey(pendingKey)
-
-    try {
-      await createTradeInvoice(appConfig.apiBase, payload)
-      await loadDataRef.current()
-    } catch (error) {
-      setInvoiceMutationError(error instanceof Error ? error.message : 'Failed to issue invoice.')
-    } finally {
-      setInvoiceMutationPendingKey((current) => (current === pendingKey ? null : current))
-    }
-  }
-
-  async function handleUpdateTradeInvoice(invoiceId: number, payload: UpdateTradeInvoiceInput) {
-    const pendingKey = `invoice:${invoiceId}`
-    setInvoiceMutationError('')
-    setInvoiceMutationPendingKey(pendingKey)
-
-    try {
-      await updateTradeInvoice(appConfig.apiBase, invoiceId, payload)
-      await loadDataRef.current()
-    } catch (error) {
-      setInvoiceMutationError(error instanceof Error ? error.message : 'Failed to update invoice.')
-    } finally {
-      setInvoiceMutationPendingKey((current) => (current === pendingKey ? null : current))
-    }
-  }
-
-  async function handleCreateTradePayment(invoiceId: number, payload: CreateTradePaymentInput) {
-    const pendingKey = `invoice:${invoiceId}:new`
-    setPaymentMutationError('')
-    setPaymentMutationPendingKey(pendingKey)
-
-    try {
-      await createTradePayment(appConfig.apiBase, payload)
-      await loadDataRef.current()
-    } catch (error) {
-      setPaymentMutationError(error instanceof Error ? error.message : 'Failed to create payment.')
-    } finally {
-      setPaymentMutationPendingKey((current) => (current === pendingKey ? null : current))
-    }
-  }
-
-  async function handleUpdateTradePayment(paymentId: number, payload: UpdateTradePaymentInput) {
-    const pendingKey = `payment:${paymentId}`
-    setPaymentMutationError('')
-    setPaymentMutationPendingKey(pendingKey)
-
-    try {
-      await updateTradePayment(appConfig.apiBase, paymentId, payload)
-      await loadDataRef.current()
-    } catch (error) {
-      setPaymentMutationError(error instanceof Error ? error.message : 'Failed to update payment.')
-    } finally {
-      setPaymentMutationPendingKey((current) => (current === pendingKey ? null : current))
-    }
-  }
-
-  async function refreshAuthSession(): Promise<StoredAuthSession | null> {
-    const storedSession = getStoredAuthSession()
-    if (!storedSession) {
-      setAuthSession(null)
-      return null
-    }
-
-    try {
-      const current = await loadCurrentSession(appConfig.apiBase)
-      const nextSession: StoredAuthSession = {
-        sessionId: current.session_id,
-        accessToken: storedSession.accessToken,
-        expiresAt: current.expires_at,
-        user: current.user,
-      }
-      saveStoredAuthSession(nextSession)
-      setAuthSession(nextSession)
-      return nextSession
-    } catch {
-      clearStoredAuthSession()
-      setAuthSession(null)
-      return null
-    }
-  }
-
-  async function handleSessionChange(nextSession: StoredAuthSession | null) {
-    if (nextSession) {
-      saveStoredAuthSession(nextSession)
-    } else {
-      clearStoredAuthSession()
-    }
-    setAuthSession(nextSession)
-    await loadData(nextSession)
-  }
-
-  useEffect(() => {
-    async function init() {
-      try {
-        const session = await refreshAuthSession()
-        await loadDataRef.current(session)
-      } catch (error) {
-        setReferenceDataLoading(false)
-        setAppLoading(false)
-        if (error instanceof ApiError) {
-          setError(error.message)
-          return
-        }
-
-        if (error instanceof Error) {
-          setError(error.message)
-          return
-        }
-
-        setError(`Could not reach API. Make sure backend is running on ${appConfig.apiDisplayHost} and CORS is enabled.`)
-      }
-    }
-
-    init()
-  }, [])
 
   useEffect(() => {
     function handlePopState() {
@@ -582,47 +430,108 @@ export default function App() {
   }, [currentView])
 
   useEffect(() => {
-    if (!authSession) {
+    if (typeof window === 'undefined') {
       return
     }
 
-    let cancelled = false
+    if (typeof window.matchMedia !== 'function') {
+      function handleResize() {
+        setIsMobileViewport(detectMobileViewport())
+      }
 
-    async function heartbeat() {
-      try {
-        await sendSessionHeartbeat(appConfig.apiBase)
-      } catch {
-        if (!cancelled) {
-          // Presence refresh should stay quiet; the authenticated workspace already surfaces session failures elsewhere.
-        }
+      handleResize()
+      window.addEventListener('resize', handleResize)
+      return () => window.removeEventListener('resize', handleResize)
+    }
+
+    const mediaQuery = window.matchMedia(MOBILE_NAV_MEDIA_QUERY)
+
+    function handleViewportChange(event: MediaQueryListEvent) {
+      setIsMobileViewport(event.matches)
+    }
+
+    setIsMobileViewport(mediaQuery.matches)
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleViewportChange)
+      return () => {
+        mediaQuery.removeEventListener('change', handleViewportChange)
       }
     }
 
-    function handleFocus() {
-      void heartbeat()
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        void heartbeat()
-      }
-    }
-
-    void heartbeat()
-    const intervalId = window.setInterval(() => {
-      void heartbeat()
-    }, 45000)
-
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
+    mediaQuery.addListener(handleViewportChange)
 
     return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      mediaQuery.removeListener(handleViewportChange)
     }
-  }, [authSession])
+  }, [])
+
+  useEffect(() => {
+    if (!isMobileViewport) {
+      setMobileNavOpen(false)
+    }
+  }, [isMobileViewport])
+
+  useEffect(() => {
+    if (!isMobileViewport || !mobileNavOpen) {
+      return
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isMobileViewport, mobileNavOpen])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+
+    function handlePreferenceChange(event: MediaQueryListEvent) {
+      setSystemPrefersDark(event.matches)
+    }
+
+    setSystemPrefersDark(mediaQuery.matches)
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handlePreferenceChange)
+      return () => {
+        mediaQuery.removeEventListener('change', handlePreferenceChange)
+      }
+    }
+
+    mediaQuery.addListener(handlePreferenceChange)
+
+    return () => {
+      mediaQuery.removeListener(handlePreferenceChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    applyAppearanceSettingsToDocument(appearanceSettings, systemPrefersDark)
+  }, [appearanceSettings, systemPrefersDark])
+
+  useEffect(() => {
+    if (trades.length === 0) {
+      if (selectedTradeId !== null) {
+        setSelectedTradeId(null)
+      }
+      return
+    }
+
+    if (selectedTradeId && trades.some((trade) => trade.trade_id === selectedTradeId)) {
+      return
+    }
+
+    setSelectedTradeId(trades[0].trade_id)
+  }, [selectedTradeId, trades])
 
   useEffect(() => {
     if (!selectedTradeId) {
@@ -680,18 +589,6 @@ export default function App() {
     [trades, selectedTradeId],
   )
 
-  useEffect(() => {
-    if (currentView !== 'trades' || trades.length === 0) {
-      return
-    }
-
-    if (selectedTradeId && trades.some((trade) => trade.trade_id === selectedTradeId)) {
-      return
-    }
-
-    setSelectedTradeId(trades[0].trade_id)
-  }, [currentView, selectedTradeId, trades])
-
   const activeTrades = useMemo(
     () => trades.filter((trade) => tradeStatusIsActive(trade.status)),
     [trades],
@@ -719,6 +616,27 @@ export default function App() {
       view === 'settings',
     )
     setCurrentView(view)
+  }
+
+  function hrefForView(view: ViewKey) {
+    return buildAppRouteUrl(
+      {
+        view,
+        docsDocumentKey: activeDocumentationDocumentKey,
+        tradeId: selectedTradeId,
+      },
+      view === 'settings' ? window.location.hash : '',
+    )
+  }
+
+  function handleViewLinkClick(event: ReactMouseEvent<HTMLAnchorElement>, view: ViewKey) {
+    if (!shouldHandleClientSideNavigation(event)) {
+      return
+    }
+
+    event.preventDefault()
+    navigateToView(view)
+    setMobileNavOpen(false)
   }
 
   function navigateToTrade(tradeId: string) {
@@ -752,6 +670,31 @@ export default function App() {
     setActiveDocumentationDocumentKey(nextDocumentKey)
     setCurrentView('guide')
   }
+
+  function handleAppearanceSettingsChange(nextSettings: Parameters<typeof saveAppearanceSettingsSnapshot>[0]) {
+    const savedSettings = saveAppearanceSettingsSnapshot(nextSettings)
+    setAppearanceSettings(savedSettings)
+    return savedSettings
+  }
+
+  function handleAppearanceSettingsReset() {
+    const defaultSettings = clearAppearanceSettingsSnapshot()
+    setAppearanceSettings(defaultSettings)
+    return defaultSettings
+  }
+
+  function handleToggleColorMode() {
+    const nextColorMode = resolvedColorMode === 'dark' ? 'light' : 'dark'
+    handleAppearanceSettingsChange({
+      ...appearanceSettings,
+      colorMode: nextColorMode,
+    })
+  }
+
+  const themeToggleLabel = resolvedColorMode === 'dark' ? 'Dark mode' : 'Light mode'
+  const themeToggleActionLabel = resolvedColorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+  const mobileNavHidden = shouldHideMobileNavigation({ isMobileViewport, mobileNavOpen })
+  const mobileNavToggleActionLabel = mobileNavigationToggleLabel(mobileNavOpen)
 
   useEffect(() => {
     syncRouteState(
@@ -1236,232 +1179,15 @@ export default function App() {
     commodityClassOrder,
   })
 
-  async function refreshTradingSources(sessionOverride?: StoredAuthSession | null) {
-    const currentSession = sessionOverride ?? authSession
-    if (!currentSession || !hasAdministrativeAccess(currentSession)) {
-      setTradingSources([])
-      return []
-    }
-
-    const rows = await fetchJson<TradingSourceRecord[]>(
-      `${appConfig.apiBase}/admin/trading-sources?limit=${bootstrapQueryLimits.tradingSources}`,
-      {
-        headers: sessionHeaders(currentSession),
-        cache: 'no-store',
-      },
-    )
-    setTradingSources(rows)
-    return rows
-  }
-
-  async function handleRunExternalDataSync(
-    provider: 'EIA' | 'EIA_FUNDAMENTALS' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT' | 'KALSHI',
-  ) {
-    setExternalDataSyncing(true)
-    setExternalDataSyncingProvider(provider)
-    setExternalDataError('')
-    setExternalDataSuccess('')
-    try {
-      const { actorId } = getMutationContext()
-      const routeByProvider: Record<typeof provider, string> = {
-        EIA: 'eia',
-        EIA_FUNDAMENTALS: 'eia-fundamentals',
-        FRED: 'fred',
-        CFTC: 'cftc',
-        CAISO: 'caiso',
-        ERCOT: 'ercot',
-        KALSHI: 'kalshi',
-      }
-      const response = await fetch(`${appConfig.apiBase}/admin/external-data/${routeByProvider[provider]}/sync`, {
-        method: 'POST',
-        headers: buildMutationHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ requested_by: actorId }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || `Failed to run ${provider} sync.`)
-      }
-
-      const payload = (await response.json()) as ExternalDataRunRecord
-      await loadData()
-      setExternalDataSuccess(
-        `${provider} sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.observation_count} observations.`,
-      )
-    } catch (err) {
-      setExternalDataError(err instanceof Error ? err.message : `Failed to run ${provider} sync.`)
-    } finally {
-      setExternalDataSyncing(false)
-      setExternalDataSyncingProvider(null)
-    }
-  }
-
-  async function handlePreviewCounterpartyCreditImport() {
-    const draft = counterpartyCreditImportDraft.trim()
-    if (!draft) {
-      setCounterpartyCreditPreviewError('Paste a JSON array of D&B rows before previewing.')
-      setCounterpartyCreditPreviewSuccess('')
-      return
-    }
-
-    let rows: unknown
-    try {
-      rows = JSON.parse(draft)
-    } catch {
-      setCounterpartyCreditPreviewError('D&B preview payload must be valid JSON.')
-      setCounterpartyCreditPreviewSuccess('')
-      return
-    }
-
-    if (!Array.isArray(rows) || rows.length === 0) {
-      setCounterpartyCreditPreviewError('D&B preview payload must be a non-empty JSON array.')
-      setCounterpartyCreditPreviewSuccess('')
-      return
-    }
-
-    setCounterpartyCreditPreviewing(true)
-    setCounterpartyCreditPreviewError('')
-    setCounterpartyCreditPreviewSuccess('')
-    setCounterpartyCreditImportError('')
-    setCounterpartyCreditImportSuccess('')
-    try {
-      const payload = await postJson<CounterpartyCreditPreviewRecord>(
-        `${appConfig.apiBase}/admin/external-data/dnb/counterparty-credit/preview`,
-        {
-          rows,
-          default_limit_currency_code: 'USD',
-        },
-        { headers: buildMutationHeaders() },
-      )
-
-      setCounterpartyCreditPreview(payload)
-      setCounterpartyCreditPreviewSuccess(
-        `D&B preview analyzed ${payload.total_rows} row${payload.total_rows === 1 ? '' : 's'}: ${payload.ready_rows} ready, ${payload.blocked_rows} blocked.`,
-      )
-    } catch (err) {
-      setCounterpartyCreditPreview(null)
-      setCounterpartyCreditPreviewError(
-        err instanceof Error ? err.message : 'Failed to preview D&B counterparty credit rows.',
-      )
-    } finally {
-      setCounterpartyCreditPreviewing(false)
-    }
-  }
-
-  function handleCounterpartyCreditImportDraftChange(value: string) {
-    setCounterpartyCreditImportDraft(value)
-    setCounterpartyCreditPreview(null)
-    setCounterpartyCreditPreviewError('')
-    setCounterpartyCreditPreviewSuccess('')
-    setCounterpartyCreditImportError('')
-    setCounterpartyCreditImportSuccess('')
-  }
-
-  async function handleImportCounterpartyCreditSnapshots() {
-    const snapshots =
-      counterpartyCreditPreview?.rows
-        .filter((row) => row.ready_to_import && row.snapshot)
-        .map((row) => row.snapshot) ?? []
-
-    if (snapshots.length === 0) {
-      setCounterpartyCreditImportError('Preview D&B rows first and make sure at least one row is ready to import.')
-      setCounterpartyCreditImportSuccess('')
-      return
-    }
-
-    setCounterpartyCreditImporting(true)
-    setCounterpartyCreditImportError('')
-    setCounterpartyCreditImportSuccess('')
-    try {
-      const { actorId } = getMutationContext()
-      const payload = await postJson<ExternalDataRunRecord>(
-        `${appConfig.apiBase}/admin/external-data/counterparty-credit/import`,
-        {
-          provider: 'DNB',
-          snapshots,
-          requested_by: actorId,
-        },
-        { headers: buildMutationHeaders() },
-      )
-
-      await loadData()
-      if (payload.status === 'FAILED') {
-        setCounterpartyCreditImportError(
-          payload.error_summary || `DNB counterparty credit import run ${payload.id} failed.`,
-        )
-        return
-      }
-
-      setCounterpartyCreditImportSuccess(
-        `DNB counterparty credit import run ${payload.id} loaded ${payload.observation_count} snapshot${payload.observation_count === 1 ? '' : 's'}.`,
-      )
-    } catch (err) {
-      setCounterpartyCreditImportError(
-        err instanceof Error ? err.message : 'Failed to import counterparty credit snapshots.',
-      )
-    } finally {
-      setCounterpartyCreditImporting(false)
-    }
-  }
-
-  async function handleSeedTradingSources() {
-    setTradingSourcesSyncing(true)
-    setTradingSourcesError('')
-    setTradingSourcesSuccess('')
-    try {
-      const { actorId } = getMutationContext()
-      const payload = await postJson<{ total_rows: number; created_count: number; updated_count: number }>(
-        `${appConfig.apiBase}/admin/trading-sources/seed`,
-        { requested_by: actorId, replace_existing: true },
-        { headers: buildMutationHeaders() },
-      )
-      setTradingSourcesSuccess(
-        `Trading source register loaded: ${payload.created_count} created, ${payload.updated_count} updated, ${payload.total_rows} total rows.`,
-      )
-
-      try {
-        await refreshTradingSources()
-      } catch (refreshError) {
-        setTradingSourcesError(
-          refreshError instanceof Error
-            ? `Trading sources were seeded, but the follow-up refresh failed: ${refreshError.message}`
-            : 'Trading sources were seeded, but the follow-up refresh failed.',
-        )
-      }
-    } catch (err) {
-      setTradingSourcesError(err instanceof Error ? err.message : 'Failed to seed trading sources.')
-    } finally {
-      setTradingSourcesSyncing(false)
-    }
-  }
-
-  async function handleRunNwsWeatherSync() {
-    setWeatherSyncing(true)
-    setWeatherSyncError('')
-    setWeatherSyncSuccess('')
-    try {
-      const { actorId } = getMutationContext()
-      const response = await fetch(`${appConfig.apiBase}/admin/weather/sync/nws`, {
-        method: 'POST',
-        headers: buildMutationHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ requested_by: actorId }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || 'Failed to run NWS weather sync.')
-      }
-
-      const payload = (await response.json()) as ExternalDataRunRecord
-      await loadData()
-      setWeatherSyncSuccess(
-        `NWS sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.series_count} series and ${payload.observation_count} observations.`,
-      )
-    } catch (err) {
-      setWeatherSyncError(err instanceof Error ? err.message : 'Failed to run NWS weather sync.')
-    } finally {
-      setWeatherSyncing(false)
-    }
+  async function refreshTradeMutationData() {
+    await loadData({
+      groups: buildMutationRefreshGroups({
+        currentView,
+        groupLoaded,
+        mutation: 'trade-event',
+      }),
+      force: true,
+    })
   }
 
   async function handleCreateTrade(e: React.FormEvent) {
@@ -1535,7 +1261,7 @@ export default function App() {
         payload: submission.payload,
       })
 
-      await loadData()
+      await refreshTradeMutationData()
       navigateToTrade(submission.tradeId)
       resetCreateForm()
       setCreateError('')
@@ -1635,7 +1361,7 @@ export default function App() {
         payload: submission.payload,
       })
 
-      await loadData()
+      await refreshTradeMutationData()
       setInspectorTab('overview')
       setAmendError('')
     } catch (err) {
@@ -1675,7 +1401,7 @@ export default function App() {
         },
       })
 
-      await loadData()
+      await refreshTradeMutationData()
       setInspectorTab('overview')
     } catch (err) {
       setAmendError(err instanceof Error ? err.message : 'Cancel trade failed.')
@@ -1718,7 +1444,7 @@ export default function App() {
         },
       })
 
-      await loadData()
+      await refreshTradeMutationData()
       setInspectorTab('overview')
       setAmendError('')
     } catch (err) {
@@ -1875,15 +1601,397 @@ export default function App() {
     assistant: 'Ask for grounded analysis with the desk state already loaded so AI stays anchored to what operations can see.',
   }[currentView]
 
-  const systemStateLabel = error
-    ? 'API unavailable'
-    : appLoading
-      ? 'Loading workspace'
-      : referenceDataError
-        ? 'Reference data issue'
-        : 'Connected'
+  const {
+    blockingWorkspaceError,
+    workspaceLoading,
+    workspaceWarning,
+    systemStateLabel,
+    systemStateTone,
+  } = deriveWorkspaceStatus({
+    appLoading,
+    currentView,
+    error,
+    groupErrors,
+    groupLoaded,
+    groupLoading,
+  })
 
-  const systemStateTone = error || referenceDataError ? 'cancelled' : 'active'
+  function handleRetryCurrentWorkspace() {
+    void loadData({
+      groups: VIEW_DATA_GROUPS[currentView],
+      force: true,
+    })
+  }
+
+  function renderWorkspaceContent() {
+    switch (currentView) {
+      case 'guide':
+        return (
+          <DocumentationWorkspace
+            activeDocumentKey={activeDocumentationDocumentKey}
+            getViewHref={hrefForView}
+            onDocumentKeyChange={handleDocumentationDocumentChange}
+            onOpenView={navigateToView}
+            roadmapRefreshVersion={roadmapRefreshVersion}
+          />
+        )
+      case 'dashboard':
+        return (
+          <DashboardWorkspace
+            authSession={authSession}
+            appLoading={appLoading}
+            activeTrades={activeTrades}
+            priceIndices={priceIndices}
+            positionsWithClass={positionsWithClass}
+            events={events}
+            formatCommodityClass={formatCommodityClass}
+            formatMoney={formatMoney}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+          />
+        )
+      case 'trades':
+        return (
+          <TradingWorkspace
+            authSession={authSession}
+            tradeCaptureFormProps={tradeCaptureFormProps}
+            trades={trades}
+            tradeWorkflowItems={tradeWorkflowItems}
+            selectedTrade={selectedTrade}
+            selectedTradeId={selectedTradeId}
+            selectedTradeEvents={selectedTradeEvents}
+            inspectorTab={inspectorTab}
+            setSelectedTradeId={setSelectedTradeId}
+            setInspectorTab={setInspectorTab}
+            handleDuplicateTrade={handleDuplicateTrade}
+            handleAmendTrade={handleAmendTrade}
+            handleCancelTrade={handleCancelTrade}
+            handleOptionLifecycleEvent={handleOptionLifecycleEvent}
+            optionLifecycleSubmittingEvent={optionLifecycleSubmittingEvent}
+            amendmentPreviewFields={amendmentPreview.changedFields}
+            cancelImpactSummary={cancelImpactSummary}
+            amendmentLockedReason={amendmentLockedReason}
+            amendExternalTradeIdInput={amendExternalTradeIdInput}
+            setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
+            amendSourceSystemInput={amendSourceSystemInput}
+            amendExecutionTimestampInput={amendExecutionTimestampInput}
+            setAmendExecutionTimestampInput={setAmendExecutionTimestampInput}
+            amendTradeDateInput={amendTradeDateInput}
+            setAmendTradeDateInput={setAmendTradeDateInput}
+            amendEffectiveStartDateInput={amendEffectiveStartDateInput}
+            setAmendEffectiveStartDateInput={setAmendEffectiveStartDateInput}
+            amendEffectiveEndDateInput={amendEffectiveEndDateInput}
+            setAmendEffectiveEndDateInput={setAmendEffectiveEndDateInput}
+            amendQualitySpecInput={amendQualitySpecInput}
+            setAmendQualitySpecInput={setAmendQualitySpecInput}
+            amendUnitInput={amendUnitInput}
+            setAmendUnitInput={setAmendUnitInput}
+            amendUnitOptions={amendUnitOptions}
+            amendTradeCurrencyInput={amendTradeCurrencyInput}
+            setAmendTradeCurrencyInput={setAmendTradeCurrencyInput}
+            amendCurrencyOptions={amendCurrencyOptions}
+            amendLocationInput={amendLocationInput}
+            setAmendLocationInput={setAmendLocationInput}
+            amendLocationOptions={amendLocationOptions}
+            amendDeliveryStartInput={amendDeliveryStartInput}
+            setAmendDeliveryStartInput={setAmendDeliveryStartInput}
+            amendDeliveryEndInput={amendDeliveryEndInput}
+            setAmendDeliveryEndInput={setAmendDeliveryEndInput}
+            amendPriceUnitInput={amendPriceUnitInput}
+            setAmendPriceUnitInput={setAmendPriceUnitInput}
+            amendPriceUnitOptions={amendPriceUnitOptions}
+            amendTradeInstrumentTypeInput={amendTradeInstrumentTypeInput}
+            setAmendTradeInstrumentTypeInput={setAmendTradeInstrumentTypeInput}
+            amendOptionTypeInput={amendOptionTypeInput}
+            setAmendOptionTypeInput={setAmendOptionTypeInput}
+            amendOptionStyleInput={amendOptionStyleInput}
+            setAmendOptionStyleInput={setAmendOptionStyleInput}
+            amendOptionExpirationDateInput={amendOptionExpirationDateInput}
+            setAmendOptionExpirationDateInput={setAmendOptionExpirationDateInput}
+            amendOptionStrikePriceInput={amendOptionStrikePriceInput}
+            setAmendOptionStrikePriceInput={setAmendOptionStrikePriceInput}
+            amendBookInput={amendBookInput}
+            setAmendBookInput={setAmendBookInput}
+            amendBookOptions={amendBookOptions}
+            amendPortfolioInput={amendPortfolioInput}
+            setAmendPortfolioInput={setAmendPortfolioInput}
+            amendPortfolioOptions={amendPortfolioOptions}
+            amendCounterpartyInput={amendCounterpartyInput}
+            setAmendCounterpartyInput={setAmendCounterpartyInput}
+            amendCounterpartyOptions={amendCounterpartyOptions}
+            amendCommodityClassInput={amendCommodityClassInput}
+            setAmendCommodityClassInput={setAmendCommodityClassInput}
+            commodityClassOptions={commodityClassOptions}
+            amendCommodityInput={amendCommodityInput}
+            setAmendCommodityInput={setAmendCommodityInput}
+            amendCommodityOptions={amendCommodityOptions}
+            amendTradeNatureInput={amendTradeNatureInput}
+            setAmendTradeNatureInput={setAmendTradeNatureInput}
+            amendTradeStructureInput={amendTradeStructureInput}
+            setAmendTradeStructureInput={setAmendTradeStructureInput}
+            amendTradeSideInput={amendTradeSideInput}
+            setAmendTradeSideInput={setAmendTradeSideInput}
+            amendPricingTypeInput={amendPricingTypeInput}
+            setAmendPricingTypeInput={setAmendPricingTypeInput}
+            amendPricingStatusInput={amendPricingStatusInput}
+            setAmendPricingStatusInput={setAmendPricingStatusInput}
+            amendConfirmationStatusInput={amendConfirmationStatusInput}
+            setAmendConfirmationStatusInput={setAmendConfirmationStatusInput}
+            amendNominationStatusInput={amendNominationStatusInput}
+            setAmendNominationStatusInput={setAmendNominationStatusInput}
+            amendAllocationStatusInput={amendAllocationStatusInput}
+            setAmendAllocationStatusInput={setAmendAllocationStatusInput}
+            amendPriceIndexInput={amendPriceIndexInput}
+            setAmendPriceIndexInput={setAmendPriceIndexInput}
+            amendPriceIndexOptions={amendPriceIndexOptions}
+            amendPriceInput={amendPriceInput}
+            setAmendPriceInput={setAmendPriceInput}
+            amendVolumeInput={amendVolumeInput}
+            setAmendVolumeInput={setAmendVolumeInput}
+            amendInvoiceStatusInput={amendInvoiceStatusInput}
+            setAmendInvoiceStatusInput={setAmendInvoiceStatusInput}
+            amendPaymentStatusInput={amendPaymentStatusInput}
+            setAmendPaymentStatusInput={setAmendPaymentStatusInput}
+            amendSettlementStatusInput={amendSettlementStatusInput}
+            setAmendSettlementStatusInput={setAmendSettlementStatusInput}
+            amendTraderUserInput={amendTraderUserInput}
+            setAmendTraderUserInput={setAmendTraderUserInput}
+            amendLegs={amendLegs}
+            activeCommodities={activeCommodities}
+            addDraftLeg={addAmendDraftLeg}
+            removeDraftLeg={removeAmendDraftLeg}
+            updateDraftLeg={updateAmendDraftLeg}
+            amending={amending}
+            cancelling={cancelling}
+            amendError={amendError}
+            counterpartyCreditPolicyPreview={amendCounterpartyCreditPolicyPreview}
+            tradeInstrumentTypeOptions={tradeInstrumentTypeOptions}
+            optionTypeOptions={optionTypeOptions}
+            optionStyleOptions={optionStyleOptions}
+            tradeNatureOptions={tradeNatureOptions}
+            tradeStructureOptions={tradeStructureOptions}
+            tradeSideOptions={tradeSideOptions}
+            pricingTypeOptions={pricingTypeOptions}
+            pricingStatusOptions={pricingStatusOptions}
+            confirmationStatusOptions={confirmationStatusOptions}
+            nominationStatusOptions={nominationStatusOptions}
+            allocationStatusOptions={allocationStatusOptions}
+            invoiceStatusOptions={invoiceStatusOptions}
+            paymentStatusOptions={paymentStatusOptions}
+            settlementStatusOptions={settlementStatusOptions}
+            formatCommodityClass={formatCommodityClass}
+            formatMoney={formatMoney}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            statusTone={statusTone}
+          />
+        )
+      case 'events':
+        return (
+          <EventsWorkspace
+            authSession={authSession}
+            eventFilter={eventFilter}
+            selectedTradeId={selectedTradeId}
+            setEventFilter={setEventFilter}
+            filteredEvents={filteredEvents}
+            formatDate={formatDate}
+            onOpenTrade={navigateToTrade}
+          />
+        )
+      case 'risk':
+        return (
+          <RiskWorkspace
+            authSession={authSession}
+            activeTrades={activeTrades}
+            positionsByClass={positionsByClass}
+            positionsWithClass={positionsWithClass}
+            optionExposures={optionExposures}
+            formatCommodityClass={formatCommodityClass}
+            formatNumber={formatNumber}
+            formatMoney={formatMoney}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            onOpenTrade={navigateToTrade}
+          />
+        )
+      case 'positions':
+        return (
+          <PositionsWorkspace
+            authSession={authSession}
+            positionsByClass={positionsByClass}
+            positionsWithClass={positionsWithClass}
+            formatCommodityClass={formatCommodityClass}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+          />
+        )
+      case 'shipments':
+        return (
+          <DeliveryWorkspace
+            authSession={authSession}
+            deliveries={deliveries}
+            formatCommodityClass={formatCommodityClass}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            formatNumber={formatNumber}
+            onOpenTrade={navigateToTrade}
+          />
+        )
+      case 'scheduling':
+        return (
+          <SchedulingWorkspace
+            authSession={authSession}
+            deliveries={deliveries}
+            formatCommodityClass={formatCommodityClass}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            onOpenTrade={navigateToTrade}
+          />
+        )
+      case 'operations':
+        return (
+          <OperationsWorkspace
+            authSession={authSession}
+            deliveries={deliveries}
+            workItems={tradeWorkflowItems}
+            externalDataSyncStatus={externalDataSyncStatus}
+            weatherSyncStatus={weatherSyncStatus}
+            tradingSources={tradingSources}
+            formatCommodityClass={formatCommodityClass}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            workflowMutationError={workflowMutationError}
+            workflowMutationPendingId={workflowMutationPendingId}
+            onOpenTrade={navigateToTrade}
+            onSaveWorkflowItem={handleSaveWorkflowItem}
+          />
+        )
+      case 'settlement':
+        return (
+          <SettlementWorkspace
+            authSession={authSession}
+            activeTrades={activeTrades}
+            invoices={tradeInvoices}
+            payments={tradePayments}
+            workItems={tradeWorkflowItems}
+            formatCommodityClass={formatCommodityClass}
+            formatMoney={formatMoney}
+            formatNumber={formatNumber}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            invoiceMutationError={invoiceMutationError}
+            invoiceMutationPendingKey={invoiceMutationPendingKey}
+            paymentMutationError={paymentMutationError}
+            paymentMutationPendingKey={paymentMutationPendingKey}
+            onOpenTrade={navigateToTrade}
+            onIssueInvoice={handleIssueTradeInvoice}
+            onSaveInvoice={handleUpdateTradeInvoice}
+            onCreatePayment={handleCreateTradePayment}
+            onSavePayment={handleUpdateTradePayment}
+            onSaveWorkflowItem={handleSaveWorkflowItem}
+          />
+        )
+      case 'reports':
+        return (
+          <ReportsWorkspace
+            authSession={authSession}
+            counterpartyCreditReport={counterpartyCreditReport}
+            formatNumber={formatNumber}
+            formatMoney={formatMoney}
+            formatDate={formatDate}
+            formatDateOnly={formatDateOnly}
+            onOpenSettlement={() => navigateToView('settlement')}
+            onOpenTrade={navigateToTrade}
+          />
+        )
+      case 'reference':
+        return (
+          <ReferenceDataWorkspace
+            controller={referenceState}
+            formatCommodityClass={formatCommodityClass}
+            formatDate={formatDate}
+          />
+        )
+      case 'admin':
+        return (
+          <AdminWorkspace
+            authSession={authSession}
+            onOpenSettings={() => navigateToView('settings')}
+            onRoadmapPublished={handleRoadmapPublished}
+            selectedTrade={selectedTrade}
+            selectedTradeEvents={selectedTradeEvents}
+            events={events}
+            trades={trades}
+            positions={positions}
+            activeBooks={activeBooks}
+            activeCommodities={activeCommodities}
+            priceIndices={priceIndices}
+            externalDataRuns={externalDataRuns}
+            externalDataSyncStatus={externalDataSyncStatus}
+            tradingSources={tradingSources}
+            weatherSyncStatus={weatherSyncStatus}
+            externalDataSyncing={externalDataSyncing}
+            externalDataSyncingProvider={externalDataSyncingProvider}
+            externalDataError={externalDataError}
+            externalDataSuccess={externalDataSuccess}
+            counterpartyCreditImportDraft={counterpartyCreditImportDraft}
+            counterpartyCreditPreview={counterpartyCreditPreview}
+            counterpartyCreditPreviewing={counterpartyCreditPreviewing}
+            counterpartyCreditPreviewError={counterpartyCreditPreviewError}
+            counterpartyCreditPreviewSuccess={counterpartyCreditPreviewSuccess}
+            counterpartyCreditImporting={counterpartyCreditImporting}
+            counterpartyCreditImportError={counterpartyCreditImportError}
+            counterpartyCreditImportSuccess={counterpartyCreditImportSuccess}
+            tradingSourcesSyncing={tradingSourcesSyncing}
+            tradingSourcesError={tradingSourcesError}
+            tradingSourcesSuccess={tradingSourcesSuccess}
+            weatherSyncing={weatherSyncing}
+            weatherSyncError={weatherSyncError}
+            weatherSyncSuccess={weatherSyncSuccess}
+            onRunExternalDataSync={handleRunExternalDataSync}
+            onCounterpartyCreditImportDraftChange={handleCounterpartyCreditImportDraftChange}
+            onPreviewCounterpartyCreditImport={handlePreviewCounterpartyCreditImport}
+            onImportCounterpartyCreditSnapshots={handleImportCounterpartyCreditSnapshots}
+            onRunNwsWeatherSync={handleRunNwsWeatherSync}
+            onSeedTradingSources={handleSeedTradingSources}
+            onRefreshData={loadData}
+            formatDate={formatDate}
+            formatMoney={formatMoney}
+            formatNumber={formatNumber}
+            formatCommodityClass={formatCommodityClass}
+          />
+        )
+      case 'settings':
+        return (
+          <SettingsWorkspace
+            health={health}
+            authSession={authSession}
+            appearanceSettings={appearanceSettings}
+            resolvedColorMode={resolvedColorMode}
+            onAppearanceSettingsChange={handleAppearanceSettingsChange}
+            onAppearanceSettingsReset={handleAppearanceSettingsReset}
+            onSessionChange={handleSessionChange}
+          />
+        )
+      case 'assistant':
+        return (
+          <AssistantWorkspace
+            authSession={authSession}
+            health={health}
+            trades={trades}
+            events={events}
+            positions={positions}
+            selectedTrade={selectedTrade}
+            selectedTradeEvents={selectedTradeEvents}
+            onOpenSettings={() => navigateToView('settings')}
+            onRefreshData={loadData}
+          />
+        )
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -1894,36 +2002,77 @@ export default function App() {
         <div>
           <span className="brand-mark">E/CTRM</span>
         </div>
-        <button
-          type="button"
-          className="button button-ghost mobile-nav-button"
-          onClick={() => setMobileNavOpen((current) => !current)}
-        >
-          {mobileNavOpen ? 'Close' : 'Menu'}
-        </button>
+        <div className="mobile-topbar-actions">
+          <button
+            type="button"
+            className="appearance-toggle appearance-toggle-mobile"
+            aria-label={themeToggleActionLabel}
+            aria-pressed={resolvedColorMode === 'dark'}
+            title={themeToggleActionLabel}
+            onClick={handleToggleColorMode}
+          >
+            <span className="appearance-toggle-copy">
+              <small>Theme</small>
+              <strong>{themeToggleLabel}</strong>
+            </span>
+            <span className={`appearance-toggle-track appearance-toggle-track-${resolvedColorMode}`} aria-hidden="true">
+              <span className="appearance-toggle-thumb" />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="button button-ghost mobile-nav-button"
+            aria-controls={MOBILE_NAVIGATION_PANEL_ID}
+            aria-expanded={mobileNavOpen}
+            aria-label={mobileNavToggleActionLabel}
+            onClick={() => setMobileNavOpen((current) => !current)}
+          >
+            {mobileNavOpen ? 'Close' : 'Menu'}
+          </button>
+        </div>
       </div>
 
-      <aside className={`side-rail ${mobileNavOpen ? 'is-open' : ''}`}>
+      <aside
+        id={MOBILE_NAVIGATION_PANEL_ID}
+        className={`side-rail ${mobileNavOpen ? 'is-open' : ''}`}
+        hidden={mobileNavHidden}
+        aria-hidden={mobileNavHidden ? true : undefined}
+      >
         <div className="brand-lockup">
           <span className="brand-mark">E/CTRM</span>
           <h1>Operator Console</h1>
           <p>A trading operations cockpit for ticket entry, lifecycle management, and live projection views.</p>
         </div>
 
+        <button
+          type="button"
+          className="appearance-toggle appearance-toggle-desktop"
+          aria-label={themeToggleActionLabel}
+          aria-pressed={resolvedColorMode === 'dark'}
+          title={themeToggleActionLabel}
+          onClick={handleToggleColorMode}
+        >
+          <span className="appearance-toggle-copy">
+            <small>Theme</small>
+            <strong>{themeToggleLabel}</strong>
+          </span>
+          <span className={`appearance-toggle-track appearance-toggle-track-${resolvedColorMode}`} aria-hidden="true">
+            <span className="appearance-toggle-thumb" />
+          </span>
+        </button>
+
         <nav className="nav-stack" aria-label="Primary">
           {VIEWS.map((view) => (
-            <button
+            <a
               key={view.key}
-              type="button"
+              href={hrefForView(view.key)}
               className={`nav-item ${currentView === view.key ? 'is-active' : ''}`}
-              onClick={() => {
-                navigateToView(view.key)
-                setMobileNavOpen(false)
-              }}
+              aria-current={currentView === view.key ? 'page' : undefined}
+              onClick={(event) => handleViewLinkClick(event, view.key)}
             >
               <span>{view.kicker}</span>
               <strong>{view.label}</strong>
-            </button>
+            </a>
           ))}
         </nav>
 
@@ -2118,7 +2267,8 @@ export default function App() {
           </div>
         </header>
 
-        {(error || referenceDataError) && <div className="error-banner">{error || referenceDataError}</div>}
+        {error ? <div className="error-banner">{error}</div> : null}
+        {workspaceWarning ? <div className="error-banner">{groupErrors[workspaceWarning]}</div> : null}
 
         {currentView !== 'guide' && (
           <section className="metric-grid">
@@ -2152,362 +2302,28 @@ export default function App() {
           </section>
         )}
 
-        {currentView === 'guide' && (
-          <DocumentationWorkspace
-            activeDocumentKey={activeDocumentationDocumentKey}
-            onDocumentKeyChange={handleDocumentationDocumentChange}
-            onOpenView={navigateToView}
-            roadmapRefreshVersion={roadmapRefreshVersion}
+        {blockingWorkspaceError && !workspaceLoading ? (
+          <WorkspaceErrorState
+            title={`${workspaceLabel(currentView)} needs attention`}
+            message={groupErrors[blockingWorkspaceError]}
+            onRetry={handleRetryCurrentWorkspace}
           />
-        )}
-
-        {currentView === 'dashboard' && (
-          <DashboardWorkspace
-            authSession={authSession}
-            appLoading={appLoading}
-            activeTrades={activeTrades}
-            priceIndices={priceIndices}
-            positionsWithClass={positionsWithClass}
-            events={events}
-            formatCommodityClass={formatCommodityClass}
-            formatMoney={formatMoney}
-            formatNumber={formatNumber}
-            formatDate={formatDate}
+        ) : workspaceLoading ? (
+          <WorkspaceLoadState
+            title={`Loading ${workspaceLabel(currentView)}`}
+            detail="Pulling the workspace-specific datasets needed for this screen."
           />
-        )}
-
-        {currentView === 'trades' && (
-          <TradingWorkspace
-            authSession={authSession}
-            tradeCaptureFormProps={tradeCaptureFormProps}
-            trades={trades}
-            tradeWorkflowItems={tradeWorkflowItems}
-            selectedTrade={selectedTrade}
-            selectedTradeId={selectedTradeId}
-            selectedTradeEvents={selectedTradeEvents}
-            inspectorTab={inspectorTab}
-            setSelectedTradeId={setSelectedTradeId}
-            setInspectorTab={setInspectorTab}
-            handleDuplicateTrade={handleDuplicateTrade}
-            handleAmendTrade={handleAmendTrade}
-            handleCancelTrade={handleCancelTrade}
-            handleOptionLifecycleEvent={handleOptionLifecycleEvent}
-            optionLifecycleSubmittingEvent={optionLifecycleSubmittingEvent}
-            amendmentPreviewFields={amendmentPreview.changedFields}
-            cancelImpactSummary={cancelImpactSummary}
-            amendmentLockedReason={amendmentLockedReason}
-            amendExternalTradeIdInput={amendExternalTradeIdInput}
-            setAmendExternalTradeIdInput={setAmendExternalTradeIdInput}
-            amendSourceSystemInput={amendSourceSystemInput}
-            amendExecutionTimestampInput={amendExecutionTimestampInput}
-            setAmendExecutionTimestampInput={setAmendExecutionTimestampInput}
-            amendTradeDateInput={amendTradeDateInput}
-            setAmendTradeDateInput={setAmendTradeDateInput}
-            amendEffectiveStartDateInput={amendEffectiveStartDateInput}
-            setAmendEffectiveStartDateInput={setAmendEffectiveStartDateInput}
-            amendEffectiveEndDateInput={amendEffectiveEndDateInput}
-            setAmendEffectiveEndDateInput={setAmendEffectiveEndDateInput}
-            amendQualitySpecInput={amendQualitySpecInput}
-            setAmendQualitySpecInput={setAmendQualitySpecInput}
-            amendUnitInput={amendUnitInput}
-            setAmendUnitInput={setAmendUnitInput}
-            amendUnitOptions={amendUnitOptions}
-            amendTradeCurrencyInput={amendTradeCurrencyInput}
-            setAmendTradeCurrencyInput={setAmendTradeCurrencyInput}
-            amendCurrencyOptions={amendCurrencyOptions}
-            amendLocationInput={amendLocationInput}
-            setAmendLocationInput={setAmendLocationInput}
-            amendLocationOptions={amendLocationOptions}
-            amendDeliveryStartInput={amendDeliveryStartInput}
-            setAmendDeliveryStartInput={setAmendDeliveryStartInput}
-            amendDeliveryEndInput={amendDeliveryEndInput}
-            setAmendDeliveryEndInput={setAmendDeliveryEndInput}
-            amendPriceUnitInput={amendPriceUnitInput}
-            setAmendPriceUnitInput={setAmendPriceUnitInput}
-            amendPriceUnitOptions={amendPriceUnitOptions}
-            amendTradeInstrumentTypeInput={amendTradeInstrumentTypeInput}
-            setAmendTradeInstrumentTypeInput={setAmendTradeInstrumentTypeInput}
-            amendOptionTypeInput={amendOptionTypeInput}
-            setAmendOptionTypeInput={setAmendOptionTypeInput}
-            amendOptionStyleInput={amendOptionStyleInput}
-            setAmendOptionStyleInput={setAmendOptionStyleInput}
-            amendOptionExpirationDateInput={amendOptionExpirationDateInput}
-            setAmendOptionExpirationDateInput={setAmendOptionExpirationDateInput}
-            amendOptionStrikePriceInput={amendOptionStrikePriceInput}
-            setAmendOptionStrikePriceInput={setAmendOptionStrikePriceInput}
-            amendBookInput={amendBookInput}
-            setAmendBookInput={setAmendBookInput}
-            amendBookOptions={amendBookOptions}
-            amendPortfolioInput={amendPortfolioInput}
-            setAmendPortfolioInput={setAmendPortfolioInput}
-            amendPortfolioOptions={amendPortfolioOptions}
-            amendCounterpartyInput={amendCounterpartyInput}
-            setAmendCounterpartyInput={setAmendCounterpartyInput}
-            amendCounterpartyOptions={amendCounterpartyOptions}
-            amendCommodityClassInput={amendCommodityClassInput}
-            setAmendCommodityClassInput={setAmendCommodityClassInput}
-            commodityClassOptions={commodityClassOptions}
-            amendCommodityInput={amendCommodityInput}
-            setAmendCommodityInput={setAmendCommodityInput}
-            amendCommodityOptions={amendCommodityOptions}
-            amendTradeNatureInput={amendTradeNatureInput}
-            setAmendTradeNatureInput={setAmendTradeNatureInput}
-            amendTradeStructureInput={amendTradeStructureInput}
-            setAmendTradeStructureInput={setAmendTradeStructureInput}
-            amendTradeSideInput={amendTradeSideInput}
-            setAmendTradeSideInput={setAmendTradeSideInput}
-            amendPricingTypeInput={amendPricingTypeInput}
-            setAmendPricingTypeInput={setAmendPricingTypeInput}
-            amendPricingStatusInput={amendPricingStatusInput}
-            setAmendPricingStatusInput={setAmendPricingStatusInput}
-            amendConfirmationStatusInput={amendConfirmationStatusInput}
-            setAmendConfirmationStatusInput={setAmendConfirmationStatusInput}
-            amendNominationStatusInput={amendNominationStatusInput}
-            setAmendNominationStatusInput={setAmendNominationStatusInput}
-            amendAllocationStatusInput={amendAllocationStatusInput}
-            setAmendAllocationStatusInput={setAmendAllocationStatusInput}
-            amendPriceIndexInput={amendPriceIndexInput}
-            setAmendPriceIndexInput={setAmendPriceIndexInput}
-            amendPriceIndexOptions={amendPriceIndexOptions}
-            amendPriceInput={amendPriceInput}
-            setAmendPriceInput={setAmendPriceInput}
-            amendVolumeInput={amendVolumeInput}
-            setAmendVolumeInput={setAmendVolumeInput}
-            amendInvoiceStatusInput={amendInvoiceStatusInput}
-            setAmendInvoiceStatusInput={setAmendInvoiceStatusInput}
-            amendPaymentStatusInput={amendPaymentStatusInput}
-            setAmendPaymentStatusInput={setAmendPaymentStatusInput}
-            amendSettlementStatusInput={amendSettlementStatusInput}
-            setAmendSettlementStatusInput={setAmendSettlementStatusInput}
-            amendTraderUserInput={amendTraderUserInput}
-            setAmendTraderUserInput={setAmendTraderUserInput}
-            amendLegs={amendLegs}
-            activeCommodities={activeCommodities}
-            addDraftLeg={addAmendDraftLeg}
-            removeDraftLeg={removeAmendDraftLeg}
-            updateDraftLeg={updateAmendDraftLeg}
-            amending={amending}
-            cancelling={cancelling}
-            amendError={amendError}
-            counterpartyCreditPolicyPreview={amendCounterpartyCreditPolicyPreview}
-            tradeInstrumentTypeOptions={tradeInstrumentTypeOptions}
-            optionTypeOptions={optionTypeOptions}
-            optionStyleOptions={optionStyleOptions}
-            tradeNatureOptions={tradeNatureOptions}
-            tradeStructureOptions={tradeStructureOptions}
-            tradeSideOptions={tradeSideOptions}
-            pricingTypeOptions={pricingTypeOptions}
-            pricingStatusOptions={pricingStatusOptions}
-            confirmationStatusOptions={confirmationStatusOptions}
-            nominationStatusOptions={nominationStatusOptions}
-            allocationStatusOptions={allocationStatusOptions}
-            invoiceStatusOptions={invoiceStatusOptions}
-            paymentStatusOptions={paymentStatusOptions}
-            settlementStatusOptions={settlementStatusOptions}
-            formatCommodityClass={formatCommodityClass}
-            formatMoney={formatMoney}
-            formatNumber={formatNumber}
-            formatDate={formatDate}
-            formatDateOnly={formatDateOnly}
-            statusTone={statusTone}
-          />
-        )}
-
-        {currentView === 'events' && (
-          <EventsWorkspace
-            authSession={authSession}
-            eventFilter={eventFilter}
-            setEventFilter={setEventFilter}
-            filteredEvents={filteredEvents}
-            formatDate={formatDate}
-          />
-        )}
-
-        {currentView === 'risk' && (
-          <RiskWorkspace
-            authSession={authSession}
-            activeTrades={activeTrades}
-            positionsByClass={positionsByClass}
-            positionsWithClass={positionsWithClass}
-            optionExposures={optionExposures}
-            formatCommodityClass={formatCommodityClass}
-            formatNumber={formatNumber}
-            formatMoney={formatMoney}
-            formatDate={formatDate}
-            formatDateOnly={formatDateOnly}
-            onOpenTrade={navigateToTrade}
-          />
-        )}
-
-        {currentView === 'positions' && (
-          <PositionsWorkspace
-            authSession={authSession}
-            positionsByClass={positionsByClass}
-            positionsWithClass={positionsWithClass}
-            formatCommodityClass={formatCommodityClass}
-            formatNumber={formatNumber}
-            formatDate={formatDate}
-          />
-        )}
-
-        {currentView === 'shipments' && (
-          <DeliveryWorkspace
-            authSession={authSession}
-            deliveries={deliveries}
-            formatCommodityClass={formatCommodityClass}
-            formatDate={formatDate}
-            formatDateOnly={formatDateOnly}
-            formatNumber={formatNumber}
-            onOpenTrade={navigateToTrade}
-          />
-        )}
-
-        {currentView === 'scheduling' && (
-          <SchedulingWorkspace
-            authSession={authSession}
-            deliveries={deliveries}
-            formatCommodityClass={formatCommodityClass}
-            formatNumber={formatNumber}
-            formatDate={formatDate}
-            formatDateOnly={formatDateOnly}
-            onOpenTrade={navigateToTrade}
-          />
-        )}
-
-        {currentView === 'operations' && (
-          <OperationsWorkspace
-            authSession={authSession}
-            deliveries={deliveries}
-            workItems={tradeWorkflowItems}
-            externalDataSyncStatus={externalDataSyncStatus}
-            weatherSyncStatus={weatherSyncStatus}
-            tradingSources={tradingSources}
-            formatCommodityClass={formatCommodityClass}
-            formatNumber={formatNumber}
-            formatDate={formatDate}
-            formatDateOnly={formatDateOnly}
-            workflowMutationError={workflowMutationError}
-            workflowMutationPendingId={workflowMutationPendingId}
-            onOpenTrade={navigateToTrade}
-            onSaveWorkflowItem={handleSaveWorkflowItem}
-          />
-        )}
-
-        {currentView === 'settlement' && (
-          <SettlementWorkspace
-            authSession={authSession}
-            activeTrades={activeTrades}
-            invoices={tradeInvoices}
-            payments={tradePayments}
-            workItems={tradeWorkflowItems}
-            formatCommodityClass={formatCommodityClass}
-            formatMoney={formatMoney}
-            formatNumber={formatNumber}
-            formatDate={formatDate}
-            formatDateOnly={formatDateOnly}
-            invoiceMutationError={invoiceMutationError}
-            invoiceMutationPendingKey={invoiceMutationPendingKey}
-            paymentMutationError={paymentMutationError}
-            paymentMutationPendingKey={paymentMutationPendingKey}
-            onOpenTrade={navigateToTrade}
-            onIssueInvoice={handleIssueTradeInvoice}
-            onSaveInvoice={handleUpdateTradeInvoice}
-            onCreatePayment={handleCreateTradePayment}
-            onSavePayment={handleUpdateTradePayment}
-            onSaveWorkflowItem={handleSaveWorkflowItem}
-          />
-        )}
-
-        {currentView === 'reports' && (
-          <ReportsWorkspace
-            authSession={authSession}
-            counterpartyCreditReport={counterpartyCreditReport}
-            formatNumber={formatNumber}
-            formatMoney={formatMoney}
-            formatDate={formatDate}
-            formatDateOnly={formatDateOnly}
-            onOpenSettlement={() => navigateToView('settlement')}
-            onOpenTrade={navigateToTrade}
-          />
-        )}
-
-        {currentView === 'reference' && (
-          <ReferenceDataWorkspace
-            controller={referenceState}
-            formatCommodityClass={formatCommodityClass}
-            formatDate={formatDate}
-          />
-        )}
-
-        {currentView === 'admin' && (
-          <AdminWorkspace
-            authSession={authSession}
-            onOpenSettings={() => navigateToView('settings')}
-            onRoadmapPublished={handleRoadmapPublished}
-            selectedTrade={selectedTrade}
-            selectedTradeEvents={selectedTradeEvents}
-            events={events}
-            trades={trades}
-            positions={positions}
-            activeBooks={activeBooks}
-            activeCommodities={activeCommodities}
-            priceIndices={priceIndices}
-            externalDataRuns={externalDataRuns}
-            externalDataSyncStatus={externalDataSyncStatus}
-            tradingSources={tradingSources}
-            weatherSyncStatus={weatherSyncStatus}
-            externalDataSyncing={externalDataSyncing}
-            externalDataSyncingProvider={externalDataSyncingProvider}
-            externalDataError={externalDataError}
-            externalDataSuccess={externalDataSuccess}
-            counterpartyCreditImportDraft={counterpartyCreditImportDraft}
-            counterpartyCreditPreview={counterpartyCreditPreview}
-            counterpartyCreditPreviewing={counterpartyCreditPreviewing}
-            counterpartyCreditPreviewError={counterpartyCreditPreviewError}
-            counterpartyCreditPreviewSuccess={counterpartyCreditPreviewSuccess}
-            counterpartyCreditImporting={counterpartyCreditImporting}
-            counterpartyCreditImportError={counterpartyCreditImportError}
-            counterpartyCreditImportSuccess={counterpartyCreditImportSuccess}
-            tradingSourcesSyncing={tradingSourcesSyncing}
-            tradingSourcesError={tradingSourcesError}
-            tradingSourcesSuccess={tradingSourcesSuccess}
-            weatherSyncing={weatherSyncing}
-            weatherSyncError={weatherSyncError}
-            weatherSyncSuccess={weatherSyncSuccess}
-            onRunExternalDataSync={handleRunExternalDataSync}
-            onCounterpartyCreditImportDraftChange={handleCounterpartyCreditImportDraftChange}
-            onPreviewCounterpartyCreditImport={handlePreviewCounterpartyCreditImport}
-            onImportCounterpartyCreditSnapshots={handleImportCounterpartyCreditSnapshots}
-            onRunNwsWeatherSync={handleRunNwsWeatherSync}
-            onSeedTradingSources={handleSeedTradingSources}
-            onRefreshData={loadData}
-            formatDate={formatDate}
-            formatMoney={formatMoney}
-            formatNumber={formatNumber}
-            formatCommodityClass={formatCommodityClass}
-          />
-        )}
-
-        {currentView === 'settings' && (
-          <SettingsWorkspace
-            health={health}
-            authSession={authSession}
-            onSessionChange={handleSessionChange}
-          />
-        )}
-
-        {currentView === 'assistant' && (
-          <AssistantWorkspace
-            authSession={authSession}
-            health={health}
-            trades={trades}
-            events={events}
-            positions={positions}
-            selectedTrade={selectedTrade}
-            selectedTradeEvents={selectedTradeEvents}
-            onOpenSettings={() => navigateToView('settings')}
-            onRefreshData={loadData}
-          />
+        ) : (
+          <Suspense
+            fallback={
+              <WorkspaceLoadState
+                title={`Preparing ${workspaceLabel(currentView)}`}
+                detail="Loading the workspace bundle."
+              />
+            }
+          >
+            {renderWorkspaceContent()}
+          </Suspense>
         )}
       </main>
     </div>

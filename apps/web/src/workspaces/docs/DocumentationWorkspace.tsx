@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useMemo, useState } from 'react'
 
+import { shouldHandleClientSideNavigation } from '../../app/navigation'
 import { loadRoadmapDocument, type RoadmapDocumentData } from '../../entities/roadmap/api'
 import type { ViewKey } from '../../shared/models'
 import { appConfig } from '../../shared/config'
@@ -11,6 +12,7 @@ export const DEFAULT_DOCUMENTATION_DOCUMENT_KEY: DocumentationDocumentKey = 'gui
 
 type DocumentationWorkspaceProps = {
   activeDocumentKey: DocumentationDocumentKey
+  getViewHref: (view: Exclude<ViewKey, 'guide'>) => string
   onDocumentKeyChange: (key: DocumentationDocumentKey) => void
   onOpenView: (view: Exclude<ViewKey, 'guide'>) => void
   roadmapRefreshVersion: number
@@ -103,6 +105,7 @@ const DOCUMENT_DEFINITIONS: Record<
 
 export function DocumentationWorkspace({
   activeDocumentKey,
+  getViewHref,
   onDocumentKeyChange,
   onOpenView,
   roadmapRefreshVersion,
@@ -117,6 +120,18 @@ export function DocumentationWorkspace({
   const activeDocumentDefinition = DOCUMENT_DEFINITIONS[activeDocumentKey]
   const activeDocumentTitle = activeDocumentKey === 'guide' ? guide.title : activeDocumentDefinition.title
   const shouldLoadRoadmap = activeDocumentKey === 'roadmap' || roadmap !== null
+
+  function handleWorkspaceLinkClick(
+    event: ReactMouseEvent<HTMLAnchorElement>,
+    view: Exclude<ViewKey, 'guide'>,
+  ) {
+    if (!shouldHandleClientSideNavigation(event)) {
+      return
+    }
+
+    event.preventDefault()
+    onOpenView(view)
+  }
 
   useEffect(() => {
     if (!shouldLoadRoadmap) {
@@ -297,6 +312,7 @@ export function DocumentationWorkspace({
           ))
         ) : (
           renderRoadmapContent({
+            getViewHref,
             roadmap,
             loading: roadmapLoading,
             error: roadmapError,
@@ -347,18 +363,18 @@ export function DocumentationWorkspace({
 
           <div className="stack">
             {QUICK_ACTIONS.map((action) => (
-              <button
+              <a
                 key={action.label}
-                type="button"
-                className="button button-ghost docs-action-button"
-                onClick={() => onOpenView(action.view)}
+                href={getViewHref(action.view)}
+                className="button button-ghost button-link docs-action-button"
+                onClick={(event) => handleWorkspaceLinkClick(event, action.view)}
               >
                 <span className="docs-action-copy">
                   <span>{action.eyebrow}</span>
                   <strong>{action.label}</strong>
                 </span>
                 <small>{action.detail}</small>
-              </button>
+              </a>
             ))}
           </div>
         </div>
@@ -368,18 +384,20 @@ export function DocumentationWorkspace({
 }
 
 function renderRoadmapContent({
+  getViewHref,
   roadmap,
   loading,
   error,
   onOpenView,
 }: {
+  getViewHref: (view: Exclude<ViewKey, 'guide'>) => string
   roadmap: RoadmapDocumentData | null
   loading: boolean
   error: string
   onOpenView: (view: Exclude<ViewKey, 'guide'>) => void
 }) {
   if (roadmap) {
-    return <RoadmapDocument roadmap={roadmap} onOpenView={onOpenView} />
+    return <RoadmapDocument roadmap={roadmap} getViewHref={getViewHref} onOpenView={onOpenView} />
   }
 
   return (

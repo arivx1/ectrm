@@ -29,6 +29,7 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.routes.events import append_event
+from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
 from apps.api.app.routes.reference_data import (
     CommodityCreate,
     CommodityStatusUpdate,
@@ -1014,6 +1015,8 @@ class ReferenceDataApiTests(unittest.TestCase):
                 db=session,
             )
 
+            trade = session.query(Trade).filter(Trade.trade_id == "T-HEADER-3").one()
+            list_trade_workflow_items(session, include_closed=True)
             trade = session.query(Trade).filter(Trade.trade_id == "T-HEADER-3").one()
 
         self.assertIsNone(trade.external_trade_id)

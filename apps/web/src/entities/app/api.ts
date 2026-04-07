@@ -14,16 +14,31 @@ import type {
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 
-export type WorkspaceBootstrap = {
+export type CoreWorkspaceBootstrap = {
   health: { status?: string }
   trades: unknown[]
   events: unknown[]
   positions: unknown[]
+}
+
+export type RiskWorkspaceBootstrap = {
   optionExposures: unknown[]
+}
+
+export type DeliveriesWorkspaceBootstrap = {
   deliveries: unknown[]
+}
+
+export type OperationsWorkspaceBootstrap = {
   workItems: TradeWorkflowItemRecord[]
+}
+
+export type SettlementWorkspaceBootstrap = {
   invoices: TradeInvoiceRecord[]
   payments: TradePaymentRecord[]
+}
+
+export type ReferenceWorkspaceBootstrap = {
   books: unknown[]
   commodities: unknown[]
   priceIndices: unknown[]
@@ -34,14 +49,29 @@ export type WorkspaceBootstrap = {
   counterparties: unknown[]
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
   counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
-  counterpartyCreditReport: CounterpartyCreditReportRow[]
   counterpartyStandards: CounterpartyStandards
   portfolios: unknown[]
+}
+
+export type ReportsWorkspaceBootstrap = {
+  counterpartyCreditReport: CounterpartyCreditReportRow[]
+}
+
+export type AdminWorkspaceBootstrap = {
   externalDataRuns: unknown[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
   tradingSources: unknown[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
 }
+
+export type WorkspaceBootstrap = CoreWorkspaceBootstrap &
+  RiskWorkspaceBootstrap &
+  DeliveriesWorkspaceBootstrap &
+  OperationsWorkspaceBootstrap &
+  SettlementWorkspaceBootstrap &
+  ReferenceWorkspaceBootstrap &
+  ReportsWorkspaceBootstrap &
+  AdminWorkspaceBootstrap
 
 export type SystemOverview = {
   generated_at: string
@@ -112,20 +142,61 @@ function withLimit(path: string, limit: number): string {
   return `${path}?limit=${limit}`
 }
 
-export async function loadWorkspaceBootstrap(
-  apiBase: string,
-  options?: { adminHeaders?: HeadersInit | null },
-): Promise<WorkspaceBootstrap> {
-  const [
+export async function loadCoreWorkspaceBootstrap(apiBase: string): Promise<CoreWorkspaceBootstrap> {
+  const [health, trades, events, positions] = await Promise.all([
+    fetchJson<{ status?: string }>(`${apiBase}/health`),
+    fetchJson<unknown[]>(`${apiBase}/trades`),
+    fetchJson<unknown[]>(`${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`),
+    fetchJson<unknown[]>(`${apiBase}/positions`),
+  ])
+
+  return {
     health,
     trades,
     events,
     positions,
-    optionExposures,
-    deliveries,
-    workItems,
+  }
+}
+
+export async function loadRiskWorkspaceBootstrap(apiBase: string): Promise<RiskWorkspaceBootstrap> {
+  return {
+    optionExposures: await fetchJson<unknown[]>(`${apiBase}/option-exposures`),
+  }
+}
+
+export async function loadDeliveriesWorkspaceBootstrap(apiBase: string): Promise<DeliveriesWorkspaceBootstrap> {
+  return {
+    deliveries: await fetchJson<unknown[]>(`${apiBase}/deliveries`),
+  }
+}
+
+export async function loadOperationsWorkspaceBootstrap(apiBase: string): Promise<OperationsWorkspaceBootstrap> {
+  return {
+    workItems: await fetchJson<TradeWorkflowItemRecord[]>(
+      `${apiBase}/operations/work-items?include_closed=true`,
+      { cache: 'no-store' },
+    ),
+  }
+}
+
+export async function loadSettlementWorkspaceBootstrap(apiBase: string): Promise<SettlementWorkspaceBootstrap> {
+  const [invoices, payments] = await Promise.all([
+    fetchJson<TradeInvoiceRecord[]>(`${apiBase}/settlement/invoices`, {
+      cache: 'no-store',
+    }),
+    fetchJson<TradePaymentRecord[]>(`${apiBase}/settlement/payments`, {
+      cache: 'no-store',
+    }),
+  ])
+
+  return {
     invoices,
     payments,
+  }
+}
+
+export async function loadReferenceWorkspaceBootstrap(apiBase: string): Promise<ReferenceWorkspaceBootstrap> {
+  const [
     books,
     commodities,
     priceIndices,
@@ -137,21 +208,6 @@ export async function loadWorkspaceBootstrap(
     counterpartyStandards,
     portfolios,
   ] = await Promise.all([
-    fetchJson<{ status?: string }>(`${apiBase}/health`),
-    fetchJson<unknown[]>(`${apiBase}/trades`),
-    fetchJson<unknown[]>(`${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`),
-    fetchJson<unknown[]>(`${apiBase}/positions`),
-    fetchJson<unknown[]>(`${apiBase}/option-exposures`),
-    fetchJson<unknown[]>(`${apiBase}/deliveries`),
-    fetchJson<TradeWorkflowItemRecord[]>(`${apiBase}/operations/work-items?include_closed=true`, {
-      cache: 'no-store',
-    }),
-    fetchJson<TradeInvoiceRecord[]>(`${apiBase}/settlement/invoices`, {
-      cache: 'no-store',
-    }),
-    fetchJson<TradePaymentRecord[]>(`${apiBase}/settlement/payments`, {
-      cache: 'no-store',
-    }),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/commodities', bootstrapQueryLimits.referenceData)}`),
     fetchJson<unknown[]>(`${apiBase}${withLimit('/reference/price-indices', bootstrapQueryLimits.referenceData)}`),
@@ -166,19 +222,14 @@ export async function loadWorkspaceBootstrap(
 
   let counterpartyCreditProfiles: CounterpartyCreditProfileRecord[] = []
   let counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[] = []
-  let counterpartyCreditReport: CounterpartyCreditReportRow[] = []
 
-  const [counterpartyCreditProfilesResult, counterpartyExternalCreditSnapshotsResult, counterpartyCreditReportResult] =
-    await Promise.allSettled([
+  const [counterpartyCreditProfilesResult, counterpartyExternalCreditSnapshotsResult] = await Promise.allSettled([
       fetchJson<CounterpartyCreditProfileRecord[]>(
         `${apiBase}${withLimit('/reference/counterparties/credit-profiles', bootstrapQueryLimits.referenceData)}`,
       ),
       fetchJson<CounterpartyExternalCreditSnapshotRecord[]>(
         `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', bootstrapQueryLimits.referenceData)}`,
       ),
-      fetchJson<CounterpartyCreditReportRow[]>(`${apiBase}/reports/counterparty-credit`, {
-        cache: 'no-store',
-      }),
     ])
 
   if (counterpartyCreditProfilesResult.status === 'fulfilled') {
@@ -189,8 +240,42 @@ export async function loadWorkspaceBootstrap(
     counterpartyExternalCreditSnapshots = counterpartyExternalCreditSnapshotsResult.value
   }
 
-  if (counterpartyCreditReportResult.status === 'fulfilled') {
-    counterpartyCreditReport = counterpartyCreditReportResult.value
+  return {
+    books,
+    commodities,
+    priceIndices,
+    currencies,
+    units,
+    locations,
+    locationStandards,
+    counterparties,
+    counterpartyCreditProfiles,
+    counterpartyExternalCreditSnapshots,
+    counterpartyStandards,
+    portfolios,
+  }
+}
+
+export async function loadReportsWorkspaceBootstrap(apiBase: string): Promise<ReportsWorkspaceBootstrap> {
+  return {
+    counterpartyCreditReport: await fetchJson<CounterpartyCreditReportRow[]>(
+      `${apiBase}/reports/counterparty-credit`,
+      { cache: 'no-store' },
+    ),
+  }
+}
+
+export async function loadAdminWorkspaceBootstrap(
+  apiBase: string,
+  options?: { adminHeaders?: HeadersInit | null },
+): Promise<AdminWorkspaceBootstrap> {
+  if (!options?.adminHeaders) {
+    return {
+      externalDataRuns: [],
+      externalDataSyncStatus: null,
+      tradingSources: [],
+      weatherSyncStatus: null,
+    }
   }
 
   let externalDataRuns: unknown[] = []
@@ -198,9 +283,8 @@ export async function loadWorkspaceBootstrap(
   let tradingSources: unknown[] = []
   let weatherSyncStatus: WeatherSyncStatusRecord | null = null
 
-  if (options?.adminHeaders) {
-    const [externalDataRunsResult, externalDataSyncStatusResult, tradingSourcesResult, weatherSyncStatusResult] =
-      await Promise.allSettled([
+  const [externalDataRunsResult, externalDataSyncStatusResult, tradingSourcesResult, weatherSyncStatusResult] =
+    await Promise.allSettled([
       fetchJson<unknown[]>(
         `${apiBase}${withLimit('/admin/external-data/runs', bootstrapQueryLimits.externalDataRuns)}`,
         { headers: options.adminHeaders },
@@ -219,50 +303,63 @@ export async function loadWorkspaceBootstrap(
       }),
     ])
 
-    if (externalDataRunsResult.status === 'fulfilled') {
-      externalDataRuns = externalDataRunsResult.value
-    }
+  if (externalDataRunsResult.status === 'fulfilled') {
+    externalDataRuns = externalDataRunsResult.value
+  }
 
-    if (externalDataSyncStatusResult.status === 'fulfilled') {
-      externalDataSyncStatus = externalDataSyncStatusResult.value
-    }
+  if (externalDataSyncStatusResult.status === 'fulfilled') {
+    externalDataSyncStatus = externalDataSyncStatusResult.value
+  }
 
-    if (tradingSourcesResult.status === 'fulfilled') {
-      tradingSources = tradingSourcesResult.value
-    }
+  if (tradingSourcesResult.status === 'fulfilled') {
+    tradingSources = tradingSourcesResult.value
+  }
 
-    if (weatherSyncStatusResult.status === 'fulfilled') {
-      weatherSyncStatus = weatherSyncStatusResult.value
-    }
+  if (weatherSyncStatusResult.status === 'fulfilled') {
+    weatherSyncStatus = weatherSyncStatusResult.value
   }
 
   return {
-    health,
-    trades,
-    events,
-    positions,
-    optionExposures,
-    deliveries,
-    workItems,
-    invoices,
-    payments,
-    books,
-    commodities,
-    priceIndices,
-    currencies,
-    units,
-    locations,
-    locationStandards,
-    counterparties,
-    counterpartyCreditProfiles,
-    counterpartyExternalCreditSnapshots,
-    counterpartyCreditReport,
-    counterpartyStandards,
-    portfolios,
     externalDataRuns,
     externalDataSyncStatus,
     tradingSources,
     weatherSyncStatus,
+  }
+}
+
+export async function loadWorkspaceBootstrap(
+  apiBase: string,
+  options?: { adminHeaders?: HeadersInit | null },
+): Promise<WorkspaceBootstrap> {
+  const [
+    core,
+    risk,
+    deliveries,
+    operations,
+    settlement,
+    reference,
+    reports,
+    admin,
+  ] = await Promise.all([
+    loadCoreWorkspaceBootstrap(apiBase),
+    loadRiskWorkspaceBootstrap(apiBase),
+    loadDeliveriesWorkspaceBootstrap(apiBase),
+    loadOperationsWorkspaceBootstrap(apiBase),
+    loadSettlementWorkspaceBootstrap(apiBase),
+    loadReferenceWorkspaceBootstrap(apiBase),
+    loadReportsWorkspaceBootstrap(apiBase),
+    loadAdminWorkspaceBootstrap(apiBase, options),
+  ])
+
+  return {
+    ...core,
+    ...risk,
+    ...deliveries,
+    ...operations,
+    ...settlement,
+    ...reference,
+    ...reports,
+    ...admin,
   }
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
 import {
   approveAssistantActionRequest,
@@ -264,88 +264,93 @@ export function AssistantWorkspace({
     setSubmitError('')
   }
 
-  async function refreshConversationHistory(preferredConversationId: number | null = null) {
-    if (!authSession) {
-      setRecentConversations([])
-      setConversationHistoryError('')
-      setConversationHistoryLoading(false)
-      setSelectedConversationId(null)
-      setSelectedConversation(null)
-      setConversationDetailError('')
-      setConversationDetailLoading(false)
-      return
-    }
+  const refreshConversationHistory = useCallback(
+    async (preferredConversationId: number | null = null) => {
+      if (!authSession) {
+        setRecentConversations([])
+        setConversationHistoryError('')
+        setConversationHistoryLoading(false)
+        setSelectedConversationId(null)
+        setSelectedConversation(null)
+        setConversationDetailError('')
+        setConversationDetailLoading(false)
+        return
+      }
 
-    setConversationHistoryLoading(true)
+      setConversationHistoryLoading(true)
 
-    try {
-      const conversationPayload = await listAssistantConversations(appConfig.apiBase, {
-        headers: { Authorization: `Bearer ${authSession.accessToken}` },
-        limit: 12,
-      })
-      setRecentConversations(conversationPayload)
-      setConversationHistoryError('')
-      setSelectedConversationId((current) => {
-        if (
-          preferredConversationId &&
-          conversationPayload.some((conversation) => conversation.conversation_id === preferredConversationId)
-        ) {
-          return preferredConversationId
-        }
-        if (
-          current &&
-          conversationPayload.some((conversation) => conversation.conversation_id === current)
-        ) {
-          return current
-        }
-        return null
-      })
-    } catch (error) {
-      setRecentConversations([])
-      setConversationHistoryError(
-        error instanceof Error ? error.message : 'Could not load assistant conversations.',
-      )
-    } finally {
-      setConversationHistoryLoading(false)
-    }
-  }
+      try {
+        const conversationPayload = await listAssistantConversations(appConfig.apiBase, {
+          headers: { Authorization: `Bearer ${authSession.accessToken}` },
+          limit: 12,
+        })
+        setRecentConversations(conversationPayload)
+        setConversationHistoryError('')
+        setSelectedConversationId((current) => {
+          if (
+            preferredConversationId &&
+            conversationPayload.some(
+              (conversation) => conversation.conversation_id === preferredConversationId,
+            )
+          ) {
+            return preferredConversationId
+          }
+          if (current && conversationPayload.some((conversation) => conversation.conversation_id === current)) {
+            return current
+          }
+          return null
+        })
+      } catch (error) {
+        setRecentConversations([])
+        setConversationHistoryError(
+          error instanceof Error ? error.message : 'Could not load assistant conversations.',
+        )
+      } finally {
+        setConversationHistoryLoading(false)
+      }
+    },
+    [authSession],
+  )
 
-  async function refreshRunHistory(preferredRunId: number | null = null) {
-    if (!authSession) {
-      setRecentRuns([])
-      setRunHistoryError('')
-      setRunHistoryLoading(false)
-      setSelectedRunId(null)
-      return
-    }
+  const refreshRunHistory = useCallback(
+    async (preferredRunId: number | null = null) => {
+      if (!authSession) {
+        setRecentRuns([])
+        setRunHistoryError('')
+        setRunHistoryLoading(false)
+        setSelectedRunId(null)
+        return
+      }
 
-    setRunHistoryLoading(true)
+      setRunHistoryLoading(true)
 
-    try {
-      const runPayload = await listAssistantRuns(appConfig.apiBase, {
-        headers: { Authorization: `Bearer ${authSession.accessToken}` },
-        limit: 12,
-      })
-      setRecentRuns(runPayload)
-      setRunHistoryError('')
-      setSelectedRunId((current) => {
-        if (preferredRunId && runPayload.some((run) => run.run_id === preferredRunId)) {
-          return preferredRunId
-        }
-        if (current && runPayload.some((run) => run.run_id === current)) {
-          return current
-        }
-        return null
-      })
-    } catch (error) {
-      setRecentRuns([])
-      setRunHistoryError(error instanceof Error ? error.message : 'Could not load assistant runs.')
-    } finally {
-      setRunHistoryLoading(false)
-    }
-  }
+      try {
+        const runPayload = await listAssistantRuns(appConfig.apiBase, {
+          headers: { Authorization: `Bearer ${authSession.accessToken}` },
+          limit: 12,
+        })
+        setRecentRuns(runPayload)
+        setRunHistoryError('')
+        setSelectedRunId((current) => {
+          if (preferredRunId && runPayload.some((run) => run.run_id === preferredRunId)) {
+            return preferredRunId
+          }
+          if (current && runPayload.some((run) => run.run_id === current)) {
+            return current
+          }
+          return null
+        })
+      } catch (error) {
+        setRecentRuns([])
+        setRunHistoryError(error instanceof Error ? error.message : 'Could not load assistant runs.')
+      } finally {
+        setRunHistoryLoading(false)
+      }
+    },
+    [authSession],
+  )
 
-  async function refreshPendingActionRequests() {
+  const refreshPendingActionRequests = useCallback(async () => {
     if (!authSession) {
       setPendingActionRequests([])
       setPendingActionRequestsError('')
@@ -371,7 +376,7 @@ export function AssistantWorkspace({
     } finally {
       setPendingActionRequestsLoading(false)
     }
-  }
+  }, [authSession])
 
   useEffect(() => {
     let cancelled = false
@@ -434,7 +439,7 @@ export function AssistantWorkspace({
     void refreshConversationHistory()
     void refreshPendingActionRequests()
     void refreshRunHistory()
-  }, [authSession])
+  }, [authSession, refreshConversationHistory, refreshPendingActionRequests, refreshRunHistory])
 
   useEffect(() => {
     if (!runtimeSettings || selectedProvider) {

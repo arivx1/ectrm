@@ -460,6 +460,7 @@ def synchronize_trade_workflow_items(
     *,
     actor_id: str = SYSTEM_WORKFLOW_ACTOR,
     now: Optional[datetime] = None,
+    rollup_settlement_status: bool = False,
 ) -> None:
     if str(trade.status or "ACTIVE").strip().upper() != "ACTIVE":
         return
@@ -504,7 +505,12 @@ def synchronize_trade_workflow_items(
             item.updated_by = actor_id
             item.version += 1
 
-    rollup_trade_workflow_statuses(trade, list(items_by_type.values()), now=reference_time)
+    rollup_trade_workflow_statuses(
+        trade,
+        list(items_by_type.values()),
+        now=reference_time,
+        rollup_settlement_status=rollup_settlement_status,
+    )
 
 
 def synchronize_active_trade_workflow_items(
@@ -572,6 +578,7 @@ def rollup_trade_workflow_statuses(
     workflow_items: list[TradeWorkflowItem],
     *,
     now: Optional[datetime] = None,
+    rollup_settlement_status: bool = True,
 ) -> bool:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     items_by_type = {item.workflow_type: item for item in workflow_items}
@@ -587,7 +594,11 @@ def rollup_trade_workflow_statuses(
     next_allocation_status = allocation_item.status if allocation_item is not None else trade.allocation_status
     next_invoice_status = invoice_item.status if invoice_item is not None else trade.invoice_status
     next_payment_status = payment_item.status if payment_item is not None else trade.payment_status
-    next_settlement_status = _derive_settlement_status(next_invoice_status, next_payment_status)
+    next_settlement_status = (
+        _derive_settlement_status(next_invoice_status, next_payment_status)
+        if rollup_settlement_status
+        else trade.settlement_status
+    )
 
     changed = False
     if trade.confirmation_status != next_confirmation_status:

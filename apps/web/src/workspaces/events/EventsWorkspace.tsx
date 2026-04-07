@@ -1,23 +1,16 @@
+import type { EventRow } from '../../shared/models'
+import { tradeAggregateType } from '../../shared/trading'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
-
-type EventRow = {
-  event_id: string
-  aggregate_type: string
-  aggregate_id: string
-  event_type: string
-  recorded_at: string
-  actor_id: string | null
-  correlation_id: string | null
-  schema_version: number
-}
 
 type EventsWorkspaceProps = {
   authSession: StoredAuthSession | null
   eventFilter: string
+  selectedTradeId: string | null
   setEventFilter: (value: string) => void
   filteredEvents: EventRow[]
   formatDate: (value: string | null | undefined) => string
+  onOpenTrade: (tradeId: string) => void
 }
 
 const EVENT_FILTER_LABELS: Record<string, string> = {
@@ -28,14 +21,31 @@ const EVENT_FILTER_LABELS: Record<string, string> = {
   TradeCancelled: 'TradeCancelled',
 }
 
+export function isTradeLinkedEvent(event: Pick<EventRow, 'aggregate_type' | 'aggregate_id'>) {
+  return event.aggregate_type === tradeAggregateType && event.aggregate_id.trim().length > 0
+}
+
+export function formatEventScopeLabel(eventFilter: string, selectedTradeId: string | null) {
+  if (eventFilter !== 'SELECTED') {
+    return EVENT_FILTER_LABELS[eventFilter] ?? eventFilter
+  }
+
+  return selectedTradeId ? `Selected trade (${selectedTradeId})` : 'Selected trade (none selected)'
+}
+
 export function EventsWorkspace({
   authSession,
   eventFilter,
+  selectedTradeId,
   setEventFilter,
   filteredEvents,
   formatDate,
+  onOpenTrade,
 }: EventsWorkspaceProps) {
   const latestEvent = filteredEvents[0] ?? null
+  const latestTradeEvent = filteredEvents.find(isTradeLinkedEvent) ?? null
+  const tradeLinkedEventCount = filteredEvents.filter(isTradeLinkedEvent).length
+  const currentScopeLabel = formatEventScopeLabel(eventFilter, selectedTradeId)
   const actorCount = new Set(filteredEvents.map((event) => event.actor_id ?? 'system')).size
   const eventTypeCounts = Object.entries(
     filteredEvents.reduce<Record<string, number>>((counts, event) => {
@@ -89,7 +99,7 @@ export function EventsWorkspace({
                 </div>
                 <div className="detail-row">
                   <span>Current Scope</span>
-                  <strong>{EVENT_FILTER_LABELS[eventFilter] ?? eventFilter}</strong>
+                  <strong>{currentScopeLabel}</strong>
                 </div>
                 <div className="detail-row">
                   <span>Latest Event</span>
@@ -99,7 +109,32 @@ export function EventsWorkspace({
                   <span>Actors In View</span>
                   <strong>{actorCount}</strong>
                 </div>
+                <div className="detail-row">
+                  <span>Trade-Linked Events</span>
+                  <strong>{tradeLinkedEventCount}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Selected Trade</span>
+                  <strong>{selectedTradeId ?? '—'}</strong>
+                </div>
               </div>
+
+              {selectedTradeId ? (
+                <div className="stack-actions">
+                  <button type="button" className="button button-secondary" onClick={() => onOpenTrade(selectedTradeId)}>
+                    Open Selected Trade
+                  </button>
+                  {latestTradeEvent && latestTradeEvent.aggregate_id !== selectedTradeId ? (
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => onOpenTrade(latestTradeEvent.aggregate_id)}
+                    >
+                      Open Latest Trade Event
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ),
         },
@@ -154,12 +189,23 @@ export function EventsWorkspace({
                     <div className="timeline-dot" />
                     <div className="timeline-body">
                       <div className="timeline-head">
-                        <strong>{event.event_type}</strong>
-                        <span>{formatDate(event.recorded_at)}</span>
+                          <strong>{event.event_type}</strong>
+                          <span>{formatDate(event.recorded_at)}</span>
                       </div>
-                      <p>
-                        {event.aggregate_id} • {event.aggregate_type}
-                      </p>
+                      <div className="timeline-summary-row">
+                        <p>
+                          {event.aggregate_id} • {event.aggregate_type}
+                        </p>
+                        {isTradeLinkedEvent(event) ? (
+                          <button
+                            type="button"
+                            className="button button-ghost timeline-action-button"
+                            onClick={() => onOpenTrade(event.aggregate_id)}
+                          >
+                            Open Trade
+                          </button>
+                        ) : null}
+                      </div>
                       <div className="timeline-meta">
                         <span>Actor {event.actor_id ?? 'system'}</span>
                         <span>Schema v{event.schema_version}</span>
