@@ -1,3 +1,4 @@
+import type { Trade } from '../../shared/models'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
 
@@ -9,7 +10,10 @@ type PositionRow = {
 }
 
 type PositionsWorkspaceProps = {
+  activeTrades: Trade[]
   authSession: StoredAuthSession | null
+  onOpenRisk: () => void
+  onOpenTrade: (tradeId: string) => void
   positionsByClass: Array<{ commodityClass: string; netVolume: number }>
   positionsWithClass: PositionRow[]
   formatCommodityClass: (value: string) => string
@@ -17,14 +21,55 @@ type PositionsWorkspaceProps = {
   formatDate: (value: string | null | undefined) => string
 }
 
+type PositionTradeContext = {
+  matchingTrades: Trade[]
+  primaryTrade: Trade | null
+}
+
+export function buildPositionTradeContext(
+  position: Pick<PositionRow, 'commodity' | 'commodity_class'>,
+  activeTrades: Trade[],
+): PositionTradeContext {
+  const matchingTrades = [...activeTrades]
+    .filter(
+      (trade) =>
+        trade.commodity === position.commodity && trade.commodity_class === position.commodity_class,
+    )
+    .sort((left, right) => {
+      const volumeDelta = Math.abs(right.volume ?? 0) - Math.abs(left.volume ?? 0)
+      if (volumeDelta !== 0) {
+        return volumeDelta
+      }
+
+      const updatedAtDelta = right.updated_at.localeCompare(left.updated_at)
+      if (updatedAtDelta !== 0) {
+        return updatedAtDelta
+      }
+
+      return left.trade_id.localeCompare(right.trade_id)
+    })
+
+  return {
+    matchingTrades,
+    primaryTrade: matchingTrades[0] ?? null,
+  }
+}
+
 export function PositionsWorkspace({
+  activeTrades,
   authSession,
+  onOpenRisk,
+  onOpenTrade,
   positionsByClass,
   positionsWithClass,
   formatCommodityClass,
   formatNumber,
   formatDate,
 }: PositionsWorkspaceProps) {
+  const positionRowsWithTradeContext = positionsWithClass.map((position) => ({
+    ...position,
+    tradeContext: buildPositionTradeContext(position, activeTrades),
+  }))
   const grossExposure = positionsWithClass.reduce((total, position) => total + Math.abs(position.net_volume), 0)
   const largestCommodityPosition = positionsWithClass.reduce<PositionRow | null>((largest, position) => {
     if (!largest || Math.abs(position.net_volume) > Math.abs(largest.net_volume)) {
@@ -50,6 +95,9 @@ export function PositionsWorkspace({
 
     return latest
   }, null)
+  const largestCommodityTrade = largestCommodityPosition
+    ? buildPositionTradeContext(largestCommodityPosition, activeTrades).primaryTrade
+    : null
 
   return (
     <TileLayout
@@ -64,8 +112,8 @@ export function PositionsWorkspace({
           description: 'A fast read on how much exposure is open and where the biggest concentrations currently sit.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content:
-            positionsWithClass.length > 0 ? (
+          content: positionsWithClass.length > 0 ? (
+            <div className="stack">
               <div className="dashboard-report-grid">
                 <article className="dashboard-report-card">
                   <span>Gross Exposure</span>
@@ -100,6 +148,21 @@ export function PositionsWorkspace({
                   </p>
                 </article>
               </div>
+              <div className="stack-actions">
+                <button type="button" className="button button-secondary" onClick={onOpenRisk}>
+                  Open Risk Workspace
+                </button>
+                {largestCommodityTrade ? (
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => onOpenTrade(largestCommodityTrade.trade_id)}
+                  >
+                    Open Largest Trade
+                  </button>
+                ) : null}
+              </div>
+            </div>
             ) : (
               <div className="empty-state">
                 <strong>No positions</strong>
@@ -135,21 +198,51 @@ export function PositionsWorkspace({
           eyebrow: 'Detailed View',
           title: largestCommodityPosition ? largestCommodityPosition.commodity : 'Commodity Rows',
           description: largestCommodityPosition
-            ? `${formatCommodityClass(largestCommodityPosition.commodity_class)} currently carries the largest absolute commodity-level exposure.`
+            ? `${formatCommodityClass(largestCommodityPosition.commodity_class)} currently carries the largest absolute commodity-level exposure, with a direct handoff into the trade creating it.`
             : 'Exact commodity-level net volume currently held in the projection.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
-          content: positionsWithClass.length > 0 ? (
+          content: positionRowsWithTradeContext.length > 0 ? (
             <div className="position-list">
-              {positionsWithClass.map((position) => (
-                <article key={position.commodity} className="position-card">
-                  <div>
-                    <strong>{position.commodity}</strong>
-                    <span>{formatCommodityClass(position.commodity_class)}</span>
+              {positionRowsWithTradeContext.map((position) => (
+                <article key={position.commodity} className="position-card position-card-drilldown">
+                  <div className="position-card-head">
+                    <div className="position-card-copy">
+                      <div>
+                        <strong>{position.commodity}</strong>
+                        <span>{formatCommodityClass(position.commodity_class)}</span>
+                      </div>
+                      <p>
+                        {position.tradeContext.matchingTrades.length > 0
+                          ? `${position.tradeContext.matchingTrades.length} active trade${position.tradeContext.matchingTrades.length === 1 ? '' : 's'} currently map into this projected row.`
+                          : 'No active trade handoff is currently available for this projected row.'}
+                      </p>
+                    </div>
+                    <div className="position-value">
+                      <b>{formatNumber(position.net_volume, 0)}</b>
+                      <span>{formatDate(position.updated_at)}</span>
+                    </div>
                   </div>
-                  <div className="position-value">
-                    <b>{formatNumber(position.net_volume, 0)}</b>
-                    <span>{formatDate(position.updated_at)}</span>
+                  <div className="position-card-actions">
+                    <span>
+                      {position.tradeContext.primaryTrade
+                        ? `Largest active ticket: ${position.tradeContext.primaryTrade.trade_id} in ${position.tradeContext.primaryTrade.book}`
+                        : 'Use the risk workspace to compare broader class-level concentration.'}
+                    </span>
+                    <div className="stack-actions">
+                      {position.tradeContext.primaryTrade ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => onOpenTrade(position.tradeContext.primaryTrade!.trade_id)}
+                        >
+                          Open Largest Trade
+                        </button>
+                      ) : null}
+                      <button type="button" className="button button-secondary" onClick={onOpenRisk}>
+                        Open Risk Workspace
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}

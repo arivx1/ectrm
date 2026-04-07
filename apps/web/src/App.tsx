@@ -1818,7 +1818,10 @@ export default function App() {
       case 'positions':
         return (
           <PositionsWorkspace
+            activeTrades={activeTrades}
             authSession={authSession}
+            onOpenRisk={() => navigateToView('risk')}
+            onOpenTrade={navigateToTrade}
             positionsByClass={positionsByClass}
             positionsWithClass={positionsWithClass}
             formatCommodityClass={formatCommodityClass}

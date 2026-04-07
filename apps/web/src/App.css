@@ -2324,6 +2324,31 @@
   padding: 1rem;
 }
 
+.position-card-drilldown {
+  display: grid;
+  gap: 0.9rem;
+  align-items: stretch;
+}
+
+.position-card-head,
+.position-card-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.position-card-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.position-card-copy p,
+.position-card-actions span {
+  margin: 0;
+  color: #66717c;
+}
+
 .position-value {
   display: grid;
   justify-items: end;
@@ -3953,6 +3978,8 @@
   .workspace-tile-head,
   .timeline-head,
   .timeline-summary-row,
+  .position-card-head,
+  .position-card-actions,
   .system-subhead,
   .roadmap-board-head,
   .roadmap-phase-head,

@@ -546,6 +546,7 @@ export function DocumentIngestionPanel({ authSession, formatDate }: DocumentInge
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const formElement = event.currentTarget
     if (!authSession) {
       setUploadError('Sign in from Settings before uploading protected documents.')
       return
@@ -567,7 +568,7 @@ export function DocumentIngestionPanel({ authSession, formatDate }: DocumentInge
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
-      event.currentTarget.reset()
+      formElement.reset()
     } catch (error) {
       if (error instanceof ApiError || error instanceof Error) {
         setUploadError(error.message)
