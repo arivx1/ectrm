@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatEventScopeLabel, isTradeLinkedEvent } from '../src/workspaces/events/EventsWorkspace'
+import { formatEventScopeLabel, isTradeLinkedEvent } from '../src/workspaces/events/eventHelpers'
 
 describe('events workspace helpers', () => {
   it('marks trade-backed rows as directly actionable', () => {

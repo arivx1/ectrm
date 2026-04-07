@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildPositionTradeContext } from '../src/workspaces/positions/PositionsWorkspace'
+import { buildPositionTradeContext } from '../src/workspaces/positions/positionHelpers'
 import type { Trade } from '../src/shared/models'
 
 function makeTrade(overrides: Partial<Trade> & Pick<Trade, 'trade_id' | 'commodity' | 'commodity_class'>): Trade {

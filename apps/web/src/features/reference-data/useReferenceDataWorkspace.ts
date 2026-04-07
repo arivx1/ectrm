@@ -120,7 +120,7 @@ export function emptyPortfolioForm(defaultBookCode = ''): PortfolioForm {
   }
 }
 
-function resolveSelectedCode<T extends { code: string }>(
+export function resolveSelectedCode<T extends { code: string }>(
   selectedCode: string | null,
   records: T[],
   options?: { preserveMissingSelection?: boolean },
