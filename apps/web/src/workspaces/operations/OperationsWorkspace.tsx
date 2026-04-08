@@ -101,21 +101,31 @@ export function OperationsWorkspace({
     .filter((row) => row.count > 0)
 
   return (
-    <div className="stack">
-      <SystemStatusPanel />
-
+    <div className="stack operations-workspace">
       <TileLayout
         workspaceId="operations"
         workspaceLabel="Operations"
         authSession={authSession}
+        toolbarDescription={`Drag tiles to reorder, resize, or hide them for your control loop. ${
+          authSession ? 'Layout changes save to your account.' : 'Layouts stay in this browser until you sign in.'
+        }`}
         tiles={[
+          {
+            id: 'operations-system',
+            eyebrow: 'Operations',
+            title: 'System Snapshot',
+            description: 'Connectivity, platform health, and feed freshness in one compact tile.',
+            span: 'half',
+            availableSpans: ['full', 'wide', 'half'],
+            content: <SystemStatusPanel variant="compact" />,
+          },
           {
             id: 'operations-snapshot',
             eyebrow: 'Workflow',
             title: 'Operations Snapshot',
-            description: 'Operational control counts that sit closer to the trader, scheduler, and exercised-option handoff loop than raw telemetry alone.',
-            span: 'full',
-            availableSpans: ['full', 'wide'],
+            description: 'The counts that matter right now across open handoffs and blockers.',
+            span: 'half',
+            availableSpans: ['full', 'wide', 'half'],
             content:
               openDeliveries.length > 0 || openOperationsWorkItems.length > 0 ? (
                 <div className="dashboard-report-grid">
@@ -156,7 +166,7 @@ export function OperationsWorkspace({
             id: 'operations-queue',
             eyebrow: 'Critical Path',
             title: openOperationsWorkItems.length > 0 ? 'Operational Work Queue' : 'No open work queue',
-            description: 'Editable queue cards for confirmation, nomination, allocation, and exercised-option settlement follow-up across the book.',
+            description: 'Editable queue items for confirmation, nomination, allocation, and settlement follow-up.',
             span: 'full',
             availableSpans: ['full', 'wide'],
             content: openOperationsWorkItems.length > 0 ? (
@@ -182,14 +192,15 @@ export function OperationsWorkspace({
           {
             id: 'operations-documents',
             eyebrow: 'Document Intake',
-            title: 'PDF Intake Groundwork',
-            description: 'Upload confirmations, invoices, bills of lading, and similar documents into a page-level classification and extraction scaffold.',
-            span: 'full',
+            title: 'Document Intake',
+            description: 'Upload and review confirmations, invoices, and transport documents.',
+            span: 'half',
             availableSpans: ['full', 'wide', 'half'],
             content: (
               <DocumentIngestionPanel
                 authSession={authSession}
                 formatDate={formatDate}
+                compact
               />
             ),
           },
@@ -197,8 +208,8 @@ export function OperationsWorkspace({
             id: 'operations-credit-exceptions',
             eyebrow: 'Credit',
             title: activeCreditExceptions.length > 0 ? 'Active Credit Exceptions' : 'No active credit exceptions',
-            description: 'Approved exception envelopes that are still live on the book, including remaining headroom and expiry timing.',
-            span: 'full',
+            description: 'Approved exceptions still on the book with expiry and headroom monitoring.',
+            span: 'half',
             availableSpans: ['full', 'wide', 'half'],
             content: activeCreditExceptions.length > 0 ? (
               <div className="position-list">
@@ -266,7 +277,7 @@ export function OperationsWorkspace({
             id: 'operations-coverage',
             eyebrow: 'Coverage',
             title: 'Operational Coverage',
-            description: 'Cross-mode visibility so logistics, network flow, and power scheduling obligations stay on one page.',
+            description: 'Active delivery obligations by operating mode.',
             span: 'half',
             availableSpans: ['full', 'wide', 'half'],
             content: modeCoverage.length > 0 ? (
@@ -288,8 +299,8 @@ export function OperationsWorkspace({
           {
             id: 'operations-feeds',
             eyebrow: 'Support Systems',
-            title: 'Feed and Registry Support',
-            description: 'Operational context that keeps the workflow surface grounded in data freshness and source coverage.',
+            title: 'Feed Support',
+            description: 'Freshness and source coverage behind the operational surface.',
             span: 'half',
             availableSpans: ['full', 'wide', 'half'],
             content: (

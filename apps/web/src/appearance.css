@@ -25,6 +25,7 @@
 :root[data-color-mode='light'] {
   color-scheme: light;
   color: #13293d;
+  --color-copy-muted: #66717c;
   background:
     radial-gradient(circle at top left, rgb(var(--theme-accent-rgb) / 0.14), transparent 30%),
     radial-gradient(circle at top right, rgb(var(--theme-highlight-rgb) / 0.14), transparent 34%),
@@ -360,6 +361,22 @@
   color: color-mix(in srgb, var(--theme-accent) 68%, #0b2d2a);
 }
 
+:root[data-color-mode='light'] .shipment-card-copy p,
+:root[data-color-mode='light'] .shipment-card-actions span,
+:root[data-color-mode='light'] .shipment-kpi-row span,
+:root[data-color-mode='light'] .shipment-blocker-list,
+:root[data-color-mode='light'] .workflow-editor-note {
+  color: var(--color-copy-muted);
+}
+
+:root[data-color-mode='light'] .shipment-kpi-row {
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+:root[data-color-mode='light'] .field-error {
+  color: #9a4338;
+}
+
 :root[data-color-mode='light'] .tile-layout-toolbar {
   background:
     radial-gradient(circle at top right, rgb(var(--theme-accent-rgb) / 0.08), transparent 28%),
@@ -488,6 +505,68 @@
 :root[data-color-mode='light'] .market-price-chart {
   border-color: rgba(18, 42, 56, 0.08);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(247, 250, 252, 0.92));
+}
+
+:root[data-color-mode='light'] .document-dropzone {
+  border-color: rgba(58, 75, 110, 0.34);
+  background:
+    radial-gradient(circle at top right, rgb(var(--theme-highlight-rgb) / 0.12), transparent 38%),
+    rgba(246, 249, 255, 0.92);
+  box-shadow: none;
+}
+
+:root[data-color-mode='light'] .document-dropzone:hover,
+:root[data-color-mode='light'] .document-dropzone:focus-visible {
+  border-color: rgb(var(--theme-highlight-rgb) / 0.46);
+  box-shadow: 0 0 0 4px rgb(var(--theme-highlight-rgb) / 0.1);
+}
+
+:root[data-color-mode='light'] .document-dropzone-active,
+:root[data-color-mode='light'] .document-dropzone-has-file {
+  border-color: rgb(var(--theme-highlight-rgb) / 0.52);
+  background:
+    radial-gradient(circle at top right, rgb(var(--theme-highlight-rgb) / 0.18), transparent 42%),
+    rgba(239, 246, 255, 0.96);
+}
+
+:root[data-color-mode='light'] .document-dropzone-active {
+  box-shadow: 0 0 0 4px rgb(var(--theme-highlight-rgb) / 0.14);
+}
+
+:root[data-color-mode='light'] .document-dropzone strong {
+  color: #13293d;
+}
+
+:root[data-color-mode='light'] .document-page-preview-panel {
+  border-color: rgba(18, 42, 56, 0.08);
+  background: rgba(247, 250, 255, 0.82);
+  box-shadow: none;
+}
+
+:root[data-color-mode='light'] .document-page-preview-image {
+  border-color: rgba(58, 75, 110, 0.14);
+  background: #ffffff;
+}
+
+:root[data-color-mode='light'] .document-table-block {
+  border-color: rgba(58, 75, 110, 0.14);
+  background: rgba(247, 249, 252, 0.92);
+}
+
+:root[data-color-mode='light'] .document-ingestion-page {
+  border-color: rgba(58, 75, 110, 0.14);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: none;
+}
+
+:root[data-color-mode='light'] .document-ingestion-page-editor,
+:root[data-color-mode='light'] .document-table-editor,
+:root[data-color-mode='light'] .document-schema-note,
+:root[data-color-mode='light'] .document-row-card,
+:root[data-color-mode='light'] .document-extra-field,
+:root[data-color-mode='light'] .document-column-item {
+  border-color: rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.7);
 }
 
 .appearance-mode-options,

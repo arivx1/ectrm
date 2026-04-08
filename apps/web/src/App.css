@@ -361,6 +361,10 @@
   gap: 1rem;
 }
 
+.system-overview-panel-compact {
+  gap: 0.8rem;
+}
+
 .system-subhead {
   display: flex;
   justify-content: space-between;
@@ -389,6 +393,11 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.system-status-grid-compact {
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
 .dependency-status-section {
   display: grid;
   gap: 0.9rem;
@@ -407,6 +416,11 @@
   border-radius: 1.2rem;
   border: 1px solid rgba(18, 42, 56, 0.08);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 250, 0.9));
+}
+
+.system-status-card-compact {
+  padding: 0.85rem 0.9rem;
+  border-radius: 1rem;
 }
 
 .system-status-card::before {
@@ -454,6 +468,11 @@
   color: #13293d;
 }
 
+.system-status-card-compact .system-status-card-head > div > strong {
+  margin-top: 0.4rem;
+  font-size: 1.28rem;
+}
+
 .system-status-card p {
   margin: 0.7rem 0 0;
   color: #66717c;
@@ -465,6 +484,12 @@
   margin-top: 1rem;
   padding-top: 0.9rem;
   border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.system-status-detail-list-compact {
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
 }
 
 .system-status-detail-row {
@@ -495,6 +520,19 @@
 .tile-layout-shell {
   display: grid;
   gap: 1rem;
+}
+
+.operations-workspace .tile-layout-toolbar p {
+  max-width: 44rem;
+}
+
+.operations-workspace .workspace-tile-head {
+  margin-bottom: 0.85rem;
+}
+
+.operations-workspace .workspace-tile-copy p {
+  max-width: 30rem;
+  line-height: 1.5;
 }
 
 .tile-layout-toolbar {
@@ -744,6 +782,10 @@
 
 .dashboard-report-grid {
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.operations-workspace .dashboard-report-grid {
+  gap: 0.75rem;
 }
 
 .market-context-section-grid {
@@ -1162,7 +1204,7 @@
 
 .field-error {
   margin-top: 0.15rem;
-  color: #9a4338;
+  color: var(--terminal-red);
   font-size: 0.82rem;
   line-height: 1.4;
 }
@@ -2923,6 +2965,10 @@
   padding: 1rem 1.05rem;
 }
 
+.operations-workspace .dashboard-report-card {
+  padding: 0.85rem 0.9rem;
+}
+
 .admin-summary-card span,
 .dashboard-report-card span,
 .docs-summary-card span,
@@ -2962,6 +3008,11 @@
   letter-spacing: -0.04em;
 }
 
+.operations-workspace .dashboard-report-card strong {
+  margin-top: 0.4rem;
+  font-size: 1.55rem;
+}
+
 .admin-summary-card p,
 .dashboard-report-card p,
 .docs-summary-card p,
@@ -2970,6 +3021,12 @@
   margin: 0.55rem 0 0;
   color: #66717c;
   line-height: 1.55;
+}
+
+.operations-workspace .dashboard-report-card p {
+  margin-top: 0.45rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .market-price-card {
@@ -4065,6 +4122,7 @@
   --terminal-red: #ff8b7f;
   --terminal-amber: #f5be67;
   --terminal-shadow: 0 24px 60px rgba(3, 8, 14, 0.38);
+  --color-copy-muted: var(--terminal-muted);
 }
 
 .app-shell {
@@ -5004,7 +5062,7 @@
 .shipment-kpi-row span,
 .shipment-blocker-list {
   margin: 0;
-  color: #66717c;
+  color: var(--color-copy-muted);
 }
 
 .shipment-card-meta {
@@ -5021,7 +5079,7 @@
 
 .shipment-kpi-row {
   padding: 0.85rem 0;
-  border-top: 1px solid rgba(18, 42, 56, 0.08);
+  border-top: 1px solid var(--terminal-line);
 }
 
 .shipment-kpi-row:first-child {
@@ -5030,7 +5088,7 @@
 }
 
 .shipment-kpi-row strong {
-  color: #13293d;
+  color: var(--terminal-text);
 }
 
 .workflow-editor-stack {
@@ -5038,9 +5096,15 @@
   gap: 0.85rem;
 }
 
+.operations-workflow-list {
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  align-items: start;
+}
+
 .workflow-editor-note,
 .workflow-item-save-error {
   margin: 0;
+  color: var(--color-copy-muted);
 }
 
 .workflow-item-grid {
@@ -5055,6 +5119,44 @@
 
 .workflow-item-actions {
   align-items: center;
+}
+
+.workflow-item-card-compact {
+  gap: 0.75rem;
+  padding: 0.9rem 0.95rem;
+}
+
+.workflow-item-card-compact .shipment-card-copy,
+.workflow-item-card-compact .shipment-kpi-stack {
+  gap: 0.28rem;
+}
+
+.workflow-item-card-compact .shipment-card-copy span,
+.workflow-item-card-compact .shipment-card-copy p,
+.workflow-item-card-compact .shipment-card-actions span {
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.workflow-item-card-compact .shipment-card-meta {
+  gap: 0.38rem;
+}
+
+.workflow-item-card-compact .workflow-item-grid {
+  gap: 0.6rem;
+}
+
+.workflow-item-card-compact .control-compact {
+  min-width: 0;
+  padding-block: 0.66rem;
+}
+
+.workflow-item-card-compact .control-textarea {
+  min-height: 4.25rem;
+}
+
+.workflow-item-card-compact .button {
+  padding: 0.72rem 0.95rem;
 }
 
 .workflow-item-button-row {
@@ -5110,6 +5212,11 @@
   gap: 1rem;
 }
 
+.document-ingestion-panel-compact,
+.document-ingestion-form-compact {
+  gap: 0.75rem;
+}
+
 .document-ingestion-form-grid {
   display: grid;
   gap: 1rem;
@@ -5129,11 +5236,12 @@
   align-content: center;
   min-height: 10.5rem;
   padding: 1.1rem 1.15rem;
-  border: 1.5px dashed rgba(58, 75, 110, 0.34);
+  border: 1.5px dashed rgba(126, 154, 184, 0.28);
   border-radius: 1rem;
   background:
-    radial-gradient(circle at top right, rgba(78, 167, 255, 0.12), transparent 38%),
-    rgba(246, 249, 255, 0.92);
+    radial-gradient(circle at top right, rgb(var(--theme-highlight-rgb) / 0.14), transparent 38%),
+    linear-gradient(180deg, rgba(13, 24, 37, 0.98), rgba(8, 15, 24, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
   cursor: pointer;
   transition:
     border-color 150ms ease,
@@ -5142,24 +5250,33 @@
     transform 150ms ease;
 }
 
+.document-dropzone-compact {
+  min-height: 7.25rem;
+  padding: 0.9rem 1rem;
+}
+
 .document-dropzone:hover,
 .document-dropzone:focus-visible {
-  border-color: rgba(59, 130, 246, 0.52);
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  border-color: rgb(var(--theme-highlight-rgb) / 0.42);
+  box-shadow: 0 0 0 4px rgb(var(--theme-highlight-rgb) / 0.12);
   outline: none;
 }
 
 .document-dropzone-active,
 .document-dropzone-has-file {
-  border-color: rgba(37, 99, 235, 0.6);
+  border-color: rgb(var(--theme-accent-rgb) / 0.36);
   background:
-    radial-gradient(circle at top right, rgba(78, 167, 255, 0.18), transparent 42%),
-    rgba(239, 246, 255, 0.96);
+    radial-gradient(circle at top right, rgb(var(--theme-highlight-rgb) / 0.18), transparent 42%),
+    linear-gradient(
+      180deg,
+      rgb(var(--theme-accent-rgb) / 0.08),
+      rgba(8, 15, 24, 0.98)
+    );
 }
 
 .document-dropzone-active {
   transform: translateY(-1px);
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
+  box-shadow: 0 0 0 4px rgb(var(--theme-highlight-rgb) / 0.14);
 }
 
 .document-dropzone-disabled {
@@ -5191,6 +5308,10 @@
   margin: 0;
 }
 
+.document-dropzone strong {
+  color: var(--terminal-text);
+}
+
 .document-dropzone p {
   color: var(--color-copy-muted);
 }
@@ -5207,6 +5328,17 @@
 
 .document-ingestion-card {
   gap: 1rem;
+}
+
+.document-ingestion-list-compact {
+  gap: 0.75rem;
+  max-height: 32rem;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.document-ingestion-list-compact .document-ingestion-card {
+  gap: 0.75rem;
 }
 
 .document-ingestion-header-actions,
@@ -5249,9 +5381,10 @@
 
 .document-page-preview-panel {
   padding: 1rem;
-  border: 1px solid rgba(18, 42, 56, 0.08);
+  border: 1px solid var(--terminal-line);
   border-radius: 1rem;
-  background: rgba(247, 250, 255, 0.82);
+  background: linear-gradient(180deg, rgba(12, 22, 34, 0.96), rgba(8, 15, 24, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .document-page-preview-head {
@@ -5268,8 +5401,8 @@
   max-height: 48rem;
   object-fit: contain;
   border-radius: 0.8rem;
-  border: 1px solid rgba(58, 75, 110, 0.14);
-  background: white;
+  border: 1px solid var(--terminal-line);
+  background: rgba(7, 14, 23, 0.98);
 }
 
 .document-review-fieldset {
@@ -5298,15 +5431,16 @@
 .document-table-block {
   padding: 0.75rem 0.9rem;
   border-radius: 0.9rem;
-  border: 1px solid rgba(58, 75, 110, 0.14);
-  background: rgba(247, 249, 252, 0.92);
+  border: 1px solid rgba(126, 154, 184, 0.14);
+  background: linear-gradient(180deg, rgba(12, 22, 34, 0.92), rgba(8, 15, 24, 0.94));
 }
 
 .document-ingestion-page {
   padding: 1rem;
   border-radius: 1rem;
-  border: 1px solid rgba(58, 75, 110, 0.14);
-  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--terminal-line);
+  background: linear-gradient(180deg, rgba(13, 24, 37, 0.94), rgba(8, 15, 24, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .document-ingestion-page-editor,
@@ -5315,9 +5449,9 @@
 .document-row-card,
 .document-extra-field,
 .document-column-item {
-  border: 1px solid rgba(18, 42, 56, 0.08);
+  border: 1px solid rgba(126, 154, 184, 0.14);
   border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.7);
+  background: linear-gradient(180deg, rgba(9, 18, 29, 0.96), rgba(14, 26, 40, 0.84));
   padding: 1rem;
 }
 

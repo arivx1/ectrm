@@ -28,6 +28,9 @@ type NavigatorWithConnection = Navigator & {
 }
 
 type DependencyHealth = SystemOverview['dependencies'][number]
+type SystemStatusPanelProps = {
+  variant?: 'full' | 'compact'
+}
 
 function getBrowserConnection(): NetworkInformationLike | undefined {
   if (typeof navigator === 'undefined') {
@@ -252,6 +255,36 @@ function dependencySummary(dependency: DependencyHealth): string {
   }
 }
 
+function dependenciesTone(overview: SystemOverview | null, error: string): StatusTone {
+  if (error && !overview) {
+    return 'cancelled'
+  }
+  if (!overview) {
+    return 'in-progress'
+  }
+  if (overview.dependencies.some((dependency) => dependency.health_status === 'failed')) {
+    return 'cancelled'
+  }
+  if (overview.dependencies.some((dependency) => dependency.health_status === 'stale')) {
+    return 'blocked'
+  }
+  if (overview.dependencies.some((dependency) => dependency.health_status === 'running')) {
+    return 'in-progress'
+  }
+  return 'active'
+}
+
+function countDependencies(
+  overview: SystemOverview | null,
+  healthStatus: DependencyHealth['health_status'],
+): number | null {
+  if (!overview) {
+    return null
+  }
+
+  return overview.dependencies.filter((dependency) => dependency.health_status === healthStatus).length
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="system-status-detail-row">
@@ -261,7 +294,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function SystemStatusPanel() {
+export function SystemStatusPanel({ variant = 'full' }: SystemStatusPanelProps) {
   const [overview, setOverview] = useState<SystemOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -335,9 +368,121 @@ export function SystemStatusPanel() {
     : lastUpdatedAt
       ? `Auto-refresh every 30 seconds. Last updated ${formatRelativeTime(lastUpdatedAt)}.`
       : 'Fetching live system telemetry.'
+  const feedTone = dependenciesTone(overview, error)
+  const panelClassName =
+    variant === 'compact' ? 'system-overview-panel system-overview-panel-compact' : 'surface system-overview-panel'
+
+  if (variant === 'compact') {
+    return (
+      <div className={panelClassName}>
+        {loading && !overview ? (
+          <div className="skeleton-stack">
+            <div className="skeleton-block" />
+            <div className="skeleton-block" />
+          </div>
+        ) : (
+          <div className="system-status-grid system-status-grid-compact">
+            <article className={`system-status-card system-status-card-compact tone-${networkTone(network)}`}>
+              <div className="system-status-card-head">
+                <div>
+                  <span>Internet Link</span>
+                  <strong>{network.online ? formatDownlink(network.downlinkMbps) : 'Offline'}</strong>
+                </div>
+                <span className={`status-pill status-pill-${networkTone(network)}`}>
+                  {network.online ? 'Connected' : 'Offline'}
+                </span>
+              </div>
+              <div className="system-status-detail-list system-status-detail-list-compact">
+                <DetailRow label="API ping" value={formatPing(network.apiPingMs)} />
+                <DetailRow label="Network" value={network.effectiveType ?? 'Unknown'} />
+                <DetailRow label="RTT" value={formatPing(network.transportRttMs)} />
+              </div>
+            </article>
+
+            <article className={`system-status-card system-status-card-compact tone-${serverTone(overview, error)}`}>
+              <div className="system-status-card-head">
+                <div>
+                  <span>Platform</span>
+                  <strong>{overview?.server_status === 'ok' ? 'Healthy' : overview ? 'Attention' : '--'}</strong>
+                </div>
+                <span className={`status-pill status-pill-${serverTone(overview, error)}`}>
+                  {!overview ? 'Loading' : overview.database_status === 'ok' ? 'DB Ready' : 'Check DB'}
+                </span>
+              </div>
+              <div className="system-status-detail-list system-status-detail-list-compact">
+                <DetailRow label="Uptime" value={formatDuration(overview?.uptime_seconds)} />
+                <DetailRow label="Open trades" value={formatInteger(overview?.open_trade_count)} />
+                <DetailRow label="Snapshot" value={formatRelativeTime(overview?.generated_at ?? null)} />
+              </div>
+            </article>
+
+            <article className={`system-status-card system-status-card-compact tone-${databaseTone(overview, error)}`}>
+              <div className="system-status-card-head">
+                <div>
+                  <span>Database</span>
+                  <strong>{formatDatabaseType(overview?.database.dialect)}</strong>
+                </div>
+                <span className={`status-pill status-pill-${databaseTone(overview, error)}`}>
+                  {!overview ? 'Loading' : overview.database_status === 'ok' ? 'Live DB' : 'Check DB'}
+                </span>
+              </div>
+              <div className="system-status-detail-list system-status-detail-list-compact">
+                <DetailRow label="Name" value={overview?.database.name ?? '--'} />
+                <DetailRow label="Size" value={formatBytes(overview?.database.size_bytes)} />
+                <DetailRow label="Tables" value={formatInteger(overview?.database.table_count)} />
+              </div>
+            </article>
+
+            <article className={`system-status-card system-status-card-compact tone-${usersTone(overview)}`}>
+              <div className="system-status-card-head">
+                <div>
+                  <span>Presence</span>
+                  <strong>{formatInteger(overview?.active_user_count)}</strong>
+                </div>
+                <span className={`status-pill status-pill-${activityTone(overview)}`}>
+                  {!overview ? 'Loading' : overview?.events_last_hour ? 'Flowing' : 'Quiet'}
+                </span>
+              </div>
+              <div className="system-status-detail-list system-status-detail-list-compact">
+                <DetailRow label="Sessions" value={formatInteger(overview?.active_session_count)} />
+                <DetailRow label="Events" value={formatInteger(overview?.events_last_hour)} />
+                <DetailRow
+                  label="Last event"
+                  value={formatRelativeTime(overview?.last_event_recorded_at ?? null, 'No events')}
+                />
+              </div>
+            </article>
+
+            <article className={`system-status-card system-status-card-compact tone-${feedTone}`}>
+              <div className="system-status-card-head">
+                <div>
+                  <span>Feed Health</span>
+                  <strong>
+                    {overview
+                      ? `${formatInteger(overview.healthy_dependency_count)}/${formatInteger(overview.dependency_count)}`
+                      : '--'}
+                  </strong>
+                </div>
+                <span className={`status-pill status-pill-${feedTone}`}>
+                  {!overview ? 'Loading' : feedTone === 'active' ? 'Healthy' : 'Attention'}
+                </span>
+              </div>
+              <div className="system-status-detail-list system-status-detail-list-compact">
+                <DetailRow label="Failed" value={formatInteger(countDependencies(overview, 'failed'))} />
+                <DetailRow label="Stale" value={formatInteger(countDependencies(overview, 'stale'))} />
+                <DetailRow label="Running" value={formatInteger(countDependencies(overview, 'running'))} />
+              </div>
+            </article>
+          </div>
+        )}
+
+        <p className="system-panel-note">{refreshNote}</p>
+      </div>
+    )
+  }
 
   return (
-    <article className="surface system-overview-panel">
+    <div className={panelClassName}>
       <div className="section-head">
         <div>
           <span className="eyebrow">Operations</span>
@@ -501,6 +646,6 @@ export function SystemStatusPanel() {
       ) : null}
 
       <p className="system-panel-note">{refreshNote}</p>
-    </article>
+    </div>
   )
 }

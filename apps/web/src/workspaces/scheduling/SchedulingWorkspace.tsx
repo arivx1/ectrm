@@ -3,6 +3,20 @@ import { useEffect, useState } from 'react'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { DeliveryRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import type { SchedulingWindowBand } from './schedulingHelpers'
+import {
+  ALLOCATION_COMPLETE_STATUSES,
+  compareBySchedulerPriority,
+  deliveryStartTimestamp,
+  deliveryStatusTone,
+  isDueWithinWindow,
+  isReadyToSchedule,
+  NOMINATION_COMPLETE_STATUSES,
+  SCHEDULED_NOMINATION_STATUSES,
+  SCHEDULING_WINDOW_HOURS,
+  selectUpcomingSchedulingWindows,
+  windowBandForDelivery,
+} from './schedulingHelpers'
 
 type SchedulingWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -16,7 +30,6 @@ type SchedulingWorkspaceProps = {
 
 type SchedulingModeFilter = 'ALL' | DeliveryRecord['mode_family']
 type SchedulingFocusFilter = 'ALL' | 'DUE_SOON' | 'BLOCKED' | 'READY_TO_SCHEDULE'
-type SchedulingWindowBand = 'LIVE' | 'NEXT_24' | 'NEXT_72' | 'LATER' | 'TBD'
 
 const MODE_LABELS: Record<DeliveryRecord['mode_family'], string> = {
   LOGISTICS: 'Logistics',
@@ -43,13 +56,6 @@ const FOCUS_FILTER_OPTIONS: Array<{ value: SchedulingFocusFilter; label: string;
   { value: 'BLOCKED', label: 'Exceptions', detail: 'Rows blocked by workflow or data gaps.' },
   { value: 'READY_TO_SCHEDULE', label: 'Ready', detail: 'Confirmed rows that can move into scheduling.' },
 ]
-
-const DELIVERY_STATUS_RANK: Record<DeliveryRecord['status'], number> = {
-  BLOCKED: 0,
-  IN_PROGRESS: 1,
-  READY: 2,
-  COMPLETED: 3,
-}
 
 const WINDOW_BAND_META: Record<
   SchedulingWindowBand,
@@ -86,11 +92,6 @@ const WINDOW_BAND_META: Record<
   },
 }
 
-const SCHEDULED_NOMINATION_STATUSES = new Set(['SCHEDULED', 'NOMINATED', 'COMPLETED'])
-const NOMINATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'SCHEDULED', 'NOMINATED', 'COMPLETED'])
-const ALLOCATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'ALLOCATED', 'COMPLETED'])
-const SCHEDULING_WINDOW_HOURS = 72
-const NEXT_DAY_WINDOW_HOURS = 24
 const SCHEDULING_CLOCK_TICK_MS = 60_000
 
 function currentTimestamp(): number {
@@ -103,48 +104,6 @@ function formatEnumLabel(value: string): string {
 
 function tradeReferenceLabel(delivery: DeliveryRecord): string {
   return delivery.leg_no === null ? delivery.trade_id : `${delivery.trade_id} · leg ${delivery.leg_no}`
-}
-
-function deliveryStartTimestamp(delivery: DeliveryRecord): number | null {
-  if (!delivery.delivery_start) {
-    return null
-  }
-
-  const parsed = Date.parse(delivery.delivery_start)
-  return Number.isNaN(parsed) ? null : parsed
-}
-
-function isDueWithinWindow(delivery: DeliveryRecord, now: number, schedulingWindowMs: number): boolean {
-  const start = deliveryStartTimestamp(delivery)
-  return start !== null && start <= now + schedulingWindowMs
-}
-
-function isReadyToSchedule(delivery: DeliveryRecord): boolean {
-  return (
-    delivery.confirmation_status === 'CONFIRMED' &&
-    !NOMINATION_COMPLETE_STATUSES.has(delivery.nomination_status) &&
-    delivery.blocker_count === 0
-  )
-}
-
-function compareBySchedulerPriority(left: DeliveryRecord, right: DeliveryRecord): number {
-  const leftRank = DELIVERY_STATUS_RANK[left.status]
-  const rightRank = DELIVERY_STATUS_RANK[right.status]
-  if (leftRank !== rightRank) {
-    return leftRank - rightRank
-  }
-
-  const leftStart = deliveryStartTimestamp(left) ?? Number.POSITIVE_INFINITY
-  const rightStart = deliveryStartTimestamp(right) ?? Number.POSITIVE_INFINITY
-  if (leftStart !== rightStart) {
-    return leftStart - rightStart
-  }
-
-  if (left.blocker_count !== right.blocker_count) {
-    return right.blocker_count - left.blocker_count
-  }
-
-  return left.trade_id.localeCompare(right.trade_id)
 }
 
 function deliveryWindowLabel(
@@ -160,36 +119,6 @@ function deliveryWindowLabel(
   }
 
   return `${formatDateOnly(delivery.delivery_start)} to ${formatDateOnly(delivery.delivery_end)}`
-}
-
-function deliveryStatusTone(status: DeliveryRecord['status']): 'active' | 'blocked' | 'in-progress' | 'shipped' {
-  switch (status) {
-    case 'BLOCKED':
-      return 'blocked'
-    case 'READY':
-      return 'active'
-    case 'COMPLETED':
-      return 'shipped'
-    default:
-      return 'in-progress'
-  }
-}
-
-function windowBandForDelivery(delivery: DeliveryRecord, now: number): SchedulingWindowBand {
-  const start = deliveryStartTimestamp(delivery)
-  if (start === null) {
-    return 'TBD'
-  }
-  if (start <= now) {
-    return 'LIVE'
-  }
-  if (start <= now + NEXT_DAY_WINDOW_HOURS * 60 * 60 * 1000) {
-    return 'NEXT_24'
-  }
-  if (start <= now + SCHEDULING_WINDOW_HOURS * 60 * 60 * 1000) {
-    return 'NEXT_72'
-  }
-  return 'LATER'
 }
 
 export function SchedulingWorkspace({
@@ -273,10 +202,7 @@ export function SchedulingWorkspace({
     )
     .sort(compareBySchedulerPriority)
     .slice(0, 8)
-  const upcomingWindows = [...filteredOpenDeliveries]
-    .filter((delivery) => deliveryStartTimestamp(delivery) !== null)
-    .sort(compareBySchedulerPriority)
-    .slice(0, 8)
+  const upcomingWindows = selectUpcomingSchedulingWindows(filteredOpenDeliveries)
   const activeModeLabel = MODE_FILTER_OPTIONS.find((option) => option.value === modeFilter)?.label ?? 'All Modes'
   const activeFocusOption =
     FOCUS_FILTER_OPTIONS.find((option) => option.value === focusFilter) ?? FOCUS_FILTER_OPTIONS[0]
@@ -614,7 +540,7 @@ export function SchedulingWorkspace({
         {
           id: 'scheduling-windows',
           eyebrow: 'Windows',
-          title: upcomingWindows.length > 0 ? 'Upcoming Delivery Windows' : 'No upcoming windows',
+          title: upcomingWindows.length > 0 ? 'Delivery Windows and Date Gaps' : 'No delivery windows yet',
           description: 'A more timeline-shaped scheduler board for seeing what is live, near, and still missing delivery dates.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],

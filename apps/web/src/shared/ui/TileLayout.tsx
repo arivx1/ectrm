@@ -43,6 +43,7 @@ type TileLayoutProps = {
   workspaceLabel: string
   tiles: WorkspaceTile[]
   authSession: StoredAuthSession | null
+  toolbarDescription?: string
 }
 
 type TileLayoutState = WorkspaceLayoutState
@@ -275,7 +276,13 @@ function SortableTileCard({
   )
 }
 
-export function TileLayout({ workspaceId, workspaceLabel, tiles, authSession }: TileLayoutProps) {
+export function TileLayout({
+  workspaceId,
+  workspaceLabel,
+  tiles,
+  authSession,
+  toolbarDescription,
+}: TileLayoutProps) {
   const tileDefinitionSignature = JSON.stringify(
     tiles.map((tile) => ({
       id: tile.id,
@@ -393,6 +400,11 @@ export function TileLayout({ workspaceId, workspaceLabel, tiles, authSession }: 
 
   const tilesById = new Map(tiles.map((tile) => [tile.id, tile]))
   const hiddenSet = new Set(layout.hidden)
+  const resolvedToolbarDescription =
+    toolbarDescription ??
+    `Drag tiles to reorder this workspace, change each tile's footprint from its header, and remove anything you do not need right now before adding it back later without leaving the screen. ${
+      authSession ? 'Your layout is saved to your account.' : 'Layouts stay in this browser until you sign in.'
+    }`
   const orderedTileIds = [
     ...layout.order.filter((tileId) => tilesById.has(tileId)),
     ...tileIds.filter((tileId) => !layout.order.includes(tileId)),
@@ -521,11 +533,7 @@ export function TileLayout({ workspaceId, workspaceLabel, tiles, authSession }: 
             {visibleTiles.length} of {tiles.length} on screen
           </span>
         </div>
-        <p id={toolbarDescriptionId}>
-          Drag tiles to reorder this workspace, change each tile&apos;s footprint from its header, and remove anything
-          you do not need right now before adding it back later without leaving the screen.{' '}
-          {authSession ? 'Your layout is saved to your account.' : 'Layouts stay in this browser until you sign in.'}
-        </p>
+        <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
         <div className="tile-layout-toolbar-actions">
           {hiddenTiles.length > 0 ? (
             hiddenTiles.map((tile) => (

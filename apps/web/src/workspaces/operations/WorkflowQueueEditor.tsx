@@ -207,7 +207,7 @@ export function WorkflowQueueEditor({
         <p className="workflow-editor-note">Sign in from Settings to edit workflow ownership, due dates, and statuses.</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
-      <div className="position-list">
+      <div className="position-list operations-workflow-list">
         {items.map((item) => {
           const draft = drafts[item.item_id] ?? buildDraft(item)
           const creditHoldSummary = buildTradeCreditHoldSummary(
@@ -255,7 +255,7 @@ export function WorkflowQueueEditor({
           const statusOptions = WORKFLOW_STATUS_OPTIONS[item.workflow_type]
 
           return (
-            <article key={item.item_id} className="position-card shipment-card workflow-item-card">
+            <article key={item.item_id} className="position-card shipment-card workflow-item-card workflow-item-card-compact">
               <div className="shipment-card-head">
                 <div className="shipment-card-copy">
                   <strong>{item.trade_id}</strong>
@@ -344,7 +344,7 @@ export function WorkflowQueueEditor({
                         ? 'Track the resulting underlying booking or settlement handoff.'
                         : 'Add an operational handoff note or settlement comment.'
                     }
-                    rows={2}
+                    rows={1}
                     disabled={savingItemId === item.item_id}
                   />
                 </label>

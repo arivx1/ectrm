@@ -8,14 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.assistant.services.action_runtime import AssistantActionProposal
+from apps.api.app.domains.trading.services.trade_event_support import (
+    sync_option_exposures_for_trade_change,
+)
+from apps.api.app.domains.trading.services.trade_event_support import (
+    sync_positions_for_trade_change,
+)
+from apps.api.app.domains.trading.services.trade_event_support import trade_snapshot
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
-from apps.api.app.routes.events import (
-    sync_option_exposures_for_trade_change,
-    sync_positions_for_trade_change,
-    trade_snapshot,
-)
 from apps.api.app.schemas.assistant import AssistantActionRequestOut
 
 
