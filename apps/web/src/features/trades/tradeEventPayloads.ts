@@ -158,11 +158,19 @@ const TRADE_FIELD_LABELS = {
   legs: 'Swap Legs',
 } as const
 
-export function buildSuggestedTradeId(now: Date = new Date()): string {
-  const pad = (segment: number) => String(segment).padStart(2, '0')
-  const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
-  const randomPart = crypto.randomUUID().slice(0, 8).toUpperCase()
-  return `T-${datePart}-${randomPart}`
+export function buildSuggestedTradeId(existingTradeIds: string[] = []): string {
+  const tradeNumberMatches = existingTradeIds
+    .map((tradeId) => /^TRD-(\d+)$/.exec(tradeId.trim().toUpperCase()))
+    .filter((match): match is RegExpExecArray => match !== null)
+
+  if (tradeNumberMatches.length === 0) {
+    return 'TRD-10001'
+  }
+
+  const maxTradeNumber = tradeNumberMatches.reduce((highest, match) => Math.max(highest, Number(match[1]) || 0), 0)
+  const width = Math.max(5, tradeNumberMatches.reduce((highest, match) => Math.max(highest, match[1].length), 0))
+
+  return `TRD-${String(maxTradeNumber + 1).padStart(width, '0')}`
 }
 
 export function getPersistedTradeLegs(selectedTradeEvents: EventRow[]): TradeLegDraft[] {

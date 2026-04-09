@@ -1,4 +1,4 @@
-.PHONY: db-up db-down api-install api-dev rebuild-trades rebuild-positions rebuild-all
+.PHONY: db-up db-down api-install api-dev rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
 
 db-up:
 	docker compose up -d
@@ -21,3 +21,9 @@ rebuild-positions:
 rebuild-all:
 	. .venv/bin/activate && PYTHONPATH=. python apps/api/scripts/rebuild_trades_projection.py
 	. .venv/bin/activate && PYTHONPATH=. python apps/api/scripts/rebuild_positions_projection.py
+
+audit-trade-projections:
+	. .venv/bin/activate && PYTHONPATH=. python apps/api/scripts/audit_trade_projection_integrity.py
+
+clean-trade-projections:
+	. .venv/bin/activate && PYTHONPATH=. python apps/api/scripts/audit_trade_projection_integrity.py --clean

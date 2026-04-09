@@ -203,11 +203,25 @@ function Sparkline({
 
   return (
     <div className={`market-price-chart market-price-chart-${tone}`}>
-      <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label="Historical price line graph">
+      <svg
+        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="Historical price line graph"
+      >
         <path className="market-price-chart-area" d={areaPath} />
         <path className="market-price-chart-line" d={linePath} />
-        {lastPoint && <circle className="market-price-chart-dot" cx={lastPoint.x} cy={lastPoint.y} r="4" />}
       </svg>
+      {lastPoint ? (
+        <span
+          aria-hidden="true"
+          className="market-price-chart-point"
+          style={{
+            left: `${(lastPoint.x / CHART_WIDTH) * 100}%`,
+            top: `${(lastPoint.y / CHART_HEIGHT) * 100}%`,
+          }}
+        />
+      ) : null}
     </div>
   )
 }

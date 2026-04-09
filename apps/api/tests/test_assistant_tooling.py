@@ -20,6 +20,7 @@ from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.chat import AssistantService
 from apps.api.app.domains.assistant.services.tools import AssistantToolService
 from apps.api.app.models import Base
+from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
@@ -62,6 +63,22 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.query(ReferencePriceIndex).delete()
             session.query(ExternalDataRun).delete()
             session.query(Trade).delete()
+            session.query(Event).delete()
+            session.add(
+                Event(
+                    event_id="evt-1001",
+                    aggregate_type="trade",
+                    aggregate_id="T-1001",
+                    event_type="TradeCreated",
+                    occurred_at=datetime(2026, 3, 17, 11, 45, tzinfo=timezone.utc),
+                    recorded_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                    actor_id="trader_1",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={"trade_id": "T-1001"},
+                )
+            )
             session.add(
                 Trade(
                     trade_id="T-1001",
@@ -335,6 +352,131 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["trade"]["trade_id"], "T-1001")
         self.assertEqual(trace.tool_name, "get_trade_by_id")
         self.assertEqual(trace.record_count, 1)
+
+    def test_tool_service_orders_latest_trades_deterministically_and_reports_ties(self) -> None:
+        latest_timestamp = datetime(2026, 4, 8, 17, 30, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Trade(
+                        trade_id="T-LATEST-A",
+                        external_trade_id="EXT-LATEST-A",
+                        source_system="ops",
+                        created_at=latest_timestamp,
+                        updated_at=latest_timestamp,
+                        execution_timestamp=latest_timestamp,
+                        trade_nature="PHYSICAL",
+                        trade_structure="SINGLE",
+                        trade_side="BUY",
+                        book="CRUDE-US",
+                        portfolio="PROMPT",
+                        counterparty="ACME",
+                        commodity_class="CRUDE",
+                        commodity="WTI",
+                        pricing_type="FIXED",
+                        pricing_status="PRICED",
+                        price_index_code=None,
+                        price=78.25,
+                        volume=1000,
+                        settlement_status="PENDING",
+                        trader_user="trader_1",
+                        status="ACTIVE",
+                        last_event_id="evt-latest-a",
+                    ),
+                    Trade(
+                        trade_id="T-LATEST-B",
+                        external_trade_id="EXT-LATEST-B",
+                        source_system="ops",
+                        created_at=latest_timestamp,
+                        updated_at=latest_timestamp,
+                        execution_timestamp=latest_timestamp,
+                        trade_nature="PHYSICAL",
+                        trade_structure="SINGLE",
+                        trade_side="BUY",
+                        book="CRUDE-US",
+                        portfolio="PROMPT",
+                        counterparty="ACME",
+                        commodity_class="CRUDE",
+                        commodity="WTI",
+                        pricing_type="FIXED",
+                        pricing_status="PRICED",
+                        price_index_code=None,
+                        price=79.25,
+                        volume=1000,
+                        settlement_status="PENDING",
+                        trader_user="trader_1",
+                        status="ACTIVE",
+                        last_event_id="evt-latest-b",
+                    ),
+                ]
+            )
+            session.commit()
+
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("list_trades", {"limit": 1})
+
+        self.assertEqual(result.output["items"][0]["trade_id"], "T-LATEST-B")
+        self.assertEqual(result.output["latest_group"]["count"], 2)
+        self.assertEqual(
+            result.output["latest_group"]["trade_ids"],
+            ["T-LATEST-B", "T-LATEST-A"],
+        )
+        self.assertIn("2 trades share the latest ordering boundary", trace.summary)
+
+    def test_tool_service_reports_orphaned_projection_when_trade_events_missing(self) -> None:
+        orphan_timestamp = datetime(2026, 4, 8, 17, 30, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                Trade(
+                    trade_id="T-ORPHAN",
+                    external_trade_id="EXT-ORPHAN",
+                    source_system="ops",
+                    created_at=orphan_timestamp,
+                    updated_at=orphan_timestamp,
+                    execution_timestamp=orphan_timestamp,
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="CRUDE-US",
+                    portfolio="PROMPT",
+                    counterparty="ACME",
+                    commodity_class="CRUDE",
+                    commodity="WTI",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    price_index_code=None,
+                    price=80.25,
+                    volume=1000,
+                    settlement_status="PENDING",
+                    trader_user="trader_1",
+                    status="ACTIVE",
+                    last_event_id="evt-orphan",
+                )
+            )
+            session.commit()
+
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("list_trade_events", {"trade_id": "T-ORPHAN", "limit": 10})
+
+        diagnostics = result.output["diagnostics"]
+        self.assertEqual(result.output["count"], 0)
+        self.assertTrue(diagnostics["trade_projection_found"])
+        self.assertEqual(diagnostics["trade_projection_last_event_id"], "evt-orphan")
+        self.assertFalse(diagnostics["last_event_found"])
+        self.assertEqual(diagnostics["total_trade_events"], 0)
+        self.assertEqual(diagnostics["consistency_status"], "projection_last_event_missing")
+        self.assertIn("last_event_id evt-orphan is missing from the event store", trace.summary)
+
+    def test_tool_service_can_lookup_event_by_event_id(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("list_trade_events", {"event_id": "evt-1001", "limit": 10})
+
+        self.assertEqual(result.output["count"], 1)
+        self.assertEqual(result.output["items"][0]["event_id"], "evt-1001")
+        self.assertTrue(result.output["diagnostics"]["last_event_found"])
+        self.assertEqual(result.output["diagnostics"]["consistency_status"], "ok")
+        self.assertEqual(trace.summary, "Returned 1 event row(s) for event_id evt-1001.")
 
     def test_tool_service_returns_market_context(self) -> None:
         with self.SessionLocal() as session:

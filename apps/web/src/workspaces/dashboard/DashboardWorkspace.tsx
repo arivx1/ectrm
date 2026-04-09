@@ -3,10 +3,14 @@ import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } 
 import { loadPnlHistoryReport } from '../../entities/reports/api'
 import { appConfig } from '../../shared/config'
 import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord } from '../../shared/models'
+import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
+import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { ExternalSeriesTileContent } from './ExternalSeriesPanel'
 import { MarketContextTileContent } from './MarketContextPanel'
 import { MarketPricesTileContent } from './MarketPricesPanel'
+import { WeatherIntelligenceTileContent } from './WeatherIntelligencePanel'
 import {
   CHART_HEIGHT,
   CHART_PADDING,
@@ -52,10 +56,6 @@ type DashboardWorkspaceProps = {
   formatMoney: (value: number | null) => string
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
-}
-
-function normalizeUnit(value: string | null | undefined): string {
-  return value?.trim().toUpperCase() || 'Unit TBD'
 }
 
 function ageInDays(value: string | null | undefined): number | null {
@@ -402,6 +402,7 @@ function PnlTrendChart({
           <div className={`market-price-chart market-price-chart-${tone} pnl-trend-chart`}>
             <svg
               viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+              preserveAspectRatio="none"
               role="img"
               aria-label={
                 firstLabel && lastLabel
@@ -456,15 +457,17 @@ function PnlTrendChart({
                   />
                 </>
               ) : null}
-              {visiblePoint && (
-                <circle
-                  className={`market-price-chart-dot ${activeChartPoint ? 'pnl-trend-hover-dot' : ''}`.trim()}
-                  cx={visiblePoint.x}
-                  cy={visiblePoint.y}
-                  r={activeChartPoint ? '4.8' : '4'}
-                />
-              )}
             </svg>
+            {visiblePoint ? (
+              <span
+                aria-hidden="true"
+                className={`market-price-chart-point ${activeChartPoint ? 'pnl-trend-hover-dot' : ''}`.trim()}
+                style={{
+                  left: `${(visiblePoint.x / CHART_WIDTH) * 100}%`,
+                  top: `${(visiblePoint.y / CHART_HEIGHT) * 100}%`,
+                }}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -590,23 +593,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     pnlFilterError,
   ])
 
-  const exposureByClass = useMemo(() => {
-    const unitsByCommodity = new Map<string, Set<string>>()
-    for (const trade of activeTrades) {
-      const existing = unitsByCommodity.get(trade.commodity) ?? new Set<string>()
-      existing.add(normalizeUnit(trade.unit_of_measure))
-      unitsByCommodity.set(trade.commodity, existing)
-    }
+  const unitLabelByCommodity = useMemo(() => buildUnitLabelByCommodity(activeTrades), [activeTrades])
 
+  const exposureByClass = useMemo(() => {
     const totals = new Map<string, { commodityClass: string; unitLabel: string; netVolume: number; commodityCount: number }>()
     for (const position of positionsWithClass) {
-      const unitCandidates = unitsByCommodity.get(position.commodity)
-      const unitLabel =
-        !unitCandidates || unitCandidates.size === 0
-          ? 'Unit TBD'
-          : unitCandidates.size === 1
-            ? [...unitCandidates][0]
-            : 'Mixed UOM'
+      const unitLabel = unitLabelByCommodity.get(position.commodity) ?? 'Unit TBD'
       const key = `${position.commodity_class}::${unitLabel}`
       const current = totals.get(key) ?? {
         commodityClass: position.commodity_class,
@@ -628,7 +620,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
 
       return left.unitLabel.localeCompare(right.unitLabel)
     })
-  }, [activeTrades, positionsWithClass])
+  }, [positionsWithClass, unitLabelByCommodity])
+
+  const grossExposureUnitLabel = useMemo(
+    () => summarizeUnitLabels(activeTrades.map((trade) => trade.unit_of_measure)),
+    [activeTrades],
+  )
 
   const markedPnlProxy = useMemo(
     () =>
@@ -1040,7 +1037,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                 </article>
                 <article className="dashboard-report-card">
                   <span>Gross Exposure</span>
-                  <strong>{formatNumber(grossExposure, 0)}</strong>
+                  <MetricValue value={formatNumber(grossExposure, 0)} unit={grossExposureUnitLabel} />
                   <p>
                     Across {positionsWithClass.length} commodity position{positionsWithClass.length === 1 ? '' : 's'} and{' '}
                     {exposureByClass.length} reporting bucket{exposureByClass.length === 1 ? '' : 's'} with UOM coverage.
@@ -1055,11 +1052,14 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                 </article>
                 <article className="dashboard-report-card">
                   <span>Largest Bucket</span>
-                  <strong>
-                    {largestExposureBucket
-                      ? `${formatNumber(largestExposureBucket.netVolume, 0)} ${largestExposureBucket.unitLabel}`
-                      : '—'}
-                  </strong>
+                  {largestExposureBucket ? (
+                    <MetricValue
+                      value={formatNumber(largestExposureBucket.netVolume, 0)}
+                      unit={largestExposureBucket.unitLabel}
+                    />
+                  ) : (
+                    <strong>—</strong>
+                  )}
                   <p>
                     {largestExposureBucket
                       ? `${formatCommodityClass(largestExposureBucket.commodityClass)} currently leads the dashboard exposure view.`
@@ -1071,6 +1071,21 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           ),
         },
         {
+          id: 'weather-intelligence',
+          eyebrow: 'Weather',
+          title: 'Weather Intelligence',
+          description: 'Desk-facing weather-sensitive exposure and regional signal context based on the stored weather footprint.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <WeatherIntelligenceTileContent
+              appLoading={appLoading}
+              formatDate={formatDate}
+              formatNumber={formatNumber}
+            />
+          ),
+        },
+        {
           id: 'market-context',
           eyebrow: 'Signals',
           title: 'Market Context',
@@ -1079,6 +1094,21 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           availableSpans: ['full', 'wide'],
           content: (
             <MarketContextTileContent
+              appLoading={appLoading}
+              formatDate={formatDate}
+              formatNumber={formatNumber}
+            />
+          ),
+        },
+        {
+          id: 'external-series',
+          eyebrow: 'Catalog',
+          title: 'External Series',
+          description: 'Inspect the raw market-data series catalog and stored observation history behind the desk-level signal blend.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <ExternalSeriesTileContent
               appLoading={appLoading}
               formatDate={formatDate}
               formatNumber={formatNumber}
@@ -1118,9 +1148,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
               {exposureByClass.map((row) => (
                 <article key={`${row.commodityClass}-${row.unitLabel}`} className="position-class-card">
                   <span>{formatCommodityClass(row.commodityClass)}</span>
-                  <strong>
-                    {formatNumber(row.netVolume, 0)} <small>{row.unitLabel}</small>
-                  </strong>
+                  <MetricValue value={formatNumber(row.netVolume, 0)} unit={row.unitLabel} />
                   <p>
                     {row.commodityCount} commodit{row.commodityCount === 1 ? 'y' : 'ies'} contributing to this
                     reporting bucket.

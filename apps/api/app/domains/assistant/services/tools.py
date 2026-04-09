@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
@@ -21,7 +21,7 @@ from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
-from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade import Trade, trade_recency_order
 from apps.api.app.schemas.assistant import AssistantToolCallOut, AssistantToolDefinitionOut
 
 REFERENCE_ENTITY_TYPE_ALIASES = {
@@ -140,7 +140,8 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
             description=(
                 "Search or filter live trade projections. Use this when the user asks for trades by book, "
                 "commodity, counterparty, status, or a short free-text query across common trade fields. "
-                "Prefer this over guessing counts or examples from the prompt context."
+                "Prefer this over guessing counts or examples from the prompt context. Results are ordered "
+                "by deterministic trade recency and include metadata about ties at the latest boundary."
             ),
             parameters={
                 "type": "object",
@@ -175,7 +176,8 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
             description=(
                 "Load recent event-store rows, optionally scoped to a trade or filtered by event type. Use "
                 "this when the user asks what changed, wants a timeline, or needs to verify the latest event "
-                "history behind a trade projection."
+                "history behind a trade projection. When a trade projection exists but event linkage is "
+                "missing, the result includes projection-consistency diagnostics."
             ),
             parameters={
                 "type": "object",
@@ -191,6 +193,10 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
                     "event_type": {
                         "type": "string",
                         "description": "Optional exact event type filter, such as TradeAmended.",
+                    },
+                    "event_id": {
+                        "type": "string",
+                        "description": "Optional exact event identifier lookup, such as a trade projection last_event_id.",
                     },
                     "limit": {
                         "type": "integer",
@@ -324,7 +330,7 @@ def _get_trade_by_id(db: Session, arguments: dict[str, Any]) -> AssistantToolExe
 
 def _list_trades(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
     limit = _normalize_limit(arguments.get("limit"), default=5)
-    stmt = select(Trade).order_by(Trade.updated_at.desc())
+    stmt = select(Trade).order_by(*trade_recency_order())
 
     query = _optional_text(arguments.get("query"))
     if query:
@@ -352,8 +358,18 @@ def _list_trades(db: Session, arguments: dict[str, Any]) -> AssistantToolExecuti
         stmt = stmt.where(Trade.commodity == commodity)
 
     rows = db.execute(stmt.limit(limit)).scalars().all()
-    payload = {"count": len(rows), "items": [_serialize_trade(row) for row in rows]}
+    payload = {
+        "count": len(rows),
+        "items": [_serialize_trade(row) for row in rows],
+        "latest_group": _serialize_latest_trade_group(db, rows[0]) if rows else None,
+    }
     summary = f"Returned {len(rows)} trade projection row(s)."
+    latest_group = payload["latest_group"]
+    if latest_group and latest_group["count"] > 1:
+        summary += (
+            f" {latest_group['count']} trades share the latest ordering boundary at "
+            f"{latest_group['updated_at']}."
+        )
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(rows))
 
 
@@ -362,6 +378,7 @@ def _list_trade_events(db: Session, arguments: dict[str, Any]) -> AssistantToolE
     trade_id = _optional_text(arguments.get("trade_id"))
     aggregate_type = _optional_text(arguments.get("aggregate_type"))
     event_type = _optional_text(arguments.get("event_type"))
+    event_id = _optional_text(arguments.get("event_id"))
 
     stmt = select(Event).order_by(Event.occurred_at.desc(), Event.recorded_at.desc())
     if trade_id:
@@ -373,14 +390,126 @@ def _list_trade_events(db: Session, arguments: dict[str, Any]) -> AssistantToolE
         stmt = stmt.where(Event.aggregate_type == aggregate_type)
     if event_type:
         stmt = stmt.where(Event.event_type == event_type)
+    if event_id:
+        stmt = stmt.where(Event.event_id == event_id)
 
     rows = db.execute(stmt.limit(limit)).scalars().all()
-    payload = {"count": len(rows), "items": [_serialize_event(row) for row in rows]}
+    diagnostics = _build_event_lookup_diagnostics(
+        db,
+        trade_id=trade_id,
+        event_type=event_type,
+        event_id=event_id,
+        matched_rows=rows,
+    )
+    payload = {
+        "count": len(rows),
+        "items": [_serialize_event(row) for row in rows],
+        "diagnostics": diagnostics,
+    }
     if trade_id:
         summary = f"Returned {len(rows)} event row(s) for trade {trade_id}."
+        if diagnostics["consistency_status"] == "projection_last_event_missing":
+            summary += (
+                f" Trade projection exists but last_event_id "
+                f"{diagnostics['trade_projection_last_event_id']} is missing from the event store."
+            )
+        elif diagnostics["consistency_status"] == "projection_last_event_mismatch":
+            summary += " Trade projection exists but its last_event_id points to a different aggregate."
+        elif diagnostics["consistency_status"] == "trade_projection_missing":
+            summary += " No live trade projection matched that trade_id."
+        elif diagnostics["consistency_status"] == "no_matching_events_for_filters":
+            summary += " The trade has event rows, but none matched the requested filters."
+    elif event_id:
+        summary = f"Returned {len(rows)} event row(s) for event_id {event_id}."
     else:
         summary = f"Returned {len(rows)} event row(s)."
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(rows))
+
+
+def _serialize_latest_trade_group(db: Session, latest_trade: Trade) -> dict[str, Any]:
+    latest_group_rows = db.execute(
+        select(Trade.trade_id)
+        .where(
+            Trade.updated_at == latest_trade.updated_at,
+            Trade.created_at == latest_trade.created_at,
+        )
+        .order_by(Trade.trade_id.desc())
+    ).all()
+    trade_ids = [row[0] for row in latest_group_rows]
+    return {
+        "updated_at": _json_default(latest_trade.updated_at),
+        "created_at": _json_default(latest_trade.created_at),
+        "count": len(trade_ids),
+        "trade_ids": trade_ids,
+    }
+
+
+def _build_event_lookup_diagnostics(
+    db: Session,
+    *,
+    trade_id: str | None,
+    event_type: str | None,
+    event_id: str | None,
+    matched_rows: list[Event],
+) -> dict[str, Any]:
+    diagnostics: dict[str, Any] = {
+        "trade_id": trade_id,
+        "event_id": event_id,
+        "event_type": event_type,
+        "trade_projection_found": False,
+        "trade_projection_last_event_id": None,
+        "last_event_found": False,
+        "last_event_matches_trade": False,
+        "total_trade_events": len(matched_rows) if trade_id and event_type is None and event_id is None else None,
+        "consistency_status": "ok",
+    }
+    if not trade_id:
+        if event_id is not None:
+            diagnostics["last_event_found"] = bool(matched_rows)
+            diagnostics["consistency_status"] = "ok" if matched_rows else "event_missing"
+        return diagnostics
+
+    trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
+    if trade is None:
+        diagnostics["consistency_status"] = "trade_projection_missing"
+        return diagnostics
+
+    diagnostics["trade_projection_found"] = True
+    diagnostics["trade_projection_last_event_id"] = trade.last_event_id
+
+    total_trade_events = db.execute(
+        select(func.count())
+        .select_from(Event)
+        .where(
+            Event.aggregate_type == "trade",
+            Event.aggregate_id == trade_id,
+        )
+    ).scalar_one()
+    diagnostics["total_trade_events"] = int(total_trade_events)
+
+    last_event = db.execute(select(Event).where(Event.event_id == trade.last_event_id)).scalars().first()
+    if last_event is not None:
+        diagnostics["last_event_found"] = True
+        diagnostics["last_event_matches_trade"] = (
+            last_event.aggregate_type == "trade" and last_event.aggregate_id == trade_id
+        )
+
+    if matched_rows:
+        if last_event is None:
+            diagnostics["consistency_status"] = "projection_last_event_missing"
+        elif not diagnostics["last_event_matches_trade"]:
+            diagnostics["consistency_status"] = "projection_last_event_mismatch"
+        return diagnostics
+
+    if total_trade_events > 0:
+        diagnostics["consistency_status"] = "no_matching_events_for_filters"
+    elif last_event is None:
+        diagnostics["consistency_status"] = "projection_last_event_missing"
+    elif not diagnostics["last_event_matches_trade"]:
+        diagnostics["consistency_status"] = "projection_last_event_mismatch"
+    else:
+        diagnostics["consistency_status"] = "aggregate_events_missing"
+    return diagnostics
 
 
 def _list_positions(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:

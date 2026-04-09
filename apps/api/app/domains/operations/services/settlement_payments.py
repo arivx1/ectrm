@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
 from apps.api.app.domains.operations.services.workflow_items import SYSTEM_WORKFLOW_ACTOR
 from apps.api.app.domains.operations.services.workflow_items import set_trade_workflow_item_projection
 from apps.api.app.models.trade import Trade
@@ -122,7 +124,11 @@ class PaymentProjection:
     note: str | None
 
 
-def _derive_payment_projection(
+def _audit_payment_payload(payment: TradePaymentOut) -> dict[str, object]:
+    return payment.model_dump(mode="json")
+
+
+def derive_invoice_payment_projection(
     *,
     invoice: TradeInvoice,
     payments: list[TradePayment],
@@ -131,7 +137,11 @@ def _derive_payment_projection(
     invoice_amount = Decimal(str(invoice.invoice_amount))
     paid_payments = [payment for payment in payments if _effective_payment_status(payment, now=now) == PaymentStatus.PAID.value]
     total_paid_amount = sum((Decimal(str(payment.payment_amount)) for payment in paid_payments), start=ZERO)
-    outstanding_amount = max(invoice_amount - total_paid_amount, ZERO)
+    outstanding_amount = (
+        ZERO
+        if invoice.status == InvoiceStatus.NOT_REQUIRED.value
+        else max(invoice_amount - total_paid_amount, ZERO)
+    )
 
     unpaid_due_dates = [
         _coerce_utc(payment.due_at)
@@ -180,6 +190,111 @@ def _derive_payment_projection(
     )
 
 
+def _aggregate_trade_payment_note(
+    *,
+    invoices: list[TradeInvoice],
+    total_paid_amount: Decimal,
+    total_outstanding_amount: Decimal,
+) -> str | None:
+    if not invoices:
+        return None
+
+    currencies = sorted({invoice.invoice_currency_code for invoice in invoices if invoice.invoice_currency_code})
+    if total_outstanding_amount > ZERO:
+        if len(currencies) == 1:
+            return (
+                f"Outstanding {currencies[0]} {total_outstanding_amount:.2f} "
+                f"across {len(invoices)} invoice(s)."
+            )
+        return f"Outstanding balances remain across {len(invoices)} invoice(s)."
+
+    if total_paid_amount > ZERO:
+        if len(currencies) == 1:
+            return f"Paid {currencies[0]} {total_paid_amount:.2f} across {len(invoices)} invoice(s)."
+        return f"Paid balances recorded across {len(invoices)} invoice(s)."
+
+    if all(invoice.status == InvoiceStatus.NOT_REQUIRED.value for invoice in invoices):
+        return "No cash settlement is required for the recorded invoices."
+    return None
+
+
+def _derive_trade_payment_projection(
+    *,
+    invoices: list[TradeInvoice],
+    payments_by_invoice_id: dict[int, list[TradePayment]],
+    now: datetime,
+) -> PaymentProjection:
+    if not invoices:
+        return PaymentProjection(
+            payment_status=PaymentStatus.PENDING.value,
+            settlement_status=SettlementStatus.PENDING.value,
+            next_due_at=None,
+            total_paid_amount=ZERO,
+            outstanding_amount=ZERO,
+            note=None,
+        )
+
+    projections = [
+        derive_invoice_payment_projection(
+            invoice=invoice,
+            payments=payments_by_invoice_id.get(invoice.id, []),
+            now=now,
+        )
+        for invoice in invoices
+    ]
+    total_paid_amount = sum((projection.total_paid_amount for projection in projections), start=ZERO)
+    total_outstanding_amount = sum((projection.outstanding_amount for projection in projections), start=ZERO)
+    next_due_dates = [
+        projection.next_due_at
+        for projection in projections
+        if projection.next_due_at is not None and projection.outstanding_amount > ZERO
+    ]
+    next_due_at = min(next_due_dates) if next_due_dates else None
+    has_disputed_invoice = any(invoice.status == InvoiceStatus.DISPUTED.value for invoice in invoices)
+
+    if total_outstanding_amount <= ZERO:
+        payment_status = (
+            PaymentStatus.NOT_REQUIRED.value
+            if all(invoice.status == InvoiceStatus.NOT_REQUIRED.value for invoice in invoices)
+            else PaymentStatus.PAID.value
+        )
+        settlement_status = (
+            SettlementStatus.DISPUTED.value if has_disputed_invoice else SettlementStatus.SETTLED.value
+        )
+    else:
+        open_projections = [projection for projection in projections if projection.outstanding_amount > ZERO]
+        if any(projection.payment_status == PaymentStatus.OVERDUE.value for projection in open_projections):
+            payment_status = PaymentStatus.OVERDUE.value
+        elif any(projection.payment_status == PaymentStatus.DUE.value for projection in open_projections):
+            payment_status = PaymentStatus.DUE.value
+        elif all(projection.payment_status == PaymentStatus.NOT_REQUIRED.value for projection in open_projections):
+            payment_status = PaymentStatus.NOT_REQUIRED.value
+        else:
+            payment_status = PaymentStatus.PENDING.value
+
+        if has_disputed_invoice:
+            settlement_status = SettlementStatus.DISPUTED.value
+        elif total_paid_amount > ZERO:
+            settlement_status = SettlementStatus.PARTIALLY_SETTLED.value
+        elif any(invoice.status in {InvoiceStatus.ISSUED.value, InvoiceStatus.APPROVED.value} for invoice in invoices):
+            settlement_status = SettlementStatus.INVOICED.value
+        else:
+            settlement_status = SettlementStatus.PENDING.value
+
+    return PaymentProjection(
+        payment_status=payment_status,
+        settlement_status=settlement_status,
+        next_due_at=next_due_at,
+        total_paid_amount=total_paid_amount,
+        outstanding_amount=total_outstanding_amount,
+        note=_aggregate_trade_payment_note(
+            invoices=invoices,
+            total_paid_amount=total_paid_amount,
+            total_outstanding_amount=total_outstanding_amount,
+        ),
+    )
+
+
 def _payment_row(
     db: Session,
     *,
@@ -216,10 +331,12 @@ def synchronize_trade_payment_projection(
     now: Optional[datetime] = None,
 ) -> TradeWorkflowItem | None:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
-    invoice = db.execute(
-        select(TradeInvoice).where(TradeInvoice.trade_id == trade.trade_id)
-    ).scalars().first()
-    if invoice is None:
+    invoices = db.execute(
+        select(TradeInvoice)
+        .where(TradeInvoice.trade_id == trade.trade_id)
+        .order_by(TradeInvoice.created_at.asc(), TradeInvoice.id.asc())
+    ).scalars().all()
+    if not invoices:
         return None
 
     payments = db.execute(
@@ -227,7 +344,15 @@ def synchronize_trade_payment_projection(
         .where(TradePayment.trade_id == trade.trade_id)
         .order_by(TradePayment.due_at.asc(), TradePayment.created_at.asc(), TradePayment.id.asc())
     ).scalars().all()
-    projection = _derive_payment_projection(invoice=invoice, payments=payments, now=reference_time)
+    payments_by_invoice_id: dict[int, list[TradePayment]] = {}
+    for payment in payments:
+        payments_by_invoice_id.setdefault(payment.invoice_id, []).append(payment)
+
+    projection = _derive_trade_payment_projection(
+        invoices=invoices,
+        payments_by_invoice_id=payments_by_invoice_id,
+        now=reference_time,
+    )
     workflow_item = set_trade_workflow_item_projection(
         db,
         trade=trade,
@@ -262,7 +387,11 @@ def _to_out(
     now: Optional[datetime] = None,
 ) -> TradePaymentOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
-    projection = _derive_payment_projection(invoice=invoice, payments=payments_for_invoice, now=reference_time)
+    projection = derive_invoice_payment_projection(
+        invoice=invoice,
+        payments=payments_for_invoice,
+        now=reference_time,
+    )
     due_at = _coerce_utc(payment.due_at) or reference_time
     received_at = _coerce_utc(payment.received_at)
     effective_status = _effective_payment_status(payment, now=reference_time)
@@ -302,8 +431,8 @@ def _to_out(
         trade_date=trade.trade_date,
         delivery_start=trade.delivery_start,
         delivery_end=trade.delivery_end,
-        invoice_status=trade.invoice_status,
-        settlement_status=trade.settlement_status,
+        invoice_status=invoice.status,
+        settlement_status=projection.settlement_status,
     )
 
 
@@ -312,6 +441,8 @@ def list_trade_payments(
     *,
     trade_id: str | None = None,
     invoice_id: int | None = None,
+    limit: int | None = None,
+    offset: int = 0,
     now: Optional[datetime] = None,
 ) -> list[TradePaymentOut]:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
@@ -331,6 +462,10 @@ def list_trade_payments(
         stmt = stmt.where(TradePayment.trade_id == trade_id)
     if invoice_id is not None:
         stmt = stmt.where(TradePayment.invoice_id == invoice_id)
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
 
     rows = db.execute(stmt).all()
     payments_by_invoice_id: dict[int, list[TradePayment]] = {}
@@ -422,7 +557,35 @@ def create_trade_payment(
         .where(TradePayment.invoice_id == invoice.id)
         .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
     ).scalars().all()
-    return _to_out(payment, invoice, trade, workflow_item, payments_for_invoice=payments, now=reference_time)
+    payment_out = _to_out(payment, invoice, trade, workflow_item, payments_for_invoice=payments, now=reference_time)
+    append_trade_audit_event(
+        db,
+        trade_id=payment_out.trade_id,
+        actor_id=actor_id,
+        event_type="TradePaymentCreated",
+        occurred_at=payment_out.updated_at,
+        causation_id=f"trade-payment:{payment_out.payment_id}",
+        payload={
+            "request": jsonable_encoder(
+                {
+                    key: value
+                    for key, value in {
+                        "invoice_id": invoice_id,
+                        "payment_reference": payment_reference,
+                        "payment_currency_code": payment_currency_code,
+                        "payment_amount": payment_amount,
+                        "status": status,
+                        "due_at": due_at,
+                        "received_at": received_at,
+                        "notes": notes,
+                    }.items()
+                    if value is not None
+                }
+            ),
+            "payment": _audit_payment_payload(payment_out),
+        },
+    )
+    return payment_out
 
 
 def update_trade_payment(
@@ -520,4 +683,17 @@ def update_trade_payment(
         .where(TradePayment.invoice_id == invoice.id)
         .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
     ).scalars().all()
-    return _to_out(payment, invoice, trade, workflow_item, payments_for_invoice=payments, now=reference_time)
+    payment_out = _to_out(payment, invoice, trade, workflow_item, payments_for_invoice=payments, now=reference_time)
+    append_trade_audit_event(
+        db,
+        trade_id=payment_out.trade_id,
+        actor_id=actor_id,
+        event_type="TradePaymentUpdated",
+        occurred_at=payment_out.updated_at,
+        causation_id=f"trade-payment:{payment_out.payment_id}",
+        payload={
+            "requested_changes": jsonable_encoder(changes),
+            "payment": _audit_payment_payload(payment_out),
+        },
+    )
+    return payment_out

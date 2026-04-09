@@ -3,6 +3,7 @@ import { test } from 'vitest'
 
 import {
   buildCreateTradeSubmission,
+  buildSuggestedTradeId,
   type TradeEditorValues,
 } from '../src/features/trades/tradeEventPayloads.ts'
 
@@ -100,4 +101,21 @@ test('buildCreateTradeSubmission rejects option trades missing strike price', ()
   )
 
   assert.equal(submission.validationError, 'Strike Price is required for options.')
+})
+
+test('buildSuggestedTradeId returns the expected visible trade number format', () => {
+  const tradeId = buildSuggestedTradeId(['TRD-30019', 'TRD-30020'])
+
+  assert.equal(tradeId, 'TRD-30021')
+})
+
+test('buildCreateTradeSubmission generates a trade id when the form does not provide one', () => {
+  const submission = buildCreateTradeSubmission(
+    buildBaseValues({
+      tradeId: '',
+    }),
+  )
+
+  assert.equal(submission.validationError, null)
+  assert.equal(submission.tradeId, 'TRD-10001')
 })

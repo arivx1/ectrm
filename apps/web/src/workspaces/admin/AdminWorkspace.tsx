@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type {
   CounterpartyCreditPreviewRecord,
   ExternalDataSyncStatusRecord,
+  WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 import { formatDateOnly } from '../../shared/format'
@@ -12,6 +13,7 @@ import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
+import { WeatherOperationsPanel } from './WeatherOperationsPanel'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 
 type Trade = {
@@ -97,6 +99,7 @@ type AdminWorkspaceProps = {
   externalDataRuns: ExternalDataRunRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
   tradingSources: TradingSourceRecord[]
+  weatherLocations: WeatherLocationRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
   externalDataSyncing: boolean
   externalDataSyncingProvider: string | null
@@ -116,10 +119,37 @@ type AdminWorkspaceProps = {
   weatherSyncing: boolean
   weatherSyncError: string
   weatherSyncSuccess: string
+  weatherLocationMutationError: string
+  weatherLocationMutationPendingCode: string | null
+  weatherLocationMutationSuccess: string
   onRunExternalDataSync: (provider: ExternalDataSyncProvider) => Promise<void>
   onCounterpartyCreditImportDraftChange: (value: string) => void
   onPreviewCounterpartyCreditImport: () => Promise<void>
   onImportCounterpartyCreditSnapshots: () => Promise<void>
+  onCreateWeatherLocation: (
+    input: {
+      code: string
+      name: string
+      latitude: number
+      longitude: number
+      reference_location_code?: string | null
+      timezone?: string | null
+      description?: string | null
+    },
+  ) => Promise<void>
+  onUpdateWeatherLocation: (
+    locationCode: string,
+    input: {
+      name?: string | null
+      latitude?: number | null
+      longitude?: number | null
+      reference_location_code?: string | null
+      timezone?: string | null
+      description?: string | null
+    },
+  ) => Promise<void>
+  onDeactivateWeatherLocation: (locationCode: string) => Promise<void>
+  onReactivateWeatherLocation: (locationCode: string) => Promise<void>
   onRunNwsWeatherSync: () => Promise<void>
   onSeedTradingSources: () => Promise<void>
   onRefreshData: () => Promise<void>
@@ -348,6 +378,7 @@ export function AdminWorkspace({
   externalDataRuns,
   externalDataSyncStatus,
   tradingSources,
+  weatherLocations,
   weatherSyncStatus,
   externalDataSyncing,
   externalDataSyncingProvider,
@@ -367,10 +398,17 @@ export function AdminWorkspace({
   weatherSyncing,
   weatherSyncError,
   weatherSyncSuccess,
+  weatherLocationMutationError,
+  weatherLocationMutationPendingCode,
+  weatherLocationMutationSuccess,
   onRunExternalDataSync,
   onCounterpartyCreditImportDraftChange,
   onPreviewCounterpartyCreditImport,
   onImportCounterpartyCreditSnapshots,
+  onCreateWeatherLocation,
+  onUpdateWeatherLocation,
+  onDeactivateWeatherLocation,
+  onReactivateWeatherLocation,
   onRunNwsWeatherSync,
   onSeedTradingSources,
   onRefreshData,
@@ -586,10 +624,6 @@ export function AdminWorkspace({
   const previewBlockedRowCount = counterpartyCreditPreview?.blocked_rows ?? 0
   const previewWarningRowCount = counterpartyCreditPreview?.warning_rows ?? 0
 
-  const weatherLocations = weatherSyncStatus?.locations ?? []
-  const latestNwsRun = weatherSyncStatus?.latest_run ?? null
-  const latestNwsSuccess = weatherSyncStatus?.latest_success ?? null
-
   const tradingSourcesByCriticality = useMemo(() => {
     const counts = new Map<string, number>()
     for (const row of tradingSources) {
@@ -633,128 +667,23 @@ export function AdminWorkspace({
           ))}
         </div>
 
-        <div className="admin-sync-panel">
-          <div className="admin-sync-head">
-            <div>
-              <span className="eyebrow">Weather Operations</span>
-              <h3>NWS Sync Health</h3>
-            </div>
-            <div className="admin-sync-head-actions">
-              {weatherSyncStatus ? (
-                <span className={`status-pill status-pill-${weatherHealthTone(weatherSyncStatus.health_status)}`}>
-                  {weatherHealthLabel(weatherSyncStatus.health_status)}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => void onRunNwsWeatherSync()}
-                disabled={weatherSyncing}
-              >
-                {weatherSyncing ? 'Running Weather Sync...' : 'Run NWS Sync'}
-              </button>
-            </div>
-          </div>
-          <p>Monitor the live NOAA ingest loop, inspect freshness by location, and trigger an on-demand sync when desk coverage needs a manual refresh.</p>
-
-          <div className="admin-sync-status-grid">
-            <article className="admin-card">
-              <AdminCardTitle
-                label="Coverage"
-                tooltip="How many active weather points are currently fresh enough to support the live intelligence blend."
-              />
-              <p>
-                {weatherSyncStatus
-                  ? `${weatherSyncStatus.healthy_location_count} of ${weatherSyncStatus.active_location_count} active locations are currently healthy.`
-                  : 'Weather sync status has not been loaded yet.'}
-              </p>
-              <span>
-                {weatherSyncStatus
-                  ? `${weatherSyncStatus.stale_location_count} stale · ${weatherSyncStatus.missing_location_count} missing`
-                  : 'Awaiting first status snapshot'}
-              </span>
-            </article>
-            <article className="admin-card">
-              <AdminCardTitle
-                label="Scheduler"
-                tooltip="Expected sync cadence and freshness targets for forecasts and observations."
-              />
-              <p>
-                {weatherSyncStatus
-                  ? `${cadenceLabel(weatherSyncStatus.scheduler_interval_minutes)} cadence with ${weatherSyncStatus.success_sla_hours}h run SLA.`
-                  : 'Scheduler cadence is not available yet.'}
-              </p>
-              <span>
-                {weatherSyncStatus
-                  ? `Forecast target ${weatherSyncStatus.forecast_freshness_hours}h · observations ${weatherSyncStatus.observation_freshness_hours}h`
-                  : 'No freshness target loaded'}
-              </span>
-            </article>
-            <article className="admin-card">
-              <AdminCardTitle
-                label="Latest Run"
-                tooltip="Most recent NWS sync attempt recorded in the platform."
-              />
-              <p>
-                {latestNwsRun
-                  ? `Run #${latestNwsRun.id} ${latestNwsRun.status} with ${latestNwsRun.series_count} series and ${latestNwsRun.observation_count} observations.`
-                  : 'No NWS sync has been recorded yet.'}
-              </p>
-              <span>{latestNwsRun ? formatDate(latestNwsRun.finished_at ?? latestNwsRun.started_at) : 'Awaiting first sync'}</span>
-            </article>
-            <article className="admin-card">
-              <AdminCardTitle
-                label="Latest Healthy Data"
-                tooltip="Newest successfully ingested weather data currently available to the intelligence layer."
-              />
-              <p>
-                {weatherSyncStatus?.latest_data_at
-                  ? `Latest weather payload landed ${formatDate(weatherSyncStatus.latest_data_at)}.`
-                  : 'No forecast or observation data is stored yet.'}
-              </p>
-              <span>{latestNwsSuccess ? `Last success run #${latestNwsSuccess.id}` : 'No successful run recorded yet'}</span>
-            </article>
-          </div>
-
-          {weatherSyncError ? <div className="feedback-banner feedback-banner-error">{weatherSyncError}</div> : null}
-          {weatherSyncSuccess ? <div className="feedback-banner feedback-banner-success">{weatherSyncSuccess}</div> : null}
-          {weatherSyncStatus?.error_summary ? (
-            <div className="feedback-banner feedback-banner-error">{weatherSyncStatus.error_summary}</div>
-          ) : null}
-
-          <div className="admin-run-list">
-            {weatherLocations.length === 0 ? (
-              <div className="detail-row">
-                <span>No tracked weather locations are loaded yet.</span>
-              </div>
-            ) : (
-              weatherLocations.map((location) => (
-                <article key={location.code} className="admin-run-row admin-weather-row">
-                  <div className="admin-weather-row-main">
-                    <div>
-                      <strong>{location.name}</strong>
-                      <p>
-                        {location.code}
-                        {location.reference_location_code ? ` · ref ${location.reference_location_code}` : ''}
-                        {location.station_id ? ` · station ${location.station_id}` : ''}
-                      </p>
-                    </div>
-                    <div className="admin-weather-row-detail">
-                      <span>Forecast {formatAgeHours(location.forecast_age_hours)}</span>
-                      <span>Observation {formatAgeHours(location.observation_age_hours)}</span>
-                    </div>
-                  </div>
-                  <div className="admin-run-meta">
-                    <span className={`status-pill status-pill-${weatherHealthTone(location.health_status)}`}>
-                      {weatherHealthLabel(location.health_status)}
-                    </span>
-                    <span>{location.last_observation_at ? `Observed ${formatDate(location.last_observation_at)}` : 'No observation yet'}</span>
-                  </div>
-                </article>
-              ))
-            )}
-          </div>
-        </div>
+        <WeatherOperationsPanel
+          authSession={authSession}
+          weatherLocations={weatherLocations}
+          weatherSyncStatus={weatherSyncStatus}
+          weatherSyncing={weatherSyncing}
+          weatherSyncError={weatherSyncError}
+          weatherSyncSuccess={weatherSyncSuccess}
+          weatherLocationMutationError={weatherLocationMutationError}
+          weatherLocationMutationPendingCode={weatherLocationMutationPendingCode}
+          weatherLocationMutationSuccess={weatherLocationMutationSuccess}
+          onRunNwsWeatherSync={onRunNwsWeatherSync}
+          onCreateWeatherLocation={onCreateWeatherLocation}
+          onUpdateWeatherLocation={onUpdateWeatherLocation}
+          onDeactivateWeatherLocation={onDeactivateWeatherLocation}
+          onReactivateWeatherLocation={onReactivateWeatherLocation}
+          formatDate={formatDate}
+        />
 
         <div className="admin-sync-panel">
           <div className="admin-sync-head">

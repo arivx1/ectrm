@@ -88,7 +88,10 @@ export function SettlementWorkspace({
   onCreatePayment,
   onSavePayment,
 }: SettlementWorkspaceProps) {
-  const invoiceByTradeId = new Map(invoices.map((invoice) => [invoice.trade_id, invoice]))
+  const invoiceCountByTradeId = new Map<string, number>()
+  for (const invoice of invoices) {
+    invoiceCountByTradeId.set(invoice.trade_id, (invoiceCountByTradeId.get(invoice.trade_id) ?? 0) + 1)
+  }
   const settlementWorkItems = workItems.filter((item) => item.queue === 'settlement')
   const invoiceWorkItems = settlementWorkItems.filter((item) => item.workflow_type === 'INVOICE')
   const paymentWorkItems = settlementWorkItems.filter((item) => item.workflow_type === 'PAYMENT')
@@ -123,12 +126,11 @@ export function SettlementWorkspace({
       trade.payment_status === 'OVERDUE',
   )
   const invoiceQueueTrades = openSettlementTrades.filter(
-    (trade) => trade.invoice_status !== 'NOT_REQUIRED' || invoiceByTradeId.has(trade.trade_id),
+    (trade) => trade.invoice_status !== 'NOT_REQUIRED' || invoiceCountByTradeId.has(trade.trade_id),
   )
-  const paymentQueueInvoices = invoiceQueueTrades
-    .map((trade) => invoiceByTradeId.get(trade.trade_id))
-    .filter((invoice): invoice is TradeInvoiceRecord => Boolean(invoice))
-  const invoicePendingCount = invoiceQueueTrades.filter((trade) => !invoiceByTradeId.has(trade.trade_id)).length
+  const invoiceQueueTradeIds = new Set(invoiceQueueTrades.map((trade) => trade.trade_id))
+  const paymentQueueInvoices = invoices.filter((invoice) => invoiceQueueTradeIds.has(invoice.trade_id))
+  const invoicePendingCount = invoiceQueueTrades.filter((trade) => !invoiceCountByTradeId.has(trade.trade_id)).length
   const paymentDueCount = activeTrades.filter((trade) => ['DUE', 'OVERDUE'].includes(trade.payment_status)).length
   const settledCount = activeTrades.filter(
     (trade) =>
@@ -275,12 +277,12 @@ export function SettlementWorkspace({
                     </div>
                   </div>
                   <SettlementInvoiceBoard
-                    key={invoiceQueueTrades
-                      .map((trade) => {
-                        const invoice = invoiceByTradeId.get(trade.trade_id)
-                        return `${trade.trade_id}:${invoice?.version ?? 'new'}`
-                      })
-                      .join('|')}
+                    key={[
+                      invoiceQueueTrades
+                        .map((trade) => `${trade.trade_id}:${invoiceCountByTradeId.get(trade.trade_id) ?? 0}`)
+                        .join('|'),
+                      invoices.map((invoice) => `${invoice.invoice_id}:${invoice.version}`).join('|'),
+                    ].join('|')}
                     authSession={authSession}
                     trades={invoiceQueueTrades}
                     invoices={invoices}

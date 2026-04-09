@@ -3,6 +3,7 @@ import type {
   ActivitySummaryRow,
   CashForecastReport,
   ExposureSummaryRow,
+  PnlComparisonReport,
   PnlHistoryReport,
   ReportingOverview,
   SettlementReportFilterOptions,
@@ -13,7 +14,9 @@ import type {
 } from '../../shared/models'
 
 type LoadPnlHistoryReportOptions = {
+  asOf?: string
   book?: string
+  portfolio?: string
   commodityClass?: string
   dateFrom?: string
   dateTo?: string
@@ -43,6 +46,16 @@ type UpdateSettlementReportPresetPayload = {
 
 function authorizationHeaders(accessToken: string): Record<string, string> {
   return { Authorization: `Bearer ${accessToken}` }
+}
+
+function authenticatedRequestInit(accessToken?: string): RequestInit | undefined {
+  if (!accessToken) {
+    return undefined
+  }
+
+  return {
+    headers: authorizationHeaders(accessToken),
+  }
 }
 
 function buildSettlementReportParams(options: LoadSettlementReportOptions = {}): URLSearchParams {
@@ -78,10 +91,17 @@ function buildSettlementReportQueryString(options: LoadSettlementReportOptions =
 export async function loadPnlHistoryReport(
   apiBase: string,
   options: LoadPnlHistoryReportOptions = {},
+  accessToken?: string,
 ): Promise<PnlHistoryReport> {
   const params = new URLSearchParams()
+  if (options.asOf) {
+    params.set('as_of', options.asOf)
+  }
   if (options.book) {
     params.set('book', options.book)
+  }
+  if (options.portfolio) {
+    params.set('portfolio', options.portfolio)
   }
   if (options.commodityClass) {
     params.set('commodity_class', options.commodityClass)
@@ -96,39 +116,76 @@ export async function loadPnlHistoryReport(
   const queryString = params.toString()
   return fetchJson<PnlHistoryReport>(`${apiBase}/reports/pnl-history${queryString ? `?${queryString}` : ''}`, {
     cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
   })
 }
 
-export async function loadReportingOverview(apiBase: string): Promise<ReportingOverview> {
+export async function loadPnlComparisonReport(
+  apiBase: string,
+  options: {
+    fromAsOf: string
+    toAsOf: string
+    portfolio?: string
+    book?: string
+    commodityClass?: string
+  },
+  accessToken?: string,
+): Promise<PnlComparisonReport> {
+  const params = new URLSearchParams()
+  params.set('from_as_of', options.fromAsOf)
+  params.set('to_as_of', options.toAsOf)
+  if (options.portfolio) {
+    params.set('portfolio', options.portfolio)
+  }
+  if (options.book) {
+    params.set('book', options.book)
+  }
+  if (options.commodityClass) {
+    params.set('commodity_class', options.commodityClass)
+  }
+
+  return fetchJson<PnlComparisonReport>(`${apiBase}/reports/pnl-compare?${params.toString()}`, {
+    cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
+  })
+}
+
+export async function loadReportingOverview(apiBase: string, accessToken?: string): Promise<ReportingOverview> {
   return fetchJson<ReportingOverview>(`${apiBase}/reports/overview`, {
     cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
   })
 }
 
-export async function loadExposureSummary(apiBase: string): Promise<ExposureSummaryRow[]> {
+export async function loadExposureSummary(apiBase: string, accessToken?: string): Promise<ExposureSummaryRow[]> {
   return fetchJson<ExposureSummaryRow[]>(`${apiBase}/reports/exposure-summary`, {
     cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
   })
 }
 
-export async function loadActivitySummary(apiBase: string): Promise<ActivitySummaryRow[]> {
+export async function loadActivitySummary(apiBase: string, accessToken?: string): Promise<ActivitySummaryRow[]> {
   return fetchJson<ActivitySummaryRow[]>(`${apiBase}/reports/activity-summary`, {
     cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
   })
 }
 
 export async function loadSettlementAgingReport(
   apiBase: string,
   options: LoadSettlementReportOptions = {},
+  accessToken?: string,
 ): Promise<SettlementAgingReport> {
   return fetchJson<SettlementAgingReport>(`${apiBase}/reports/settlement-aging${buildSettlementReportQueryString(options)}`, {
     cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
   })
 }
 
 export async function loadCashForecastReport(
   apiBase: string,
   options: LoadCashForecastReportOptions = {},
+  accessToken?: string,
 ): Promise<CashForecastReport> {
   const params = buildSettlementReportParams(options)
   if (options.horizonDays) {
@@ -138,26 +195,31 @@ export async function loadCashForecastReport(
   const queryString = params.toString()
   return fetchJson<CashForecastReport>(`${apiBase}/reports/cash-forecast${queryString ? `?${queryString}` : ''}`, {
     cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
   })
 }
 
 export async function loadSettlementExceptionReport(
   apiBase: string,
   options: LoadSettlementReportOptions = {},
+  accessToken?: string,
 ): Promise<SettlementExceptionReport> {
   return fetchJson<SettlementExceptionReport>(`${apiBase}/reports/settlement-exceptions${buildSettlementReportQueryString(options)}`, {
     cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
   })
 }
 
 export async function loadSettlementReportFilterOptions(
   apiBase: string,
   options: Pick<LoadSettlementReportOptions, 'asOf'> = {},
+  accessToken?: string,
 ): Promise<SettlementReportFilterOptions> {
   return fetchJson<SettlementReportFilterOptions>(
     `${apiBase}/reports/settlement-filter-options${buildSettlementReportQueryString(options)}`,
     {
       cache: 'no-store',
+      ...authenticatedRequestInit(accessToken),
     },
   )
 }

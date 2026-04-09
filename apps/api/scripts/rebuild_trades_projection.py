@@ -173,6 +173,48 @@ def normalize_optional_text(value, *, uppercase=False):
     return normalized.upper() if uppercase else normalized
 
 
+def validate_originating_option_trade_reference(
+    trade_state,
+    *,
+    trade_id,
+    instrument_type,
+    originating_option_trade_id,
+):
+    normalized_originating_trade_id = normalize_optional_text(originating_option_trade_id)
+    if normalized_originating_trade_id is None:
+        return None
+
+    if normalize_instrument_type(instrument_type) != TradeInstrumentType.LINEAR.value:
+        raise ValueError("originating_option_trade_id can only be set on LINEAR trades")
+    if normalized_originating_trade_id == trade_id:
+        raise ValueError("originating_option_trade_id cannot reference the trade being created")
+
+    originating_trade = trade_state.get(normalized_originating_trade_id)
+    if originating_trade is None:
+        raise ValueError(
+            f"originating_option_trade_id '{normalized_originating_trade_id}' does not reference an existing trade"
+        )
+    if normalize_instrument_type(originating_trade.get("instrument_type")) != TradeInstrumentType.OPTION.value:
+        raise ValueError("originating_option_trade_id must reference an OPTION trade")
+    if normalize_trade_status(originating_trade.get("status")) not in {
+        TradeStatus.EXERCISED.value,
+        TradeStatus.ASSIGNED.value,
+    }:
+        raise ValueError(
+            f"originating_option_trade_id '{normalized_originating_trade_id}' must reference an "
+            "EXERCISED or ASSIGNED option trade"
+        )
+    for existing_trade_id, existing_trade in trade_state.items():
+        if existing_trade_id == trade_id:
+            continue
+        if existing_trade.get("originating_option_trade_id") == normalized_originating_trade_id:
+            raise ValueError(
+                f"Option trade '{normalized_originating_trade_id}' already has a resulting trade "
+                f"'{existing_trade_id}'"
+            )
+    return normalized_originating_trade_id
+
+
 def normalize_trade_header_status(value, default, *, field_name, valid_values):
     normalized = str(value or default).strip().upper()
     if not normalized:
@@ -389,8 +431,15 @@ def main() -> None:
                         option_strike_price=payload.get("option_strike_price"),
                         option_expiration_date=payload.get("option_expiration_date"),
                     )
+                    originating_option_trade_id = validate_originating_option_trade_reference(
+                        trade_state,
+                        trade_id=trade_id,
+                        instrument_type=instrument_type,
+                        originating_option_trade_id=payload.get("originating_option_trade_id"),
+                    )
                     trade_state[trade_id] = {
                         "trade_id": trade_id,
+                        "originating_option_trade_id": originating_option_trade_id,
                         "external_trade_id": normalize_optional_text(payload.get("external_trade_id")),
                         "source_system": normalize_optional_text(payload.get("source_system"), uppercase=True)
                         or DEFAULT_SOURCE_SYSTEM,
@@ -701,6 +750,18 @@ def main() -> None:
                     continue
 
                 existing["updated_at"] = now
+                if "originating_option_trade_id" in payload:
+                    requested_originating_trade_id = normalize_optional_text(payload.get("originating_option_trade_id"))
+                    if requested_originating_trade_id != existing.get("originating_option_trade_id"):
+                        raise ValueError(
+                            "originating_option_trade_id is immutable and can only be set when the trade is created"
+                        )
+                if existing.get("originating_option_trade_id") is not None and "instrument_type" in payload:
+                    requested_instrument_type = normalize_instrument_type(payload.get("instrument_type"))
+                    if requested_instrument_type != TradeInstrumentType.LINEAR.value:
+                        raise ValueError(
+                            "Trades linked from an originating_option_trade_id must remain LINEAR instruments"
+                        )
                 if "instrument_type" in payload:
                     existing["instrument_type"] = normalize_instrument_type(payload.get("instrument_type"))
                 if "external_trade_id" in payload:
@@ -929,6 +990,7 @@ def main() -> None:
             db.add(
                 Trade(
                     trade_id=trade["trade_id"],
+                    originating_option_trade_id=trade.get("originating_option_trade_id"),
                     external_trade_id=trade.get("external_trade_id"),
                     source_system=trade.get("source_system"),
                     created_at=trade["created_at"],

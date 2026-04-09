@@ -1,8 +1,14 @@
-import { Suspense } from 'react'
+import { Suspense, useState } from 'react'
 
 import './App.css'
 import './appearance.css'
-import { MOBILE_NAVIGATION_PANEL_ID } from './app/navigation'
+import {
+  MOBILE_NAVIGATION_PANEL_ID,
+  PRIMARY_NAV_SECTIONS,
+  type PrimaryNavigationSectionKey,
+  primaryNavigationSectionByKey,
+  primaryNavigationSectionForView,
+} from './app/navigation'
 import { AppWorkspaceContent } from './entities/app/AppWorkspaceContent'
 import {
   APP_VIEWS,
@@ -11,6 +17,7 @@ import {
   workspaceLabel,
 } from './entities/app/appViews'
 import { useAppAppearance } from './entities/app/useAppAppearance'
+import { useAppTradeCaptureSettings } from './entities/app/useAppTradeCaptureSettings'
 import { useAppRouteState } from './entities/app/useAppRouteState'
 import { useAppShellState } from './entities/app/useAppShellState'
 import { useAppTradeActions } from './entities/app/useAppTradeActions'
@@ -20,11 +27,8 @@ import { deriveWorkspaceStatus, VIEW_DATA_GROUPS } from './entities/app/workspac
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
-import { tradeTooltipCopy } from './features/trades/tooltipCopy'
 import { appConfig } from './shared/config'
-import { formatDate, formatMoney, formatNumber, statusTone } from './shared/format'
-import { commodityClassOrder, tradeStatusIsActive } from './shared/trading'
-import { Tooltip } from './shared/ui/Tooltip'
+import { commodityClassOrder } from './shared/trading'
 
 function WorkspaceLoadState({
   title,
@@ -63,11 +67,32 @@ function WorkspaceErrorState({
 
 export default function App() {
   const route = useAppRouteState()
+  const [openNavSectionKeys, setOpenNavSectionKeys] = useState<PrimaryNavigationSectionKey[]>(() => [
+    route.activeNavigationSectionKey ?? primaryNavigationSectionForView(route.currentView).key,
+  ])
   const shell = useAppShellState(route.currentView)
   const appearance = useAppAppearance()
+  const tradeCapturePreferences = useAppTradeCaptureSettings()
   const workspaceData = useAppWorkspaceData(route.currentView)
 
+  function toggleNavSection(sectionKey: PrimaryNavigationSectionKey) {
+    setOpenNavSectionKeys((current) =>
+      current.includes(sectionKey)
+        ? current.filter((key) => key !== sectionKey)
+        : [...current, sectionKey],
+    )
+  }
+
+  function isNavSectionOpen(sectionKey: PrimaryNavigationSectionKey) {
+    return openNavSectionKeys.includes(sectionKey)
+  }
+
+  const activePrimarySection = route.activeNavigationSectionKey
+    ? primaryNavigationSectionByKey(route.activeNavigationSectionKey)
+    : primaryNavigationSectionForView(route.currentView)
+
   const summary = useAppWorkspaceSummary({
+    authSession: workspaceData.authSession,
     trades: workspaceData.trades,
     events: workspaceData.events,
     positions: workspaceData.positions,
@@ -88,6 +113,8 @@ export default function App() {
     summary.activeBooks,
     summary.commodityClassOptions,
     summary.activeCommodities,
+    tradeCapturePreferences.tradeCaptureSettings,
+    workspaceData.trades.map((trade) => trade.trade_id),
     workspaceData.priceIndices,
     summary.activeCounterparties,
     summary.activePortfolios,
@@ -181,8 +208,9 @@ export default function App() {
   }
 
   const selectedTrade = summary.selectedTrade
-  const heroTitle = HERO_TITLE_BY_VIEW[route.currentView]
-  const heroBody = HERO_BODY_BY_VIEW[route.currentView]
+  const showingNavigationSectionLanding = route.activeNavigationSectionKey !== null
+  const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[route.currentView]
+  const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[route.currentView]
 
   return (
     <div className="app-shell">
@@ -259,166 +287,74 @@ export default function App() {
         </button>
 
         <nav className="nav-stack" aria-label="Primary">
-          {APP_VIEWS.map((view) => (
-            <a
-              key={view.key}
-              href={route.hrefForView(view.key)}
-              className={`nav-item ${route.currentView === view.key ? 'is-active' : ''}`}
-              aria-current={route.currentView === view.key ? 'page' : undefined}
-              onClick={(event) => {
-                if (route.handleViewLinkClick(event, view.key)) {
-                  shell.setMobileNavOpen(false)
-                }
-              }}
-            >
-              <span>{view.kicker}</span>
-              <strong>{view.label}</strong>
-            </a>
-          ))}
-        </nav>
+          {PRIMARY_NAV_SECTIONS.map((section) => {
+            const expanded = isNavSectionOpen(section.key)
+            const containsCurrentView =
+              route.activeNavigationSectionKey === section.key ||
+              (route.activeNavigationSectionKey === null && section.views.some((view) => view.key === route.currentView))
 
-        <div className="side-card side-card-contrast side-card-terminal">
-          <div className="side-card-head">
-            <div>
-              <span className="eyebrow">Desk State</span>
-              <strong className="side-card-title">Projection + routing</strong>
-            </div>
-            <Tooltip
-              content={systemStateTone === 'active' ? tradeTooltipCopy.systemReady : tradeTooltipCopy.systemAttention}
-              focusable
-            >
-              <span className={`status-pill status-pill-${systemStateTone} system-pill tooltip-trigger-hint`}>
-                {systemStateLabel}
-              </span>
-            </Tooltip>
-          </div>
+            return (
+              <section key={section.key} className="nav-section">
+                <div className="nav-section-header">
+                  <button
+                    type="button"
+                    className={`nav-item nav-section-toggle ${containsCurrentView ? 'is-active' : ''}`}
+                    aria-expanded={expanded}
+                    aria-controls={`nav-section-${section.key}`}
+                    onClick={() => {
+                      toggleNavSection(section.key)
+                      route.navigateToSection(section.key)
+                      shell.setMobileNavOpen(false)
+                    }}
+                  >
+                    <div className="nav-section-copy">
+                      <span>{section.kicker}</span>
+                      <strong>{section.label}</strong>
+                    </div>
+                  </button>
 
-          <div className="side-stat-grid">
-            <article className="side-stat">
-              <span>Open Trades</span>
-              <strong>{summary.activeTrades.length}</strong>
-            </article>
-            <article className="side-stat">
-              <span>Pricing</span>
-              <strong>{summary.pricingCoverage === null ? '0%' : `${summary.pricingCoverage}%`}</strong>
-            </article>
-            <article className="side-stat">
-              <span>Pending Settle</span>
-              <strong>{summary.pendingSettlementTrades}</strong>
-            </article>
-            <article className="side-stat">
-              <span>Books</span>
-              <strong>{summary.trackedBooks}</strong>
-            </article>
-          </div>
-
-          <div className="side-card-section">
-            <span className="side-section-title">Registry coverage</span>
-            <div className="health-line">
-              <span>API</span>
-              <strong>{workspaceData.health}</strong>
-            </div>
-            <div className="health-line">
-              <span>Books</span>
-              <strong>{workspaceData.books.length}</strong>
-            </div>
-            <div className="health-line">
-              <span>Commodities</span>
-              <strong>{workspaceData.commodities.length}</strong>
-            </div>
-            <div className="health-line">
-              <span>Price indices</span>
-              <strong>{workspaceData.priceIndices.length}</strong>
-            </div>
-            <div className="health-line">
-              <span>Currencies</span>
-              <strong>{workspaceData.currencies.length}</strong>
-            </div>
-            <div className="health-line">
-              <span>Units</span>
-              <strong>{workspaceData.units.length}</strong>
-            </div>
-            <div className="health-line">
-              <span>Locations</span>
-              <strong>{workspaceData.locations.length}</strong>
-            </div>
-            <div className="health-line">
-              <span>Counterparties</span>
-              <strong>{workspaceData.counterparties.length}</strong>
-            </div>
-            <div className="health-line">
-              <span>Portfolios</span>
-              <strong>{workspaceData.portfolios.length}</strong>
-            </div>
-          </div>
-        </div>
-
-        {route.currentView !== 'guide' && (
-          <div className="side-card side-card-focus">
-            <div className="side-card-head">
-              <span className="eyebrow">Selected Trade</span>
-              {selectedTrade ? (
-                <Tooltip
-                  content={
-                    tradeStatusIsActive(selectedTrade.status)
-                      ? tradeTooltipCopy.activeTrade
-                      : tradeTooltipCopy.closedTrade
-                  }
-                  focusable
-                >
-                  <span className={`status-pill status-pill-${statusTone(selectedTrade.status)} tooltip-trigger-hint`}>
-                    {selectedTrade.status}
-                  </span>
-                </Tooltip>
-              ) : null}
-            </div>
-            {selectedTrade ? (
-              <>
-                <strong className="side-card-title">{selectedTrade.trade_id}</strong>
-                <p>
-                  {selectedTrade.trade_nature} • {selectedTrade.trade_structure} • {selectedTrade.book}
-                </p>
-                <div className="selection-pill-row">
-                  <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
-                  <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
-                  {selectedTrade.credit_hold_active ? (
-                    <span className="status-pill status-pill-blocked">
-                      Credit {selectedTrade.credit_approval_status?.replaceAll('_', ' ') ?? 'HOLD'}
+                  <button
+                    type="button"
+                    className={`nav-item nav-section-toggle-button ${expanded ? 'is-active' : ''}`}
+                    aria-expanded={expanded}
+                    aria-controls={`nav-section-${section.key}`}
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${section.label} section`}
+                    onClick={() => {
+                      toggleNavSection(section.key)
+                    }}
+                  >
+                    <span className="nav-section-indicator" aria-hidden="true">
+                      {expanded ? '-' : '+'}
                     </span>
-                  ) : null}
+                  </button>
                 </div>
-                {selectedTrade.credit_hold_active ? (
-                  <p className="field-error">
-                    {selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}
-                  </p>
-                ) : null}
-                <div className="side-selection-grid">
-                  <article className="side-stat">
-                    <span>Price</span>
-                    <strong>{formatMoney(selectedTrade.price)}</strong>
-                  </article>
-                  <article className="side-stat">
-                    <span>Volume</span>
-                    <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
-                  </article>
-                  <article className="side-stat">
-                    <span>Counterparty</span>
-                    <strong>{selectedTrade.counterparty ?? 'TBD'}</strong>
-                  </article>
-                  <article className="side-stat">
-                    <span>Updated</span>
-                    <strong>{formatDate(selectedTrade.updated_at)}</strong>
-                  </article>
+
+                <div id={`nav-section-${section.key}`} className="nav-section-children" hidden={!expanded}>
+                  {section.views.map((view) => (
+                    <a
+                      key={view.key}
+                      href={route.hrefForView(view.key)}
+                      className={`nav-item nav-item-nested ${
+                        route.activeNavigationSectionKey === null && route.currentView === view.key ? 'is-active' : ''
+                      }`}
+                      aria-current={
+                        route.activeNavigationSectionKey === null && route.currentView === view.key ? 'page' : undefined
+                      }
+                      onClick={(event) => {
+                        if (route.handleViewLinkClick(event, view.key)) {
+                          shell.setMobileNavOpen(false)
+                        }
+                      }}
+                    >
+                      <span>{view.kicker}</span>
+                      <strong>{view.label}</strong>
+                    </a>
+                  ))}
                 </div>
-              </>
-            ) : (
-              <>
-                <strong className="side-card-title">No trade selected</strong>
-                <p>Pick a trade from the workspace to unlock its inspector and event trail.</p>
-              </>
-            )}
-          </div>
-        )}
+              </section>
+            )
+          })}
+        </nav>
       </aside>
 
       <main className="main-stage">
@@ -430,93 +366,66 @@ export default function App() {
             </div>
             <h2>{heroTitle}</h2>
             <p>{heroBody}</p>
-
-            {route.currentView !== 'guide' && (
-              <div className="hero-tape">
-                <article className="hero-tape-item">
-                  <span>Pricing Coverage</span>
-                  <strong>{summary.pricingCoverage === null ? '0%' : `${summary.pricingCoverage}%`}</strong>
-                  <small>
-                    {summary.pricedActiveTrades} of {summary.activeTrades.length} active tickets priced
-                  </small>
-                </article>
-                <article className="hero-tape-item">
-                  <span>Pending Pricing</span>
-                  <strong>{summary.pendingPricingTrades}</strong>
-                  <small>Trades still waiting on explicit pricing state</small>
-                </article>
-                <article className="hero-tape-item">
-                  <span>Books in Play</span>
-                  <strong>{summary.trackedBooks}</strong>
-                  <small>Distinct books carrying active exposure</small>
-                </article>
-                <article className="hero-tape-item">
-                  <span>Largest Line</span>
-                  <strong>
-                    {summary.largestPositionRow ? formatNumber(summary.largestPositionRow.net_volume, 0) : 'Flat'}
-                  </strong>
-                  <small>
-                    {summary.largestPositionRow
-                      ? summary.largestPositionRow.commodity
-                      : 'Waiting for open positions'}
-                  </small>
-                </article>
-              </div>
-            )}
           </div>
 
           <div className="hero-badge">
             <span>Focus</span>
             <strong>
-              {selectedTrade
+              {showingNavigationSectionLanding
+                ? activePrimarySection.label
+                : selectedTrade
                 ? selectedTrade.trade_id
                 : APP_VIEWS.find((view) => view.key === route.currentView)?.label}
             </strong>
             <small>
-              {selectedTrade
+              {showingNavigationSectionLanding
+                ? `${activePrimarySection.views.length} workspace${activePrimarySection.views.length === 1 ? '' : 's'} grouped in this section`
+                : selectedTrade
                 ? `${selectedTrade.commodity} • ${selectedTrade.book}`
                 : `${workspaceData.events.length} loaded events across the current session`}
             </small>
           </div>
         </header>
 
-        {workspaceData.error ? <div className="error-banner">{workspaceData.error}</div> : null}
-        {workspaceWarning ? <div className="error-banner">{workspaceData.groupErrors[workspaceWarning]}</div> : null}
+        {!showingNavigationSectionLanding && workspaceData.error ? <div className="error-banner">{workspaceData.error}</div> : null}
+        {!showingNavigationSectionLanding && workspaceWarning ? (
+          <div className="error-banner">{workspaceData.groupErrors[workspaceWarning]}</div>
+        ) : null}
 
-        {route.currentView !== 'guide' && (
-          <section className="metric-grid">
-            <article className="metric-card">
-              <span>Open Trades</span>
-              <strong>{summary.activeTrades.length}</strong>
-              <p>Trades currently carrying exposure.</p>
-            </article>
-            <article className="metric-card">
-              <span>Gross Volume</span>
-              <strong>{formatNumber(summary.totalActiveVolume, 0)}</strong>
-              <p>Total active volume across uncancelled trades.</p>
-            </article>
-            <article className="metric-card">
-              <span>Pricing Coverage</span>
-              <strong>{summary.pricingCoverage === null ? '0%' : `${summary.pricingCoverage}%`}</strong>
-              <p>
-                {summary.pricedActiveTrades} of {summary.activeTrades.length} active trades currently carry a stored
-                price differential.
-              </p>
-            </article>
-            <article className="metric-card">
-              <span>Open Positions</span>
-              <strong>{summary.positionsWithClass.length}</strong>
-              <p>Commodity rows now contributing to the live position projection.</p>
-            </article>
-            <article className="metric-card">
-              <span>Events Loaded</span>
-              <strong>{workspaceData.events.length}</strong>
-              <p>Recent event records available for review.</p>
-            </article>
-          </section>
-        )}
-
-        {blockingWorkspaceError && !workspaceLoading ? (
+        {showingNavigationSectionLanding ? (
+          <Suspense
+            fallback={
+              <WorkspaceLoadState
+                title={`Preparing ${activePrimarySection.label}`}
+                detail="Loading the section overview."
+              />
+            }
+          >
+            <AppWorkspaceContent
+              activeDocumentationDocumentKey={route.activeDocumentationDocumentKey}
+              activeNavigationSectionKey={route.activeNavigationSectionKey}
+              captureForm={captureForm}
+              amendForm={amendForm}
+              appearance={appearance}
+              tradeCapturePreferences={tradeCapturePreferences}
+              currentView={route.currentView}
+              handleDocumentationDocumentChange={route.handleDocumentationDocumentChange}
+              handleRoadmapPublished={shell.handleRoadmapPublished}
+              hrefForView={route.hrefForView}
+              navigateToTrade={navigateToTrade}
+              navigateToView={route.navigateToView}
+              referenceState={referenceState}
+              roadmapRefreshVersion={shell.roadmapRefreshVersion}
+              selectedTradeId={route.selectedTradeId}
+              setInspectorTab={shell.setInspectorTab}
+              setSelectedTradeId={route.setSelectedTradeId}
+              shell={shell}
+              summary={summary}
+              tradeActions={tradeActions}
+              workspaceData={workspaceData}
+            />
+          </Suspense>
+        ) : blockingWorkspaceError && !workspaceLoading ? (
           <WorkspaceErrorState
             title={`${workspaceLabel(route.currentView)} needs attention`}
             message={workspaceData.groupErrors[blockingWorkspaceError]}
@@ -538,9 +447,11 @@ export default function App() {
           >
             <AppWorkspaceContent
               activeDocumentationDocumentKey={route.activeDocumentationDocumentKey}
+              activeNavigationSectionKey={route.activeNavigationSectionKey}
               captureForm={captureForm}
               amendForm={amendForm}
               appearance={appearance}
+              tradeCapturePreferences={tradeCapturePreferences}
               currentView={route.currentView}
               handleDocumentationDocumentChange={route.handleDocumentationDocumentChange}
               handleRoadmapPublished={shell.handleRoadmapPublished}

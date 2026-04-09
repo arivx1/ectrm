@@ -680,6 +680,102 @@ class AssistantApiTests(unittest.TestCase):
         assert isinstance(second_input, list)
         self.assertEqual([item["call_id"] for item in second_input], ["call_1", "call_2"])
 
+    def test_trades_endpoint_returns_deterministic_recency_order(self) -> None:
+        token = self._create_session_token()
+        latest_timestamp = datetime(2026, 4, 8, 17, 30, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Event(
+                        event_id="evt-latest-a",
+                        aggregate_type="trade",
+                        aggregate_id="T-LATEST-A",
+                        event_type="TradeCreated",
+                        occurred_at=latest_timestamp,
+                        recorded_at=latest_timestamp,
+                        actor_id="assistant_user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={"trade_id": "T-LATEST-A"},
+                    ),
+                    Event(
+                        event_id="evt-latest-b",
+                        aggregate_type="trade",
+                        aggregate_id="T-LATEST-B",
+                        event_type="TradeCreated",
+                        occurred_at=latest_timestamp,
+                        recorded_at=latest_timestamp,
+                        actor_id="assistant_user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={"trade_id": "T-LATEST-B"},
+                    ),
+                    Trade(
+                        trade_id="T-LATEST-A",
+                        external_trade_id="EXT-T-LATEST-A",
+                        source_system="TEST",
+                        created_at=latest_timestamp,
+                        updated_at=latest_timestamp,
+                        execution_timestamp=latest_timestamp,
+                        trade_nature="PHYSICAL",
+                        trade_structure="SINGLE",
+                        trade_side="BUY",
+                        book="CRUDE",
+                        portfolio="PROMPT",
+                        counterparty="ACME",
+                        commodity_class="CRUDE",
+                        commodity="WTI",
+                        pricing_type="FIXED",
+                        pricing_status="PRICED",
+                        price_index_code=None,
+                        price=75.25,
+                        volume=1000,
+                        settlement_status="PENDING",
+                        trader_user="assistant_user",
+                        status="ACTIVE",
+                        last_event_id="evt-latest-a",
+                    ),
+                    Trade(
+                        trade_id="T-LATEST-B",
+                        external_trade_id="EXT-T-LATEST-B",
+                        source_system="TEST",
+                        created_at=latest_timestamp,
+                        updated_at=latest_timestamp,
+                        execution_timestamp=latest_timestamp,
+                        trade_nature="PHYSICAL",
+                        trade_structure="SINGLE",
+                        trade_side="BUY",
+                        book="CRUDE",
+                        portfolio="PROMPT",
+                        counterparty="ACME",
+                        commodity_class="CRUDE",
+                        commodity="WTI",
+                        pricing_type="FIXED",
+                        pricing_status="PRICED",
+                        price_index_code=None,
+                        price=75.25,
+                        volume=1000,
+                        settlement_status="PENDING",
+                        trader_user="assistant_user",
+                        status="ACTIVE",
+                        last_event_id="evt-latest-b",
+                    ),
+                ]
+            )
+            session.commit()
+
+        response = self.client.get(
+            "/trades",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([row["trade_id"] for row in payload[:2]], ["T-LATEST-B", "T-LATEST-A"])
+
     def test_assistant_prompt_respects_agent_allowed_tools(self) -> None:
         token = self._create_session_token()
         self._create_trade_with_event(trade_id="T-1005")

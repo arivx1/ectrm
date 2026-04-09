@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class TradeOut(BaseModel):
     trade_id: str
+    originating_option_trade_id: Optional[str]
     external_trade_id: Optional[str]
     source_system: Optional[str]
     created_at: datetime
@@ -41,6 +42,7 @@ class TradeOut(BaseModel):
     confirmation_status: str
     nomination_status: str
     allocation_status: str
+    actualization_status: str
     price_index_code: Optional[str]
     price: Optional[float]
     volume: Optional[float]

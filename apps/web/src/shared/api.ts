@@ -205,6 +205,17 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
   return response.json() as Promise<T>
 }
 
+function mergeHeaders(
+  baseHeaders: HeadersInit | undefined,
+  extraHeaders?: Record<string, string>,
+): Headers {
+  const merged = new Headers(baseHeaders)
+  for (const [name, value] of Object.entries(extraHeaders ?? {})) {
+    merged.set(name, value)
+  }
+  return merged
+}
+
 
 export async function postJson<T>(
   url: string,
@@ -214,10 +225,7 @@ export async function postJson<T>(
   return fetchJson<T>(url, {
     ...init,
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers: mergeHeaders(init?.headers, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
 }
@@ -230,10 +238,7 @@ export async function putJson<T>(
   return fetchJson<T>(url, {
     ...init,
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers: mergeHeaders(init?.headers, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
 }
@@ -246,10 +251,7 @@ export async function patchJson<T>(
   return fetchJson<T>(url, {
     ...init,
     method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers: mergeHeaders(init?.headers, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
 }

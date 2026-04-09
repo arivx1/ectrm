@@ -49,7 +49,7 @@ function buildCreateDraft(invoice: TradeInvoiceRecord, payments: TradePaymentRec
   return {
     paymentReference: '',
     paymentCurrencyCode: invoice.invoice_currency_code,
-    paymentAmount: String(templatePayment?.outstanding_amount ?? invoice.invoice_amount),
+    paymentAmount: String(templatePayment?.outstanding_amount ?? invoice.outstanding_amount),
     status: invoice.payment_status === 'PAID' ? 'PENDING' : invoice.payment_status,
     dueAt: invoice.due_at.slice(0, 10),
     receivedAt: '',
@@ -227,9 +227,8 @@ export function SettlementPaymentBoard({
             left.due_at.localeCompare(right.due_at) || left.payment_id - right.payment_id,
           )
           const paymentItem = paymentItemByTradeId.get(invoice.trade_id)
-          const aggregate = invoicePayments[0]
-          const totalPaidAmount = aggregate ? aggregate.total_paid_amount : 0
-          const outstandingAmount = aggregate ? aggregate.outstanding_amount : invoice.invoice_amount
+          const totalPaidAmount = invoice.total_paid_amount
+          const outstandingAmount = invoice.outstanding_amount
           const createDraft = createDrafts[invoice.invoice_id] ?? buildCreateDraft(invoice, invoicePayments)
           const createPending = savingKey === `invoice:${invoice.invoice_id}:new`
 

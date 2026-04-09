@@ -9,8 +9,12 @@ from pydantic import BaseModel
 class TradeInvoiceOut(BaseModel):
     invoice_id: int
     trade_id: str
+    delivery_id: Optional[str]
+    leg_no: Optional[int]
     invoice_number: str
     invoice_currency_code: str
+    billed_quantity: Optional[float]
+    quantity_unit_code: Optional[str]
     invoice_amount: float
     status: str
     issued_at: datetime
@@ -38,12 +42,16 @@ class TradeInvoiceOut(BaseModel):
     delivery_end: Optional[date]
     payment_status: str
     settlement_status: str
+    total_paid_amount: float
+    outstanding_amount: float
 
 
 class TradeInvoiceCreate(BaseModel):
     trade_id: str
+    leg_no: Optional[int] = None
     invoice_number: Optional[str] = None
     invoice_currency_code: Optional[str] = None
+    billed_quantity: Optional[float] = None
     invoice_amount: Optional[float] = None
     issued_at: Optional[datetime] = None
     due_at: Optional[datetime] = None

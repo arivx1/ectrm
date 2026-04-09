@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type {
   CounterpartyRecord,
   CurrencyRecord,
@@ -21,12 +21,21 @@ import {
   tradeSideOptions,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
+import {
+  resolveTradeCaptureRuleEvaluation,
+  resolveTradeCaptureVisibilityState,
+  type TradeCaptureRuleContext,
+  type TradeCaptureSettings,
+} from '../../shared/tradeCaptureSettings'
 import { findLatestPersistedLegs, makeLegDraft } from './tradeDraftUtils'
+import { buildSuggestedTradeId } from './tradeEventPayloads'
 
 export function useTradeCaptureForm(
   activeBooks: ReferenceRecord[],
   commodityClassOptions: string[],
   activeCommodities: ReferenceRecord[],
+  tradeCaptureSettings: TradeCaptureSettings,
+  existingTradeIds: string[],
   priceIndices: PriceIndexRecord[],
   activeCounterparties: CounterpartyRecord[],
   activePortfolios: PortfolioRecord[],
@@ -34,19 +43,36 @@ export function useTradeCaptureForm(
   activeCurrencies: CurrencyRecord[],
   activeLocations: LocationRecord[],
 ) {
-  const [tradeIdInput, setTradeIdInput] = useState('')
-  const [tradeInstrumentTypeInput, setTradeInstrumentTypeInputState] = useState<string>(tradeFormDefaults.instrumentType)
-  const [optionTypeInput, setOptionTypeInput] = useState<string>(tradeFormDefaults.optionType)
-  const [optionStyleInput, setOptionStyleInput] = useState<string>(tradeFormDefaults.optionStyle)
+  const captureDefaults = useMemo(() => tradeCaptureSettings.defaults, [tradeCaptureSettings])
+  const initialRuleEvaluation = resolveTradeCaptureRuleEvaluation({
+    context: {
+      instrumentType: captureDefaults.instrumentType,
+      tradeStructure: captureDefaults.tradeStructure,
+      pricingType: captureDefaults.pricingType,
+      commodityClass: commodityClassOptions[0] ?? '',
+      book: activeBooks[0]?.code ?? '',
+    },
+    settings: tradeCaptureSettings,
+  })
+  const initialRuleDefaults = initialRuleEvaluation.defaultOverrides
+  const suggestedTradeId = useMemo(() => buildSuggestedTradeId(existingTradeIds), [existingTradeIds])
+  const [tradeIdInput, setTradeIdInput] = useState(() => suggestedTradeId)
+  const [tradeInstrumentTypeInput, setTradeInstrumentTypeInputState] = useState<string>(captureDefaults.instrumentType)
+  const [optionTypeInput, setOptionTypeInput] = useState<string>(initialRuleDefaults.optionType ?? captureDefaults.optionType)
+  const [optionStyleInput, setOptionStyleInput] = useState<string>(initialRuleDefaults.optionStyle ?? captureDefaults.optionStyle)
   const [optionExpirationDateInput, setOptionExpirationDateInput] = useState<string>(tradeFormDefaults.optionExpirationDate)
   const [optionStrikePriceInput, setOptionStrikePriceInput] = useState<string>(tradeFormDefaults.optionStrikePrice)
-  const [tradeNatureInput, setTradeNatureInput] = useState<string>(tradeFormDefaults.nature)
-  const [tradeStructureInput, setTradeStructureInput] = useState<string>(tradeFormDefaults.structure)
-  const [tradeSideInput, setTradeSideInput] = useState<string>(tradeFormDefaults.side)
+  const [tradeNatureInput, setTradeNatureInput] = useState<string>(initialRuleDefaults.tradeNature ?? captureDefaults.tradeNature)
+  const [tradeStructureInput, setTradeStructureInput] = useState<string>(
+    initialRuleDefaults.tradeStructure ?? captureDefaults.tradeStructure,
+  )
+  const [tradeSideInput, setTradeSideInput] = useState<string>(initialRuleDefaults.tradeSide ?? captureDefaults.tradeSide)
   const [bookInput, setBookInput] = useState<string>('')
   const [commodityClassInput, setCommodityClassInput] = useState<string>('')
   const [commodityInput, setCommodityInput] = useState<string>('')
-  const [pricingTypeInput, setPricingTypeInput] = useState<string>(tradeFormDefaults.pricingType)
+  const [pricingTypeInput, setPricingTypeInput] = useState<string>(
+    initialRuleDefaults.pricingType ?? captureDefaults.pricingType,
+  )
   const [priceIndexInput, setPriceIndexInput] = useState<string>('')
   const [priceInput, setPriceInput] = useState<string>(tradeFormDefaults.price)
   const [volumeInput, setVolumeInput] = useState<string>(tradeFormDefaults.volume)
@@ -65,8 +91,12 @@ export function useTradeCaptureForm(
   const [priceUnitInput, setPriceUnitInput] = useState<string>(tradeHeaderDefaults.price_unit_code)
   const [portfolioInput, setPortfolioInput] = useState<string>(tradeHeaderDefaults.portfolio)
   const [counterpartyInput, setCounterpartyInput] = useState<string>(tradeHeaderDefaults.counterparty)
-  const [pricingStatusInput, setPricingStatusInput] = useState<string>(tradeHeaderDefaults.pricing_status)
-  const [settlementStatusInput, setSettlementStatusInput] = useState<string>(tradeHeaderDefaults.settlement_status)
+  const [pricingStatusInput, setPricingStatusInput] = useState<string>(
+    initialRuleDefaults.pricingStatus ?? captureDefaults.pricingStatus,
+  )
+  const [settlementStatusInput, setSettlementStatusInput] = useState<string>(
+    initialRuleDefaults.settlementStatus ?? captureDefaults.settlementStatus,
+  )
   const [traderUserInput, setTraderUserInput] = useState<string>(tradeHeaderDefaults.trader_user)
   const [createLegs, setCreateLegs] = useState<TradeLegDraft[]>(() => buildDefaultTradeLegs(makeLegDraft))
   const [duplicateSourceTradeId, setDuplicateSourceTradeId] = useState<string | null>(null)
@@ -132,15 +162,129 @@ export function useTradeCaptureForm(
     ? priceUnitInput
     : ''
 
+  useEffect(() => {
+    setTradeIdInput((current) => (current === suggestedTradeId ? current : suggestedTradeId))
+  }, [suggestedTradeId])
+
+  const activeRuleEvaluation = useMemo(
+    () =>
+      resolveTradeCaptureRuleEvaluation({
+        context: {
+          instrumentType: tradeInstrumentTypeInput,
+          tradeStructure: tradeStructureInput,
+          pricingType: pricingTypeInput,
+          commodityClass: resolvedCommodityClassInput,
+          book: resolvedBookInput,
+        },
+        settings: tradeCaptureSettings,
+      }),
+    [
+      pricingTypeInput,
+      resolvedBookInput,
+      resolvedCommodityClassInput,
+      tradeCaptureSettings,
+      tradeInstrumentTypeInput,
+      tradeStructureInput,
+    ],
+  )
+
+  const visibilityState = useMemo(
+    () =>
+      resolveTradeCaptureVisibilityState({
+        instrumentType: tradeInstrumentTypeInput,
+        tradeStructure: tradeStructureInput,
+        pricingType: pricingTypeInput,
+        commodityClass: resolvedCommodityClassInput,
+        book: resolvedBookInput,
+        settings: tradeCaptureSettings,
+      }),
+    [
+      pricingTypeInput,
+      resolvedBookInput,
+      resolvedCommodityClassInput,
+      tradeCaptureSettings,
+      tradeInstrumentTypeInput,
+      tradeStructureInput,
+    ],
+  )
+
+  function applyRuleDefaults(overrides: Partial<TradeCaptureRuleContext> = {}) {
+    const ruleEvaluation = resolveTradeCaptureRuleEvaluation({
+      context: {
+        instrumentType: overrides.instrumentType ?? tradeInstrumentTypeInput,
+        tradeStructure: overrides.tradeStructure ?? tradeStructureInput,
+        pricingType: overrides.pricingType ?? pricingTypeInput,
+        commodityClass: overrides.commodityClass ?? resolvedCommodityClassInput,
+        book: overrides.book ?? resolvedBookInput,
+      },
+      settings: tradeCaptureSettings,
+    })
+
+    const nextPricingType = ruleEvaluation.defaultOverrides.pricingType ?? ruleEvaluation.context.pricingType
+    const nextInstrumentType = ruleEvaluation.context.instrumentType
+
+    if (ruleEvaluation.defaultOverrides.tradeNature && ruleEvaluation.defaultOverrides.tradeNature !== tradeNatureInput) {
+      setTradeNatureInput(ruleEvaluation.defaultOverrides.tradeNature)
+    }
+    if (
+      ruleEvaluation.defaultOverrides.tradeStructure &&
+      ruleEvaluation.defaultOverrides.tradeStructure !== tradeStructureInput
+    ) {
+      setTradeStructureInput(ruleEvaluation.defaultOverrides.tradeStructure)
+    }
+    if (ruleEvaluation.defaultOverrides.tradeSide && ruleEvaluation.defaultOverrides.tradeSide !== tradeSideInput) {
+      setTradeSideInput(ruleEvaluation.defaultOverrides.tradeSide)
+    }
+    if (ruleEvaluation.defaultOverrides.pricingType && ruleEvaluation.defaultOverrides.pricingType !== pricingTypeInput) {
+      setPricingTypeInput(ruleEvaluation.defaultOverrides.pricingType)
+    }
+    if (
+      ruleEvaluation.defaultOverrides.pricingStatus &&
+      ruleEvaluation.defaultOverrides.pricingStatus !== pricingStatusInput
+    ) {
+      setPricingStatusInput(ruleEvaluation.defaultOverrides.pricingStatus)
+    }
+    if (
+      ruleEvaluation.defaultOverrides.settlementStatus &&
+      ruleEvaluation.defaultOverrides.settlementStatus !== settlementStatusInput
+    ) {
+      setSettlementStatusInput(ruleEvaluation.defaultOverrides.settlementStatus)
+    }
+    if (ruleEvaluation.defaultOverrides.optionType && ruleEvaluation.defaultOverrides.optionType !== optionTypeInput) {
+      setOptionTypeInput(ruleEvaluation.defaultOverrides.optionType)
+    }
+    if (ruleEvaluation.defaultOverrides.optionStyle && ruleEvaluation.defaultOverrides.optionStyle !== optionStyleInput) {
+      setOptionStyleInput(ruleEvaluation.defaultOverrides.optionStyle)
+    }
+
+    if (tradeInstrumentUsesOptionFields(nextInstrumentType) || !pricingTypeRequiresPriceIndex(nextPricingType)) {
+      setPriceIndexInput('')
+    }
+  }
+
   function setTradeInstrumentTypeInput(value: string) {
     setTradeInstrumentTypeInputState(value)
-    if (!tradeInstrumentUsesOptionFields(value)) {
-      return
-    }
-    setTradeNatureInput('FINANCIAL')
-    setTradeStructureInput('SINGLE')
-    setPricingTypeInput('FIXED')
-    setPriceIndexInput('')
+    applyRuleDefaults({ instrumentType: value })
+  }
+
+  function setTradeStructureInputWithRules(value: string) {
+    setTradeStructureInput(value)
+    applyRuleDefaults({ tradeStructure: value })
+  }
+
+  function setBookInputWithRules(value: string) {
+    setBookInput(value)
+    applyRuleDefaults({ book: value })
+  }
+
+  function setCommodityClassInputWithRules(value: string) {
+    setCommodityClassInput(value)
+    applyRuleDefaults({ commodityClass: value })
+  }
+
+  function setPricingTypeInputWithRules(value: string) {
+    setPricingTypeInput(value)
+    applyRuleDefaults({ pricingType: value })
   }
 
   function updateDraftLeg(index: number, field: keyof TradeLegDraft, value: string) {
@@ -193,19 +337,19 @@ export function useTradeCaptureForm(
             })
           : buildDefaultTradeLegs(makeLegDraft)
 
-    setTradeIdInput('')
-    setTradeInstrumentTypeInputState(selectedTrade.instrument_type ?? tradeFormDefaults.instrumentType)
-    setOptionTypeInput(selectedTrade.option_type ?? tradeFormDefaults.optionType)
-    setOptionStyleInput(selectedTrade.option_style ?? tradeFormDefaults.optionStyle)
+    setTradeIdInput(suggestedTradeId)
+    setTradeInstrumentTypeInputState(selectedTrade.instrument_type ?? captureDefaults.instrumentType)
+    setOptionTypeInput(selectedTrade.option_type ?? captureDefaults.optionType)
+    setOptionStyleInput(selectedTrade.option_style ?? captureDefaults.optionStyle)
     setOptionExpirationDateInput(selectedTrade.option_expiration_date ?? tradeFormDefaults.optionExpirationDate)
     setOptionStrikePriceInput(selectedTrade.option_strike_price?.toString() ?? tradeFormDefaults.optionStrikePrice)
-    setTradeNatureInput(selectedTrade.trade_nature ?? tradeFormDefaults.nature)
-    setTradeStructureInput(selectedTrade.trade_structure ?? tradeFormDefaults.structure)
-    setTradeSideInput(selectedTrade.trade_side ?? tradeFormDefaults.side)
+    setTradeNatureInput(selectedTrade.trade_nature ?? captureDefaults.tradeNature)
+    setTradeStructureInput(selectedTrade.trade_structure ?? captureDefaults.tradeStructure)
+    setTradeSideInput(selectedTrade.trade_side ?? captureDefaults.tradeSide)
     setBookInput(selectedTrade.book ?? activeBooks[0]?.code ?? '')
     setCommodityClassInput(selectedTrade.commodity_class ?? commodityClassOptions[0] ?? '')
     setCommodityInput(selectedTrade.commodity ?? '')
-    setPricingTypeInput(selectedTrade.pricing_type ?? tradeFormDefaults.pricingType)
+    setPricingTypeInput(selectedTrade.pricing_type ?? captureDefaults.pricingType)
     setPriceIndexInput(selectedTrade.price_index_code ?? '')
     setPriceInput(selectedTrade.price?.toString() ?? tradeFormDefaults.price)
     setVolumeInput(selectedTrade.volume?.toString() ?? tradeFormDefaults.volume)
@@ -223,27 +367,38 @@ export function useTradeCaptureForm(
     setPriceUnitInput(selectedTrade.price_unit_code ?? tradeHeaderDefaults.price_unit_code)
     setPortfolioInput(selectedTrade.portfolio ?? tradeHeaderDefaults.portfolio)
     setCounterpartyInput(selectedTrade.counterparty ?? tradeHeaderDefaults.counterparty)
-    setPricingStatusInput(selectedTrade.pricing_status ?? tradeHeaderDefaults.pricing_status)
-    setSettlementStatusInput(tradeHeaderDefaults.settlement_status)
+    setPricingStatusInput(selectedTrade.pricing_status ?? captureDefaults.pricingStatus)
+    setSettlementStatusInput(captureDefaults.settlementStatus)
     setTraderUserInput(selectedTrade.trader_user ?? tradeHeaderDefaults.trader_user)
     setCreateLegs(duplicateLegs)
     setDuplicateSourceTradeId(selectedTrade.trade_id)
   }
 
-  function reset() {
-    setTradeIdInput('')
-    setTradeInstrumentTypeInputState(tradeFormDefaults.instrumentType)
-    setOptionTypeInput(tradeFormDefaults.optionType)
-    setOptionStyleInput(tradeFormDefaults.optionStyle)
+  function reset(nextTradeId: string = suggestedTradeId) {
+    const resetRuleEvaluation = resolveTradeCaptureRuleEvaluation({
+      context: {
+        instrumentType: captureDefaults.instrumentType,
+        tradeStructure: captureDefaults.tradeStructure,
+        pricingType: captureDefaults.pricingType,
+        commodityClass: commodityClassOptions[0] ?? '',
+        book: activeBooks[0]?.code ?? '',
+      },
+      settings: tradeCaptureSettings,
+    })
+
+    setTradeIdInput(nextTradeId)
+    setTradeInstrumentTypeInputState(captureDefaults.instrumentType)
+    setOptionTypeInput(resetRuleEvaluation.defaultOverrides.optionType ?? captureDefaults.optionType)
+    setOptionStyleInput(resetRuleEvaluation.defaultOverrides.optionStyle ?? captureDefaults.optionStyle)
     setOptionExpirationDateInput(tradeFormDefaults.optionExpirationDate)
     setOptionStrikePriceInput(tradeFormDefaults.optionStrikePrice)
-    setTradeNatureInput(tradeFormDefaults.nature)
-    setTradeStructureInput(tradeFormDefaults.structure)
-    setTradeSideInput(tradeFormDefaults.side)
+    setTradeNatureInput(resetRuleEvaluation.defaultOverrides.tradeNature ?? captureDefaults.tradeNature)
+    setTradeStructureInput(resetRuleEvaluation.defaultOverrides.tradeStructure ?? captureDefaults.tradeStructure)
+    setTradeSideInput(resetRuleEvaluation.defaultOverrides.tradeSide ?? captureDefaults.tradeSide)
     setBookInput(activeBooks[0]?.code ?? '')
     setCommodityClassInput(commodityClassOptions[0] ?? '')
     setCommodityInput('')
-    setPricingTypeInput(tradeFormDefaults.pricingType)
+    setPricingTypeInput(resetRuleEvaluation.defaultOverrides.pricingType ?? captureDefaults.pricingType)
     setPriceIndexInput('')
     setPriceInput(tradeFormDefaults.price)
     setVolumeInput(tradeFormDefaults.volume)
@@ -261,8 +416,10 @@ export function useTradeCaptureForm(
     setPriceUnitInput(tradeHeaderDefaults.price_unit_code)
     setPortfolioInput(tradeHeaderDefaults.portfolio)
     setCounterpartyInput(tradeHeaderDefaults.counterparty)
-    setPricingStatusInput(tradeHeaderDefaults.pricing_status)
-    setSettlementStatusInput(tradeHeaderDefaults.settlement_status)
+    setPricingStatusInput(resetRuleEvaluation.defaultOverrides.pricingStatus ?? captureDefaults.pricingStatus)
+    setSettlementStatusInput(
+      resetRuleEvaluation.defaultOverrides.settlementStatus ?? captureDefaults.settlementStatus,
+    )
     setTraderUserInput(tradeHeaderDefaults.trader_user)
     setCreateLegs(buildDefaultTradeLegs(makeLegDraft))
     setDuplicateSourceTradeId(null)
@@ -284,17 +441,17 @@ export function useTradeCaptureForm(
     tradeNatureInput,
     setTradeNatureInput,
     tradeStructureInput,
-    setTradeStructureInput,
+    setTradeStructureInput: setTradeStructureInputWithRules,
     tradeSideInput,
     setTradeSideInput,
     bookInput: resolvedBookInput,
-    setBookInput,
+    setBookInput: setBookInputWithRules,
     commodityClassInput: resolvedCommodityClassInput,
-    setCommodityClassInput,
+    setCommodityClassInput: setCommodityClassInputWithRules,
     commodityInput: resolvedCommodityInput,
     setCommodityInput,
     pricingTypeInput,
-    setPricingTypeInput,
+    setPricingTypeInput: setPricingTypeInputWithRules,
     priceIndexInput: resolvedPriceIndexInput,
     setPriceIndexInput,
     priceInput,
@@ -336,6 +493,9 @@ export function useTradeCaptureForm(
     setPricingStatusInput,
     settlementStatusInput,
     setSettlementStatusInput,
+    showOptionDetails: visibilityState.showOptionDetails,
+    showPriceIndexField: visibilityState.showPriceIndex,
+    activeRuleMatches: activeRuleEvaluation.matchedRules,
     traderUserInput,
     setTraderUserInput,
     duplicateSourceTradeId,

@@ -19,6 +19,8 @@ from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.event import Event
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
@@ -65,9 +67,11 @@ class SettlementInvoicesApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             session.query(TradePayment).delete()
+            session.query(TradeActualization).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
+            session.query(Event).delete()
             session.query(UserSession).delete()
             session.query(UserAccount).delete()
             session.commit()
@@ -122,6 +126,7 @@ class SettlementInvoicesApiTests(unittest.TestCase):
                     confirmation_status="CONFIRMED",
                     nomination_status="PENDING",
                     allocation_status="PENDING",
+                    actualization_status="PENDING",
                     price_index_code=None,
                     price=79.25,
                     volume=1000,
@@ -134,6 +139,25 @@ class SettlementInvoicesApiTests(unittest.TestCase):
                 )
             )
             session.commit()
+
+    def _actualize_trade(
+        self,
+        admin_token: str,
+        *,
+        trade_id: str,
+        actual_quantity: float,
+        actualized_at: str = "2026-04-09T12:00:00Z",
+    ) -> None:
+        response = self.client.put(
+            f"/shipments/{trade_id}/actualization",
+            json={
+                "actual_quantity": actual_quantity,
+                "actualized_at": actualized_at,
+                "source": "OPS",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 200)
 
     def _seed_credit_approval_item(
         self,
@@ -180,7 +204,10 @@ class SettlementInvoicesApiTests(unittest.TestCase):
         self.assertEqual(body["trade_id"], "T-INV-1")
         self.assertEqual(body["invoice_number"], "INV-1001")
 
-        list_response = self.client.get("/settlement/invoices?trade_id=T-INV-1")
+        list_response = self.client.get(
+            "/settlement/invoices?trade_id=T-INV-1",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
         self.assertEqual(list_response.status_code, 200)
         listed = list_response.json()
         self.assertEqual(len(listed), 1)
@@ -202,13 +229,29 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             self.assertEqual(trade.settlement_status, "INVOICED")
             self.assertEqual(workflow_item.status, "ISSUED")
             self.assertIsNotNone(workflow_item.due_at)
+            audit_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-INV-1",
+                    Event.event_type == "TradeInvoiceIssued",
+                )
+                .one()
+            )
+            self.assertEqual(audit_event.actor_id, "settlement_admin")
+            self.assertEqual(audit_event.payload["request"]["trade_id"], "T-INV-1")
+            self.assertEqual(audit_event.payload["invoice"]["invoice_number"], "INV-1001")
 
     def test_invoice_patch_approve_rolls_trade_and_workflow_forward(self) -> None:
         admin_token = self._bootstrap_admin()
         self._seed_trade(trade_id="T-INV-2")
         create_response = self.client.post(
             "/settlement/invoices",
-            json={"trade_id": "T-INV-2", "invoice_number": "INV-1002"},
+            json={
+                "trade_id": "T-INV-2",
+                "invoice_number": "INV-1002",
+                "invoice_amount": 79250,
+            },
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(create_response.status_code, 201)
@@ -244,7 +287,11 @@ class SettlementInvoicesApiTests(unittest.TestCase):
         self._seed_trade(trade_id="T-INV-3")
         create_response = self.client.post(
             "/settlement/invoices",
-            json={"trade_id": "T-INV-3", "invoice_number": "INV-1003"},
+            json={
+                "trade_id": "T-INV-3",
+                "invoice_number": "INV-1003",
+                "invoice_amount": 79250,
+            },
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(create_response.status_code, 201)
@@ -312,7 +359,11 @@ class SettlementInvoicesApiTests(unittest.TestCase):
 
         create_response = self.client.post(
             "/settlement/invoices",
-            json={"trade_id": "T-INV-HOLD-1", "invoice_number": "INV-HOLD-1"},
+            json={
+                "trade_id": "T-INV-HOLD-1",
+                "invoice_number": "INV-HOLD-1",
+                "invoice_amount": 79250,
+            },
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(create_response.status_code, 201)
@@ -350,7 +401,11 @@ class SettlementInvoicesApiTests(unittest.TestCase):
         admin_token = self._bootstrap_admin()
         create_response = self.client.post(
             "/settlement/invoices",
-            json={"trade_id": "T-INV-4", "invoice_number": "INV-1004"},
+            json={
+                "trade_id": "T-INV-4",
+                "invoice_number": "INV-1004",
+                "invoice_amount": 79250,
+            },
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(create_response.status_code, 201)
@@ -361,6 +416,102 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             json={"status": "APPROVED"},
         )
         self.assertEqual(patch_response.status_code, 401)
+
+    def test_quantity_based_invoice_requires_actualization_before_defaulting(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-ACT-1")
+
+        response = self.client.post(
+            "/settlement/invoices",
+            json={"trade_id": "T-INV-ACT-1"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("actualized quantity", response.text.lower())
+
+    def test_issue_invoice_defaults_billed_quantity_and_amount_from_actualization(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-ACT-2")
+        self._actualize_trade(admin_token, trade_id="T-INV-ACT-2", actual_quantity=400)
+
+        response = self.client.post(
+            "/settlement/invoices",
+            json={"trade_id": "T-INV-ACT-2"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["delivery_id"], "DLV-T-INV-ACT-2")
+        self.assertAlmostEqual(body["billed_quantity"], 400.0)
+        self.assertAlmostEqual(body["invoice_amount"], 31700.0)
+        self.assertEqual(body["payment_status"], "PENDING")
+        self.assertEqual(body["settlement_status"], "INVOICED")
+
+        with self.SessionLocal() as session:
+            invoice = session.query(TradeInvoice).filter(TradeInvoice.trade_id == "T-INV-ACT-2").one()
+            self.assertEqual(invoice.delivery_id, "DLV-T-INV-ACT-2")
+            self.assertEqual(invoice.leg_no, None)
+            self.assertAlmostEqual(float(invoice.billed_quantity), 400.0)
+
+    def test_trade_can_carry_multiple_invoices_and_invoice_status_rolls_up(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-MULTI-1")
+        self._actualize_trade(admin_token, trade_id="T-INV-MULTI-1", actual_quantity=600)
+
+        first_response = self.client.post(
+            "/settlement/invoices",
+            json={
+                "trade_id": "T-INV-MULTI-1",
+                "invoice_number": "INV-T-INV-MULTI-1-1",
+                "billed_quantity": 400,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(first_response.status_code, 201)
+        first_invoice_id = first_response.json()["invoice_id"]
+        self.assertAlmostEqual(first_response.json()["invoice_amount"], 31700.0)
+
+        approve_response = self.client.patch(
+            f"/settlement/invoices/{first_invoice_id}",
+            json={"status": "APPROVED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(approve_response.status_code, 200)
+
+        second_response = self.client.post(
+            "/settlement/invoices",
+            json={"trade_id": "T-INV-MULTI-1"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(second_response.status_code, 201)
+        second_body = second_response.json()
+        self.assertEqual(second_body["invoice_number"], "INV-T-INV-MULTI-1-2")
+        self.assertAlmostEqual(second_body["billed_quantity"], 200.0)
+        self.assertAlmostEqual(second_body["invoice_amount"], 15850.0)
+
+        list_response = self.client.get(
+            "/settlement/invoices?trade_id=T-INV-MULTI-1",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        listed = list_response.json()
+        self.assertEqual(len(listed), 2)
+        self.assertEqual({row["status"] for row in listed}, {"APPROVED", "ISSUED"})
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-INV-MULTI-1").one()
+            workflow_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-INV-MULTI-1",
+                    TradeWorkflowItem.workflow_type == "INVOICE",
+                )
+                .one()
+            )
+
+            self.assertEqual(trade.invoice_status, "ISSUED")
+            self.assertEqual(trade.settlement_status, "INVOICED")
+            self.assertEqual(workflow_item.status, "ISSUED")
 
 
 if __name__ == "__main__":

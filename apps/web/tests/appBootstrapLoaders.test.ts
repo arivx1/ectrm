@@ -12,6 +12,7 @@ vi.mock('../src/shared/api.ts', () => ({
 vi.mock('../src/shared/config.ts', () => ({
   bootstrapQueryLimits: {
     events: 100,
+    workspaceRecords: 250,
     selectedTradeEvents: 500,
     referenceData: 2000,
     externalDataRuns: 10,
@@ -22,7 +23,11 @@ vi.mock('../src/shared/config.ts', () => ({
 import {
   loadAdminWorkspaceBootstrap,
   loadCoreWorkspaceBootstrap,
+  loadDeliveriesWorkspaceBootstrap,
+  loadOperationsWorkspaceBootstrap,
   loadReferenceWorkspaceBootstrap,
+  loadRiskWorkspaceBootstrap,
+  loadSettlementWorkspaceBootstrap,
 } from '../src/entities/app/api.ts'
 
 beforeEach(() => {
@@ -34,13 +39,13 @@ test('loadCoreWorkspaceBootstrap fetches only the shell-critical datasets', asyn
     if (url.endsWith('/health')) {
       return { status: 'ok' }
     }
-    if (url.endsWith('/trades')) {
+    if (url.endsWith('/trades?limit=250')) {
       return [{ trade_id: 'T-1' }]
     }
     if (url.endsWith('/events?limit=100')) {
       return [{ event_id: '1' }]
     }
-    if (url.endsWith('/positions')) {
+    if (url.endsWith('/positions?limit=250')) {
       return [{ commodity: 'PWR' }]
     }
     throw new Error(`Unexpected URL: ${url}`)
@@ -58,11 +63,44 @@ test('loadCoreWorkspaceBootstrap fetches only the shell-critical datasets', asyn
     fetchJsonMock.mock.calls.map((call) => call[0]),
     [
       'https://example.test/api/health',
-      'https://example.test/api/trades',
+      'https://example.test/api/trades?limit=250',
       'https://example.test/api/events?limit=100',
-      'https://example.test/api/positions',
+      'https://example.test/api/positions?limit=250',
     ],
   )
+})
+
+test('workspace loaders apply bounded bootstrap windows to large operational datasets', async () => {
+  fetchJsonMock.mockImplementation(async (url: string) => {
+    const responses = new Map<string, unknown>([
+      ['https://example.test/api/option-exposures?limit=250', [{ trade_id: 'OPT-1' }]],
+      ['https://example.test/api/deliveries?limit=250', [{ delivery_id: 'DLV-1' }]],
+      ['https://example.test/api/confirmations?limit=250', [{ confirmation_id: 1 }]],
+      ['https://example.test/api/operations/work-items?limit=250', [{ item_id: 1 }]],
+      ['https://example.test/api/settlement/invoices?limit=250', [{ invoice_id: 11 }]],
+      ['https://example.test/api/settlement/payments?limit=250', [{ payment_id: 21 }]],
+    ])
+
+    if (!responses.has(url)) {
+      throw new Error(`Unexpected URL: ${url}`)
+    }
+
+    return responses.get(url)
+  })
+
+  const [risk, deliveries, operations, settlement] = await Promise.all([
+    loadRiskWorkspaceBootstrap('https://example.test/api'),
+    loadDeliveriesWorkspaceBootstrap('https://example.test/api'),
+    loadOperationsWorkspaceBootstrap('https://example.test/api'),
+    loadSettlementWorkspaceBootstrap('https://example.test/api'),
+  ])
+
+  assert.deepEqual(risk.optionExposures, [{ trade_id: 'OPT-1' }])
+  assert.deepEqual(deliveries.deliveries, [{ delivery_id: 'DLV-1' }])
+  assert.deepEqual(operations.confirmations, [{ confirmation_id: 1 }])
+  assert.deepEqual(operations.workItems, [{ item_id: 1 }])
+  assert.deepEqual(settlement.invoices, [{ invoice_id: 11 }])
+  assert.deepEqual(settlement.payments, [{ payment_id: 21 }])
 })
 
 test('loadReferenceWorkspaceBootstrap keeps core reference data even when optional credit feeds fail', async () => {
@@ -113,6 +151,7 @@ test('loadAdminWorkspaceBootstrap returns empty admin data without an authentica
     externalDataRuns: [],
     externalDataSyncStatus: null,
     tradingSources: [],
+    weatherLocations: [],
     weatherSyncStatus: null,
   })
   assert.equal(fetchJsonMock.mock.calls.length, 0)
@@ -129,7 +168,10 @@ test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', as
     if (url.endsWith('/admin/trading-sources?limit=500')) {
       return [{ source_id: 'SRC-1' }]
     }
-    if (url.endsWith('/admin/weather/sync/status')) {
+    if (url.endsWith('/admin/weather/locations')) {
+      return [{ code: 'HOUSTON_GC' }]
+    }
+    if (url.endsWith('/admin/weather/sync/status?include_inactive=true')) {
       return { latest_run: '2026-04-06T00:00:00Z' }
     }
     throw new Error(`Unexpected URL: ${url}`)
@@ -144,8 +186,9 @@ test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', as
     externalDataRuns: [{ id: 101 }],
     externalDataSyncStatus: null,
     tradingSources: [{ source_id: 'SRC-1' }],
+    weatherLocations: [{ code: 'HOUSTON_GC' }],
     weatherSyncStatus: { latest_run: '2026-04-06T00:00:00Z' },
   })
-  assert.equal(fetchJsonMock.mock.calls.length, 4)
+  assert.equal(fetchJsonMock.mock.calls.length, 5)
   assert.strictEqual(fetchJsonMock.mock.calls[0]?.[1]?.headers, headers)
 })

@@ -13,6 +13,7 @@ class Trade(Base):
     __tablename__ = "trades"
 
     trade_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    originating_option_trade_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     external_trade_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     source_system: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -47,6 +48,7 @@ class Trade(Base):
     confirmation_status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")
     nomination_status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")
     allocation_status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")
+    actualization_status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")
     price_index_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     price: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
     volume: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
@@ -57,3 +59,11 @@ class Trade(Base):
 
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE")
     last_event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+
+def trade_recency_order():
+    return (
+        Trade.updated_at.desc(),
+        Trade.created_at.desc(),
+        Trade.trade_id.desc(),
+    )

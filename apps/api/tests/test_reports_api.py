@@ -19,6 +19,7 @@ from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.event import Event
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
@@ -66,8 +67,15 @@ class ReportsApiTests(unittest.TestCase):
             session.query(UserAccount).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
+            session.query(Event).delete()
             session.query(Trade).delete()
             session.commit()
+        self.report_token = self._create_user_session(
+            user_id="reports_viewer",
+            email="reports@example.com",
+            display_name="Reports Viewer",
+        )
+        self.report_headers = {"Authorization": f"Bearer {self.report_token}"}
 
     def _create_user_session(
         self,
@@ -104,6 +112,7 @@ class ReportsApiTests(unittest.TestCase):
         trade_id: str,
         counterparty: str,
         book: str,
+        portfolio: str = "PROMPT",
         trade_currency_code: str = "USD",
         invoice_status: str = "ISSUED",
         payment_status: str = "PENDING",
@@ -137,7 +146,7 @@ class ReportsApiTests(unittest.TestCase):
                     trade_structure="SINGLE",
                     trade_side="BUY",
                     book=book,
-                    portfolio="PROMPT",
+                    portfolio=portfolio,
                     counterparty=counterparty,
                     commodity_class="CRUDE_OIL",
                     commodity="WTI",
@@ -158,6 +167,119 @@ class ReportsApiTests(unittest.TestCase):
                 )
             )
             session.commit()
+
+    def test_pnl_history_report_accepts_as_of_and_portfolio_filters(self) -> None:
+        self._seed_trade(trade_id="T-PNL-1", counterparty="SHELL_TRADING", book="CRUDE_PHYS", portfolio="PROMPT")
+        self._seed_trade(
+            trade_id="T-PNL-2",
+            counterparty="SHELL_TRADING",
+            book="CRUDE_PHYS",
+            portfolio="LOAD_SHAPING",
+        )
+
+        response = self.client.get(
+            "/reports/pnl-history",
+            params={"as_of": "2026-04-06", "portfolio": "prompt"},
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["summary"]["total_pnl"], 80000.0)
+        self.assertEqual(payload["point_count"], 1)
+        self.assertEqual(len(payload["valuations"]), 1)
+        self.assertEqual(payload["valuations"][0]["trade_id"], "T-PNL-1")
+        self.assertEqual(payload["valuations"][0]["portfolio"], "PROMPT")
+
+    def test_pnl_comparison_report_returns_two_snapshot_delta(self) -> None:
+        self._seed_trade(trade_id="T-COMP-1", counterparty="SHELL_TRADING", book="CRUDE_PHYS", portfolio="PROMPT")
+        self._seed_trade(
+            trade_id="T-COMP-2",
+            counterparty="SHELL_TRADING",
+            book="CRUDE_PHYS",
+            portfolio="LOAD_SHAPING",
+        )
+
+        response = self.client.get(
+            "/reports/pnl-compare",
+            params={
+                "from_as_of": "2026-04-05",
+                "to_as_of": "2026-04-06",
+                "portfolio": "prompt",
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["from_as_of"], "2026-04-05")
+        self.assertEqual(payload["to_as_of"], "2026-04-06")
+        self.assertEqual(payload["delta"]["total_pnl"], 80000.0)
+        self.assertEqual(
+            payload["attribution_summary"],
+            {
+                "market_move_pnl": 0.0,
+                "quantity_change_pnl": 80000.0,
+                "coverage_change_pnl": 0.0,
+                "other_change_pnl": 0.0,
+                "realization_transfer_pnl": 0.0,
+                "reconciled_pnl_delta": 80000.0,
+            },
+        )
+        self.assertEqual(len(payload["portfolio_deltas"]), 1)
+        self.assertEqual(payload["portfolio_deltas"][0]["portfolio"], "PROMPT")
+        self.assertEqual(len(payload["attributions"]), 1)
+        self.assertEqual(payload["attributions"][0]["trade_id"], "T-COMP-1")
+        self.assertEqual(payload["attributions"][0]["attribution_category"], "NEW_POSITION")
+        self.assertEqual(
+            payload["attributions"][0]["breakdown"],
+            {
+                "market_move_pnl": 0.0,
+                "quantity_change_pnl": 80000.0,
+                "coverage_change_pnl": 0.0,
+                "other_change_pnl": 0.0,
+                "realization_transfer_pnl": 0.0,
+                "reconciled_pnl_delta": 80000.0,
+            },
+        )
+        self.assertEqual(payload["attributions"][0]["driver_events"], [])
+        self.assertEqual(
+            payload["attributions"][0]["driver_summary"],
+            "No lifecycle events in the compare window; exposure changed across snapshots without a captured trade event.",
+        )
+        self.assertEqual(
+            payload["daily_bridge"],
+            [
+                {
+                    "from_as_of": "2026-04-05",
+                    "to_as_of": "2026-04-06",
+                    "delta": {
+                        "total_pnl": 80000.0,
+                        "realized_pnl": 0.0,
+                        "unrealized_pnl": 80000.0,
+                        "priced_trade_count": 1,
+                        "realized_trade_count": 0,
+                        "unrealized_trade_count": 1,
+                    },
+                    "attribution_summary": {
+                        "market_move_pnl": 0.0,
+                        "quantity_change_pnl": 80000.0,
+                        "coverage_change_pnl": 0.0,
+                        "other_change_pnl": 0.0,
+                        "realization_transfer_pnl": 0.0,
+                        "reconciled_pnl_delta": 80000.0,
+                    },
+                    "changed_trade_count": 1,
+                    "top_driver_trade_id": "T-COMP-1",
+                    "top_driver_category": "NEW_POSITION",
+                    "top_driver_pnl_delta": 80000.0,
+                    "top_driver_summary": (
+                        "No lifecycle events in the compare window; exposure changed across snapshots "
+                        "without a captured trade event."
+                    ),
+                }
+            ],
+        )
 
     def _seed_invoice(
         self,
@@ -274,7 +396,7 @@ class ReportsApiTests(unittest.TestCase):
             received_at=datetime(2026, 4, 3, 15, 0, tzinfo=timezone.utc),
         )
 
-        response = self.client.get("/reports/settlement-aging?as_of=2026-04-06")
+        response = self.client.get("/reports/settlement-aging?as_of=2026-04-06", headers=self.report_headers)
         self.assertEqual(response.status_code, 200)
 
         body = response.json()
@@ -350,7 +472,7 @@ class ReportsApiTests(unittest.TestCase):
             invoice_currency_code="EUR",
         )
 
-        response = self.client.get("/reports/cash-forecast?as_of=2026-04-06&horizon_days=7")
+        response = self.client.get("/reports/cash-forecast?as_of=2026-04-06&horizon_days=7", headers=self.report_headers)
         self.assertEqual(response.status_code, 200)
 
         body = response.json()
@@ -376,7 +498,7 @@ class ReportsApiTests(unittest.TestCase):
         self.assertEqual(points[("2026-04-12", "USD")]["expected_amount"], 550.0)
 
     def test_cash_forecast_validates_horizon_days(self) -> None:
-        response = self.client.get("/reports/cash-forecast?horizon_days=0")
+        response = self.client.get("/reports/cash-forecast?horizon_days=0", headers=self.report_headers)
         self.assertEqual(response.status_code, 422)
         self.assertIn("horizon_days must be greater than zero", response.json()["detail"])
 
@@ -421,7 +543,7 @@ class ReportsApiTests(unittest.TestCase):
             status="ISSUED",
         )
 
-        response = self.client.get("/reports/settlement-exceptions?as_of=2026-04-06")
+        response = self.client.get("/reports/settlement-exceptions?as_of=2026-04-06", headers=self.report_headers)
         self.assertEqual(response.status_code, 200)
 
         body = response.json()
@@ -492,7 +614,10 @@ class ReportsApiTests(unittest.TestCase):
             received_at=datetime(2026, 4, 5, 13, 0, tzinfo=timezone.utc),
         )
 
-        aging_response = self.client.get("/reports/settlement-aging?as_of=2026-04-06&book=DISTILLATES&currency=EUR")
+        aging_response = self.client.get(
+            "/reports/settlement-aging?as_of=2026-04-06&book=DISTILLATES&currency=EUR",
+            headers=self.report_headers,
+        )
         self.assertEqual(aging_response.status_code, 200)
         aging_body = aging_response.json()
         self.assertEqual(aging_body["row_count"], 1)
@@ -500,7 +625,10 @@ class ReportsApiTests(unittest.TestCase):
         self.assertEqual(aging_body["rows"][0]["counterparty_code"], "VITOL")
         self.assertEqual(aging_body["currency_summaries"][0]["currency_code"], "EUR")
 
-        forecast_response = self.client.get("/reports/cash-forecast?as_of=2026-04-06&horizon_days=7&counterparty=VITOL&currency=EUR")
+        forecast_response = self.client.get(
+            "/reports/cash-forecast?as_of=2026-04-06&horizon_days=7&counterparty=VITOL&currency=EUR",
+            headers=self.report_headers,
+        )
         self.assertEqual(forecast_response.status_code, 200)
         forecast_body = forecast_response.json()
         self.assertEqual(forecast_body["row_count"], 1)
@@ -509,7 +637,8 @@ class ReportsApiTests(unittest.TestCase):
         self.assertEqual(forecast_body["points"][0]["currency_code"], "EUR")
 
         exception_response = self.client.get(
-            "/reports/settlement-exceptions?as_of=2026-04-06&counterparty=BP_TRADING&exception_type=SHORT_PAY&severity=in-progress"
+            "/reports/settlement-exceptions?as_of=2026-04-06&counterparty=BP_TRADING&exception_type=SHORT_PAY&severity=in-progress",
+            headers=self.report_headers,
         )
         self.assertEqual(exception_response.status_code, 200)
         exception_body = exception_response.json()
@@ -517,7 +646,10 @@ class ReportsApiTests(unittest.TestCase):
         self.assertEqual(exception_body["rows"][0]["trade_id"], "T-FLT-3")
         self.assertEqual(exception_body["rows"][0]["exception_type"], "SHORT_PAY")
 
-        filter_options_response = self.client.get("/reports/settlement-filter-options?as_of=2026-04-06")
+        filter_options_response = self.client.get(
+            "/reports/settlement-filter-options?as_of=2026-04-06",
+            headers=self.report_headers,
+        )
         self.assertEqual(filter_options_response.status_code, 200)
         filter_options = filter_options_response.json()
         self.assertEqual(filter_options["books"], ["CRUDE_PHYS", "DISTILLATES"])

@@ -101,6 +101,18 @@ Rebuild the position projection:
 PYTHONPATH=. python apps/api/scripts/rebuild_positions_projection.py
 ```
 
+Audit trade projection rows whose `last_event_id` linkage is inconsistent:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/audit_trade_projection_integrity.py
+```
+
+Audit and remove only auto-cleanable orphan trade projections:
+
+```bash
+PYTHONPATH=. python apps/api/scripts/audit_trade_projection_integrity.py --clean
+```
+
 Run one scheduler cycle for market data:
 
 ```bash

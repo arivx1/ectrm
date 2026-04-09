@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  isPrimaryNavigationSectionKey,
+  MAX_PRIMARY_NAV_SECTIONS,
   MOBILE_NAV_MEDIA_QUERY,
   MOBILE_NAVIGATION_PANEL_ID,
   mobileNavigationToggleLabel,
+  PRIMARY_NAV_SECTIONS,
+  primaryNavigationSectionForView,
   shouldHandleClientSideNavigation,
   shouldHideMobileNavigation,
 } from '../src/app/navigation'
+import { APP_VIEWS } from '../src/entities/app/appViews'
 
 describe('mobile navigation helpers', () => {
   it('hides the drawer only when the mobile nav is closed on a mobile viewport', () => {
@@ -58,5 +63,32 @@ describe('mobile navigation helpers', () => {
   it('keeps the drawer wiring constants stable', () => {
     expect(MOBILE_NAVIGATION_PANEL_ID).toBe('primary-navigation-panel')
     expect(MOBILE_NAV_MEDIA_QUERY).toBe('(max-width: 960px)')
+  })
+
+  it('keeps primary navigation grouped to five sections or fewer', () => {
+    expect(PRIMARY_NAV_SECTIONS.length).toBeLessThanOrEqual(MAX_PRIMARY_NAV_SECTIONS)
+
+    const sectionViewKeys = PRIMARY_NAV_SECTIONS.flatMap((section) => section.views.map((view) => view.key))
+
+    expect(sectionViewKeys).toHaveLength(APP_VIEWS.length)
+    expect(new Set(sectionViewKeys)).toEqual(new Set(APP_VIEWS.map((view) => view.key)))
+  })
+
+  it('maps representative workspaces into their grouped nav sections', () => {
+    expect(primaryNavigationSectionForView('dashboard').key).toBe('overview')
+    expect(primaryNavigationSectionForView('trades').key).toBe('trading')
+    expect(primaryNavigationSectionForView('shipments').key).toBe('execution')
+    expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')
+    expect(primaryNavigationSectionForView('settings').key).toBe('administration')
+  })
+
+  it('recognizes supported primary navigation section keys', () => {
+    expect(isPrimaryNavigationSectionKey('overview')).toBe(true)
+    expect(isPrimaryNavigationSectionKey('trading')).toBe(true)
+    expect(isPrimaryNavigationSectionKey('execution')).toBe(true)
+    expect(isPrimaryNavigationSectionKey('intelligence')).toBe(true)
+    expect(isPrimaryNavigationSectionKey('administration')).toBe(true)
+    expect(isPrimaryNavigationSectionKey('dashboard')).toBe(false)
+    expect(isPrimaryNavigationSectionKey(null)).toBe(false)
   })
 })

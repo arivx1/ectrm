@@ -8,10 +8,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services import build_database_overview
+from apps.api.app.domains.operations.services.trade_confirmations import trade_has_confirmation_record
 from apps.api.app.domains.operations.services.settlement_invoices import trade_has_invoice_record
 from apps.api.app.domains.operations.services.settlement_payments import trade_has_payment_records
+from apps.api.app.domains.operations.services.workflow_items import book_trade_workflow_item_underlying
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
 from apps.api.app.domains.operations.services.workflow_items import update_trade_workflow_item
@@ -26,6 +29,7 @@ from apps.api.app.schemas.operations import SystemOverviewOut
 from apps.api.app.schemas.operations import TradeWorkflowItemCreate
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.schemas.operations import TradeWorkflowItemUpdate
+from apps.api.app.shared.enums import TradeWorkflowType
 
 router = APIRouter(prefix="/operations", tags=["operations"])
 
@@ -164,11 +168,17 @@ def _assert_workflow_status_is_not_ledger_managed(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invoice workflow status is ledger-managed. Update the invoice record from Settlement instead.",
         )
+    if item.workflow_type == "CONFIRMATION" and trade_has_confirmation_record(db, trade_id=item.trade_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Confirmation workflow status is record-managed. Update the confirmation record instead.",
+        )
     if item.workflow_type == "PAYMENT" and trade_has_payment_records(db, trade_id=item.trade_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Payment workflow status is ledger-managed. Update the payment record from Settlement instead.",
         )
+
 
 @router.get("/system-overview", response_model=SystemOverviewOut)
 def get_system_overview(request: Request, db: Session = Depends(get_db)) -> SystemOverviewOut:
@@ -239,6 +249,8 @@ def get_work_items(
     queue: str | None = Query(default=None),
     include_closed: bool = Query(default=False),
     trade_id: str | None = Query(default=None),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[TradeWorkflowItemOut]:
     try:
@@ -247,6 +259,8 @@ def get_work_items(
             queue=queue,
             include_closed=include_closed,
             trade_id=trade_id,
+            limit=limit,
+            offset=offset,
         )
         db.commit()
         return items
@@ -320,6 +334,42 @@ def patch_work_item(
         )
         db.commit()
         return item
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/work-items/{item_id}/book-underlying", response_model=TradeWorkflowItemOut)
+def post_work_item_book_underlying(
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TradeWorkflowItemOut:
+    actor_id = _require_authenticated_actor(request)
+    reference_time = datetime.now(timezone.utc)
+
+    try:
+        item = book_trade_workflow_item_underlying(
+            db,
+            item_id=item_id,
+            actor_id=actor_id,
+            actor_role=_authenticated_actor_role(request),
+            now=reference_time,
+        )
+        db.commit()
+        return item
+    except HTTPException:
+        db.rollback()
+        raise
     except LookupError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

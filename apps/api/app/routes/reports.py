@@ -12,7 +12,10 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reports.services.counterparty_credit import (
     build_counterparty_credit_report,
 )
-from apps.api.app.domains.reports.services.pnl_history import build_pnl_history_report
+from apps.api.app.domains.reports.services.pnl_history import (
+    build_pnl_comparison_report,
+    build_pnl_history_report,
+)
 from apps.api.app.domains.reports.services.overview import (
     build_activity_summary,
     build_exposure_summary,
@@ -31,6 +34,7 @@ from apps.api.app.schemas.report import (
     CounterpartyCreditReportRow,
     ExposureSummaryRow,
     PnlHistoryReport,
+    PnlComparisonReport,
     ReportingOverview,
     SettlementReportFilterOptions,
     SettlementReportFilters,
@@ -162,7 +166,9 @@ def get_counterparty_credit_report(
 
 @router.get("/pnl-history", response_model=PnlHistoryReport)
 def get_pnl_history(
+    as_of: date | None = Query(default=None),
     book: str | None = Query(default=None),
+    portfolio: str | None = Query(default=None),
     commodity_class: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
@@ -177,10 +183,39 @@ def get_pnl_history(
     return PnlHistoryReport(
         **build_pnl_history_report(
             db,
+            as_of=as_of,
             book=book,
+            portfolio=portfolio,
             commodity_class=commodity_class,
             date_from=date_from,
             date_to=date_to,
+        )
+    )
+
+
+@router.get("/pnl-compare", response_model=PnlComparisonReport)
+def get_pnl_comparison(
+    from_as_of: date = Query(...),
+    to_as_of: date = Query(...),
+    book: str | None = Query(default=None),
+    portfolio: str | None = Query(default=None),
+    commodity_class: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> PnlComparisonReport:
+    if from_as_of > to_as_of:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="from_as_of must be on or before to_as_of",
+        )
+
+    return PnlComparisonReport(
+        **build_pnl_comparison_report(
+            db,
+            from_as_of=from_as_of,
+            to_as_of=to_as_of,
+            book=book,
+            portfolio=portfolio,
+            commodity_class=commodity_class,
         )
     )
 

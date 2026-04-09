@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.schemas.option_exposure import OptionExposureOut
@@ -14,12 +15,18 @@ router = APIRouter(prefix="/option-exposures", tags=["option-exposures"])
 
 
 @router.get("", response_model=List[OptionExposureOut])
-def list_option_exposures(db: Session = Depends(get_db)) -> List[OptionExposureOut]:
+def list_option_exposures(
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> List[OptionExposureOut]:
     rows = db.execute(
         select(OptionExposure).order_by(
             OptionExposure.option_expiration_date.asc(),
             OptionExposure.trade_id.asc(),
         )
+        .offset(offset)
+        .limit(limit)
     ).scalars().all()
 
     return [

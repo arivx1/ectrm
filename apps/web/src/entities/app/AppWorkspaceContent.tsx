@@ -1,6 +1,8 @@
 import { lazy } from 'react'
 
+import type { PrimaryNavigationSectionKey } from '../../app/navigation'
 import type { useAppAppearance } from './useAppAppearance'
+import type { useAppTradeCaptureSettings } from './useAppTradeCaptureSettings'
 import type { useAppRouteState } from './useAppRouteState'
 import type { useAppShellState } from './useAppShellState'
 import type { useAppTradeActions } from './useAppTradeActions'
@@ -34,6 +36,7 @@ import {
   tradeStructureOptions,
 } from '../../shared/trading'
 import type { DocumentationDocumentKey } from '../../workspaces/docs/DocumentationWorkspace'
+import { NavigationSectionWorkspace } from '../../workspaces/navigation/NavigationSectionWorkspace'
 
 const DocumentationWorkspace = lazy(() =>
   import('../../workspaces/docs/DocumentationWorkspace').then((module) => ({
@@ -113,11 +116,16 @@ const AssistantWorkspace = lazy(() =>
 
 type AppWorkspaceContentProps = {
   activeDocumentationDocumentKey: DocumentationDocumentKey
+  activeNavigationSectionKey: PrimaryNavigationSectionKey | null
   captureForm: ReturnType<typeof useTradeCaptureForm>
   amendForm: ReturnType<typeof useTradeAmendForm>
   appearance: Pick<
     ReturnType<typeof useAppAppearance>,
     'appearanceSettings' | 'handleAppearanceSettingsChange' | 'handleAppearanceSettingsReset' | 'resolvedColorMode'
+  >
+  tradeCapturePreferences: Pick<
+    ReturnType<typeof useAppTradeCaptureSettings>,
+    'tradeCaptureSettings' | 'handleTradeCaptureSettingsChange' | 'handleTradeCaptureSettingsReset'
   >
   currentView: ReturnType<typeof useAppRouteState>['currentView']
   handleDocumentationDocumentChange: ReturnType<typeof useAppRouteState>['handleDocumentationDocumentChange']
@@ -138,9 +146,11 @@ type AppWorkspaceContentProps = {
 
 export function AppWorkspaceContent({
   activeDocumentationDocumentKey,
+  activeNavigationSectionKey,
   captureForm,
   amendForm,
   appearance,
+  tradeCapturePreferences,
   currentView,
   handleDocumentationDocumentChange,
   hrefForView,
@@ -157,12 +167,22 @@ export function AppWorkspaceContent({
   tradeActions,
   workspaceData,
 }: AppWorkspaceContentProps) {
+  if (activeNavigationSectionKey !== null) {
+    return (
+      <NavigationSectionWorkspace
+        sectionKey={activeNavigationSectionKey}
+        getViewHref={hrefForView}
+        onOpenView={navigateToView}
+      />
+    )
+  }
+
   const referenceDataLoading = workspaceData.groupLoading.reference && !workspaceData.groupLoaded.reference
 
   const tradeCaptureFormProps = {
     onSubmit: tradeActions.handleCreateTrade,
+    onClearForm: tradeActions.handleResetCreateTradeForm,
     tradeIdInput: captureForm.tradeIdInput,
-    setTradeIdInput: captureForm.setTradeIdInput,
     tradeInstrumentTypeInput: captureForm.tradeInstrumentTypeInput,
     setTradeInstrumentTypeInput: captureForm.setTradeInstrumentTypeInput,
     optionTypeInput: captureForm.optionTypeInput,
@@ -235,6 +255,9 @@ export function AppWorkspaceContent({
     setPriceUnitInput: captureForm.setPriceUnitInput,
     settlementStatusInput: captureForm.settlementStatusInput,
     setSettlementStatusInput: captureForm.setSettlementStatusInput,
+    showOptionFields: captureForm.showOptionDetails,
+    showPriceIndexField: captureForm.showPriceIndexField,
+    activeRuleMatches: captureForm.activeRuleMatches,
     traderUserInput: captureForm.traderUserInput,
     setTraderUserInput: captureForm.setTraderUserInput,
     duplicateSourceTradeId: captureForm.duplicateSourceTradeId,
@@ -293,6 +316,13 @@ export function AppWorkspaceContent({
           tradeCaptureFormProps={tradeCaptureFormProps}
           trades={workspaceData.trades}
           tradeWorkflowItems={workspaceData.tradeWorkflowItems}
+          activeTradeCount={summary.activeTrades.length}
+          totalActiveVolume={summary.totalActiveVolume}
+          pricedActiveTrades={summary.pricedActiveTrades}
+          pricingCoverage={summary.pricingCoverage}
+          pendingPricingTrades={summary.pendingPricingTrades}
+          trackedBooks={summary.trackedBooks}
+          largestPositionRow={summary.largestPositionRow}
           selectedTrade={summary.selectedTrade}
           selectedTradeId={selectedTradeId}
           selectedTradeEvents={summary.selectedTradeEvents}
@@ -428,6 +458,7 @@ export function AppWorkspaceContent({
         <EventsWorkspace
           authSession={workspaceData.authSession}
           eventFilter={shell.eventFilter}
+          eventsLoadedCount={workspaceData.events.length}
           selectedTradeId={selectedTradeId}
           setEventFilter={shell.setEventFilter}
           filteredEvents={summary.filteredEvents}
@@ -439,6 +470,7 @@ export function AppWorkspaceContent({
       return (
         <RiskWorkspace
           authSession={workspaceData.authSession}
+          trades={workspaceData.trades}
           activeTrades={summary.activeTrades}
           positionsByClass={summary.positionsByClass}
           positionsWithClass={summary.positionsWithClass}
@@ -449,6 +481,9 @@ export function AppWorkspaceContent({
           formatDate={formatDate}
           formatDateOnly={formatDateOnly}
           onOpenTrade={navigateToTrade}
+          onOptionLifecycleEvent={tradeActions.handleTradeOptionLifecycleEvent}
+          optionLifecycleSubmittingEvent={tradeActions.optionLifecycleSubmittingEvent}
+          optionLifecycleSubmittingTradeId={tradeActions.optionLifecycleSubmittingTradeId}
         />
       )
     case 'positions':
@@ -474,7 +509,18 @@ export function AppWorkspaceContent({
           formatDate={formatDate}
           formatDateOnly={formatDateOnly}
           formatNumber={formatNumber}
+          deliveryMutationError={workspaceData.deliveryMutationError}
+          deliveryMutationPendingId={workspaceData.deliveryMutationPendingId}
+          deliverySyncError={workspaceData.deliverySyncError}
+          deliverySyncSuccess={workspaceData.deliverySyncSuccess}
+          deliveriesSyncing={workspaceData.deliveriesSyncing}
           onOpenTrade={navigateToTrade}
+          onSyncDeliveriesFromTrades={workspaceData.handleSyncDeliveriesFromTrades}
+          onSaveDelivery={workspaceData.handleUpdateDelivery}
+          onSaveDeliveryLogisticsDetails={workspaceData.handleUpdateDeliveryLogisticsDetails}
+          onSaveDeliveryPipelineDetails={workspaceData.handleUpdateDeliveryPipelineDetails}
+          onSaveDeliveryPowerDetails={workspaceData.handleUpdateDeliveryPowerDetails}
+          onCreateDeliveryEvent={workspaceData.handleCreateDeliveryEvent}
         />
       )
     case 'scheduling':
@@ -486,13 +532,23 @@ export function AppWorkspaceContent({
           formatNumber={formatNumber}
           formatDate={formatDate}
           formatDateOnly={formatDateOnly}
+          actualizationMutationError={workspaceData.actualizationMutationError}
+          actualizationMutationPendingDeliveryId={workspaceData.actualizationMutationPendingDeliveryId}
+          workflowMutationError={workspaceData.workflowMutationError}
+          workflowCreationPendingTradeId={workspaceData.workflowCreationPendingTradeId}
+          workflowMutationPendingId={workspaceData.workflowMutationPendingId}
+          onCreateWorkflowItem={workspaceData.handleCreateWorkflowItem}
           onOpenTrade={navigateToTrade}
+          onSaveActualization={workspaceData.handleSaveDeliveryActualization}
+          onSaveWorkflowItem={workspaceData.handleSaveWorkflowItem}
         />
       )
     case 'operations':
       return (
         <OperationsWorkspace
           authSession={workspaceData.authSession}
+          activeTrades={summary.activeTrades}
+          confirmations={workspaceData.tradeConfirmations}
           deliveries={workspaceData.deliveries}
           workItems={workspaceData.tradeWorkflowItems}
           externalDataSyncStatus={workspaceData.externalDataSyncStatus}
@@ -502,9 +558,20 @@ export function AppWorkspaceContent({
           formatNumber={formatNumber}
           formatDate={formatDate}
           formatDateOnly={formatDateOnly}
+          confirmationMutationError={workspaceData.confirmationMutationError}
+          confirmationMutationPendingKey={workspaceData.confirmationMutationPendingKey}
           workflowMutationError={workspaceData.workflowMutationError}
+          workflowCreationPendingTradeId={workspaceData.workflowCreationPendingTradeId}
           workflowMutationPendingId={workspaceData.workflowMutationPendingId}
+          onCreateConfirmation={workspaceData.handleCreateTradeConfirmation}
+          onIssueConfirmation={workspaceData.handleIssueTradeConfirmation}
+          onCreateWorkflowItem={workspaceData.handleCreateWorkflowItem}
           onOpenTrade={navigateToTrade}
+          onOptionLifecycleEvent={tradeActions.handleTradeOptionLifecycleEvent}
+          optionLifecycleSubmittingEvent={tradeActions.optionLifecycleSubmittingEvent}
+          optionLifecycleSubmittingTradeId={tradeActions.optionLifecycleSubmittingTradeId}
+          onBookUnderlyingTrade={workspaceData.handleBookUnderlyingTrade}
+          onSaveConfirmation={workspaceData.handleUpdateTradeConfirmation}
           onSaveWorkflowItem={workspaceData.handleSaveWorkflowItem}
         />
       )
@@ -536,8 +603,10 @@ export function AppWorkspaceContent({
     case 'reports':
       return (
         <ReportsWorkspace
+          activeTrades={summary.activeTrades}
           authSession={workspaceData.authSession}
           counterpartyCreditReport={workspaceData.counterpartyCreditReport}
+          portfolios={workspaceData.portfolios}
           formatNumber={formatNumber}
           formatMoney={formatMoney}
           formatDate={formatDate}
@@ -571,6 +640,7 @@ export function AppWorkspaceContent({
           externalDataRuns={workspaceData.externalDataRuns}
           externalDataSyncStatus={workspaceData.externalDataSyncStatus}
           tradingSources={workspaceData.tradingSources}
+          weatherLocations={workspaceData.weatherLocations}
           weatherSyncStatus={workspaceData.weatherSyncStatus}
           externalDataSyncing={workspaceData.externalDataSyncing}
           externalDataSyncingProvider={workspaceData.externalDataSyncingProvider}
@@ -590,12 +660,19 @@ export function AppWorkspaceContent({
           weatherSyncing={workspaceData.weatherSyncing}
           weatherSyncError={workspaceData.weatherSyncError}
           weatherSyncSuccess={workspaceData.weatherSyncSuccess}
+          weatherLocationMutationError={workspaceData.weatherLocationMutationError}
+          weatherLocationMutationPendingCode={workspaceData.weatherLocationMutationPendingCode}
+          weatherLocationMutationSuccess={workspaceData.weatherLocationMutationSuccess}
           onRunExternalDataSync={workspaceData.handleRunExternalDataSync}
           onCounterpartyCreditImportDraftChange={workspaceData.handleCounterpartyCreditImportDraftChange}
           onPreviewCounterpartyCreditImport={workspaceData.handlePreviewCounterpartyCreditImport}
           onImportCounterpartyCreditSnapshots={workspaceData.handleImportCounterpartyCreditSnapshots}
+          onCreateWeatherLocation={workspaceData.handleCreateWeatherLocation}
+          onDeactivateWeatherLocation={workspaceData.handleDeactivateWeatherLocation}
+          onReactivateWeatherLocation={workspaceData.handleReactivateWeatherLocation}
           onRunNwsWeatherSync={workspaceData.handleRunNwsWeatherSync}
           onSeedTradingSources={workspaceData.handleSeedTradingSources}
+          onUpdateWeatherLocation={workspaceData.handleUpdateWeatherLocation}
           onRefreshData={workspaceData.loadData}
           formatDate={formatDate}
           formatMoney={formatMoney}
@@ -610,8 +687,13 @@ export function AppWorkspaceContent({
           authSession={workspaceData.authSession}
           appearanceSettings={appearance.appearanceSettings}
           resolvedColorMode={appearance.resolvedColorMode}
+          bookOptions={summary.activeBooks}
+          commodityClassOptions={summary.commodityClassOptions}
           onAppearanceSettingsChange={appearance.handleAppearanceSettingsChange}
           onAppearanceSettingsReset={appearance.handleAppearanceSettingsReset}
+          tradeCaptureSettings={tradeCapturePreferences.tradeCaptureSettings}
+          onTradeCaptureSettingsChange={tradeCapturePreferences.handleTradeCaptureSettingsChange}
+          onTradeCaptureSettingsReset={tradeCapturePreferences.handleTradeCaptureSettingsReset}
           onSessionChange={workspaceData.handleSessionChange}
         />
       )

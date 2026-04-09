@@ -167,11 +167,20 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         self.assertIsNone(trader_dashboard.json())
 
         trades_payload = {
-            "order": ["trade-board", "create-trade", "trade-inspector"],
-            "hidden": ["trade-inspector"],
+            "order": [
+                "trade-board",
+                "trade-pricing-coverage",
+                "trade-pending-pricing",
+                "create-trade",
+                "trade-inspector",
+                "trade-books-in-play",
+                "trade-largest-line",
+            ],
+            "hidden": ["trade-inspector", "trade-books-in-play"],
             "spans": {
                 "trade-board": "wide",
                 "trade-inspector": "half",
+                "trade-pricing-coverage": "side",
             },
         }
         save_trades = self.client.put(

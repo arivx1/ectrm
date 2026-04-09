@@ -44,3 +44,16 @@ export async function updateTradeWorkflowItem(
     },
   )
 }
+
+export async function bookOptionSettlementUnderlying(
+  apiBase: string,
+  itemId: number,
+): Promise<TradeWorkflowItemRecord> {
+  return postJson<TradeWorkflowItemRecord>(
+    `${apiBase}/operations/work-items/${itemId}/book-underlying`,
+    {},
+    {
+      headers: operationsHeaders(),
+    },
+  )
+}

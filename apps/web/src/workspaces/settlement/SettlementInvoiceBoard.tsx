@@ -20,8 +20,10 @@ type SettlementInvoiceBoardProps = {
 }
 
 type InvoiceDraft = {
+  legNo: string
   invoiceNumber: string
   invoiceCurrencyCode: string
+  billedQuantity: string
   invoiceAmount: string
   issuedAt: string
   dueAt: string
@@ -29,59 +31,67 @@ type InvoiceDraft = {
   disputeReason: string
 }
 
-function defaultInvoiceAmount(trade: Trade): string {
-  if (trade.price == null || trade.volume == null) {
-    return ''
-  }
-  const amount = Math.abs(trade.price * trade.volume)
-  return Number.isFinite(amount) ? String(amount) : ''
-}
-
-function defaultInvoiceNumber(trade: Trade): string {
-  return `INV-${trade.trade_id}`
-}
-
-function buildDraft(trade: Trade, invoice: TradeInvoiceRecord | undefined): InvoiceDraft {
+function buildCreateDraft(trade: Trade): InvoiceDraft {
   return {
-    invoiceNumber: invoice?.invoice_number ?? defaultInvoiceNumber(trade),
-    invoiceCurrencyCode: invoice?.invoice_currency_code ?? trade.trade_currency_code ?? 'USD',
-    invoiceAmount: invoice ? String(invoice.invoice_amount) : defaultInvoiceAmount(trade),
-    issuedAt: invoice?.issued_at ? invoice.issued_at.slice(0, 10) : '',
-    dueAt: invoice?.due_at ? invoice.due_at.slice(0, 10) : trade.delivery_end ?? trade.effective_end_date ?? '',
-    notes: invoice?.notes ?? '',
-    disputeReason: invoice?.dispute_reason ?? '',
+    legNo: '',
+    invoiceNumber: '',
+    invoiceCurrencyCode: trade.trade_currency_code ?? 'USD',
+    billedQuantity: '',
+    invoiceAmount: '',
+    issuedAt: '',
+    dueAt: trade.delivery_end ?? trade.effective_end_date ?? '',
+    notes: '',
+    disputeReason: '',
   }
 }
 
-function emptyDraft(trade: Trade): InvoiceDraft {
-  return buildDraft(trade, undefined)
+function buildEditDraft(invoice: TradeInvoiceRecord): InvoiceDraft {
+  return {
+    legNo: invoice.leg_no != null ? String(invoice.leg_no) : '',
+    invoiceNumber: invoice.invoice_number,
+    invoiceCurrencyCode: invoice.invoice_currency_code,
+    billedQuantity: invoice.billed_quantity != null ? String(invoice.billed_quantity) : '',
+    invoiceAmount: String(invoice.invoice_amount),
+    issuedAt: invoice.issued_at ? invoice.issued_at.slice(0, 10) : '',
+    dueAt: invoice.due_at ? invoice.due_at.slice(0, 10) : '',
+    notes: invoice.notes ?? '',
+    disputeReason: invoice.dispute_reason ?? '',
+  }
 }
 
-function updateIsoDate(value: string): string | null {
+function toIsoDate(value: string): string | null {
   return value ? `${value}T12:00:00.000Z` : null
 }
 
 function buildCreatePayload(trade: Trade, draft: InvoiceDraft): CreateTradeInvoiceInput {
   const payload: CreateTradeInvoiceInput = { trade_id: trade.trade_id }
+  const parsedLegNo = Number.parseInt(draft.legNo, 10)
+  const billedQuantity = Number.parseFloat(draft.billedQuantity)
+  const invoiceAmount = Number.parseFloat(draft.invoiceAmount)
   const invoiceNumber = draft.invoiceNumber.trim()
   const invoiceCurrencyCode = draft.invoiceCurrencyCode.trim().toUpperCase()
-  const invoiceAmount = Number.parseFloat(draft.invoiceAmount)
   const notes = draft.notes.trim()
 
+  if (Number.isInteger(parsedLegNo) && parsedLegNo > 0) {
+    payload.leg_no = parsedLegNo
+  }
   if (invoiceNumber) {
     payload.invoice_number = invoiceNumber
   }
   if (invoiceCurrencyCode) {
     payload.invoice_currency_code = invoiceCurrencyCode
   }
+  if (Number.isFinite(billedQuantity)) {
+    payload.billed_quantity = billedQuantity
+  }
   if (Number.isFinite(invoiceAmount)) {
     payload.invoice_amount = invoiceAmount
   }
   if (draft.issuedAt) {
-    payload.issued_at = updateIsoDate(draft.issuedAt)
+    payload.issued_at = toIsoDate(draft.issuedAt)
   }
   if (draft.dueAt) {
-    payload.due_at = updateIsoDate(draft.dueAt)
+    payload.due_at = toIsoDate(draft.dueAt)
   }
   if (notes) {
     payload.notes = notes
@@ -99,8 +109,6 @@ function buildUpdatePayload(
   const invoiceNumber = draft.invoiceNumber.trim()
   const invoiceCurrencyCode = draft.invoiceCurrencyCode.trim().toUpperCase()
   const invoiceAmount = Number.parseFloat(draft.invoiceAmount)
-  const issuedAt = draft.issuedAt
-  const dueAt = draft.dueAt
   const notes = draft.notes.trim()
   const disputeReason = draft.disputeReason.trim()
 
@@ -113,11 +121,11 @@ function buildUpdatePayload(
   if (Number.isFinite(invoiceAmount) && invoiceAmount !== invoice.invoice_amount) {
     payload.invoice_amount = invoiceAmount
   }
-  if (issuedAt !== invoice.issued_at.slice(0, 10)) {
-    payload.issued_at = updateIsoDate(issuedAt)
+  if (draft.issuedAt !== invoice.issued_at.slice(0, 10)) {
+    payload.issued_at = toIsoDate(draft.issuedAt)
   }
-  if (dueAt !== invoice.due_at.slice(0, 10)) {
-    payload.due_at = updateIsoDate(dueAt)
+  if (draft.dueAt !== invoice.due_at.slice(0, 10)) {
+    payload.due_at = toIsoDate(draft.dueAt)
   }
   if (notes !== (invoice.notes ?? '')) {
     payload.notes = notes || null
@@ -132,25 +140,42 @@ function buildUpdatePayload(
   return payload
 }
 
-function invoiceTone(
-  trade: Trade,
-  invoice: TradeInvoiceRecord | undefined,
-): 'active' | 'in-progress' | 'blocked' {
+function invoiceTone(trade: Trade, hasInvoices: boolean): 'active' | 'in-progress' | 'blocked' {
   if (trade.credit_hold_active) {
     return 'blocked'
   }
   if (
     trade.settlement_status === 'DISPUTED' ||
-    invoice?.status === 'DISPUTED' ||
-    invoice?.is_overdue ||
+    trade.invoice_status === 'DISPUTED' ||
     trade.payment_status === 'OVERDUE'
   ) {
     return 'blocked'
   }
-  if (invoice) {
+  if (hasInvoices) {
     return 'in-progress'
   }
   return 'active'
+}
+
+function invoiceScopeLabel(invoice: TradeInvoiceRecord): string {
+  if (invoice.leg_no != null) {
+    return `Leg ${invoice.leg_no}`
+  }
+  if (invoice.delivery_id) {
+    return 'Delivery scoped'
+  }
+  return 'Trade-level adjustment'
+}
+
+function formatBilledQuantity(invoice: TradeInvoiceRecord): string | null {
+  if (invoice.billed_quantity == null) {
+    return null
+  }
+  const quantity = invoice.billed_quantity.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
+  })
+  return [quantity, invoice.quantity_unit_code].filter(Boolean).join(' ')
 }
 
 export function SettlementInvoiceBoard({
@@ -168,34 +193,60 @@ export function SettlementInvoiceBoard({
   onOpenTrade,
   onSaveInvoice,
 }: SettlementInvoiceBoardProps) {
-  const invoiceByTradeId = new Map(invoices.map((invoice) => [invoice.trade_id, invoice]))
+  const invoicesByTradeId = new Map<string, TradeInvoiceRecord[]>()
+  for (const invoice of [...invoices].sort(
+    (left, right) => right.issued_at.localeCompare(left.issued_at) || right.invoice_id - left.invoice_id,
+  )) {
+    const current = invoicesByTradeId.get(invoice.trade_id) ?? []
+    current.push(invoice)
+    invoicesByTradeId.set(invoice.trade_id, current)
+  }
+
   const invoiceItemByTradeId = new Map(invoiceWorkItems.map((item) => [item.trade_id, item]))
-  const [drafts, setDrafts] = useState<Record<string, InvoiceDraft>>(() =>
-    Object.fromEntries(
-      trades.map((trade) => [trade.trade_id, buildDraft(trade, invoiceByTradeId.get(trade.trade_id))]),
-    ),
+  const [createDrafts, setCreateDrafts] = useState<Record<string, InvoiceDraft>>(() =>
+    Object.fromEntries(trades.map((trade) => [trade.trade_id, buildCreateDraft(trade)])),
+  )
+  const [editDrafts, setEditDrafts] = useState<Record<number, InvoiceDraft>>(() =>
+    Object.fromEntries(invoices.map((invoice) => [invoice.invoice_id, buildEditDraft(invoice)])),
   )
 
-  function updateDraft(tradeId: string, patch: Partial<InvoiceDraft>) {
+  function updateCreateDraft(tradeId: string, patch: Partial<InvoiceDraft>) {
     const trade = trades.find((candidate) => candidate.trade_id === tradeId)
     if (!trade) {
       return
     }
-    setDrafts((current) => ({
+    setCreateDrafts((current) => ({
       ...current,
       [tradeId]: {
-        ...(current[tradeId] ?? emptyDraft(trade)),
+        ...(current[tradeId] ?? buildCreateDraft(trade)),
+        ...patch,
+      },
+    }))
+  }
+
+  function updateEditDraft(invoiceId: number, patch: Partial<InvoiceDraft>, invoice: TradeInvoiceRecord) {
+    setEditDrafts((current) => ({
+      ...current,
+      [invoiceId]: {
+        ...(current[invoiceId] ?? buildEditDraft(invoice)),
         ...patch,
       },
     }))
   }
 
   async function handleIssueInvoice(trade: Trade) {
-    await onIssueInvoice(trade.trade_id, buildCreatePayload(trade, drafts[trade.trade_id] ?? emptyDraft(trade)))
+    await onIssueInvoice(
+      trade.trade_id,
+      buildCreatePayload(trade, createDrafts[trade.trade_id] ?? buildCreateDraft(trade)),
+    )
   }
 
-  async function handleSaveInvoice(trade: Trade, invoice: TradeInvoiceRecord, nextStatus?: string) {
-    const payload = buildUpdatePayload(invoice, drafts[trade.trade_id] ?? buildDraft(trade, invoice), nextStatus)
+  async function handleSaveInvoice(invoice: TradeInvoiceRecord, nextStatus?: string) {
+    const payload = buildUpdatePayload(
+      invoice,
+      editDrafts[invoice.invoice_id] ?? buildEditDraft(invoice),
+      nextStatus,
+    )
     if (Object.keys(payload).length === 0) {
       return
     }
@@ -205,24 +256,29 @@ export function SettlementInvoiceBoard({
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to issue, approve, and dispute settlement invoices.</p>
+        <p className="workflow-editor-note">
+          Sign in from Settings to issue, approve, and dispute settlement invoices.
+        </p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
       <div className="position-list">
         {trades.map((trade) => {
-          const invoice = invoiceByTradeId.get(trade.trade_id)
+          const tradeInvoices = invoicesByTradeId.get(trade.trade_id) ?? []
           const workflowItem = invoiceItemByTradeId.get(trade.trade_id)
-          const draft = drafts[trade.trade_id] ?? buildDraft(trade, invoice)
-          const pendingKey = invoice ? `invoice:${invoice.invoice_id}` : `trade:${trade.trade_id}`
-          const isSaving = savingKey === pendingKey
+          const createDraft = createDrafts[trade.trade_id] ?? buildCreateDraft(trade)
+          const isCreating = savingKey === `trade:${trade.trade_id}`
           const creditHoldActive = trade.credit_hold_active === true
-          const savePayload = invoice ? buildUpdatePayload(invoice, draft) : null
-          const approvePayload = invoice ? buildUpdatePayload(invoice, draft, 'APPROVED') : null
-          const disputePayload = invoice ? buildUpdatePayload(invoice, draft, 'DISPUTED') : null
-          const disputeBlocked = !invoice ? true : !draft.disputeReason.trim() && invoice.status !== 'DISPUTED'
+          const latestInvoice = tradeInvoices[0]
+          const createHelperText =
+            trade.trade_nature === 'PHYSICAL'
+              ? 'Leave amount blank to default from remaining actualized quantity. Provide a leg and/or billed quantity to target a specific delivery slice.'
+              : 'Leave amount blank to default from the trade notional.'
 
           return (
-            <article key={trade.trade_id} className="position-card shipment-card workflow-item-card settlement-invoice-card">
+            <article
+              key={trade.trade_id}
+              className="position-card shipment-card workflow-item-card settlement-invoice-card"
+            >
               <div className="shipment-card-head">
                 <div className="shipment-card-copy">
                   <strong>{trade.trade_id}</strong>
@@ -230,48 +286,84 @@ export function SettlementInvoiceBoard({
                     {trade.commodity} • {trade.counterparty ?? 'Counterparty TBD'} • {trade.book}
                   </span>
                 </div>
-                <span className={`status-pill status-pill-${invoiceTone(trade, invoice)}`}>
-                  {(invoice?.status ?? 'PENDING').replaceAll('_', ' ')}
+                <span className={`status-pill status-pill-${invoiceTone(trade, tradeInvoices.length > 0)}`}>
+                  {trade.invoice_status.replaceAll('_', ' ')}
                 </span>
               </div>
               <div className="shipment-card-meta">
-                <span className="entity-chip entity-chip-soft">{formatCommodityClass(trade.commodity_class)}</span>
-                <span className="entity-chip entity-chip-soft">Payment {trade.payment_status.replaceAll('_', ' ')}</span>
-                {creditHoldActive ? <span className="status-pill status-pill-blocked">Credit Hold</span> : null}
+                <span className="entity-chip entity-chip-soft">
+                  {formatCommodityClass(trade.commodity_class)}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  Actualization {trade.actualization_status.replaceAll('_', ' ')}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  Payment {trade.payment_status.replaceAll('_', ' ')}
+                </span>
                 <span className="entity-chip entity-chip-soft">
                   {workflowItem?.owner ? `Owner ${workflowItem.owner}` : 'Unassigned'}
                 </span>
                 <span className="entity-chip entity-chip-soft">
-                  {draft.dueAt ? `Due ${formatDateOnly(draft.dueAt)}` : 'Due date TBD'}
+                  {tradeInvoices.length === 1 ? '1 invoice' : `${tradeInvoices.length} invoices`}
                 </span>
+                {creditHoldActive ? <span className="status-pill status-pill-blocked">Credit Hold</span> : null}
               </div>
               <div className="shipment-card-copy">
                 <p>
-                  {invoice
-                    ? `Issued ${formatDateOnly(invoice.issued_at)} • Updated ${formatDate(invoice.updated_at)}`
-                    : `Est. notional ${formatMoney(
-                        trade.price != null && trade.volume != null ? Math.abs(trade.price * trade.volume) : null,
-                        trade.trade_currency_code,
-                      )}`}
+                  {latestInvoice
+                    ? `${tradeInvoices.length} invoice(s) recorded • Latest ${latestInvoice.invoice_number} updated ${formatDate(
+                        latestInvoice.updated_at,
+                      )}`
+                    : createHelperText}
                 </p>
               </div>
+
               <div className="workflow-item-grid settlement-invoice-grid">
                 <label className="field">
                   <span>Invoice Number</span>
                   <input
                     className="control control-compact"
-                    value={draft.invoiceNumber}
-                    onChange={(event) => updateDraft(trade.trade_id, { invoiceNumber: event.target.value })}
-                    disabled={isSaving || creditHoldActive}
+                    value={createDraft.invoiceNumber}
+                    onChange={(event) => updateCreateDraft(trade.trade_id, { invoiceNumber: event.target.value })}
+                    disabled={isCreating || creditHoldActive}
+                    placeholder="Auto-sequence"
+                  />
+                </label>
+                <label className="field">
+                  <span>Leg</span>
+                  <input
+                    className="control control-compact"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={createDraft.legNo}
+                    onChange={(event) => updateCreateDraft(trade.trade_id, { legNo: event.target.value })}
+                    disabled={isCreating || creditHoldActive}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label className="field">
+                  <span>Billed Quantity</span>
+                  <input
+                    className="control control-compact"
+                    type="number"
+                    min="0"
+                    step="0.000001"
+                    value={createDraft.billedQuantity}
+                    onChange={(event) => updateCreateDraft(trade.trade_id, { billedQuantity: event.target.value })}
+                    disabled={isCreating || creditHoldActive}
+                    placeholder="Default remaining actualized"
                   />
                 </label>
                 <label className="field">
                   <span>Currency</span>
                   <input
                     className="control control-compact"
-                    value={draft.invoiceCurrencyCode}
-                    onChange={(event) => updateDraft(trade.trade_id, { invoiceCurrencyCode: event.target.value })}
-                    disabled={isSaving || creditHoldActive}
+                    value={createDraft.invoiceCurrencyCode}
+                    onChange={(event) =>
+                      updateCreateDraft(trade.trade_id, { invoiceCurrencyCode: event.target.value })
+                    }
+                    disabled={isCreating || creditHoldActive}
                   />
                 </label>
                 <label className="field">
@@ -281,9 +373,10 @@ export function SettlementInvoiceBoard({
                     type="number"
                     min="0"
                     step="0.01"
-                    value={draft.invoiceAmount}
-                    onChange={(event) => updateDraft(trade.trade_id, { invoiceAmount: event.target.value })}
-                    disabled={isSaving || creditHoldActive}
+                    value={createDraft.invoiceAmount}
+                    onChange={(event) => updateCreateDraft(trade.trade_id, { invoiceAmount: event.target.value })}
+                    disabled={isCreating || creditHoldActive}
+                    placeholder="Default from settlement basis"
                   />
                 </label>
                 <label className="field">
@@ -291,9 +384,9 @@ export function SettlementInvoiceBoard({
                   <input
                     className="control control-compact"
                     type="date"
-                    value={draft.issuedAt}
-                    onChange={(event) => updateDraft(trade.trade_id, { issuedAt: event.target.value })}
-                    disabled={isSaving || creditHoldActive}
+                    value={createDraft.issuedAt}
+                    onChange={(event) => updateCreateDraft(trade.trade_id, { issuedAt: event.target.value })}
+                    disabled={isCreating || creditHoldActive}
                   />
                 </label>
                 <label className="field">
@@ -301,9 +394,9 @@ export function SettlementInvoiceBoard({
                   <input
                     className="control control-compact"
                     type="date"
-                    value={draft.dueAt}
-                    onChange={(event) => updateDraft(trade.trade_id, { dueAt: event.target.value })}
-                    disabled={isSaving || creditHoldActive}
+                    value={createDraft.dueAt}
+                    onChange={(event) => updateCreateDraft(trade.trade_id, { dueAt: event.target.value })}
+                    disabled={isCreating || creditHoldActive}
                   />
                 </label>
                 <label className="field">
@@ -319,87 +412,275 @@ export function SettlementInvoiceBoard({
                   <textarea
                     className="control control-compact"
                     rows={3}
-                    value={draft.notes}
-                    onChange={(event) => updateDraft(trade.trade_id, { notes: event.target.value })}
-                    disabled={isSaving || creditHoldActive}
+                    value={createDraft.notes}
+                    onChange={(event) => updateCreateDraft(trade.trade_id, { notes: event.target.value })}
+                    disabled={isCreating || creditHoldActive}
                   />
                 </label>
-                <label className="field field-wide">
-                  <span>Dispute Reason</span>
-                  <textarea
-                    className="control control-compact"
-                    rows={2}
-                    value={draft.disputeReason}
-                    onChange={(event) => updateDraft(trade.trade_id, { disputeReason: event.target.value })}
-                    disabled={isSaving || creditHoldActive}
-                  />
-                </label>
+              </div>
+              <div className="workflow-item-actions">
+                <div className="shipment-card-copy">
+                  <p>{createHelperText}</p>
+                </div>
+                <div className="workflow-item-button-row">
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    onClick={() => handleIssueInvoice(trade)}
+                    disabled={!authSession || isCreating || creditHoldActive}
+                  >
+                    {isCreating
+                      ? 'Issuing...'
+                      : tradeInvoices.length > 0
+                        ? 'Issue Additional Invoice'
+                        : 'Issue First Invoice'}
+                  </button>
+                  <button type="button" className="button button-ghost" onClick={() => onOpenTrade(trade.trade_id)}>
+                    Open Trade
+                  </button>
+                </div>
               </div>
               {creditHoldActive ? (
                 <p className="field-error">
                   {trade.credit_hold_reason ?? 'Credit approval is pending review.'}
                 </p>
               ) : null}
-              <div className="workflow-item-actions">
-                <div className="shipment-card-copy">
-                  <p>
-                    {invoice
-                      ? `Invoice ${invoice.invoice_number} for ${formatMoney(
-                          invoice.invoice_amount,
-                          invoice.invoice_currency_code,
-                        )}`
-                      : 'Issue the first invoice record to move this trade from status-only settlement into the invoice ledger.'}
-                  </p>
+
+              {tradeInvoices.length > 0 ? (
+                <div className="settlement-payment-list">
+                  {tradeInvoices.map((invoice) => {
+                    const draft = editDrafts[invoice.invoice_id] ?? buildEditDraft(invoice)
+                    const isSavingInvoice = savingKey === `invoice:${invoice.invoice_id}`
+                    const savePayload = buildUpdatePayload(invoice, draft)
+                    const approvePayload = buildUpdatePayload(invoice, draft, 'APPROVED')
+                    const disputePayload = buildUpdatePayload(invoice, draft, 'DISPUTED')
+                    const disputeBlocked =
+                      !draft.disputeReason.trim() && invoice.status !== 'DISPUTED'
+                    const billedQuantity = formatBilledQuantity(invoice)
+
+                    return (
+                      <article key={invoice.invoice_id} className="settlement-payment-entry">
+                        <div className="shipment-card-head">
+                          <div className="shipment-card-copy">
+                            <strong>{invoice.invoice_number}</strong>
+                            <span>
+                              Issued {formatDateOnly(invoice.issued_at)} • Updated {formatDate(invoice.updated_at)}
+                            </span>
+                          </div>
+                          <span
+                            className={`status-pill status-pill-${
+                              invoice.status === 'DISPUTED' || invoice.is_overdue ? 'blocked' : 'in-progress'
+                            }`}
+                          >
+                            {invoice.status.replaceAll('_', ' ')}
+                          </span>
+                        </div>
+                        <div className="shipment-card-meta">
+                          <span className="entity-chip entity-chip-soft">{invoiceScopeLabel(invoice)}</span>
+                          {billedQuantity ? (
+                            <span className="entity-chip entity-chip-soft">{billedQuantity}</span>
+                          ) : null}
+                          <span className="entity-chip entity-chip-soft">
+                            Payment {invoice.payment_status.replaceAll('_', ' ')}
+                          </span>
+                          <span className="entity-chip entity-chip-soft">
+                            Settlement {invoice.settlement_status.replaceAll('_', ' ')}
+                          </span>
+                        </div>
+                        <div className="settlement-payment-summary">
+                          <div className="shipment-kpi-row">
+                            <span>Invoice Amount</span>
+                            <strong>
+                              {formatMoney(invoice.invoice_amount, invoice.invoice_currency_code)}
+                            </strong>
+                          </div>
+                          <div className="shipment-kpi-row">
+                            <span>Total Paid</span>
+                            <strong>
+                              {formatMoney(invoice.total_paid_amount, invoice.invoice_currency_code)}
+                            </strong>
+                          </div>
+                          <div className="shipment-kpi-row">
+                            <span>Outstanding</span>
+                            <strong>
+                              {formatMoney(invoice.outstanding_amount, invoice.invoice_currency_code)}
+                            </strong>
+                          </div>
+                          <div className="shipment-kpi-row">
+                            <span>Due</span>
+                            <strong>{formatDateOnly(invoice.due_at)}</strong>
+                          </div>
+                        </div>
+                        <div className="workflow-item-grid settlement-invoice-grid">
+                          <label className="field">
+                            <span>Invoice Number</span>
+                            <input
+                              className="control control-compact"
+                              value={draft.invoiceNumber}
+                              onChange={(event) =>
+                                updateEditDraft(invoice.invoice_id, { invoiceNumber: event.target.value }, invoice)
+                              }
+                              disabled={isSavingInvoice || creditHoldActive}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Scope</span>
+                            <input
+                              className="control control-compact"
+                              value={invoiceScopeLabel(invoice)}
+                              disabled
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Quantity</span>
+                            <input
+                              className="control control-compact"
+                              value={billedQuantity ?? 'Manual amount'}
+                              disabled
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Currency</span>
+                            <input
+                              className="control control-compact"
+                              value={draft.invoiceCurrencyCode}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  invoice.invoice_id,
+                                  { invoiceCurrencyCode: event.target.value },
+                                  invoice,
+                                )
+                              }
+                              disabled={isSavingInvoice || creditHoldActive}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Amount</span>
+                            <input
+                              className="control control-compact"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={draft.invoiceAmount}
+                              onChange={(event) =>
+                                updateEditDraft(invoice.invoice_id, { invoiceAmount: event.target.value }, invoice)
+                              }
+                              disabled={isSavingInvoice || creditHoldActive}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Issued</span>
+                            <input
+                              className="control control-compact"
+                              type="date"
+                              value={draft.issuedAt}
+                              onChange={(event) =>
+                                updateEditDraft(invoice.invoice_id, { issuedAt: event.target.value }, invoice)
+                              }
+                              disabled={isSavingInvoice || creditHoldActive}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Due</span>
+                            <input
+                              className="control control-compact"
+                              type="date"
+                              value={draft.dueAt}
+                              onChange={(event) =>
+                                updateEditDraft(invoice.invoice_id, { dueAt: event.target.value }, invoice)
+                              }
+                              disabled={isSavingInvoice || creditHoldActive}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Payment</span>
+                            <input
+                              className="control control-compact"
+                              value={invoice.payment_status.replaceAll('_', ' ')}
+                              disabled
+                            />
+                          </label>
+                          <label className="field field-wide">
+                            <span>Notes</span>
+                            <textarea
+                              className="control control-compact"
+                              rows={3}
+                              value={draft.notes}
+                              onChange={(event) =>
+                                updateEditDraft(invoice.invoice_id, { notes: event.target.value }, invoice)
+                              }
+                              disabled={isSavingInvoice || creditHoldActive}
+                            />
+                          </label>
+                          <label className="field field-wide">
+                            <span>Dispute Reason</span>
+                            <textarea
+                              className="control control-compact"
+                              rows={2}
+                              value={draft.disputeReason}
+                              onChange={(event) =>
+                                updateEditDraft(invoice.invoice_id, { disputeReason: event.target.value }, invoice)
+                              }
+                              disabled={isSavingInvoice || creditHoldActive}
+                            />
+                          </label>
+                        </div>
+                        <div className="workflow-item-actions">
+                          <div className="shipment-card-copy">
+                            <p>
+                              {invoice.delivery_id
+                                ? `Scoped to ${invoiceScopeLabel(invoice).toLowerCase()}${billedQuantity ? ` for ${billedQuantity}` : ''}.`
+                                : 'Recorded as a trade-level adjustment invoice.'}
+                            </p>
+                          </div>
+                          <div className="workflow-item-button-row">
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              onClick={() => handleSaveInvoice(invoice)}
+                              disabled={
+                                !authSession ||
+                                isSavingInvoice ||
+                                creditHoldActive ||
+                                Object.keys(savePayload).length === 0
+                              }
+                            >
+                              {isSavingInvoice ? 'Saving...' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              onClick={() => handleSaveInvoice(invoice, 'APPROVED')}
+                              disabled={
+                                !authSession ||
+                                isSavingInvoice ||
+                                creditHoldActive ||
+                                Object.keys(approvePayload).length === 0
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              onClick={() => handleSaveInvoice(invoice, 'DISPUTED')}
+                              disabled={
+                                !authSession ||
+                                isSavingInvoice ||
+                                creditHoldActive ||
+                                disputeBlocked ||
+                                Object.keys(disputePayload).length === 0
+                              }
+                            >
+                              Mark Disputed
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    )
+                  })}
                 </div>
-                <div className="workflow-item-button-row">
-                  {!invoice ? (
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      onClick={() => handleIssueInvoice(trade)}
-                      disabled={!authSession || isSaving || creditHoldActive}
-                    >
-                      {isSaving ? 'Issuing...' : 'Issue Invoice'}
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="button button-ghost"
-                        onClick={() => handleSaveInvoice(trade, invoice)}
-                        disabled={!authSession || isSaving || creditHoldActive || Object.keys(savePayload ?? {}).length === 0}
-                      >
-                        {isSaving ? 'Saving...' : 'Save'}
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => handleSaveInvoice(trade, invoice, 'APPROVED')}
-                        disabled={!authSession || isSaving || creditHoldActive || Object.keys(approvePayload ?? {}).length === 0}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => handleSaveInvoice(trade, invoice, 'DISPUTED')}
-                        disabled={
-                          !authSession ||
-                          isSaving ||
-                          creditHoldActive ||
-                          disputeBlocked ||
-                          Object.keys(disputePayload ?? {}).length === 0
-                        }
-                      >
-                        Mark Disputed
-                      </button>
-                    </>
-                  )}
-                  <button type="button" className="button button-ghost" onClick={() => onOpenTrade(trade.trade_id)}>
-                    Open Trade
-                  </button>
-                </div>
-              </div>
+              ) : null}
             </article>
           )
         })}

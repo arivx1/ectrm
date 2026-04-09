@@ -1,6 +1,26 @@
-import type { DeliveryRecord } from '../../shared/models'
+import type { DeliveryRecord, DeliverySchedulingWorkflowItemRecord } from '../../shared/models'
 
 export type SchedulingWindowBand = 'LIVE' | 'NEXT_24' | 'NEXT_72' | 'LATER' | 'TBD'
+export type SchedulingStage = 'BLOCKED' | 'READY' | 'IN_FLIGHT' | 'WATCHLIST'
+export type SchedulingViewPreset =
+  | 'DESK'
+  | 'HOT_WINDOW'
+  | 'BLOCKED'
+  | 'READY'
+  | 'IN_FLIGHT'
+  | 'WATCHLIST'
+
+export type SchedulingWorkbenchRow = {
+  delivery: DeliveryRecord
+  dueAt: string | null
+  isDueSoon: boolean
+  nextWorkflowItem: DeliverySchedulingWorkflowItemRecord | null
+  openWorkflowItems: DeliverySchedulingWorkflowItemRecord[]
+  owner: string | null
+  stage: SchedulingStage
+  workflowItems: DeliverySchedulingWorkflowItemRecord[]
+  windowBand: SchedulingWindowBand
+}
 
 const DELIVERY_STATUS_RANK: Record<DeliveryRecord['status'], number> = {
   BLOCKED: 0,
@@ -8,7 +28,17 @@ const DELIVERY_STATUS_RANK: Record<DeliveryRecord['status'], number> = {
   READY: 2,
   COMPLETED: 3,
 }
-
+const WORKFLOW_TYPE_ORDER: Record<DeliverySchedulingWorkflowItemRecord['workflow_type'], number> = {
+  CONFIRMATION: 0,
+  NOMINATION: 1,
+  ALLOCATION: 2,
+}
+const STAGE_RANK: Record<SchedulingStage, number> = {
+  BLOCKED: 0,
+  READY: 1,
+  IN_FLIGHT: 2,
+  WATCHLIST: 3,
+}
 export const SCHEDULED_NOMINATION_STATUSES = new Set(['SCHEDULED', 'NOMINATED', 'COMPLETED'])
 export const NOMINATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'SCHEDULED', 'NOMINATED', 'COMPLETED'])
 export const ALLOCATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'ALLOCATED', 'COMPLETED'])
@@ -117,4 +147,101 @@ export function selectUpcomingSchedulingWindows(
   limit = 8,
 ): DeliveryRecord[] {
   return [...deliveries].sort(compareBySchedulerPriority).slice(0, limit)
+}
+
+function workflowDueTimestamp(item: Pick<DeliverySchedulingWorkflowItemRecord, 'due_at'>): number {
+  const parsed = Date.parse(item.due_at ?? '')
+  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+}
+
+export function compareSchedulingWorkflowItems(
+  left: Pick<DeliverySchedulingWorkflowItemRecord, 'workflow_type' | 'due_at' | 'updated_at' | 'item_id'>,
+  right: Pick<DeliverySchedulingWorkflowItemRecord, 'workflow_type' | 'due_at' | 'updated_at' | 'item_id'>,
+): number {
+  const leftTypeRank = WORKFLOW_TYPE_ORDER[left.workflow_type]
+  const rightTypeRank = WORKFLOW_TYPE_ORDER[right.workflow_type]
+  if (leftTypeRank !== rightTypeRank) {
+    return leftTypeRank - rightTypeRank
+  }
+
+  const leftDue = workflowDueTimestamp(left)
+  const rightDue = workflowDueTimestamp(right)
+  if (leftDue !== rightDue) {
+    return leftDue - rightDue
+  }
+
+  const updatedAtComparison = right.updated_at.localeCompare(left.updated_at)
+  if (updatedAtComparison !== 0) {
+    return updatedAtComparison
+  }
+
+  return left.item_id - right.item_id
+}
+
+export function compareSchedulingWorkbenchRows(
+  left: SchedulingWorkbenchRow,
+  right: SchedulingWorkbenchRow,
+): number {
+  const leftStageRank = STAGE_RANK[left.stage]
+  const rightStageRank = STAGE_RANK[right.stage]
+  if (leftStageRank !== rightStageRank) {
+    return leftStageRank - rightStageRank
+  }
+
+  if (left.isDueSoon !== right.isDueSoon) {
+    return left.isDueSoon ? -1 : 1
+  }
+
+  const leftDue = left.dueAt ? workflowDueTimestamp({ due_at: left.dueAt }) : Number.POSITIVE_INFINITY
+  const rightDue = right.dueAt ? workflowDueTimestamp({ due_at: right.dueAt }) : Number.POSITIVE_INFINITY
+  if (leftDue !== rightDue) {
+    return leftDue - rightDue
+  }
+
+  return compareBySchedulerPriority(left.delivery, right.delivery)
+}
+
+export function buildSchedulingWorkbenchRows(
+  deliveries: DeliveryRecord[],
+  now: number,
+  schedulingWindowMs: number,
+): SchedulingWorkbenchRow[] {
+  return deliveries
+    .map((delivery) => {
+      const workflowItemsForTrade = [...delivery.scheduling_work_items].sort(compareSchedulingWorkflowItems)
+      const openWorkflowItems = workflowItemsForTrade.filter((item) => !item.is_closed)
+
+      return {
+        delivery,
+        dueAt: delivery.scheduling_due_at,
+        isDueSoon: isDueWithinWindow(delivery, now, schedulingWindowMs),
+        nextWorkflowItem: openWorkflowItems[0] ?? null,
+        openWorkflowItems,
+        owner: delivery.scheduling_owner,
+        stage: delivery.scheduling_stage,
+        workflowItems: workflowItemsForTrade,
+        windowBand: windowBandForDelivery(delivery, now),
+      }
+    })
+    .sort(compareSchedulingWorkbenchRows)
+}
+
+export function matchesSchedulingView(
+  row: SchedulingWorkbenchRow,
+  preset: SchedulingViewPreset,
+): boolean {
+  switch (preset) {
+    case 'HOT_WINDOW':
+      return row.isDueSoon || row.windowBand === 'LIVE'
+    case 'BLOCKED':
+      return row.stage === 'BLOCKED'
+    case 'READY':
+      return row.stage === 'READY'
+    case 'IN_FLIGHT':
+      return row.stage === 'IN_FLIGHT'
+    case 'WATCHLIST':
+      return row.stage === 'WATCHLIST'
+    default:
+      return true
+  }
 }

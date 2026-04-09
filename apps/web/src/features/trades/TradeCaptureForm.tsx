@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import { TradeLegEditor } from './TradeLegEditor'
 import {
   buildCounterpartyCreditRestrictionMessage,
@@ -7,6 +9,7 @@ import {
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
 import { FieldLabel } from '../../shared/ui/Tooltip'
+import type { TradeCaptureAppliedRule } from '../../shared/tradeCaptureSettings'
 import {
   defaultTradeExecutionTime,
   getQualitySpecOptionsForCommodity,
@@ -40,8 +43,8 @@ type TradeLegDraft = {
 
 type TradeCaptureFormProps = {
   onSubmit: (event: React.FormEvent) => void
+  onClearForm: () => void
   tradeIdInput: string
-  setTradeIdInput: (value: string) => void
   tradeNatureInput: string
   setTradeNatureInput: (value: string) => void
   tradeStructureInput: string
@@ -63,6 +66,7 @@ type TradeCaptureFormProps = {
   setPricingStatusInput: (value: string) => void
   priceIndexInput: string
   setPriceIndexInput: (value: string) => void
+  showPriceIndexField: boolean
   createPriceIndexOptions: ReferenceRecord[]
   priceInput: string
   setPriceInput: (value: string) => void
@@ -112,8 +116,10 @@ type TradeCaptureFormProps = {
   setOptionExpirationDateInput: (value: string) => void
   optionStrikePriceInput: string
   setOptionStrikePriceInput: (value: string) => void
+  showOptionFields: boolean
   settlementStatusInput: string
   setSettlementStatusInput: (value: string) => void
+  activeRuleMatches: TradeCaptureAppliedRule[]
   traderUserInput: string
   setTraderUserInput: (value: string) => void
   createLegs: TradeLegDraft[]
@@ -139,11 +145,33 @@ type TradeCaptureFormProps = {
   formatCommodityClass: (value: string) => string
 }
 
+type TradeCaptureSectionProps = {
+  step: string
+  title: string
+  description: string
+  children: ReactNode
+}
+
+function TradeCaptureSection({ step, title, description, children }: TradeCaptureSectionProps) {
+  return (
+    <section className="trade-form-section field-full">
+      <div className="trade-form-section-head">
+        <div>
+          <span className="trade-form-section-step">Step {step}</span>
+          <h4>{title}</h4>
+        </div>
+        <p>{description}</p>
+      </div>
+      <div className="trade-form-section-grid">{children}</div>
+    </section>
+  )
+}
+
 export function TradeCaptureForm(props: TradeCaptureFormProps) {
   const {
     onSubmit,
+    onClearForm,
     tradeIdInput,
-    setTradeIdInput,
     tradeNatureInput,
     setTradeNatureInput,
     tradeStructureInput,
@@ -165,6 +193,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     setPricingStatusInput,
     priceIndexInput,
     setPriceIndexInput,
+    showPriceIndexField,
     createPriceIndexOptions,
     priceInput,
     setPriceInput,
@@ -214,8 +243,10 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     setOptionExpirationDateInput,
     optionStrikePriceInput,
     setOptionStrikePriceInput,
+    showOptionFields,
     settlementStatusInput,
     setSettlementStatusInput,
+    activeRuleMatches,
     traderUserInput,
     setTraderUserInput,
     createLegs,
@@ -244,23 +275,139 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
   const qualitySpecOptions = getQualitySpecOptionsForCommodity(commodityInput)
   const qualitySpecListId = qualitySpecOptions.length > 0 ? 'trade-quality-spec-options' : undefined
   const optionTrade = tradeInstrumentUsesOptionFields(tradeInstrumentTypeInput)
+  const structureUsesLegs = tradeStructureSupportsLegs(tradeStructureInput)
   const selectedCounterparty =
     createCounterpartyOptions.find((counterparty) => counterparty.code === counterpartyInput) ?? null
   const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
 
+  const timingSummary = executionDateInput
+    ? [executionDateInput, executionTimeInput || defaultTradeExecutionTime].filter(Boolean).join(' • ')
+    : 'Execution not scheduled yet'
+  const productSummary = structureUsesLegs
+    ? createLegs[0]?.commodity || 'Leg 1 sets the product once selected'
+    : commodityInput || 'Choose a commodity to define the ticket'
+  const pricingSummary = [pricingTypeInput, pricingStatusInput, `Settlement ${settlementStatusInput}`].join(' • ')
+  const activeRuleCount = activeRuleMatches.length
+
   return (
-    <>
-      <form className="trade-form trade-form-feature" onSubmit={onSubmit}>
-        <input type="hidden" value={sourceSystemInput || ''} readOnly />
-        {duplicateSourceTradeId && (
-          <div className="field field-wide">
-            <div className="feedback-banner feedback-banner-success trade-structure-note">
-              <strong>Duplicating {duplicateSourceTradeId}</strong>
-              <p>New trade and external IDs are blank, execution time is reset, and settlement starts back at PENDING.</p>
-            </div>
+    <form className="trade-form trade-form-feature" onSubmit={onSubmit}>
+      <input type="hidden" value={sourceSystemInput || ''} readOnly />
+
+      <section className="trade-form-overview field-full">
+        <div className="trade-form-overview-head">
+          <div>
+            <span className="eyebrow">Ticket Flow</span>
+            <h3>{tradeIdInput}</h3>
+            <p>Capture the trade in four sections so the header, delivery, and pricing context stay easy to scan.</p>
           </div>
-        )}
-        <label className="field field-wide">
+          <div className="trade-form-overview-meta">
+            <span className="entity-chip">{duplicateSourceTradeId ? `Duplicating ${duplicateSourceTradeId}` : 'New Ticket'}</span>
+            <span className="entity-chip entity-chip-soft">{tradeInstrumentTypeInput}</span>
+            <span className="entity-chip entity-chip-soft">{tradeStructureInput}</span>
+            <span className="entity-chip entity-chip-soft">Pricing {pricingStatusInput}</span>
+            <span className="entity-chip entity-chip-soft">Settlement {settlementStatusInput}</span>
+          </div>
+        </div>
+
+        <div className="trade-form-overview-grid">
+          <article className="trade-form-overview-card">
+            <span>Ticket</span>
+            <strong>{tradeIdInput}</strong>
+            <p>{duplicateSourceTradeId ? 'Fresh trade number reserved for the duplicated ticket.' : 'Trade number is reserved automatically and stays read-only.'}</p>
+          </article>
+          <article className="trade-form-overview-card">
+            <span>Structure</span>
+            <strong>{[tradeInstrumentTypeInput, tradeNatureInput, tradeStructureInput].join(' • ')}</strong>
+            <p>{structureUsesLegs ? 'Swap legs will drive the commodity and volume.' : `Header side is ${tradeSideInput}.`}</p>
+          </article>
+          <article className="trade-form-overview-card">
+            <span>Timing</span>
+            <strong>{timingSummary}</strong>
+            <p>{locationInput || deliveryStartInput || deliveryEndInput ? [locationInput || 'Location pending', deliveryStartInput || 'Delivery start pending', deliveryEndInput || 'Delivery end pending'].filter(Boolean).join(' • ') : 'Add execution, effective, and delivery dates in the scheduling section.'}</p>
+          </article>
+          <article className="trade-form-overview-card">
+            <span>Pricing</span>
+            <strong>{pricingSummary}</strong>
+            <p>{productSummary}</p>
+          </article>
+        </div>
+
+        <div className="trade-form-rule-panel">
+          <div className="trade-form-rule-head">
+            <div>
+              <span>Active Rules</span>
+              <strong>
+                {activeRuleCount === 0
+                  ? 'Baseline defaults only'
+                  : `${activeRuleCount} rule${activeRuleCount === 1 ? '' : 's'} shaping this ticket`}
+              </strong>
+            </div>
+            <p>
+              {activeRuleCount === 0
+                ? 'Nothing conditional is matched right now. The form is following the baseline setup plus the built-in relevance rules for options, swaps, and pricing.'
+                : 'These rules matched from Settings and explain why the form defaulted values or changed field visibility.'}
+            </p>
+          </div>
+
+          {activeRuleCount === 0 ? (
+            <p className="trade-form-rule-empty">
+              Open Settings and add rule packs if this ticket should react to instrument, structure, pricing, commodity class, or book.
+            </p>
+          ) : (
+            <div className="trade-form-rule-list">
+              {activeRuleMatches.map((rule, index) => (
+                <article key={rule.id} className="trade-form-rule-card">
+                  <div className="trade-form-rule-card-head">
+                    <strong>{rule.name}</strong>
+                    <span className="entity-chip entity-chip-soft">Rule {index + 1}</span>
+                  </div>
+                  <p>{rule.reasons.join(' • ')}</p>
+                  <div className="trade-form-rule-tags">
+                    {rule.effects.map((effect) => (
+                      <span key={`${rule.id}-${effect}`} className="entity-chip">
+                        {effect}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {duplicateSourceTradeId && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-success trade-structure-note">
+            <strong>Duplicating {duplicateSourceTradeId}</strong>
+            <p>Trade number was regenerated, external IDs are blank, execution time is reset, and settlement starts back at PENDING.</p>
+          </div>
+        </div>
+      )}
+
+      {createError && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-error trade-structure-note">
+            <strong>Trade cannot be created yet</strong>
+            <p>{createError}</p>
+          </div>
+        </div>
+      )}
+
+      <TradeCaptureSection
+        step="1"
+        title="Ticket Setup"
+        description="Start with the generated trade number, then define who owns the ticket and how the position is structured."
+      >
+        <label className="field">
+          <div className="trade-form-field-title">
+            <span>Trade #</span>
+            <span className="entity-chip entity-chip-soft">Auto-generated</span>
+          </div>
+          <input className="control control-readonly" value={tradeIdInput} readOnly spellCheck={false} />
+          <p className="trade-form-helper">A fresh trade number is created automatically whenever you start over or duplicate a ticket.</p>
+        </label>
+        <label className="field">
           <span>External Trade ID</span>
           <input
             className="control"
@@ -270,16 +417,149 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             disabled={submitting}
           />
         </label>
-        <label className="field field-wide">
-          <span>Trade ID (optional)</span>
+        <label className="field">
+          <FieldLabel label="Instrument" tooltip={tradeTooltipCopy.instrument} />
+          <select
+            className="control"
+            value={tradeInstrumentTypeInput}
+            onChange={(event) => setTradeInstrumentTypeInput(event.target.value)}
+            disabled={submitting}
+          >
+            {tradeInstrumentTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Nature</span>
+          <select
+            className="control"
+            value={tradeNatureInput}
+            onChange={(event) => setTradeNatureInput(event.target.value)}
+            disabled={submitting || optionTrade}
+          >
+            {tradeNatureOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <FieldLabel label="Structure" tooltip={tradeTooltipCopy.structure} />
+          <select
+            className="control"
+            value={tradeStructureInput}
+            onChange={(event) => setTradeStructureInput(event.target.value)}
+            disabled={submitting || optionTrade}
+          >
+            {tradeStructureOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <FieldLabel label="Side" tooltip={tradeTooltipCopy.side} />
+          <select
+            className="control"
+            value={tradeSideInput}
+            onChange={(event) => setTradeSideInput(event.target.value)}
+            disabled={structureUsesLegs}
+          >
+            {tradeSideOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Counterparty</span>
+          <select
+            className="control"
+            value={counterpartyInput}
+            onChange={(event) => setCounterpartyInput(event.target.value)}
+            disabled={submitting}
+          >
+            <option value="">No counterparty</option>
+            {createCounterpartyOptions.map((counterparty) => (
+              <option key={counterparty.code} value={counterparty.code}>
+                {formatCounterpartyOptionLabel(counterparty)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Book</span>
+          <select
+            className="control"
+            value={bookInput}
+            onChange={(event) => setBookInput(event.target.value)}
+            disabled={submitting || referenceDataLoading || activeBooks.length === 0}
+          >
+            {activeBooks.map((book) => (
+              <option key={book.code} value={book.code}>
+                {book.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Portfolio</span>
+          <select
+            className="control"
+            value={portfolioInput}
+            onChange={(event) => setPortfolioInput(event.target.value)}
+            disabled={submitting || createPortfolioOptions.length === 0}
+          >
+            <option value="">No portfolio</option>
+            {createPortfolioOptions.map((portfolio) => (
+              <option key={portfolio.code} value={portfolio.code}>
+                {portfolio.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Trader User</span>
           <input
             className="control"
-            value={tradeIdInput}
-            onChange={(event) => setTradeIdInput(event.target.value)}
-            placeholder="Auto-generated if blank"
-            disabled={submitting || referenceDataLoading || !hasReferenceOptions}
+            value={traderUserInput}
+            onChange={(event) => setTraderUserInput(event.target.value)}
+            placeholder="trader.alpha"
+            disabled={submitting}
           />
         </label>
+
+        {counterpartyCreditWarning && (
+          <div className="field-full">
+            <div className="feedback-banner feedback-banner-error trade-structure-note">
+              <strong>Counterparty blocked for trading</strong>
+              <p>{counterpartyCreditWarning}</p>
+            </div>
+          </div>
+        )}
+        {counterpartyCreditPolicyPreview && (
+          <div className="field-full">
+            <div
+              className={`feedback-banner ${counterpartyCreditPolicyPreview.tone === 'error' ? 'feedback-banner-error' : ''} trade-structure-note`}
+            >
+              <strong>{counterpartyCreditPolicyPreview.title}</strong>
+              <p>{counterpartyCreditPolicyPreview.message}</p>
+            </div>
+          </div>
+        )}
+      </TradeCaptureSection>
+
+      <TradeCaptureSection
+        step="2"
+        title="Dates And Delivery"
+        description="Set the execution timestamp first, then layer in trade, effective, and delivery windows so downstream scheduling has clear anchors."
+      >
         <label className="field">
           <span>Execution Date</span>
           <input
@@ -335,135 +615,53 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           />
         </label>
         <label className="field">
-          <FieldLabel label="Instrument" tooltip={tradeTooltipCopy.instrument} />
+          <span>Location</span>
           <select
             className="control"
-            value={tradeInstrumentTypeInput}
-            onChange={(event) => setTradeInstrumentTypeInput(event.target.value)}
+            value={locationInput}
+            onChange={(event) => setLocationInput(event.target.value)}
             disabled={submitting}
           >
-            {tradeInstrumentTypeOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
+            <option value="">No location</option>
+            {createLocationOptions.map((location) => (
+              <option key={location.code} value={location.code}>
+                {location.code} · {location.name}
               </option>
             ))}
           </select>
         </label>
         <label className="field">
-          <span>Nature</span>
-          <select
+          <span>Delivery Start</span>
+          <input
             className="control"
-            value={tradeNatureInput}
-            onChange={(event) => setTradeNatureInput(event.target.value)}
-            disabled={submitting || optionTrade}
-          >
-            {tradeNatureOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <FieldLabel label="Structure" tooltip={tradeTooltipCopy.structure} />
-          <select
-            className="control"
-            value={tradeStructureInput}
-            onChange={(event) => setTradeStructureInput(event.target.value)}
-            disabled={submitting || optionTrade}
-          >
-            {tradeStructureOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <FieldLabel label="Side" tooltip={tradeTooltipCopy.side} />
-          <select
-            className="control"
-            value={tradeSideInput}
-            onChange={(event) => setTradeSideInput(event.target.value)}
-            disabled={tradeStructureSupportsLegs(tradeStructureInput)}
-          >
-            {tradeSideOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Counterparty</span>
-          <select
-            className="control"
-            value={counterpartyInput}
-            onChange={(event) => setCounterpartyInput(event.target.value)}
+            type="date"
+            value={deliveryStartInput}
+            onChange={(event) => setDeliveryStartInput(event.target.value)}
             disabled={submitting}
-          >
-            <option value="">No counterparty</option>
-            {createCounterpartyOptions.map((counterparty) => (
-              <option key={counterparty.code} value={counterparty.code}>
-                {formatCounterpartyOptionLabel(counterparty)}
-              </option>
-            ))}
-          </select>
-        </label>
-        {counterpartyCreditWarning && (
-          <div className="field field-wide">
-            <div className="feedback-banner feedback-banner-error trade-structure-note">
-              <strong>Counterparty blocked for trading</strong>
-              <p>{counterpartyCreditWarning}</p>
-            </div>
-          </div>
-        )}
-        {counterpartyCreditPolicyPreview && (
-          <div className="field field-wide">
-            <div
-              className={`feedback-banner ${counterpartyCreditPolicyPreview.tone === 'error' ? 'feedback-banner-error' : ''} trade-structure-note`}
-            >
-              <strong>{counterpartyCreditPolicyPreview.title}</strong>
-              <p>{counterpartyCreditPolicyPreview.message}</p>
-            </div>
-          </div>
-        )}
-        <label className="field">
-          <span>Book</span>
-          <select
-            className="control"
-            value={bookInput}
-            onChange={(event) => setBookInput(event.target.value)}
-            disabled={submitting || referenceDataLoading || activeBooks.length === 0}
-          >
-            {activeBooks.map((book) => (
-              <option key={book.code} value={book.code}>
-                {book.name}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label className="field">
-          <span>Portfolio</span>
-          <select
+          <span>Delivery End</span>
+          <input
             className="control"
-            value={portfolioInput}
-            onChange={(event) => setPortfolioInput(event.target.value)}
-            disabled={submitting || createPortfolioOptions.length === 0}
-          >
-            <option value="">No portfolio</option>
-            {createPortfolioOptions.map((portfolio) => (
-              <option key={portfolio.code} value={portfolio.code}>
-                {portfolio.name}
-              </option>
-            ))}
-          </select>
+            type="date"
+            value={deliveryEndInput}
+            onChange={(event) => setDeliveryEndInput(event.target.value)}
+            disabled={submitting}
+          />
         </label>
-        {tradeStructureSupportsLegs(tradeStructureInput) ? (
-          <div className="field field-wide">
+      </TradeCaptureSection>
+
+      <TradeCaptureSection
+        step="3"
+        title="Market And Terms"
+        description="Pick the product and contract terms here. The section adapts when the ticket becomes a swap or an option."
+      >
+        {structureUsesLegs ? (
+          <div className="field-full">
             <div className="feedback-banner trade-structure-note">
               <strong>Swap trades are leg-driven.</strong>
-              <p>Primary commodity now follows Leg 1 automatically, and top-level volume stays off the trade header.</p>
+              <p>Leg 1 now defines the primary commodity automatically, and top-level volume stays off the trade header.</p>
             </div>
           </div>
         ) : (
@@ -500,14 +698,16 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             </label>
           </>
         )}
-        {optionTrade && (
-          <div className="field field-wide">
+
+        {showOptionFields && (
+          <div className="field-full">
             <div className="feedback-banner trade-structure-note">
-              <strong>Option tickets are single-leg financial trades.</strong>
-              <p>Premium is captured in the price field, the commodity stays as the underlying, and option tickets stay out of the net-position projection until option risk math is added.</p>
+              <strong>Option tickets stay single-leg and financial.</strong>
+              <p>Premium is captured in the price field, the commodity remains the underlying, and expiry plus strike stay visible in this section.</p>
             </div>
           </div>
         )}
+
         <label className="field">
           <span>Quality Spec</span>
           <input
@@ -535,56 +735,6 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
               </option>
             ))}
           </select>
-        </label>
-        <label className="field">
-          <span>Option Type</span>
-          <select
-            className="control"
-            value={optionTypeInput}
-            onChange={(event) => setOptionTypeInput(event.target.value)}
-            disabled={submitting || !optionTrade}
-          >
-            {optionTypeOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Option Style</span>
-          <select
-            className="control"
-            value={optionStyleInput}
-            onChange={(event) => setOptionStyleInput(event.target.value)}
-            disabled={submitting || !optionTrade}
-          >
-            {optionStyleOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Expiration</span>
-          <input
-            className="control"
-            type="date"
-            value={optionExpirationDateInput}
-            onChange={(event) => setOptionExpirationDateInput(event.target.value)}
-            disabled={submitting || !optionTrade}
-          />
-        </label>
-        <label className="field">
-          <span>Strike Price</span>
-          <input
-            className="control"
-            inputMode="decimal"
-            value={optionStrikePriceInput}
-            onChange={(event) => setOptionStrikePriceInput(event.target.value)}
-            disabled={submitting || !optionTrade}
-          />
         </label>
         <label className="field">
           <span>Trade Currency</span>
@@ -618,47 +768,88 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>Location</span>
-          <select
-            className="control"
-            value={locationInput}
-            onChange={(event) => setLocationInput(event.target.value)}
-            disabled={submitting}
-          >
-            <option value="">No location</option>
-            {createLocationOptions.map((location) => (
-              <option key={location.code} value={location.code}>
-                {location.code} · {location.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Delivery Start</span>
-          <input
-            className="control"
-            type="date"
-            value={deliveryStartInput}
-            onChange={(event) => setDeliveryStartInput(event.target.value)}
-            disabled={submitting}
-          />
-        </label>
-        <label className="field">
-          <span>Delivery End</span>
-          <input
-            className="control"
-            type="date"
-            value={deliveryEndInput}
-            onChange={(event) => setDeliveryEndInput(event.target.value)}
-            disabled={submitting}
-          />
-        </label>
+        {showOptionFields && (
+          <>
+            <label className="field">
+              <span>Option Type</span>
+              <select
+                className="control"
+                value={optionTypeInput}
+                onChange={(event) => setOptionTypeInput(event.target.value)}
+                disabled={submitting || !optionTrade}
+              >
+                {optionTypeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Option Style</span>
+              <select
+                className="control"
+                value={optionStyleInput}
+                onChange={(event) => setOptionStyleInput(event.target.value)}
+                disabled={submitting || !optionTrade}
+              >
+                {optionStyleOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Expiration</span>
+              <input
+                className="control"
+                type="date"
+                value={optionExpirationDateInput}
+                onChange={(event) => setOptionExpirationDateInput(event.target.value)}
+                disabled={submitting || !optionTrade}
+              />
+            </label>
+            <label className="field">
+              <span>Strike Price</span>
+              <input
+                className="control"
+                inputMode="decimal"
+                value={optionStrikePriceInput}
+                onChange={(event) => setOptionStrikePriceInput(event.target.value)}
+                disabled={submitting || !optionTrade}
+              />
+            </label>
+          </>
+        )}
+
+        {structureUsesLegs && (
+          <div className="field-full">
+            <TradeLegEditor
+              title="Swap Legs"
+              legs={createLegs}
+              commodityClassOptions={commodityClassOptions}
+              activeCommodities={activeCommodities}
+              tradeSideOptions={tradeSideOptions}
+              onAdd={addDraftLeg}
+              onRemove={removeDraftLeg}
+              onUpdate={updateDraftLeg}
+              formatCommodityClass={formatCommodityClass}
+            />
+          </div>
+        )}
+      </TradeCaptureSection>
+
+      <TradeCaptureSection
+        step="4"
+        title="Pricing And Settlement"
+        description="Finish the economic terms here, then review the pricing index and settlement posture before creating the trade."
+      >
         <label className="field">
           <span>{optionTrade ? 'Premium' : pricingTypeRequiresExplicitPrice(pricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
           <input className="control" inputMode="decimal" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} />
         </label>
-        {!tradeStructureSupportsLegs(tradeStructureInput) && (
+        {!structureUsesLegs && (
           <label className="field">
             <span>{optionTrade ? 'Contracts' : 'Volume'}</span>
             <input className="control" inputMode="decimal" value={volumeInput} onChange={(event) => setVolumeInput(event.target.value)} />
@@ -694,56 +885,45 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             ))}
           </select>
         </label>
-        <label className="field field-wide">
-          <FieldLabel label="Price Index" tooltip={tradeTooltipCopy.priceIndex} />
-          <select
-            className="control"
-            value={priceIndexInput}
-            onChange={(event) => setPriceIndexInput(event.target.value)}
-            disabled={optionTrade || !pricingTypeRequiresPriceIndex(pricingTypeInput) || createPriceIndexOptions.length === 0}
-          >
-            <option value="">No price index</option>
-            {createPriceIndexOptions.map((priceIndex) => (
-              <option key={priceIndex.code} value={priceIndex.code}>
-                {priceIndex.code} · {priceIndex.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field field-wide">
-          <span>Trader User</span>
-          <input
-            className="control"
-            value={traderUserInput}
-            onChange={(event) => setTraderUserInput(event.target.value)}
-            placeholder="trader.alpha"
-            disabled={submitting}
-          />
-        </label>
-        <button type="submit" className="button button-primary" disabled={submitting || referenceDataLoading || !hasReferenceOptions}>
-          {submitting ? 'Submitting...' : 'Create Trade'}
-        </button>
-      </form>
+        {showPriceIndexField && (
+          <label className="field field-full">
+            <FieldLabel label="Price Index" tooltip={tradeTooltipCopy.priceIndex} />
+            <select
+              className="control"
+              value={priceIndexInput}
+              onChange={(event) => setPriceIndexInput(event.target.value)}
+              disabled={optionTrade || !pricingTypeRequiresPriceIndex(pricingTypeInput) || createPriceIndexOptions.length === 0}
+            >
+              <option value="">No price index</option>
+              {createPriceIndexOptions.map((priceIndex) => (
+                <option key={priceIndex.code} value={priceIndex.code}>
+                  {priceIndex.code} · {priceIndex.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </TradeCaptureSection>
 
-      {tradeStructureSupportsLegs(tradeStructureInput) && (
-        <TradeLegEditor
-          title="Swap Legs"
-          legs={createLegs}
-          commodityClassOptions={commodityClassOptions}
-          activeCommodities={activeCommodities}
-          tradeSideOptions={tradeSideOptions}
-          onAdd={addDraftLeg}
-          onRemove={removeDraftLeg}
-          onUpdate={updateDraftLeg}
-          formatCommodityClass={formatCommodityClass}
-        />
-      )}
-
-      <p className={`form-note ${createError ? 'form-note-error' : ''}`}>
-        {createError || (hasReferenceOptions
-          ? 'Leave Trade ID blank to auto-generate it. Pick an execution date to default the time to midnight. INDEX deals can omit price differential, SWAP deals derive the trade summary from Leg 1, and the first options slice books premium plus strike and expiry on single-leg tickets.'
-          : 'Trade entry is disabled until at least one active book and one active commodity exist in reference data.')}
-      </p>
-    </>
+      <section className="trade-form-actions field-full">
+        <div className="trade-form-actions-copy">
+          <span className="eyebrow">Finish</span>
+          <strong>{hasReferenceOptions ? 'Create the trade when the ticket looks right.' : 'Trade entry is waiting on reference data.'}</strong>
+          <p>
+            {hasReferenceOptions
+              ? 'Trade numbers are generated automatically. Pick an execution date to default the time to midnight. INDEX deals can omit price differential, SWAP deals derive the summary from Leg 1, and option tickets book premium plus strike and expiry on single-leg trades.'
+              : 'Trade entry is disabled until at least one active book and one active commodity exist in reference data.'}
+          </p>
+        </div>
+        <div className="stack-actions">
+          <button type="button" className="button button-ghost" onClick={onClearForm} disabled={submitting}>
+            Clear Form
+          </button>
+          <button type="submit" className="button button-primary" disabled={submitting || referenceDataLoading || !hasReferenceOptions}>
+            {submitting ? 'Submitting...' : 'Create Trade'}
+          </button>
+        </div>
+      </section>
+    </form>
   )
 }

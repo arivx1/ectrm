@@ -25,6 +25,7 @@ from apps.api.app.routes.external_data import (
     get_latest_price_index_observation,
     list_external_series_definitions,
     list_external_series_observations,
+    list_latest_price_index_observations,
     list_price_index_observations,
     list_external_data_runs,
     trigger_caiso_sync,
@@ -377,6 +378,81 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload[0].price_index_code, "WTI_CUSHING_D")
         self.assertEqual(payload[0].observation_date, date(2026, 3, 10))
         self.assertEqual(payload[0].value, 67.2)
+
+    def test_list_latest_price_index_observations_returns_latest_row_per_requested_code(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            session.add(
+                ReferencePriceIndex(
+                    code="BRENT_DATED_D",
+                    name="Brent Dated Spot Daily",
+                    commodity_code="BRENT",
+                    currency_code="USD",
+                    unit_code="BBL",
+                    provider="EIA",
+                    market="DATED",
+                    location_code=None,
+                    calendar_code=None,
+                    description="Test Brent",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=datetime.now(timezone.utc),
+                    created_by="system",
+                    updated_at=datetime.now(timezone.utc),
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add_all(
+                [
+                    PriceIndexObservation(
+                        id=3,
+                        price_index_code="BRENT_DATED_D",
+                        observation_date=date(2026, 3, 9),
+                        value=Decimal("68.900000"),
+                        unit_code="BBL",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="PET.RBRTE.D",
+                        source_frequency="DAILY",
+                        source_published_at=datetime(2026, 3, 9, 17, 0, tzinfo=timezone.utc),
+                        source_revision="2026-03-09T17:00:00Z",
+                        downloaded_at=datetime(2026, 3, 9, 18, 0, tzinfo=timezone.utc),
+                        run_id=2,
+                        raw_payload={"period": "2026-03-09", "value": "68.9"},
+                        created_at=datetime(2026, 3, 9, 18, 0, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 9, 18, 0, tzinfo=timezone.utc),
+                    ),
+                    PriceIndexObservation(
+                        id=4,
+                        price_index_code="BRENT_DATED_D",
+                        observation_date=date(2026, 3, 10),
+                        value=Decimal("69.100000"),
+                        unit_code="BBL",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="PET.RBRTE.D",
+                        source_frequency="DAILY",
+                        source_published_at=datetime(2026, 3, 10, 17, 0, tzinfo=timezone.utc),
+                        source_revision="2026-03-10T17:00:00Z",
+                        downloaded_at=datetime(2026, 3, 10, 18, 30, tzinfo=timezone.utc),
+                        run_id=2,
+                        raw_payload={"period": "2026-03-10", "value": "69.1"},
+                        created_at=datetime(2026, 3, 10, 18, 30, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 3, 10, 18, 30, tzinfo=timezone.utc),
+                    ),
+                ]
+            )
+            session.commit()
+            payload = list_latest_price_index_observations(
+                ["wti_cushing_d", "BRENT_DATED_D", "WTI_CUSHING_D", "UNKNOWN_CODE"],
+                db=session,
+            )
+
+        self.assertEqual([row.price_index_code for row in payload], ["WTI_CUSHING_D", "BRENT_DATED_D"])
+        self.assertEqual(payload[0].value, 67.2)
+        self.assertEqual(payload[1].value, 69.1)
 
     def test_list_external_series_definitions_filters_by_provider(self) -> None:
         self._seed_rows()

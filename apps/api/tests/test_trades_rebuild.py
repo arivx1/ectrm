@@ -527,6 +527,108 @@ class TradesRebuildScriptTests(unittest.TestCase):
         self.assertEqual(expired_trade.status, "EXPIRED")
         self.assertEqual(assigned_trade.status, "ASSIGNED")
 
+    def test_rebuild_preserves_originating_option_trade_link_on_resulting_linear_trade(self) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Event(
+                        event_id="event-opt-link-create",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-LINKED-REBUILD-1",
+                        event_type="TradeCreated",
+                        occurred_at=self.now,
+                        recorded_at=self.now,
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "instrument_type": "OPTION",
+                            "trade_nature": "FINANCIAL",
+                            "trade_structure": "SINGLE",
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "portfolio": "PROMPT",
+                            "counterparty": "SHELL_TRADING",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 3.5,
+                            "volume": 10,
+                            "unit_of_measure": "BBL",
+                            "trade_currency_code": "USD",
+                            "location_code": "CUSHING",
+                            "price_unit_code": "BBL",
+                            "option_type": "CALL",
+                            "option_style": "AMERICAN",
+                            "option_strike_price": 81,
+                            "option_expiration_date": "2026-06-30",
+                        },
+                    ),
+                    Event(
+                        event_id="event-opt-link-exercise",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-LINKED-REBUILD-1",
+                        event_type="OptionExercised",
+                        occurred_at=datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                        actor_id="test-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={},
+                    ),
+                    Event(
+                        event_id="event-opt-link-child-create",
+                        aggregate_type="trade",
+                        aggregate_id="T-OPT-LINKED-REBUILD-1-UNDERLYING",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 20, 12, 1, tzinfo=timezone.utc),
+                        actor_id="ops-user",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "originating_option_trade_id": "T-OPT-LINKED-REBUILD-1",
+                            "source_system": "OPTION_SETTLEMENT",
+                            "instrument_type": "LINEAR",
+                            "trade_nature": "FINANCIAL",
+                            "trade_structure": "SINGLE",
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "portfolio": "PROMPT",
+                            "counterparty": "SHELL_TRADING",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "pricing_status": "PRICED",
+                            "price": 81,
+                            "volume": 10,
+                            "unit_of_measure": "BBL",
+                            "trade_currency_code": "USD",
+                            "location_code": "CUSHING",
+                            "price_unit_code": "BBL",
+                        },
+                    ),
+                ]
+            )
+            session.commit()
+
+        with patch.object(rebuild_trades_projection, "SessionLocal", self.SessionLocal):
+            rebuild_trades_projection.main()
+
+        with self.SessionLocal() as session:
+            linked_trade = (
+                session.query(Trade)
+                .filter(Trade.trade_id == "T-OPT-LINKED-REBUILD-1-UNDERLYING")
+                .one()
+            )
+
+        self.assertEqual(linked_trade.originating_option_trade_id, "T-OPT-LINKED-REBUILD-1")
+        self.assertEqual(linked_trade.instrument_type, "LINEAR")
+        self.assertEqual(linked_trade.trade_side, "BUY")
+
     def test_rebuild_rejects_invalid_trade_header_status_values(self) -> None:
         with self.SessionLocal() as session:
             session.add(

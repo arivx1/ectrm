@@ -162,12 +162,12 @@ export async function streamAssistantResponse(
     onEvent: (event: AssistantStreamEvent) => void
   },
 ): Promise<void> {
+  const headers = new Headers(init.headers)
+  headers.set('Content-Type', 'application/json')
+
   const response = await requestOk(`${apiBase}/assistant/respond/stream`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
+    headers,
     body: JSON.stringify(payload),
   })
   const correlationId = getResponseCorrelationId(response)

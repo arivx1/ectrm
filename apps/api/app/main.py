@@ -34,6 +34,7 @@ from apps.api.app.domains.operations.services import build_database_overview
 from apps.api.app.routes.assistant import admin_router as assistant_admin_router
 from apps.api.app.routes.assistant import router as assistant_router
 from apps.api.app.routes.auth import router as auth_router
+from apps.api.app.routes.confirmations import router as confirmations_router
 from apps.api.app.routes.admin_data import admin_router as admin_data_router
 from apps.api.app.routes.deliveries import router as deliveries_router
 from apps.api.app.routes.documents import router as documents_router
@@ -79,6 +80,7 @@ app.state.session_factory = SessionLocal
 app.state.started_at = datetime.now(timezone.utc)
 
 app.include_router(auth_router)
+app.include_router(confirmations_router)
 app.include_router(events_router)
 app.include_router(layout_definitions_router)
 app.include_router(operations_router)
@@ -108,6 +110,19 @@ PUBLIC_WRITE_PATHS = frozenset(
     {"/auth/session", "/auth/bootstrap-admin", "/auth/single-user-session", "/auth/google-session"}
 )
 ADMIN_PATH_PREFIXES = ("/admin", "/users")
+AUTHENTICATED_READ_PATH_PREFIXES = (
+    "/confirmations",
+    "/deliveries",
+    "/events",
+    "/operations/work-items",
+    "/option-exposures",
+    "/positions",
+    "/reference",
+    "/reports",
+    "/settlement",
+    "/shipments",
+    "/trades",
+)
 
 
 def _correlation_id_for_request(request: Request) -> str | None:
@@ -190,6 +205,12 @@ def _auth_error(request: Request, status_code: int, message: str, correlation_id
         },
     )
     response.headers["x-correlation-id"] = correlation_id
+    origin = request.headers.get("origin")
+    if origin and origin in settings.cors_allow_origins:
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["access-control-allow-credentials"] = "true"
+        response.headers["access-control-expose-headers"] = "x-correlation-id"
+        response.headers["vary"] = "Origin"
     return response
 
 
@@ -199,6 +220,10 @@ def _is_cors_preflight(request: Request) -> bool:
         and bool(request.headers.get("origin"))
         and bool(request.headers.get("access-control-request-method"))
     )
+
+
+def _requires_authenticated_read(request: Request) -> bool:
+    return request.method.upper() == "GET" and request.url.path.startswith(AUTHENTICATED_READ_PATH_PREFIXES)
 
 
 @app.middleware("http")
@@ -223,8 +248,9 @@ async def add_correlation_id(request: Request, call_next):
         except AuthError as exc:
             request_path = request.url.path
             protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
+            protected_read = _requires_authenticated_read(request)
             admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
-            if protected_write or admin_path:
+            if protected_write or protected_read or admin_path:
                 response = _auth_error(request, exc.status_code, exc.message, correlation_id)
                 _log_request_completion(request, response.status_code)
                 return response
@@ -246,6 +272,7 @@ async def add_correlation_id(request: Request, call_next):
     try:
         request_path = request.url.path
         protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
+        protected_read = _requires_authenticated_read(request)
         admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
 
         if admin_path:
@@ -262,6 +289,15 @@ async def add_correlation_id(request: Request, call_next):
                 request,
                 401,
                 "Authentication is required for write operations.",
+                correlation_id,
+            )
+            _log_request_completion(request, response.status_code)
+            return response
+        elif protected_read and principal is None:
+            response = _auth_error(
+                request,
+                401,
+                "Authentication is required for protected workspace data.",
                 correlation_id,
             )
             _log_request_completion(request, response.status_code)

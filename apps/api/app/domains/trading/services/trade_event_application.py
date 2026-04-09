@@ -7,6 +7,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.trade_confirmations import (
+    build_trade_confirmation_revision_snapshot,
+)
+from apps.api.app.domains.operations.services.trade_confirmations import (
+    maybe_supersede_trade_confirmation_for_trade_amendment,
+)
 from apps.api.app.domains.operations.services.trade_credit_hold import (
     format_trade_credit_hold_message,
 )
@@ -21,6 +27,7 @@ from apps.api.app.domains.trading.services import trade_event_support as support
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
 from apps.api.app.shared.enums import (
+    ActualizationStatus,
     AllocationStatus,
     ConfirmationStatus,
     InvoiceStatus,
@@ -179,6 +186,12 @@ def _apply_trade_created(
         field_name="Allocation status",
         valid_values={allocation_status.value for allocation_status in AllocationStatus},
     )
+    actualization_status = support.normalize_trade_header_status(
+        payload_data.get("actualization_status"),
+        default=workflow_defaults["actualization_status"],
+        field_name="Actualization status",
+        valid_values={actualization_status.value for actualization_status in ActualizationStatus},
+    )
     settlement_status = support.normalize_trade_header_status(
         payload_data.get("settlement_status"),
         default="PENDING",
@@ -214,6 +227,12 @@ def _apply_trade_created(
             option_strike_price=payload_data.get("option_strike_price"),
             option_expiration_date=payload_data.get("option_expiration_date"),
         )
+    )
+    originating_option_trade_id = support.validate_originating_option_trade_reference(
+        context.db,
+        trade_id=context.event.aggregate_id,
+        instrument_type=instrument_type,
+        originating_option_trade_id=payload_data.get("originating_option_trade_id"),
     )
     support.validate_date_range(
         effective_start_date,
@@ -265,6 +284,7 @@ def _apply_trade_created(
 
     trade = Trade(
         trade_id=context.event.aggregate_id,
+        originating_option_trade_id=originating_option_trade_id,
         external_trade_id=external_trade_id,
         source_system=source_system,
         created_at=context.recorded_at,
@@ -298,6 +318,7 @@ def _apply_trade_created(
         confirmation_status=confirmation_status,
         nomination_status=nomination_status,
         allocation_status=allocation_status,
+        actualization_status=actualization_status,
         price_index_code=price_index_code,
         price=price,
         volume=volume,
@@ -358,6 +379,7 @@ def _apply_trade_amended(
     trade: Trade,
     payload_data: dict[str, object],
 ) -> None:
+    before_confirmation_revision = build_trade_confirmation_revision_snapshot(context.db, trade=trade)
     if (
         support.normalize_instrument_type(trade.instrument_type)
         == TradeInstrumentType.OPTION.value
@@ -371,7 +393,28 @@ def _apply_trade_amended(
             ),
         )
     trade.updated_at = context.recorded_at
+    if "originating_option_trade_id" in payload_data:
+        requested_originating_trade_id = support.normalize_optional_text(
+            payload_data.get("originating_option_trade_id")
+        )
+        if requested_originating_trade_id != trade.originating_option_trade_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="originating_option_trade_id is immutable and can only be set when the trade is created",
+            )
+    if trade.originating_option_trade_id is not None and "instrument_type" in payload_data:
+        requested_instrument_type = support.normalize_instrument_type(payload_data.get("instrument_type"))
+        if requested_instrument_type != TradeInstrumentType.LINEAR.value:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Trades linked from an originating_option_trade_id must remain LINEAR instruments",
+            )
     support.reject_invoice_projection_override(
+        context.db,
+        trade_id=trade.trade_id,
+        payload_data=payload_data,
+    )
+    support.reject_actualization_projection_override(
         context.db,
         trade_id=trade.trade_id,
         payload_data=payload_data,
@@ -563,6 +606,13 @@ def _apply_trade_amended(
             field_name="Allocation status",
             valid_values={allocation_status.value for allocation_status in AllocationStatus},
         )
+    if "actualization_status" in payload_data:
+        trade.actualization_status = support.normalize_trade_header_status(
+            payload_data.get("actualization_status"),
+            default=trade.actualization_status,
+            field_name="Actualization status",
+            valid_values={actualization_status.value for actualization_status in ActualizationStatus},
+        )
     if "invoice_status" in payload_data:
         trade.invoice_status = support.normalize_trade_header_status(
             payload_data.get("invoice_status"),
@@ -716,6 +766,13 @@ def _apply_trade_amended(
         actor_id=workflow_actor_id,
         now=context.recorded_at,
         policy_result=counterparty_credit_policy,
+    )
+    maybe_supersede_trade_confirmation_for_trade_amendment(
+        context.db,
+        trade=trade,
+        actor_id=workflow_actor_id,
+        now=context.recorded_at,
+        before_revision_snapshot=before_confirmation_revision,
     )
 
 

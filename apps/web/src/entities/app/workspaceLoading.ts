@@ -133,9 +133,14 @@ export function deriveWorkspaceStatus({
     VIEW_DATA_GROUPS[currentView].find(
       (group) => groupErrors[group] && group !== blockingWorkspaceError,
     ) ?? null
+  const authenticationIssue =
+    /authentication is required/i.test(error) ||
+    Object.values(groupErrors).some((message) => /authentication is required/i.test(message))
 
   const systemStateLabel = error
-    ? 'API unavailable'
+    ? authenticationIssue
+      ? 'Authentication required'
+      : 'API unavailable'
     : appLoading
       ? 'Loading shell'
       : blockingWorkspaceError

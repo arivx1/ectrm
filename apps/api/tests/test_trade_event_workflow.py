@@ -18,9 +18,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.domains.operations.services.actualizations import upsert_trade_actualization
+from apps.api.app.domains.operations.services.shipments import append_delivery_event
+from apps.api.app.domains.operations.services.shipments import synchronize_delivery_obligations_from_trades
+from apps.api.app.domains.operations.services.shipments import update_delivery_obligation
+from apps.api.app.domains.operations.services.trade_confirmations import create_trade_confirmation
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
 from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
+from apps.api.app.domains.operations.services.workflow_items import book_trade_workflow_item_underlying
 from apps.api.app.domains.operations.services.workflow_items import update_trade_workflow_item
 from apps.api.app.models.event import Base
 from apps.api.app.models.event import Event
@@ -39,6 +45,7 @@ from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_credit_exception import TradeCreditException
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
@@ -72,6 +79,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
             session.query(Position).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
+            session.query(TradeConfirmation).delete()
             session.query(TradeCreditException).delete()
             session.query(TradePriceTerm).delete()
             session.query(TradeWorkflowItem).delete()
@@ -107,6 +115,42 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 return value.astimezone(tz)
 
         return patch("apps.api.app.routes.events.datetime", _FixedDateTime)
+
+    def _append_trade_created_event(self, session, *, trade_id: str, **payload_overrides) -> None:
+        payload = {
+            "book": "CRUDE_PHYS",
+            "commodity_class": "CRUDE_OIL",
+            "commodity": "WTI",
+            "pricing_type": "FIXED",
+            "trade_side": "BUY",
+            "trade_nature": "PHYSICAL",
+            "trade_structure": "SINGLE",
+            "portfolio": "OIL_DISCRETIONARY",
+            "counterparty": "SHELL_TRADING",
+            "trade_currency_code": "USD",
+            "price_unit_code": "BBL",
+            "unit_of_measure": "BBL",
+            "location_code": "CUSHING",
+            "trade_date": "2026-03-21",
+            "delivery_start": "2026-03-22",
+            "delivery_end": "2026-03-24",
+            "price": 75.25,
+            "volume": 1000,
+        }
+        payload.update(payload_overrides)
+        append_event(
+            EventCreate(
+                aggregate_type="trade",
+                aggregate_id=trade_id,
+                event_type="TradeCreated",
+                occurred_at=self.now,
+                actor_id="test-user",
+                payload=payload,
+                schema_version=4,
+            ),
+            request=self._request(),
+            db=session,
+        )
 
     def _upsert_counterparty_credit_profile(
         self,
@@ -491,6 +535,8 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 .one()
             )
             positions = session.query(Position).all()
+            position_commodity = positions[0].commodity if positions else None
+            position_net_volume = float(positions[0].net_volume) if positions else None
 
         self.assertEqual(trade.instrument_type, "OPTION")
         self.assertEqual(trade.trade_nature, "FINANCIAL")
@@ -604,6 +650,132 @@ class TradeEventWorkflowTests(unittest.TestCase):
         self.assertEqual(option_settlement_item.status, "PENDING")
         self.assertIn("resulting BUY WTI 10", option_settlement_item.notes or "")
         self.assertEqual(positions, [])
+
+    def test_resulting_linear_trade_can_link_back_to_closed_option_trade(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-OPTION-LINK-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "instrument_type": "OPTION",
+                        "trade_nature": "FINANCIAL",
+                        "trade_structure": "SINGLE",
+                        "trade_side": "BUY",
+                        "book": "CRUDE_PHYS",
+                        "portfolio": "OIL_DISCRETIONARY",
+                        "counterparty": "SHELL_TRADING",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "price": 3.5,
+                        "volume": 10,
+                        "unit_of_measure": "BBL",
+                        "trade_currency_code": "USD",
+                        "location_code": "CUSHING",
+                        "price_unit_code": "BBL",
+                        "option_type": "CALL",
+                        "option_style": "AMERICAN",
+                        "option_strike_price": 81,
+                        "option_expiration_date": "2026-06-30",
+                    },
+                    schema_version=5,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-OPTION-LINK-1",
+                    event_type="OptionExercised",
+                    occurred_at=self.now + timedelta(days=10),
+                    actor_id="test-user",
+                    payload={},
+                    schema_version=5,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-LINKED-LINEAR-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now + timedelta(days=10),
+                    actor_id="ops-user",
+                    payload={
+                        "originating_option_trade_id": "T-OPTION-LINK-1",
+                        "source_system": "OPTION_SETTLEMENT",
+                        "instrument_type": "LINEAR",
+                        "trade_nature": "FINANCIAL",
+                        "trade_structure": "SINGLE",
+                        "trade_side": "BUY",
+                        "book": "CRUDE_PHYS",
+                        "portfolio": "OIL_DISCRETIONARY",
+                        "counterparty": "SHELL_TRADING",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "pricing_status": "PRICED",
+                        "price": 81,
+                        "volume": 10,
+                        "unit_of_measure": "BBL",
+                        "trade_currency_code": "USD",
+                        "location_code": "CUSHING",
+                        "price_unit_code": "BBL",
+                    },
+                    schema_version=5,
+                ),
+                request=self._request(),
+                db=session,
+            )
+
+            child_trade = session.query(Trade).filter(Trade.trade_id == "T-LINKED-LINEAR-1").one()
+            child_trade_originating_option_trade_id = child_trade.originating_option_trade_id
+            child_trade_instrument_type = child_trade.instrument_type
+            positions = session.query(Position).all()
+            position_commodity = positions[0].commodity if positions else None
+            position_net_volume = float(positions[0].net_volume) if positions else None
+
+            with self.assertRaises(HTTPException) as error:
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-LINKED-LINEAR-2",
+                        event_type="TradeCreated",
+                        occurred_at=self.now + timedelta(days=10),
+                        actor_id="ops-user",
+                        payload={
+                            "originating_option_trade_id": "T-OPTION-LINK-1",
+                            "instrument_type": "LINEAR",
+                            "trade_nature": "FINANCIAL",
+                            "trade_structure": "SINGLE",
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "portfolio": "OIL_DISCRETIONARY",
+                            "counterparty": "SHELL_TRADING",
+                            "commodity_class": "CRUDE_OIL",
+                            "commodity": "WTI",
+                            "pricing_type": "FIXED",
+                            "price": 81,
+                            "volume": 10,
+                        },
+                        schema_version=5,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        self.assertEqual(child_trade_originating_option_trade_id, "T-OPTION-LINK-1")
+        self.assertEqual(child_trade_instrument_type, "LINEAR")
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(position_commodity, "WTI")
+        self.assertEqual(position_net_volume, 10.0)
+        self.assertEqual(error.exception.status_code, 409)
 
     def test_option_assigned_rejects_long_option_trade(self) -> None:
         with self.SessionLocal() as session:
@@ -912,18 +1084,21 @@ class TradeEventWorkflowTests(unittest.TestCase):
             self.assertEqual(physical_trade.confirmation_status, "PENDING")
             self.assertEqual(physical_trade.nomination_status, "PENDING")
             self.assertEqual(physical_trade.allocation_status, "PENDING")
+            self.assertEqual(physical_trade.actualization_status, "PENDING")
             self.assertEqual(physical_trade.invoice_status, "PENDING")
             self.assertEqual(physical_trade.payment_status, "PENDING")
             self.assertEqual(financial_trade.confirmation_status, "PENDING")
             self.assertEqual(financial_trade.nomination_status, "NOT_REQUIRED")
             self.assertEqual(financial_trade.allocation_status, "NOT_REQUIRED")
+            self.assertEqual(financial_trade.actualization_status, "NOT_REQUIRED")
             self.assertEqual(financial_trade.invoice_status, "NOT_REQUIRED")
             self.assertEqual(financial_trade.payment_status, "PENDING")
-            self.assertEqual(len(physical_workflow_items), 5)
+            self.assertEqual(len(physical_workflow_items), 6)
             self.assertEqual(
                 {item.workflow_type: item.status for item in physical_workflow_items},
                 {
                     "ALLOCATION": "PENDING",
+                    "ACTUALIZATION": "PENDING",
                     "CONFIRMATION": "PENDING",
                     "INVOICE": "PENDING",
                     "NOMINATION": "PENDING",
@@ -965,6 +1140,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
         self.assertEqual(amended_trade.confirmation_status, "CONFIRMED")
         self.assertEqual(amended_trade.nomination_status, "NOMINATED")
         self.assertEqual(amended_trade.allocation_status, "ALLOCATED")
+        self.assertEqual(amended_trade.actualization_status, "PENDING")
         self.assertEqual(amended_trade.invoice_status, "ISSUED")
         self.assertEqual(amended_trade.payment_status, "DUE")
         self.assertEqual(amended_trade.settlement_status, "INVOICED")
@@ -972,6 +1148,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
             {item.workflow_type: item.status for item in amended_workflow_items},
             {
                 "ALLOCATION": "ALLOCATED",
+                "ACTUALIZATION": "PENDING",
                 "CONFIRMATION": "CONFIRMED",
                 "INVOICE": "ISSUED",
                 "NOMINATION": "NOMINATED",
@@ -1018,6 +1195,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 trade_id="T-INVOICE-LOCK-1",
                 actor_id="settlement.ops",
                 invoice_number="INV-LOCK-1",
+                invoice_amount=1000,
                 now=self.now,
             )
             session.commit()
@@ -1082,6 +1260,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 trade_id="T-PAYMENT-LOCK-1",
                 actor_id="settlement.ops",
                 invoice_number="INV-PAY-1",
+                invoice_amount=1000,
                 now=self.now,
             )
             create_trade_payment(
@@ -1113,6 +1292,451 @@ class TradeEventWorkflowTests(unittest.TestCase):
 
         self.assertEqual(error.exception.status_code, 422)
         self.assertIn("settlement payments", str(error.exception.detail))
+
+    def test_direct_trade_services_record_audit_events(self) -> None:
+        with self.SessionLocal() as session:
+            self._append_trade_created_event(session, trade_id="T-DIRECT-AUDIT-1")
+            create_trade_confirmation(
+                session,
+                trade_id="T-DIRECT-AUDIT-1",
+                actor_id="ops.user",
+                confirmation_number="CONF-DIRECT-1",
+                now=self.now,
+            )
+            invoice = issue_trade_invoice(
+                session,
+                trade_id="T-DIRECT-AUDIT-1",
+                actor_id="settlement.ops",
+                invoice_number="INV-DIRECT-1",
+                invoice_amount=1000,
+                now=self.now,
+            )
+            create_trade_payment(
+                session,
+                invoice_id=invoice.invoice_id,
+                actor_id="settlement.ops",
+                payment_amount=1000,
+                status="PAID",
+                now=self.now,
+            )
+            confirmation_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-DIRECT-AUDIT-1",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .one()
+            )
+            update_trade_workflow_item(
+                session,
+                item_id=confirmation_item.id,
+                actor_id="ops.user",
+                actor_role="OPERATIONS",
+                changes={"status": "CONFIRMED", "notes": "Counterparty verbally matched."},
+                now=self.now,
+            )
+            session.commit()
+
+            confirmation_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-DIRECT-AUDIT-1",
+                    Event.event_type == "TradeConfirmationCreated",
+                )
+                .one()
+            )
+            invoice_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-DIRECT-AUDIT-1",
+                    Event.event_type == "TradeInvoiceIssued",
+                )
+                .one()
+            )
+            payment_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-DIRECT-AUDIT-1",
+                    Event.event_type == "TradePaymentCreated",
+                )
+                .one()
+            )
+            workflow_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-DIRECT-AUDIT-1",
+                    Event.event_type == "TradeWorkflowItemUpdated",
+                )
+                .one()
+            )
+
+        self.assertEqual(
+            confirmation_event.payload["confirmation"]["confirmation_number"],
+            "CONF-DIRECT-1",
+        )
+        self.assertEqual(invoice_event.payload["request"]["trade_id"], "T-DIRECT-AUDIT-1")
+        self.assertEqual(payment_event.payload["payment"]["status"], "PAID")
+        self.assertEqual(
+            workflow_event.payload["workflow_item"]["workflow_type"],
+            "CONFIRMATION",
+        )
+
+    def test_trade_amendment_supersedes_current_confirmation_when_booked_economics_change(self) -> None:
+        amended_at = self.now + timedelta(hours=6)
+
+        with self.SessionLocal() as session:
+            self._append_trade_created_event(session, trade_id="T-CONF-SUPERSEDE-1")
+            create_trade_confirmation(
+                session,
+                trade_id="T-CONF-SUPERSEDE-1",
+                actor_id="ops.user",
+                confirmation_number="CONF-T-CONF-SUPERSEDE-1-01",
+                status="CONFIRMED",
+                now=self.now,
+            )
+            session.commit()
+
+            with self._event_datetime_patch(amended_at):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CONF-SUPERSEDE-1",
+                        event_type="TradeAmended",
+                        occurred_at=amended_at,
+                        actor_id="trader.user",
+                        payload={"price": 76.5},
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+            confirmations = (
+                session.query(TradeConfirmation)
+                .filter(TradeConfirmation.trade_id == "T-CONF-SUPERSEDE-1")
+                .order_by(TradeConfirmation.id.asc())
+                .all()
+            )
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-SUPERSEDE-1").one()
+            confirmation_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-SUPERSEDE-1",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .one()
+            )
+            supersede_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-CONF-SUPERSEDE-1",
+                    Event.event_type == "TradeConfirmationSuperseded",
+                )
+                .one()
+            )
+
+        self.assertEqual(len(confirmations), 2)
+        self.assertEqual(confirmations[0].status, "CONFIRMED")
+        self.assertEqual(confirmations[1].status, "SENT")
+        sent_at = confirmations[1].sent_at
+        self.assertIsNotNone(sent_at)
+        self.assertEqual(sent_at.replace(tzinfo=timezone.utc), amended_at)
+        self.assertIn("Supersedes CONF-T-CONF-SUPERSEDE-1-01", confirmations[1].notes or "")
+        self.assertIn("price", confirmations[1].notes or "")
+        self.assertEqual(trade.confirmation_status, "SENT")
+        self.assertEqual(confirmation_item.status, "SENT")
+        self.assertEqual(
+            supersede_event.payload["superseded_confirmation_number"],
+            "CONF-T-CONF-SUPERSEDE-1-01",
+        )
+        self.assertEqual(supersede_event.payload["changed_fields"], ["price"])
+        self.assertEqual(
+            supersede_event.payload["confirmation"]["confirmation_number"],
+            confirmations[1].confirmation_number,
+        )
+
+    def test_trade_amendment_does_not_supersede_confirmation_for_non_economic_changes(self) -> None:
+        amended_at = self.now + timedelta(hours=3)
+
+        with self.SessionLocal() as session:
+            self._append_trade_created_event(session, trade_id="T-CONF-SUPERSEDE-2")
+            create_trade_confirmation(
+                session,
+                trade_id="T-CONF-SUPERSEDE-2",
+                actor_id="ops.user",
+                confirmation_number="CONF-T-CONF-SUPERSEDE-2-01",
+                status="CONFIRMED",
+                now=self.now,
+            )
+            session.commit()
+
+            with self._event_datetime_patch(amended_at):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CONF-SUPERSEDE-2",
+                        event_type="TradeAmended",
+                        occurred_at=amended_at,
+                        actor_id="trader.user",
+                        payload={"trader_user": "desk.ops"},
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+            confirmations = (
+                session.query(TradeConfirmation)
+                .filter(TradeConfirmation.trade_id == "T-CONF-SUPERSEDE-2")
+                .order_by(TradeConfirmation.id.asc())
+                .all()
+            )
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-SUPERSEDE-2").one()
+            supersede_events = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-CONF-SUPERSEDE-2",
+                    Event.event_type == "TradeConfirmationSuperseded",
+                )
+                .all()
+            )
+
+        self.assertEqual(len(confirmations), 1)
+        self.assertEqual(confirmations[0].status, "CONFIRMED")
+        self.assertEqual(trade.confirmation_status, "CONFIRMED")
+        self.assertEqual(supersede_events, [])
+
+    def test_trade_amendment_supersede_reopens_confirmation_even_when_credit_hold_reappears(self) -> None:
+        amended_at = self.now + timedelta(hours=9)
+
+        with self.SessionLocal() as session:
+            self._upsert_counterparty_credit_profile(
+                session,
+                limit_amount=5000,
+                breach_action="REQUIRE_APPROVAL",
+            )
+            self._append_trade_created_event(
+                session,
+                trade_id="T-CONF-SUPERSEDE-CREDIT-1",
+                price=10,
+                volume=100,
+            )
+            create_trade_confirmation(
+                session,
+                trade_id="T-CONF-SUPERSEDE-CREDIT-1",
+                actor_id="ops.user",
+                confirmation_number="CONF-T-CONF-SUPERSEDE-CREDIT-1-01",
+                status="CONFIRMED",
+                now=self.now,
+            )
+            session.commit()
+
+            self._upsert_counterparty_credit_profile(
+                session,
+                limit_amount=500,
+                breach_action="REQUIRE_APPROVAL",
+            )
+
+            with self._event_datetime_patch(amended_at):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CONF-SUPERSEDE-CREDIT-1",
+                        event_type="TradeAmended",
+                        occurred_at=amended_at,
+                        actor_id="trader.user",
+                        payload={"price": 12},
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+            confirmations = (
+                session.query(TradeConfirmation)
+                .filter(TradeConfirmation.trade_id == "T-CONF-SUPERSEDE-CREDIT-1")
+                .order_by(TradeConfirmation.id.asc())
+                .all()
+            )
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-SUPERSEDE-CREDIT-1").one()
+            credit_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-SUPERSEDE-CREDIT-1",
+                    TradeWorkflowItem.workflow_type == "CREDIT_APPROVAL",
+                )
+                .one()
+            )
+
+        self.assertEqual(len(confirmations), 2)
+        self.assertEqual(confirmations[1].status, "SENT")
+        self.assertEqual(trade.confirmation_status, "SENT")
+        self.assertEqual(credit_item.status, "PENDING_REVIEW")
+
+    def test_direct_delivery_services_record_audit_events(self) -> None:
+        with self.SessionLocal() as session:
+            self._append_trade_created_event(session, trade_id="T-DIRECT-DELIVERY-1")
+            synchronize_delivery_obligations_from_trades(
+                session,
+                actor_id="ops.dispatch",
+                now=self.now,
+            )
+            update_delivery_obligation(
+                session,
+                delivery_id="DLV-T-DIRECT-DELIVERY-1-L1",
+                actor_id="ops.dispatch",
+                changes={"transport_mode": "TRUCK", "operations_owner": "dispatch.alpha"},
+                now=self.now,
+            )
+            append_delivery_event(
+                session,
+                delivery_id="DLV-T-DIRECT-DELIVERY-1-L1",
+                actor_id="ops.dispatch",
+                event_type="EXECUTION_STARTED",
+                occurred_at=self.now,
+                notes="Truck departed terminal.",
+                now=self.now,
+            )
+            actualization = upsert_trade_actualization(
+                session,
+                trade_id="T-DIRECT-DELIVERY-1",
+                leg_no=1,
+                actual_quantity=1000,
+                actualized_at=self.now,
+                source="METER",
+                notes="Delivered in full.",
+                actor_id="ops.dispatch",
+                now=self.now,
+            )
+            session.commit()
+
+            delivery_update_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-DIRECT-DELIVERY-1",
+                    Event.event_type == "TradeDeliveryUpdated",
+                )
+                .one()
+            )
+            delivery_event_logged = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-DIRECT-DELIVERY-1",
+                    Event.event_type == "TradeDeliveryEventLogged",
+                )
+                .one()
+            )
+            actualization_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-DIRECT-DELIVERY-1",
+                    Event.event_type == "TradeActualizationUpserted",
+                )
+                .one()
+            )
+
+        self.assertEqual(
+            delivery_update_event.payload["requested_changes"]["transport_mode"],
+            "TRUCK",
+        )
+        self.assertEqual(
+            delivery_event_logged.payload["latest_event"]["event_type"],
+            "EXECUTION_STARTED",
+        )
+        self.assertEqual(actualization.actualization_status, "ACTUALIZED")
+        self.assertEqual(
+            actualization_event.payload["actualization"]["actualization_status"],
+            "ACTUALIZED",
+        )
+
+    def test_direct_option_settlement_booking_records_audit_event(self) -> None:
+        with self.SessionLocal() as session:
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-OPTION-BOOK-DIRECT-1",
+                    event_type="TradeCreated",
+                    occurred_at=self.now,
+                    actor_id="test-user",
+                    payload={
+                        "instrument_type": "OPTION",
+                        "trade_nature": "FINANCIAL",
+                        "trade_structure": "SINGLE",
+                        "trade_side": "BUY",
+                        "book": "CRUDE_PHYS",
+                        "commodity_class": "CRUDE_OIL",
+                        "commodity": "WTI",
+                        "pricing_type": "FIXED",
+                        "price": 3.5,
+                        "volume": 10,
+                        "option_type": "CALL",
+                        "option_style": "AMERICAN",
+                        "option_strike_price": 81,
+                        "option_expiration_date": "2026-06-30",
+                    },
+                    schema_version=5,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            append_event(
+                EventCreate(
+                    aggregate_type="trade",
+                    aggregate_id="T-OPTION-BOOK-DIRECT-1",
+                    event_type="OptionExercised",
+                    occurred_at=self.now + timedelta(days=10),
+                    actor_id="test-user",
+                    payload={},
+                    schema_version=5,
+                ),
+                request=self._request(),
+                db=session,
+            )
+            option_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-OPTION-BOOK-DIRECT-1",
+                    TradeWorkflowItem.workflow_type == "OPTION_SETTLEMENT",
+                )
+                .one()
+            )
+
+            booked_item = book_trade_workflow_item_underlying(
+                session,
+                item_id=option_item.id,
+                actor_id="ops.user",
+                actor_role="OPS_ADMIN",
+                now=self.now + timedelta(days=10, minutes=5),
+            )
+            session.commit()
+
+            linked_trade = (
+                session.query(Trade)
+                .filter(Trade.originating_option_trade_id == "T-OPTION-BOOK-DIRECT-1")
+                .one()
+            )
+            audit_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-OPTION-BOOK-DIRECT-1",
+                    Event.event_type == "TradeWorkflowItemUnderlyingBooked",
+                )
+                .one()
+            )
+
+        self.assertEqual(booked_item.linked_trade_id, linked_trade.trade_id)
+        self.assertEqual(audit_event.payload["linked_trade_id"], linked_trade.trade_id)
+        self.assertEqual(booked_item.status, "BOOKED")
 
     def test_trade_create_blocks_when_counterparty_credit_limit_breach_action_is_block(self) -> None:
         with self.SessionLocal() as session:

@@ -58,12 +58,14 @@ import type {
   PriceIndexRecord,
   ReferenceRecord,
   Trade,
+  TradeConfirmationRecord,
   TradeInvoiceRecord,
   TradePaymentRecord,
   TradeWorkflowItemRecord,
   TradingSourceRecord,
   UnitRecord,
   ViewKey,
+  WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 
@@ -80,6 +82,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [positions, setPositions] = useState<PositionRow[]>([])
   const [optionExposures, setOptionExposures] = useState<OptionExposureRow[]>([])
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
+  const [tradeConfirmations, setTradeConfirmations] = useState<TradeConfirmationRecord[]>([])
   const [tradeWorkflowItems, setTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
   const [tradeInvoices, setTradeInvoices] = useState<TradeInvoiceRecord[]>([])
   const [tradePayments, setTradePayments] = useState<TradePaymentRecord[]>([])
@@ -101,6 +104,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
   const [externalDataSyncStatus, setExternalDataSyncStatus] = useState<ExternalDataSyncStatusRecord | null>(null)
   const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
+  const [weatherLocations, setWeatherLocations] = useState<WeatherLocationRecord[]>([])
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
   const [error, setError] = useState<string>('')
   const [appLoading, setAppLoading] = useState(true)
@@ -130,6 +134,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   function resetDeferredWorkspaceData() {
     setOptionExposures([])
     setDeliveries([])
+    setTradeConfirmations([])
     tradeWorkflowItemsRef.current = []
     setTradeWorkflowItems([])
     setTradeInvoices([])
@@ -151,6 +156,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setExternalDataRuns([])
     setExternalDataSyncStatus(null)
     setTradingSources([])
+    setWeatherLocations([])
     setWeatherSyncStatus(null)
     setGroupLoaded({ ...EMPTY_GROUP_FLAGS })
     setGroupLoading({ ...EMPTY_GROUP_FLAGS })
@@ -160,6 +166,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   async function loadData(options?: LoadDataOptions) {
     const currentSession = options?.sessionOverride ?? authSession
     const force = options?.force ?? true
+    const readHeaders = currentSession ? sessionHeaders(currentSession) : null
     const requestedGroups = buildRequestedGroups({
       currentView,
       force,
@@ -180,7 +187,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         switch (group) {
           case 'core': {
             const { health: healthJson, trades: tradesJson, events: eventsJson, positions: positionsJson } =
-              await loadCoreWorkspaceBootstrap(appConfig.apiBase)
+              await loadCoreWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
             const nextTrades = decorateTradesWithWorkflowItems(
               tradesJson as Trade[],
               tradeWorkflowItemsRef.current,
@@ -195,7 +202,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
             return
           }
           case 'reference': {
-            const payload = await loadReferenceWorkspaceBootstrap(appConfig.apiBase)
+            const payload = await loadReferenceWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
             setBooks(payload.books as ReferenceRecord[])
             setCommodities(payload.commodities as ReferenceRecord[])
             setPriceIndices(payload.priceIndices as PriceIndexRecord[])
@@ -214,19 +221,20 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
             return
           }
           case 'risk': {
-            const payload = await loadRiskWorkspaceBootstrap(appConfig.apiBase)
+            const payload = await loadRiskWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
             setOptionExposures(payload.optionExposures as OptionExposureRow[])
             markGroupLoaded(group, true)
             return
           }
           case 'deliveries': {
-            const payload = await loadDeliveriesWorkspaceBootstrap(appConfig.apiBase)
+            const payload = await loadDeliveriesWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
             setDeliveries(payload.deliveries as DeliveryRecord[])
             markGroupLoaded(group, true)
             return
           }
           case 'operations': {
-            const payload = await loadOperationsWorkspaceBootstrap(appConfig.apiBase)
+            const payload = await loadOperationsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+            setTradeConfirmations(payload.confirmations as TradeConfirmationRecord[])
             const nextTradeWorkflowItems = decorateWorkflowItems(payload.workItems as TradeWorkflowItemRecord[])
             tradeWorkflowItemsRef.current = nextTradeWorkflowItems
             setTradeWorkflowItems(nextTradeWorkflowItems)
@@ -235,14 +243,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
             return
           }
           case 'settlement': {
-            const payload = await loadSettlementWorkspaceBootstrap(appConfig.apiBase)
+            const payload = await loadSettlementWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
             setTradeInvoices(payload.invoices as TradeInvoiceRecord[])
             setTradePayments(payload.payments as TradePaymentRecord[])
             markGroupLoaded(group, true)
             return
           }
           case 'reports': {
-            const payload = await loadReportsWorkspaceBootstrap(appConfig.apiBase)
+            const payload = await loadReportsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
             setCounterpartyCreditReport(payload.counterpartyCreditReport as CounterpartyCreditReportRow[])
             markGroupLoaded(group, true)
             return
@@ -257,6 +265,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
             setExternalDataRuns(payload.externalDataRuns as ExternalDataRunRecord[])
             setExternalDataSyncStatus(payload.externalDataSyncStatus as ExternalDataSyncStatusRecord | null)
             setTradingSources(payload.tradingSources as TradingSourceRecord[])
+            setWeatherLocations(payload.weatherLocations as WeatherLocationRecord[])
             setWeatherSyncStatus(payload.weatherSyncStatus as WeatherSyncStatusRecord | null)
             markGroupLoaded(group, true)
           }
@@ -452,11 +461,13 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     sessionResetKey: authSession?.sessionId ?? 'anonymous',
     setError,
     tradeInvoices,
+    tradeConfirmations,
     tradePayments,
     tradeWorkflowItems,
     trades,
     tradingSources,
     units,
+    weatherLocations,
     weatherSyncStatus,
   }
 }

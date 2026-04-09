@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.actualizations import trade_has_actualization_record
 from apps.api.app.domains.operations.services.settlement_invoices import trade_has_invoice_record
 from apps.api.app.domains.operations.services.settlement_payments import trade_has_payment_records
 from apps.api.app.domains.operations.services.trade_credit_exceptions import (
@@ -45,6 +46,7 @@ from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.shared.enums import (
+    ActualizationStatus,
     AllocationStatus,
     ConfirmationStatus,
     CreditApprovalStatus,
@@ -75,6 +77,7 @@ CREDIT_HOLD_FIELD_LABELS = {
     "confirmation_status": "confirmation",
     "nomination_status": "nomination",
     "allocation_status": "allocation",
+    "actualization_status": "actualization",
     "invoice_status": "invoice",
     "payment_status": "payment",
     "settlement_status": "settlement",
@@ -484,6 +487,11 @@ def default_trade_workflow_statuses(trade_nature: str) -> dict[str, str]:
             if requires_physical_workflows
             else AllocationStatus.NOT_REQUIRED.value
         ),
+        "actualization_status": (
+            ActualizationStatus.PENDING.value
+            if requires_physical_workflows
+            else ActualizationStatus.NOT_REQUIRED.value
+        ),
         "invoice_status": (
             InvoiceStatus.PENDING.value
             if requires_physical_workflows
@@ -665,6 +673,74 @@ def validate_option_lifecycle_transition(
     return OPTION_LIFECYCLE_EVENT_TO_STATUS[event_type]
 
 
+def validate_originating_option_trade_reference(
+    db: Session,
+    *,
+    trade_id: str,
+    instrument_type: str,
+    originating_option_trade_id: object | None,
+) -> str | None:
+    normalized_originating_trade_id = normalize_optional_text(originating_option_trade_id)
+    if normalized_originating_trade_id is None:
+        return None
+
+    if normalize_instrument_type(instrument_type) != TradeInstrumentType.LINEAR.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="originating_option_trade_id can only be set on LINEAR trades",
+        )
+    if normalized_originating_trade_id == trade_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="originating_option_trade_id cannot reference the trade being created",
+        )
+
+    originating_trade = db.execute(
+        select(Trade).where(Trade.trade_id == normalized_originating_trade_id)
+    ).scalars().first()
+    if originating_trade is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"originating_option_trade_id '{normalized_originating_trade_id}' "
+                "does not reference an existing trade"
+            ),
+        )
+    if normalize_instrument_type(originating_trade.instrument_type) != TradeInstrumentType.OPTION.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="originating_option_trade_id must reference an OPTION trade",
+        )
+    if normalize_trade_status(originating_trade.status) not in {
+        TradeStatus.EXERCISED.value,
+        TradeStatus.ASSIGNED.value,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"originating_option_trade_id '{normalized_originating_trade_id}' must reference an "
+                "EXERCISED or ASSIGNED option trade"
+            ),
+        )
+
+    existing_child_trade = db.execute(
+        select(Trade).where(
+            Trade.originating_option_trade_id == normalized_originating_trade_id,
+            Trade.trade_id != trade_id,
+        )
+    ).scalars().first()
+    if existing_child_trade is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Option trade '{normalized_originating_trade_id}' already has a resulting trade "
+                f"'{existing_child_trade.trade_id}'"
+            ),
+        )
+
+    return normalized_originating_trade_id
+
+
 def reject_invoice_projection_override(
     db: Session,
     *,
@@ -693,6 +769,25 @@ def reject_invoice_projection_override(
                 "Update the payment record from the Settlement workspace instead of amending the trade header."
             ),
         )
+
+
+def reject_actualization_projection_override(
+    db: Session,
+    *,
+    trade_id: str,
+    payload_data: dict[str, object],
+) -> None:
+    if "actualization_status" not in payload_data:
+        return
+    if not trade_has_actualization_record(db, trade_id=trade_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=(
+            "Actualization status is now derived from recorded delivery actualizations for this trade. "
+            "Update the shipment actualization instead of amending the trade header."
+        ),
+    )
 
 
 def require_active_book(db: Session, book_code: object | None) -> str:

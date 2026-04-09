@@ -50,6 +50,57 @@ VALUATION_STATUS_UNPRICED_MISSING_PRICE_INDEX = "UNPRICED_MISSING_PRICE_INDEX"
 VALUATION_STATUS_UNPRICED_MISSING_MARK = "UNPRICED_MISSING_MARK"
 PRICING_SOURCE_EVENT_STATE = "EVENT_STATE"
 PRICING_SOURCE_PRIMARY_PRICE_TERM = "PRIMARY_PRICE_TERM"
+TRADE_LIFECYCLE_EVENT_TYPES = (
+    "TradeCreated",
+    "TradeAmended",
+    "TradeCancelled",
+    "OptionExercised",
+    "OptionExpired",
+    "OptionAssigned",
+)
+ATTRIBUTION_CATEGORY_NEW_POSITION = "NEW_POSITION"
+ATTRIBUTION_CATEGORY_REMOVED_POSITION = "REMOVED_POSITION"
+ATTRIBUTION_CATEGORY_ENTERED_TOTALS = "ENTERED_TOTALS"
+ATTRIBUTION_CATEGORY_EXITED_TOTALS = "EXITED_TOTALS"
+ATTRIBUTION_CATEGORY_REALIZATION = "REALIZATION"
+ATTRIBUTION_CATEGORY_REOPENED = "REOPENED"
+ATTRIBUTION_CATEGORY_POSITION_CHANGE = "POSITION_CHANGE"
+ATTRIBUTION_CATEGORY_MARK_CHANGE = "MARK_CHANGE"
+ATTRIBUTION_CATEGORY_CARRY = "CARRY"
+ATTRIBUTION_CATEGORY_OUTSIDE_TOTALS = "OUTSIDE_TOTALS"
+ATTRIBUTION_COMPONENT_TOLERANCE = Decimal("0.0001")
+EVENT_DRIVER_FIELD_LABELS = {
+    "instrument_type": "instrument",
+    "trade_structure": "structure",
+    "book": "book",
+    "portfolio": "portfolio",
+    "commodity_class": "commodity class",
+    "pricing_type": "pricing type",
+    "price_index_code": "price index",
+    "trade_currency_code": "currency",
+    "price_unit_code": "price unit",
+    "trade_side": "side",
+    "price": "fixed price",
+    "volume": "quantity",
+    "settlement_status": "settlement",
+    "status": "status",
+}
+EVENT_DRIVER_FIELD_ORDER = (
+    "settlement_status",
+    "volume",
+    "price",
+    "pricing_type",
+    "price_index_code",
+    "book",
+    "portfolio",
+    "trade_side",
+    "status",
+    "instrument_type",
+    "trade_structure",
+    "trade_currency_code",
+    "price_unit_code",
+    "commodity_class",
+)
 
 
 @dataclass
@@ -60,6 +111,15 @@ class PnlSnapshot:
     priced_trade_count: int = 0
     realized_trade_count: int = 0
     unrealized_trade_count: int = 0
+
+
+@dataclass
+class AttributionBreakdown:
+    market_move_pnl: Decimal = ZERO
+    quantity_change_pnl: Decimal = ZERO
+    coverage_change_pnl: Decimal = ZERO
+    other_change_pnl: Decimal = ZERO
+    realization_transfer_pnl: Decimal = ZERO
 
 
 @dataclass
@@ -76,6 +136,7 @@ class PrimaryPriceTerm:
 class TradeValuation:
     trade_id: str
     book: str | None
+    portfolio: str | None
     commodity_class: str | None
     instrument_type: str
     trade_structure: str
@@ -105,6 +166,7 @@ def _empty_trade_state(trade_id: str) -> dict[str, Any]:
         "instrument_type": DEFAULT_INSTRUMENT_TYPE,
         "trade_structure": DEFAULT_TRADE_STRUCTURE,
         "book": None,
+        "portfolio": None,
         "commodity_class": None,
         "pricing_type": DEFAULT_PRICING_TYPE,
         "price_index_code": None,
@@ -300,6 +362,7 @@ def _build_trade_valuation(
     return TradeValuation(
         trade_id=state["trade_id"],
         book=_normalize_text(state.get("book")),
+        portfolio=_normalize_text(state.get("portfolio")),
         commodity_class=_normalize_code(state.get("commodity_class")),
         instrument_type=instrument_type,
         trade_structure=trade_structure,
@@ -390,10 +453,117 @@ def _serialize_pnl_snapshot(snapshot: PnlSnapshot) -> dict[str, float | int]:
     }
 
 
+def _add_attribution_breakdowns(
+    current: AttributionBreakdown,
+    delta: AttributionBreakdown,
+) -> AttributionBreakdown:
+    return AttributionBreakdown(
+        market_move_pnl=current.market_move_pnl + delta.market_move_pnl,
+        quantity_change_pnl=current.quantity_change_pnl + delta.quantity_change_pnl,
+        coverage_change_pnl=current.coverage_change_pnl + delta.coverage_change_pnl,
+        other_change_pnl=current.other_change_pnl + delta.other_change_pnl,
+        realization_transfer_pnl=current.realization_transfer_pnl + delta.realization_transfer_pnl,
+    )
+
+
+def _serialize_attribution_breakdown(breakdown: AttributionBreakdown) -> dict[str, float]:
+    reconciled = (
+        breakdown.market_move_pnl
+        + breakdown.quantity_change_pnl
+        + breakdown.coverage_change_pnl
+        + breakdown.other_change_pnl
+    )
+    return {
+        "market_move_pnl": float(breakdown.market_move_pnl),
+        "quantity_change_pnl": float(breakdown.quantity_change_pnl),
+        "coverage_change_pnl": float(breakdown.coverage_change_pnl),
+        "other_change_pnl": float(breakdown.other_change_pnl),
+        "realization_transfer_pnl": float(breakdown.realization_transfer_pnl),
+        "reconciled_pnl_delta": float(reconciled),
+    }
+
+
+def _event_driver_field_label(field_name: str) -> str:
+    return EVENT_DRIVER_FIELD_LABELS.get(field_name, field_name.replace("_", " "))
+
+
+def _event_driver_value(field_name: str, value: object | None) -> str:
+    if value is None:
+        return "blank"
+
+    if field_name == "volume":
+        quantity = _decimal_or_none(value)
+        if quantity is not None:
+            normalized = abs(quantity)
+            return format(normalized.normalize(), "f").rstrip("0").rstrip(".") or "0"
+
+    normalized_code = _normalize_code(value)
+    if normalized_code is not None:
+        return normalized_code
+
+    normalized_text = _normalize_text(value)
+    if normalized_text is not None:
+        return normalized_text
+
+    return str(value)
+
+
+def _trade_amendment_event_summary(payload: dict[str, Any]) -> str:
+    changed_fields = [field_name for field_name in EVENT_DRIVER_FIELD_ORDER if field_name in payload]
+    if not changed_fields:
+        return "Trade amended"
+
+    parts = [
+        f"{_event_driver_field_label(field_name)} to {_event_driver_value(field_name, payload.get(field_name))}"
+        for field_name in changed_fields[:3]
+    ]
+    if len(changed_fields) == 1:
+        summary = parts[0]
+    elif len(changed_fields) == 2:
+        summary = f"{parts[0]} and {parts[1]}"
+    else:
+        summary = f"{', '.join(parts[:-1])}, and {parts[-1]}"
+
+    remaining_count = len(changed_fields) - len(parts)
+    if remaining_count > 0:
+        summary = f"{summary} (+{remaining_count} more field{'s' if remaining_count != 1 else ''})"
+
+    return f"Amended {summary}"
+
+
+def _trade_driver_event_summary(event: Event) -> str:
+    payload = event.payload or {}
+    if event.event_type == "TradeCreated":
+        return "Trade created"
+    if event.event_type == "TradeAmended":
+        return _trade_amendment_event_summary(payload)
+    if event.event_type == "TradeCancelled":
+        reason = _normalize_text(payload.get("cancellation_reason"))
+        return f"Trade cancelled ({reason})" if reason else "Trade cancelled"
+    if event.event_type == "OptionExercised":
+        return "Option exercised"
+    if event.event_type == "OptionExpired":
+        return "Option expired"
+    if event.event_type == "OptionAssigned":
+        return "Option assigned"
+    return event.event_type
+
+
+def _serialize_attribution_driver_event(event: Event) -> dict[str, Any]:
+    return {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "occurred_at": event.occurred_at,
+        "actor_id": event.actor_id,
+        "summary": _trade_driver_event_summary(event),
+    }
+
+
 def _serialize_trade_valuation(valuation: TradeValuation) -> dict[str, Any]:
     return {
         "trade_id": valuation.trade_id,
         "book": valuation.book,
+        "portfolio": valuation.portfolio,
         "commodity_class": valuation.commodity_class,
         "instrument_type": valuation.instrument_type,
         "trade_structure": valuation.trade_structure,
@@ -433,6 +603,244 @@ def _empty_pnl_history_report(generated_at: datetime) -> dict[str, Any]:
     }
 
 
+def _deserialize_pnl_snapshot(payload: dict[str, Any] | None) -> PnlSnapshot:
+    row = payload or {}
+    return PnlSnapshot(
+        total_pnl=Decimal(str(row.get("total_pnl") or 0)),
+        realized_pnl=Decimal(str(row.get("realized_pnl") or 0)),
+        unrealized_pnl=Decimal(str(row.get("unrealized_pnl") or 0)),
+        priced_trade_count=int(row.get("priced_trade_count") or 0),
+        realized_trade_count=int(row.get("realized_trade_count") or 0),
+        unrealized_trade_count=int(row.get("unrealized_trade_count") or 0),
+    )
+
+
+def _pnl_snapshot_for_serialized_valuation(valuation: dict[str, Any] | None) -> PnlSnapshot:
+    if valuation is None or not bool(valuation.get("included_in_totals")):
+        return PnlSnapshot()
+
+    contribution = Decimal(str(valuation.get("pnl_contribution") or 0))
+    if str(valuation.get("pnl_bucket") or "").strip().upper() == "REALIZED":
+        return PnlSnapshot(
+            total_pnl=contribution,
+            realized_pnl=contribution,
+            unrealized_pnl=ZERO,
+            priced_trade_count=1,
+            realized_trade_count=1,
+            unrealized_trade_count=0,
+        )
+
+    return PnlSnapshot(
+        total_pnl=contribution,
+        realized_pnl=ZERO,
+        unrealized_pnl=contribution,
+        priced_trade_count=1,
+        realized_trade_count=0,
+        unrealized_trade_count=1,
+    )
+
+
+def _portfolio_snapshots_from_valuations(valuations: list[dict[str, Any]]) -> dict[str, PnlSnapshot]:
+    snapshots: dict[str, PnlSnapshot] = {}
+    for valuation in valuations:
+        if not bool(valuation.get("included_in_totals")):
+            continue
+        portfolio_code = _normalize_text(valuation.get("portfolio")) or "UNASSIGNED"
+        snapshots[portfolio_code] = _add_pnl_snapshots(
+            snapshots.get(portfolio_code, PnlSnapshot()),
+            _pnl_snapshot_for_serialized_valuation(valuation),
+        )
+    return snapshots
+
+
+def _included_in_totals(valuation: dict[str, Any] | None) -> bool:
+    return bool(valuation and valuation.get("included_in_totals"))
+
+
+def _valuation_pnl_for_totals(valuation: dict[str, Any] | None) -> Decimal:
+    if valuation is None or not _included_in_totals(valuation):
+        return ZERO
+    return Decimal(str(valuation.get("pnl_contribution") or 0))
+
+
+def _valuation_decimal(valuation: dict[str, Any] | None, field_name: str) -> Decimal | None:
+    if valuation is None:
+        return None
+    raw_value = valuation.get(field_name)
+    if raw_value is None:
+        return None
+    return Decimal(str(raw_value))
+
+
+def _valuation_signed_quantity(valuation: dict[str, Any] | None) -> Decimal | None:
+    quantity = _valuation_decimal(valuation, "quantity")
+    if quantity is None:
+        return None
+    direction = int(valuation.get("direction") or 0) if valuation is not None else 0
+    return quantity * Decimal(direction)
+
+
+def _realization_transfer_amount(
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> Decimal:
+    if not _included_in_totals(before) or not _included_in_totals(after):
+        return ZERO
+
+    before_bucket = _normalize_code(before.get("pnl_bucket") if before else None)
+    after_bucket = _normalize_code(after.get("pnl_bucket") if after else None)
+    if before_bucket == after_bucket:
+        return ZERO
+    if before_bucket == "UNREALIZED" and after_bucket == "REALIZED":
+        return _valuation_pnl_for_totals(before)
+    if before_bucket == "REALIZED" and after_bucket == "UNREALIZED":
+        return -_valuation_pnl_for_totals(after)
+    return ZERO
+
+
+def _attribution_breakdown(
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> AttributionBreakdown:
+    pnl_delta = _valuation_pnl_for_totals(after) - _valuation_pnl_for_totals(before)
+    realization_transfer_pnl = _realization_transfer_amount(before, after)
+    before_included = _included_in_totals(before)
+    after_included = _included_in_totals(after)
+
+    if not before_included and not after_included:
+        return AttributionBreakdown(realization_transfer_pnl=realization_transfer_pnl)
+
+    if before_included != after_included:
+        coverage_change_pnl = ZERO
+        quantity_change_pnl = ZERO
+        if before is None or after is None:
+            quantity_change_pnl = pnl_delta
+        else:
+            coverage_change_pnl = pnl_delta
+        return AttributionBreakdown(
+            quantity_change_pnl=quantity_change_pnl,
+            coverage_change_pnl=coverage_change_pnl,
+            realization_transfer_pnl=realization_transfer_pnl,
+        )
+
+    before_effective_mark = _valuation_decimal(before, "effective_mark") or ZERO
+    after_effective_mark = _valuation_decimal(after, "effective_mark") or ZERO
+    before_market_price = _valuation_decimal(before, "market_price")
+    after_market_price = _valuation_decimal(after, "market_price")
+    before_quantity = _valuation_signed_quantity(before) or ZERO
+    after_quantity = _valuation_signed_quantity(after) or ZERO
+
+    market_move_pnl = ZERO
+    if (
+        before_market_price is not None
+        and after_market_price is not None
+        and _normalize_code(before.get("price_index_code") if before else None)
+        and _normalize_code(before.get("price_index_code") if before else None)
+        == _normalize_code(after.get("price_index_code") if after else None)
+    ):
+        market_move_pnl = (after_market_price - before_market_price) * before_quantity
+
+    quantity_change_pnl = after_effective_mark * (after_quantity - before_quantity)
+    coverage_change_pnl = ZERO
+    other_change_pnl = pnl_delta - market_move_pnl - quantity_change_pnl - coverage_change_pnl
+
+    return AttributionBreakdown(
+        market_move_pnl=market_move_pnl,
+        quantity_change_pnl=quantity_change_pnl,
+        coverage_change_pnl=coverage_change_pnl,
+        other_change_pnl=other_change_pnl,
+        realization_transfer_pnl=realization_transfer_pnl,
+    )
+
+
+def _build_driver_summary(
+    driver_events: list[dict[str, Any]],
+    breakdown: AttributionBreakdown,
+) -> str:
+    if driver_events:
+        summary_parts = [
+            f"{str(event.get('summary') or 'Lifecycle event')} on {event['occurred_at'].date().isoformat()}"
+            for event in driver_events[:2]
+            if isinstance(event.get("occurred_at"), datetime)
+        ]
+        if len(driver_events) > 2:
+            summary_parts.append(
+                f"+{len(driver_events) - 2} more lifecycle event{'s' if len(driver_events) - 2 != 1 else ''}"
+            )
+        if summary_parts:
+            return "; ".join(summary_parts)
+
+    if abs(breakdown.market_move_pnl) > ATTRIBUTION_COMPONENT_TOLERANCE:
+        return "No lifecycle events in the compare window; movement came from market or mark changes."
+    if abs(breakdown.quantity_change_pnl) > ATTRIBUTION_COMPONENT_TOLERANCE:
+        return "No lifecycle events in the compare window; exposure changed across snapshots without a captured trade event."
+    if abs(breakdown.coverage_change_pnl) > ATTRIBUTION_COMPONENT_TOLERANCE:
+        return "No lifecycle events in the compare window; valuation coverage changed across snapshots."
+    if abs(breakdown.realization_transfer_pnl) > ATTRIBUTION_COMPONENT_TOLERANCE:
+        return "No lifecycle events in the compare window; value still moved between unrealized and realized buckets."
+    if abs(breakdown.other_change_pnl) > ATTRIBUTION_COMPONENT_TOLERANCE:
+        return "No lifecycle events in the compare window; residual movement came from pricing-term or other non-market changes."
+    return "No lifecycle events in the compare window; valuation carried forward between snapshots."
+
+
+def _is_changed_attribution_row(row: dict[str, Any]) -> bool:
+    return abs(float(row.get("pnl_delta") or 0)) > float(ATTRIBUTION_COMPONENT_TOLERANCE) or str(
+        row.get("attribution_category") or ""
+    ) not in {"CARRY", "OUTSIDE_TOTALS"}
+
+
+def _attribution_row_magnitude(row: dict[str, Any]) -> float:
+    breakdown = row.get("breakdown") or {}
+    return max(
+        abs(float(row.get("pnl_delta") or 0)),
+        abs(float(breakdown.get("realization_transfer_pnl") or 0)),
+        abs(float(breakdown.get("reconciled_pnl_delta") or 0)),
+    )
+
+
+def _attribution_category(
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> str:
+    before_included = _included_in_totals(before)
+    after_included = _included_in_totals(after)
+
+    if not before_included and not after_included:
+        return ATTRIBUTION_CATEGORY_OUTSIDE_TOTALS
+    if not before_included and after_included:
+        return ATTRIBUTION_CATEGORY_NEW_POSITION if before is None else ATTRIBUTION_CATEGORY_ENTERED_TOTALS
+    if before_included and not after_included:
+        return ATTRIBUTION_CATEGORY_REMOVED_POSITION if after is None else ATTRIBUTION_CATEGORY_EXITED_TOTALS
+
+    before_bucket = _normalize_code(before.get("pnl_bucket") if before else None)
+    after_bucket = _normalize_code(after.get("pnl_bucket") if after else None)
+    if before_bucket != after_bucket:
+        if before_bucket == "UNREALIZED" and after_bucket == "REALIZED":
+            return ATTRIBUTION_CATEGORY_REALIZATION
+        if before_bucket == "REALIZED" and after_bucket == "UNREALIZED":
+            return ATTRIBUTION_CATEGORY_REOPENED
+        return ATTRIBUTION_CATEGORY_POSITION_CHANGE
+
+    if (
+        _normalize_text(before.get("portfolio") if before else None) != _normalize_text(after.get("portfolio") if after else None)
+        or _normalize_text(before.get("book") if before else None) != _normalize_text(after.get("book") if after else None)
+        or _normalize_code(before.get("trade_side") if before else None) != _normalize_code(after.get("trade_side") if after else None)
+        or before.get("quantity") != after.get("quantity")
+        or before.get("direction") != after.get("direction")
+    ):
+        return ATTRIBUTION_CATEGORY_POSITION_CHANGE
+
+    if (
+        before.get("effective_mark") != after.get("effective_mark")
+        or before.get("pricing_type") != after.get("pricing_type")
+        or before.get("price_index_code") != after.get("price_index_code")
+        or before.get("fixed_price") != after.get("fixed_price")
+    ):
+        return ATTRIBUTION_CATEGORY_MARK_CHANGE
+
+    return ATTRIBUTION_CATEGORY_CARRY
+
+
 def _normalize_filter_code(value: str | None) -> str | None:
     return _normalize_code(value)
 
@@ -441,9 +849,13 @@ def _state_matches_filters(
     state: dict[str, Any],
     *,
     book: str | None,
+    portfolio: str | None,
     commodity_class: str | None,
 ) -> bool:
     if book and _normalize_filter_code(state.get("book")) != book:
+        return False
+
+    if portfolio and _normalize_filter_code(state.get("portfolio")) != portfolio:
         return False
 
     if commodity_class and _normalize_filter_code(state.get("commodity_class")) != commodity_class:
@@ -460,6 +872,7 @@ def _apply_trade_event(current: dict[str, Any] | None, event: Event) -> dict[str
         next_state["instrument_type"] = payload.get("instrument_type") or DEFAULT_INSTRUMENT_TYPE
         next_state["trade_structure"] = payload.get("trade_structure") or DEFAULT_TRADE_STRUCTURE
         next_state["book"] = payload.get("book")
+        next_state["portfolio"] = payload.get("portfolio")
         next_state["commodity_class"] = payload.get("commodity_class")
         next_state["pricing_type"] = payload.get("pricing_type") or DEFAULT_PRICING_TYPE
         next_state["price_index_code"] = payload.get("price_index_code")
@@ -479,6 +892,7 @@ def _apply_trade_event(current: dict[str, Any] | None, event: Event) -> dict[str
             "instrument_type",
             "trade_structure",
             "book",
+            "portfolio",
             "commodity_class",
             "pricing_type",
             "price_index_code",
@@ -512,6 +926,7 @@ def _legacy_trade_state(row: Trade) -> dict[str, Any]:
         "instrument_type": row.instrument_type,
         "trade_structure": row.trade_structure,
         "book": row.book,
+        "portfolio": row.portfolio,
         "commodity_class": row.commodity_class,
         "pricing_type": row.pricing_type,
         "price_index_code": row.price_index_code,
@@ -522,6 +937,36 @@ def _legacy_trade_state(row: Trade) -> dict[str, Any]:
         "volume": row.volume,
         "settlement_status": row.settlement_status,
     }
+
+
+def _load_trade_driver_events(
+    db: Session,
+    *,
+    trade_ids: list[str],
+    from_as_of: date,
+    to_as_of: date,
+) -> dict[str, list[dict[str, Any]]]:
+    if not trade_ids or from_as_of >= to_as_of:
+        return {}
+
+    window_start = datetime.combine(from_as_of + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    window_end = datetime.combine(to_as_of + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    rows = db.execute(
+        select(Event)
+        .where(
+            Event.aggregate_type == "trade",
+            Event.aggregate_id.in_(trade_ids),
+            Event.event_type.in_(TRADE_LIFECYCLE_EVENT_TYPES),
+            Event.occurred_at >= window_start,
+            Event.occurred_at < window_end,
+        )
+        .order_by(Event.aggregate_id.asc(), Event.occurred_at.asc(), Event.recorded_at.asc(), Event.event_id.asc())
+    ).scalars().all()
+
+    grouped_events: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped_events.setdefault(row.aggregate_id, []).append(_serialize_attribution_driver_event(row))
+    return grouped_events
 
 
 def _load_daily_mark_updates(
@@ -559,12 +1004,14 @@ def build_pnl_history_report(
     *,
     as_of: date | None = None,
     book: str | None = None,
+    portfolio: str | None = None,
     commodity_class: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc)
     normalized_book = _normalize_filter_code(book)
+    normalized_portfolio = _normalize_filter_code(portfolio)
     normalized_commodity_class = _normalize_filter_code(commodity_class)
     end_date = date_to or as_of or generated_at.date()
     window_start_date = date_from
@@ -573,14 +1020,7 @@ def build_pnl_history_report(
         select(Event)
         .where(
             Event.aggregate_type == "trade",
-            Event.event_type.in_((
-                "TradeCreated",
-                "TradeAmended",
-                "TradeCancelled",
-                "OptionExercised",
-                "OptionExpired",
-                "OptionAssigned",
-            )),
+            Event.event_type.in_(TRADE_LIFECYCLE_EVENT_TYPES),
         )
         .order_by(Event.occurred_at.asc(), Event.recorded_at.asc(), Event.event_id.asc())
     ).scalars().all()
@@ -660,6 +1100,7 @@ def build_pnl_history_report(
             if not _state_matches_filters(
                 state,
                 book=normalized_book,
+                portfolio=normalized_portfolio,
                 commodity_class=normalized_commodity_class,
             ):
                 continue
@@ -695,6 +1136,7 @@ def build_pnl_history_report(
         and _state_matches_filters(
             state,
             book=normalized_book,
+            portfolio=normalized_portfolio,
             commodity_class=normalized_commodity_class,
         )
     ]
@@ -737,4 +1179,193 @@ def build_pnl_history_report(
         "points": points,
         "summary": _serialize_pnl_snapshot(end_snapshot),
         "valuations": valuations,
+    }
+
+
+def build_pnl_comparison_report(
+    db: Session,
+    *,
+    from_as_of: date,
+    to_as_of: date,
+    book: str | None = None,
+    portfolio: str | None = None,
+    commodity_class: str | None = None,
+) -> dict[str, Any]:
+    generated_at = datetime.now(timezone.utc)
+    comparison_payload = _build_pnl_comparison_report_payload(
+        db,
+        from_as_of=from_as_of,
+        to_as_of=to_as_of,
+        book=book,
+        portfolio=portfolio,
+        commodity_class=commodity_class,
+        generated_at=generated_at,
+    )
+
+    daily_bridge: list[dict[str, Any]] = []
+    if from_as_of < to_as_of:
+        bridge_from = from_as_of
+        while bridge_from < to_as_of:
+            bridge_to = bridge_from + timedelta(days=1)
+            bridge_payload = _build_pnl_comparison_report_payload(
+                db,
+                from_as_of=bridge_from,
+                to_as_of=bridge_to,
+                book=book,
+                portfolio=portfolio,
+                commodity_class=commodity_class,
+                generated_at=generated_at,
+            )
+            changed_rows = [
+                row for row in list(bridge_payload.get("attributions") or []) if _is_changed_attribution_row(row)
+            ]
+            top_driver = (
+                sorted(
+                    changed_rows,
+                    key=lambda row: (
+                        -_attribution_row_magnitude(row),
+                        str(row.get("trade_id") or ""),
+                    ),
+                )[0]
+                if changed_rows
+                else None
+            )
+            daily_bridge.append(
+                {
+                    "from_as_of": bridge_from,
+                    "to_as_of": bridge_to,
+                    "delta": bridge_payload["delta"],
+                    "attribution_summary": bridge_payload["attribution_summary"],
+                    "changed_trade_count": len(changed_rows),
+                    "top_driver_trade_id": str(top_driver.get("trade_id")) if top_driver else None,
+                    "top_driver_category": (
+                        str(top_driver.get("attribution_category")) if top_driver else None
+                    ),
+                    "top_driver_pnl_delta": (
+                        float(top_driver.get("pnl_delta")) if top_driver is not None else None
+                    ),
+                    "top_driver_summary": (
+                        str(top_driver.get("driver_summary")) if top_driver else None
+                    ),
+                }
+            )
+            bridge_from = bridge_to
+
+    return {
+        **comparison_payload,
+        "daily_bridge": daily_bridge,
+    }
+
+
+def _build_pnl_comparison_report_payload(
+    db: Session,
+    *,
+    from_as_of: date,
+    to_as_of: date,
+    book: str | None = None,
+    portfolio: str | None = None,
+    commodity_class: str | None = None,
+    generated_at: datetime | None = None,
+) -> dict[str, Any]:
+    resolved_generated_at = generated_at or datetime.now(timezone.utc)
+    from_report = build_pnl_history_report(
+        db,
+        as_of=from_as_of,
+        book=book,
+        portfolio=portfolio,
+        commodity_class=commodity_class,
+    )
+    to_report = build_pnl_history_report(
+        db,
+        as_of=to_as_of,
+        book=book,
+        portfolio=portfolio,
+        commodity_class=commodity_class,
+    )
+
+    from_snapshot = _deserialize_pnl_snapshot(from_report.get("summary"))
+    to_snapshot = _deserialize_pnl_snapshot(to_report.get("summary"))
+    delta_snapshot = _subtract_pnl_snapshots(to_snapshot, from_snapshot)
+
+    from_portfolio_snapshots = _portfolio_snapshots_from_valuations(list(from_report.get("valuations") or []))
+    to_portfolio_snapshots = _portfolio_snapshots_from_valuations(list(to_report.get("valuations") or []))
+    all_portfolios = sorted(set(from_portfolio_snapshots) | set(to_portfolio_snapshots))
+    portfolio_deltas: list[dict[str, Any]] = []
+    for portfolio_code in all_portfolios:
+        before_snapshot = from_portfolio_snapshots.get(portfolio_code, PnlSnapshot())
+        after_snapshot = to_portfolio_snapshots.get(portfolio_code, PnlSnapshot())
+        portfolio_deltas.append(
+            {
+                "portfolio": portfolio_code,
+                "from_snapshot": _serialize_pnl_snapshot(before_snapshot),
+                "to_snapshot": _serialize_pnl_snapshot(after_snapshot),
+                "delta": _serialize_pnl_snapshot(_subtract_pnl_snapshots(after_snapshot, before_snapshot)),
+            }
+        )
+
+    portfolio_deltas.sort(
+        key=lambda row: (
+            -abs(float(((row.get("delta") or {}).get("total_pnl") or 0))),
+            str(row.get("portfolio") or ""),
+        )
+    )
+
+    from_valuations_by_trade = {
+        str(row.get("trade_id")): row
+        for row in list(from_report.get("valuations") or [])
+        if row.get("trade_id")
+    }
+    to_valuations_by_trade = {
+        str(row.get("trade_id")): row
+        for row in list(to_report.get("valuations") or [])
+        if row.get("trade_id")
+    }
+    all_trade_ids = sorted(set(from_valuations_by_trade) | set(to_valuations_by_trade))
+    driver_events_by_trade = _load_trade_driver_events(
+        db,
+        trade_ids=all_trade_ids,
+        from_as_of=from_as_of,
+        to_as_of=to_as_of,
+    )
+    attributions: list[dict[str, Any]] = []
+    attribution_summary = AttributionBreakdown()
+    for trade_id in all_trade_ids:
+        before = from_valuations_by_trade.get(trade_id)
+        after = to_valuations_by_trade.get(trade_id)
+        breakdown = _attribution_breakdown(before, after)
+        driver_events = driver_events_by_trade.get(trade_id, [])
+        attribution_summary = _add_attribution_breakdowns(attribution_summary, breakdown)
+        attributions.append(
+            {
+                "trade_id": trade_id,
+                "attribution_category": _attribution_category(before, after),
+                "pnl_delta": float(_valuation_pnl_for_totals(after) - _valuation_pnl_for_totals(before)),
+                "breakdown": _serialize_attribution_breakdown(breakdown),
+                "driver_summary": _build_driver_summary(driver_events, breakdown),
+                "driver_events": driver_events,
+                "from_valuation": before,
+                "to_valuation": after,
+            }
+        )
+
+    attributions.sort(
+        key=lambda row: (
+            -abs(float(row.get("pnl_delta") or 0)),
+            str(row.get("trade_id") or ""),
+        )
+    )
+
+    return {
+        "generated_at": resolved_generated_at,
+        "basis": str(to_report.get("basis") or from_report.get("basis") or TRADE_PNL_BASIS),
+        "methodology": str(to_report.get("methodology") or from_report.get("methodology") or TRADE_PNL_METHODOLOGY),
+        "from_as_of": from_as_of,
+        "to_as_of": to_as_of,
+        "from_snapshot": _serialize_pnl_snapshot(from_snapshot),
+        "to_snapshot": _serialize_pnl_snapshot(to_snapshot),
+        "delta": _serialize_pnl_snapshot(delta_snapshot),
+        "attribution_summary": _serialize_attribution_breakdown(attribution_summary),
+        "portfolio_deltas": portfolio_deltas,
+        "attributions": attributions,
+        "daily_bridge": [],
     }

@@ -2,6 +2,11 @@ from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
+from apps.api.app.models.delivery_event import DeliveryEvent
+from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetail
+from apps.api.app.models.delivery_obligation import DeliveryObligation
+from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
+from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.event import Base, Event
@@ -29,6 +34,8 @@ from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
+from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_credit_exception import TradeCreditException
 from apps.api.app.models.trade_invoice import TradeInvoice
@@ -47,6 +54,11 @@ __all__ = [
     "AssistantConversation",
     "AssistantRun",
     "Base",
+    "DeliveryEvent",
+    "DeliveryLogisticsDetail",
+    "DeliveryObligation",
+    "DeliveryPipelineDetail",
+    "DeliveryPowerDetail",
     "DocumentIngestion",
     "DocumentIngestionPage",
     "Event",
@@ -72,6 +84,8 @@ __all__ = [
     "ReferencePriceIndexSource",
     "ReferenceUnit",
     "Trade",
+    "TradeActualization",
+    "TradeConfirmation",
     "TradeCreditApprovalDecision",
     "TradeCreditException",
     "TradeInvoice",

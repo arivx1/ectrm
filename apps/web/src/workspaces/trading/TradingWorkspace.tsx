@@ -1,12 +1,18 @@
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
+import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
+import { formatCurrencyAmount } from '../../shared/format'
 import type { TradeCreditExceptionRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
+  buildOpenOptionValuation,
+  buildOptionSettlementValuation,
   calculateDaysToExpiration,
   calculatePremiumCashflow,
   calculateUnderlyingEquivalentVolume,
+  type OpenOptionValuation,
+  type OptionSettlementValuation,
 } from '../../shared/optionExposure'
 import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { TileLayout } from '../../shared/ui/TileLayout'
@@ -21,6 +27,7 @@ import {
 
 type Trade = {
   trade_id: string
+  originating_option_trade_id: string | null
   external_trade_id: string | null
   source_system: string | null
   trade_date: string | null
@@ -51,6 +58,7 @@ type Trade = {
   confirmation_status: string
   nomination_status: string
   allocation_status: string
+  actualization_status: string
   price_index_code: string | null
   price: number | null
   volume: number | null
@@ -112,6 +120,21 @@ const RISK_TOOLTIPS = {
   projectionState: 'Current lifecycle status on the trade read model, not the raw event stream.',
 } as const
 
+function TradingMetricTileContent({
+  value,
+  detail,
+}: {
+  value: string
+  detail: string
+}) {
+  return (
+    <div className="trading-metric-tile">
+      <strong>{value}</strong>
+      <p>{detail}</p>
+    </div>
+  )
+}
+
 function creditApprovalLabel(value: string | undefined): string {
   return (value || 'NOT_REQUIRED').replaceAll('_', ' ')
 }
@@ -144,11 +167,158 @@ function creditExceptionReasonLabel(value: string | null | undefined): string | 
   return normalized ? normalized.replaceAll('_', ' ') : null
 }
 
+function settlementCashflowLabel(
+  value: number | null,
+  formatMoney: (value: number | null) => string,
+): string {
+  if (value === null) {
+    return '—'
+  }
+  if (value > 0) {
+    return `Paid ${formatMoney(Math.abs(value))}`
+  }
+  if (value < 0) {
+    return `Received ${formatMoney(Math.abs(value))}`
+  }
+  return formatMoney(0)
+}
+
+function settlementUnitPriceLabel(
+  valuation: OptionSettlementValuation,
+): string {
+  if (valuation.effectiveUnitPrice === null) {
+    return '—'
+  }
+
+  return `${formatCurrencyAmount(valuation.effectiveUnitPrice, valuation.referenceCurrencyCode)} ${
+    (valuation.underlyingDirection ?? 'BUY').trim().toUpperCase() === 'SELL' ? 'received/unit' : 'paid/unit'
+  }`
+}
+
+function settlementReferenceMarkLabel(
+  valuation: OptionSettlementValuation,
+): string {
+  if (valuation.referencePrice === null) {
+    return '—'
+  }
+
+  return `${formatCurrencyAmount(valuation.referencePrice, valuation.referenceCurrencyCode)}${
+    valuation.referenceUnitCode ? ` / ${valuation.referenceUnitCode}` : ''
+  }`
+}
+
+function openOptionReferenceMarkLabel(
+  valuation: OpenOptionValuation,
+): string {
+  if (valuation.referencePrice === null) {
+    return '—'
+  }
+
+  return `${formatCurrencyAmount(valuation.referencePrice, valuation.referenceCurrencyCode)}${
+    valuation.referenceUnitCode ? ` / ${valuation.referenceUnitCode}` : ''
+  }`
+}
+
+function openOptionIntrinsicExposureLabel(
+  valuation: OpenOptionValuation,
+): string {
+  if (valuation.intrinsicExposure === null) {
+    return '—'
+  }
+  if (valuation.intrinsicExposure < 0) {
+    return `Liability ${formatCurrencyAmount(Math.abs(valuation.intrinsicExposure), valuation.referenceCurrencyCode)}`
+  }
+  if (valuation.intrinsicExposure > 0) {
+    return `Value ${formatCurrencyAmount(valuation.intrinsicExposure, valuation.referenceCurrencyCode)}`
+  }
+  return formatCurrencyAmount(0, valuation.referenceCurrencyCode)
+}
+
+function openOptionBreakEvenLabel(
+  valuation: OpenOptionValuation,
+): string {
+  if (valuation.breakEvenPrice === null) {
+    return '—'
+  }
+
+  return `${formatCurrencyAmount(valuation.breakEvenPrice, valuation.referenceCurrencyCode)}${
+    valuation.referenceUnitCode ? ` / ${valuation.referenceUnitCode}` : ''
+  }`
+}
+
+function openOptionExpiryPnlLabel(
+  valuation: OpenOptionValuation,
+): string {
+  if (valuation.expiryPnlAtMark === null) {
+    return '—'
+  }
+  if (valuation.expiryPnlAtMark > 0) {
+    return `Gain ${formatCurrencyAmount(Math.abs(valuation.expiryPnlAtMark), valuation.referenceCurrencyCode)}`
+  }
+  if (valuation.expiryPnlAtMark < 0) {
+    return `Loss ${formatCurrencyAmount(Math.abs(valuation.expiryPnlAtMark), valuation.referenceCurrencyCode)}`
+  }
+  return 'Break-even'
+}
+
+function openOptionExpiryStateLabel(
+  valuation: OpenOptionValuation,
+): string {
+  switch (valuation.expiryState) {
+    case 'PAST_EXPIRY_UNRESOLVED':
+      return 'Past expiry unresolved'
+    case 'EXPIRING_TODAY':
+      return 'Expiring today'
+    case 'EXPIRING_SOON':
+      return 'Expiring soon'
+    default:
+      return 'Open'
+  }
+}
+
+function optionLifecycleActionLabel(
+  action: OptionLifecycleEventType | null,
+): string {
+  switch (action) {
+    case 'OptionExercised':
+      return 'Exercise'
+    case 'OptionAssigned':
+      return 'Assign'
+    case 'OptionExpired':
+      return 'Expire'
+    default:
+      return 'Monitor'
+  }
+}
+
+function settlementMarkToMarketLabel(
+  value: number | null,
+  currencyCode: string | null | undefined,
+): string {
+  if (value === null) {
+    return '—'
+  }
+  if (value > 0) {
+    return `Gain ${formatCurrencyAmount(Math.abs(value), currencyCode)}`
+  }
+  if (value < 0) {
+    return `Loss ${formatCurrencyAmount(Math.abs(value), currencyCode)}`
+  }
+  return formatCurrencyAmount(0, currencyCode)
+}
+
 type TradingWorkspaceProps = {
   authSession: StoredAuthSession | null
   tradeCaptureFormProps: TradeCaptureFormProps
   trades: Trade[]
   tradeWorkflowItems: TradeWorkflowItemRecord[]
+  activeTradeCount: number
+  totalActiveVolume: number
+  pricedActiveTrades: number
+  pricingCoverage: number | null
+  pendingPricingTrades: number
+  trackedBooks: number
+  largestPositionRow: { commodity: string; net_volume: number } | null
   selectedTrade: Trade | null
   selectedTradeId: string | null
   selectedTradeEvents: EventRow[]
@@ -285,6 +455,13 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     tradeCaptureFormProps,
     trades,
     tradeWorkflowItems,
+    activeTradeCount,
+    totalActiveVolume,
+    pricedActiveTrades,
+    pricingCoverage,
+    pendingPricingTrades,
+    trackedBooks,
+    largestPositionRow,
     selectedTrade,
     selectedTradeId,
     selectedTradeEvents,
@@ -473,6 +650,39 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
         (item) => item.trade_id === selectedTrade.trade_id && item.workflow_type === 'OPTION_SETTLEMENT',
       ) ?? null
     : null
+  const selectedTradeLinkedUnderlying = selectedTrade
+    ? trades.find((trade) => trade.originating_option_trade_id === selectedTrade.trade_id) ?? null
+    : null
+  const selectedTradeOriginatingOption = selectedTrade?.originating_option_trade_id
+    ? trades.find((trade) => trade.trade_id === selectedTrade.originating_option_trade_id) ?? null
+    : null
+  const {
+    latestMarksByCode: selectedTradeLatestMarksByCode,
+    loading: selectedTradeMarksLoading,
+    error: selectedTradeMarksError,
+  } = useLatestPriceIndexMarks([
+    selectedTrade?.price_index_code,
+    selectedTradeLinkedUnderlying?.price_index_code,
+    selectedTradeOriginatingOption?.price_index_code,
+  ])
+  const selectedTradeSettlementValuation =
+    selectedTrade && selectedTradeIsOption && selectedTradeLinkedUnderlying
+      ? buildOptionSettlementValuation(
+          selectedTrade,
+          selectedTradeLinkedUnderlying,
+          selectedTradeLatestMarksByCode,
+        )
+      : selectedTrade && selectedTradeOriginatingOption
+        ? buildOptionSettlementValuation(
+            selectedTradeOriginatingOption,
+            selectedTrade,
+            selectedTradeLatestMarksByCode,
+          )
+        : null
+  const selectedTradeOpenOptionValuation =
+    selectedTrade && selectedTradeIsOption && selectedTradeIsActive
+      ? buildOpenOptionValuation(selectedTrade, selectedTradeLatestMarksByCode)
+      : null
 
   const tradeBoardColumns: DataSheetColumn<Trade>[] = [
     {
@@ -656,6 +866,9 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <span className="entity-chip entity-chip-soft">Pricing {selectedTrade.pricing_status}</span>
                     <span className="entity-chip entity-chip-soft">Confirmation {selectedTrade.confirmation_status}</span>
                     <span className="entity-chip entity-chip-soft">Nomination {selectedTrade.nomination_status}</span>
+                    <span className="entity-chip entity-chip-soft">
+                      Actualization {selectedTrade.actualization_status.replaceAll('_', ' ')}
+                    </span>
                     <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
                     <span className="entity-chip entity-chip-soft">Payment {selectedTrade.payment_status}</span>
                   </div>
@@ -679,6 +892,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                       {selectedTradeIsActive ? optionLifecycleGuidance : `This option is already closed as ${selectedTrade.status}.`}
                     </p>
                   ) : null}
+                  {selectedTradeIsOption && selectedTradeOpenOptionValuation ? (
+                    <p className={selectedTradeOpenOptionValuation.decisionTone === 'blocked' ? 'field-error' : 'form-note'}>
+                      {selectedTradeOpenOptionValuation.decisionLabel}: {selectedTradeOpenOptionValuation.decisionReason}
+                    </p>
+                  ) : null}
                   {selectedTradeOptionSettlementItem ? (
                     <p className="form-note">
                       Operations workflow: {selectedTradeOptionSettlementItem.status.replaceAll('_', ' ')}
@@ -686,7 +904,40 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         ? ` due ${formatDateOnly(selectedTradeOptionSettlementItem.due_at)}.`
                         : '.'}{' '}
                       {selectedTradeOptionSettlementItem.notes ?? 'Book the resulting underlying handoff from this lifecycle event.'}
+                      {selectedTradeOptionSettlementItem.linked_trade_id
+                        ? ` Linked trade ${selectedTradeOptionSettlementItem.linked_trade_id} is ${selectedTradeOptionSettlementItem.linked_trade_status ?? 'ACTIVE'}.`
+                        : ''}
                     </p>
+                  ) : null}
+                  {selectedTradeLinkedUnderlying ? (
+                    <div className="shipment-card-meta">
+                      <span className="entity-chip entity-chip-soft">
+                        Linked Underlying {selectedTradeLinkedUnderlying.trade_id}
+                      </span>
+                      <span className="entity-chip entity-chip-soft">{selectedTradeLinkedUnderlying.status}</span>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => setSelectedTradeId(selectedTradeLinkedUnderlying.trade_id)}
+                      >
+                        Open Underlying
+                      </button>
+                    </div>
+                  ) : null}
+                  {selectedTradeOriginatingOption ? (
+                    <div className="shipment-card-meta">
+                      <span className="entity-chip entity-chip-soft">
+                        Originating Option {selectedTradeOriginatingOption.trade_id}
+                      </span>
+                      <span className="entity-chip entity-chip-soft">{selectedTradeOriginatingOption.status}</span>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => setSelectedTradeId(selectedTradeOriginatingOption.trade_id)}
+                      >
+                        Open Option
+                      </button>
+                    </div>
                   ) : null}
 
                   <div className="trade-inspector-summary-grid">
@@ -814,6 +1065,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                       <strong>{selectedTradeOptionSettlementItem.status}</strong>
                     </div>
                   )}
+                  {selectedTradeLinkedUnderlying && (
+                    <div className="detail-row">
+                      <span>Linked Underlying Trade</span>
+                      <strong>{selectedTradeLinkedUnderlying.trade_id}</strong>
+                    </div>
+                  )}
+                  {selectedTradeOriginatingOption && (
+                    <div className="detail-row">
+                      <span>Originating Option Trade</span>
+                      <strong>{selectedTradeOriginatingOption.trade_id}</strong>
+                    </div>
+                  )}
                   {selectedTradeIsOption && (
                     <div className="detail-row">
                       <span>Option Type</span>
@@ -881,6 +1144,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   <div className="detail-row">
                     <span>Allocation Status</span>
                     <strong>{selectedTrade.allocation_status}</strong>
+                  </div>
+                  <div className="detail-row">
+                    <span>Actualization Status</span>
+                    <strong>{selectedTrade.actualization_status}</strong>
                   </div>
                   <div className="detail-row">
                     <span>Price Index</span>
@@ -1169,6 +1436,16 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
 
               {selectedTrade && inspectorTab === 'risk' && (
                 <div className="detail-list">
+                  {selectedTradeIsOption &&
+                  (selectedTradeSettlementValuation || selectedTradeOpenOptionValuation) ? (
+                    selectedTradeMarksError ? (
+                      <p className="field-error">Live marks unavailable: {selectedTradeMarksError}</p>
+                    ) : selectedTradeMarksLoading ? (
+                      <p className="form-note">
+                        Refreshing latest price index mark for this option reference.
+                      </p>
+                    ) : null
+                  ) : null}
                   {selectedTradeIsOption ? (
                     <>
                       <div className="detail-row">
@@ -1201,18 +1478,228 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                             : '—'}
                         </strong>
                       </div>
+                      {selectedTradeSettlementValuation ? (
+                        <>
+                          <div className="detail-row">
+                            <span>Linked Underlying</span>
+                            <strong>{selectedTradeSettlementValuation.linkedTradeId}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Reference Price Index</span>
+                            <strong>{selectedTradeSettlementValuation.referencePriceIndexCode ?? '—'}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Booked Underlying Price</span>
+                            <strong>
+                              {formatCurrencyAmount(
+                                selectedTradeSettlementValuation.linkedPrice,
+                                selectedTradeSettlementValuation.referenceCurrencyCode,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Live Reference Mark</span>
+                            <strong>{settlementReferenceMarkLabel(selectedTradeSettlementValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Underlying Cashflow</span>
+                            <strong>
+                              {settlementCashflowLabel(
+                                selectedTradeSettlementValuation.underlyingCashflow,
+                                formatMoney,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Package Cashflow</span>
+                            <strong>
+                              {settlementCashflowLabel(
+                                selectedTradeSettlementValuation.netPackageCashflow,
+                                formatMoney,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Underlying MTM</span>
+                            <strong>
+                              {settlementMarkToMarketLabel(
+                                selectedTradeSettlementValuation.underlyingMarkToMarket,
+                                selectedTradeSettlementValuation.referenceCurrencyCode,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Package MTM</span>
+                            <strong>
+                              {settlementMarkToMarketLabel(
+                                selectedTradeSettlementValuation.packageMarkToMarket,
+                                selectedTradeSettlementValuation.referenceCurrencyCode,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Effective Package Price</span>
+                            <strong>{settlementUnitPriceLabel(selectedTradeSettlementValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Moneyness at Market Mark</span>
+                            <strong>{selectedTradeSettlementValuation.moneyness ?? '—'}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Intrinsic Value at Mark</span>
+                            <strong>
+                              {formatCurrencyAmount(
+                                selectedTradeSettlementValuation.intrinsicValue,
+                                selectedTradeSettlementValuation.referenceCurrencyCode,
+                              )}
+                            </strong>
+                          </div>
+                          {selectedTradeSettlementValuation.markStatus !== 'VALUED' ? (
+                            <div className="detail-row">
+                              <span>Mark Status</span>
+                              <strong>{selectedTradeSettlementValuation.markStatusReason ?? 'Awaiting mark'}</strong>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : selectedTradeOpenOptionValuation ? (
+                        <>
+                          <div className="detail-row">
+                            <span>Expiry State</span>
+                            <strong>{openOptionExpiryStateLabel(selectedTradeOpenOptionValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Recommended Action</span>
+                            <strong>{optionLifecycleActionLabel(selectedTradeOpenOptionValuation.recommendedAction)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Decision Cue</span>
+                            <strong>{selectedTradeOpenOptionValuation.decisionLabel}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Decision Reason</span>
+                            <strong>{selectedTradeOpenOptionValuation.decisionReason}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Reference Price Index</span>
+                            <strong>{selectedTradeOpenOptionValuation.referencePriceIndexCode ?? '—'}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Live Reference Mark</span>
+                            <strong>{openOptionReferenceMarkLabel(selectedTradeOpenOptionValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Moneyness at Market Mark</span>
+                            <strong>{selectedTradeOpenOptionValuation.moneyness ?? '—'}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Intrinsic Value at Mark</span>
+                            <strong>
+                              {formatCurrencyAmount(
+                                selectedTradeOpenOptionValuation.intrinsicValue,
+                                selectedTradeOpenOptionValuation.referenceCurrencyCode,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Intrinsic Exposure</span>
+                            <strong>{openOptionIntrinsicExposureLabel(selectedTradeOpenOptionValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Break-even at Expiry</span>
+                            <strong>{openOptionBreakEvenLabel(selectedTradeOpenOptionValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Expiry P&L @ Market Mark</span>
+                            <strong>{openOptionExpiryPnlLabel(selectedTradeOpenOptionValuation)}</strong>
+                          </div>
+                          {selectedTradeOpenOptionValuation.markStatus !== 'VALUED' ? (
+                            <div className="detail-row">
+                              <span>Mark Status</span>
+                              <strong>{selectedTradeOpenOptionValuation.markStatusReason ?? 'Awaiting mark'}</strong>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
                     </>
                   ) : (
-                    <div className="detail-row">
-                      <InlineTooltipLabel tooltip={RISK_TOOLTIPS.notional} tooltipLabel="More information about notional">
-                        Notional
-                      </InlineTooltipLabel>
-                      <strong>
-                        {selectedTrade.price !== null && selectedTrade.volume !== null
-                          ? formatMoney(selectedTrade.price * selectedTrade.volume)
-                          : '—'}
-                      </strong>
-                    </div>
+                    <>
+                      <div className="detail-row">
+                        <InlineTooltipLabel tooltip={RISK_TOOLTIPS.notional} tooltipLabel="More information about notional">
+                          Notional
+                        </InlineTooltipLabel>
+                        <strong>
+                          {selectedTrade.price !== null && selectedTrade.volume !== null
+                            ? formatMoney(selectedTrade.price * selectedTrade.volume)
+                            : '—'}
+                        </strong>
+                      </div>
+                      {selectedTradeSettlementValuation ? (
+                        <>
+                          <div className="detail-row">
+                            <span>Originating Option</span>
+                            <strong>{selectedTradeSettlementValuation.optionTradeId}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Reference Price Index</span>
+                            <strong>{selectedTradeSettlementValuation.referencePriceIndexCode ?? '—'}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Live Reference Mark</span>
+                            <strong>{settlementReferenceMarkLabel(selectedTradeSettlementValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Option Premium</span>
+                            <strong>
+                              {settlementCashflowLabel(
+                                selectedTradeSettlementValuation.premiumCashflow,
+                                formatMoney,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Package Cashflow</span>
+                            <strong>
+                              {settlementCashflowLabel(
+                                selectedTradeSettlementValuation.netPackageCashflow,
+                                formatMoney,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Underlying MTM</span>
+                            <strong>
+                              {settlementMarkToMarketLabel(
+                                selectedTradeSettlementValuation.underlyingMarkToMarket,
+                                selectedTradeSettlementValuation.referenceCurrencyCode,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Package MTM</span>
+                            <strong>
+                              {settlementMarkToMarketLabel(
+                                selectedTradeSettlementValuation.packageMarkToMarket,
+                                selectedTradeSettlementValuation.referenceCurrencyCode,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Effective Package Price</span>
+                            <strong>{settlementUnitPriceLabel(selectedTradeSettlementValuation)}</strong>
+                          </div>
+                          <div className="detail-row">
+                            <span>Option Moneyness</span>
+                            <strong>{selectedTradeSettlementValuation.moneyness ?? '—'}</strong>
+                          </div>
+                          {selectedTradeSettlementValuation.markStatus !== 'VALUED' ? (
+                            <div className="detail-row">
+                              <span>Mark Status</span>
+                              <strong>{selectedTradeSettlementValuation.markStatusReason ?? 'Awaiting mark'}</strong>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </>
                   )}
                   <div className="detail-row">
                     <InlineTooltipLabel tooltip={RISK_TOOLTIPS.lifecycle} tooltipLabel="More information about lifecycle">
@@ -1249,6 +1736,90 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                 </div>
               )}
             </div>
+          ),
+        },
+        {
+          id: 'trade-open-count',
+          eyebrow: 'Snapshot',
+          title: 'Open Trades',
+          description: 'The number of tickets currently carrying live exposure in the blotter.',
+          span: 'half',
+          availableSpans: ['wide', 'half', 'side'],
+          content: (
+            <TradingMetricTileContent
+              value={formatNumber(activeTradeCount, 0)}
+              detail="Trades currently carrying exposure"
+            />
+          ),
+        },
+        {
+          id: 'trade-gross-volume',
+          eyebrow: 'Snapshot',
+          title: 'Gross Volume',
+          description: 'The total active volume rolled up across uncancelled trade tickets.',
+          span: 'half',
+          availableSpans: ['wide', 'half', 'side'],
+          content: (
+            <TradingMetricTileContent
+              value={formatNumber(totalActiveVolume, 0)}
+              detail="Total active volume across uncancelled trades"
+            />
+          ),
+        },
+        {
+          id: 'trade-pricing-coverage',
+          eyebrow: 'Snapshot',
+          title: 'Pricing Coverage',
+          description: 'How much of the active blotter is already carrying an explicit stored price.',
+          span: 'half',
+          availableSpans: ['wide', 'half', 'side'],
+          content: (
+            <TradingMetricTileContent
+              value={pricingCoverage === null ? '0%' : `${pricingCoverage}%`}
+              detail={`${pricedActiveTrades} of ${activeTradeCount} active ticket${activeTradeCount === 1 ? '' : 's'} priced`}
+            />
+          ),
+        },
+        {
+          id: 'trade-pending-pricing',
+          eyebrow: 'Snapshot',
+          title: 'Pending Pricing',
+          description: 'Active tickets still waiting on an explicit pricing status to clear.',
+          span: 'half',
+          availableSpans: ['wide', 'half', 'side'],
+          content: (
+            <TradingMetricTileContent
+              value={formatNumber(pendingPricingTrades, 0)}
+              detail="Trades still waiting on explicit pricing state"
+            />
+          ),
+        },
+        {
+          id: 'trade-books-in-play',
+          eyebrow: 'Snapshot',
+          title: 'Books in Play',
+          description: 'Distinct books that currently carry active exposure in the projected trade set.',
+          span: 'half',
+          availableSpans: ['wide', 'half', 'side'],
+          content: (
+            <TradingMetricTileContent
+              value={formatNumber(trackedBooks, 0)}
+              detail="Distinct books carrying active exposure"
+            />
+          ),
+        },
+        {
+          id: 'trade-largest-line',
+          eyebrow: 'Snapshot',
+          title: 'Largest Line',
+          description: 'The largest projected commodity line by absolute open position across the current desk view.',
+          span: 'half',
+          availableSpans: ['wide', 'half', 'side'],
+          content: (
+            <TradingMetricTileContent
+              value={largestPositionRow ? formatNumber(largestPositionRow.net_volume, 0) : 'Flat'}
+              detail={largestPositionRow ? largestPositionRow.commodity : 'Waiting for open positions'}
+            />
           ),
         },
         {

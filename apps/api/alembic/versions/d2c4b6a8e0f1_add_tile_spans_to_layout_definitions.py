@@ -1,7 +1,7 @@
 """add tile spans to layout definitions
 
 Revision ID: d2c4b6a8e0f1
-Revises: c2d3e4f5a6b7
+Revises: c2d3e4f5a6b8
 Create Date: 2026-04-05 13:05:00.000000
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 
 revision: str = "d2c4b6a8e0f1"
-down_revision: Union[str, Sequence[str], None] = "c2d3e4f5a6b7"
+down_revision: Union[str, Sequence[str], None] = "c2d3e4f5a6b8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

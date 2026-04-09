@@ -118,6 +118,7 @@ export const appConfig = Object.freeze({
 
 export const bootstrapQueryLimits = Object.freeze({
   events: resolvePositiveIntSetting(BOOTSTRAP_EVENTS_LIMIT_OVERRIDE_STORAGE_KEY, 'VITE_BOOTSTRAP_EVENTS_LIMIT', 100),
+  workspaceRecords: readPositiveInt(readEnvString('VITE_BOOTSTRAP_WORKSPACE_RECORDS_LIMIT'), 250),
   selectedTradeEvents: resolvePositiveIntSetting(
     SELECTED_TRADE_EVENTS_LIMIT_OVERRIDE_STORAGE_KEY,
     'VITE_SELECTED_TRADE_EVENTS_LIMIT',

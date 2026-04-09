@@ -25,15 +25,39 @@ import {
   saveClientRuntimeOverrideSnapshot,
   type ClientRuntimeOverrideSnapshot,
 } from '../../shared/config'
+import {
+  createTradeCaptureRule,
+  type TradeCaptureRule,
+  type TradeCaptureRuleVisibilityOverride,
+  type TradeCaptureSettings,
+  type TradeCaptureVisibilityMode,
+} from '../../shared/tradeCaptureSettings'
 import { type StoredAuthSession } from '../../shared/mutation'
+import {
+  optionStyleOptions,
+  optionTypeOptions,
+  pricingTypeOptions,
+  pricingStatusOptions,
+  settlementStatusOptions,
+  commodityClassOrder,
+  tradeInstrumentTypeOptions,
+  tradeNatureOptions,
+  tradeSideOptions,
+  tradeStructureOptions,
+} from '../../shared/trading'
 
 type SettingsWorkspaceProps = {
   health: string
   authSession: StoredAuthSession | null
   appearanceSettings: AppearanceSettings
+  tradeCaptureSettings: TradeCaptureSettings
+  bookOptions: Array<{ code: string; name: string }>
+  commodityClassOptions: string[]
   resolvedColorMode: ResolvedColorMode
   onAppearanceSettingsChange: (settings: AppearanceSettings) => AppearanceSettings
   onAppearanceSettingsReset: () => AppearanceSettings
+  onTradeCaptureSettingsChange: (settings: TradeCaptureSettings) => TradeCaptureSettings
+  onTradeCaptureSettingsReset: () => TradeCaptureSettings
   onSessionChange: (session: StoredAuthSession | null) => Promise<void> | void
 }
 
@@ -99,6 +123,29 @@ function formatModeLabel(value: ColorModePreference | ResolvedColorMode): string
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+function formatVisibilityModeLabel(value: TradeCaptureVisibilityMode): string {
+  return value === 'always' ? 'Always visible' : 'Auto'
+}
+
+function formatEnabledState(value: boolean): string {
+  return value ? 'Enabled' : 'Disabled'
+}
+
+function formatRuleVisibilityOverrideLabel(value: TradeCaptureRuleVisibilityOverride): string {
+  switch (value) {
+    case 'show':
+      return 'Show'
+    case 'hide':
+      return 'Hide'
+    default:
+      return 'Inherit'
+  }
+}
+
+function formatRuleValueLabel(value: string | null): string {
+  return value ? value.split('_').join(' ') : 'Any'
+}
+
 function previewStyle(palette: AppearancePalette): CSSProperties {
   return {
     '--appearance-accent': palette.accent,
@@ -161,9 +208,14 @@ export function SettingsWorkspace({
   health,
   authSession,
   appearanceSettings,
+  tradeCaptureSettings,
+  bookOptions,
+  commodityClassOptions,
   resolvedColorMode,
   onAppearanceSettingsChange,
   onAppearanceSettingsReset,
+  onTradeCaptureSettingsChange,
+  onTradeCaptureSettingsReset,
   onSessionChange,
 }: SettingsWorkspaceProps) {
   const [loginForm, setLoginForm] = useState({ identifier: '', password: '' })
@@ -178,10 +230,12 @@ export function SettingsWorkspace({
     getClientRuntimeOverrideSnapshot(),
   )
   const [appearanceForm, setAppearanceForm] = useState<AppearanceSettings>(() => appearanceSettings)
+  const [tradeCaptureForm, setTradeCaptureForm] = useState<TradeCaptureSettings>(() => tradeCaptureSettings)
   const [authFlash, setAuthFlash] = useState<FlashMessage | null>(null)
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [runtimeFlash, setRuntimeFlash] = useState<FlashMessage | null>(null)
   const [appearanceFlash, setAppearanceFlash] = useState<FlashMessage | null>(null)
+  const [tradeCaptureFlash, setTradeCaptureFlash] = useState<FlashMessage | null>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
@@ -220,6 +274,10 @@ export function SettingsWorkspace({
   useEffect(() => {
     setAppearanceForm(appearanceSettings)
   }, [appearanceSettings])
+
+  useEffect(() => {
+    setTradeCaptureForm(tradeCaptureSettings)
+  }, [tradeCaptureSettings])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -445,12 +503,79 @@ export function SettingsWorkspace({
     })
   }
 
+  function handleSaveTradeCaptureSettings(event: React.FormEvent) {
+    event.preventDefault()
+    const savedSettings = onTradeCaptureSettingsChange(tradeCaptureForm)
+    setTradeCaptureForm(savedSettings)
+    setTradeCaptureFlash({
+      tone: 'success',
+      message: 'Trade ticket defaults saved locally for this browser. New or cleared tickets will pick them up immediately.',
+    })
+  }
+
+  function handleResetTradeCaptureSettings() {
+    const defaultSettings = onTradeCaptureSettingsReset()
+    setTradeCaptureForm(defaultSettings)
+    setTradeCaptureFlash({
+      tone: 'success',
+      message: 'Trade ticket defaults reset to the checked-in desk behavior for this browser.',
+    })
+  }
+
+  function updateTradeCaptureRule(index: number, updater: (rule: TradeCaptureRule) => TradeCaptureRule) {
+    setTradeCaptureFlash(null)
+    setTradeCaptureForm((current) => ({
+      ...current,
+      rules: current.rules.map((rule, ruleIndex) => (ruleIndex === index ? updater(rule) : rule)),
+    }))
+  }
+
+  function moveTradeCaptureRule(index: number, direction: -1 | 1) {
+    setTradeCaptureFlash(null)
+    setTradeCaptureForm((current) => {
+      const nextIndex = index + direction
+      if (nextIndex < 0 || nextIndex >= current.rules.length) {
+        return current
+      }
+
+      const nextRules = [...current.rules]
+      const [movedRule] = nextRules.splice(index, 1)
+      nextRules.splice(nextIndex, 0, movedRule)
+
+      return {
+        ...current,
+        rules: nextRules,
+      }
+    })
+  }
+
+  function handleAddTradeCaptureRule() {
+    setTradeCaptureFlash(null)
+    setTradeCaptureForm((current) => ({
+      ...current,
+      rules: [...current.rules, createTradeCaptureRule(`Rule ${current.rules.length + 1}`)],
+    }))
+  }
+
+  function handleRemoveTradeCaptureRule(index: number) {
+    setTradeCaptureFlash(null)
+    setTradeCaptureForm((current) => ({
+      ...current,
+      rules: current.rules.filter((_, ruleIndex) => ruleIndex !== index),
+    }))
+  }
+
   const googleClientId = serverSettings?.google_auth.client_id?.trim() ?? ''
   const healthTone = health === 'ok' ? 'active' : 'cancelled'
   const authTone = authSession ? 'active' : 'cancelled'
   const authLoading = authAction !== null
   const runtimeOverrideCount = Object.values(runtimeOverrideForm).filter((value) => value.trim() !== '').length
   const activePalette = resolveAppearancePalette(appearanceSettings, resolvedColorMode)
+  const enabledTradeCaptureRuleCount = tradeCaptureForm.rules.filter((rule) => rule.enabled).length
+  const visibilityOverrideRuleCount = tradeCaptureForm.rules.filter(
+    (rule) => rule.visibility.optionDetails !== 'inherit' || rule.visibility.priceIndex !== 'inherit',
+  ).length
+  const availableCommodityClassOptions = commodityClassOptions.length > 0 ? commodityClassOptions : [...commodityClassOrder]
   const singleUserAuthEnabled = Boolean(serverSettings?.single_user_auth_enabled)
   const googleAuthEnabled = Boolean(serverSettings?.google_auth.enabled && googleClientId)
   const googleAutoCreateUsers = Boolean(serverSettings?.google_auth.auto_create_users)
@@ -916,6 +1041,817 @@ export function SettingsWorkspace({
             <p className={`form-note ${appearanceFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
               {appearanceFlash?.message ??
                 'Appearance settings are stored in this browser today. That gives us a solid first slice while we prepare user-profile persistence on the API.'}
+            </p>
+          </form>
+        </article>
+
+        <article className="surface">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Browser Settings</span>
+              <h3>Trade Ticket Defaults</h3>
+            </div>
+            <p>Set the baseline ticket here, then build an ordered rule stack that can react to instrument, structure, pricing, commodity class, and book.</p>
+          </div>
+
+          <div className="settings-summary-grid">
+            <article className="settings-summary-card">
+              <span>New ticket baseline</span>
+              <strong>
+                {tradeCaptureForm.defaults.instrumentType} • {tradeCaptureForm.defaults.tradeNature} • {tradeCaptureForm.defaults.tradeStructure}
+              </strong>
+              <p>
+                Side {tradeCaptureForm.defaults.tradeSide} • Pricing {tradeCaptureForm.defaults.pricingType}
+              </p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Rule stack</span>
+              <strong>{enabledTradeCaptureRuleCount} enabled</strong>
+              <p>
+                {tradeCaptureForm.rules.length} total rules. They run top to bottom, and later rules win on conflicts.
+              </p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Visibility baseline</span>
+              <strong>{formatVisibilityModeLabel(tradeCaptureForm.visibility.optionDetails)}</strong>
+              <p>
+                Option details · {formatVisibilityModeLabel(tradeCaptureForm.visibility.priceIndex)} price index
+              </p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Visibility overrides</span>
+              <strong>{visibilityOverrideRuleCount}</strong>
+              <p>Rules currently changing whether option details or price index stay visible.</p>
+            </article>
+          </div>
+
+          <form className="stack-form settings-form" onSubmit={handleSaveTradeCaptureSettings}>
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Baseline</span>
+                <h3>New Ticket Starting Values</h3>
+              </div>
+              <p>These values seed a brand-new trade or the Clear Form action before any conditional rules fire.</p>
+            </div>
+
+            <div className="mini-grid">
+              <label className="field">
+                <span>Instrument</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.instrumentType}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        instrumentType: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {tradeInstrumentTypeOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Nature</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.tradeNature}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        tradeNature: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {tradeNatureOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Structure</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.tradeStructure}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        tradeStructure: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {tradeStructureOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Side</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.tradeSide}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        tradeSide: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {tradeSideOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Pricing Type</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.pricingType}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        pricingType: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {pricingTypeOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Pricing Status</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.pricingStatus}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        pricingStatus: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {pricingStatusOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Settlement Status</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.settlementStatus}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        settlementStatus: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {settlementStatusOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Option Type</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.optionType}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        optionType: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {optionTypeOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Option Style</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.defaults.optionStyle}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      defaults: {
+                        ...current.defaults,
+                        optionStyle: event.target.value,
+                      },
+                    }))
+                  }}
+                >
+                  {optionStyleOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Visibility</span>
+                <h3>Field Reveal Baseline</h3>
+              </div>
+              <p>Use Auto for progressive disclosure, or keep fields visible while still disabling them when they do not apply.</p>
+            </div>
+
+            <div className="mini-grid">
+              <label className="field">
+                <span>Option Detail Fields</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.visibility.optionDetails}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      visibility: {
+                        ...current.visibility,
+                        optionDetails: event.target.value as TradeCaptureVisibilityMode,
+                      },
+                    }))
+                  }}
+                >
+                  <option value="auto">Auto show for options</option>
+                  <option value="always">Always keep visible</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Price Index Field</span>
+                <select
+                  className="control"
+                  value={tradeCaptureForm.visibility.priceIndex}
+                  onChange={(event) => {
+                    setTradeCaptureFlash(null)
+                    setTradeCaptureForm((current) => ({
+                      ...current,
+                      visibility: {
+                        ...current.visibility,
+                        priceIndex: event.target.value as TradeCaptureVisibilityMode,
+                      },
+                    }))
+                  }}
+                >
+                  <option value="auto">Auto show when required</option>
+                  <option value="always">Always keep visible</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="section-head section-head-control">
+              <div>
+                <span className="eyebrow">Conditional Rules</span>
+                <h3>Rule Stack</h3>
+              </div>
+              <div className="toolbar settings-actions">
+                <button type="button" className="button button-secondary" onClick={handleAddTradeCaptureRule}>
+                  Add Rule
+                </button>
+              </div>
+            </div>
+
+            <p className="form-note">
+              Rules run from top to bottom. If multiple rules set the same field or visibility override, the later rule wins.
+            </p>
+
+            <div className="trade-capture-rule-stack">
+              {tradeCaptureForm.rules.map((rule, index) => {
+                const bookListId = `trade-capture-rule-book-${rule.id}`
+
+                return (
+                  <article key={rule.id} className="settings-rule-card">
+                    <div className="settings-rule-card-head">
+                      <div>
+                        <span className="eyebrow">Rule {index + 1}</span>
+                        <strong className="settings-rule-title">{rule.name || `Rule ${index + 1}`}</strong>
+                      </div>
+                      <div className="toolbar settings-rule-toolbar">
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => moveTradeCaptureRule(index, -1)}
+                          disabled={index === 0}
+                        >
+                          Move Up
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => moveTradeCaptureRule(index, 1)}
+                          disabled={index === tradeCaptureForm.rules.length - 1}
+                        >
+                          Move Down
+                        </button>
+                        <button type="button" className="button button-ghost" onClick={() => handleRemoveTradeCaptureRule(index)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mini-grid">
+                      <label className="field field-wide">
+                        <span>Rule Name</span>
+                        <input
+                          className="control"
+                          value={rule.name}
+                          onChange={(event) =>
+                            updateTradeCaptureRule(index, (current) => ({
+                              ...current,
+                              name: event.target.value,
+                            }))
+                          }
+                          placeholder={`Rule ${index + 1}`}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Status</span>
+                        <select
+                          className="control"
+                          value={rule.enabled ? 'enabled' : 'disabled'}
+                          onChange={(event) =>
+                            updateTradeCaptureRule(index, (current) => ({
+                              ...current,
+                              enabled: event.target.value === 'enabled',
+                            }))
+                          }
+                        >
+                          <option value="enabled">Enabled</option>
+                          <option value="disabled">Disabled</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Quick Read</span>
+                        <input
+                          className="control"
+                          value={`${formatEnabledState(rule.enabled)} · ${Object.values(rule.conditions).filter(Boolean).length} trigger${Object.values(rule.conditions).filter(Boolean).length === 1 ? '' : 's'}`}
+                          readOnly
+                        />
+                      </label>
+                    </div>
+
+                    <div className="settings-rule-group">
+                      <div className="section-head">
+                        <div>
+                          <span className="eyebrow">Match</span>
+                          <h3>When This Rule Applies</h3>
+                        </div>
+                        <p>
+                          Current trigger snapshot: {formatRuleValueLabel(rule.conditions.instrumentType)} instrument · {formatRuleValueLabel(rule.conditions.tradeStructure)} structure · {formatRuleValueLabel(rule.conditions.pricingType)} pricing
+                        </p>
+                      </div>
+
+                      <div className="mini-grid">
+                        <label className="field">
+                          <span>Instrument</span>
+                          <select
+                            className="control"
+                            value={rule.conditions.instrumentType ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                conditions: {
+                                  ...current.conditions,
+                                  instrumentType: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Any instrument</option>
+                            {tradeInstrumentTypeOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Structure</span>
+                          <select
+                            className="control"
+                            value={rule.conditions.tradeStructure ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                conditions: {
+                                  ...current.conditions,
+                                  tradeStructure: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Any structure</option>
+                            {tradeStructureOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Pricing Type</span>
+                          <select
+                            className="control"
+                            value={rule.conditions.pricingType ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                conditions: {
+                                  ...current.conditions,
+                                  pricingType: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Any pricing type</option>
+                            {pricingTypeOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Commodity Class</span>
+                          <select
+                            className="control"
+                            value={rule.conditions.commodityClass ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                conditions: {
+                                  ...current.conditions,
+                                  commodityClass: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Any commodity class</option>
+                            {availableCommodityClassOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Book</span>
+                          <input
+                            className="control"
+                            list={bookListId}
+                            value={rule.conditions.book ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                conditions: {
+                                  ...current.conditions,
+                                  book: event.target.value.trim() || null,
+                                },
+                              }))
+                            }
+                            placeholder="Any book"
+                          />
+                          <datalist id={bookListId}>
+                            {bookOptions.map((book) => (
+                              <option key={book.code} value={book.code}>
+                                {book.name}
+                              </option>
+                            ))}
+                          </datalist>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="settings-rule-group">
+                      <div className="section-head">
+                        <div>
+                          <span className="eyebrow">Defaults</span>
+                          <h3>Set These Fields</h3>
+                        </div>
+                        <p>Leave any field on “Do not change” if this rule should only influence other attributes.</p>
+                      </div>
+
+                      <div className="mini-grid">
+                        <label className="field">
+                          <span>Nature</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.tradeNature ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  tradeNature: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {tradeNatureOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Structure</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.tradeStructure ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  tradeStructure: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {tradeStructureOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Side</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.tradeSide ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  tradeSide: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {tradeSideOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Pricing Type</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.pricingType ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  pricingType: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {pricingTypeOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Pricing Status</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.pricingStatus ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  pricingStatus: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {pricingStatusOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Settlement Status</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.settlementStatus ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  settlementStatus: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {settlementStatusOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Option Type</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.optionType ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  optionType: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {optionTypeOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Option Style</span>
+                          <select
+                            className="control"
+                            value={rule.defaults.optionStyle ?? ''}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                defaults: {
+                                  ...current.defaults,
+                                  optionStyle: event.target.value || null,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="">Do not change</option>
+                            {optionStyleOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="settings-rule-group">
+                      <div className="section-head">
+                        <div>
+                          <span className="eyebrow">Visibility Override</span>
+                          <h3>Show Or Hide Key Fields</h3>
+                        </div>
+                        <p>Choose Inherit to keep following the global baseline visibility behavior.</p>
+                      </div>
+
+                      <div className="mini-grid">
+                        <label className="field">
+                          <span>Option Detail Fields</span>
+                          <select
+                            className="control"
+                            value={rule.visibility.optionDetails}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                visibility: {
+                                  ...current.visibility,
+                                  optionDetails: event.target.value as TradeCaptureRuleVisibilityOverride,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="inherit">Inherit baseline</option>
+                            <option value="show">Force visible</option>
+                            <option value="hide">Force hidden</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Price Index Field</span>
+                          <select
+                            className="control"
+                            value={rule.visibility.priceIndex}
+                            onChange={(event) =>
+                              updateTradeCaptureRule(index, (current) => ({
+                                ...current,
+                                visibility: {
+                                  ...current.visibility,
+                                  priceIndex: event.target.value as TradeCaptureRuleVisibilityOverride,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="inherit">Inherit baseline</option>
+                            <option value="show">Force visible</option>
+                            <option value="hide">Force hidden</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Visibility Snapshot</span>
+                          <input
+                            className="control"
+                            value={`${formatRuleVisibilityOverrideLabel(rule.visibility.optionDetails)} option details · ${formatRuleVisibilityOverrideLabel(rule.visibility.priceIndex)} price index`}
+                            readOnly
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+
+            <div className="toolbar settings-actions">
+              <button type="submit" className="button button-primary">
+                Apply Trade Defaults
+              </button>
+              <button type="button" className="button button-ghost" onClick={handleResetTradeCaptureSettings}>
+                Reset Trade Defaults
+              </button>
+            </div>
+
+            <p className={`form-note ${tradeCaptureFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+              {tradeCaptureFlash?.message ??
+                'Trade ticket defaults are browser-local today. The form now reads baseline values, evaluates the ordered rule stack, and explains active matches directly in Trade Entry.'}
             </p>
           </form>
         </article>

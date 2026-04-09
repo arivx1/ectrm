@@ -20,12 +20,22 @@ from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
+from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
 from apps.api.app.models.reference_counterparty_external_credit_snapshot import (
     ReferenceCounterpartyExternalCreditSnapshot,
 )
+from apps.api.app.models.reference_currency import ReferenceCurrency
+from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_portfolio import ReferencePortfolio
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_credit_exception import TradeCreditException
 from apps.api.app.models.trade_invoice import TradeInvoice
@@ -72,17 +82,29 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         settings.BOOTSTRAP_ADMIN_TOKEN = "bootstrap-secret"
 
         with self.SessionLocal() as session:
+            session.query(TradeActualization).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeCreditApprovalDecision).delete()
             session.query(TradeCreditException).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
+            session.query(Event).delete()
             session.query(ReferenceCounterpartyExternalCreditSnapshot).delete()
             session.query(ReferenceCounterpartyCreditProfile).delete()
             session.query(ExternalDataRun).delete()
+            session.query(ReferenceUnit).delete()
+            session.query(ReferenceLocation).delete()
+            session.query(ReferenceCurrency).delete()
+            session.query(ReferencePortfolio).delete()
+            session.query(ReferencePriceIndex).delete()
+            session.query(ReferenceCounterparty).delete()
+            session.query(ReferenceCommodity).delete()
+            session.query(ReferenceBook).delete()
             session.query(UserSession).delete()
             session.query(UserAccount).delete()
+            session.commit()
+            self._seed_reference_data(session)
             session.commit()
 
     def tearDown(self) -> None:
@@ -127,6 +149,15 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()["access_token"]
 
+    def _auth_headers(self, token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
+    def _get_work_items(self, token: str, *, query: str = ""):
+        path = "/operations/work-items"
+        if query:
+            path = f"{path}?{query}"
+        return self.client.get(path, headers=self._auth_headers(token))
+
     def _seed_trade(
         self,
         *,
@@ -138,6 +169,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         option_style: str | None = None,
         option_strike_price: float | None = None,
         option_expiration_date: date | None = None,
+        price_index_code: str | None = None,
         price: float = 79.25,
         volume: float = 1000,
         unit_of_measure: str = "BBL",
@@ -186,7 +218,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                     confirmation_status=confirmation_status,
                     nomination_status=nomination_status,
                     allocation_status=allocation_status,
-                    price_index_code=None,
+                    price_index_code=price_index_code,
                     price=price,
                     volume=volume,
                     invoice_status=invoice_status,
@@ -198,6 +230,164 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                 )
             )
             session.commit()
+
+    def _seed_reference_data(self, session) -> None:
+        session.add(
+            ReferenceBook(
+                code="CRUDE_PHYS",
+                name="Crude Physical",
+                description="Test book",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceCommodity(
+                code="WTI",
+                commodity_class="CRUDE_OIL",
+                name="WTI",
+                description="WTI",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceCounterparty(
+                code="SHELL_TRADING",
+                name="Shell Trading",
+                short_name=None,
+                legal_entity_name=None,
+                counterparty_type="SUPPLIER",
+                country_code=None,
+                description="Test counterparty",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.add(
+            ReferencePortfolio(
+                code="PROMPT",
+                name="Prompt",
+                book_code="CRUDE_PHYS",
+                owner=None,
+                strategy="Prompt",
+                trader_persona=None,
+                risk_archetype=None,
+                description="Prompt test portfolio",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceUnit(
+                code="BBL",
+                name="Barrel",
+                commodity_class="CRUDE_OIL",
+                dimension="VOLUME",
+                base_unit_code=None,
+                conversion_factor=None,
+                precision=3,
+                description="Barrel",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceCurrency(
+                code="USD",
+                name="US Dollar",
+                symbol="$",
+                description="US Dollar",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceLocation(
+                code="CUSHING",
+                name="Cushing",
+                location_kind="POINT",
+                location_type="HUB",
+                parent_location_code=None,
+                market="PHYSICAL",
+                city="Cushing",
+                subdivision_code="OK",
+                country_code="US",
+                continent_code="NA",
+                latitude=None,
+                longitude=None,
+                region="Midcontinent",
+                timezone="America/Chicago",
+                description="Cushing hub",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.add(
+            ReferencePriceIndex(
+                code="WTI_CUSHING_D",
+                name="WTI Cushing Spot Daily",
+                commodity_code="WTI",
+                currency_code="USD",
+                unit_code="BBL",
+                provider="EIA",
+                market="CUSHING",
+                location_code="CUSHING",
+                calendar_code=None,
+                description="WTI Cushing test mark",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+        )
+        session.flush()
 
     def _seed_credit_approval_item(
         self,
@@ -300,20 +490,24 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             session.commit()
 
     def test_work_items_list_backfills_trade_rows_and_filters_by_queue(self) -> None:
+        admin_token = self._bootstrap_admin()
         self._seed_trade(trade_id="T-OPS-1")
 
-        operations_response = self.client.get("/operations/work-items?queue=operations")
+        operations_response = self._get_work_items(admin_token, query="queue=operations")
         self.assertEqual(operations_response.status_code, 200)
         operations_items = operations_response.json()
-        self.assertEqual(len(operations_items), 3)
+        self.assertEqual(len(operations_items), 4)
         self.assertEqual(
             {item["workflow_type"] for item in operations_items},
-            {"CONFIRMATION", "NOMINATION", "ALLOCATION"},
+            {"CONFIRMATION", "NOMINATION", "ALLOCATION", "ACTUALIZATION"},
         )
         self.assertTrue(all(item["queue"] == "operations" for item in operations_items))
         self.assertTrue(all(item["due_at"] is not None for item in operations_items))
 
-        settlement_response = self.client.get("/operations/work-items?queue=settlement&include_closed=true")
+        settlement_response = self._get_work_items(
+            admin_token,
+            query="queue=settlement&include_closed=true",
+        )
         self.assertEqual(settlement_response.status_code, 200)
         settlement_items = settlement_response.json()
         self.assertEqual(len(settlement_items), 2)
@@ -323,9 +517,10 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         )
 
         with self.SessionLocal() as session:
-            self.assertEqual(session.query(TradeWorkflowItem).count(), 5)
+            self.assertEqual(session.query(TradeWorkflowItem).count(), 6)
 
     def test_work_items_list_backfills_option_settlement_for_closed_exercised_option(self) -> None:
+        admin_token = self._bootstrap_admin()
         self._seed_trade(
             trade_id="T-OPTION-OPS-1",
             instrument_type="OPTION",
@@ -335,12 +530,13 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             option_style="AMERICAN",
             option_strike_price=81,
             option_expiration_date=date(2026, 6, 30),
+            price_index_code="WTI_CUSHING_D",
             price=3.5,
             volume=10,
             status="EXERCISED",
         )
 
-        response = self.client.get("/operations/work-items?queue=operations")
+        response = self._get_work_items(admin_token, query="queue=operations")
         self.assertEqual(response.status_code, 200)
         items = [item for item in response.json() if item["trade_id"] == "T-OPTION-OPS-1"]
 
@@ -351,6 +547,86 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(items[0]["due_at"][:10], "2026-04-06")
         self.assertIn("resulting BUY WTI 10 BBL", items[0]["notes"])
         self.assertIn("Strike 81 USD/BBL", items[0]["notes"])
+
+    def test_shipment_actualization_updates_trade_and_workflow_projection(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-ACTUAL-OPS-1", volume=1000)
+
+        initial_items = self._get_work_items(admin_token, query="queue=operations").json()
+        actualization_item = next(
+            item
+            for item in initial_items
+            if item["trade_id"] == "T-ACTUAL-OPS-1" and item["workflow_type"] == "ACTUALIZATION"
+        )
+        self.assertEqual(actualization_item["status"], "PENDING")
+
+        blocked_patch = self.client.patch(
+            f"/operations/work-items/{actualization_item['item_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"status": "ACTUALIZED"},
+        )
+        self.assertEqual(blocked_patch.status_code, 422)
+        self.assertIn("Use shipment actualization", blocked_patch.json()["detail"])
+
+        partial_actualization = self.client.put(
+            "/shipments/T-ACTUAL-OPS-1/actualization",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "actual_quantity": 875,
+                "actualized_at": "2026-04-08T18:00:00Z",
+                "source": "METER",
+                "notes": "Provisional terminal ticket.",
+            },
+        )
+        self.assertEqual(partial_actualization.status_code, 200)
+        partial_payload = partial_actualization.json()
+        self.assertEqual(partial_payload["actualization_status"], "PARTIALLY_ACTUALIZED")
+        self.assertEqual(partial_payload["quantity_variance"], -125.0)
+
+        refreshed_items = self._get_work_items(
+            admin_token,
+            query="queue=operations&trade_id=T-ACTUAL-OPS-1",
+        ).json()
+        refreshed_actualization_item = next(
+            item
+            for item in refreshed_items
+            if item["workflow_type"] == "ACTUALIZATION"
+        )
+        self.assertEqual(refreshed_actualization_item["status"], "PARTIALLY_ACTUALIZED")
+
+        final_actualization = self.client.put(
+            "/shipments/T-ACTUAL-OPS-1/actualization",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "actual_quantity": 1000,
+                "actualized_at": "2026-04-09T02:00:00Z",
+                "source": "METER",
+                "notes": "Final custody transfer quantity.",
+            },
+        )
+        self.assertEqual(final_actualization.status_code, 200)
+        self.assertEqual(final_actualization.json()["actualization_status"], "ACTUALIZED")
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-ACTUAL-OPS-1").one()
+            self.assertEqual(trade.actualization_status, "ACTUALIZED")
+            self.assertEqual(session.query(TradeActualization).filter(TradeActualization.trade_id == "T-ACTUAL-OPS-1").count(), 1)
+            audit_events = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-ACTUAL-OPS-1",
+                    Event.event_type == "TradeActualizationUpserted",
+                )
+                .order_by(Event.recorded_at.asc())
+                .all()
+            )
+            self.assertEqual(len(audit_events), 2)
+            self.assertEqual(audit_events[0].payload["request"]["actual_quantity"], 875.0)
+            self.assertEqual(
+                audit_events[-1].payload["actualization"]["actualization_status"],
+                "ACTUALIZED",
+            )
 
     def test_work_item_patch_allows_option_settlement_updates_on_closed_option_trade(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -368,7 +644,10 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             status="ASSIGNED",
         )
 
-        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        queue_response = self._get_work_items(
+            admin_token,
+            query="queue=operations&include_closed=true",
+        )
         self.assertEqual(queue_response.status_code, 200)
         option_item = next(
             item
@@ -386,13 +665,78 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(patch_response.json()["owner"], "ops_admin")
         self.assertEqual(patch_response.json()["notes"], "Underlying trade booked on the physical desk.")
 
+    def test_book_underlying_creates_linked_trade_and_closes_option_settlement_item(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(
+            trade_id="T-OPTION-OPS-BOOK-1",
+            instrument_type="OPTION",
+            trade_nature="FINANCIAL",
+            trade_side="BUY",
+            option_type="CALL",
+            option_style="AMERICAN",
+            option_strike_price=81,
+            option_expiration_date=date(2026, 6, 30),
+            price_index_code="WTI_CUSHING_D",
+            price=3.5,
+            volume=10,
+            status="EXERCISED",
+        )
+
+        queue_response = self._get_work_items(
+            admin_token,
+            query="queue=operations&include_closed=true",
+        )
+        self.assertEqual(queue_response.status_code, 200)
+        option_item = next(
+            item
+            for item in queue_response.json()
+            if item["trade_id"] == "T-OPTION-OPS-BOOK-1" and item["workflow_type"] == "OPTION_SETTLEMENT"
+        )
+        self.assertIsNone(option_item["linked_trade_id"])
+
+        book_response = self.client.post(
+            f"/operations/work-items/{option_item['item_id']}/book-underlying",
+            json={},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(book_response.status_code, 200)
+        booked_item = book_response.json()
+        self.assertEqual(booked_item["status"], "BOOKED")
+        self.assertIsNotNone(booked_item["linked_trade_id"])
+        self.assertEqual(booked_item["linked_trade_status"], "ACTIVE")
+        self.assertIn(booked_item["linked_trade_id"], booked_item["notes"])
+
+        repeat_response = self.client.post(
+            f"/operations/work-items/{option_item['item_id']}/book-underlying",
+            json={},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(repeat_response.status_code, 200)
+        self.assertEqual(repeat_response.json()["linked_trade_id"], booked_item["linked_trade_id"])
+
+        with self.SessionLocal() as session:
+            linked_trades = (
+                session.query(Trade)
+                .filter(Trade.originating_option_trade_id == "T-OPTION-OPS-BOOK-1")
+                .all()
+            )
+            self.assertEqual(len(linked_trades), 1)
+            linked_trade = linked_trades[0]
+            self.assertEqual(linked_trade.trade_id, booked_item["linked_trade_id"])
+            self.assertEqual(linked_trade.instrument_type, "LINEAR")
+            self.assertEqual(linked_trade.trade_side, "BUY")
+            self.assertEqual(float(linked_trade.price), 81.0)
+            self.assertEqual(float(linked_trade.volume), 10.0)
+            self.assertEqual(linked_trade.price_index_code, "WTI_CUSHING_D")
+            self.assertEqual(linked_trade.source_system, "OPTION_SETTLEMENT")
+
     def test_work_item_patch_rolls_up_trade_statuses(self) -> None:
         admin_token = self._bootstrap_admin()
         self._create_user(user_id="ops_trader", email="trader@example.com", display_name="Ops Trader")
         trader_token = self._login(identifier="ops_trader", password="supersecret2")
         self._seed_trade(trade_id="T-ROLLUP-1")
 
-        queue_response = self.client.get("/operations/work-items?include_closed=true")
+        queue_response = self._get_work_items(admin_token, query="include_closed=true")
         self.assertEqual(queue_response.status_code, 200)
         work_items = {item["workflow_type"]: item for item in queue_response.json()}
 
@@ -427,6 +771,23 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             self.assertEqual(trade.invoice_status, "APPROVED")
             self.assertEqual(trade.payment_status, "PAID")
             self.assertEqual(trade.settlement_status, "SETTLED")
+            workflow_events = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-ROLLUP-1",
+                    Event.event_type == "TradeWorkflowItemUpdated",
+                )
+                .all()
+            )
+            self.assertEqual(len(workflow_events), 3)
+            self.assertEqual(
+                {
+                    event.payload["workflow_item"]["workflow_type"]
+                    for event in workflow_events
+                },
+                {"CONFIRMATION", "INVOICE", "PAYMENT"},
+            )
 
     def test_credit_approval_actions_require_comment_and_release_lifecycle_hold(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -438,7 +799,10 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             notes="",
         )
 
-        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        queue_response = self._get_work_items(
+            admin_token,
+            query="queue=operations&include_closed=true",
+        )
         self.assertEqual(queue_response.status_code, 200)
         work_items = {item["workflow_type"]: item for item in queue_response.json() if item["trade_id"] == "T-CREDIT-OPS-1"}
         self.assertEqual(
@@ -493,7 +857,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(release_response.json()["status"], "CONFIRMED")
 
     def test_credit_approval_requires_credit_authorized_role_and_records_decision_history(self) -> None:
-        self._bootstrap_admin()
+        admin_token = self._bootstrap_admin()
         self._seed_counterparty_credit_profile()
         self._seed_counterparty_external_credit_snapshot()
         self._create_user(
@@ -516,7 +880,10 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             notes="Exposure breach opened for review.",
         )
 
-        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        queue_response = self._get_work_items(
+            admin_token,
+            query="queue=operations&include_closed=true",
+        )
         self.assertEqual(queue_response.status_code, 200)
         work_item = next(
             item
@@ -584,7 +951,10 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             notes="Exposure breach opened for review.",
         )
 
-        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        queue_response = self._get_work_items(
+            admin_token,
+            query="queue=operations&include_closed=true",
+        )
         self.assertEqual(queue_response.status_code, 200)
         work_item = next(
             item
@@ -622,7 +992,10 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             notes="Exposure breach opened for review.",
         )
 
-        queue_response = self.client.get("/operations/work-items?queue=operations&include_closed=true")
+        queue_response = self._get_work_items(
+            admin_token,
+            query="queue=operations&include_closed=true",
+        )
         self.assertEqual(queue_response.status_code, 200)
         work_item = next(
             item
@@ -651,6 +1024,9 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
     def test_work_item_mutations_require_authentication(self) -> None:
         self._seed_trade(trade_id="T-AUTH-1")
         queue_response = self.client.get("/operations/work-items?include_closed=true")
+        self.assertEqual(queue_response.status_code, 401)
+        admin_token = self._bootstrap_admin()
+        queue_response = self._get_work_items(admin_token, query="include_closed=true")
         self.assertEqual(queue_response.status_code, 200)
         item_id = queue_response.json()[0]["item_id"]
 

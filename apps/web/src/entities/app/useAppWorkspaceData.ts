@@ -1,3 +1,4 @@
+import { useAppShipmentMutations } from './useAppShipmentMutations'
 import { useAppAdminActions } from './useAppAdminActions'
 import { useAppSettlementMutations } from './useAppSettlementMutations'
 import { useAppWorkspaceBootstrap } from './useAppWorkspaceBootstrap'
@@ -12,6 +13,11 @@ export function useAppWorkspaceData(currentView: ViewKey) {
     resetKey: sessionResetKey,
   })
 
+  const shipmentMutations = useAppShipmentMutations({
+    refreshMutationData,
+    resetKey: sessionResetKey,
+  })
+
   const adminActions = useAppAdminActions({
     refreshMutationData,
     resetKey: sessionResetKey,
@@ -19,6 +25,7 @@ export function useAppWorkspaceData(currentView: ViewKey) {
 
   return {
     ...workspaceData,
+    ...shipmentMutations,
     ...settlementMutations,
     ...adminActions,
   }

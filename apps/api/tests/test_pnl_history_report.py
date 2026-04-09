@@ -7,7 +7,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.app.domains.reports.services.pnl_history import build_pnl_history_report
+from apps.api.app.domains.reports.services.pnl_history import (
+    build_pnl_comparison_report,
+    build_pnl_history_report,
+)
 from apps.api.app.models.event import Base, Event
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.trade import Trade
@@ -372,7 +375,7 @@ class PnlHistoryReportTests(unittest.TestCase):
             ],
         )
 
-    def test_filters_limit_report_by_book_commodity_class_and_date_window(self) -> None:
+    def test_filters_limit_report_by_book_portfolio_commodity_class_and_date_window(self) -> None:
         with self.SessionLocal() as session:
             session.add_all(
                 [
@@ -390,6 +393,7 @@ class PnlHistoryReportTests(unittest.TestCase):
                         payload={
                             "trade_side": "BUY",
                             "book": "CRUDE_PHYS",
+                            "portfolio": "PROMPT",
                             "commodity_class": "CRUDE_OIL",
                             "price": 2.0,
                             "volume": 100.0,
@@ -410,6 +414,7 @@ class PnlHistoryReportTests(unittest.TestCase):
                         payload={
                             "trade_side": "BUY",
                             "book": "POWER_WEST",
+                            "portfolio": "LOAD_SHAPING",
                             "commodity_class": "POWER",
                             "price": 5.0,
                             "volume": 4.0,
@@ -424,6 +429,7 @@ class PnlHistoryReportTests(unittest.TestCase):
                 session,
                 as_of=date(2026, 3, 4),
                 book="power_west",
+                portfolio="load_shaping",
                 commodity_class="power",
                 date_from=date(2026, 3, 2),
                 date_to=date(2026, 3, 3),
@@ -564,6 +570,7 @@ class PnlHistoryReportTests(unittest.TestCase):
             {
                 "trade_id": "TERM-1",
                 "book": "CRUDE_PHYS",
+                "portfolio": None,
                 "commodity_class": "CRUDE_OIL",
                 "instrument_type": "LINEAR",
                 "trade_structure": "SINGLE",
@@ -751,6 +758,227 @@ class PnlHistoryReportTests(unittest.TestCase):
             "UNSUPPORTED_STRUCTURE",
         )
         self.assertTrue(all(not row["included_in_totals"] for row in report["valuations"]))
+
+    def test_comparison_report_returns_summary_delta_and_trade_attribution(self) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    Event(
+                        event_id="evt-comp-1",
+                        aggregate_type="trade",
+                        aggregate_id="T-BUY",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 1, 12, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "trade_side": "BUY",
+                            "book": "CRUDE_PHYS",
+                            "portfolio": "PROMPT",
+                            "price": 2.0,
+                            "volume": 100.0,
+                            "settlement_status": "PENDING",
+                        },
+                    ),
+                    Event(
+                        event_id="evt-comp-2",
+                        aggregate_type="trade",
+                        aggregate_id="T-SELL",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 3, 2, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 2, 12, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "trade_side": "SELL",
+                            "book": "CRUDE_PHYS",
+                            "portfolio": "PROMPT",
+                            "price": 1.5,
+                            "volume": 50.0,
+                            "settlement_status": "PENDING",
+                        },
+                    ),
+                    Event(
+                        event_id="evt-comp-3",
+                        aggregate_type="trade",
+                        aggregate_id="T-BUY",
+                        event_type="TradeAmended",
+                        occurred_at=datetime(2026, 3, 3, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 3, 12, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={"settlement_status": "SETTLED"},
+                    ),
+                    Event(
+                        event_id="evt-comp-4",
+                        aggregate_type="trade",
+                        aggregate_id="T-SELL",
+                        event_type="TradeCancelled",
+                        occurred_at=datetime(2026, 3, 4, 12, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 3, 4, 12, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={},
+                    ),
+                ]
+            )
+            session.commit()
+
+            report = build_pnl_comparison_report(
+                session,
+                from_as_of=date(2026, 3, 2),
+                to_as_of=date(2026, 3, 4),
+                portfolio="prompt",
+            )
+
+        self.assertEqual(
+            report["delta"],
+            {
+                "total_pnl": 75.0,
+                "realized_pnl": 200.0,
+                "unrealized_pnl": -125.0,
+                "priced_trade_count": -1,
+                "realized_trade_count": 1,
+                "unrealized_trade_count": -2,
+            },
+        )
+        self.assertEqual(len(report["portfolio_deltas"]), 1)
+        self.assertEqual(report["portfolio_deltas"][0]["portfolio"], "PROMPT")
+        self.assertEqual(report["portfolio_deltas"][0]["delta"]["total_pnl"], 75.0)
+        self.assertEqual(
+            report["attribution_summary"],
+            {
+                "market_move_pnl": 0.0,
+                "quantity_change_pnl": 75.0,
+                "coverage_change_pnl": 0.0,
+                "other_change_pnl": 0.0,
+                "realization_transfer_pnl": 200.0,
+                "reconciled_pnl_delta": 75.0,
+            },
+        )
+        self.assertEqual(
+            report["daily_bridge"],
+            [
+                {
+                    "from_as_of": date(2026, 3, 2),
+                    "to_as_of": date(2026, 3, 3),
+                    "delta": {
+                        "total_pnl": 0.0,
+                        "realized_pnl": 200.0,
+                        "unrealized_pnl": -200.0,
+                        "priced_trade_count": 0,
+                        "realized_trade_count": 1,
+                        "unrealized_trade_count": -1,
+                    },
+                    "attribution_summary": {
+                        "market_move_pnl": 0.0,
+                        "quantity_change_pnl": 0.0,
+                        "coverage_change_pnl": 0.0,
+                        "other_change_pnl": 0.0,
+                        "realization_transfer_pnl": 200.0,
+                        "reconciled_pnl_delta": 0.0,
+                    },
+                    "changed_trade_count": 1,
+                    "top_driver_trade_id": "T-BUY",
+                    "top_driver_category": "REALIZATION",
+                    "top_driver_pnl_delta": 0.0,
+                    "top_driver_summary": "Amended settlement to SETTLED on 2026-03-03",
+                },
+                {
+                    "from_as_of": date(2026, 3, 3),
+                    "to_as_of": date(2026, 3, 4),
+                    "delta": {
+                        "total_pnl": 75.0,
+                        "realized_pnl": 0.0,
+                        "unrealized_pnl": 75.0,
+                        "priced_trade_count": -1,
+                        "realized_trade_count": 0,
+                        "unrealized_trade_count": -1,
+                    },
+                    "attribution_summary": {
+                        "market_move_pnl": 0.0,
+                        "quantity_change_pnl": 75.0,
+                        "coverage_change_pnl": 0.0,
+                        "other_change_pnl": 0.0,
+                        "realization_transfer_pnl": 0.0,
+                        "reconciled_pnl_delta": 75.0,
+                    },
+                    "changed_trade_count": 1,
+                    "top_driver_trade_id": "T-SELL",
+                    "top_driver_category": "REMOVED_POSITION",
+                    "top_driver_pnl_delta": 75.0,
+                    "top_driver_summary": "Trade cancelled on 2026-03-04",
+                },
+            ],
+        )
+        attributions_by_trade = {row["trade_id"]: row for row in report["attributions"]}
+        self.assertEqual(attributions_by_trade["T-BUY"]["attribution_category"], "REALIZATION")
+        self.assertEqual(attributions_by_trade["T-BUY"]["pnl_delta"], 0.0)
+        self.assertEqual(
+            attributions_by_trade["T-BUY"]["breakdown"],
+            {
+                "market_move_pnl": 0.0,
+                "quantity_change_pnl": 0.0,
+                "coverage_change_pnl": 0.0,
+                "other_change_pnl": 0.0,
+                "realization_transfer_pnl": 200.0,
+                "reconciled_pnl_delta": 0.0,
+            },
+        )
+        self.assertEqual(
+            attributions_by_trade["T-BUY"]["driver_summary"],
+            "Amended settlement to SETTLED on 2026-03-03",
+        )
+        self.assertEqual(
+            attributions_by_trade["T-BUY"]["driver_events"],
+            [
+                {
+                    "event_id": "evt-comp-3",
+                    "event_type": "TradeAmended",
+                    "occurred_at": datetime(2026, 3, 3, 12, 0),
+                    "actor_id": "ops",
+                    "summary": "Amended settlement to SETTLED",
+                }
+            ],
+        )
+        self.assertEqual(attributions_by_trade["T-SELL"]["attribution_category"], "REMOVED_POSITION")
+        self.assertEqual(attributions_by_trade["T-SELL"]["pnl_delta"], 75.0)
+        self.assertEqual(
+            attributions_by_trade["T-SELL"]["breakdown"],
+            {
+                "market_move_pnl": 0.0,
+                "quantity_change_pnl": 75.0,
+                "coverage_change_pnl": 0.0,
+                "other_change_pnl": 0.0,
+                "realization_transfer_pnl": 0.0,
+                "reconciled_pnl_delta": 75.0,
+            },
+        )
+        self.assertEqual(
+            attributions_by_trade["T-SELL"]["driver_summary"],
+            "Trade cancelled on 2026-03-04",
+        )
+        self.assertEqual(
+            attributions_by_trade["T-SELL"]["driver_events"],
+            [
+                {
+                    "event_id": "evt-comp-4",
+                    "event_type": "TradeCancelled",
+                    "occurred_at": datetime(2026, 3, 4, 12, 0),
+                    "actor_id": "ops",
+                    "summary": "Trade cancelled",
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

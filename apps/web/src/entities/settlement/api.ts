@@ -4,8 +4,10 @@ import type { TradeInvoiceRecord, TradePaymentRecord } from '../../shared/models
 
 export type CreateTradeInvoiceInput = {
   trade_id: string
+  leg_no?: number | null
   invoice_number?: string | null
   invoice_currency_code?: string | null
+  billed_quantity?: number | null
   invoice_amount?: number | null
   issued_at?: string | null
   due_at?: string | null

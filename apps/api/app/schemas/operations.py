@@ -93,6 +93,8 @@ class TradeCreditExceptionOut(BaseModel):
 class TradeWorkflowItemOut(BaseModel):
     item_id: int
     trade_id: str
+    linked_trade_id: Optional[str]
+    linked_trade_status: Optional[str]
     queue: str
     workflow_type: str
     status: str

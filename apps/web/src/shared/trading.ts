@@ -36,6 +36,7 @@ export const pricingStatusOptions = ['PENDING', 'PARTIALLY_PRICED', 'PRICED', 'D
 export const confirmationStatusOptions = ['PENDING', 'SENT', 'CONFIRMED', 'DISPUTED'] as const
 export const nominationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'SCHEDULED', 'NOMINATED', 'COMPLETED'] as const
 export const allocationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'PARTIALLY_ALLOCATED', 'ALLOCATED', 'COMPLETED'] as const
+export const actualizationStatusOptions = ['NOT_REQUIRED', 'PENDING', 'PARTIALLY_ACTUALIZED', 'ACTUALIZED'] as const
 export const creditApprovalStatusOptions = ['PENDING_REVIEW', 'APPROVED', 'NOT_REQUIRED', 'REJECTED'] as const
 export const optionSettlementStatusOptions = ['PENDING', 'BOOKED', 'NOT_REQUIRED'] as const
 export const invoiceStatusOptions = ['NOT_REQUIRED', 'PENDING', 'ISSUED', 'APPROVED', 'DISPUTED'] as const

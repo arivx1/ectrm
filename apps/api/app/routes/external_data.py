@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -341,6 +341,45 @@ def get_latest_external_series_observation(
     if row is None:
         raise HTTPException(status_code=404, detail="External series observation not found")
     return _to_external_series_observation_out(row)
+
+
+@router.get(
+    "/market-data/price-indices/observations/latest",
+    response_model=List[PriceIndexObservationOut],
+)
+def list_latest_price_index_observations(
+    price_index_codes: List[str] = Query(default=[]),
+    db: Session = Depends(get_db),
+) -> List[PriceIndexObservationOut]:
+    normalized_codes: list[str] = []
+    seen_codes: set[str] = set()
+    for code in price_index_codes:
+        normalized_code = code.strip().upper()
+        if not normalized_code or normalized_code in seen_codes:
+            continue
+        normalized_codes.append(normalized_code)
+        seen_codes.add(normalized_code)
+
+    if not normalized_codes:
+        return []
+
+    rows = db.execute(
+        select(PriceIndexObservation)
+        .where(PriceIndexObservation.price_index_code.in_(normalized_codes))
+        .order_by(
+            PriceIndexObservation.price_index_code.asc(),
+            PriceIndexObservation.observation_date.desc(),
+            PriceIndexObservation.downloaded_at.desc(),
+            PriceIndexObservation.id.desc(),
+        )
+    ).scalars().all()
+
+    latest_by_code: dict[str, PriceIndexObservation] = {}
+    for row in rows:
+        if row.price_index_code not in latest_by_code:
+            latest_by_code[row.price_index_code] = row
+
+    return [_to_observation_out(latest_by_code[code]) for code in normalized_codes if code in latest_by_code]
 
 
 @router.get(

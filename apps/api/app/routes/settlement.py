@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
 from apps.api.app.domains.operations.services.settlement_invoices import list_trade_invoices
@@ -36,10 +37,12 @@ def _provided_fields(payload: TradeInvoiceUpdate) -> set[str]:
 @router.get("/invoices", response_model=list[TradeInvoiceOut])
 def get_trade_invoices(
     trade_id: str | None = Query(default=None),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[TradeInvoiceOut]:
     try:
-        return list_trade_invoices(db, trade_id=trade_id)
+        return list_trade_invoices(db, trade_id=trade_id, limit=limit, offset=offset)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
@@ -56,8 +59,10 @@ def post_trade_invoice(
             db,
             trade_id=payload.trade_id,
             actor_id=actor_id,
+            leg_no=payload.leg_no,
             invoice_number=payload.invoice_number,
             invoice_currency_code=payload.invoice_currency_code,
+            billed_quantity=payload.billed_quantity,
             invoice_amount=payload.invoice_amount,
             issued_at=payload.issued_at,
             due_at=payload.due_at,
@@ -109,10 +114,12 @@ def patch_trade_invoice(
 def get_trade_payments(
     trade_id: str | None = Query(default=None),
     invoice_id: int | None = Query(default=None),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[TradePaymentOut]:
     try:
-        return list_trade_payments(db, trade_id=trade_id, invoice_id=invoice_id)
+        return list_trade_payments(db, trade_id=trade_id, invoice_id=invoice_id, limit=limit, offset=offset)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 

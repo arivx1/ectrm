@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
 
+import {
+  createWeatherLocation,
+  deactivateWeatherLocation,
+  reactivateWeatherLocation,
+  updateWeatherLocation,
+  type CreateWeatherLocationInput,
+  type UpdateWeatherLocationInput,
+} from '../weather/api'
 import { type CounterpartyCreditPreviewRecord, type ExternalDataRunRecord } from '../../shared/models'
 import { postJson } from '../../shared/api'
 import { appConfig } from '../../shared/config'
@@ -32,6 +40,9 @@ export function useAppAdminActions(args: {
   const [tradingSourcesSuccess, setTradingSourcesSuccess] = useState<string>('')
   const [weatherSyncError, setWeatherSyncError] = useState<string>('')
   const [weatherSyncSuccess, setWeatherSyncSuccess] = useState<string>('')
+  const [weatherLocationMutationError, setWeatherLocationMutationError] = useState('')
+  const [weatherLocationMutationSuccess, setWeatherLocationMutationSuccess] = useState('')
+  const [weatherLocationMutationPendingCode, setWeatherLocationMutationPendingCode] = useState<string | null>(null)
   const [externalDataSyncing, setExternalDataSyncing] = useState(false)
   const [externalDataSyncingProvider, setExternalDataSyncingProvider] = useState<string | null>(null)
   const [tradingSourcesSyncing, setTradingSourcesSyncing] = useState(false)
@@ -52,6 +63,9 @@ export function useAppAdminActions(args: {
     setTradingSourcesSuccess('')
     setWeatherSyncError('')
     setWeatherSyncSuccess('')
+    setWeatherLocationMutationError('')
+    setWeatherLocationMutationSuccess('')
+    setWeatherLocationMutationPendingCode(null)
     setExternalDataSyncing(false)
     setExternalDataSyncingProvider(null)
     setTradingSourcesSyncing(false)
@@ -258,6 +272,87 @@ export function useAppAdminActions(args: {
     }
   }
 
+  async function runWeatherLocationMutation(args: {
+    locationCode: string
+    successMessage: string
+    fallbackMessage: string
+    run: () => Promise<unknown>
+  }) {
+    const { locationCode, successMessage, fallbackMessage, run } = args
+    setWeatherLocationMutationPendingCode(locationCode)
+    setWeatherLocationMutationError('')
+    setWeatherLocationMutationSuccess('')
+
+    try {
+      await run()
+      await refreshMutationData('admin-weather-sync')
+      setWeatherLocationMutationSuccess(successMessage)
+    } catch (nextError) {
+      setWeatherLocationMutationError(nextError instanceof Error ? nextError.message : fallbackMessage)
+    } finally {
+      setWeatherLocationMutationPendingCode((current) => (current === locationCode ? null : current))
+    }
+  }
+
+  async function handleCreateWeatherLocation(
+    input: Omit<CreateWeatherLocationInput, 'created_by'>,
+  ) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode: input.code,
+      successMessage: `Weather location ${input.code} created.`,
+      fallbackMessage: 'Failed to create weather location.',
+      run: () =>
+        createWeatherLocation(appConfig.apiBase, {
+          ...input,
+          created_by: actorId,
+        }),
+    })
+  }
+
+  async function handleUpdateWeatherLocation(
+    locationCode: string,
+    input: Omit<UpdateWeatherLocationInput, 'updated_by'>,
+  ) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode,
+      successMessage: `Weather location ${locationCode} updated.`,
+      fallbackMessage: 'Failed to update weather location.',
+      run: () =>
+        updateWeatherLocation(appConfig.apiBase, locationCode, {
+          ...input,
+          updated_by: actorId,
+        }),
+    })
+  }
+
+  async function handleDeactivateWeatherLocation(locationCode: string) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode,
+      successMessage: `Weather location ${locationCode} deactivated.`,
+      fallbackMessage: 'Failed to deactivate weather location.',
+      run: () =>
+        deactivateWeatherLocation(appConfig.apiBase, locationCode, {
+          updated_by: actorId,
+        }),
+    })
+  }
+
+  async function handleReactivateWeatherLocation(locationCode: string) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode,
+      successMessage: `Weather location ${locationCode} reactivated.`,
+      fallbackMessage: 'Failed to reactivate weather location.',
+      run: () =>
+        reactivateWeatherLocation(appConfig.apiBase, locationCode, {
+          updated_by: actorId,
+        }),
+    })
+  }
+
   return {
     counterpartyCreditImportDraft,
     counterpartyCreditImportError,
@@ -276,10 +371,17 @@ export function useAppAdminActions(args: {
     handlePreviewCounterpartyCreditImport,
     handleRunExternalDataSync,
     handleRunNwsWeatherSync,
+    handleCreateWeatherLocation,
+    handleDeactivateWeatherLocation,
+    handleReactivateWeatherLocation,
     handleSeedTradingSources,
+    handleUpdateWeatherLocation,
     tradingSourcesError,
     tradingSourcesSuccess,
     tradingSourcesSyncing,
+    weatherLocationMutationError,
+    weatherLocationMutationPendingCode,
+    weatherLocationMutationSuccess,
     weatherSyncError,
     weatherSyncSuccess,
     weatherSyncing,

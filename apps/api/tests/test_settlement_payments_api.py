@@ -19,6 +19,8 @@ from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.event import Event
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
@@ -65,9 +67,11 @@ class SettlementPaymentsApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             session.query(TradePayment).delete()
+            session.query(TradeActualization).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
+            session.query(Event).delete()
             session.query(UserSession).delete()
             session.query(UserAccount).delete()
             session.commit()
@@ -127,6 +131,7 @@ class SettlementPaymentsApiTests(unittest.TestCase):
                     confirmation_status="CONFIRMED",
                     nomination_status="PENDING",
                     allocation_status="PENDING",
+                    actualization_status="PENDING",
                     price_index_code=None,
                     price=80,
                     volume=1000,
@@ -233,7 +238,10 @@ class SettlementPaymentsApiTests(unittest.TestCase):
         self.assertEqual(second_payment.status_code, 201)
         self.assertEqual(second_payment.json()["outstanding_amount"], 0)
 
-        list_response = self.client.get(f"/settlement/payments?invoice_id={invoice_id}")
+        list_response = self.client.get(
+            f"/settlement/payments?invoice_id={invoice_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(len(list_response.json()), 2)
 
@@ -241,6 +249,19 @@ class SettlementPaymentsApiTests(unittest.TestCase):
             trade = session.query(Trade).filter(Trade.trade_id == "T-PMT-2").one()
             self.assertEqual(trade.payment_status, "PAID")
             self.assertEqual(trade.settlement_status, "SETTLED")
+            payment_events = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-PMT-2",
+                    Event.event_type == "TradePaymentCreated",
+                )
+                .order_by(Event.recorded_at.asc())
+                .all()
+            )
+            self.assertEqual(len(payment_events), 2)
+            self.assertEqual(payment_events[0].payload["payment"]["payment_amount"], 400.0)
+            self.assertEqual(payment_events[1].payload["payment"]["payment_amount"], 600.0)
 
     def test_payment_patch_marks_pending_payment_as_paid(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -276,6 +297,22 @@ class SettlementPaymentsApiTests(unittest.TestCase):
             trade = session.query(Trade).filter(Trade.trade_id == "T-PMT-3").one()
             self.assertEqual(trade.payment_status, "PAID")
             self.assertEqual(trade.settlement_status, "SETTLED")
+            audit_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-PMT-3",
+                    Event.event_type == "TradePaymentUpdated",
+                )
+                .one()
+            )
+            self.assertEqual(
+                datetime.fromisoformat(
+                    audit_event.payload["requested_changes"]["received_at"].replace("Z", "+00:00")
+                ),
+                datetime(2026, 4, 7, 12, 0, tzinfo=timezone.utc),
+            )
+            self.assertEqual(audit_event.payload["payment"]["status"], "PAID")
 
     def test_payment_mutations_require_authentication_and_block_workflow_status_override(self) -> None:
         self._seed_trade(trade_id="T-PMT-4")
@@ -300,7 +337,10 @@ class SettlementPaymentsApiTests(unittest.TestCase):
         )
         self.assertEqual(create_response.status_code, 201)
 
-        work_items_response = self.client.get("/operations/work-items?include_closed=true")
+        work_items_response = self.client.get(
+            "/operations/work-items?include_closed=true",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
         self.assertEqual(work_items_response.status_code, 200)
         payment_item = next(item for item in work_items_response.json() if item["trade_id"] == "T-PMT-4" and item["workflow_type"] == "PAYMENT")
 

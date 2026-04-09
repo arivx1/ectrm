@@ -1,6 +1,6 @@
 """create layout definitions table
 
-Revision ID: c2d3e4f5a6b7
+Revision ID: c2d3e4f5a6b8
 Revises: b1c2d3e4f5a6
 Create Date: 2026-04-05 12:00:00.000000
 """
@@ -13,7 +13,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "c2d3e4f5a6b7"
+revision: str = "c2d3e4f5a6b8"
 down_revision: Union[str, Sequence[str], None] = "b1c2d3e4f5a6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

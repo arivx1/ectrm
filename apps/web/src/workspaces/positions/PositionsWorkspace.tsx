@@ -1,4 +1,10 @@
 import type { Trade } from '../../shared/models'
+import {
+  buildUnitLabelByCommodity,
+  buildUnitLabelByCommodityClass,
+  summarizeUnitLabels,
+} from '../../shared/unitDisplay'
+import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { buildPositionTradeContext } from './positionHelpers'
@@ -37,7 +43,10 @@ export function PositionsWorkspace({
     ...position,
     tradeContext: buildPositionTradeContext(position, activeTrades),
   }))
+  const commodityUnitLabels = buildUnitLabelByCommodity(activeTrades)
+  const commodityClassUnitLabels = buildUnitLabelByCommodityClass(activeTrades)
   const grossExposure = positionsWithClass.reduce((total, position) => total + Math.abs(position.net_volume), 0)
+  const grossExposureUnitLabel = summarizeUnitLabels(activeTrades.map((trade) => trade.unit_of_measure))
   const largestCommodityPosition = positionsWithClass.reduce<PositionRow | null>((largest, position) => {
     if (!largest || Math.abs(position.net_volume) > Math.abs(largest.net_volume)) {
       return position
@@ -65,6 +74,9 @@ export function PositionsWorkspace({
   const largestCommodityTrade = largestCommodityPosition
     ? buildPositionTradeContext(largestCommodityPosition, activeTrades).primaryTrade
     : null
+  const largestCommodityClassUnitLabel = largestCommodityClass
+    ? commodityClassUnitLabels.get(largestCommodityClass.commodityClass) ?? 'Unit TBD'
+    : null
 
   return (
     <TileLayout
@@ -84,24 +96,27 @@ export function PositionsWorkspace({
               <div className="dashboard-report-grid">
                 <article className="dashboard-report-card">
                   <span>Gross Exposure</span>
-                  <strong>{formatNumber(grossExposure, 0)}</strong>
+                  <MetricValue value={formatNumber(grossExposure, 0)} unit={grossExposureUnitLabel} />
                   <p>Absolute net volume rolled up across every commodity row in the current positions projection.</p>
                 </article>
                 <article className="dashboard-report-card">
-                  <span>Commodity Rows</span>
+                  <span>Open Positions</span>
                   <strong>{formatNumber(positionsWithClass.length, 0)}</strong>
-                  <p>Distinct commodity positions currently represented in the live projection.</p>
+                  <p>Commodity rows now contributing to the live position projection.</p>
                 </article>
                 <article className="dashboard-report-card">
                   <span>Largest Class</span>
-                  <strong>
-                    {largestCommodityClass
-                      ? `${formatNumber(largestCommodityClass.netVolume, 0)} ${formatCommodityClass(largestCommodityClass.commodityClass)}`
-                      : '—'}
-                  </strong>
+                  {largestCommodityClass && largestCommodityClassUnitLabel ? (
+                    <MetricValue
+                      value={formatNumber(largestCommodityClass.netVolume, 0)}
+                      unit={largestCommodityClassUnitLabel}
+                    />
+                  ) : (
+                    <strong>—</strong>
+                  )}
                   <p>
                     {largestCommodityClass
-                      ? 'The class carrying the largest absolute exposure right now.'
+                      ? `${formatCommodityClass(largestCommodityClass.commodityClass)} is carrying the largest absolute exposure right now.`
                       : 'No class-level exposure is available yet.'}
                   </p>
                 </article>
@@ -149,7 +164,10 @@ export function PositionsWorkspace({
               {positionsByClass.map((row) => (
                 <article key={row.commodityClass} className="position-class-card">
                   <span>{formatCommodityClass(row.commodityClass)}</span>
-                  <strong>{formatNumber(row.netVolume, 0)}</strong>
+                  <MetricValue
+                    value={formatNumber(row.netVolume, 0)}
+                    unit={commodityClassUnitLabels.get(row.commodityClass) ?? 'Unit TBD'}
+                  />
                 </article>
               ))}
             </div>
@@ -186,7 +204,11 @@ export function PositionsWorkspace({
                       </p>
                     </div>
                     <div className="position-value">
-                      <b>{formatNumber(position.net_volume, 0)}</b>
+                      <MetricValue
+                        as="b"
+                        value={formatNumber(position.net_volume, 0)}
+                        unit={commodityUnitLabels.get(position.commodity) ?? 'Unit TBD'}
+                      />
                       <span>{formatDate(position.updated_at)}</span>
                     </div>
                   </div>

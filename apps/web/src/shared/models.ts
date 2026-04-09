@@ -1,5 +1,6 @@
 export type Trade = {
   trade_id: string
+  originating_option_trade_id: string | null
   external_trade_id: string | null
   source_system: string | null
   created_at: string
@@ -33,6 +34,7 @@ export type Trade = {
   confirmation_status: string
   nomination_status: string
   allocation_status: string
+  actualization_status: string
   price_index_code: string | null
   price: number | null
   volume: number | null
@@ -123,6 +125,45 @@ export type OptionExposureRow = {
   updated_at: string
 }
 
+export type DeliveryFieldSource = 'TRADE_DERIVED' | 'MANUAL' | 'SYSTEM_GENERATED'
+
+export type DeliveryExecutionStatus =
+  | 'PLANNED'
+  | 'SCHEDULED'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'ON_HOLD'
+  | 'CANCELLED'
+
+export type DeliveryEventType =
+  | 'PLAN_CAPTURED'
+  | 'SCHEDULE_COMMITTED'
+  | 'EXECUTION_STARTED'
+  | 'CHECKPOINT_RECORDED'
+  | 'DELIVERY_COMPLETED'
+  | 'HOLD_APPLIED'
+  | 'HOLD_RELEASED'
+  | 'CANCELLED'
+
+export type DeliveryEventRecord = {
+  event_id: number
+  delivery_id: string
+  trade_id: string
+  leg_no: number | null
+  event_type: DeliveryEventType
+  execution_status: DeliveryExecutionStatus
+  occurred_at: string
+  location_code: string | null
+  reference_code: string | null
+  source: string | null
+  notes: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
 export type DeliveryRecord = {
   delivery_id: string
   trade_id: string
@@ -143,8 +184,11 @@ export type DeliveryRecord = {
   transport_mode_source: 'EXPLICIT' | 'DERIVED' | 'UNSPECIFIED'
   delivery_profile: 'LOAD_DISCHARGE_WINDOW' | 'FLOW_WINDOW' | 'INTERVAL_SCHEDULE'
   book: string
+  book_source: DeliveryFieldSource
   portfolio: string | null
+  portfolio_source: DeliveryFieldSource
   counterparty: string | null
+  counterparty_source: DeliveryFieldSource
   commodity_class: string
   commodity: string
   volume: number | null
@@ -152,8 +196,67 @@ export type DeliveryRecord = {
   trade_currency_code: string | null
   price_unit_code: string | null
   location_code: string | null
+  location_source: DeliveryFieldSource
   delivery_start: string | null
   delivery_end: string | null
+  delivery_window_source: DeliveryFieldSource
+  origin_location_code: string | null
+  origin_location_code_source: DeliveryFieldSource | null
+  destination_location_code: string | null
+  destination_location_code_source: DeliveryFieldSource | null
+  carrier_name: string | null
+  carrier_name_source: DeliveryFieldSource | null
+  carrier_reference: string | null
+  carrier_reference_source: DeliveryFieldSource | null
+  asset_reference: string | null
+  asset_reference_source: DeliveryFieldSource | null
+  incoterm_code: string | null
+  incoterm_code_source: DeliveryFieldSource | null
+  equipment_type: string | null
+  equipment_type_source: DeliveryFieldSource | null
+  load_reference: string | null
+  load_reference_source: DeliveryFieldSource | null
+  discharge_reference: string | null
+  discharge_reference_source: DeliveryFieldSource | null
+  receipt_location_code: string | null
+  receipt_location_code_source: DeliveryFieldSource | null
+  delivery_location_code: string | null
+  delivery_location_code_source: DeliveryFieldSource | null
+  pipeline_system: string | null
+  pipeline_system_source: DeliveryFieldSource | null
+  pipeline_path: string | null
+  pipeline_path_source: DeliveryFieldSource | null
+  pipeline_contract_number: string | null
+  pipeline_contract_number_source: DeliveryFieldSource | null
+  pipeline_cycle_code: string | null
+  pipeline_cycle_code_source: DeliveryFieldSource | null
+  nomination_reference: string | null
+  nomination_reference_source: DeliveryFieldSource | null
+  market_operator: string | null
+  market_operator_source: DeliveryFieldSource | null
+  pricing_node_code: string | null
+  pricing_node_code_source: DeliveryFieldSource | null
+  delivery_node_code: string | null
+  delivery_node_code_source: DeliveryFieldSource | null
+  profile_code: string | null
+  profile_code_source: DeliveryFieldSource | null
+  schedule_reference: string | null
+  schedule_reference_source: DeliveryFieldSource | null
+  interval_minutes: number | null
+  interval_minutes_source: DeliveryFieldSource | null
+  timezone_name: string | null
+  timezone_name_source: DeliveryFieldSource | null
+  execution_status: DeliveryExecutionStatus
+  execution_status_source: DeliveryFieldSource
+  event_count: number
+  latest_event_type: DeliveryEventType | null
+  latest_event_at: string | null
+  operations_owner: string | null
+  operations_owner_source: DeliveryFieldSource
+  external_reference: string | null
+  external_reference_source: DeliveryFieldSource
+  ops_notes: string | null
+  ops_notes_source: DeliveryFieldSource
   booked_at: string
   last_updated_at: string
   age_days: number
@@ -161,14 +264,42 @@ export type DeliveryRecord = {
   confirmation_status: string
   nomination_status: string
   allocation_status: string
+  actualization_status: string
+  actualized_quantity: number | null
+  actualized_at: string | null
+  actualization_source: string | null
+  actualization_notes: string | null
+  actualization_updated_at: string | null
+  actualization_variance_quantity: number | null
   invoice_status: string
   payment_status: string
   settlement_status: string
   blocker_count: number
   blockers: string[]
+  scheduling_stage: 'BLOCKED' | 'READY' | 'IN_FLIGHT' | 'WATCHLIST'
+  scheduling_owner: string | null
+  scheduling_due_at: string | null
+  open_scheduling_work_item_count: number
+  next_scheduling_workflow_type: 'CONFIRMATION' | 'NOMINATION' | 'ALLOCATION' | null
+  next_scheduling_workflow_status: string | null
+  scheduling_work_items: DeliverySchedulingWorkflowItemRecord[]
+  delivery_events: DeliveryEventRecord[]
 }
 
 export type ShipmentRecord = DeliveryRecord
+
+export type DeliverySchedulingWorkflowItemRecord = {
+  item_id: number
+  workflow_type: 'CONFIRMATION' | 'NOMINATION' | 'ALLOCATION'
+  status: string
+  owner: string | null
+  due_at: string | null
+  notes: string | null
+  updated_at: string
+  version: number
+  is_closed: boolean
+  is_overdue: boolean
+}
 
 export type TradeCreditApprovalDecisionRecord = {
   decision_id: number
@@ -218,11 +349,14 @@ export type TradeCreditExceptionRecord = {
 export type TradeWorkflowItemRecord = {
   item_id: number
   trade_id: string
+  linked_trade_id: string | null
+  linked_trade_status: string | null
   queue: 'operations' | 'settlement'
   workflow_type:
     | 'CONFIRMATION'
     | 'NOMINATION'
     | 'ALLOCATION'
+    | 'ACTUALIZATION'
     | 'INVOICE'
     | 'PAYMENT'
     | 'CREDIT_APPROVAL'
@@ -257,11 +391,69 @@ export type TradeWorkflowItemRecord = {
   credit_hold_reason?: string | null
 }
 
+export type TradeConfirmationRecord = {
+  confirmation_id: number
+  trade_id: string
+  source_document_id: string | null
+  source_document_display_name: string | null
+  source_document_review_status: string | null
+  confirmation_number: string
+  status: string
+  sent_at: string | null
+  confirmed_at: string | null
+  issue_count: number
+  last_issued_at: string | null
+  last_issued_by: string | null
+  last_issue_method: string | null
+  last_issue_recipient: string | null
+  last_issue_note: string | null
+  dispute_reason: string | null
+  notes: string | null
+  comparison_waiver_note: string | null
+  comparison_waived_at: string | null
+  comparison_waived_by: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  workflow_item_id: number | null
+  workflow_owner: string | null
+  is_current: boolean
+  age_days: number
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  comparison_status: string
+  blocking_mismatch_count: number
+  mismatches: TradeConfirmationMismatchRecord[]
+}
+
+export type TradeConfirmationMismatchRecord = {
+  field_key: string
+  label: string
+  mismatch_type: string
+  expected_value: string | null
+  actual_value: string | null
+  blocking: boolean
+}
+
 export type TradeInvoiceRecord = {
   invoice_id: number
   trade_id: string
+  delivery_id: string | null
+  leg_no: number | null
   invoice_number: string
   invoice_currency_code: string
+  billed_quantity: number | null
+  quantity_unit_code: string | null
   invoice_amount: number
   status: string
   issued_at: string
@@ -289,6 +481,8 @@ export type TradeInvoiceRecord = {
   delivery_end: string | null
   payment_status: string
   settlement_status: string
+  total_paid_amount: number
+  outstanding_amount: number
 }
 
 export type TradePaymentRecord = {
@@ -752,6 +946,7 @@ export type PnlHistorySummary = {
 export type PnlTradeValuation = {
   trade_id: string
   book: string | null
+  portfolio: string | null
   commodity_class: string | null
   instrument_type: string
   trade_structure: string
@@ -782,6 +977,68 @@ export type PnlHistoryReport = {
   points: PnlHistoryPoint[]
   summary: PnlHistorySummary
   valuations: PnlTradeValuation[]
+}
+
+export type PnlPortfolioComparisonRow = {
+  portfolio: string
+  from_snapshot: PnlHistorySummary
+  to_snapshot: PnlHistorySummary
+  delta: PnlHistorySummary
+}
+
+export type PnlAttributionBreakdown = {
+  market_move_pnl: number
+  quantity_change_pnl: number
+  coverage_change_pnl: number
+  other_change_pnl: number
+  realization_transfer_pnl: number
+  reconciled_pnl_delta: number
+}
+
+export type PnlAttributionDriverEvent = {
+  event_id: string
+  event_type: string
+  occurred_at: string
+  actor_id: string | null
+  summary: string
+}
+
+export type PnlTradeAttributionRow = {
+  trade_id: string
+  attribution_category: string
+  pnl_delta: number
+  breakdown: PnlAttributionBreakdown
+  driver_summary: string
+  driver_events: PnlAttributionDriverEvent[]
+  from_valuation: PnlTradeValuation | null
+  to_valuation: PnlTradeValuation | null
+}
+
+export type PnlComparisonBridgeDay = {
+  from_as_of: string
+  to_as_of: string
+  delta: PnlHistorySummary
+  attribution_summary: PnlAttributionBreakdown
+  changed_trade_count: number
+  top_driver_trade_id: string | null
+  top_driver_category: string | null
+  top_driver_pnl_delta: number | null
+  top_driver_summary: string | null
+}
+
+export type PnlComparisonReport = {
+  generated_at: string
+  basis: string
+  methodology: string
+  from_as_of: string
+  to_as_of: string
+  from_snapshot: PnlHistorySummary
+  to_snapshot: PnlHistorySummary
+  delta: PnlHistorySummary
+  attribution_summary: PnlAttributionBreakdown
+  portfolio_deltas: PnlPortfolioComparisonRow[]
+  attributions: PnlTradeAttributionRow[]
+  daily_bridge: PnlComparisonBridgeDay[]
 }
 
 export type SettlementAgingCurrencySummary = {
@@ -994,6 +1251,163 @@ export type MarketContextRecord = {
   macro: MarketContextSeriesRecord[]
   positioning: MarketContextSeriesRecord[]
   freshness: MarketContextFreshnessRecord[]
+}
+
+export type ExternalSeriesDefinitionRecord = {
+  code: string
+  provider: string
+  dataset_code: string | null
+  series_id: string
+  name: string
+  category: string
+  frequency: string
+  unit_code: string
+  source_url: string | null
+  description: string | null
+  query_params: Record<string, unknown> | null
+  transform_rule: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  version: number
+}
+
+export type ExternalSeriesObservationRecord = {
+  id: number
+  series_code: string
+  observation_date: string
+  value: number
+  unit_code: string
+  source_provider: string
+  source_series_id: string
+  source_frequency: string
+  source_published_at: string | null
+  source_revision: string | null
+  downloaded_at: string
+  run_id: number
+  created_at: string
+  updated_at: string
+}
+
+export type WeatherLocationRecord = {
+  code: string
+  name: string
+  reference_location_code: string | null
+  latitude: number
+  longitude: number
+  timezone: string | null
+  source_provider: string
+  cwa: string | null
+  grid_id: string | null
+  grid_x: number | null
+  grid_y: number | null
+  station_id: string | null
+  description: string | null
+  is_active: boolean
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type WeatherForecastPeriodRecord = {
+  id: number
+  weather_location_code: string
+  source_provider: string
+  period_number: number
+  start_at: string
+  end_at: string
+  is_daytime: boolean
+  temperature: number | null
+  temperature_unit: string | null
+  wind_speed: string | null
+  wind_direction: string | null
+  short_forecast: string | null
+  detailed_forecast: string | null
+  probability_of_precipitation_pct: number | null
+  relative_humidity_pct: number | null
+  dewpoint_celsius: number | null
+  icon_url: string | null
+  downloaded_at: string
+  run_id: number
+}
+
+export type WeatherObservationRecord = {
+  id: number
+  weather_location_code: string
+  source_provider: string
+  station_id: string
+  observed_at: string
+  text_description: string | null
+  icon_url: string | null
+  temperature_celsius: number | null
+  dewpoint_celsius: number | null
+  relative_humidity_pct: number | null
+  wind_speed_kmh: number | null
+  wind_direction_degrees: number | null
+  barometric_pressure_pa: number | null
+  visibility_meters: number | null
+  downloaded_at: string
+  run_id: number
+}
+
+export type WeatherCommodityExposureRecord = {
+  commodity_code: string
+  commodity_name: string
+  commodity_class: string
+  net_volume: number
+  active_trade_count: number
+  directional_bias: string
+  weather_sensitivity_score: number
+  primary_driver: string
+  suggested_watch: string
+}
+
+export type WeatherRegionalSignalRecord = {
+  region_code: string
+  region_name: string
+  demand_risk: string
+  supply_risk: string
+  storm_risk: string
+  primary_driver: string
+  narrative: string
+  data_mode: string | null
+  tracked_location_count: number | null
+  current_temperature_f: number | null
+  forecast_average_temperature_f: number | null
+  temperature_trend_f: number | null
+  heating_degree_days_24h: number | null
+  cooling_degree_days_24h: number | null
+  forecast_bias_f: number | null
+  forecast_age_hours: number | null
+  observation_age_hours: number | null
+}
+
+export type WeatherTrackedSourceRecord = {
+  source_id: string
+  source_name: string
+  source_category: string
+  update_frequency: string
+  business_owner: string
+  status: string
+}
+
+export type WeatherIntelligenceOverviewRecord = {
+  analysis_mode: string
+  as_of_date: string
+  seasonal_regime: string
+  headline: string
+  summary: string
+  latest_position_update_at: string | null
+  latest_weather_update_at: string | null
+  live_weather_location_count: number
+  weather_sensitive_exposure_count: number
+  weather_sensitive_gross_volume: number
+  focus_areas: string[]
+  exposures: WeatherCommodityExposureRecord[]
+  regional_signals: WeatherRegionalSignalRecord[]
+  tracked_sources: WeatherTrackedSourceRecord[]
 }
 
 export type WeatherSyncLocationStatusRecord = {

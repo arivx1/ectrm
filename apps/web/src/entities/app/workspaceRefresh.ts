@@ -3,7 +3,10 @@ import { VIEW_DATA_GROUPS, type AppDataGroup, type AppDataGroupFlags } from './w
 
 export type WorkspaceMutationKind =
   | 'trade-event'
+  | 'delivery'
+  | 'confirmation'
   | 'workflow-item'
+  | 'actualization'
   | 'invoice'
   | 'payment'
   | 'admin-external-data'
@@ -12,7 +15,10 @@ export type WorkspaceMutationKind =
 
 const MUTATION_GROUPS: Record<WorkspaceMutationKind, AppDataGroup[]> = {
   'trade-event': ['core', 'operations'],
+  delivery: ['deliveries'],
+  confirmation: ['core', 'deliveries', 'operations'],
   'workflow-item': ['core', 'operations', 'settlement'],
+  actualization: ['core', 'deliveries', 'operations'],
   invoice: ['core', 'settlement'],
   payment: ['core', 'settlement'],
   'admin-external-data': ['admin', 'operations'],

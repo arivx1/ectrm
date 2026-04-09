@@ -30,6 +30,7 @@ from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.core.auth import GoogleIdentity, hash_password
@@ -102,6 +103,7 @@ class AuthHttpTests(unittest.TestCase):
             session.query(UserAccount).delete()
             session.query(TradePriceTerm).delete()
             session.query(TradeLeg).delete()
+            session.query(TradeWorkflowItem).delete()
             session.query(Position).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
@@ -285,6 +287,19 @@ class AuthHttpTests(unittest.TestCase):
         self.assertIn("POST", response.headers.get("access-control-allow-methods", ""))
         self.assertNotIn("error", response.text.lower())
 
+    def test_write_auth_rejections_preserve_cors_headers_for_browser_clients(self) -> None:
+        response = self.client.patch(
+            "/confirmations/999",
+            json={"status": "CONFIRMED"},
+            headers={"Origin": "http://127.0.0.1:5173"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173")
+        self.assertEqual(response.headers.get("access-control-allow-credentials"), "true")
+        self.assertEqual(response.headers.get("access-control-expose-headers"), "x-correlation-id")
+        self.assertEqual(response.json()["error"]["code"], "AUTHENTICATION_REQUIRED")
+
     def test_admin_auth_rejection_is_logged_with_request_context(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()
         try:
@@ -332,11 +347,15 @@ class AuthHttpTests(unittest.TestCase):
         self.assertIn("Request completed status_code=401", output)
 
     def test_http_exception_is_logged_with_request_context(self) -> None:
+        token = self._bootstrap_admin()["access_token"]
         stream, handler, original_stream = self._swap_log_stream()
         try:
             response = self.client.get(
                 "/trades/MISSING",
-                headers={"x-correlation-id": "http-log-123"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "x-correlation-id": "http-log-123",
+                },
             )
             handler.flush()
         finally:
@@ -352,6 +371,58 @@ class AuthHttpTests(unittest.TestCase):
         self.assertIn("request_method=GET", output)
         self.assertIn("request_path=/trades/MISSING", output)
         self.assertIn("Request completed status_code=404", output)
+
+    def test_protected_workspace_reads_require_authentication(self) -> None:
+        self._seed_trade_reference_data()
+        token = self._bootstrap_admin()["access_token"]
+
+        create_response = self.client.post(
+            "/events",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "aggregate_type": "trade",
+                "aggregate_id": "T-AUTH-READ",
+                "event_type": "TradeCreated",
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "actor_id": "ops_admin",
+                "payload": {
+                    "book": "CRUDE_PHYS",
+                    "portfolio": "OIL_DISCRETIONARY",
+                    "counterparty": "SHELL_TRADING",
+                    "commodity_class": "CRUDE_OIL",
+                    "commodity": "WTI",
+                    "pricing_type": "FIXED",
+                    "trade_side": "BUY",
+                    "price": 80,
+                    "volume": 1000,
+                },
+                "schema_version": 1,
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+
+        unauthenticated_trade = self.client.get("/trades/T-AUTH-READ")
+        self.assertEqual(unauthenticated_trade.status_code, 401)
+        self.assertEqual(
+            unauthenticated_trade.json()["error"]["message"],
+            "Authentication is required for protected workspace data.",
+        )
+
+        authenticated_trade = self.client.get(
+            "/trades/T-AUTH-READ",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(authenticated_trade.status_code, 200)
+        self.assertEqual(authenticated_trade.json()["trade_id"], "T-AUTH-READ")
+
+        unauthenticated_positions = self.client.get("/positions")
+        self.assertEqual(unauthenticated_positions.status_code, 401)
+        authenticated_positions = self.client.get(
+            "/positions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(authenticated_positions.status_code, 200)
+        self.assertEqual(authenticated_positions.json()[0]["net_volume"], 1000.0)
 
     def test_successful_requests_emit_completion_logs(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()
@@ -798,7 +869,10 @@ class AuthHttpTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201)
 
-        positions = self.client.get("/positions")
+        positions = self.client.get(
+            "/positions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         self.assertEqual(positions.status_code, 200)
         self.assertEqual(positions.json()[0]["net_volume"], -1000.0)
 
@@ -838,7 +912,10 @@ class AuthHttpTests(unittest.TestCase):
         )
         self.assertEqual(create_response.status_code, 201)
 
-        trade_response = self.client.get("/trades/T-HTTP-HEADER")
+        trade_response = self.client.get(
+            "/trades/T-HTTP-HEADER",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         self.assertEqual(trade_response.status_code, 200)
         payload = trade_response.json()
 

@@ -11,6 +11,7 @@ import {
 import {
   buildAmendTradeSubmission,
   buildCreateTradeSubmission,
+  buildSuggestedTradeId,
   previewTradeAmendment,
 } from '../../features/trades/tradeEventPayloads'
 import { appConfig } from '../../shared/config'
@@ -84,6 +85,8 @@ export function useAppTradeActions(args: {
   const [cancelling, setCancelling] = useState(false)
   const [optionLifecycleSubmittingEvent, setOptionLifecycleSubmittingEvent] =
     useState<OptionLifecycleEventType | null>(null)
+  const [optionLifecycleSubmittingTradeId, setOptionLifecycleSubmittingTradeId] =
+    useState<string | null>(null)
 
   async function refreshTradeMutationData() {
     await loadData({
@@ -286,13 +289,19 @@ export function useAppTradeActions(args: {
 
       await refreshTradeMutationData()
       navigateToTrade(submission.tradeId)
-      captureForm.reset()
+      captureForm.reset(buildSuggestedTradeId([...trades.map((trade) => trade.trade_id), submission.tradeId]))
       setCreateError('')
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Create trade failed.')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  function handleResetCreateTradeForm() {
+    setError('')
+    setCreateError('')
+    captureForm.reset()
   }
 
   function handleDuplicateTrade() {
@@ -433,20 +442,25 @@ export function useAppTradeActions(args: {
     }
   }
 
-  async function handleOptionLifecycleEvent(eventType: OptionLifecycleEventType) {
+  async function handleTradeOptionLifecycleEvent(
+    tradeId: string,
+    eventType: OptionLifecycleEventType,
+  ) {
     setError('')
     setAmendError('')
 
-    if (!selectedTradeId || !selectedTrade) {
-      setAmendError('Select an option trade first.')
+    const trade = trades.find((candidate) => candidate.trade_id === tradeId) ?? null
+
+    if (!trade) {
+      setAmendError(`Trade ${tradeId} is not loaded.`)
       return
     }
-    if (selectedTrade.instrument_type !== 'OPTION') {
-      setAmendError(`Trade ${selectedTrade.trade_id} is not an option trade.`)
+    if (trade.instrument_type !== 'OPTION') {
+      setAmendError(`Trade ${trade.trade_id} is not an option trade.`)
       return
     }
-    if (!tradeStatusIsActive(selectedTrade.status)) {
-      setAmendError(`Trade ${selectedTrade.trade_id} is already closed as ${selectedTrade.status}.`)
+    if (!tradeStatusIsActive(trade.status)) {
+      setAmendError(`Trade ${trade.trade_id} is already closed as ${trade.status}.`)
       return
     }
 
@@ -457,10 +471,11 @@ export function useAppTradeActions(args: {
     }
 
     setOptionLifecycleSubmittingEvent(eventType)
+    setOptionLifecycleSubmittingTradeId(tradeId)
 
     try {
       await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: selectedTradeId,
+        aggregate_id: tradeId,
         event_type: eventType,
         payload: {
           status: nextStatusByEvent[eventType],
@@ -468,7 +483,9 @@ export function useAppTradeActions(args: {
       })
 
       await refreshTradeMutationData()
-      setInspectorTab('overview')
+      if (selectedTradeId === tradeId) {
+        setInspectorTab('overview')
+      }
       setAmendError('')
     } catch (err) {
       const defaultMessageByEvent: Record<OptionLifecycleEventType, string> = {
@@ -479,7 +496,17 @@ export function useAppTradeActions(args: {
       setAmendError(err instanceof Error ? err.message : defaultMessageByEvent[eventType])
     } finally {
       setOptionLifecycleSubmittingEvent(null)
+      setOptionLifecycleSubmittingTradeId(null)
     }
+  }
+
+  async function handleOptionLifecycleEvent(eventType: OptionLifecycleEventType) {
+    if (!selectedTradeId) {
+      setAmendError('Select an option trade first.')
+      return
+    }
+
+    await handleTradeOptionLifecycleEvent(selectedTradeId, eventType)
   }
 
   return {
@@ -495,9 +522,12 @@ export function useAppTradeActions(args: {
     handleAmendTrade,
     handleCancelTrade,
     handleCreateTrade,
+    handleResetCreateTradeForm,
     handleDuplicateTrade,
     handleOptionLifecycleEvent,
+    handleTradeOptionLifecycleEvent,
     optionLifecycleSubmittingEvent,
+    optionLifecycleSubmittingTradeId,
     submitting,
   }
 }

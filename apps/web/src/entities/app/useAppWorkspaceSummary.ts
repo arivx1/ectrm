@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { fetchJson } from '../../shared/api'
 import { appConfig, bootstrapQueryLimits } from '../../shared/config'
+import type { StoredAuthSession } from '../../shared/mutation'
 import type {
   CounterpartyRecord,
   CurrencyRecord,
@@ -13,11 +14,13 @@ import type {
   Trade,
   UnitRecord,
 } from '../../shared/models'
+import { sessionHeaders } from './workspaceDataShared'
 import { classForCommodity } from '../../shared/reference'
 import { tradeAggregateType, tradeStatusIsActive } from '../../shared/trading'
 import { buildCounterpartyCreditRestrictionMessage } from '../../features/trades/counterpartyCredit'
 
 type UseAppWorkspaceSummaryArgs = {
+  authSession: StoredAuthSession | null
   trades: Trade[]
   events: EventRow[]
   positions: PositionRow[]
@@ -35,6 +38,7 @@ type UseAppWorkspaceSummaryArgs = {
 }
 
 export function useAppWorkspaceSummary({
+  authSession,
   trades,
   events,
   positions,
@@ -79,6 +83,7 @@ export function useAppWorkspaceSummary({
       try {
         const rows = await fetchJson<EventRow[]>(
           `${appConfig.apiBase}/events?aggregate_type=${tradeAggregateType}&aggregate_id=${encodeURIComponent(tradeId)}&limit=${bootstrapQueryLimits.selectedTradeEvents}`,
+          authSession ? { headers: sessionHeaders(authSession) } : undefined,
         )
         if (!cancelled) {
           setStoredSelectedTradeEvents(rows)
@@ -95,7 +100,7 @@ export function useAppWorkspaceSummary({
     return () => {
       cancelled = true
     }
-  }, [selectedTradeId])
+  }, [authSession, selectedTradeId])
 
   const selectedTradeEvents = selectedTradeId ? storedSelectedTradeEvents : []
 
@@ -196,15 +201,11 @@ export function useAppWorkspaceSummary({
   )
 
   const filteredEvents = useMemo(() => {
-    if (eventFilter === 'ALL') {
-      return events
-    }
-
     if (eventFilter === 'SELECTED') {
       return selectedTradeEvents
     }
 
-    return events.filter((event) => event.event_type === eventFilter)
+    return events
   }, [eventFilter, events, selectedTradeEvents])
 
   function findCounterpartyCreditRestriction(counterpartyCode: string): string | null {

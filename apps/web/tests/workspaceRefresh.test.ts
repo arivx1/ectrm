@@ -33,6 +33,21 @@ test('workflow-item refresh includes settlement when operations mutate', () => {
   assert.deepEqual(groups, ['core', 'deliveries', 'operations', 'admin', 'settlement'])
 })
 
+test('delivery refresh keeps loaded groups warm while forcing deliveries reload', () => {
+  const groups = buildMutationRefreshGroups({
+    currentView: 'shipments',
+    groupLoaded: {
+      ...EMPTY_GROUP_FLAGS,
+      core: true,
+      deliveries: true,
+      operations: true,
+    },
+    mutation: 'delivery',
+  })
+
+  assert.deepEqual(groups, ['core', 'deliveries', 'operations'])
+})
+
 test('payment refresh preserves already loaded risk data while forcing settlement reloads', () => {
   const groups = buildMutationRefreshGroups({
     currentView: 'settlement',

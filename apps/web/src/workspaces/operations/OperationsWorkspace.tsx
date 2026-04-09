@@ -1,19 +1,33 @@
-import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
+import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
+import type {
+  CreateTradeConfirmationInput,
+  IssueTradeConfirmationInput,
+  UpdateTradeConfirmationInput,
+} from '../../entities/confirmations/api'
+import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
+import { formatCurrencyAmount } from '../../shared/format'
+import { buildOpenOptionActionQueue, type OpenOptionValuation } from '../../shared/optionExposure'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type {
   DeliveryRecord,
   ExternalDataSyncStatusRecord,
+  Trade,
+  TradeConfirmationRecord,
   TradeWorkflowItemRecord,
   TradingSourceRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import type { OptionLifecycleEventType } from '../../shared/trading'
+import { ConfirmationLedgerBoard } from './ConfirmationLedgerBoard'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 import { DocumentIngestionPanel } from './DocumentIngestionPanel'
 import { WorkflowQueueEditor } from './WorkflowQueueEditor'
 
 type OperationsWorkspaceProps = {
   authSession: StoredAuthSession | null
+  activeTrades: Trade[]
+  confirmations: TradeConfirmationRecord[]
   deliveries: DeliveryRecord[]
   workItems: TradeWorkflowItemRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
@@ -23,9 +37,23 @@ type OperationsWorkspaceProps = {
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
+  confirmationMutationError: string
+  confirmationMutationPendingKey: string | null
   workflowMutationError: string
+  workflowCreationPendingTradeId: string | null
   workflowMutationPendingId: number | null
+  onCreateConfirmation: (tradeId: string, payload: CreateTradeConfirmationInput) => Promise<void>
+  onIssueConfirmation: (confirmationId: number, payload: IssueTradeConfirmationInput) => Promise<void>
+  onCreateWorkflowItem: (
+    tradeId: string,
+    payload: Omit<CreateTradeWorkflowItemInput, 'trade_id'>,
+  ) => Promise<void>
   onOpenTrade: (tradeId: string) => void
+  onOptionLifecycleEvent: (tradeId: string, eventType: OptionLifecycleEventType) => Promise<void>
+  optionLifecycleSubmittingEvent: OptionLifecycleEventType | null
+  optionLifecycleSubmittingTradeId: string | null
+  onBookUnderlyingTrade: (itemId: number) => Promise<void>
+  onSaveConfirmation: (confirmationId: number, payload: UpdateTradeConfirmationInput) => Promise<void>
   onSaveWorkflowItem: (itemId: number, payload: UpdateTradeWorkflowItemInput) => Promise<void>
 }
 
@@ -47,8 +75,86 @@ function dueWithinDays(value: string | null | undefined, days: number): boolean 
   return differenceMs >= 0 && differenceMs <= days * 86_400_000
 }
 
+function openOptionReferenceMarkLabel(
+  valuation: OpenOptionValuation,
+): string {
+  if (valuation.referencePrice === null) {
+    return '—'
+  }
+
+  return `${formatCurrencyAmount(valuation.referencePrice, valuation.referenceCurrencyCode)}${
+    valuation.referenceUnitCode ? ` / ${valuation.referenceUnitCode}` : ''
+  }`
+}
+
+function openOptionBreakEvenLabel(
+  valuation: OpenOptionValuation,
+): string {
+  if (valuation.breakEvenPrice === null) {
+    return '—'
+  }
+
+  return `${formatCurrencyAmount(valuation.breakEvenPrice, valuation.referenceCurrencyCode)}${
+    valuation.referenceUnitCode ? ` / ${valuation.referenceUnitCode}` : ''
+  }`
+}
+
+function openOptionExpiryPnlLabel(
+  valuation: OpenOptionValuation,
+): string {
+  if (valuation.expiryPnlAtMark === null) {
+    return '—'
+  }
+  if (valuation.expiryPnlAtMark > 0) {
+    return `Gain ${formatCurrencyAmount(Math.abs(valuation.expiryPnlAtMark), valuation.referenceCurrencyCode)}`
+  }
+  if (valuation.expiryPnlAtMark < 0) {
+    return `Loss ${formatCurrencyAmount(Math.abs(valuation.expiryPnlAtMark), valuation.referenceCurrencyCode)}`
+  }
+  return 'Break-even'
+}
+
+function openOptionExpiryStateLabel(
+  valuation: OpenOptionValuation,
+): string {
+  switch (valuation.expiryState) {
+    case 'PAST_EXPIRY_UNRESOLVED':
+      return 'Past expiry unresolved'
+    case 'EXPIRING_TODAY':
+      return 'Expiring today'
+    case 'EXPIRING_SOON':
+      return 'Expiring soon'
+    default:
+      return 'Open'
+  }
+}
+
+function optionLifecycleActionLabel(action: OptionLifecycleEventType): string {
+  switch (action) {
+    case 'OptionExercised':
+      return 'Exercise'
+    case 'OptionAssigned':
+      return 'Assign'
+    case 'OptionExpired':
+      return 'Expire'
+  }
+}
+
+function optionLifecyclePendingLabel(action: OptionLifecycleEventType): string {
+  switch (action) {
+    case 'OptionExercised':
+      return 'Exercising...'
+    case 'OptionAssigned':
+      return 'Assigning...'
+    case 'OptionExpired':
+      return 'Expiring...'
+  }
+}
+
 export function OperationsWorkspace({
   authSession,
+  activeTrades,
+  confirmations,
   deliveries,
   workItems,
   externalDataSyncStatus,
@@ -58,15 +164,37 @@ export function OperationsWorkspace({
   formatNumber,
   formatDate,
   formatDateOnly,
+  confirmationMutationError,
+  confirmationMutationPendingKey,
   workflowMutationError,
+  workflowCreationPendingTradeId,
   workflowMutationPendingId,
+  onCreateConfirmation,
+  onIssueConfirmation,
+  onCreateWorkflowItem,
   onOpenTrade,
+  onOptionLifecycleEvent,
+  optionLifecycleSubmittingEvent,
+  optionLifecycleSubmittingTradeId,
+  onBookUnderlyingTrade,
+  onSaveConfirmation,
   onSaveWorkflowItem,
 }: OperationsWorkspaceProps) {
+  const activeOptionTrades = activeTrades.filter((trade) => trade.instrument_type === 'OPTION')
+  const {
+    latestMarksByCode,
+    loading: latestMarksLoading,
+    error: latestMarksError,
+  } = useLatestPriceIndexMarks(activeOptionTrades.map((trade) => trade.price_index_code))
+  const openOptionActionQueue = buildOpenOptionActionQueue(activeOptionTrades, latestMarksByCode)
   const openDeliveries = deliveries.filter((delivery) => delivery.status !== 'COMPLETED')
   const blockedDeliveries = deliveries.filter((delivery) => delivery.status === 'BLOCKED')
   const operationsWorkItems = workItems.filter((item) => item.queue === 'operations')
+  const confirmationWorkItems = operationsWorkItems.filter((item) => item.workflow_type === 'CONFIRMATION')
   const openOperationsWorkItems = operationsWorkItems.filter((item) => !item.is_closed)
+  const managedConfirmationTradeIds = confirmations
+    .filter((confirmation) => confirmation.is_current)
+    .map((confirmation) => confirmation.trade_id)
   const unassignedWorkflowItems = openOperationsWorkItems.filter((item) => !item.owner?.trim()).length
   const dueSoonWorkflowItems = openOperationsWorkItems.filter((item) => dueWithinDays(item.due_at, 2)).length
   const blockedWorkflowItems = openOperationsWorkItems.filter(
@@ -122,12 +250,12 @@ export function OperationsWorkspace({
           {
             id: 'operations-snapshot',
             eyebrow: 'Workflow',
-            title: 'Operations Snapshot',
-            description: 'The counts that matter right now across open handoffs and blockers.',
-            span: 'half',
-            availableSpans: ['full', 'wide', 'half'],
-            content:
-              openDeliveries.length > 0 || openOperationsWorkItems.length > 0 ? (
+          title: 'Operations Snapshot',
+          description: 'The counts that matter right now across open handoffs and blockers.',
+          span: 'half',
+          availableSpans: ['full', 'wide', 'half'],
+          content:
+              openDeliveries.length > 0 || openOperationsWorkItems.length > 0 || openOptionActionQueue.length > 0 ? (
                 <div className="dashboard-report-grid">
                   <article className="dashboard-report-card">
                     <span>Open Workflow</span>
@@ -154,38 +282,179 @@ export function OperationsWorkspace({
                     <strong>{formatNumber(activeCreditExceptions.length, 0)}</strong>
                     <p>Trades running under an approved credit envelope that still need expiry and headroom monitoring.</p>
                   </article>
+                  <article className="dashboard-report-card">
+                    <span>Option Expiry Alerts</span>
+                    <strong>{formatNumber(openOptionActionQueue.length, 0)}</strong>
+                    <p>Open options inside the expiry window or still unresolved after expiry.</p>
+                  </article>
                 </div>
               ) : (
                 <div className="empty-state">
                   <strong>No operational queue</strong>
-                  <p>Create active physical trades or close options through exercise and assignment to populate the operations workspace.</p>
+                  <p>Create active physical trades, workflow handoffs, or near-expiry options to populate the operations workspace.</p>
                 </div>
               ),
           },
           {
-            id: 'operations-queue',
-            eyebrow: 'Critical Path',
-            title: openOperationsWorkItems.length > 0 ? 'Operational Work Queue' : 'No open work queue',
-            description: 'Editable queue items for confirmation, nomination, allocation, and settlement follow-up.',
+            id: 'operations-option-expiry',
+            eyebrow: 'Option Control',
+            title: openOptionActionQueue.length > 0 ? 'Option Expiry Queue' : 'No option expiry queue',
+            description: 'Keep expiry-day and near-expiry option decisions visible beside the operational handoff queue.',
             span: 'full',
             availableSpans: ['full', 'wide'],
-            content: openOperationsWorkItems.length > 0 ? (
+            content: openOptionActionQueue.length > 0 ? (
+              <div className="detail-list">
+                {latestMarksError ? (
+                  <p className="field-error">Live marks unavailable: {latestMarksError}</p>
+                ) : latestMarksLoading ? (
+                  <p className="form-note">Refreshing latest price index marks for the option expiry queue.</p>
+                ) : null}
+                <div className="position-list">
+                  {openOptionActionQueue.slice(0, 8).map((valuation) => (
+                    <article key={valuation.tradeId} className="position-card shipment-card">
+                      <div className="shipment-card-head">
+                        <div className="shipment-card-copy">
+                          <strong>{valuation.tradeId}</strong>
+                          <span>
+                            {valuation.commodity} • {valuation.book} • {valuation.tradeSide ?? 'BUY'} {valuation.optionType ?? 'CALL'}
+                          </span>
+                        </div>
+                        <span className={`status-pill status-pill-${valuation.decisionTone}`}>
+                          {valuation.decisionLabel}
+                        </span>
+                      </div>
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">{openOptionExpiryStateLabel(valuation)}</span>
+                        <span className="entity-chip entity-chip-soft">
+                          {valuation.optionStyle ?? 'AMERICAN'} • {valuation.moneyness ?? 'Unmarked'}
+                        </span>
+                        {valuation.daysToExpiration !== null ? (
+                          <span className="entity-chip entity-chip-soft">{valuation.daysToExpiration}d to expiry</span>
+                        ) : null}
+                        {valuation.referencePriceIndexCode ? (
+                          <span className="entity-chip entity-chip-soft">{valuation.referencePriceIndexCode}</span>
+                        ) : null}
+                      </div>
+                      <div className="shipment-card-copy">
+                        <p>{valuation.decisionReason}</p>
+                      </div>
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">
+                          Strike {formatCurrencyAmount(valuation.strikePrice, valuation.referenceCurrencyCode)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          Live mark {openOptionReferenceMarkLabel(valuation)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          Break-even {openOptionBreakEvenLabel(valuation)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          Expiry P&L {openOptionExpiryPnlLabel(valuation)}
+                        </span>
+                      </div>
+                      <div className="shipment-card-actions">
+                        <span>Updated {formatDate(valuation.updatedAt)}</span>
+                        <div className="workflow-item-button-row">
+                          {valuation.availableActions.map((action) => (
+                            <button
+                              key={action}
+                              type="button"
+                              className="button button-secondary"
+                              onClick={() => void onOptionLifecycleEvent(valuation.tradeId, action)}
+                              disabled={!authSession || optionLifecycleSubmittingTradeId !== null}
+                            >
+                              {optionLifecycleSubmittingTradeId === valuation.tradeId &&
+                              optionLifecycleSubmittingEvent === action
+                                ? optionLifecyclePendingLabel(action)
+                                : optionLifecycleActionLabel(action)}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            className="button button-ghost"
+                            onClick={() => onOpenTrade(valuation.tradeId)}
+                            disabled={optionLifecycleSubmittingTradeId !== null}
+                          >
+                            Open Trade
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No option expiry alerts</strong>
+                <p>Active options inside the five-day window, on expiry day, or past expiry will appear here.</p>
+              </div>
+            ),
+          },
+          {
+            id: 'operations-confirmation-ledger',
+            eyebrow: 'Trade Confirmation',
+            title: managedConfirmationTradeIds.length > 0 ? 'Confirmation Ledger' : 'Trade Confirmation Ledger',
+            description:
+              'Manage confirmed, disputed, and amended confirmation records. Booked economic amendments now reopen a fresh SENT version automatically.',
+            span: 'full',
+            availableSpans: ['full', 'wide'],
+            content: activeTrades.length > 0 ? (
+              <ConfirmationLedgerBoard
+                key={[
+                  activeTrades.map((trade) => trade.trade_id).join('|'),
+                  confirmations.map((confirmation) => `${confirmation.confirmation_id}:${confirmation.version}`).join('|'),
+                  confirmationWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
+                ].join('|')}
+                authSession={authSession}
+                trades={activeTrades}
+                confirmations={confirmations}
+                confirmationWorkItems={confirmationWorkItems}
+                saveError={confirmationMutationError}
+                savingKey={confirmationMutationPendingKey}
+                formatCommodityClass={formatCommodityClass}
+                formatDate={formatDate}
+                formatDateOnly={formatDateOnly}
+                onCreateConfirmation={onCreateConfirmation}
+                onIssueConfirmation={onIssueConfirmation}
+                onOpenTrade={onOpenTrade}
+                onSaveConfirmation={onSaveConfirmation}
+              />
+            ) : (
+              <div className="empty-state">
+                <strong>No confirmation queue</strong>
+                <p>Active trades will appear here once there is confirmation work to manage.</p>
+              </div>
+            ),
+          },
+          {
+            id: 'operations-queue',
+            eyebrow: 'Critical Path',
+          title: openOperationsWorkItems.length > 0 ? 'Operational Work Queue' : 'No open work queue',
+          description: 'Use the queue for owners, due dates, and downstream handoffs after confirmation records set the lifecycle status.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: activeTrades.length > 0 ? (
               <WorkflowQueueEditor
                 key={openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
                 authSession={authSession}
+                activeTrades={activeTrades}
                 items={openOperationsWorkItems}
+                managedConfirmationTradeIds={managedConfirmationTradeIds}
+                creationPendingTradeId={workflowCreationPendingTradeId}
                 savingItemId={workflowMutationPendingId}
                 saveError={workflowMutationError}
                 formatCommodityClass={formatCommodityClass}
                 formatDate={formatDate}
                 formatDateOnly={formatDateOnly}
+                onCreateItem={onCreateWorkflowItem}
                 onOpenTrade={onOpenTrade}
+                onBookUnderlyingTrade={onBookUnderlyingTrade}
                 onSaveItem={onSaveWorkflowItem}
               />
             ) : (
               <div className="empty-state">
-                <strong>No active delivery work</strong>
-                <p>The work queue will appear once delivery obligations exist.</p>
+                <strong>No active operations context</strong>
+                <p>Create active trades to start opening confirmation, actualization, credit, or option-settlement work.</p>
               </div>
             ),
           },

@@ -74,6 +74,7 @@ class PnlHistorySummary(BaseModel):
 class PnlTradeValuation(BaseModel):
     trade_id: str
     book: str | None
+    portfolio: str | None
     commodity_class: str | None
     instrument_type: str
     trade_structure: str
@@ -104,6 +105,68 @@ class PnlHistoryReport(BaseModel):
     points: list[PnlHistoryPoint]
     summary: PnlHistorySummary
     valuations: list[PnlTradeValuation]
+
+
+class PnlPortfolioComparisonRow(BaseModel):
+    portfolio: str
+    from_snapshot: PnlHistorySummary
+    to_snapshot: PnlHistorySummary
+    delta: PnlHistorySummary
+
+
+class PnlAttributionBreakdown(BaseModel):
+    market_move_pnl: float
+    quantity_change_pnl: float
+    coverage_change_pnl: float
+    other_change_pnl: float
+    realization_transfer_pnl: float
+    reconciled_pnl_delta: float
+
+
+class PnlAttributionDriverEvent(BaseModel):
+    event_id: str
+    event_type: str
+    occurred_at: datetime
+    actor_id: str | None
+    summary: str
+
+
+class PnlTradeAttributionRow(BaseModel):
+    trade_id: str
+    attribution_category: str
+    pnl_delta: float
+    breakdown: PnlAttributionBreakdown
+    driver_summary: str
+    driver_events: list[PnlAttributionDriverEvent]
+    from_valuation: PnlTradeValuation | None
+    to_valuation: PnlTradeValuation | None
+
+
+class PnlComparisonBridgeDay(BaseModel):
+    from_as_of: date
+    to_as_of: date
+    delta: PnlHistorySummary
+    attribution_summary: PnlAttributionBreakdown
+    changed_trade_count: int
+    top_driver_trade_id: str | None
+    top_driver_category: str | None
+    top_driver_pnl_delta: float | None
+    top_driver_summary: str | None
+
+
+class PnlComparisonReport(BaseModel):
+    generated_at: datetime
+    basis: str
+    methodology: str
+    from_as_of: date
+    to_as_of: date
+    from_snapshot: PnlHistorySummary
+    to_snapshot: PnlHistorySummary
+    delta: PnlHistorySummary
+    attribution_summary: PnlAttributionBreakdown
+    portfolio_deltas: list[PnlPortfolioComparisonRow]
+    attributions: list[PnlTradeAttributionRow]
+    daily_bridge: list[PnlComparisonBridgeDay]
 
 
 class SettlementAgingCurrencySummary(BaseModel):
