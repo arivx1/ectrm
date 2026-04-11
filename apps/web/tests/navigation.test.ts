@@ -76,6 +76,7 @@ describe('mobile navigation helpers', () => {
 
   it('maps representative workspaces into their grouped nav sections', () => {
     expect(primaryNavigationSectionForView('dashboard').key).toBe('overview')
+    expect(primaryNavigationSectionForView('demo').key).toBe('overview')
     expect(primaryNavigationSectionForView('trades').key).toBe('trading')
     expect(primaryNavigationSectionForView('shipments').key).toBe('execution')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')

@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react'
 import {
   createTradeConfirmation,
   issueTradeConfirmation,
+  respondTradeConfirmation,
   updateTradeConfirmation,
   type CreateTradeConfirmationInput,
   type IssueTradeConfirmationInput,
+  type RespondTradeConfirmationInput,
   type UpdateTradeConfirmationInput,
 } from '../confirmations/api'
 import {
@@ -118,6 +120,26 @@ export function useAppSettlementMutations(args: {
     } catch (nextError) {
       setConfirmationMutationError(
         nextError instanceof Error ? nextError.message : 'Failed to issue confirmation record.',
+      )
+    } finally {
+      setConfirmationMutationPendingKey((current) => (current === pendingKey ? null : current))
+    }
+  }
+
+  async function handleRespondTradeConfirmation(
+    confirmationId: number,
+    payload: RespondTradeConfirmationInput,
+  ) {
+    const pendingKey = `confirmation:${confirmationId}:response:${payload.action}`
+    setConfirmationMutationError('')
+    setConfirmationMutationPendingKey(pendingKey)
+
+    try {
+      await respondTradeConfirmation(appConfig.apiBase, confirmationId, payload)
+      await refreshMutationData('confirmation')
+    } catch (nextError) {
+      setConfirmationMutationError(
+        nextError instanceof Error ? nextError.message : 'Failed to record confirmation response.',
       )
     } finally {
       setConfirmationMutationPendingKey((current) => (current === pendingKey ? null : current))
@@ -269,6 +291,7 @@ export function useAppSettlementMutations(args: {
     handleCreateWorkflowItem,
     handleCreateTradeConfirmation,
     handleIssueTradeConfirmation,
+    handleRespondTradeConfirmation,
     handleSaveDeliveryActualization,
     handleCreateTradePayment,
     handleIssueTradeInvoice,

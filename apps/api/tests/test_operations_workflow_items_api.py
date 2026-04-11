@@ -20,8 +20,11 @@ from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
+from apps.api.app.models.option_exposure import OptionExposure
+from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
@@ -36,6 +39,7 @@ from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_actualization import TradeActualization
+from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_credit_exception import TradeCreditException
 from apps.api.app.models.trade_invoice import TradeInvoice
@@ -85,9 +89,13 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             session.query(TradeActualization).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
+            session.query(TradeConfirmation).delete()
             session.query(TradeCreditApprovalDecision).delete()
             session.query(TradeCreditException).delete()
             session.query(TradeWorkflowItem).delete()
+            session.query(DeliveryObligation).delete()
+            session.query(OptionExposure).delete()
+            session.query(Position).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
             session.query(ReferenceCounterpartyExternalCreditSnapshot).delete()
@@ -628,6 +636,50 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                 "ACTUALIZED",
             )
 
+    def test_shipment_actualization_requires_operations_authorized_role(self) -> None:
+        self._create_user(
+            user_id="ops.actualization",
+            email="ops.actualization@example.com",
+            display_name="Ops Actualization",
+            role="OPERATIONS",
+        )
+        self._create_user(
+            user_id="trader.actualization",
+            email="trader.actualization@example.com",
+            display_name="Trader Actualization",
+            role="TRADER",
+        )
+        operations_token = self._login(identifier="ops.actualization", password="supersecret2")
+        trader_token = self._login(identifier="trader.actualization", password="supersecret2")
+        self._seed_trade(trade_id="T-ACTUAL-OPS-ROLE-1", volume=1000)
+
+        trader_response = self.client.put(
+            "/shipments/T-ACTUAL-OPS-ROLE-1/actualization",
+            headers=self._auth_headers(trader_token),
+            json={
+                "actual_quantity": 1000,
+                "actualized_at": "2026-04-09T02:00:00Z",
+                "source": "METER",
+            },
+        )
+        self.assertEqual(trader_response.status_code, 403)
+        self.assertEqual(
+            trader_response.json()["detail"],
+            "Only OPERATIONS, OPS_ADMIN, or ADMIN sessions can manage shipment actualization.",
+        )
+
+        operations_response = self.client.put(
+            "/shipments/T-ACTUAL-OPS-ROLE-1/actualization",
+            headers=self._auth_headers(operations_token),
+            json={
+                "actual_quantity": 1000,
+                "actualized_at": "2026-04-09T02:00:00Z",
+                "source": "METER",
+            },
+        )
+        self.assertEqual(operations_response.status_code, 200)
+        self.assertEqual(operations_response.json()["actualization_status"], "ACTUALIZED")
+
     def test_work_item_patch_allows_option_settlement_updates_on_closed_option_trade(self) -> None:
         admin_token = self._bootstrap_admin()
         self._seed_trade(
@@ -1032,6 +1084,247 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
 
         response = self.client.patch(f"/operations/work-items/{item_id}", json={"owner": "ops.alpha"})
         self.assertEqual(response.status_code, 401)
+
+    def test_workspace_summary_reports_total_and_queue_scoped_counts(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-SUM-1")
+        self._seed_trade(trade_id="T-SUM-2", status="CANCELLED", settlement_status="SETTLED")
+
+        with self.SessionLocal() as session:
+            session.add(
+                Position(
+                    commodity="WTI",
+                    net_volume=1000,
+                    updated_at=self.now,
+                )
+            )
+            session.add(
+                OptionExposure(
+                    trade_id="T-SUM-1",
+                    book="CRUDE_PHYS",
+                    portfolio="PROMPT",
+                    counterparty="SHELL_TRADING",
+                    commodity_class="CRUDE_OIL",
+                    commodity="WTI",
+                    trade_side="BUY",
+                    option_type="CALL",
+                    option_style="AMERICAN",
+                    option_strike_price=80,
+                    option_expiration_date=date(2026, 4, 30),
+                    contract_volume=250,
+                    premium_price=1.25,
+                    premium_cashflow=312.5,
+                    underlying_equivalent_volume=250,
+                    trade_currency_code="USD",
+                    price_unit_code="BBL",
+                    updated_at=self.now,
+                )
+            )
+            session.add(
+                DeliveryObligation(
+                    delivery_id="DLV-T-SUM-1",
+                    trade_id="T-SUM-1",
+                    trade_leg_id=None,
+                    leg_no=None,
+                    external_trade_id="EXT-T-SUM-1",
+                    direction="BUY",
+                    mode_family="NETWORK_FLOW",
+                    transport_mode="PIPELINE",
+                    transport_mode_source="DERIVED",
+                    delivery_profile="FLOW_WINDOW",
+                    book="CRUDE_PHYS",
+                    book_source="TRADE_DERIVED",
+                    portfolio="PROMPT",
+                    portfolio_source="TRADE_DERIVED",
+                    counterparty="SHELL_TRADING",
+                    counterparty_source="TRADE_DERIVED",
+                    commodity_class="CRUDE_OIL",
+                    commodity="WTI",
+                    volume=1000,
+                    unit_of_measure="BBL",
+                    trade_currency_code="USD",
+                    price_unit_code="BBL",
+                    location_code="CUSHING",
+                    location_source="TRADE_DERIVED",
+                    delivery_start=date(2026, 4, 7),
+                    delivery_end=date(2026, 4, 9),
+                    delivery_window_source="TRADE_DERIVED",
+                    execution_status="PLANNED",
+                    execution_status_source="SYSTEM_GENERATED",
+                    operations_owner=None,
+                    operations_owner_source="SYSTEM_GENERATED",
+                    external_reference=None,
+                    external_reference_source="SYSTEM_GENERATED",
+                    ops_notes=None,
+                    ops_notes_source="SYSTEM_GENERATED",
+                    booked_at=self.now,
+                    source_trade_updated_at=self.now,
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            session.add(
+                TradeConfirmation(
+                    trade_id="T-SUM-1",
+                    source_document_id=None,
+                    confirmation_number="CONF-T-SUM-1",
+                    status="SENT",
+                    sent_at=self.now,
+                    confirmed_at=None,
+                    issue_count=1,
+                    last_issued_at=self.now,
+                    last_issued_by="ops_admin",
+                    last_issue_method="EMAIL",
+                    last_issue_recipient="ops@example.com",
+                    last_issue_note=None,
+                    receipt_status="ISSUED",
+                    received_at=None,
+                    received_by=None,
+                    response_method=None,
+                    response_reference=None,
+                    response_note=None,
+                    dispute_reason=None,
+                    notes=None,
+                    comparison_waiver_note=None,
+                    comparison_waived_at=None,
+                    comparison_waived_by=None,
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            session.add(
+                TradeWorkflowItem(
+                    trade_id="T-SUM-1",
+                    workflow_type="CONFIRMATION",
+                    status="PENDING",
+                    owner=None,
+                    due_at=None,
+                    notes="Pending confirmation.",
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            session.add(
+                TradeWorkflowItem(
+                    trade_id="T-SUM-2",
+                    workflow_type="NOMINATION",
+                    status="COMPLETED",
+                    owner=None,
+                    due_at=None,
+                    notes="Closed nomination.",
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            session.add(
+                TradeWorkflowItem(
+                    trade_id="T-SUM-1",
+                    workflow_type="PAYMENT",
+                    status="PENDING",
+                    owner=None,
+                    due_at=None,
+                    notes="Pending payment.",
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            invoice = TradeInvoice(
+                trade_id="T-SUM-1",
+                delivery_id="DLV-T-SUM-1",
+                leg_no=None,
+                invoice_number="INV-T-SUM-1",
+                invoice_currency_code="USD",
+                billed_quantity=1000,
+                quantity_unit_code="BBL",
+                invoice_amount=79250,
+                status="ISSUED",
+                issued_at=self.now,
+                due_at=self.now + timedelta(days=10),
+                dispute_reason=None,
+                notes=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+            session.add(invoice)
+            session.flush()
+            session.add(
+                TradePayment(
+                    trade_id="T-SUM-1",
+                    invoice_id=invoice.id,
+                    payment_reference="PAY-T-SUM-1",
+                    payment_currency_code="USD",
+                    payment_amount=79250,
+                    status="PENDING",
+                    due_at=self.now + timedelta(days=10),
+                    received_at=None,
+                    notes=None,
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        response = self.client.get(
+            "/operations/workspace-summary",
+            headers=self._auth_headers(admin_token),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["trades"]["total_count"], 2)
+        self.assertEqual(payload["trades"]["active_count"], 1)
+        self.assertEqual(payload["trades"]["priced_active_count"], 1)
+        self.assertEqual(payload["trades"]["pending_pricing_count"], 0)
+        self.assertEqual(payload["trades"]["pending_settlement_count"], 1)
+        self.assertEqual(payload["trades"]["tracked_book_count"], 1)
+        self.assertEqual(payload["trades"]["total_active_volume"], 1000.0)
+        self.assertEqual(payload["positions"]["total_count"], 1)
+        self.assertEqual(payload["option_exposures"]["total_count"], 1)
+        self.assertEqual(payload["deliveries"]["total_count"], 1)
+        self.assertEqual(payload["confirmations"]["total_count"], 1)
+        self.assertEqual(payload["work_items"]["total_count"], 2)
+        self.assertEqual(payload["work_items"]["operations_queue_count"], 1)
+        self.assertEqual(payload["work_items"]["settlement_queue_count"], 1)
+        self.assertEqual(payload["invoices"]["total_count"], 1)
+        self.assertEqual(payload["payments"]["total_count"], 1)
+        self.assertEqual(payload["dashboard"]["positions"]["gross_exposure"], 1000.0)
+        self.assertEqual(payload["dashboard"]["positions"]["position_count"], 1)
+        self.assertEqual(payload["dashboard"]["positions"]["bucket_count"], 1)
+        self.assertEqual(payload["dashboard"]["positions"]["buckets"][0]["commodity_class"], "CRUDE_OIL")
+        self.assertEqual(payload["dashboard"]["positions"]["buckets"][0]["unit_label"], "BBL")
+        self.assertEqual(payload["dashboard"]["attention"]["total_count"], 1)
+        self.assertEqual(payload["dashboard"]["attention"]["confirmation_backlog_count"], 1)
+        self.assertEqual(payload["dashboard"]["attention"]["nomination_backlog_count"], 1)
+        self.assertEqual(payload["dashboard"]["attention"]["invoice_backlog_count"], 1)
+        self.assertEqual(payload["dashboard"]["attention"]["overdue_payment_count"], 0)
+        self.assertEqual(payload["settlement"]["open_work_item_count"], 1)
+        self.assertEqual(payload["settlement"]["invoice_pending_count"], 0)
+        self.assertEqual(payload["settlement"]["payment_due_count"], 0)
+        self.assertEqual(payload["settlement"]["settled_count"], 0)
+        self.assertEqual(payload["settlement"]["trade_exception_count"], 0)
+        self.assertEqual(payload["settlement"]["workflow_exception_count"], 0)
+        self.assertEqual(payload["settlement"]["breakdown"], [{"status": "PENDING", "count": 1}])
 
 
 if __name__ == "__main__":

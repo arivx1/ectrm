@@ -10,6 +10,9 @@ from apps.api.app.domains.operations.services.shipments import update_delivery_l
 from apps.api.app.domains.operations.services.shipments import update_delivery_obligation
 from apps.api.app.domains.operations.services.shipments import update_delivery_pipeline_detail
 from apps.api.app.domains.operations.services.shipments import update_delivery_power_detail
+from apps.api.app.domains.operations.services.workspace_bootstrap_summary import (
+    build_workspace_bootstrap_summary,
+)
 
 __all__ = [
     "build_database_overview",
@@ -22,4 +25,5 @@ __all__ = [
     "update_delivery_obligation",
     "update_delivery_pipeline_detail",
     "update_delivery_power_detail",
+    "build_workspace_bootstrap_summary",
 ]

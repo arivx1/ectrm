@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
-import { loadPnlHistoryReport } from '../../entities/reports/api'
-import { appConfig } from '../../shared/config'
+import type { WorkspaceDashboardSummary } from '../../entities/app/api'
 import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord } from '../../shared/models'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { loadDashboardPnlHistory } from './pnlHistoryLoader'
 import { ExternalSeriesTileContent } from './ExternalSeriesPanel'
 import { MarketContextTileContent } from './MarketContextPanel'
 import { MarketPricesTileContent } from './MarketPricesPanel'
@@ -49,6 +49,7 @@ type DashboardWorkspaceProps = {
   authSession: StoredAuthSession | null
   appLoading: boolean
   activeTrades: TradeRecord[]
+  dashboardSummary: WorkspaceDashboardSummary | null
   priceIndices: PriceIndexRecord[]
   positionsWithClass: PositionRow[]
   events: EventRow[]
@@ -492,6 +493,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     authSession,
     appLoading,
     activeTrades,
+    dashboardSummary,
     priceIndices,
     positionsWithClass,
     events,
@@ -556,12 +558,15 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       setPnlHistoryError('')
 
       try {
-        const nextReport = await loadPnlHistoryReport(appConfig.apiBase, {
-          book: selectedBookFilter || undefined,
-          commodityClass: selectedCommodityClassFilter || undefined,
-          dateFrom: dateFromFilter || undefined,
-          dateTo: dateToFilter || undefined,
-        })
+        const nextReport = await loadDashboardPnlHistory(
+          {
+            book: selectedBookFilter,
+            commodityClass: selectedCommodityClassFilter,
+            dateFrom: dateFromFilter,
+            dateTo: dateToFilter,
+          },
+          authSession,
+        )
         if (!cancelled) {
           setPnlHistoryReport(nextReport)
         }
@@ -586,6 +591,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     appLoading,
     activeTrades,
     events,
+    authSession,
     selectedBookFilter,
     selectedCommodityClassFilter,
     dateFromFilter,
@@ -596,6 +602,15 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const unitLabelByCommodity = useMemo(() => buildUnitLabelByCommodity(activeTrades), [activeTrades])
 
   const exposureByClass = useMemo(() => {
+    if (dashboardSummary?.positions.buckets.length) {
+      return dashboardSummary.positions.buckets.map((row) => ({
+        commodityClass: row.commodity_class,
+        unitLabel: row.unit_label,
+        netVolume: row.net_volume,
+        commodityCount: row.commodity_count,
+      }))
+    }
+
     const totals = new Map<string, { commodityClass: string; unitLabel: string; netVolume: number; commodityCount: number }>()
     for (const position of positionsWithClass) {
       const unitLabel = unitLabelByCommodity.get(position.commodity) ?? 'Unit TBD'
@@ -620,11 +635,16 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
 
       return left.unitLabel.localeCompare(right.unitLabel)
     })
-  }, [positionsWithClass, unitLabelByCommodity])
+  }, [dashboardSummary, positionsWithClass, unitLabelByCommodity])
 
   const grossExposureUnitLabel = useMemo(
-    () => summarizeUnitLabels(activeTrades.map((trade) => trade.unit_of_measure)),
-    [activeTrades],
+    () =>
+      summarizeUnitLabels(
+        dashboardSummary?.positions.buckets.length
+          ? dashboardSummary.positions.buckets.map((bucket) => bucket.unit_label)
+          : activeTrades.map((trade) => trade.unit_of_measure),
+      ),
+    [activeTrades, dashboardSummary],
   )
 
   const markedPnlProxy = useMemo(
@@ -676,14 +696,26 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     dateFromFilter || dateToFilter ? `Window · ${formatDateWindowLabel(dateFromFilter, dateToFilter)}` : null,
   ].filter((value): value is string => Boolean(value))
 
+  const positionRowCount = dashboardSummary?.positions.position_count ?? positionsWithClass.length
+  const positionBucketCount = dashboardSummary?.positions.bucket_count ?? exposureByClass.length
   const grossExposure = useMemo(
-    () => positionsWithClass.reduce((sum, position) => sum + Math.abs(position.net_volume), 0),
-    [positionsWithClass],
+    () =>
+      dashboardSummary?.positions.gross_exposure ??
+      positionsWithClass.reduce((sum, position) => sum + Math.abs(position.net_volume), 0),
+    [dashboardSummary, positionsWithClass],
   )
 
   const largestExposureBucket = useMemo(
-    () =>
-      exposureByClass.reduce<{ commodityClass: string; unitLabel: string; netVolume: number } | null>(
+    () => {
+      if (dashboardSummary?.positions.largest_bucket) {
+        return {
+          commodityClass: dashboardSummary.positions.largest_bucket.commodity_class,
+          unitLabel: dashboardSummary.positions.largest_bucket.unit_label,
+          netVolume: dashboardSummary.positions.largest_bucket.net_volume,
+        }
+      }
+
+      return exposureByClass.reduce<{ commodityClass: string; unitLabel: string; netVolume: number } | null>(
         (current, row) =>
           current === null || Math.abs(row.netVolume) > Math.abs(current.netVolume)
             ? {
@@ -693,11 +725,63 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
               }
             : current,
         null,
-      ),
-    [exposureByClass],
+      )
+    },
+    [dashboardSummary, exposureByClass],
   )
 
   const dashboardIssues = useMemo(() => {
+    if (dashboardSummary?.attention) {
+      const attention = dashboardSummary.attention
+      return {
+        total: attention.total_count,
+        rows: [
+          {
+            label: 'Confirmation backlog',
+            count: attention.confirmation_backlog_count,
+            detail: 'Trades executed 1+ day ago that still are not confirmed.',
+            tone: attention.confirmation_backlog_count > 0 ? 'blocked' : 'active',
+          },
+          {
+            label: 'Nomination backlog',
+            count: attention.nomination_backlog_count,
+            detail: 'Physical trades nearing delivery that still need nomination or scheduling completion.',
+            tone: attention.nomination_backlog_count > 0 ? 'blocked' : 'active',
+          },
+          {
+            label: 'Allocation backlog',
+            count: attention.allocation_backlog_count,
+            detail: 'Nominated flows that have not reached an allocated or completed state yet.',
+            tone: attention.allocation_backlog_count > 0 ? 'blocked' : 'active',
+          },
+          {
+            label: 'Invoice backlog',
+            count: attention.invoice_backlog_count,
+            detail: 'Physical trades aging 5+ days without an issued or approved invoice workflow state.',
+            tone: attention.invoice_backlog_count > 0 ? 'blocked' : 'active',
+          },
+          {
+            label: 'Overdue payments',
+            count: attention.overdue_payment_count,
+            detail: 'Trades with overdue payment state or aging invoices that still are not paid.',
+            tone: attention.overdue_payment_count > 0 ? 'blocked' : 'active',
+          },
+          {
+            label: 'Stale pricing',
+            count: attention.stale_pricing_count,
+            detail: 'Trades still marked pending or partial pricing 2+ days after execution.',
+            tone: attention.stale_pricing_count > 0 ? 'blocked' : 'active',
+          },
+          {
+            label: 'Incomplete ops data',
+            count: attention.incomplete_ops_data_count,
+            detail: 'Active trades missing core execution, counterparty, quantity, or physical delivery attributes.',
+            tone: attention.incomplete_ops_data_count > 0 ? 'blocked' : 'active',
+          },
+        ] as Array<{ label: string; count: number; detail: string; tone: 'active' | 'blocked' }>,
+      }
+    }
+
     const confirmationBacklog = activeTrades.filter((trade) => {
       const ageDays = ageInDays(trade.execution_timestamp)
       return ageDays !== null && ageDays >= 1 && trade.confirmation_status !== 'CONFIRMED'
@@ -815,7 +899,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
         },
       ] as Array<{ label: string; count: number; detail: string; tone: 'active' | 'blocked' }>,
     }
-  }, [activeTrades])
+  }, [activeTrades, dashboardSummary])
 
   return (
     <TileLayout
@@ -1039,8 +1123,8 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                   <span>Gross Exposure</span>
                   <MetricValue value={formatNumber(grossExposure, 0)} unit={grossExposureUnitLabel} />
                   <p>
-                    Across {positionsWithClass.length} commodity position{positionsWithClass.length === 1 ? '' : 's'} and{' '}
-                    {exposureByClass.length} reporting bucket{exposureByClass.length === 1 ? '' : 's'} with UOM coverage.
+                    Across {positionRowCount} commodity position{positionRowCount === 1 ? '' : 's'} and {positionBucketCount}{' '}
+                    reporting bucket{positionBucketCount === 1 ? '' : 's'} with UOM coverage.
                   </p>
                 </article>
                 <article className="dashboard-report-card">

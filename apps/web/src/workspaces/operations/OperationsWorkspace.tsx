@@ -2,6 +2,7 @@ import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPr
 import type {
   CreateTradeConfirmationInput,
   IssueTradeConfirmationInput,
+  RespondTradeConfirmationInput,
   UpdateTradeConfirmationInput,
 } from '../../entities/confirmations/api'
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
@@ -44,6 +45,7 @@ type OperationsWorkspaceProps = {
   workflowMutationPendingId: number | null
   onCreateConfirmation: (tradeId: string, payload: CreateTradeConfirmationInput) => Promise<void>
   onIssueConfirmation: (confirmationId: number, payload: IssueTradeConfirmationInput) => Promise<void>
+  onRespondConfirmation: (confirmationId: number, payload: RespondTradeConfirmationInput) => Promise<void>
   onCreateWorkflowItem: (
     tradeId: string,
     payload: Omit<CreateTradeWorkflowItemInput, 'trade_id'>,
@@ -171,6 +173,7 @@ export function OperationsWorkspace({
   workflowMutationPendingId,
   onCreateConfirmation,
   onIssueConfirmation,
+  onRespondConfirmation,
   onCreateWorkflowItem,
   onOpenTrade,
   onOptionLifecycleEvent,
@@ -395,7 +398,7 @@ export function OperationsWorkspace({
             eyebrow: 'Trade Confirmation',
             title: managedConfirmationTradeIds.length > 0 ? 'Confirmation Ledger' : 'Trade Confirmation Ledger',
             description:
-              'Manage confirmed, disputed, and amended confirmation records. Booked economic amendments now reopen a fresh SENT version automatically.',
+              'Manage drafted, confirmed, disputed, and amended confirmation records. Trade capture and booked economic amendments now auto-open a fresh draft version automatically.',
             span: 'full',
             availableSpans: ['full', 'wide'],
             content: activeTrades.length > 0 ? (
@@ -416,6 +419,7 @@ export function OperationsWorkspace({
                 formatDateOnly={formatDateOnly}
                 onCreateConfirmation={onCreateConfirmation}
                 onIssueConfirmation={onIssueConfirmation}
+                onRespondConfirmation={onRespondConfirmation}
                 onOpenTrade={onOpenTrade}
                 onSaveConfirmation={onSaveConfirmation}
               />

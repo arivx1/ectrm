@@ -1,4 +1,4 @@
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 
 import './App.css'
 import './appearance.css'
@@ -23,7 +23,12 @@ import { useAppShellState } from './entities/app/useAppShellState'
 import { useAppTradeActions } from './entities/app/useAppTradeActions'
 import { useAppWorkspaceData } from './entities/app/useAppWorkspaceData'
 import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
-import { deriveWorkspaceStatus, VIEW_DATA_GROUPS } from './entities/app/workspaceLoading'
+import {
+  deriveWorkspaceStatus,
+  isAuthenticationRequiredMessage,
+  shouldPresentSettingsSignInState,
+  VIEW_DATA_GROUPS,
+} from './entities/app/workspaceLoading'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
@@ -93,6 +98,7 @@ export default function App() {
 
   const summary = useAppWorkspaceSummary({
     authSession: workspaceData.authSession,
+    bootstrapSummary: workspaceData.workspaceBootstrapSummary,
     trades: workspaceData.trades,
     events: workspaceData.events,
     positions: workspaceData.positions,
@@ -146,9 +152,7 @@ export default function App() {
     captureForm,
     amendForm,
     counterpartyCreditProfiles: workspaceData.counterpartyCreditProfiles,
-    currentView: route.currentView,
-    groupLoaded: workspaceData.groupLoaded,
-    loadData: workspaceData.loadData,
+    refreshMutationData: workspaceData.refreshMutationData,
     selectedTrade: summary.selectedTrade,
     selectedTradeEvents: summary.selectedTradeEvents,
     selectedTradeId: route.selectedTradeId,
@@ -211,6 +215,30 @@ export default function App() {
   const showingNavigationSectionLanding = route.activeNavigationSectionKey !== null
   const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[route.currentView]
   const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[route.currentView]
+  const hasAuthenticationIssue =
+    isAuthenticationRequiredMessage(workspaceData.error) ||
+    Object.values(workspaceData.groupErrors).some((message) => isAuthenticationRequiredMessage(message))
+  const showingSettingsSignInState = shouldPresentSettingsSignInState({
+    currentView: route.currentView,
+    error: workspaceData.error,
+    hasAuthSession: workspaceData.authSession !== null,
+    showingNavigationSectionLanding,
+  })
+  const signedOutStartupNeedsSettings =
+    !workspaceData.authSession &&
+    !showingNavigationSectionLanding &&
+    route.currentView !== 'settings' &&
+    hasAuthenticationIssue
+  const effectiveSystemStateLabel = showingSettingsSignInState ? 'Needs sign-in' : systemStateLabel
+  const effectiveSystemStateTone = showingSettingsSignInState ? 'active' : systemStateTone
+
+  useEffect(() => {
+    if (!signedOutStartupNeedsSettings) {
+      return
+    }
+
+    route.replaceView('settings')
+  }, [route, signedOutStartupNeedsSettings])
 
   return (
     <div className="app-shell">
@@ -362,7 +390,9 @@ export default function App() {
           <div className="hero-copy">
             <div className="hero-heading-row">
               <span className="eyebrow">Workspace</span>
-              <span className={`hero-session-pill hero-session-pill-${systemStateTone}`}>{systemStateLabel}</span>
+              <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
+                {effectiveSystemStateLabel}
+              </span>
             </div>
             <h2>{heroTitle}</h2>
             <p>{heroBody}</p>
@@ -387,7 +417,9 @@ export default function App() {
           </div>
         </header>
 
-        {!showingNavigationSectionLanding && workspaceData.error ? <div className="error-banner">{workspaceData.error}</div> : null}
+        {!showingNavigationSectionLanding && workspaceData.error && !showingSettingsSignInState ? (
+          <div className="error-banner">{workspaceData.error}</div>
+        ) : null}
         {!showingNavigationSectionLanding && workspaceWarning ? (
           <div className="error-banner">{workspaceData.groupErrors[workspaceWarning]}</div>
         ) : null}

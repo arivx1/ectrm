@@ -6,6 +6,8 @@ import {
   deriveWorkspaceStatus,
   EMPTY_GROUP_ERRORS,
   EMPTY_GROUP_FLAGS,
+  isAuthenticationRequiredMessage,
+  shouldPresentSettingsSignInState,
 } from '../src/entities/app/workspaceLoading.ts'
 
 test('buildRequestedGroups starts with core plus the current workspace dependencies', () => {
@@ -16,7 +18,18 @@ test('buildRequestedGroups starts with core plus the current workspace dependenc
     groupLoading: { ...EMPTY_GROUP_FLAGS },
   })
 
-  assert.deepEqual(requestedGroups, ['core', 'reference', 'operations'])
+  assert.deepEqual(requestedGroups, ['core', 'trades', 'reference', 'operations'])
+})
+
+test('buildRequestedGroups keeps the demo workspace light by only requesting core data', () => {
+  const requestedGroups = buildRequestedGroups({
+    currentView: 'demo',
+    force: false,
+    groupLoaded: { ...EMPTY_GROUP_FLAGS },
+    groupLoading: { ...EMPTY_GROUP_FLAGS },
+  })
+
+  assert.deepEqual(requestedGroups, ['core'])
 })
 
 test('buildRequestedGroups skips groups that are already loaded or in flight when not forced', () => {
@@ -26,6 +39,7 @@ test('buildRequestedGroups skips groups that are already loaded or in flight whe
     groupLoaded: {
       ...EMPTY_GROUP_FLAGS,
       core: true,
+      trades: true,
       deliveries: true,
     },
     groupLoading: {
@@ -44,12 +58,13 @@ test('buildRequestedGroups includes previously loaded groups during a forced ref
     groupLoaded: {
       ...EMPTY_GROUP_FLAGS,
       core: true,
+      trades: true,
       reports: true,
     },
     groupLoading: { ...EMPTY_GROUP_FLAGS },
   })
 
-  assert.deepEqual(requestedGroups, ['core', 'reference', 'reports'])
+  assert.deepEqual(requestedGroups, ['core', 'trades', 'events', 'positions', 'reference', 'reports'])
 })
 
 test('deriveWorkspaceStatus reports blocking workspace errors before rendering the workspace', () => {
@@ -72,6 +87,43 @@ test('deriveWorkspaceStatus reports blocking workspace errors before rendering t
   assert.equal(status.systemStateTone, 'cancelled')
 })
 
+test('deriveWorkspaceStatus keeps blocking workspaces in a loading state until their required groups arrive', () => {
+  const status = deriveWorkspaceStatus({
+    appLoading: false,
+    currentView: 'trades',
+    error: '',
+    groupErrors: { ...EMPTY_GROUP_ERRORS },
+    groupLoaded: {
+      ...EMPTY_GROUP_FLAGS,
+      core: true,
+    },
+    groupLoading: { ...EMPTY_GROUP_FLAGS },
+  })
+
+  assert.equal(status.blockingWorkspaceError, null)
+  assert.equal(status.workspaceLoading, true)
+  assert.equal(status.workspaceWarning, null)
+  assert.equal(status.systemStateLabel, 'Loading workspace')
+  assert.equal(status.systemStateTone, 'active')
+})
+
+test('deriveWorkspaceStatus keeps the workspace blocked while the shell is reloading', () => {
+  const status = deriveWorkspaceStatus({
+    appLoading: true,
+    currentView: 'settings',
+    error: '',
+    groupErrors: { ...EMPTY_GROUP_ERRORS },
+    groupLoaded: { ...EMPTY_GROUP_FLAGS },
+    groupLoading: { ...EMPTY_GROUP_FLAGS },
+  })
+
+  assert.equal(status.blockingWorkspaceError, null)
+  assert.equal(status.workspaceLoading, true)
+  assert.equal(status.workspaceWarning, null)
+  assert.equal(status.systemStateLabel, 'Loading shell')
+  assert.equal(status.systemStateTone, 'active')
+})
+
 test('deriveWorkspaceStatus treats loaded group failures as cached-data warnings', () => {
   const status = deriveWorkspaceStatus({
     appLoading: false,
@@ -84,6 +136,9 @@ test('deriveWorkspaceStatus treats loaded group failures as cached-data warnings
     groupLoaded: {
       ...EMPTY_GROUP_FLAGS,
       core: true,
+      trades: true,
+      events: true,
+      positions: true,
       reference: true,
     },
     groupLoading: { ...EMPTY_GROUP_FLAGS },
@@ -98,21 +153,71 @@ test('deriveWorkspaceStatus treats loaded group failures as cached-data warnings
 test('deriveWorkspaceStatus distinguishes partial non-blocking data from shell failures', () => {
   const status = deriveWorkspaceStatus({
     appLoading: false,
-    currentView: 'dashboard',
+    currentView: 'operations',
     error: '',
     groupErrors: {
       ...EMPTY_GROUP_ERRORS,
-      reference: 'Reference warmup failed.',
+      admin: 'Admin warmup failed.',
     },
     groupLoaded: {
       ...EMPTY_GROUP_FLAGS,
       core: true,
+      trades: true,
+      deliveries: true,
+      operations: true,
     },
     groupLoading: { ...EMPTY_GROUP_FLAGS },
   })
 
   assert.equal(status.blockingWorkspaceError, null)
-  assert.equal(status.workspaceWarning, 'reference')
+  assert.equal(status.workspaceWarning, 'admin')
   assert.equal(status.systemStateLabel, 'Partial data')
   assert.equal(status.systemStateTone, 'active')
+})
+
+test('isAuthenticationRequiredMessage matches the startup auth failure banner', () => {
+  assert.equal(isAuthenticationRequiredMessage('Authentication is required for protected workspace data.'), true)
+  assert.equal(isAuthenticationRequiredMessage('Could not reach API at http://127.0.0.1:8000.'), false)
+})
+
+test('shouldPresentSettingsSignInState treats auth redirects into Settings as a sign-in state, not a shell failure', () => {
+  assert.equal(
+    shouldPresentSettingsSignInState({
+      currentView: 'settings',
+      error: 'Authentication is required for protected workspace data.',
+      hasAuthSession: false,
+      showingNavigationSectionLanding: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldPresentSettingsSignInState({
+      currentView: 'settings',
+      error: '',
+      hasAuthSession: false,
+      showingNavigationSectionLanding: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldPresentSettingsSignInState({
+      currentView: 'dashboard',
+      error: 'Authentication is required for protected workspace data.',
+      hasAuthSession: false,
+      showingNavigationSectionLanding: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPresentSettingsSignInState({
+      currentView: 'settings',
+      error: 'Could not reach API at http://127.0.0.1:8000.',
+      hasAuthSession: false,
+      showingNavigationSectionLanding: false,
+    }),
+    false,
+  )
 })

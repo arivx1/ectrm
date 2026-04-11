@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
+from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
@@ -91,6 +92,39 @@ class TradeConfirmationsApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 201)
+        return response.json()["access_token"]
+
+    def _create_user(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        display_name: str,
+        role: str,
+        password: str = "supersecret2",
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id=user_id,
+                    email=email,
+                    display_name=display_name,
+                    role=role,
+                    password_hash=hash_password(password),
+                    is_active=True,
+                    last_login_at=self.now,
+                    created_at=self.now,
+                    created_by="confirm_admin",
+                    updated_at=self.now,
+                    updated_by="confirm_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _login(self, *, identifier: str, password: str = "supersecret2") -> str:
+        response = self.client.post("/auth/session", json={"identifier": identifier, "password": password})
+        self.assertEqual(response.status_code, 200)
         return response.json()["access_token"]
 
     def _seed_trade(self, *, trade_id: str) -> None:
@@ -339,6 +373,53 @@ class TradeConfirmationsApiTests(unittest.TestCase):
                 audit_event.payload["confirmation"]["confirmation_number"],
                 "CONF-1001",
             )
+
+    def test_operations_role_can_create_confirmation_record(self) -> None:
+        self._create_user(
+            user_id="ops.confirmations",
+            email="ops.confirmations@example.com",
+            display_name="Ops Confirmations",
+            role="OPERATIONS",
+        )
+        operations_token = self._login(identifier="ops.confirmations")
+        self._seed_trade(trade_id="T-CONF-OPS-1")
+
+        response = self.client.post(
+            "/confirmations",
+            json={
+                "trade_id": "T-CONF-OPS-1",
+                "confirmation_number": "CONF-OPS-1001",
+            },
+            headers={"Authorization": f"Bearer {operations_token}"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["confirmation_number"], "CONF-OPS-1001")
+
+    def test_trader_role_cannot_manage_confirmation_records(self) -> None:
+        self._create_user(
+            user_id="trader.confirmations",
+            email="trader.confirmations@example.com",
+            display_name="Trader Confirmations",
+            role="TRADER",
+        )
+        trader_token = self._login(identifier="trader.confirmations")
+        self._seed_trade(trade_id="T-CONF-TRADER-1")
+
+        response = self.client.post(
+            "/confirmations",
+            json={
+                "trade_id": "T-CONF-TRADER-1",
+                "confirmation_number": "CONF-TRADER-1001",
+            },
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"],
+            "Only OPERATIONS, OPS_ADMIN, or ADMIN sessions can manage confirmations.",
+        )
 
     def test_patch_confirmation_to_confirmed_updates_trade_and_workflow(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -675,6 +756,38 @@ class TradeConfirmationsApiTests(unittest.TestCase):
             self.assertEqual(audit_event.payload["previous_issue_count"], 0)
             self.assertEqual(audit_event.payload["confirmation"]["issue_count"], 1)
 
+    def test_issue_confirmation_promotes_pending_draft_to_sent(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-CONF-7A")
+
+        create_response = self.client.post(
+            "/confirmations",
+            json={
+                "trade_id": "T-CONF-7A",
+                "confirmation_number": "CONF-7001A",
+                "status": "PENDING",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        confirmation_id = create_response.json()["confirmation_id"]
+
+        issue_response = self.client.post(
+            f"/confirmations/{confirmation_id}/issue",
+            json={"issue_method": "EMAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 200)
+        body = issue_response.json()
+        self.assertEqual(body["status"], "SENT")
+        self.assertEqual(body["issue_count"], 1)
+        self.assertEqual(body["receipt_status"], "ISSUED_AWAITING_RESPONSE")
+        self.assertIsNotNone(body["sent_at"])
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-7A").one()
+            self.assertEqual(trade.confirmation_status, "SENT")
+
     def test_reissue_confirmation_increments_issue_count(self) -> None:
         admin_token = self._bootstrap_admin()
         self._seed_trade(trade_id="T-CONF-8")
@@ -740,6 +853,238 @@ class TradeConfirmationsApiTests(unittest.TestCase):
         )
         self.assertEqual(issue_response.status_code, 422)
         self.assertIn("current confirmation record", issue_response.text.lower())
+
+    def test_receive_confirmation_tracks_response_metadata_without_closing_status(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-CONF-10")
+
+        create_response = self.client.post(
+            "/confirmations",
+            json={"trade_id": "T-CONF-10", "confirmation_number": "CONF-10001"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        confirmation_id = create_response.json()["confirmation_id"]
+
+        issue_response = self.client.post(
+            f"/confirmations/{confirmation_id}/issue",
+            json={"issue_method": "EMAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 200)
+
+        response = self.client.post(
+            f"/confirmations/{confirmation_id}/response",
+            json={
+                "action": "RECEIVED",
+                "response_method": "EMAIL",
+                "response_reference": "ACK-10001",
+                "response_note": "Counterparty acknowledged receipt and is reviewing.",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "SENT")
+        self.assertEqual(body["receipt_status"], "RECEIVED")
+        self.assertIsNotNone(body["received_at"])
+        self.assertEqual(body["received_by"], "confirm_admin")
+        self.assertEqual(body["response_method"], "EMAIL")
+        self.assertEqual(body["response_reference"], "ACK-10001")
+        self.assertEqual(body["response_note"], "Counterparty acknowledged receipt and is reviewing.")
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-10").one()
+            workflow_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-10",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .one()
+            )
+            audit_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-CONF-10",
+                    Event.event_type == "TradeConfirmationReceived",
+                )
+                .one()
+            )
+
+            self.assertEqual(trade.confirmation_status, "SENT")
+            self.assertIn("Issued once", workflow_item.notes or "")
+            self.assertIn("Counterparty receipt acknowledged", workflow_item.notes or "")
+            self.assertEqual(audit_event.payload["confirmation"]["receipt_status"], "RECEIVED")
+
+    def test_issued_confirmation_status_must_use_response_actions(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-CONF-10A")
+
+        create_response = self.client.post(
+            "/confirmations",
+            json={"trade_id": "T-CONF-10A", "confirmation_number": "CONF-10001A"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        confirmation_id = create_response.json()["confirmation_id"]
+
+        issue_response = self.client.post(
+            f"/confirmations/{confirmation_id}/issue",
+            json={"issue_method": "EMAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 200)
+
+        update_response = self.client.patch(
+            f"/confirmations/{confirmation_id}",
+            json={"status": "CONFIRMED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(update_response.status_code, 422)
+        self.assertIn("response workflow", update_response.text.lower())
+
+    def test_counterparty_confirmed_response_updates_trade_and_workflow(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-CONF-11")
+
+        create_response = self.client.post(
+            "/confirmations",
+            json={"trade_id": "T-CONF-11", "confirmation_number": "CONF-11001"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        confirmation_id = create_response.json()["confirmation_id"]
+
+        issue_response = self.client.post(
+            f"/confirmations/{confirmation_id}/issue",
+            json={"issue_method": "PORTAL", "issue_recipient": "shell-portal-user"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 200)
+
+        response = self.client.post(
+            f"/confirmations/{confirmation_id}/response",
+            json={
+                "action": "COUNTERPARTY_CONFIRMED",
+                "response_method": "PORTAL",
+                "response_reference": "PORTAL-OK-11",
+                "response_note": "Counterparty confirmed via portal.",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "CONFIRMED")
+        self.assertEqual(body["receipt_status"], "COUNTERPARTY_CONFIRMED")
+        self.assertEqual(body["response_reference"], "PORTAL-OK-11")
+        self.assertIsNotNone(body["confirmed_at"])
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-11").one()
+            workflow_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-11",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .one()
+            )
+
+            self.assertEqual(trade.confirmation_status, "CONFIRMED")
+            self.assertEqual(workflow_item.status, "CONFIRMED")
+            self.assertIn("Counterparty confirmed", workflow_item.notes or "")
+
+    def test_counterparty_disputed_response_marks_confirmation_disputed(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-CONF-12")
+
+        create_response = self.client.post(
+            "/confirmations",
+            json={"trade_id": "T-CONF-12", "confirmation_number": "CONF-12001"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        confirmation_id = create_response.json()["confirmation_id"]
+
+        issue_response = self.client.post(
+            f"/confirmations/{confirmation_id}/issue",
+            json={"issue_method": "EMAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 200)
+
+        response = self.client.post(
+            f"/confirmations/{confirmation_id}/response",
+            json={
+                "action": "COUNTERPARTY_DISPUTED",
+                "response_method": "PHONE",
+                "response_reference": "CALL-12001",
+                "response_note": "Counterparty disputed quality details.",
+                "dispute_reason": "Counterparty disputed quality details.",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "DISPUTED")
+        self.assertEqual(body["receipt_status"], "COUNTERPARTY_DISPUTED")
+        self.assertEqual(body["dispute_reason"], "Counterparty disputed quality details.")
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-12").one()
+            workflow_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-12",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .one()
+            )
+
+            self.assertEqual(trade.confirmation_status, "DISPUTED")
+            self.assertEqual(workflow_item.status, "DISPUTED")
+            self.assertIn("Counterparty disputed", workflow_item.notes or "")
+
+    def test_counterparty_confirmed_response_respects_comparison_waiver_guard(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-CONF-13")
+        self._seed_verified_confirmation_document(
+            document_id="doc-confirm-13",
+            trade_id="T-CONF-13",
+            confirmation_number="CONF-DOC-13001",
+            economic_terms=self._confirmation_economic_terms(volume="900 BBL"),
+        )
+
+        create_response = self.client.post(
+            "/confirmations",
+            json={
+                "trade_id": "T-CONF-13",
+                "source_document_id": "doc-confirm-13",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        confirmation_id = create_response.json()["confirmation_id"]
+
+        issue_response = self.client.post(
+            f"/confirmations/{confirmation_id}/issue",
+            json={"issue_method": "EMAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 200)
+
+        response = self.client.post(
+            f"/confirmations/{confirmation_id}/response",
+            json={
+                "action": "COUNTERPARTY_CONFIRMED",
+                "response_method": "EMAIL",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("comparison waiver note", response.text.lower())
 
 
 if __name__ == "__main__":

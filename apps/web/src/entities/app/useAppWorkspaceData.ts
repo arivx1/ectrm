@@ -24,6 +24,7 @@ export function useAppWorkspaceData(currentView: ViewKey) {
   })
 
   return {
+    refreshMutationData,
     ...workspaceData,
     ...shipmentMutations,
     ...settlementMutations,

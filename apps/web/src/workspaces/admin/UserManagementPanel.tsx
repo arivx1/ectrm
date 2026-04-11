@@ -40,7 +40,7 @@ type UserManagementPanelProps = {
   onOpenSettings: () => void
 }
 
-const USER_ROLE_SUGGESTIONS = ['OPS_ADMIN', 'ADMIN', 'CREDIT_APPROVER', 'TRADER', 'OPERATIONS', 'VIEWER']
+const USER_ROLE_SUGGESTIONS = ['OPS_ADMIN', 'ADMIN', 'CREDIT_APPROVER', 'TRADER', 'OPERATIONS', 'ACCOUNTING', 'VIEWER']
 
 const EMPTY_CREATE_FORM: UserCreateForm = {
   userId: '',

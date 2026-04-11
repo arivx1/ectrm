@@ -25,6 +25,8 @@ PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 390000
 ADMIN_ROLES = frozenset({"OPS_ADMIN", "ADMIN"})
 CREDIT_APPROVER_ROLES = frozenset({"CREDIT_APPROVER"})
+OPERATIONS_ROLES = frozenset({"OPERATIONS"})
+SETTLEMENT_ROLES = frozenset({"ACCOUNTING", "ACCOUNTANT", "SETTLEMENT"})
 GOOGLE_AUTH_ISSUERS = frozenset({"accounts.google.com", "https://accounts.google.com"})
 GOD_LOGIN_USER_ID = "admin"
 GOD_LOGIN_PASSWORD = "admin"
@@ -377,6 +379,16 @@ def is_admin_role(role: Optional[str]) -> bool:
 def is_credit_approver_role(role: Optional[str]) -> bool:
     normalized_role = normalize_role(role)
     return normalized_role in ADMIN_ROLES or normalized_role in CREDIT_APPROVER_ROLES
+
+
+def is_operations_role(role: Optional[str]) -> bool:
+    normalized_role = normalize_role(role)
+    return normalized_role in ADMIN_ROLES or normalized_role in OPERATIONS_ROLES
+
+
+def is_settlement_role(role: Optional[str]) -> bool:
+    normalized_role = normalize_role(role)
+    return normalized_role in ADMIN_ROLES or normalized_role in SETTLEMENT_ROLES
 
 
 def resolve_audit_actor_id(payload_actor_id: Optional[str], *, required: bool = True) -> Optional[str]:

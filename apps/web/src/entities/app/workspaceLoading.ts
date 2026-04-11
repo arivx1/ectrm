@@ -1,20 +1,20 @@
 import type { ViewKey } from '../../shared/models'
+import {
+  type AppDataGroup,
+  VIEW_BLOCKING_GROUPS,
+  VIEW_DATA_GROUPS,
+} from './workspaceRegistry'
 
-export type AppDataGroup =
-  | 'core'
-  | 'reference'
-  | 'risk'
-  | 'deliveries'
-  | 'operations'
-  | 'settlement'
-  | 'reports'
-  | 'admin'
+export type { AppDataGroup } from './workspaceRegistry'
 
 export type AppDataGroupFlags = Record<AppDataGroup, boolean>
 export type AppDataGroupErrors = Record<AppDataGroup, string>
 
 export const EMPTY_GROUP_FLAGS: AppDataGroupFlags = {
   core: false,
+  trades: false,
+  events: false,
+  positions: false,
   reference: false,
   risk: false,
   deliveries: false,
@@ -26,6 +26,9 @@ export const EMPTY_GROUP_FLAGS: AppDataGroupFlags = {
 
 export const EMPTY_GROUP_ERRORS: AppDataGroupErrors = {
   core: '',
+  trades: '',
+  events: '',
+  positions: '',
   reference: '',
   risk: '',
   deliveries: '',
@@ -35,40 +38,33 @@ export const EMPTY_GROUP_ERRORS: AppDataGroupErrors = {
   admin: '',
 }
 
-export const VIEW_DATA_GROUPS: Record<ViewKey, AppDataGroup[]> = {
-  dashboard: ['reference'],
-  guide: [],
-  trades: ['reference', 'operations'],
-  events: [],
-  risk: ['reference', 'risk'],
-  positions: ['reference'],
-  shipments: ['deliveries'],
-  scheduling: ['deliveries'],
-  operations: ['deliveries', 'operations', 'admin'],
-  settlement: ['operations', 'settlement'],
-  reports: ['reports'],
-  reference: ['reference'],
-  admin: ['reference', 'admin'],
-  settings: [],
-  assistant: [],
+export { VIEW_BLOCKING_GROUPS, VIEW_DATA_GROUPS } from './workspaceRegistry'
+
+export function isAuthenticationRequiredMessage(message: string): boolean {
+  return /authentication is required/i.test(message)
 }
 
-export const VIEW_BLOCKING_GROUPS: Record<ViewKey, AppDataGroup[]> = {
-  dashboard: [],
-  guide: [],
-  trades: ['reference'],
-  events: [],
-  risk: ['risk'],
-  positions: [],
-  shipments: ['deliveries'],
-  scheduling: ['deliveries'],
-  operations: ['deliveries', 'operations'],
-  settlement: ['operations', 'settlement'],
-  reports: [],
-  reference: ['reference'],
-  admin: ['admin'],
-  settings: [],
-  assistant: [],
+type SettingsSignInStateArgs = {
+  currentView: ViewKey
+  error: string
+  hasAuthSession: boolean
+  showingNavigationSectionLanding: boolean
+}
+
+export function shouldPresentSettingsSignInState({
+  currentView,
+  error,
+  hasAuthSession,
+  showingNavigationSectionLanding,
+}: SettingsSignInStateArgs): boolean {
+  const hasNonAuthError = Boolean(error) && !isAuthenticationRequiredMessage(error)
+
+  return (
+    currentView === 'settings' &&
+    !hasAuthSession &&
+    !showingNavigationSectionLanding &&
+    !hasNonAuthError
+  )
 }
 
 type BuildRequestedGroupsArgs = {
@@ -115,7 +111,6 @@ export function deriveWorkspaceStatus({
   error,
   groupErrors,
   groupLoaded,
-  groupLoading,
 }: DeriveWorkspaceStatusArgs): {
   blockingWorkspaceError: AppDataGroup | null
   workspaceLoading: boolean
@@ -126,16 +121,17 @@ export function deriveWorkspaceStatus({
   const blockingGroups = VIEW_BLOCKING_GROUPS[currentView]
   const blockingWorkspaceError =
     blockingGroups.find((group) => !groupLoaded[group] && groupErrors[group]) ?? null
-  const workspaceLoading = blockingGroups.some(
-    (group) => groupLoading[group] && !groupLoaded[group],
-  )
+  const workspaceLoading =
+    appLoading ||
+    (blockingWorkspaceError === null &&
+      blockingGroups.some((group) => !groupLoaded[group] && !groupErrors[group]))
   const workspaceWarning =
     VIEW_DATA_GROUPS[currentView].find(
       (group) => groupErrors[group] && group !== blockingWorkspaceError,
     ) ?? null
   const authenticationIssue =
-    /authentication is required/i.test(error) ||
-    Object.values(groupErrors).some((message) => /authentication is required/i.test(message))
+    isAuthenticationRequiredMessage(error) ||
+    Object.values(groupErrors).some((message) => isAuthenticationRequiredMessage(message))
 
   const systemStateLabel = error
     ? authenticationIssue

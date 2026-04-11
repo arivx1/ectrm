@@ -1,0 +1,1 @@
+"""Accrual domain package."""

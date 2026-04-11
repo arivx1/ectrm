@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
+from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
@@ -99,6 +100,39 @@ class DeliveriesApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 201)
+        return response.json()["access_token"]
+
+    def _create_user(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        display_name: str,
+        role: str,
+        password: str = "supersecret2",
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id=user_id,
+                    email=email,
+                    display_name=display_name,
+                    role=role,
+                    password_hash=hash_password(password),
+                    is_active=True,
+                    last_login_at=self.now,
+                    created_at=self.now,
+                    created_by="delivery_admin",
+                    updated_at=self.now,
+                    updated_by="delivery_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _login(self, *, identifier: str, password: str = "supersecret2") -> str:
+        response = self.client.post("/auth/session", json={"identifier": identifier, "password": password})
+        self.assertEqual(response.status_code, 200)
         return response.json()["access_token"]
 
     def _seed_trades(self) -> None:
@@ -272,6 +306,54 @@ class DeliveriesApiTests(unittest.TestCase):
             )
             self.assertEqual(audit_event.payload["requested_changes"]["transport_mode"], "TRUCK")
             self.assertEqual(audit_event.payload["delivery"]["transport_mode"], "TRUCK")
+
+    def test_operations_role_can_manage_deliveries(self) -> None:
+        self._create_user(
+            user_id="ops.delivery",
+            email="ops.delivery@example.com",
+            display_name="Ops Delivery",
+            role="OPERATIONS",
+        )
+        operations_token = self._login(identifier="ops.delivery")
+        self._seed_trades()
+
+        sync_response = self.client.post(
+            "/deliveries/sync-from-trades",
+            headers={"Authorization": f"Bearer {operations_token}"},
+        )
+        self.assertEqual(sync_response.status_code, 200)
+
+        patch_response = self.client.patch(
+            "/deliveries/DLV-T-LOG-1",
+            json={"transport_mode": "TRUCK"},
+            headers={"Authorization": f"Bearer {operations_token}"},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["transport_mode"], "TRUCK")
+
+    def test_trader_role_cannot_manage_deliveries(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._create_user(
+            user_id="trader.delivery",
+            email="trader.delivery@example.com",
+            display_name="Trader Delivery",
+            role="TRADER",
+        )
+        trader_token = self._login(identifier="trader.delivery")
+        self._seed_trades()
+        self._sync_deliveries(admin_token)
+
+        response = self.client.patch(
+            "/deliveries/DLV-T-LOG-1",
+            json={"transport_mode": "TRUCK"},
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"],
+            "Only OPERATIONS, OPS_ADMIN, or ADMIN sessions can manage deliveries.",
+        )
 
     def test_patch_delivery_can_reset_transport_mode_to_seeded_classification(self) -> None:
         admin_token = self._bootstrap_admin()

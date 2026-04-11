@@ -26,10 +26,20 @@ from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.confirmation import TradeConfirmationOut
 from apps.api.app.schemas.confirmation import TradeConfirmationMismatchOut
+from apps.api.app.shared.enums import ConfirmationReceiptStatus
 from apps.api.app.shared.enums import ConfirmationStatus
 from apps.api.app.shared.enums import TradeWorkflowType
 
 CONFIRMATION_ISSUE_METHODS: tuple[str, ...] = ("EMAIL", "EDI", "PORTAL", "MANUAL", "OTHER")
+CONFIRMATION_RESPONSE_METHODS: tuple[str, ...] = ("EMAIL", "EDI", "PORTAL", "PHONE", "MANUAL", "OTHER")
+CONFIRMATION_RESPONSE_ACTIONS: tuple[str, ...] = (
+    ConfirmationReceiptStatus.RECEIVED.value,
+    ConfirmationReceiptStatus.COUNTERPARTY_CONFIRMED.value,
+    ConfirmationReceiptStatus.COUNTERPARTY_DISPUTED.value,
+)
+AUTO_GENERATED_CAPTURE_DRAFT_NOTE = (
+    "Auto-generated draft from booked trade economics on trade capture."
+)
 
 
 def _audit_confirmation_payload(confirmation: TradeConfirmationOut) -> dict[str, object]:
@@ -58,6 +68,29 @@ def _normalize_issue_method(value: object | None, *, default: str | None = None)
         raise ValueError(
             "Issue method is invalid. Expected one of: "
             f"{', '.join(CONFIRMATION_ISSUE_METHODS)}."
+        )
+    return normalized
+
+
+def _normalize_response_method(value: object | None, *, default: str | None = None) -> str | None:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return default
+    normalized = normalized.upper()
+    if normalized not in CONFIRMATION_RESPONSE_METHODS:
+        raise ValueError(
+            "Response method is invalid. Expected one of: "
+            f"{', '.join(CONFIRMATION_RESPONSE_METHODS)}."
+        )
+    return normalized
+
+
+def _normalize_response_action(value: object | None) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized not in CONFIRMATION_RESPONSE_ACTIONS:
+        raise ValueError(
+            "Confirmation response action is invalid. Expected one of: "
+            f"{', '.join(CONFIRMATION_RESPONSE_ACTIONS)}."
         )
     return normalized
 
@@ -263,6 +296,7 @@ def _workflow_note_for_confirmation(
     document: DocumentIngestion | None,
 ) -> str | None:
     issue_summary = _issue_summary_for_confirmation(confirmation)
+    receipt_summary = _receipt_summary_for_confirmation(confirmation)
 
     base_note: str | None = None
     if confirmation.status == ConfirmationStatus.DISPUTED.value:
@@ -277,9 +311,8 @@ def _workflow_note_for_confirmation(
     elif document is not None:
         base_note = f"Linked to verified document {document.display_name}."
 
-    if base_note and issue_summary:
-        return f"{base_note} {issue_summary}"
-    return base_note or issue_summary
+    note_parts = [part for part in (base_note, issue_summary, receipt_summary) if part]
+    return " ".join(note_parts) if note_parts else None
 
 
 def _issue_summary_for_confirmation(confirmation: TradeConfirmation) -> str | None:
@@ -301,6 +334,34 @@ def _issue_summary_for_confirmation(confirmation: TradeConfirmation) -> str | No
             summary = f"{summary} on {issue_date.date().isoformat()}"
     if confirmation.last_issue_note:
         summary = f"{summary}. {confirmation.last_issue_note}"
+    return summary + "."
+
+
+def _receipt_summary_for_confirmation(confirmation: TradeConfirmation) -> str | None:
+    if confirmation.receipt_status == ConfirmationReceiptStatus.NOT_ISSUED.value:
+        return None
+    if confirmation.receipt_status == ConfirmationReceiptStatus.ISSUED_AWAITING_RESPONSE.value:
+        return "Awaiting counterparty response."
+
+    if confirmation.receipt_status == ConfirmationReceiptStatus.RECEIVED.value:
+        summary = "Counterparty receipt acknowledged"
+    elif confirmation.receipt_status == ConfirmationReceiptStatus.COUNTERPARTY_CONFIRMED.value:
+        summary = "Counterparty confirmed"
+    elif confirmation.receipt_status == ConfirmationReceiptStatus.COUNTERPARTY_DISPUTED.value:
+        summary = "Counterparty disputed"
+    else:
+        summary = f"Response status {confirmation.receipt_status.replace('_', ' ').lower()}"
+
+    if confirmation.response_method:
+        summary = f"{summary} via {confirmation.response_method}"
+    if confirmation.response_reference:
+        summary = f"{summary} ref {confirmation.response_reference}"
+    if confirmation.received_at:
+        received_at = _coerce_utc(confirmation.received_at)
+        if received_at is not None:
+            summary = f"{summary} on {received_at.date().isoformat()}"
+    if confirmation.response_note:
+        summary = f"{summary}. {confirmation.response_note}"
     return summary + "."
 
 
@@ -356,6 +417,25 @@ def _assert_confirmation_status_change_not_credit_blocked(
                 "or the trade is amended back within limit."
             ),
         )
+    )
+
+
+def _assert_issued_confirmation_status_change_uses_response_action(
+    *,
+    confirmation: TradeConfirmation,
+    next_status: str,
+    status_requested: bool,
+) -> None:
+    if not status_requested:
+        return
+    if confirmation.issue_count <= 0:
+        return
+    if next_status == confirmation.status:
+        return
+
+    raise ValueError(
+        "Issued confirmations track counterparty progress through response actions. "
+        "Use the confirmation response workflow instead of updating status directly."
     )
 
 
@@ -428,6 +508,12 @@ def _to_out(
         last_issue_method=confirmation.last_issue_method,
         last_issue_recipient=confirmation.last_issue_recipient,
         last_issue_note=confirmation.last_issue_note,
+        receipt_status=confirmation.receipt_status,
+        received_at=_coerce_utc(confirmation.received_at),
+        received_by=confirmation.received_by,
+        response_method=confirmation.response_method,
+        response_reference=confirmation.response_reference,
+        response_note=confirmation.response_note,
         dispute_reason=confirmation.dispute_reason,
         notes=confirmation.notes,
         comparison_waiver_note=confirmation.comparison_waiver_note,
@@ -474,6 +560,30 @@ def trade_has_confirmation_record(db: Session, *, trade_id: str) -> bool:
             select(TradeConfirmation.id).where(TradeConfirmation.trade_id == trade_id).limit(1)
         ).scalar_one_or_none()
         is not None
+    )
+
+
+def ensure_trade_confirmation_draft_for_trade_capture(
+    db: Session,
+    *,
+    trade: Trade,
+    actor_id: str,
+    now: datetime,
+) -> TradeConfirmationOut | None:
+    db.flush()
+    if trade.confirmation_status != ConfirmationStatus.PENDING.value:
+        return None
+    if trade_has_confirmation_record(db, trade_id=trade.trade_id):
+        return None
+
+    return create_trade_confirmation(
+        db,
+        trade_id=trade.trade_id,
+        actor_id=actor_id,
+        status=ConfirmationStatus.PENDING.value,
+        notes=AUTO_GENERATED_CAPTURE_DRAFT_NOTE,
+        now=now,
+        enforce_credit_hold_status_change=False,
     )
 
 
@@ -571,6 +681,20 @@ def _format_trade_confirmation_change_summary(field_keys: list[str]) -> str:
     if len(labels) <= 3:
         return ", ".join(labels)
     return f"{', '.join(labels[:3])}, and {len(labels) - 3} more"
+
+
+def _auto_generated_amendment_draft_note(
+    *,
+    changed_fields: list[str],
+    superseded_confirmation_number: str | None = None,
+) -> str:
+    change_summary = _format_trade_confirmation_change_summary(changed_fields)
+    if superseded_confirmation_number:
+        return (
+            f"Supersedes {superseded_confirmation_number} after booked economics changed "
+            f"on trade amendment: {change_summary}."
+        )
+    return f"Auto-generated draft after booked economics changed on trade amendment: {change_summary}."
 
 
 def list_trade_confirmations(
@@ -750,6 +874,12 @@ def create_trade_confirmation(
         last_issue_method=None,
         last_issue_recipient=None,
         last_issue_note=None,
+        receipt_status=ConfirmationReceiptStatus.NOT_ISSUED.value,
+        received_at=None,
+        received_by=None,
+        response_method=None,
+        response_reference=None,
+        response_note=None,
         dispute_reason=normalized_dispute_reason,
         notes=normalized_notes,
         comparison_waiver_note=None,
@@ -858,8 +988,8 @@ def issue_trade_confirmation(
     is_current = confirmation.id == _latest_confirmation_id_for_trade(db, trade_id=confirmation.trade_id)
     if not is_current:
         raise ValueError("Only the current confirmation record can be issued or reissued.")
-    if confirmation.status != ConfirmationStatus.SENT.value:
-        raise ValueError("Only current SENT confirmation records can be issued or reissued.")
+    if confirmation.status not in {ConfirmationStatus.PENDING.value, ConfirmationStatus.SENT.value}:
+        raise ValueError("Only current PENDING or SENT confirmation records can be issued or reissued.")
 
     confirmation_pages: list[DocumentIngestionPage] = []
     if source_document is not None:
@@ -869,6 +999,15 @@ def issue_trade_confirmation(
             trade=trade,
         )
         source_document = _source_document
+
+    if confirmation.status == ConfirmationStatus.PENDING.value:
+        _assert_confirmation_status_change_not_credit_blocked(
+            db,
+            trade=trade,
+            previous_status=confirmation.status,
+            next_status=ConfirmationStatus.SENT.value,
+        )
+        confirmation.status = ConfirmationStatus.SENT.value
 
     previous_issue_count = confirmation.issue_count
     confirmation.issue_count = previous_issue_count + 1
@@ -888,6 +1027,12 @@ def issue_trade_confirmation(
         if issue_note is not None
         else confirmation.last_issue_note
     )
+    confirmation.receipt_status = ConfirmationReceiptStatus.ISSUED_AWAITING_RESPONSE.value
+    confirmation.received_at = None
+    confirmation.received_by = None
+    confirmation.response_method = None
+    confirmation.response_reference = None
+    confirmation.response_note = None
     if confirmation.sent_at is None:
         confirmation.sent_at = effective_issued_at
     confirmation.updated_at = reference_time
@@ -945,6 +1090,182 @@ def issue_trade_confirmation(
     return confirmation_out
 
 
+def record_trade_confirmation_response(
+    db: Session,
+    *,
+    confirmation_id: int,
+    actor_id: str,
+    action: str,
+    received_at: datetime | None = None,
+    response_method: str | None = None,
+    response_reference: str | None = None,
+    response_note: str | None = None,
+    dispute_reason: str | None = None,
+    now: Optional[datetime] = None,
+) -> TradeConfirmationOut:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    effective_received_at = _coerce_utc(received_at) or reference_time
+    normalized_action = _normalize_response_action(action)
+    row = db.execute(
+        select(TradeConfirmation, Trade, TradeWorkflowItem, DocumentIngestion)
+        .join(Trade, Trade.trade_id == TradeConfirmation.trade_id)
+        .outerjoin(
+            TradeWorkflowItem,
+            (TradeWorkflowItem.trade_id == TradeConfirmation.trade_id)
+            & (TradeWorkflowItem.workflow_type == TradeWorkflowType.CONFIRMATION.value),
+        )
+        .outerjoin(DocumentIngestion, DocumentIngestion.document_id == TradeConfirmation.source_document_id)
+        .where(
+            TradeConfirmation.id == confirmation_id,
+            Trade.status == "ACTIVE",
+        )
+    ).first()
+    if row is None:
+        raise LookupError(f"Confirmation record '{confirmation_id}' was not found.")
+
+    confirmation, trade, workflow_item, source_document = row
+    is_current = confirmation.id == _latest_confirmation_id_for_trade(db, trade_id=confirmation.trade_id)
+    if not is_current:
+        raise ValueError("Only the current confirmation record can accept counterparty responses.")
+    if confirmation.issue_count <= 0:
+        raise ValueError("Confirmation responses cannot be recorded before the current record is issued.")
+    if confirmation.status != ConfirmationStatus.SENT.value:
+        raise ValueError("Only current SENT confirmation records can accept counterparty responses.")
+    normalized_sent_at = _coerce_utc(confirmation.sent_at)
+    if normalized_sent_at is not None and effective_received_at < normalized_sent_at:
+        raise ValueError("Received timestamp must be on or after the confirmation sent timestamp.")
+
+    confirmation_pages: list[DocumentIngestionPage] = []
+    if source_document is not None:
+        _source_document, confirmation_pages, _document_fields = _load_verified_confirmation_document(
+            db,
+            source_document_id=source_document.document_id,
+            trade=trade,
+        )
+        source_document = _source_document
+
+    normalized_response_method = _normalize_response_method(response_method)
+    normalized_response_reference = _normalize_optional_text(response_reference)
+    normalized_response_note = _normalize_optional_text(response_note)
+    normalized_dispute_reason = _normalize_optional_text(dispute_reason)
+
+    next_status = confirmation.status
+    if normalized_action == ConfirmationReceiptStatus.COUNTERPARTY_CONFIRMED.value:
+        next_status = ConfirmationStatus.CONFIRMED.value
+        _assert_confirmation_status_change_not_credit_blocked(
+            db,
+            trade=trade,
+            previous_status=confirmation.status,
+            next_status=next_status,
+        )
+        comparison_result = build_trade_confirmation_comparison(
+            trade=trade,
+            confirmation_pages=confirmation_pages,
+            comparison_waiver_note=confirmation.comparison_waiver_note,
+        )
+        _assert_confirmation_comparison_not_blocked(
+            status=next_status,
+            comparison_result=comparison_result,
+        )
+        confirmation.status = next_status
+        confirmation.confirmed_at = _normalize_confirmed_at(
+            effective_received_at,
+            status=confirmation.status,
+            fallback_document=source_document,
+            fallback_sent_at=normalized_sent_at,
+            fallback=reference_time,
+        )
+        confirmation.dispute_reason = None
+    elif normalized_action == ConfirmationReceiptStatus.COUNTERPARTY_DISPUTED.value:
+        next_status = ConfirmationStatus.DISPUTED.value
+        _assert_confirmation_status_change_not_credit_blocked(
+            db,
+            trade=trade,
+            previous_status=confirmation.status,
+            next_status=next_status,
+        )
+        confirmation.status = next_status
+        confirmation.confirmed_at = None
+        confirmation.dispute_reason = normalized_dispute_reason or normalized_response_note
+        _validate_dispute_reason(status=confirmation.status, dispute_reason=confirmation.dispute_reason)
+    else:
+        confirmation.confirmed_at = None
+
+    confirmation.receipt_status = normalized_action
+    confirmation.received_at = effective_received_at
+    confirmation.received_by = actor_id
+    confirmation.response_method = normalized_response_method
+    confirmation.response_reference = normalized_response_reference
+    confirmation.response_note = normalized_response_note
+    _validate_confirmation_timestamps(
+        sent_at=normalized_sent_at,
+        confirmed_at=confirmation.confirmed_at,
+    )
+    confirmation.updated_at = reference_time
+    confirmation.updated_by = actor_id
+    confirmation.version += 1
+    db.flush()
+
+    workflow_item = _sync_confirmation_projection(
+        db,
+        trade=trade,
+        confirmation=confirmation,
+        actor_id=actor_id,
+        now=reference_time,
+        document=source_document,
+    )
+    db.flush()
+
+    confirmation_out = _to_out(
+        confirmation,
+        trade,
+        workflow_item,
+        source_document,
+        comparison_result=build_trade_confirmation_comparison(
+            trade=trade,
+            confirmation_pages=confirmation_pages,
+            comparison_waiver_note=confirmation.comparison_waiver_note,
+        ),
+        now=reference_time,
+        is_current=True,
+    )
+
+    event_type = {
+        ConfirmationReceiptStatus.RECEIVED.value: "TradeConfirmationReceived",
+        ConfirmationReceiptStatus.COUNTERPARTY_CONFIRMED.value: "TradeConfirmationCounterpartyConfirmed",
+        ConfirmationReceiptStatus.COUNTERPARTY_DISPUTED.value: "TradeConfirmationCounterpartyDisputed",
+    }[normalized_action]
+    append_trade_audit_event(
+        db,
+        trade_id=confirmation_out.trade_id,
+        actor_id=actor_id,
+        event_type=event_type,
+        occurred_at=confirmation_out.updated_at,
+        causation_id=(
+            f"trade-confirmation:{confirmation_out.confirmation_id}:response:"
+            f"{normalized_action.lower()}:{confirmation_out.version}"
+        ),
+        payload={
+            "request": jsonable_encoder(
+                {
+                    key: value
+                    for key, value in {
+                        "action": action,
+                        "received_at": received_at,
+                        "response_method": response_method,
+                        "response_reference": response_reference,
+                        "response_note": response_note,
+                        "dispute_reason": dispute_reason,
+                    }.items()
+                    if value is not None
+                }
+            ),
+            "confirmation": _audit_confirmation_payload(confirmation_out),
+        },
+    )
+    return confirmation_out
+
+
 def maybe_supersede_trade_confirmation_for_trade_amendment(
     db: Session,
     *,
@@ -961,8 +1282,6 @@ def maybe_supersede_trade_confirmation_for_trade_amendment(
         .order_by(TradeConfirmation.id.desc())
         .limit(1)
     ).scalars().first()
-    if current_confirmation is None:
-        return None
 
     after_revision_snapshot = _trade_confirmation_revision_snapshot(db, trade=trade)
     changed_fields = _changed_trade_confirmation_revision_fields(
@@ -972,15 +1291,27 @@ def maybe_supersede_trade_confirmation_for_trade_amendment(
     if not changed_fields:
         return None
 
+    if current_confirmation is None:
+        if trade.confirmation_status != ConfirmationStatus.PENDING.value:
+            return None
+        return create_trade_confirmation(
+            db,
+            trade_id=trade.trade_id,
+            actor_id=actor_id,
+            status=ConfirmationStatus.PENDING.value,
+            notes=_auto_generated_amendment_draft_note(changed_fields=changed_fields),
+            now=now,
+            enforce_credit_hold_status_change=False,
+        )
+
     superseding_confirmation = create_trade_confirmation(
         db,
         trade_id=trade.trade_id,
         actor_id=actor_id,
-        status=ConfirmationStatus.SENT.value,
-        sent_at=now,
-        notes=(
-            f"Supersedes {current_confirmation.confirmation_number} after booked economics changed "
-            f"on trade amendment: {_format_trade_confirmation_change_summary(changed_fields)}."
+        status=ConfirmationStatus.PENDING.value,
+        notes=_auto_generated_amendment_draft_note(
+            changed_fields=changed_fields,
+            superseded_confirmation_number=current_confirmation.confirmation_number,
         ),
         now=now,
         enforce_credit_hold_status_change=False,
@@ -1070,6 +1401,11 @@ def update_trade_confirmation(
 
     status_input = changes.get("status") if "status" in changes else confirmation.status
     next_status = _validate_confirmation_status(status_input, default=confirmation.status)
+    _assert_issued_confirmation_status_change_uses_response_action(
+        confirmation=confirmation,
+        next_status=next_status,
+        status_requested="status" in changes,
+    )
     is_current = confirmation.id == _latest_confirmation_id_for_trade(db, trade_id=confirmation.trade_id)
     if is_current:
         _assert_confirmation_status_change_not_credit_blocked(

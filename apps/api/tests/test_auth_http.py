@@ -99,18 +99,8 @@ class AuthHttpTests(unittest.TestCase):
         settings.GOOGLE_AUTH_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 
         with self.SessionLocal() as session:
-            session.query(UserSession).delete()
-            session.query(UserAccount).delete()
-            session.query(TradePriceTerm).delete()
-            session.query(TradeLeg).delete()
-            session.query(TradeWorkflowItem).delete()
-            session.query(Position).delete()
-            session.query(Trade).delete()
-            session.query(Event).delete()
-            session.query(ReferencePortfolio).delete()
-            session.query(ReferenceCounterparty).delete()
-            session.query(ReferenceCommodity).delete()
-            session.query(ReferenceBook).delete()
+            for table in reversed(Base.metadata.sorted_tables):
+                session.execute(table.delete())
             session.commit()
 
     def tearDown(self) -> None:
@@ -287,6 +277,20 @@ class AuthHttpTests(unittest.TestCase):
         self.assertIn("POST", response.headers.get("access-control-allow-methods", ""))
         self.assertNotIn("error", response.text.lower())
 
+    def test_admin_preflight_options_requests_allow_loopback_fallback_ports(self) -> None:
+        response = self.client.options(
+            "/admin/trading-sources/seed",
+            headers={
+                "Origin": "http://127.0.0.1:5174",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://127.0.0.1:5174")
+        self.assertIn("POST", response.headers.get("access-control-allow-methods", ""))
+
     def test_write_auth_rejections_preserve_cors_headers_for_browser_clients(self) -> None:
         response = self.client.patch(
             "/confirmations/999",
@@ -296,6 +300,19 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173")
+        self.assertEqual(response.headers.get("access-control-allow-credentials"), "true")
+        self.assertEqual(response.headers.get("access-control-expose-headers"), "x-correlation-id")
+        self.assertEqual(response.json()["error"]["code"], "AUTHENTICATION_REQUIRED")
+
+    def test_write_auth_rejections_preserve_cors_headers_for_loopback_fallback_ports(self) -> None:
+        response = self.client.patch(
+            "/confirmations/999",
+            json={"status": "CONFIRMED"},
+            headers={"Origin": "http://localhost:5174"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://localhost:5174")
         self.assertEqual(response.headers.get("access-control-allow-credentials"), "true")
         self.assertEqual(response.headers.get("access-control-expose-headers"), "x-correlation-id")
         self.assertEqual(response.json()["error"]["code"], "AUTHENTICATION_REQUIRED")
@@ -423,6 +440,15 @@ class AuthHttpTests(unittest.TestCase):
         )
         self.assertEqual(authenticated_positions.status_code, 200)
         self.assertEqual(authenticated_positions.json()[0]["net_volume"], 1000.0)
+
+        unauthenticated_workspace_summary = self.client.get("/operations/workspace-summary")
+        self.assertEqual(unauthenticated_workspace_summary.status_code, 401)
+        authenticated_workspace_summary = self.client.get(
+            "/operations/workspace-summary",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(authenticated_workspace_summary.status_code, 200)
+        self.assertIn("trades", authenticated_workspace_summary.json())
 
     def test_successful_requests_emit_completion_logs(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()

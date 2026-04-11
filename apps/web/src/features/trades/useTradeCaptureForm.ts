@@ -27,6 +27,8 @@ import {
   type TradeCaptureRuleContext,
   type TradeCaptureSettings,
 } from '../../shared/tradeCaptureSettings'
+import { buildCounterpartySearchDisplayValue } from './counterpartySearch'
+import { buildReferenceSearchDisplayValue } from './referenceSearch'
 import { findLatestPersistedLegs, makeLegDraft } from './tradeDraftUtils'
 import { buildSuggestedTradeId } from './tradeEventPayloads'
 
@@ -68,6 +70,7 @@ export function useTradeCaptureForm(
   )
   const [tradeSideInput, setTradeSideInput] = useState<string>(initialRuleDefaults.tradeSide ?? captureDefaults.tradeSide)
   const [bookInput, setBookInput] = useState<string>('')
+  const [bookSearchInput, setBookSearchInput] = useState<string>('')
   const [commodityClassInput, setCommodityClassInput] = useState<string>('')
   const [commodityInput, setCommodityInput] = useState<string>('')
   const [pricingTypeInput, setPricingTypeInput] = useState<string>(
@@ -90,7 +93,9 @@ export function useTradeCaptureForm(
   const [deliveryEndInput, setDeliveryEndInput] = useState<string>(tradeHeaderDefaults.delivery_end)
   const [priceUnitInput, setPriceUnitInput] = useState<string>(tradeHeaderDefaults.price_unit_code)
   const [portfolioInput, setPortfolioInput] = useState<string>(tradeHeaderDefaults.portfolio)
+  const [portfolioSearchInput, setPortfolioSearchInput] = useState<string>(tradeHeaderDefaults.portfolio)
   const [counterpartyInput, setCounterpartyInput] = useState<string>(tradeHeaderDefaults.counterparty)
+  const [counterpartySearchInput, setCounterpartySearchInput] = useState<string>(tradeHeaderDefaults.counterparty)
   const [pricingStatusInput, setPricingStatusInput] = useState<string>(
     initialRuleDefaults.pricingStatus ?? captureDefaults.pricingStatus,
   )
@@ -104,6 +109,7 @@ export function useTradeCaptureForm(
   const resolvedBookInput = activeBooks.some((book) => book.code === bookInput)
     ? bookInput
     : activeBooks[0]?.code || ''
+  const selectedBook = activeBooks.find((book) => book.code === resolvedBookInput) ?? null
   const swapPrimaryLeg = tradeStructureSupportsLegs(tradeStructureInput) ? createLegs[0] : null
   const resolvedCommodityClassInput =
     swapPrimaryLeg?.commodity_class || commodityClassInput || commodityClassOptions[0] || ''
@@ -140,10 +146,14 @@ export function useTradeCaptureForm(
   const resolvedPortfolioInput = createPortfolioOptions.some((portfolio) => portfolio.code === portfolioInput)
     ? portfolioInput
     : ''
+  const selectedPortfolio =
+    createPortfolioOptions.find((portfolio) => portfolio.code === resolvedPortfolioInput) ?? null
 
   const resolvedCounterpartyInput = activeCounterparties.some((counterparty) => counterparty.code === counterpartyInput)
     ? counterpartyInput
     : ''
+  const selectedCounterparty =
+    activeCounterparties.find((counterparty) => counterparty.code === resolvedCounterpartyInput) ?? null
   const resolvedTradeCurrencyInput = activeCurrencies.some((currency) => currency.code === tradeCurrencyInput)
     ? tradeCurrencyInput
     : ''
@@ -165,6 +175,37 @@ export function useTradeCaptureForm(
   useEffect(() => {
     setTradeIdInput((current) => (current === suggestedTradeId ? current : suggestedTradeId))
   }, [suggestedTradeId])
+
+  useEffect(() => {
+    if (!selectedBook) {
+      return
+    }
+
+    const nextBookSearchInput = buildReferenceSearchDisplayValue(selectedBook)
+    setBookSearchInput((current) => (current.trim().length === 0 || current === selectedBook.code ? nextBookSearchInput : current))
+  }, [selectedBook])
+
+  useEffect(() => {
+    if (!selectedPortfolio) {
+      return
+    }
+
+    const nextPortfolioSearchInput = buildReferenceSearchDisplayValue(selectedPortfolio)
+    setPortfolioSearchInput((current) =>
+      current.trim().length === 0 || current === selectedPortfolio.code ? nextPortfolioSearchInput : current,
+    )
+  }, [selectedPortfolio])
+
+  useEffect(() => {
+    if (!selectedCounterparty) {
+      return
+    }
+
+    const nextCounterpartySearchInput = buildCounterpartySearchDisplayValue(selectedCounterparty)
+    setCounterpartySearchInput((current) =>
+      current.trim().length === 0 || current === selectedCounterparty.code ? nextCounterpartySearchInput : current,
+    )
+  }, [selectedCounterparty])
 
   const activeRuleEvaluation = useMemo(
     () =>
@@ -274,6 +315,10 @@ export function useTradeCaptureForm(
 
   function setBookInputWithRules(value: string) {
     setBookInput(value)
+    if (value !== resolvedBookInput) {
+      setPortfolioInput('')
+      setPortfolioSearchInput('')
+    }
     applyRuleDefaults({ book: value })
   }
 
@@ -346,7 +391,9 @@ export function useTradeCaptureForm(
     setTradeNatureInput(selectedTrade.trade_nature ?? captureDefaults.tradeNature)
     setTradeStructureInput(selectedTrade.trade_structure ?? captureDefaults.tradeStructure)
     setTradeSideInput(selectedTrade.trade_side ?? captureDefaults.tradeSide)
-    setBookInput(selectedTrade.book ?? activeBooks[0]?.code ?? '')
+    const nextBookInput = selectedTrade.book ?? activeBooks[0]?.code ?? ''
+    setBookInput(nextBookInput)
+    setBookSearchInput(buildReferenceSearchDisplayValue(activeBooks.find((book) => book.code === nextBookInput) ?? null) || nextBookInput)
     setCommodityClassInput(selectedTrade.commodity_class ?? commodityClassOptions[0] ?? '')
     setCommodityInput(selectedTrade.commodity ?? '')
     setPricingTypeInput(selectedTrade.pricing_type ?? captureDefaults.pricingType)
@@ -365,8 +412,21 @@ export function useTradeCaptureForm(
     setDeliveryStartInput(selectedTrade.delivery_start ?? tradeHeaderDefaults.delivery_start)
     setDeliveryEndInput(selectedTrade.delivery_end ?? tradeHeaderDefaults.delivery_end)
     setPriceUnitInput(selectedTrade.price_unit_code ?? tradeHeaderDefaults.price_unit_code)
-    setPortfolioInput(selectedTrade.portfolio ?? tradeHeaderDefaults.portfolio)
-    setCounterpartyInput(selectedTrade.counterparty ?? tradeHeaderDefaults.counterparty)
+    const nextPortfolioInput = selectedTrade.portfolio ?? tradeHeaderDefaults.portfolio
+    setPortfolioInput(nextPortfolioInput)
+    setPortfolioSearchInput(
+      buildReferenceSearchDisplayValue(
+        activePortfolios.find((portfolio) => portfolio.code === nextPortfolioInput && portfolio.book_code === nextBookInput) ??
+          null,
+      ) || nextPortfolioInput,
+    )
+    const nextCounterpartyInput = selectedTrade.counterparty ?? tradeHeaderDefaults.counterparty
+    setCounterpartyInput(nextCounterpartyInput)
+    setCounterpartySearchInput(
+      buildCounterpartySearchDisplayValue(
+        activeCounterparties.find((counterparty) => counterparty.code === nextCounterpartyInput) ?? null,
+      ) || nextCounterpartyInput,
+    )
     setPricingStatusInput(selectedTrade.pricing_status ?? captureDefaults.pricingStatus)
     setSettlementStatusInput(captureDefaults.settlementStatus)
     setTraderUserInput(selectedTrade.trader_user ?? tradeHeaderDefaults.trader_user)
@@ -396,6 +456,7 @@ export function useTradeCaptureForm(
     setTradeStructureInput(resetRuleEvaluation.defaultOverrides.tradeStructure ?? captureDefaults.tradeStructure)
     setTradeSideInput(resetRuleEvaluation.defaultOverrides.tradeSide ?? captureDefaults.tradeSide)
     setBookInput(activeBooks[0]?.code ?? '')
+    setBookSearchInput(buildReferenceSearchDisplayValue(activeBooks[0] ?? null))
     setCommodityClassInput(commodityClassOptions[0] ?? '')
     setCommodityInput('')
     setPricingTypeInput(resetRuleEvaluation.defaultOverrides.pricingType ?? captureDefaults.pricingType)
@@ -415,7 +476,9 @@ export function useTradeCaptureForm(
     setDeliveryEndInput(tradeHeaderDefaults.delivery_end)
     setPriceUnitInput(tradeHeaderDefaults.price_unit_code)
     setPortfolioInput(tradeHeaderDefaults.portfolio)
+    setPortfolioSearchInput(tradeHeaderDefaults.portfolio)
     setCounterpartyInput(tradeHeaderDefaults.counterparty)
+    setCounterpartySearchInput(tradeHeaderDefaults.counterparty)
     setPricingStatusInput(resetRuleEvaluation.defaultOverrides.pricingStatus ?? captureDefaults.pricingStatus)
     setSettlementStatusInput(
       resetRuleEvaluation.defaultOverrides.settlementStatus ?? captureDefaults.settlementStatus,
@@ -446,6 +509,8 @@ export function useTradeCaptureForm(
     setTradeSideInput,
     bookInput: resolvedBookInput,
     setBookInput: setBookInputWithRules,
+    bookSearchInput,
+    setBookSearchInput,
     commodityClassInput: resolvedCommodityClassInput,
     setCommodityClassInput: setCommodityClassInputWithRules,
     commodityInput: resolvedCommodityInput,
@@ -487,8 +552,12 @@ export function useTradeCaptureForm(
     setPriceUnitInput,
     portfolioInput: resolvedPortfolioInput,
     setPortfolioInput,
+    portfolioSearchInput,
+    setPortfolioSearchInput,
     counterpartyInput: resolvedCounterpartyInput,
     setCounterpartyInput,
+    counterpartySearchInput,
+    setCounterpartySearchInput,
     pricingStatusInput,
     setPricingStatusInput,
     settlementStatusInput,

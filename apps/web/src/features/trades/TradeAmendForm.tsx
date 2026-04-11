@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   buildCounterpartyCreditRestrictionMessage,
   type CounterpartyCreditPolicyPreview,
-  formatCounterpartyOptionLabel,
 } from './counterpartyCredit'
+import { buildCounterpartySearchDisplayValue } from './counterpartySearch'
+import { buildReferenceSearchDisplayValue } from './referenceSearch'
 import { TradeLegEditor } from './TradeLegEditor'
+import { CounterpartySearchField, ReferenceSearchField } from './tradeSearchFields'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
 import { FieldLabel } from '../../shared/ui/Tooltip'
@@ -283,9 +285,65 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
   const qualitySpecOptions = getQualitySpecOptionsForCommodity(amendCommodityInput)
   const qualitySpecListId = qualitySpecOptions.length > 0 ? `trade-quality-spec-options-${selectedTradeId}` : undefined
   const optionTrade = tradeInstrumentUsesOptionFields(amendTradeInstrumentTypeInput)
+  const selectedBook = amendBookOptions.find((book) => book.code === amendBookInput) ?? null
+  const selectedPortfolio =
+    amendPortfolioOptions.find((portfolio) => portfolio.code === amendPortfolioInput) ?? null
   const selectedCounterparty =
     amendCounterpartyOptions.find((counterparty) => counterparty.code === amendCounterpartyInput) ?? null
+  const [amendBookSearchInput, setAmendBookSearchInput] = useState(
+    () => buildReferenceSearchDisplayValue(selectedBook) || amendBookInput,
+  )
+  const [amendPortfolioSearchInput, setAmendPortfolioSearchInput] = useState(
+    () => buildReferenceSearchDisplayValue(selectedPortfolio) || amendPortfolioInput,
+  )
+  const [amendCounterpartySearchInput, setAmendCounterpartySearchInput] = useState(
+    () => buildCounterpartySearchDisplayValue(selectedCounterparty) || amendCounterpartyInput,
+  )
   const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
+
+  useEffect(() => {
+    if (!selectedBook) {
+      return
+    }
+
+    const nextBookSearchInput = buildReferenceSearchDisplayValue(selectedBook)
+    setAmendBookSearchInput((current) =>
+      current.trim().length === 0 || current === selectedBook.code ? nextBookSearchInput : current,
+    )
+  }, [selectedBook])
+
+  useEffect(() => {
+    if (!selectedPortfolio) {
+      return
+    }
+
+    const nextPortfolioSearchInput = buildReferenceSearchDisplayValue(selectedPortfolio)
+    setAmendPortfolioSearchInput((current) =>
+      current.trim().length === 0 || current === selectedPortfolio.code ? nextPortfolioSearchInput : current,
+    )
+  }, [selectedPortfolio])
+
+  useEffect(() => {
+    if (!selectedCounterparty) {
+      return
+    }
+
+    const nextCounterpartySearchInput = buildCounterpartySearchDisplayValue(selectedCounterparty)
+    setAmendCounterpartySearchInput((current) =>
+      current.trim().length === 0 || current === selectedCounterparty.code ? nextCounterpartySearchInput : current,
+    )
+  }, [selectedCounterparty])
+
+  function handleAmendBookSelection(value: string) {
+    if (value !== amendBookInput) {
+      setAmendBookInput(value)
+      setAmendPortfolioInput('')
+      setAmendPortfolioSearchInput('')
+      return
+    }
+
+    setAmendBookInput(value)
+  }
 
   return (
     <form key={selectedTradeId} className="stack-form" onSubmit={onSubmit}>
@@ -402,17 +460,14 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>Counterparty</span>
-          <select className="control" value={amendCounterpartyInput} onChange={(event) => setAmendCounterpartyInput(event.target.value)} disabled={amending || cancelling}>
-            <option value="">No counterparty</option>
-            {amendCounterpartyOptions.map((counterparty) => (
-              <option key={counterparty.code} value={counterparty.code}>
-                {formatCounterpartyOptionLabel(counterparty)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CounterpartySearchField
+          counterpartyInput={amendCounterpartyInput}
+          setCounterpartyInput={setAmendCounterpartyInput}
+          counterpartySearchInput={amendCounterpartySearchInput}
+          setCounterpartySearchInput={setAmendCounterpartySearchInput}
+          createCounterpartyOptions={amendCounterpartyOptions}
+          disabled={amending || cancelling}
+        />
         {counterpartyCreditWarning && (
           <div className="field field-wide">
             <div className="feedback-banner feedback-banner-error trade-structure-note">
@@ -434,27 +489,44 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
       </div>
 
       <div className="mini-grid">
-        <label className="field">
-          <span>Book</span>
-          <select className="control" value={amendBookInput} onChange={(event) => setAmendBookInput(event.target.value)} disabled={amending || cancelling || amendBookOptions.length === 0}>
-            {amendBookOptions.map((book) => (
-              <option key={book.code} value={book.code}>
-                {book.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Portfolio</span>
-          <select className="control" value={amendPortfolioInput} onChange={(event) => setAmendPortfolioInput(event.target.value)} disabled={amending || cancelling}>
-            <option value="">No portfolio</option>
-            {amendPortfolioOptions.map((portfolio) => (
-              <option key={portfolio.code} value={portfolio.code}>
-                {portfolio.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ReferenceSearchField
+          label="Book"
+          selectedCode={amendBookInput}
+          setSelectedCode={handleAmendBookSelection}
+          searchInput={amendBookSearchInput}
+          setSearchInput={setAmendBookSearchInput}
+          options={amendBookOptions}
+          disabled={amending || cancelling || amendBookOptions.length === 0}
+          allowEmpty={false}
+          preserveSelectionWhileSearching
+          placeholder="Search by book name or code"
+          idleHelperText="Search by book name or code."
+          unmatchedHelperText="No exact book is selected yet. Choose a result to move the amendment."
+          emptyStateText="No books match that search yet."
+          selectedHelperText={(book) => `Amending into ${book.code}.`}
+          searchingHelperText={(book) => `Current book stays ${book.code} until you choose a new result.`}
+          buildSecondaryLabel={(book) => book.code}
+        />
+        <ReferenceSearchField
+          label="Portfolio"
+          selectedCode={amendPortfolioInput}
+          setSelectedCode={setAmendPortfolioInput}
+          searchInput={amendPortfolioSearchInput}
+          setSearchInput={setAmendPortfolioSearchInput}
+          options={amendPortfolioOptions}
+          disabled={amending || cancelling}
+          allowEmpty
+          placeholder="Search by portfolio name or code"
+          idleHelperText={
+            amendPortfolioOptions.length === 0
+              ? 'No active portfolios are configured for the current book yet.'
+              : 'Search by portfolio name or code. Leave blank for no portfolio.'
+          }
+          unmatchedHelperText="No exact portfolio is selected yet. Choose a result or clear the field for no portfolio."
+          emptyStateText="No portfolios match that search yet."
+          selectedHelperText={(portfolio) => `Amending within ${portfolio.code}.`}
+          buildSecondaryLabel={(portfolio) => `${portfolio.code} · ${portfolio.book_code}`}
+        />
       </div>
 
       <div className="mini-grid">

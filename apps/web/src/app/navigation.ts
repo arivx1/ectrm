@@ -9,9 +9,9 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     label: 'Overview',
     kicker: 'Start here',
     heroTitle: 'Overview surfaces and desk orientation',
-    heroBody: 'Start with the live desk picture, then move into the operator guide when you need workflow context and operating language.',
-    landingBody: 'Use this section to get oriented quickly before drilling into a specific trading, execution, or control workflow.',
-    viewKeys: ['dashboard', 'guide'],
+    heroBody: 'Start with the live desk picture, move into the operator guide for context, or run a scenario walkthrough before drilling into live workflows.',
+    landingBody: 'Use this section to get oriented quickly, whether you need the live desk view, product context, or a guided lifecycle demo.',
+    viewKeys: ['dashboard', 'guide', 'demo'],
   },
   {
     key: 'trading',

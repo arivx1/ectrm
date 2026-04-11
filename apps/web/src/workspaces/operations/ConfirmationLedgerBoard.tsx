@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import {
   type CreateTradeConfirmationInput,
   type IssueTradeConfirmationInput,
+  type RespondTradeConfirmationInput,
   type UpdateTradeConfirmationInput,
 } from '../../entities/confirmations/api'
 import { listDocumentIngestions } from '../../entities/documents/api'
@@ -28,6 +29,7 @@ type ConfirmationLedgerBoardProps = {
   formatDateOnly: (value: string | null | undefined) => string
   onCreateConfirmation: (tradeId: string, payload: CreateTradeConfirmationInput) => Promise<void>
   onIssueConfirmation: (confirmationId: number, payload: IssueTradeConfirmationInput) => Promise<void>
+  onRespondConfirmation: (confirmationId: number, payload: RespondTradeConfirmationInput) => Promise<void>
   onOpenTrade: (tradeId: string) => void
   onSaveConfirmation: (confirmationId: number, payload: UpdateTradeConfirmationInput) => Promise<void>
 }
@@ -38,15 +40,20 @@ type ConfirmationDraft = {
   status: string
   sentAt: string
   confirmedAt: string
+  receivedAt: string
   issueMethod: string
   issueRecipient: string
   issueNote: string
+  responseMethod: string
+  responseReference: string
+  responseNote: string
   notes: string
   disputeReason: string
   comparisonWaiverNote: string
 }
 
 const confirmationIssueMethodOptions = ['EMAIL', 'EDI', 'PORTAL', 'MANUAL', 'OTHER'] as const
+const confirmationResponseMethodOptions = ['EMAIL', 'EDI', 'PORTAL', 'PHONE', 'MANUAL', 'OTHER'] as const
 
 function updateIsoDate(value: string): string | null {
   return value ? `${value}T12:00:00.000Z` : null
@@ -68,9 +75,13 @@ function buildDraft(
     status: currentConfirmation?.status ?? trade.confirmation_status ?? 'SENT',
     sentAt: currentConfirmation?.sent_at?.slice(0, 10) ?? '',
     confirmedAt: currentConfirmation?.confirmed_at?.slice(0, 10) ?? '',
+    receivedAt: currentConfirmation?.received_at?.slice(0, 10) ?? '',
     issueMethod: currentConfirmation?.last_issue_method ?? 'EMAIL',
     issueRecipient: currentConfirmation?.last_issue_recipient ?? '',
     issueNote: currentConfirmation?.last_issue_note ?? '',
+    responseMethod: currentConfirmation?.response_method ?? 'EMAIL',
+    responseReference: currentConfirmation?.response_reference ?? '',
+    responseNote: currentConfirmation?.response_note ?? '',
     notes: currentConfirmation?.notes ?? '',
     disputeReason: currentConfirmation?.dispute_reason ?? '',
     comparisonWaiverNote: currentConfirmation?.comparison_waiver_note ?? '',
@@ -221,6 +232,34 @@ function buildIssuePayload(draft: ConfirmationDraft): IssueTradeConfirmationInpu
   return payload
 }
 
+function buildResponsePayload(
+  action: RespondTradeConfirmationInput['action'],
+  draft: ConfirmationDraft,
+): RespondTradeConfirmationInput {
+  const payload: RespondTradeConfirmationInput = { action }
+  const responseMethod = draft.responseMethod.trim().toUpperCase()
+  const responseReference = draft.responseReference.trim()
+  const responseNote = draft.responseNote.trim()
+  const disputeReason = draft.disputeReason.trim()
+
+  if (draft.receivedAt) {
+    payload.received_at = updateIsoDate(draft.receivedAt)
+  }
+  if (responseMethod) {
+    payload.response_method = responseMethod
+  }
+  if (responseReference) {
+    payload.response_reference = responseReference
+  }
+  if (responseNote) {
+    payload.response_note = responseNote
+  }
+  if (action === 'COUNTERPARTY_DISPUTED' && disputeReason) {
+    payload.dispute_reason = disputeReason
+  }
+  return payload
+}
+
 function confirmationTone(
   trade: Trade,
   currentConfirmation: TradeConfirmationRecord | undefined,
@@ -249,20 +288,30 @@ function confirmationPriority(
     trade.credit_hold_active ||
     trade.confirmation_status === 'DISPUTED' ||
     currentConfirmation?.status === 'DISPUTED' ||
+    currentConfirmation?.receipt_status === 'COUNTERPARTY_DISPUTED' ||
     currentConfirmation?.comparison_status === 'MISMATCHED'
   ) {
     return 0
   }
-  if (!currentConfirmation && trade.confirmation_status !== 'CONFIRMED') {
+  if (currentConfirmation?.receipt_status === 'RECEIVED') {
     return 1
   }
-  if (!currentConfirmation) {
+  if (currentConfirmation?.receipt_status === 'ISSUED_AWAITING_RESPONSE') {
     return 2
   }
-  if (trade.confirmation_status !== 'CONFIRMED') {
+  if (!currentConfirmation && trade.confirmation_status !== 'CONFIRMED') {
     return 3
   }
-  return 4
+  if (!currentConfirmation) {
+    return 4
+  }
+  if (currentConfirmation.issue_count <= 0 && ['PENDING', 'SENT'].includes(currentConfirmation.status)) {
+    return 5
+  }
+  if (trade.confirmation_status !== 'CONFIRMED') {
+    return 6
+  }
+  return 7
 }
 
 function comparisonStatusTone(status: string): 'active' | 'in-progress' | 'blocked' {
@@ -297,6 +346,33 @@ function dispatchStateLabel(confirmation: TradeConfirmationRecord): string {
   return confirmation.issue_count === 1 ? 'Issued once' : `Reissued ${confirmation.issue_count}x`
 }
 
+function receiptStatusTone(status: string): 'active' | 'in-progress' | 'blocked' {
+  if (status === 'COUNTERPARTY_DISPUTED') {
+    return 'blocked'
+  }
+  if (status === 'RECEIVED' || status === 'COUNTERPARTY_CONFIRMED') {
+    return 'in-progress'
+  }
+  return 'active'
+}
+
+function receiptStatusLabel(status: string): string {
+  switch (status) {
+    case 'NOT_ISSUED':
+      return 'Not Issued'
+    case 'ISSUED_AWAITING_RESPONSE':
+      return 'Awaiting Response'
+    case 'RECEIVED':
+      return 'Received'
+    case 'COUNTERPARTY_CONFIRMED':
+      return 'Counterparty Confirmed'
+    case 'COUNTERPARTY_DISPUTED':
+      return 'Counterparty Disputed'
+    default:
+      return status.replaceAll('_', ' ')
+  }
+}
+
 function mismatchSummary(mismatchType: string): string {
   if (mismatchType === 'MISSING_DOCUMENT_VALUE') {
     return 'Missing from the linked document review.'
@@ -319,6 +395,7 @@ export function ConfirmationLedgerBoard({
   formatDateOnly,
   onCreateConfirmation,
   onIssueConfirmation,
+  onRespondConfirmation,
   onOpenTrade,
   onSaveConfirmation,
 }: ConfirmationLedgerBoardProps) {
@@ -464,6 +541,17 @@ export function ConfirmationLedgerBoard({
     await onIssueConfirmation(confirmation.confirmation_id, buildIssuePayload(draft))
   }
 
+  async function handleResponse(
+    confirmation: TradeConfirmationRecord,
+    trade: Trade,
+    action: RespondTradeConfirmationInput['action'],
+  ) {
+    const draft =
+      drafts[trade.trade_id] ??
+      buildDraft(trade, confirmation, (confirmationsByTradeId.get(trade.trade_id) ?? []).length)
+    await onRespondConfirmation(confirmation.confirmation_id, buildResponsePayload(action, draft))
+  }
+
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
@@ -480,6 +568,10 @@ export function ConfirmationLedgerBoard({
           const workflowItem = confirmationWorkItemByTradeId.get(trade.trade_id)
           const draft =
             drafts[trade.trade_id] ?? buildDraft(trade, currentConfirmation, tradeConfirmations.length)
+          const statusLockedToResponseWorkflow = (currentConfirmation?.issue_count ?? 0) > 0
+          const statusOptions = statusLockedToResponseWorkflow
+            ? confirmationStatusOptions.filter((option) => option === draft.status)
+            : confirmationStatusOptions
           const candidateDocuments = candidateDocumentsForTrade(trade, documents, currentConfirmation)
           const selectedDocumentMissing =
             !!draft.sourceDocumentId &&
@@ -488,21 +580,14 @@ export function ConfirmationLedgerBoard({
             ? [
                 `confirmation:${currentConfirmation.confirmation_id}`,
                 `confirmation:${currentConfirmation.confirmation_id}:issue`,
+                `confirmation:${currentConfirmation.confirmation_id}:response:RECEIVED`,
+                `confirmation:${currentConfirmation.confirmation_id}:response:COUNTERPARTY_CONFIRMED`,
+                `confirmation:${currentConfirmation.confirmation_id}:response:COUNTERPARTY_DISPUTED`,
                 `trade:${trade.trade_id}:confirmation:new`,
               ]
             : [`trade:${trade.trade_id}:confirmation:new`]
           const isSaving = savingKey !== null && pendingKeys.includes(savingKey)
           const savePayload = currentConfirmation ? buildUpdatePayload(currentConfirmation, draft) : null
-          const confirmPayload = currentConfirmation
-            ? buildUpdatePayload(currentConfirmation, draft, 'CONFIRMED')
-            : null
-          const disputePayload = currentConfirmation
-            ? buildUpdatePayload(currentConfirmation, draft, 'DISPUTED')
-            : null
-          const disputeBlocked =
-            draft.status === 'DISPUTED' || (currentConfirmation?.status === 'DISPUTED')
-              ? !draft.disputeReason.trim()
-              : false
           const comparisonMismatchCount = currentConfirmation?.blocking_mismatch_count ?? 0
           const comparisonWaiverDraftNote = draft.comparisonWaiverNote.trim()
           const effectiveDraftStatus =
@@ -516,6 +601,12 @@ export function ConfirmationLedgerBoard({
             !comparisonWaiverDraftNote
           const confirmBlockedByComparison =
             comparisonMismatchCount > 0 && !comparisonWaiverDraftNote
+          const responseActionBlocked =
+            !currentConfirmation ||
+            currentConfirmation.status !== 'SENT' ||
+            currentConfirmation.issue_count <= 0
+          const responseDisputeBlocked =
+            responseActionBlocked || (!draft.disputeReason.trim() && !draft.responseNote.trim())
 
           return (
             <article key={trade.trade_id} className="position-card shipment-card workflow-item-card settlement-invoice-card">
@@ -559,6 +650,11 @@ export function ConfirmationLedgerBoard({
                     {dispatchStateLabel(currentConfirmation)}
                   </span>
                 ) : null}
+                {currentConfirmation ? (
+                  <span className={`status-pill status-pill-${receiptStatusTone(currentConfirmation.receipt_status)}`}>
+                    {receiptStatusLabel(currentConfirmation.receipt_status)}
+                  </span>
+                ) : null}
                 {currentConfirmation?.last_issue_method ? (
                   <span className="entity-chip entity-chip-soft">
                     {currentConfirmation.last_issue_method}
@@ -567,6 +663,11 @@ export function ConfirmationLedgerBoard({
                 {currentConfirmation?.last_issued_at ? (
                   <span className="entity-chip entity-chip-soft">
                     Last issued {formatDate(currentConfirmation.last_issued_at)}
+                  </span>
+                ) : null}
+                {currentConfirmation?.received_at ? (
+                  <span className="entity-chip entity-chip-soft">
+                    Received {formatDate(currentConfirmation.received_at)}
                   </span>
                 ) : null}
                 {currentConfirmation?.source_document_display_name ? (
@@ -620,9 +721,9 @@ export function ConfirmationLedgerBoard({
                     className="control control-compact"
                     value={draft.status}
                     onChange={(event) => updateDraft(trade.trade_id, { status: event.target.value })}
-                    disabled={isSaving}
+                    disabled={isSaving || statusLockedToResponseWorkflow}
                   >
-                    {confirmationStatusOptions.map((option) => (
+                    {statusOptions.map((option) => (
                       <option key={option} value={option}>
                         {option.replaceAll('_', ' ')}
                       </option>
@@ -646,6 +747,16 @@ export function ConfirmationLedgerBoard({
                     type="date"
                     value={draft.confirmedAt}
                     onChange={(event) => updateDraft(trade.trade_id, { confirmedAt: event.target.value })}
+                    disabled={isSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Received</span>
+                  <input
+                    className="control control-compact"
+                    type="date"
+                    value={draft.receivedAt}
+                    onChange={(event) => updateDraft(trade.trade_id, { receivedAt: event.target.value })}
                     disabled={isSaving}
                   />
                 </label>
@@ -693,6 +804,42 @@ export function ConfirmationLedgerBoard({
                     disabled={isSaving}
                   />
                 </label>
+                <label className="field">
+                  <span>Response Method</span>
+                  <select
+                    className="control control-compact"
+                    value={draft.responseMethod}
+                    onChange={(event) => updateDraft(trade.trade_id, { responseMethod: event.target.value })}
+                    disabled={isSaving}
+                  >
+                    {confirmationResponseMethodOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Response Reference</span>
+                  <input
+                    className="control control-compact"
+                    value={draft.responseReference}
+                    onChange={(event) => updateDraft(trade.trade_id, { responseReference: event.target.value })}
+                    placeholder="email thread, portal id, or call note ref"
+                    disabled={isSaving}
+                  />
+                </label>
+                <label className="field field-wide">
+                  <span>Response Note</span>
+                  <textarea
+                    className="control control-compact"
+                    rows={2}
+                    value={draft.responseNote}
+                    onChange={(event) => updateDraft(trade.trade_id, { responseNote: event.target.value })}
+                    placeholder="Counterparty acknowledgement, confirm text, or dispute context."
+                    disabled={isSaving}
+                  />
+                </label>
                 <label className="field field-wide">
                   <span>Notes</span>
                   <textarea
@@ -732,8 +879,8 @@ export function ConfirmationLedgerBoard({
               ) : null}
               {currentConfirmation?.comparison_status === 'MISMATCHED' ? (
                 <p className="field-error">
-                  Linked confirmation economics do not match the booked trade. `Mark Confirmed` stays blocked until the
-                  mismatches are resolved or a comparison waiver note is recorded.
+                  Linked confirmation economics do not match the booked trade. `Counterparty Confirmed` stays blocked
+                  until the mismatches are resolved or a comparison waiver note is recorded.
                 </p>
               ) : null}
               {currentConfirmation?.comparison_status === 'WAIVED' && currentConfirmation.comparison_waiver_note ? (
@@ -754,6 +901,24 @@ export function ConfirmationLedgerBoard({
                 <p className="workflow-editor-note">
                   This record is the current confirmation version, but it has not been issued outbound yet. Use
                   `Issue Confirmation` once the desk is ready to send it.
+                </p>
+              ) : null}
+              {currentConfirmation?.receipt_status === 'ISSUED_AWAITING_RESPONSE' ? (
+                <p className="workflow-editor-note">
+                  The confirmation is out with the counterparty and still awaiting a response. Record receipt,
+                  confirmation, or dispute here as soon as the desk hears back.
+                </p>
+              ) : null}
+              {statusLockedToResponseWorkflow ? (
+                <p className="workflow-editor-note">
+                  Status is now managed by the response actions for this issued record. Use `Mark Received`,
+                  `Counterparty Confirmed`, or `Counterparty Disputed` to advance the lifecycle.
+                </p>
+              ) : null}
+              {currentConfirmation?.receipt_status === 'RECEIVED' ? (
+                <p className="workflow-editor-note">
+                  The counterparty acknowledged receipt. Use `Counterparty Confirmed` or `Counterparty Disputed`
+                  once the desk completes its review conversation.
                 </p>
               ) : null}
               {currentConfirmation?.mismatches.length ? (
@@ -797,8 +962,8 @@ export function ConfirmationLedgerBoard({
                   <p>
                     {currentConfirmation
                       ? currentConfirmation.comparison_status === 'MISMATCHED'
-                        ? 'Resolve the mismatches, record a waiver, or log a new version when a reissued confirmation arrives. Trade amendments that change booked economics now auto-open a fresh SENT version.'
-                        : 'Save the latest record in place, or log a new confirmation record when a reissued confirm arrives. Trade amendments that change booked economics now auto-open a fresh SENT version.'
+                        ? 'Resolve the mismatches, record a waiver, or log a new version when a reissued confirmation arrives. Use the response actions to track receipt, confirmation, and disputes from the counterparty.'
+                        : 'Save the latest record in place, issue or reissue it outbound, and use the response actions to track receipt, confirmation, or dispute. Trade capture and booked economic amendments now auto-open a fresh draft version automatically.'
                       : 'Manual confirmations can be logged directly, or linked to a verified TRADE_CONFIRMATION document from document intake.'}
                   </p>
                 </div>
@@ -818,13 +983,46 @@ export function ConfirmationLedgerBoard({
                         type="button"
                         className="button button-primary"
                         onClick={() => void handleIssue(currentConfirmation, trade)}
-                        disabled={!authSession || isSaving || currentConfirmation.status !== 'SENT'}
+                        disabled={
+                          !authSession ||
+                          isSaving ||
+                          !['PENDING', 'SENT'].includes(currentConfirmation.status)
+                        }
                       >
                         {isSaving
                           ? 'Issuing...'
                           : currentConfirmation.issue_count > 0
                             ? 'Reissue Confirmation'
                             : 'Issue Confirmation'}
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void handleResponse(currentConfirmation, trade, 'RECEIVED')}
+                        disabled={!authSession || isSaving || responseActionBlocked}
+                      >
+                        Mark Received
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void handleResponse(currentConfirmation, trade, 'COUNTERPARTY_CONFIRMED')}
+                        disabled={
+                          !authSession ||
+                          isSaving ||
+                          responseActionBlocked ||
+                          confirmBlockedByComparison
+                        }
+                      >
+                        Counterparty Confirmed
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void handleResponse(currentConfirmation, trade, 'COUNTERPARTY_DISPUTED')}
+                        disabled={!authSession || isSaving || responseDisputeBlocked}
+                      >
+                        Counterparty Disputed
                       </button>
                       <button
                         type="button"
@@ -838,32 +1036,6 @@ export function ConfirmationLedgerBoard({
                         }
                       >
                         {isSaving ? 'Saving...' : 'Save Current'}
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => void handleSave(currentConfirmation, trade, 'CONFIRMED')}
-                        disabled={
-                          !authSession ||
-                          isSaving ||
-                          confirmBlockedByComparison ||
-                          Object.keys(confirmPayload ?? {}).length === 0
-                        }
-                      >
-                        Mark Confirmed
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => void handleSave(currentConfirmation, trade, 'DISPUTED')}
-                        disabled={
-                          !authSession ||
-                          isSaving ||
-                          disputeBlocked ||
-                          Object.keys(disputePayload ?? {}).length === 0
-                        }
-                      >
-                        Mark Disputed
                       </button>
                       <button
                         type="button"
@@ -899,12 +1071,16 @@ export function ConfirmationLedgerBoard({
                             ? ` • ${comparisonStatusLabel(confirmation.comparison_status)}`
                             : ''}
                           {confirmation.issue_count > 0 ? ` • ${dispatchStateLabel(confirmation)}` : ''}
+                          {confirmation.receipt_status !== 'NOT_ISSUED'
+                            ? ` • ${receiptStatusLabel(confirmation.receipt_status)}`
+                            : ''}
                           {confirmation.source_document_display_name
                             ? ` • ${confirmation.source_document_display_name}`
                             : ''}
                         </p>
                         <p>
-                          {confirmation.last_issue_note?.trim() ||
+                          {confirmation.response_note?.trim() ||
+                            confirmation.last_issue_note?.trim() ||
                             confirmation.notes?.trim() ||
                             confirmation.dispute_reason?.trim() ||
                             `Created by ${confirmation.created_by}`}

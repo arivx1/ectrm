@@ -62,6 +62,21 @@ def _normalize_payment_currency_code(value: object | None, *, invoice: TradeInvo
     return normalized
 
 
+def _payment_currency_matches_invoice(payment_currency_code: object | None, *, invoice: TradeInvoice) -> bool:
+    normalized_payment_currency = str(payment_currency_code or "").strip().upper()
+    normalized_invoice_currency = str(invoice.invoice_currency_code or "").strip().upper()
+    return bool(normalized_payment_currency) and normalized_payment_currency == normalized_invoice_currency
+
+
+def _validate_payment_currency_matches_invoice(payment_currency_code: str, *, invoice: TradeInvoice) -> None:
+    if _payment_currency_matches_invoice(payment_currency_code, invoice=invoice):
+        return
+    raise ValueError(
+        f"Payment currency '{payment_currency_code}' must match invoice currency "
+        f"'{invoice.invoice_currency_code}' until explicit FX application is supported."
+    )
+
+
 def _normalize_payment_amount(value: object | None, *, invoice: TradeInvoice) -> Decimal:
     candidate = value if value is not None else invoice.invoice_amount
     try:
@@ -128,6 +143,83 @@ def _audit_payment_payload(payment: TradePaymentOut) -> dict[str, object]:
     return payment.model_dump(mode="json")
 
 
+def _payment_reserves_invoice_balance(
+    *,
+    payment_status: str,
+) -> bool:
+    return payment_status != PaymentStatus.NOT_REQUIRED.value
+
+
+def _payment_applies_to_invoice(
+    payment: TradePayment,
+    *,
+    invoice: TradeInvoice,
+) -> bool:
+    return (
+        _payment_reserves_invoice_balance(payment_status=payment.status)
+        and _payment_currency_matches_invoice(payment.payment_currency_code, invoice=invoice)
+    )
+
+
+def _sum_reserved_invoice_payment_amount(
+    payments: list[TradePayment],
+    *,
+    invoice: TradeInvoice,
+    exclude_payment_id: int | None = None,
+) -> Decimal:
+    return sum(
+        (
+            Decimal(str(payment.payment_amount))
+            for payment in payments
+            if (exclude_payment_id is None or payment.id != exclude_payment_id)
+            and _payment_applies_to_invoice(payment, invoice=invoice)
+        ),
+        start=ZERO,
+    )
+
+
+def _validate_payment_amount_within_invoice_balance(
+    *,
+    invoice: TradeInvoice,
+    payments: list[TradePayment],
+    next_payment_amount: Decimal,
+    next_payment_status: str,
+    next_payment_currency_code: str,
+    exclude_payment_id: int | None = None,
+    current_payment: TradePayment | None = None,
+) -> None:
+    if not _payment_reserves_invoice_balance(payment_status=next_payment_status):
+        return
+    if not _payment_currency_matches_invoice(next_payment_currency_code, invoice=invoice):
+        return
+
+    invoice_amount = Decimal(str(invoice.invoice_amount))
+    reserved_amount = _sum_reserved_invoice_payment_amount(
+        payments,
+        invoice=invoice,
+        exclude_payment_id=exclude_payment_id,
+    )
+    remaining_open_balance = invoice_amount - reserved_amount
+
+    if next_payment_amount <= remaining_open_balance:
+        return
+
+    if current_payment is not None:
+        current_payment_amount = Decimal(str(current_payment.payment_amount))
+        if (
+            current_payment_amount == next_payment_amount
+            and current_payment.status == next_payment_status
+            and current_payment.payment_currency_code == next_payment_currency_code
+        ):
+            return
+
+    display_remaining_open_balance = max(remaining_open_balance, ZERO)
+    raise ValueError(
+        f"Payment amount {next_payment_amount:.2f} exceeds the remaining open balance of "
+        f"{invoice.invoice_currency_code} {display_remaining_open_balance:.2f}."
+    )
+
+
 def derive_invoice_payment_projection(
     *,
     invoice: TradeInvoice,
@@ -135,7 +227,12 @@ def derive_invoice_payment_projection(
     now: datetime,
 ) -> PaymentProjection:
     invoice_amount = Decimal(str(invoice.invoice_amount))
-    paid_payments = [payment for payment in payments if _effective_payment_status(payment, now=now) == PaymentStatus.PAID.value]
+    applicable_payments = [payment for payment in payments if _payment_applies_to_invoice(payment, invoice=invoice)]
+    paid_payments = [
+        payment
+        for payment in applicable_payments
+        if _effective_payment_status(payment, now=now) == PaymentStatus.PAID.value
+    ]
     total_paid_amount = sum((Decimal(str(payment.payment_amount)) for payment in paid_payments), start=ZERO)
     outstanding_amount = (
         ZERO
@@ -145,7 +242,7 @@ def derive_invoice_payment_projection(
 
     unpaid_due_dates = [
         _coerce_utc(payment.due_at)
-        for payment in payments
+        for payment in applicable_payments
         if _effective_payment_status(payment, now=now) != PaymentStatus.PAID.value
     ]
     unpaid_due_dates = [value for value in unpaid_due_dates if value is not None]
@@ -468,9 +565,16 @@ def list_trade_payments(
         stmt = stmt.limit(limit)
 
     rows = db.execute(stmt).all()
+    invoice_ids = sorted({invoice.id for _, invoice, _, _ in rows})
     payments_by_invoice_id: dict[int, list[TradePayment]] = {}
-    for payment, invoice, _, _ in rows:
-        payments_by_invoice_id.setdefault(invoice.id, []).append(payment)
+    if invoice_ids:
+        all_invoice_payments = db.execute(
+            select(TradePayment)
+            .where(TradePayment.invoice_id.in_(invoice_ids))
+            .order_by(TradePayment.invoice_id.asc(), TradePayment.due_at.asc(), TradePayment.id.asc())
+        ).scalars().all()
+        for payment in all_invoice_payments:
+            payments_by_invoice_id.setdefault(payment.invoice_id, []).append(payment)
 
     return [
         _to_out(
@@ -512,17 +616,30 @@ def create_trade_payment(
         raise LookupError(f"Invoice '{invoice_id}' was not found.")
 
     invoice, trade = row
-    existing_count = db.execute(
-        select(TradePayment.id).where(TradePayment.invoice_id == invoice_id)
+    existing_payments = db.execute(
+        select(TradePayment)
+        .where(TradePayment.invoice_id == invoice_id)
+        .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
     ).scalars().all()
     next_due_at = _normalize_due_at(due_at, invoice=invoice)
     next_received_at = _normalize_received_at(received_at)
     next_status = _normalize_payment_status(status) if status is not None else _base_due_status(due_at=next_due_at, now=reference_time)
+    next_payment_currency_code = _normalize_payment_currency_code(payment_currency_code, invoice=invoice, trade=trade)
+    _validate_payment_currency_matches_invoice(next_payment_currency_code, invoice=invoice)
+    next_payment_amount = _normalize_payment_amount(payment_amount, invoice=invoice)
 
     if next_received_at is not None:
         next_status = PaymentStatus.PAID.value
     elif next_status == PaymentStatus.PAID.value:
         next_received_at = reference_time
+
+    _validate_payment_amount_within_invoice_balance(
+        invoice=invoice,
+        payments=existing_payments,
+        next_payment_amount=next_payment_amount,
+        next_payment_status=next_status,
+        next_payment_currency_code=next_payment_currency_code,
+    )
 
     payment = TradePayment(
         trade_id=trade.trade_id,
@@ -530,10 +647,10 @@ def create_trade_payment(
         payment_reference=_normalize_payment_reference(
             payment_reference,
             trade=trade,
-            sequence_number=len(existing_count) + 1,
+            sequence_number=len(existing_payments) + 1,
         ),
-        payment_currency_code=_normalize_payment_currency_code(payment_currency_code, invoice=invoice, trade=trade),
-        payment_amount=_normalize_payment_amount(payment_amount, invoice=invoice),
+        payment_currency_code=next_payment_currency_code,
+        payment_amount=next_payment_amount,
         status=next_status,
         due_at=next_due_at,
         received_at=next_received_at,
@@ -602,8 +719,10 @@ def update_trade_payment(
         raise LookupError(f"Payment '{payment_id}' was not found.")
 
     payment, invoice, trade, _ = row
-    existing_count = db.execute(
-        select(TradePayment.id).where(TradePayment.invoice_id == invoice.id)
+    existing_payments = db.execute(
+        select(TradePayment)
+        .where(TradePayment.invoice_id == invoice.id)
+        .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
     ).scalars().all()
 
     next_payment_reference = payment.payment_reference
@@ -618,7 +737,7 @@ def update_trade_payment(
         next_payment_reference = _normalize_payment_reference(
             changes.get("payment_reference"),
             trade=trade,
-            sequence_number=max(len(existing_count), 1),
+            sequence_number=max(len(existing_payments), 1),
         )
     if "payment_currency_code" in changes:
         next_payment_currency_code = _normalize_payment_currency_code(
@@ -643,6 +762,17 @@ def update_trade_payment(
         next_received_at = reference_time
     else:
         next_received_at = None
+
+    _validate_payment_currency_matches_invoice(next_payment_currency_code, invoice=invoice)
+    _validate_payment_amount_within_invoice_balance(
+        invoice=invoice,
+        payments=existing_payments,
+        next_payment_amount=next_payment_amount,
+        next_payment_status=next_status,
+        next_payment_currency_code=next_payment_currency_code,
+        exclude_payment_id=payment.id,
+        current_payment=payment,
+    )
 
     changed = False
     if payment.payment_reference != next_payment_reference:

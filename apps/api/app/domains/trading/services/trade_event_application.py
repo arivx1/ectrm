@@ -11,6 +11,9 @@ from apps.api.app.domains.operations.services.trade_confirmations import (
     build_trade_confirmation_revision_snapshot,
 )
 from apps.api.app.domains.operations.services.trade_confirmations import (
+    ensure_trade_confirmation_draft_for_trade_capture,
+)
+from apps.api.app.domains.operations.services.trade_confirmations import (
     maybe_supersede_trade_confirmation_for_trade_amendment,
 )
 from apps.api.app.domains.operations.services.trade_credit_hold import (
@@ -370,6 +373,12 @@ def _apply_trade_created(
         now=context.recorded_at,
         policy_result=counterparty_credit_policy,
     )
+    ensure_trade_confirmation_draft_for_trade_capture(
+        context.db,
+        trade=trade,
+        actor_id=workflow_actor_id,
+        now=context.recorded_at,
+    )
     return trade
 
 
@@ -438,6 +447,11 @@ def _apply_trade_amended(
                 ),
             ),
         )
+    support.reject_confirmation_projection_override(
+        context.db,
+        trade_id=trade.trade_id,
+        payload_data=payload_data,
+    )
 
     legs_payload: list[dict[str, object]] | None = None
     should_sync_legs = False

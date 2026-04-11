@@ -31,6 +31,12 @@ class TradeConfirmationOut(BaseModel):
     last_issue_method: Optional[str]
     last_issue_recipient: Optional[str]
     last_issue_note: Optional[str]
+    receipt_status: str
+    received_at: Optional[datetime]
+    received_by: Optional[str]
+    response_method: Optional[str]
+    response_reference: Optional[str]
+    response_note: Optional[str]
     dispute_reason: Optional[str]
     notes: Optional[str]
     comparison_waiver_note: Optional[str]
@@ -88,3 +94,12 @@ class TradeConfirmationIssue(BaseModel):
     issue_method: Optional[str] = None
     issue_recipient: Optional[str] = None
     issue_note: Optional[str] = None
+
+
+class TradeConfirmationResponse(BaseModel):
+    action: str
+    received_at: Optional[datetime] = None
+    response_method: Optional[str] = None
+    response_reference: Optional[str] = None
+    response_note: Optional[str] = None
+    dispute_reason: Optional[str] = None

@@ -32,6 +32,15 @@ export type IssueTradeConfirmationInput = {
   issue_note?: string | null
 }
 
+export type RespondTradeConfirmationInput = {
+  action: 'RECEIVED' | 'COUNTERPARTY_CONFIRMED' | 'COUNTERPARTY_DISPUTED'
+  received_at?: string | null
+  response_method?: string | null
+  response_reference?: string | null
+  response_note?: string | null
+  dispute_reason?: string | null
+}
+
 function confirmationHeaders(): Headers {
   return buildMutationHeaders()
 }
@@ -66,6 +75,20 @@ export async function issueTradeConfirmation(
 ): Promise<TradeConfirmationRecord> {
   return postJson<TradeConfirmationRecord>(
     `${apiBase}/confirmations/${confirmationId}/issue`,
+    payload as Record<string, unknown>,
+    {
+      headers: confirmationHeaders(),
+    },
+  )
+}
+
+export async function respondTradeConfirmation(
+  apiBase: string,
+  confirmationId: number,
+  payload: RespondTradeConfirmationInput,
+): Promise<TradeConfirmationRecord> {
+  return postJson<TradeConfirmationRecord>(
+    `${apiBase}/confirmations/${confirmationId}/response`,
     payload as Record<string, unknown>,
     {
       headers: confirmationHeaders(),

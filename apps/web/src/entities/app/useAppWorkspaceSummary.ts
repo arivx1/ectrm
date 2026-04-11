@@ -15,12 +15,14 @@ import type {
   UnitRecord,
 } from '../../shared/models'
 import { sessionHeaders } from './workspaceDataShared'
+import type { WorkspaceBootstrapSummary } from './api'
 import { classForCommodity } from '../../shared/reference'
 import { tradeAggregateType, tradeStatusIsActive } from '../../shared/trading'
 import { buildCounterpartyCreditRestrictionMessage } from '../../features/trades/counterpartyCredit'
 
 type UseAppWorkspaceSummaryArgs = {
   authSession: StoredAuthSession | null
+  bootstrapSummary: WorkspaceBootstrapSummary | null
   trades: Trade[]
   events: EventRow[]
   positions: PositionRow[]
@@ -39,6 +41,7 @@ type UseAppWorkspaceSummaryArgs = {
 
 export function useAppWorkspaceSummary({
   authSession,
+  bootstrapSummary,
   trades,
   events,
   positions,
@@ -55,10 +58,11 @@ export function useAppWorkspaceSummary({
   commodityClassOrder,
 }: UseAppWorkspaceSummaryArgs) {
   const [storedSelectedTradeEvents, setStoredSelectedTradeEvents] = useState<EventRow[]>([])
+  const knownTotalTradeCount = bootstrapSummary?.trades.total_count ?? null
 
   useEffect(() => {
     if (trades.length === 0) {
-      if (selectedTradeId !== null) {
+      if (knownTotalTradeCount === 0 && selectedTradeId !== null) {
         setSelectedTradeId(null)
       }
       return
@@ -69,7 +73,12 @@ export function useAppWorkspaceSummary({
     }
 
     setSelectedTradeId(trades[0].trade_id)
-  }, [selectedTradeId, setSelectedTradeId, trades])
+  }, [knownTotalTradeCount, selectedTradeId, setSelectedTradeId, trades])
+
+  const selectedTrade = useMemo(
+    () => trades.find((trade) => trade.trade_id === selectedTradeId) ?? null,
+    [trades, selectedTradeId],
+  )
 
   useEffect(() => {
     if (!selectedTradeId) {
@@ -100,7 +109,7 @@ export function useAppWorkspaceSummary({
     return () => {
       cancelled = true
     }
-  }, [authSession, selectedTradeId])
+  }, [authSession, selectedTrade?.last_event_id, selectedTradeId])
 
   const selectedTradeEvents = selectedTradeId ? storedSelectedTradeEvents : []
 
@@ -116,39 +125,43 @@ export function useAppWorkspaceSummary({
   const activePortfolios = useMemo(() => portfolios.filter((portfolio) => portfolio.is_active), [portfolios])
   const hasReferenceOptions = activeBooks.length > 0 && activeCommodities.length > 0
 
-  const selectedTrade = useMemo(
-    () => trades.find((trade) => trade.trade_id === selectedTradeId) ?? null,
-    [trades, selectedTradeId],
-  )
-
   const activeTrades = useMemo(
     () => trades.filter((trade) => tradeStatusIsActive(trade.status)),
     [trades],
   )
 
+  const activeTradeCount = useMemo(
+    () => bootstrapSummary?.trades.active_count ?? activeTrades.length,
+    [activeTrades.length, bootstrapSummary],
+  )
+
   const totalActiveVolume = useMemo(
-    () => activeTrades.reduce((sum, trade) => sum + (trade.volume ?? 0), 0),
-    [activeTrades],
+    () => bootstrapSummary?.trades.total_active_volume ?? activeTrades.reduce((sum, trade) => sum + (trade.volume ?? 0), 0),
+    [activeTrades, bootstrapSummary],
   )
 
   const pricedActiveTrades = useMemo(
-    () => activeTrades.filter((trade) => trade.price !== null).length,
-    [activeTrades],
+    () => bootstrapSummary?.trades.priced_active_count ?? activeTrades.filter((trade) => trade.price !== null).length,
+    [activeTrades, bootstrapSummary],
   )
 
   const pendingPricingTrades = useMemo(
-    () => activeTrades.filter((trade) => trade.pricing_status === 'PENDING').length,
-    [activeTrades],
+    () =>
+      bootstrapSummary?.trades.pending_pricing_count ??
+      activeTrades.filter((trade) => trade.pricing_status === 'PENDING').length,
+    [activeTrades, bootstrapSummary],
   )
 
   const pendingSettlementTrades = useMemo(
-    () => activeTrades.filter((trade) => trade.settlement_status !== 'SETTLED').length,
-    [activeTrades],
+    () =>
+      bootstrapSummary?.trades.pending_settlement_count ??
+      activeTrades.filter((trade) => trade.settlement_status !== 'SETTLED').length,
+    [activeTrades, bootstrapSummary],
   )
 
   const trackedBooks = useMemo(
-    () => new Set(activeTrades.map((trade) => trade.book)).size,
-    [activeTrades],
+    () => bootstrapSummary?.trades.tracked_book_count ?? new Set(activeTrades.map((trade) => trade.book)).size,
+    [activeTrades, bootstrapSummary],
   )
 
   const commodityClassOptions = useMemo(
@@ -183,12 +196,12 @@ export function useAppWorkspaceSummary({
   }, [commodityClassOrder, positionsWithClass])
 
   const pricingCoverage = useMemo(() => {
-    if (activeTrades.length === 0) {
+    if (activeTradeCount === 0) {
       return null
     }
 
-    return Math.round((pricedActiveTrades / activeTrades.length) * 100)
-  }, [activeTrades.length, pricedActiveTrades])
+    return Math.round((pricedActiveTrades / activeTradeCount) * 100)
+  }, [activeTradeCount, pricedActiveTrades])
 
   const largestPositionRow = useMemo(
     () =>
@@ -226,6 +239,7 @@ export function useAppWorkspaceSummary({
     activeCurrencies,
     activeLocations,
     activePortfolios,
+    activeTradeCount,
     activeTrades,
     activeUnits,
     commodityClassOptions,

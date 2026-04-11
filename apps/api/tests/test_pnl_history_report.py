@@ -562,6 +562,21 @@ class PnlHistoryReportTests(unittest.TestCase):
 
             report = build_pnl_history_report(session, as_of=date(2026, 3, 6))
 
+        self.assertEqual(report["point_count"], 1)
+        self.assertEqual(
+            report["points"],
+            [
+                {
+                    "date": date(2026, 3, 6),
+                    "total_pnl": 24.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 24.0,
+                    "priced_trade_count": 1,
+                    "realized_trade_count": 0,
+                    "unrealized_trade_count": 1,
+                }
+            ],
+        )
         self.assertEqual(report["summary"]["total_pnl"], 24.0)
         self.assertEqual(report["points"][-1]["total_pnl"], 24.0)
         self.assertEqual(len(report["valuations"]), 1)
@@ -593,6 +608,112 @@ class PnlHistoryReportTests(unittest.TestCase):
                 "included_in_totals": True,
             },
         )
+
+    def test_legacy_trade_does_not_backfill_current_state_before_latest_projection_date(self) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                Trade(
+                    trade_id="LEGACY-DEFERRED-1",
+                    created_at=datetime(2026, 3, 5, 9, 0, tzinfo=timezone.utc),
+                    updated_at=datetime(2026, 3, 7, 8, 0, tzinfo=timezone.utc),
+                    execution_timestamp=datetime(2026, 3, 5, 9, 0, tzinfo=timezone.utc),
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="CRUDE_PHYS",
+                    commodity_class="CRUDE_OIL",
+                    commodity="WTI",
+                    trade_currency_code="USD",
+                    price_unit_code="BBL",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    price_index_code=None,
+                    price=11.0,
+                    volume=2.0,
+                    settlement_status="PENDING",
+                    status="ACTIVE",
+                    instrument_type="LINEAR",
+                    last_event_id="legacy-deferred-event-1",
+                )
+            )
+            session.commit()
+
+            report = build_pnl_history_report(session, as_of=date(2026, 3, 6))
+
+        self.assertEqual(report["point_count"], 0)
+        self.assertEqual(report["points"], [])
+        self.assertEqual(
+            report["summary"],
+            {
+                "total_pnl": 0.0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0,
+                "priced_trade_count": 0,
+                "realized_trade_count": 0,
+                "unrealized_trade_count": 0,
+            },
+        )
+        self.assertEqual(report["valuations"], [])
+
+    def test_legacy_trade_enters_history_on_latest_projection_date(self) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                Trade(
+                    trade_id="LEGACY-DEFERRED-2",
+                    created_at=datetime(2026, 3, 5, 9, 0, tzinfo=timezone.utc),
+                    updated_at=datetime(2026, 3, 7, 8, 0, tzinfo=timezone.utc),
+                    execution_timestamp=datetime(2026, 3, 5, 9, 0, tzinfo=timezone.utc),
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="CRUDE_PHYS",
+                    commodity_class="CRUDE_OIL",
+                    commodity="WTI",
+                    trade_currency_code="USD",
+                    price_unit_code="BBL",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    price_index_code=None,
+                    price=11.0,
+                    volume=2.0,
+                    settlement_status="PENDING",
+                    status="ACTIVE",
+                    instrument_type="LINEAR",
+                    last_event_id="legacy-deferred-event-2",
+                )
+            )
+            session.commit()
+
+            report = build_pnl_history_report(session, as_of=date(2026, 3, 7))
+
+        self.assertEqual(report["point_count"], 1)
+        self.assertEqual(
+            report["points"],
+            [
+                {
+                    "date": date(2026, 3, 7),
+                    "total_pnl": 22.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 22.0,
+                    "priced_trade_count": 1,
+                    "realized_trade_count": 0,
+                    "unrealized_trade_count": 1,
+                }
+            ],
+        )
+        self.assertEqual(
+            report["summary"],
+            {
+                "total_pnl": 22.0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 22.0,
+                "priced_trade_count": 1,
+                "realized_trade_count": 0,
+                "unrealized_trade_count": 1,
+            },
+        )
+        self.assertEqual(len(report["valuations"]), 1)
+        self.assertEqual(report["valuations"][0]["trade_id"], "LEGACY-DEFERRED-2")
 
     def test_historical_window_uses_event_state_before_later_price_amendment(self) -> None:
         with self.SessionLocal() as session:

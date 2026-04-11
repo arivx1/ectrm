@@ -34,6 +34,8 @@ from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
+from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
@@ -84,6 +86,8 @@ __all__ = [
     "ReferencePriceIndexSource",
     "ReferenceUnit",
     "Trade",
+    "TradeAccrualEntry",
+    "TradeAccrualLot",
     "TradeActualization",
     "TradeConfirmation",
     "TradeCreditApprovalDecision",

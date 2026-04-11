@@ -407,6 +407,12 @@ export type TradeConfirmationRecord = {
   last_issue_method: string | null
   last_issue_recipient: string | null
   last_issue_note: string | null
+  receipt_status: string
+  received_at: string | null
+  received_by: string | null
+  response_method: string | null
+  response_reference: string | null
+  response_note: string | null
   dispute_reason: string | null
   notes: string | null
   comparison_waiver_note: string | null
@@ -1709,6 +1715,7 @@ export type AssistantConversation = AssistantConversationSummary & {
 export type ViewKey =
   | 'dashboard'
   | 'guide'
+  | 'demo'
   | 'trades'
   | 'events'
   | 'risk'

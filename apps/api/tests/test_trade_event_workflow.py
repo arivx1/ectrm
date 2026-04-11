@@ -1115,7 +1115,6 @@ class TradeEventWorkflowTests(unittest.TestCase):
                     actor_id="test-user",
                     payload={
                         "pricing_status": "PARTIALLY_PRICED",
-                        "confirmation_status": "CONFIRMED",
                         "nomination_status": "NOMINATED",
                         "allocation_status": "ALLOCATED",
                         "invoice_status": "ISSUED",
@@ -1137,7 +1136,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
             )
 
         self.assertEqual(amended_trade.pricing_status, "PARTIALLY_PRICED")
-        self.assertEqual(amended_trade.confirmation_status, "CONFIRMED")
+        self.assertEqual(amended_trade.confirmation_status, "PENDING")
         self.assertEqual(amended_trade.nomination_status, "NOMINATED")
         self.assertEqual(amended_trade.allocation_status, "ALLOCATED")
         self.assertEqual(amended_trade.actualization_status, "PENDING")
@@ -1149,12 +1148,63 @@ class TradeEventWorkflowTests(unittest.TestCase):
             {
                 "ALLOCATION": "ALLOCATED",
                 "ACTUALIZATION": "PENDING",
-                "CONFIRMATION": "CONFIRMED",
+                "CONFIRMATION": "PENDING",
                 "INVOICE": "ISSUED",
                 "NOMINATION": "NOMINATED",
                 "PAYMENT": "DUE",
             },
         )
+
+    def test_trade_capture_auto_generates_confirmation_draft(self) -> None:
+        with self.SessionLocal() as session:
+            self._append_trade_created_event(session, trade_id="T-CONF-AUTO-DRAFT-1")
+
+            confirmation = (
+                session.query(TradeConfirmation)
+                .filter(TradeConfirmation.trade_id == "T-CONF-AUTO-DRAFT-1")
+                .one()
+            )
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-AUTO-DRAFT-1").one()
+            confirmation_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-AUTO-DRAFT-1",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .one()
+            )
+
+        self.assertEqual(confirmation.status, "PENDING")
+        self.assertEqual(confirmation.issue_count, 0)
+        self.assertIsNone(confirmation.sent_at)
+        self.assertEqual(confirmation.receipt_status, "NOT_ISSUED")
+        self.assertEqual(confirmation.confirmation_number, "CONF-T-CONF-AUTO-DRAFT-1-01")
+        self.assertIn("Auto-generated draft", confirmation.notes or "")
+        self.assertEqual(trade.confirmation_status, "PENDING")
+        self.assertEqual(confirmation_item.status, "PENDING")
+        self.assertIn("Auto-generated draft", confirmation_item.notes or "")
+
+    def test_trade_amendment_rejects_confirmation_projection_override_when_confirmation_record_exists(self) -> None:
+        with self.SessionLocal() as session:
+            self._append_trade_created_event(session, trade_id="T-CONF-LOCK-1")
+
+            with self.assertRaises(HTTPException) as error:
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CONF-LOCK-1",
+                        event_type="TradeAmended",
+                        occurred_at=self.now,
+                        actor_id="test-user",
+                        payload={"confirmation_status": "CONFIRMED"},
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+        self.assertEqual(error.exception.status_code, 422)
+        self.assertIn("managed confirmation records", str(error.exception.detail).lower())
 
     def test_trade_amendment_rejects_invoice_projection_override_when_invoice_exists(self) -> None:
         with self.SessionLocal() as session:
@@ -1344,7 +1394,8 @@ class TradeEventWorkflowTests(unittest.TestCase):
                     Event.aggregate_id == "T-DIRECT-AUDIT-1",
                     Event.event_type == "TradeConfirmationCreated",
                 )
-                .one()
+                .order_by(Event.recorded_at.asc(), Event.event_id.asc())
+                .all()
             )
             invoice_event = (
                 session.query(Event)
@@ -1374,9 +1425,12 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 .one()
             )
 
-        self.assertEqual(
-            confirmation_event.payload["confirmation"]["confirmation_number"],
+        self.assertIn(
             "CONF-DIRECT-1",
+            [
+                event.payload["confirmation"]["confirmation_number"]
+                for event in confirmation_event
+            ],
         )
         self.assertEqual(invoice_event.payload["request"]["trade_id"], "T-DIRECT-AUDIT-1")
         self.assertEqual(payment_event.payload["payment"]["status"], "PAID")
@@ -1394,7 +1448,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 session,
                 trade_id="T-CONF-SUPERSEDE-1",
                 actor_id="ops.user",
-                confirmation_number="CONF-T-CONF-SUPERSEDE-1-01",
+                confirmation_number="CONF-T-CONF-SUPERSEDE-1-02",
                 status="CONFIRMED",
                 now=self.now,
             )
@@ -1440,24 +1494,23 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 .one()
             )
 
-        self.assertEqual(len(confirmations), 2)
-        self.assertEqual(confirmations[0].status, "CONFIRMED")
-        self.assertEqual(confirmations[1].status, "SENT")
-        sent_at = confirmations[1].sent_at
-        self.assertIsNotNone(sent_at)
-        self.assertEqual(sent_at.replace(tzinfo=timezone.utc), amended_at)
-        self.assertIn("Supersedes CONF-T-CONF-SUPERSEDE-1-01", confirmations[1].notes or "")
-        self.assertIn("price", confirmations[1].notes or "")
-        self.assertEqual(trade.confirmation_status, "SENT")
-        self.assertEqual(confirmation_item.status, "SENT")
+        self.assertEqual(len(confirmations), 3)
+        self.assertEqual(confirmations[0].status, "PENDING")
+        self.assertEqual(confirmations[1].status, "CONFIRMED")
+        self.assertEqual(confirmations[2].status, "PENDING")
+        self.assertIsNone(confirmations[2].sent_at)
+        self.assertIn("Supersedes CONF-T-CONF-SUPERSEDE-1-02", confirmations[2].notes or "")
+        self.assertIn("price", confirmations[2].notes or "")
+        self.assertEqual(trade.confirmation_status, "PENDING")
+        self.assertEqual(confirmation_item.status, "PENDING")
         self.assertEqual(
             supersede_event.payload["superseded_confirmation_number"],
-            "CONF-T-CONF-SUPERSEDE-1-01",
+            "CONF-T-CONF-SUPERSEDE-1-02",
         )
         self.assertEqual(supersede_event.payload["changed_fields"], ["price"])
         self.assertEqual(
             supersede_event.payload["confirmation"]["confirmation_number"],
-            confirmations[1].confirmation_number,
+            confirmations[2].confirmation_number,
         )
 
     def test_trade_amendment_does_not_supersede_confirmation_for_non_economic_changes(self) -> None:
@@ -1469,7 +1522,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 session,
                 trade_id="T-CONF-SUPERSEDE-2",
                 actor_id="ops.user",
-                confirmation_number="CONF-T-CONF-SUPERSEDE-2-01",
+                confirmation_number="CONF-T-CONF-SUPERSEDE-2-02",
                 status="CONFIRMED",
                 now=self.now,
             )
@@ -1507,9 +1560,82 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 .all()
             )
 
-        self.assertEqual(len(confirmations), 1)
-        self.assertEqual(confirmations[0].status, "CONFIRMED")
+        self.assertEqual(len(confirmations), 2)
+        self.assertEqual(confirmations[0].status, "PENDING")
+        self.assertEqual(confirmations[1].status, "CONFIRMED")
         self.assertEqual(trade.confirmation_status, "CONFIRMED")
+        self.assertEqual(supersede_events, [])
+
+    def test_trade_amendment_creates_initial_confirmation_draft_for_legacy_pending_trade_without_confirmation_rows(self) -> None:
+        amended_at = self.now + timedelta(hours=4)
+
+        with self.SessionLocal() as session:
+            self._append_trade_created_event(session, trade_id="T-CONF-LEGACY-1")
+            (
+                session.query(TradeConfirmation)
+                .filter(TradeConfirmation.trade_id == "T-CONF-LEGACY-1")
+                .delete()
+            )
+            (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-LEGACY-1",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .delete()
+            )
+            session.commit()
+
+            with self._event_datetime_patch(amended_at):
+                append_event(
+                    EventCreate(
+                        aggregate_type="trade",
+                        aggregate_id="T-CONF-LEGACY-1",
+                        event_type="TradeAmended",
+                        occurred_at=amended_at,
+                        actor_id="trader.user",
+                        payload={"price": 76.5},
+                        schema_version=4,
+                    ),
+                    request=self._request(),
+                    db=session,
+                )
+
+            confirmations = (
+                session.query(TradeConfirmation)
+                .filter(TradeConfirmation.trade_id == "T-CONF-LEGACY-1")
+                .order_by(TradeConfirmation.id.asc())
+                .all()
+            )
+            trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-LEGACY-1").one()
+            confirmation_item = (
+                session.query(TradeWorkflowItem)
+                .filter(
+                    TradeWorkflowItem.trade_id == "T-CONF-LEGACY-1",
+                    TradeWorkflowItem.workflow_type == "CONFIRMATION",
+                )
+                .one()
+            )
+            supersede_events = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-CONF-LEGACY-1",
+                    Event.event_type == "TradeConfirmationSuperseded",
+                )
+                .all()
+            )
+
+        self.assertEqual(len(confirmations), 1)
+        self.assertEqual(confirmations[0].status, "PENDING")
+        self.assertIsNone(confirmations[0].sent_at)
+        self.assertIn(
+            "Auto-generated draft after booked economics changed on trade amendment",
+            confirmations[0].notes or "",
+        )
+        self.assertIn("price", confirmations[0].notes or "")
+        self.assertEqual(trade.confirmation_status, "PENDING")
+        self.assertEqual(confirmation_item.status, "PENDING")
         self.assertEqual(supersede_events, [])
 
     def test_trade_amendment_supersede_reopens_confirmation_even_when_credit_hold_reappears(self) -> None:
@@ -1531,7 +1657,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 session,
                 trade_id="T-CONF-SUPERSEDE-CREDIT-1",
                 actor_id="ops.user",
-                confirmation_number="CONF-T-CONF-SUPERSEDE-CREDIT-1-01",
+                confirmation_number="CONF-T-CONF-SUPERSEDE-CREDIT-1-02",
                 status="CONFIRMED",
                 now=self.now,
             )
@@ -1574,9 +1700,9 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 .one()
             )
 
-        self.assertEqual(len(confirmations), 2)
-        self.assertEqual(confirmations[1].status, "SENT")
-        self.assertEqual(trade.confirmation_status, "SENT")
+        self.assertEqual(len(confirmations), 3)
+        self.assertEqual(confirmations[2].status, "PENDING")
+        self.assertEqual(trade.confirmation_status, "PENDING")
         self.assertEqual(credit_item.status, "PENDING_REVIEW")
 
     def test_direct_delivery_services_record_audit_events(self) -> None:

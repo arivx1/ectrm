@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
+from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
@@ -91,6 +92,39 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 201)
+        return response.json()["access_token"]
+
+    def _create_user(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        display_name: str,
+        role: str,
+        password: str = "supersecret2",
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id=user_id,
+                    email=email,
+                    display_name=display_name,
+                    role=role,
+                    password_hash=hash_password(password),
+                    is_active=True,
+                    last_login_at=self.now,
+                    created_at=self.now,
+                    created_by="settlement_admin",
+                    updated_at=self.now,
+                    updated_by="settlement_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _login(self, *, identifier: str, password: str = "supersecret2") -> str:
+        response = self.client.post("/auth/session", json={"identifier": identifier, "password": password})
+        self.assertEqual(response.status_code, 200)
         return response.json()["access_token"]
 
     def _seed_trade(self, *, trade_id: str) -> None:
@@ -241,6 +275,55 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             self.assertEqual(audit_event.actor_id, "settlement_admin")
             self.assertEqual(audit_event.payload["request"]["trade_id"], "T-INV-1")
             self.assertEqual(audit_event.payload["invoice"]["invoice_number"], "INV-1001")
+
+    def test_accounting_role_can_issue_invoice(self) -> None:
+        self._create_user(
+            user_id="accounting.invoice",
+            email="accounting.invoice@example.com",
+            display_name="Accounting Invoice",
+            role="ACCOUNTING",
+        )
+        accounting_token = self._login(identifier="accounting.invoice")
+        self._seed_trade(trade_id="T-INV-ACCOUNTING-1")
+
+        response = self.client.post(
+            "/settlement/invoices",
+            json={
+                "trade_id": "T-INV-ACCOUNTING-1",
+                "invoice_number": "INV-ACCOUNTING-1001",
+                "invoice_amount": 79250,
+            },
+            headers={"Authorization": f"Bearer {accounting_token}"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["invoice_number"], "INV-ACCOUNTING-1001")
+
+    def test_trader_role_cannot_issue_invoice(self) -> None:
+        self._create_user(
+            user_id="trader.invoice",
+            email="trader.invoice@example.com",
+            display_name="Trader Invoice",
+            role="TRADER",
+        )
+        trader_token = self._login(identifier="trader.invoice")
+        self._seed_trade(trade_id="T-INV-TRADER-1")
+
+        response = self.client.post(
+            "/settlement/invoices",
+            json={
+                "trade_id": "T-INV-TRADER-1",
+                "invoice_number": "INV-TRADER-1001",
+                "invoice_amount": 79250,
+            },
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"],
+            "Only ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can manage settlement.",
+        )
 
     def test_invoice_patch_approve_rolls_trade_and_workflow_forward(self) -> None:
         admin_token = self._bootstrap_admin()

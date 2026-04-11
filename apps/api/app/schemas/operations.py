@@ -45,6 +45,84 @@ class SystemOverviewOut(BaseModel):
     dependencies: list[DependencyHealthOut]
 
 
+class WorkspaceCollectionSummaryOut(BaseModel):
+    total_count: int
+
+
+class WorkspaceTradeSummaryOut(WorkspaceCollectionSummaryOut):
+    active_count: int
+    priced_active_count: int
+    pending_pricing_count: int
+    pending_settlement_count: int
+    tracked_book_count: int
+    total_active_volume: float
+
+
+class WorkspaceWorkflowItemSummaryOut(WorkspaceCollectionSummaryOut):
+    operations_queue_count: int
+    settlement_queue_count: int
+
+
+class WorkspaceDashboardPositionBucketOut(BaseModel):
+    commodity_class: str
+    unit_label: str
+    net_volume: float
+    commodity_count: int
+
+
+class WorkspaceDashboardPositionSummaryOut(BaseModel):
+    gross_exposure: float
+    position_count: int
+    bucket_count: int
+    buckets: list[WorkspaceDashboardPositionBucketOut]
+    largest_bucket: Optional[WorkspaceDashboardPositionBucketOut]
+
+
+class WorkspaceDashboardAttentionSummaryOut(BaseModel):
+    total_count: int
+    confirmation_backlog_count: int
+    nomination_backlog_count: int
+    allocation_backlog_count: int
+    invoice_backlog_count: int
+    overdue_payment_count: int
+    stale_pricing_count: int
+    incomplete_ops_data_count: int
+
+
+class WorkspaceDashboardSummaryOut(BaseModel):
+    positions: WorkspaceDashboardPositionSummaryOut
+    attention: WorkspaceDashboardAttentionSummaryOut
+
+
+class WorkspaceSettlementBreakdownRowOut(BaseModel):
+    status: str
+    count: int
+
+
+class WorkspaceSettlementSummaryOut(BaseModel):
+    open_work_item_count: int
+    invoice_pending_count: int
+    payment_due_count: int
+    settled_count: int
+    trade_exception_count: int
+    workflow_exception_count: int
+    breakdown: list[WorkspaceSettlementBreakdownRowOut]
+
+
+class WorkspaceBootstrapSummaryOut(BaseModel):
+    generated_at: datetime
+    trades: WorkspaceTradeSummaryOut
+    positions: WorkspaceCollectionSummaryOut
+    option_exposures: WorkspaceCollectionSummaryOut
+    deliveries: WorkspaceCollectionSummaryOut
+    confirmations: WorkspaceCollectionSummaryOut
+    work_items: WorkspaceWorkflowItemSummaryOut
+    invoices: WorkspaceCollectionSummaryOut
+    payments: WorkspaceCollectionSummaryOut
+    dashboard: WorkspaceDashboardSummaryOut
+    settlement: WorkspaceSettlementSummaryOut
+
+
 class TradeCreditApprovalDecisionOut(BaseModel):
     decision_id: int
     trade_id: str

@@ -47,6 +47,7 @@ def _outstanding_amount_for_invoice(
 
 
 def _total_paid_amount_for_invoice(
+    invoice: TradeInvoiceOut,
     payments_by_invoice_id: dict[int, list[TradePaymentOut]],
     *,
     invoice_id: int,
@@ -56,12 +57,14 @@ def _total_paid_amount_for_invoice(
             _to_decimal(payment.payment_amount)
             for payment in payments_by_invoice_id.get(invoice_id, [])
             if payment.status == PaymentStatus.PAID.value
+            and payment.payment_currency_code == invoice.invoice_currency_code
         ),
         start=ZERO,
     )
 
 
 def _last_received_at_for_invoice(
+    invoice: TradeInvoiceOut,
     payments_by_invoice_id: dict[int, list[TradePaymentOut]],
     *,
     invoice_id: int,
@@ -69,7 +72,11 @@ def _last_received_at_for_invoice(
     received_values = [
         payment.received_at
         for payment in payments_by_invoice_id.get(invoice_id, [])
-        if payment.received_at is not None and payment.status == PaymentStatus.PAID.value
+        if (
+            payment.received_at is not None
+            and payment.status == PaymentStatus.PAID.value
+            and payment.payment_currency_code == invoice.invoice_currency_code
+        )
     ]
     return max(received_values) if received_values else None
 
@@ -81,7 +88,10 @@ def _next_due_at_for_invoice(
     unpaid_due_dates = [
         payment.due_at
         for payment in payments_by_invoice_id.get(invoice.invoice_id, [])
-        if payment.status not in {PaymentStatus.PAID.value, PaymentStatus.NOT_REQUIRED.value}
+        if (
+            payment.status not in {PaymentStatus.PAID.value, PaymentStatus.NOT_REQUIRED.value}
+            and payment.payment_currency_code == invoice.invoice_currency_code
+        )
     ]
     if unpaid_due_dates:
         return min(unpaid_due_dates)
@@ -600,10 +610,12 @@ def build_settlement_exception_report(
     for invoice in invoices:
         outstanding_amount = _outstanding_amount_for_invoice(invoice, payments_by_invoice_id)
         total_paid_amount = _total_paid_amount_for_invoice(
+            invoice,
             payments_by_invoice_id,
             invoice_id=invoice.invoice_id,
         )
         last_received_at = _last_received_at_for_invoice(
+            invoice,
             payments_by_invoice_id,
             invoice_id=invoice.invoice_id,
         )

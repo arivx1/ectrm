@@ -34,8 +34,10 @@ TRADE_PNL_METHODOLOGY = (
     "primary price term when the report reaches the latest known trade state. v1 values only "
     "LINEAR single-leg trades: FIXED uses the fixed price, INDEX uses the market observation, "
     "HYBRID uses market observation plus fixed differential, settlement changes move priced "
-    "trades between realized and unrealized buckets, and OPTION, SWAP, and FORMULA trades stay "
-    "out of MTM totals until dedicated valuation support lands."
+    "trades between realized and unrealized buckets, OPTION, SWAP, and FORMULA trades stay out "
+    "of MTM totals until dedicated valuation support lands, and legacy projection-only trades "
+    "without event history enter the timeline on their latest trustworthy projection date rather "
+    "than backfilling future state into earlier as-of dates."
 )
 SUPPORTED_VALUATION_INSTRUMENT = "LINEAR"
 SUPPORTED_VALUATION_STRUCTURE = "SINGLE"
@@ -939,6 +941,13 @@ def _legacy_trade_state(row: Trade) -> dict[str, Any]:
     }
 
 
+def _legacy_trade_trustworthy_start_date(row: Trade, *, generated_at: datetime) -> date:
+    anchor = row.execution_timestamp or row.created_at or generated_at
+    anchor_date = anchor.date()
+    projection_date = (row.updated_at or row.created_at or generated_at).date()
+    return max(anchor_date, projection_date)
+
+
 def _load_trade_driver_events(
     db: Session,
     *,
@@ -1049,20 +1058,19 @@ def build_pnl_history_report(
     latest_legacy_projection_date: date | None = None
 
     for row in legacy_rows:
-        anchor = row.execution_timestamp or row.created_at or generated_at
-        anchor_date = anchor.date()
-        start_dates.append(anchor_date)
-        if row.price_index_code:
-            relevant_price_index_codes.add(row.price_index_code.strip().upper())
-
         if row.trade_id in trade_ids_with_events:
             continue
 
         row_projection_date = (row.updated_at or row.created_at or generated_at).date()
+        trusted_start_date = _legacy_trade_trustworthy_start_date(row, generated_at=generated_at)
+        start_dates.append(trusted_start_date)
+        if row.price_index_code:
+            relevant_price_index_codes.add(row.price_index_code.strip().upper())
+
         if latest_legacy_projection_date is None or row_projection_date > latest_legacy_projection_date:
             latest_legacy_projection_date = row_projection_date
 
-        legacy_starts_by_date.setdefault(anchor_date, []).append(_legacy_trade_state(row))
+        legacy_starts_by_date.setdefault(trusted_start_date, []).append(_legacy_trade_state(row))
 
     if not start_dates:
         return _empty_pnl_history_report(generated_at)

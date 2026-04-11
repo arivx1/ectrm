@@ -1,14 +1,24 @@
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+LOOPBACK_CORS_HOSTS = frozenset({"localhost", "127.0.0.1"})
+LOOPBACK_CORS_ORIGIN_REGEX = r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$"
 
 DEFAULT_CORS_ALLOW_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
 API_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
+
+def _origin_is_loopback(origin: str) -> bool:
+    parsed = urlparse(origin)
+    return parsed.scheme in {"http", "https"} and (parsed.hostname or "").strip().lower() in LOOPBACK_CORS_HOSTS
 
 
 class Settings(BaseSettings):
@@ -110,6 +120,24 @@ class Settings(BaseSettings):
     @property
     def cors_allow_origins(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def cors_allow_origin_regex(self) -> str | None:
+        return LOOPBACK_CORS_ORIGIN_REGEX if any(_origin_is_loopback(origin) for origin in self.cors_allow_origins) else None
+
+    def is_cors_origin_allowed(self, origin: str | None) -> bool:
+        if origin is None:
+            return False
+
+        normalized = origin.strip()
+        if not normalized:
+            return False
+
+        if normalized in self.cors_allow_origins:
+            return True
+
+        regex = self.cors_allow_origin_regex
+        return bool(regex and re.fullmatch(regex, normalized))
 
 
 settings = Settings()

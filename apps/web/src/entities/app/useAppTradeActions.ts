@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'react'
 
 import { submitTradeEvent } from '../trade/api'
-import { buildMutationRefreshGroups } from './workspaceRefresh'
-import type { AppDataGroupFlags } from './workspaceLoading'
 import type { useTradeAmendForm } from '../../features/trades/useTradeAmendForm'
 import type { useTradeCaptureForm } from '../../features/trades/useTradeCaptureForm'
 import {
@@ -38,18 +36,13 @@ function parseOptionalTradeNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-type LoadData = (options?: {
-  groups?: Array<keyof AppDataGroupFlags>
-  force?: boolean
-}) => Promise<void>
+type RefreshMutationData = (mutation: 'trade-event') => Promise<void>
 
 export function useAppTradeActions(args: {
   captureForm: ReturnType<typeof useTradeCaptureForm>
   amendForm: ReturnType<typeof useTradeAmendForm>
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
-  currentView: ViewKey
-  groupLoaded: AppDataGroupFlags
-  loadData: LoadData
+  refreshMutationData: RefreshMutationData
   selectedTrade: Trade | null
   selectedTradeEvents: EventRow[]
   selectedTradeId: string | null
@@ -64,9 +57,7 @@ export function useAppTradeActions(args: {
     captureForm,
     amendForm,
     counterpartyCreditProfiles,
-    currentView,
-    groupLoaded,
-    loadData,
+    refreshMutationData,
     selectedTrade,
     selectedTradeEvents,
     selectedTradeId,
@@ -89,14 +80,7 @@ export function useAppTradeActions(args: {
     useState<string | null>(null)
 
   async function refreshTradeMutationData() {
-    await loadData({
-      groups: buildMutationRefreshGroups({
-        currentView,
-        groupLoaded,
-        mutation: 'trade-event',
-      }),
-      force: true,
-    })
+    await refreshMutationData('trade-event')
   }
 
   const createCounterpartyCreditPolicyPreview = useMemo(

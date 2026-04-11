@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
+from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
@@ -91,6 +92,39 @@ class SettlementPaymentsApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 201)
+        return response.json()["access_token"]
+
+    def _create_user(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        display_name: str,
+        role: str,
+        password: str = "supersecret2",
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id=user_id,
+                    email=email,
+                    display_name=display_name,
+                    role=role,
+                    password_hash=hash_password(password),
+                    is_active=True,
+                    last_login_at=self.now,
+                    created_at=self.now,
+                    created_by="settlement_admin",
+                    updated_at=self.now,
+                    updated_by="settlement_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _login(self, *, identifier: str, password: str = "supersecret2") -> str:
+        response = self.client.post("/auth/session", json={"identifier": identifier, "password": password})
+        self.assertEqual(response.status_code, 200)
         return response.json()["access_token"]
 
     def _seed_trade(self, *, trade_id: str) -> None:
@@ -199,6 +233,69 @@ class SettlementPaymentsApiTests(unittest.TestCase):
             self.assertEqual(workflow_item.status, "PAID")
             self.assertIn("Paid USD 80000.00", workflow_item.notes)
 
+    def test_accounting_role_can_create_payment(self) -> None:
+        self._create_user(
+            user_id="accounting.payment",
+            email="accounting.payment@example.com",
+            display_name="Accounting Payment",
+            role="ACCOUNTING",
+        )
+        accounting_token = self._login(identifier="accounting.payment")
+        self._seed_trade(trade_id="T-PMT-ACCOUNTING-1")
+        invoice_id = self._issue_invoice(
+            accounting_token,
+            trade_id="T-PMT-ACCOUNTING-1",
+            invoice_amount=80000,
+            due_at="2026-04-11T12:00:00Z",
+        )
+
+        response = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_reference": "WIRE-ACCOUNTING-80000",
+                "payment_amount": 80000,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {accounting_token}"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["status"], "PAID")
+
+    def test_trader_role_cannot_create_payment(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._create_user(
+            user_id="trader.payment",
+            email="trader.payment@example.com",
+            display_name="Trader Payment",
+            role="TRADER",
+        )
+        trader_token = self._login(identifier="trader.payment")
+        self._seed_trade(trade_id="T-PMT-TRADER-1")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-TRADER-1",
+            invoice_amount=80000,
+            due_at="2026-04-11T12:00:00Z",
+        )
+
+        response = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_amount": 80000,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"],
+            "Only ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can manage settlement.",
+        )
+
     def test_partial_payment_rolls_trade_to_partially_settled_until_fully_paid(self) -> None:
         admin_token = self._bootstrap_admin()
         self._seed_trade(trade_id="T-PMT-2")
@@ -206,7 +303,7 @@ class SettlementPaymentsApiTests(unittest.TestCase):
             admin_token,
             trade_id="T-PMT-2",
             invoice_amount=1000,
-            due_at="2026-04-10T12:00:00Z",
+            due_at="2026-04-12T12:00:00Z",
         )
 
         first_payment = self.client.post(
@@ -262,6 +359,178 @@ class SettlementPaymentsApiTests(unittest.TestCase):
             self.assertEqual(len(payment_events), 2)
             self.assertEqual(payment_events[0].payload["payment"]["payment_amount"], 400.0)
             self.assertEqual(payment_events[1].payload["payment"]["payment_amount"], 600.0)
+
+    def test_payment_create_rejects_currency_mismatch(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-PMT-CCY-1")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-CCY-1",
+            invoice_amount=1000,
+            due_at="2026-04-12T12:00:00Z",
+        )
+
+        response = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_currency_code": "EUR",
+                "payment_amount": 1000,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("must match invoice currency 'USD'", response.json()["detail"])
+
+    def test_payment_update_rejects_currency_mismatch(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-PMT-CCY-2")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-CCY-2",
+            invoice_amount=1000,
+            due_at="2026-04-12T12:00:00Z",
+        )
+
+        create_response = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_amount": 500,
+                "status": "PENDING",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        payment_id = create_response.json()["payment_id"]
+
+        patch_response = self.client.patch(
+            f"/settlement/payments/{payment_id}",
+            json={"payment_currency_code": "EUR"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(patch_response.status_code, 422)
+        self.assertIn("must match invoice currency 'USD'", patch_response.json()["detail"])
+
+    def test_payment_projection_ignores_legacy_mismatched_currency_rows(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-PMT-CCY-3")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-CCY-3",
+            invoice_amount=1000,
+            due_at="2026-04-12T12:00:00Z",
+        )
+
+        with self.SessionLocal() as session:
+            session.add(
+                TradePayment(
+                    trade_id="T-PMT-CCY-3",
+                    invoice_id=invoice_id,
+                    payment_reference="LEGACY-EUR-1",
+                    payment_currency_code="EUR",
+                    payment_amount=400,
+                    status="PAID",
+                    due_at=datetime(2026, 4, 12, 12, 0, tzinfo=timezone.utc),
+                    received_at=datetime(2026, 4, 7, 12, 0, tzinfo=timezone.utc),
+                    notes="Legacy mismatched payment",
+                    created_at=self.now,
+                    created_by="cash.ops",
+                    updated_at=self.now,
+                    updated_by="cash.ops",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        list_response = self.client.get(
+            f"/settlement/payments?invoice_id={invoice_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.json()), 1)
+        self.assertEqual(list_response.json()[0]["payment_currency_code"], "EUR")
+        self.assertEqual(list_response.json()[0]["total_paid_amount"], 0)
+        self.assertEqual(list_response.json()[0]["outstanding_amount"], 1000)
+
+    def test_payment_create_rejects_amount_above_remaining_open_balance(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-PMT-OVR-1")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-OVR-1",
+            invoice_amount=1000,
+            due_at="2026-04-12T12:00:00Z",
+        )
+
+        first_payment = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_amount": 400,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(first_payment.status_code, 201)
+
+        second_payment = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_amount": 700,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(second_payment.status_code, 422)
+        self.assertIn("remaining open balance of USD 600.00", second_payment.json()["detail"])
+
+    def test_payment_update_rejects_amount_above_remaining_open_balance(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-PMT-OVR-2")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-OVR-2",
+            invoice_amount=1000,
+            due_at="2026-04-12T12:00:00Z",
+        )
+
+        first_payment = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_amount": 400,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(first_payment.status_code, 201)
+
+        second_payment = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_amount": 500,
+                "status": "PENDING",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(second_payment.status_code, 201)
+        payment_id = second_payment.json()["payment_id"]
+
+        patch_response = self.client.patch(
+            f"/settlement/payments/{payment_id}",
+            json={"payment_amount": 700},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(patch_response.status_code, 422)
+        self.assertIn("remaining open balance of USD 600.00", patch_response.json()["detail"])
 
     def test_payment_patch_marks_pending_payment_as_paid(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -351,6 +620,60 @@ class SettlementPaymentsApiTests(unittest.TestCase):
         )
         self.assertEqual(override_response.status_code, 422)
         self.assertIn("ledger-managed", override_response.json()["detail"])
+
+    def test_paginated_payment_list_uses_full_invoice_payment_history_for_projection(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-PMT-5")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-5",
+            invoice_amount=1000,
+            due_at="2026-04-12T12:00:00Z",
+        )
+
+        first_payment = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_reference": "WIRE-400",
+                "payment_amount": 400,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(first_payment.status_code, 201)
+
+        second_payment = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_reference": "WIRE-200",
+                "payment_amount": 200,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(second_payment.status_code, 201)
+
+        first_page = self.client.get(
+            f"/settlement/payments?invoice_id={invoice_id}&limit=1&offset=0",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(len(first_page.json()), 1)
+        self.assertEqual(first_page.json()[0]["payment_reference"], "WIRE-400")
+        self.assertEqual(first_page.json()[0]["total_paid_amount"], 600)
+        self.assertEqual(first_page.json()[0]["outstanding_amount"], 400)
+
+        second_page = self.client.get(
+            f"/settlement/payments?invoice_id={invoice_id}&limit=1&offset=1",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(len(second_page.json()), 1)
+        self.assertEqual(second_page.json()[0]["payment_reference"], "WIRE-200")
+        self.assertEqual(second_page.json()[0]["total_paid_amount"], 600)
+        self.assertEqual(second_page.json()[0]["outstanding_amount"], 400)
 
 
 if __name__ == "__main__":

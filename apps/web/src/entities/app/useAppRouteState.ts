@@ -96,6 +96,14 @@ export function useAppRouteState() {
   }
 
   function navigateToView(view: ViewKey) {
+    applyViewNavigation(view, 'push')
+  }
+
+  function replaceView(view: ViewKey) {
+    applyViewNavigation(view, 'replace')
+  }
+
+  function applyViewNavigation(view: ViewKey, historyMode: 'push' | 'replace') {
     syncRouteState(
       {
         section: null,
@@ -103,7 +111,7 @@ export function useAppRouteState() {
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
       },
-      'push',
+      historyMode,
       view === 'settings',
     )
     setActiveNavigationSectionKey(null)
@@ -221,6 +229,7 @@ export function useAppRouteState() {
     navigateToSection,
     navigateToTrade,
     navigateToView,
+    replaceView,
     selectedTradeId,
     setSelectedTradeId,
   }

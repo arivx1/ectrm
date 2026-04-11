@@ -4,14 +4,32 @@ import { loadCurrentSession, sendSessionHeartbeat } from '../auth/api'
 import {
   loadAdminWorkspaceBootstrap,
   loadCoreWorkspaceBootstrap,
+  loadDeliveriesWindow,
   loadDeliveriesWorkspaceBootstrap,
+  loadEventsWorkspaceBootstrap,
+  loadOptionExposuresWindow,
   loadOperationsWorkspaceBootstrap,
+  loadPositionsWorkspaceBootstrap,
+  loadPositionsWindow,
   loadReferenceWorkspaceBootstrap,
   loadReportsWorkspaceBootstrap,
+  loadTradeConfirmationsWindow,
+  loadTradeInvoicesWindow,
+  loadTradePaymentsWindow,
+  loadTradesWorkspaceBootstrap,
+  loadTradesWindow,
+  loadTradeWorkflowItemsWindow,
   loadRiskWorkspaceBootstrap,
   loadSettlementWorkspaceBootstrap,
+  type WorkspaceBootstrapSummary,
+  type WorkspaceCollectionWindow,
 } from './api'
-import { buildMutationRefreshGroups, type WorkspaceMutationKind } from './workspaceRefresh'
+import {
+  buildMutationRefreshGroups,
+  buildTargetedMutationRefreshPlan,
+  type WorkspaceCollectionKey,
+  type WorkspaceMutationKind,
+} from './workspaceRefresh'
 import {
   buildRequestedGroups,
   EMPTY_GROUP_ERRORS,
@@ -28,7 +46,7 @@ import {
   hasAdministrativeAccess,
   sessionHeaders,
 } from './workspaceDataShared'
-import { appConfig } from '../../shared/config'
+import { appConfig, bootstrapQueryLimits } from '../../shared/config'
 import {
   clearStoredAuthSession,
   getStoredAuthSession,
@@ -75,6 +93,66 @@ type LoadDataOptions = {
   force?: boolean
 }
 
+type WorkspaceCollectionWindows = Record<WorkspaceCollectionKey, WorkspaceCollectionWindow>
+type WorkspaceCollectionLoadingFlags = Record<WorkspaceCollectionKey, boolean>
+type WorkspaceCollectionErrors = Record<WorkspaceCollectionKey, string>
+
+function createEmptyCollectionWindows(): WorkspaceCollectionWindows {
+  return {
+    trades: { loadedCount: 0, hasMore: false },
+    positions: { loadedCount: 0, hasMore: false },
+    optionExposures: { loadedCount: 0, hasMore: false },
+    deliveries: { loadedCount: 0, hasMore: false },
+    confirmations: { loadedCount: 0, hasMore: false },
+    operationsWorkItems: { loadedCount: 0, hasMore: false },
+    settlementWorkItems: { loadedCount: 0, hasMore: false },
+    invoices: { loadedCount: 0, hasMore: false },
+    payments: { loadedCount: 0, hasMore: false },
+  }
+}
+
+const EMPTY_COLLECTION_LOADING: WorkspaceCollectionLoadingFlags = {
+  trades: false,
+  positions: false,
+  optionExposures: false,
+  deliveries: false,
+  confirmations: false,
+  operationsWorkItems: false,
+  settlementWorkItems: false,
+  invoices: false,
+  payments: false,
+}
+
+const EMPTY_COLLECTION_ERRORS: WorkspaceCollectionErrors = {
+  trades: '',
+  positions: '',
+  optionExposures: '',
+  deliveries: '',
+  confirmations: '',
+  operationsWorkItems: '',
+  settlementWorkItems: '',
+  invoices: '',
+  payments: '',
+}
+
+function mergeCollectionRows<T>(
+  currentRows: T[],
+  nextRows: T[],
+  getKey: (row: T) => PropertyKey,
+): T[] {
+  const seenKeys = new Set(currentRows.map((row) => getKey(row)))
+  const appendedRows = nextRows.filter((row) => {
+    const key = getKey(row)
+    if (seenKeys.has(key)) {
+      return false
+    }
+    seenKeys.add(key)
+    return true
+  })
+
+  return [...currentRows, ...appendedRows]
+}
+
 export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [health, setHealth] = useState<string>('checking...')
   const [trades, setTrades] = useState<Trade[]>([])
@@ -83,6 +161,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [optionExposures, setOptionExposures] = useState<OptionExposureRow[]>([])
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
   const [tradeConfirmations, setTradeConfirmations] = useState<TradeConfirmationRecord[]>([])
+  const [operationsTradeWorkflowItems, setOperationsTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
+  const [settlementTradeWorkflowItems, setSettlementTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
   const [tradeWorkflowItems, setTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
   const [tradeInvoices, setTradeInvoices] = useState<TradeInvoiceRecord[]>([])
   const [tradePayments, setTradePayments] = useState<TradePaymentRecord[]>([])
@@ -106,18 +186,70 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
   const [weatherLocations, setWeatherLocations] = useState<WeatherLocationRecord[]>([])
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
+  const [workspaceBootstrapSummary, setWorkspaceBootstrapSummary] = useState<WorkspaceBootstrapSummary | null>(null)
   const [error, setError] = useState<string>('')
   const [appLoading, setAppLoading] = useState(true)
   const [groupLoaded, setGroupLoaded] = useState<AppDataGroupFlags>(() => ({ ...EMPTY_GROUP_FLAGS }))
   const [groupLoading, setGroupLoading] = useState<AppDataGroupFlags>(() => ({ ...EMPTY_GROUP_FLAGS }))
   const [groupErrors, setGroupErrors] = useState<AppDataGroupErrors>(() => ({ ...EMPTY_GROUP_ERRORS }))
   const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => getStoredAuthSession())
+  const [collectionWindows, setCollectionWindows] = useState<WorkspaceCollectionWindows>(() =>
+    createEmptyCollectionWindows(),
+  )
+  const [collectionLoadingMore, setCollectionLoadingMore] = useState<WorkspaceCollectionLoadingFlags>(() => ({
+    ...EMPTY_COLLECTION_LOADING,
+  }))
+  const [collectionErrors, setCollectionErrors] = useState<WorkspaceCollectionErrors>(() => ({
+    ...EMPTY_COLLECTION_ERRORS,
+  }))
+
+  const collectionWindowsRef = useRef(collectionWindows)
+  collectionWindowsRef.current = collectionWindows
+
+  const operationsTradeWorkflowItemsRef = useRef(operationsTradeWorkflowItems)
+  operationsTradeWorkflowItemsRef.current = operationsTradeWorkflowItems
+
+  const settlementTradeWorkflowItemsRef = useRef(settlementTradeWorkflowItems)
+  settlementTradeWorkflowItemsRef.current = settlementTradeWorkflowItems
 
   const tradeWorkflowItemsRef = useRef(tradeWorkflowItems)
   tradeWorkflowItemsRef.current = tradeWorkflowItems
 
   const groupLoadedRef = useRef(groupLoaded)
   groupLoadedRef.current = groupLoaded
+
+  function buildTradeWorkflowItems(
+    operationsRows: TradeWorkflowItemRecord[],
+    settlementRows: TradeWorkflowItemRecord[],
+  ): TradeWorkflowItemRecord[] {
+    return decorateWorkflowItems(
+      mergeCollectionRows(operationsRows, settlementRows, (item) => item.item_id),
+    )
+  }
+
+  function syncTradeWorkflowItems(
+    nextOperationsRows: TradeWorkflowItemRecord[],
+    nextSettlementRows: TradeWorkflowItemRecord[],
+  ): TradeWorkflowItemRecord[] {
+    operationsTradeWorkflowItemsRef.current = nextOperationsRows
+    settlementTradeWorkflowItemsRef.current = nextSettlementRows
+    setOperationsTradeWorkflowItems(nextOperationsRows)
+    setSettlementTradeWorkflowItems(nextSettlementRows)
+
+    const nextTradeWorkflowItems = buildTradeWorkflowItems(nextOperationsRows, nextSettlementRows)
+    tradeWorkflowItemsRef.current = nextTradeWorkflowItems
+    setTradeWorkflowItems(nextTradeWorkflowItems)
+    setTrades((current) => decorateTradesWithWorkflowItems(current, nextTradeWorkflowItems))
+
+    return nextTradeWorkflowItems
+  }
+
+  function refreshWindowSize(key: WorkspaceCollectionKey): number {
+    return Math.max(
+      bootstrapQueryLimits.workspaceRecords,
+      collectionWindowsRef.current[key].loadedCount,
+    )
+  }
 
   function markGroupLoaded(group: AppDataGroup, loaded: boolean) {
     setGroupLoaded((current) => ({ ...current, [group]: loaded }))
@@ -131,15 +263,28 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setGroupErrors((current) => ({ ...current, [group]: message }))
   }
 
-  function resetDeferredWorkspaceData() {
+  function setCollectionWindow(key: WorkspaceCollectionKey, window: WorkspaceCollectionWindow) {
+    setCollectionWindows((current) => ({ ...current, [key]: window }))
+  }
+
+  function setCollectionLoading(key: WorkspaceCollectionKey, loading: boolean) {
+    setCollectionLoadingMore((current) => ({ ...current, [key]: loading }))
+  }
+
+  function setCollectionError(key: WorkspaceCollectionKey, message: string) {
+    setCollectionErrors((current) => ({ ...current, [key]: message }))
+  }
+
+  function resetWorkspaceData() {
+    setTrades([])
+    setEvents([])
+    setPositions([])
     setOptionExposures([])
     setDeliveries([])
     setTradeConfirmations([])
-    tradeWorkflowItemsRef.current = []
-    setTradeWorkflowItems([])
+    syncTradeWorkflowItems([], [])
     setTradeInvoices([])
     setTradePayments([])
-    setTrades((current) => decorateTradesWithWorkflowItems(current, []))
     setBooks([])
     setCommodities([])
     setPriceIndices([])
@@ -158,15 +303,24 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setTradingSources([])
     setWeatherLocations([])
     setWeatherSyncStatus(null)
+    setWorkspaceBootstrapSummary(null)
+    setError('')
     setGroupLoaded({ ...EMPTY_GROUP_FLAGS })
     setGroupLoading({ ...EMPTY_GROUP_FLAGS })
     setGroupErrors({ ...EMPTY_GROUP_ERRORS })
+    setCollectionWindows(createEmptyCollectionWindows())
+    setCollectionLoadingMore({ ...EMPTY_COLLECTION_LOADING })
+    setCollectionErrors({ ...EMPTY_COLLECTION_ERRORS })
   }
 
   async function loadData(options?: LoadDataOptions) {
     const currentSession = options?.sessionOverride ?? authSession
     const force = options?.force ?? true
     const readHeaders = currentSession ? sessionHeaders(currentSession) : null
+    const adminHeaders =
+      currentSession && hasAdministrativeAccess(currentSession)
+        ? sessionHeaders(currentSession)
+        : null
     const requestedGroups = buildRequestedGroups({
       currentView,
       force,
@@ -179,97 +333,126 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
       return
     }
 
+    const groupLoaders: Record<AppDataGroup, () => Promise<void>> = {
+      core: async () => {
+        const { health: healthJson, workspaceSummary } = await loadCoreWorkspaceBootstrap(
+          appConfig.apiBase,
+          { readHeaders },
+        )
+        setHealth(healthJson.status ?? 'unknown')
+        setWorkspaceBootstrapSummary(workspaceSummary)
+        setError('')
+        markGroupLoaded('core', true)
+      },
+      trades: async () => {
+        const payload = await loadTradesWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        const nextTrades = decorateTradesWithWorkflowItems(
+          payload.trades,
+          tradeWorkflowItemsRef.current,
+        )
+        setTrades(nextTrades)
+        setCollectionWindow('trades', {
+          loadedCount: nextTrades.length,
+          hasMore: payload.tradesWindow.hasMore,
+        })
+        setCollectionError('trades', '')
+        markGroupLoaded('trades', true)
+      },
+      events: async () => {
+        const payload = await loadEventsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setEvents(payload.events as EventRow[])
+        markGroupLoaded('events', true)
+      },
+      positions: async () => {
+        const payload = await loadPositionsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setPositions(payload.positions)
+        setCollectionWindow('positions', payload.positionsWindow)
+        setCollectionError('positions', '')
+        markGroupLoaded('positions', true)
+      },
+      reference: async () => {
+        const payload = await loadReferenceWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setBooks(payload.books as ReferenceRecord[])
+        setCommodities(payload.commodities as ReferenceRecord[])
+        setPriceIndices(payload.priceIndices as PriceIndexRecord[])
+        setCurrencies(payload.currencies as CurrencyRecord[])
+        setUnits(payload.units as UnitRecord[])
+        setLocations(payload.locations as LocationRecord[])
+        setLocationStandards(payload.locationStandards as LocationStandards)
+        setCounterparties(payload.counterparties as CounterpartyRecord[])
+        setCounterpartyCreditProfiles(payload.counterpartyCreditProfiles as CounterpartyCreditProfileRecord[])
+        setCounterpartyExternalCreditSnapshots(
+          payload.counterpartyExternalCreditSnapshots as CounterpartyExternalCreditSnapshotRecord[],
+        )
+        setCounterpartyStandards(payload.counterpartyStandards as CounterpartyStandards)
+        setPortfolios(payload.portfolios as PortfolioRecord[])
+        markGroupLoaded('reference', true)
+      },
+      risk: async () => {
+        const payload = await loadRiskWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setOptionExposures(payload.optionExposures)
+        setCollectionWindow('optionExposures', payload.optionExposuresWindow)
+        setCollectionError('optionExposures', '')
+        markGroupLoaded('risk', true)
+      },
+      deliveries: async () => {
+        const payload = await loadDeliveriesWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setDeliveries(payload.deliveries)
+        setCollectionWindow('deliveries', payload.deliveriesWindow)
+        setCollectionError('deliveries', '')
+        markGroupLoaded('deliveries', true)
+      },
+      operations: async () => {
+        const payload = await loadOperationsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setTradeConfirmations(payload.confirmations)
+        setCollectionWindow('confirmations', payload.confirmationsWindow)
+        setCollectionError('confirmations', '')
+        syncTradeWorkflowItems(payload.workItems, settlementTradeWorkflowItemsRef.current)
+        setCollectionWindow('operationsWorkItems', {
+          loadedCount: payload.workItems.length,
+          hasMore: payload.workItemsWindow.hasMore,
+        })
+        setCollectionError('operationsWorkItems', '')
+        markGroupLoaded('operations', true)
+      },
+      settlement: async () => {
+        const payload = await loadSettlementWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setTradeInvoices(payload.invoices)
+        setCollectionWindow('invoices', payload.invoicesWindow)
+        setCollectionError('invoices', '')
+        setTradePayments(payload.payments)
+        setCollectionWindow('payments', payload.paymentsWindow)
+        setCollectionError('payments', '')
+        syncTradeWorkflowItems(operationsTradeWorkflowItemsRef.current, payload.workItems)
+        setCollectionWindow('settlementWorkItems', {
+          loadedCount: payload.workItems.length,
+          hasMore: payload.workItemsWindow.hasMore,
+        })
+        setCollectionError('settlementWorkItems', '')
+        markGroupLoaded('settlement', true)
+      },
+      reports: async () => {
+        const payload = await loadReportsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
+        setCounterpartyCreditReport(payload.counterpartyCreditReport as CounterpartyCreditReportRow[])
+        markGroupLoaded('reports', true)
+      },
+      admin: async () => {
+        const payload = await loadAdminWorkspaceBootstrap(appConfig.apiBase, { adminHeaders })
+        setExternalDataRuns(payload.externalDataRuns as ExternalDataRunRecord[])
+        setExternalDataSyncStatus(payload.externalDataSyncStatus as ExternalDataSyncStatusRecord | null)
+        setTradingSources(payload.tradingSources as TradingSourceRecord[])
+        setWeatherLocations(payload.weatherLocations as WeatherLocationRecord[])
+        setWeatherSyncStatus(payload.weatherSyncStatus as WeatherSyncStatusRecord | null)
+        markGroupLoaded('admin', true)
+      },
+    }
+
     async function loadGroup(group: AppDataGroup) {
       markGroupLoading(group, true)
       setGroupError(group, '')
 
       try {
-        switch (group) {
-          case 'core': {
-            const { health: healthJson, trades: tradesJson, events: eventsJson, positions: positionsJson } =
-              await loadCoreWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
-            const nextTrades = decorateTradesWithWorkflowItems(
-              tradesJson as Trade[],
-              tradeWorkflowItemsRef.current,
-            )
-
-            setHealth(healthJson.status ?? 'unknown')
-            setTrades(nextTrades)
-            setEvents(eventsJson as EventRow[])
-            setPositions(positionsJson as PositionRow[])
-            setError('')
-            markGroupLoaded(group, true)
-            return
-          }
-          case 'reference': {
-            const payload = await loadReferenceWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
-            setBooks(payload.books as ReferenceRecord[])
-            setCommodities(payload.commodities as ReferenceRecord[])
-            setPriceIndices(payload.priceIndices as PriceIndexRecord[])
-            setCurrencies(payload.currencies as CurrencyRecord[])
-            setUnits(payload.units as UnitRecord[])
-            setLocations(payload.locations as LocationRecord[])
-            setLocationStandards(payload.locationStandards as LocationStandards)
-            setCounterparties(payload.counterparties as CounterpartyRecord[])
-            setCounterpartyCreditProfiles(payload.counterpartyCreditProfiles as CounterpartyCreditProfileRecord[])
-            setCounterpartyExternalCreditSnapshots(
-              payload.counterpartyExternalCreditSnapshots as CounterpartyExternalCreditSnapshotRecord[],
-            )
-            setCounterpartyStandards(payload.counterpartyStandards as CounterpartyStandards)
-            setPortfolios(payload.portfolios as PortfolioRecord[])
-            markGroupLoaded(group, true)
-            return
-          }
-          case 'risk': {
-            const payload = await loadRiskWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
-            setOptionExposures(payload.optionExposures as OptionExposureRow[])
-            markGroupLoaded(group, true)
-            return
-          }
-          case 'deliveries': {
-            const payload = await loadDeliveriesWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
-            setDeliveries(payload.deliveries as DeliveryRecord[])
-            markGroupLoaded(group, true)
-            return
-          }
-          case 'operations': {
-            const payload = await loadOperationsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
-            setTradeConfirmations(payload.confirmations as TradeConfirmationRecord[])
-            const nextTradeWorkflowItems = decorateWorkflowItems(payload.workItems as TradeWorkflowItemRecord[])
-            tradeWorkflowItemsRef.current = nextTradeWorkflowItems
-            setTradeWorkflowItems(nextTradeWorkflowItems)
-            setTrades((current) => decorateTradesWithWorkflowItems(current, nextTradeWorkflowItems))
-            markGroupLoaded(group, true)
-            return
-          }
-          case 'settlement': {
-            const payload = await loadSettlementWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
-            setTradeInvoices(payload.invoices as TradeInvoiceRecord[])
-            setTradePayments(payload.payments as TradePaymentRecord[])
-            markGroupLoaded(group, true)
-            return
-          }
-          case 'reports': {
-            const payload = await loadReportsWorkspaceBootstrap(appConfig.apiBase, { readHeaders })
-            setCounterpartyCreditReport(payload.counterpartyCreditReport as CounterpartyCreditReportRow[])
-            markGroupLoaded(group, true)
-            return
-          }
-          case 'admin': {
-            const payload = await loadAdminWorkspaceBootstrap(appConfig.apiBase, {
-              adminHeaders:
-                currentSession && hasAdministrativeAccess(currentSession)
-                  ? sessionHeaders(currentSession)
-                  : null,
-            })
-            setExternalDataRuns(payload.externalDataRuns as ExternalDataRunRecord[])
-            setExternalDataSyncStatus(payload.externalDataSyncStatus as ExternalDataSyncStatusRecord | null)
-            setTradingSources(payload.tradingSources as TradingSourceRecord[])
-            setWeatherLocations(payload.weatherLocations as WeatherLocationRecord[])
-            setWeatherSyncStatus(payload.weatherSyncStatus as WeatherSyncStatusRecord | null)
-            markGroupLoaded(group, true)
-          }
-        }
+        await groupLoaders[group]()
       } catch (nextError) {
         const message =
           nextError instanceof Error
@@ -299,7 +482,290 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const loadDataRef = useRef(loadData)
   loadDataRef.current = loadData
 
+  async function refreshWorkspaceCollection(
+    key: WorkspaceCollectionKey,
+    readHeaders: HeadersInit | null,
+  ) {
+    const refreshLoaders: Record<WorkspaceCollectionKey, () => Promise<void>> = {
+      trades: async () => {
+        const payload = await loadTradesWindow(appConfig.apiBase, { readHeaders }, 0, refreshWindowSize('trades'))
+        const nextTrades = decorateTradesWithWorkflowItems(payload.rows, tradeWorkflowItemsRef.current)
+        setTrades(nextTrades)
+        setCollectionWindow('trades', payload.window)
+        setCollectionError('trades', '')
+        markGroupLoaded('trades', true)
+      },
+      positions: async () => {
+        const payload = await loadPositionsWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          0,
+          refreshWindowSize('positions'),
+        )
+        setPositions(payload.rows)
+        setCollectionWindow('positions', payload.window)
+        setCollectionError('positions', '')
+        markGroupLoaded('positions', true)
+      },
+      optionExposures: async () => {
+        const payload = await loadOptionExposuresWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          0,
+          refreshWindowSize('optionExposures'),
+        )
+        setOptionExposures(payload.rows)
+        setCollectionWindow('optionExposures', payload.window)
+        setCollectionError('optionExposures', '')
+        markGroupLoaded('risk', true)
+      },
+      deliveries: async () => {
+        const payload = await loadDeliveriesWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          0,
+          refreshWindowSize('deliveries'),
+        )
+        setDeliveries(payload.rows)
+        setCollectionWindow('deliveries', payload.window)
+        setCollectionError('deliveries', '')
+        markGroupLoaded('deliveries', true)
+      },
+      confirmations: async () => {
+        const payload = await loadTradeConfirmationsWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          0,
+          refreshWindowSize('confirmations'),
+        )
+        setTradeConfirmations(payload.rows)
+        setCollectionWindow('confirmations', payload.window)
+        setCollectionError('confirmations', '')
+        markGroupLoaded('operations', true)
+      },
+      operationsWorkItems: async () => {
+        const payload = await loadTradeWorkflowItemsWindow(
+          appConfig.apiBase,
+          'operations',
+          { readHeaders },
+          0,
+          refreshWindowSize('operationsWorkItems'),
+        )
+        syncTradeWorkflowItems(payload.rows, settlementTradeWorkflowItemsRef.current)
+        setCollectionWindow('operationsWorkItems', payload.window)
+        setCollectionError('operationsWorkItems', '')
+        markGroupLoaded('operations', true)
+      },
+      settlementWorkItems: async () => {
+        const payload = await loadTradeWorkflowItemsWindow(
+          appConfig.apiBase,
+          'settlement',
+          { readHeaders },
+          0,
+          refreshWindowSize('settlementWorkItems'),
+        )
+        syncTradeWorkflowItems(operationsTradeWorkflowItemsRef.current, payload.rows)
+        setCollectionWindow('settlementWorkItems', payload.window)
+        setCollectionError('settlementWorkItems', '')
+        markGroupLoaded('settlement', true)
+      },
+      invoices: async () => {
+        const payload = await loadTradeInvoicesWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          0,
+          refreshWindowSize('invoices'),
+        )
+        setTradeInvoices(payload.rows)
+        setCollectionWindow('invoices', payload.window)
+        setCollectionError('invoices', '')
+        markGroupLoaded('settlement', true)
+      },
+      payments: async () => {
+        const payload = await loadTradePaymentsWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          0,
+          refreshWindowSize('payments'),
+        )
+        setTradePayments(payload.rows)
+        setCollectionWindow('payments', payload.window)
+        setCollectionError('payments', '')
+        markGroupLoaded('settlement', true)
+      },
+    }
+
+    await refreshLoaders[key]()
+  }
+
+  async function handleLoadMoreWorkspaceCollection(key: WorkspaceCollectionKey) {
+    if (collectionLoadingMore[key] || !collectionWindows[key].hasMore) {
+      return
+    }
+
+    const readHeaders = authSession ? sessionHeaders(authSession) : null
+    setCollectionLoading(key, true)
+    setCollectionError(key, '')
+
+    const collectionLoaders: Record<WorkspaceCollectionKey, () => Promise<void>> = {
+      trades: async () => {
+        const payload = await loadTradesWindow(appConfig.apiBase, { readHeaders }, trades.length)
+        const nextTrades = decorateTradesWithWorkflowItems(
+          mergeCollectionRows(trades, payload.rows, (trade) => trade.trade_id),
+          tradeWorkflowItemsRef.current,
+        )
+        setTrades(nextTrades)
+        setCollectionWindow('trades', {
+          loadedCount: nextTrades.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      positions: async () => {
+        const payload = await loadPositionsWindow(appConfig.apiBase, { readHeaders }, positions.length)
+        const nextPositions = mergeCollectionRows(positions, payload.rows, (position) => position.commodity)
+        setPositions(nextPositions)
+        setCollectionWindow('positions', {
+          loadedCount: nextPositions.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      optionExposures: async () => {
+        const payload = await loadOptionExposuresWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          optionExposures.length,
+        )
+        const nextOptionExposures = mergeCollectionRows(
+          optionExposures,
+          payload.rows,
+          (optionExposure) => optionExposure.trade_id,
+        )
+        setOptionExposures(nextOptionExposures)
+        setCollectionWindow('optionExposures', {
+          loadedCount: nextOptionExposures.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      deliveries: async () => {
+        const payload = await loadDeliveriesWindow(appConfig.apiBase, { readHeaders }, deliveries.length)
+        const nextDeliveries = mergeCollectionRows(
+          deliveries,
+          payload.rows,
+          (delivery) => delivery.delivery_id,
+        )
+        setDeliveries(nextDeliveries)
+        setCollectionWindow('deliveries', {
+          loadedCount: nextDeliveries.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      confirmations: async () => {
+        const payload = await loadTradeConfirmationsWindow(
+          appConfig.apiBase,
+          { readHeaders },
+          tradeConfirmations.length,
+        )
+        const nextTradeConfirmations = mergeCollectionRows(
+          tradeConfirmations,
+          payload.rows,
+          (confirmation) => confirmation.confirmation_id,
+        )
+        setTradeConfirmations(nextTradeConfirmations)
+        setCollectionWindow('confirmations', {
+          loadedCount: nextTradeConfirmations.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      operationsWorkItems: async () => {
+        const currentRows = operationsTradeWorkflowItemsRef.current
+        const payload = await loadTradeWorkflowItemsWindow(
+          appConfig.apiBase,
+          'operations',
+          { readHeaders },
+          currentRows.length,
+        )
+        const nextQueueRows = mergeCollectionRows(currentRows, payload.rows, (item) => item.item_id)
+        syncTradeWorkflowItems(nextQueueRows, settlementTradeWorkflowItemsRef.current)
+        setCollectionWindow('operationsWorkItems', {
+          loadedCount: nextQueueRows.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      settlementWorkItems: async () => {
+        const currentRows = settlementTradeWorkflowItemsRef.current
+        const payload = await loadTradeWorkflowItemsWindow(
+          appConfig.apiBase,
+          'settlement',
+          { readHeaders },
+          currentRows.length,
+        )
+        const nextQueueRows = mergeCollectionRows(currentRows, payload.rows, (item) => item.item_id)
+        syncTradeWorkflowItems(operationsTradeWorkflowItemsRef.current, nextQueueRows)
+        setCollectionWindow('settlementWorkItems', {
+          loadedCount: nextQueueRows.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      invoices: async () => {
+        const payload = await loadTradeInvoicesWindow(appConfig.apiBase, { readHeaders }, tradeInvoices.length)
+        const nextTradeInvoices = mergeCollectionRows(
+          tradeInvoices,
+          payload.rows,
+          (invoice) => invoice.invoice_id,
+        )
+        setTradeInvoices(nextTradeInvoices)
+        setCollectionWindow('invoices', {
+          loadedCount: nextTradeInvoices.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      payments: async () => {
+        const payload = await loadTradePaymentsWindow(appConfig.apiBase, { readHeaders }, tradePayments.length)
+        const nextTradePayments = mergeCollectionRows(
+          tradePayments,
+          payload.rows,
+          (payment) => payment.payment_id,
+        )
+        setTradePayments(nextTradePayments)
+        setCollectionWindow('payments', {
+          loadedCount: nextTradePayments.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+    }
+
+    try {
+      await collectionLoaders[key]()
+    } catch (nextError) {
+      setCollectionError(
+        key,
+        nextError instanceof Error
+          ? nextError.message
+          : `Could not load more ${key.replaceAll(/([A-Z])/g, ' $1').toLowerCase()}.`,
+      )
+    } finally {
+      setCollectionLoading(key, false)
+    }
+  }
+
   async function refreshMutationData(mutation: WorkspaceMutationKind) {
+    const targetedPlan = buildTargetedMutationRefreshPlan({
+      currentView,
+      mutation,
+    })
+
+    if (targetedPlan) {
+      const readHeaders = authSession ? sessionHeaders(authSession) : null
+      await loadDataRef.current({
+        groups: targetedPlan.groups,
+        force: true,
+      })
+      await Promise.all(
+        targetedPlan.collections.map((key) => refreshWorkspaceCollection(key, readHeaders)),
+      )
+      return
+    }
+
     await loadDataRef.current({
       groups: buildMutationRefreshGroups({
         currentView,
@@ -343,7 +809,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     }
 
     setAppLoading(true)
-    resetDeferredWorkspaceData()
+    resetWorkspaceData()
     setAuthSession(nextSession)
 
     try {
@@ -433,6 +899,9 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     authSession,
     appLoading,
     books,
+    collectionErrors,
+    collectionLoadingMore,
+    collectionWindows,
     commodities,
     counterparties,
     counterpartyCreditProfiles,
@@ -449,6 +918,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     groupLoaded,
     groupLoading,
     handleSessionChange,
+    handleLoadMoreWorkspaceCollection,
     health,
     loadData,
     locationStandards,
@@ -468,6 +938,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     tradingSources,
     units,
     weatherLocations,
+    workspaceBootstrapSummary,
     weatherSyncStatus,
   }
 }

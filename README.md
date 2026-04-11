@@ -131,3 +131,5 @@ to explore.
 - [Trading source candidate guide](docs/engineering/trading-source-candidates.md)
 - [Trading source seed script](docs/engineering/trading-source-register-seed.psql)
 - [Trading source roadmap](docs/engineering/trading-source-roadmap.md)
+- [Future-ready engineering work packages](docs/engineering/future-ready-engineering-work-packages.md)
+- [Future-ready Wave 0 tickets](docs/engineering/future-ready-wave-0-tickets.md)

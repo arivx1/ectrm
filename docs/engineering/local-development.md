@@ -41,6 +41,11 @@ Run this from:
 apps/web
 ```
 
+If Vite needs another local port because `5173` is already occupied, the API
+should still accept loopback browser origins such as `http://localhost:5174`
+and `http://127.0.0.1:5174` as long as loopback origins remain part of the
+configured CORS allowlist.
+
 ### Rebuild trades projection
 
 ```bash

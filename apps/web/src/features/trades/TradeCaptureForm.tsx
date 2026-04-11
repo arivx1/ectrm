@@ -4,8 +4,8 @@ import { TradeLegEditor } from './TradeLegEditor'
 import {
   buildCounterpartyCreditRestrictionMessage,
   type CounterpartyCreditPolicyPreview,
-  formatCounterpartyOptionLabel,
 } from './counterpartyCredit'
+import { CounterpartySearchField, ReferenceSearchField } from './tradeSearchFields'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
 import { FieldLabel } from '../../shared/ui/Tooltip'
@@ -53,6 +53,8 @@ type TradeCaptureFormProps = {
   setTradeSideInput: (value: string) => void
   bookInput: string
   setBookInput: (value: string) => void
+  bookSearchInput: string
+  setBookSearchInput: (value: string) => void
   activeBooks: ReferenceRecord[]
   commodityClassInput: string
   setCommodityClassInput: (value: string) => void
@@ -90,9 +92,13 @@ type TradeCaptureFormProps = {
   setEffectiveEndDateInput: (value: string) => void
   portfolioInput: string
   setPortfolioInput: (value: string) => void
+  portfolioSearchInput: string
+  setPortfolioSearchInput: (value: string) => void
   createPortfolioOptions: PortfolioRecord[]
   counterpartyInput: string
   setCounterpartyInput: (value: string) => void
+  counterpartySearchInput: string
+  setCounterpartySearchInput: (value: string) => void
   createCounterpartyOptions: CounterpartyRecord[]
   tradeCurrencyInput: string
   setTradeCurrencyInput: (value: string) => void
@@ -180,6 +186,8 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     setTradeSideInput,
     bookInput,
     setBookInput,
+    bookSearchInput,
+    setBookSearchInput,
     activeBooks,
     commodityClassInput,
     setCommodityClassInput,
@@ -217,9 +225,13 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     setEffectiveEndDateInput,
     portfolioInput,
     setPortfolioInput,
+    portfolioSearchInput,
+    setPortfolioSearchInput,
     createPortfolioOptions,
     counterpartyInput,
     setCounterpartyInput,
+    counterpartySearchInput,
+    setCounterpartySearchInput,
     createCounterpartyOptions,
     tradeCurrencyInput,
     setTradeCurrencyInput,
@@ -477,53 +489,52 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>Counterparty</span>
-          <select
-            className="control"
-            value={counterpartyInput}
-            onChange={(event) => setCounterpartyInput(event.target.value)}
-            disabled={submitting}
-          >
-            <option value="">No counterparty</option>
-            {createCounterpartyOptions.map((counterparty) => (
-              <option key={counterparty.code} value={counterparty.code}>
-                {formatCounterpartyOptionLabel(counterparty)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Book</span>
-          <select
-            className="control"
-            value={bookInput}
-            onChange={(event) => setBookInput(event.target.value)}
-            disabled={submitting || referenceDataLoading || activeBooks.length === 0}
-          >
-            {activeBooks.map((book) => (
-              <option key={book.code} value={book.code}>
-                {book.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Portfolio</span>
-          <select
-            className="control"
-            value={portfolioInput}
-            onChange={(event) => setPortfolioInput(event.target.value)}
-            disabled={submitting || createPortfolioOptions.length === 0}
-          >
-            <option value="">No portfolio</option>
-            {createPortfolioOptions.map((portfolio) => (
-              <option key={portfolio.code} value={portfolio.code}>
-                {portfolio.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CounterpartySearchField
+          counterpartyInput={counterpartyInput}
+          setCounterpartyInput={setCounterpartyInput}
+          counterpartySearchInput={counterpartySearchInput}
+          setCounterpartySearchInput={setCounterpartySearchInput}
+          createCounterpartyOptions={createCounterpartyOptions}
+          disabled={submitting}
+        />
+        <ReferenceSearchField
+          label="Book"
+          selectedCode={bookInput}
+          setSelectedCode={setBookInput}
+          searchInput={bookSearchInput}
+          setSearchInput={setBookSearchInput}
+          options={activeBooks}
+          disabled={submitting || referenceDataLoading || activeBooks.length === 0}
+          allowEmpty={false}
+          preserveSelectionWhileSearching
+          placeholder="Search by book name or code"
+          idleHelperText="Search by book name or code."
+          unmatchedHelperText="No exact book is selected yet. Choose a result to move the ticket."
+          emptyStateText="No books match that search yet."
+          selectedHelperText={(book) => `Booking into ${book.code}.`}
+          searchingHelperText={(book) => `Current book stays ${book.code} until you choose a new result.`}
+          buildSecondaryLabel={(book) => book.code}
+        />
+        <ReferenceSearchField
+          label="Portfolio"
+          selectedCode={portfolioInput}
+          setSelectedCode={setPortfolioInput}
+          searchInput={portfolioSearchInput}
+          setSearchInput={setPortfolioSearchInput}
+          options={createPortfolioOptions}
+          disabled={submitting || createPortfolioOptions.length === 0}
+          allowEmpty
+          placeholder="Search by portfolio name or code"
+          idleHelperText={
+            createPortfolioOptions.length === 0
+              ? 'No active portfolios are configured for the current book yet.'
+              : 'Search by portfolio name or code. Leave blank for no portfolio.'
+          }
+          unmatchedHelperText="No exact portfolio is selected yet. Choose a result or clear the field for no portfolio."
+          emptyStateText="No portfolios match that search yet."
+          selectedHelperText={(portfolio) => `Allocating to ${portfolio.code}.`}
+          buildSecondaryLabel={(portfolio) => `${portfolio.code} · ${portfolio.book_code}`}
+        />
         <label className="field">
           <span>Trader User</span>
           <input

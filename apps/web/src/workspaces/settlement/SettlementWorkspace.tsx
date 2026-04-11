@@ -1,4 +1,5 @@
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
+import type { WorkspaceSettlementSummary } from '../../entities/app/api'
 import type {
   CreateTradeInvoiceInput,
   CreateTradePaymentInput,
@@ -16,6 +17,7 @@ type SettlementWorkspaceProps = {
   activeTrades: Trade[]
   invoices: TradeInvoiceRecord[]
   payments: TradePaymentRecord[]
+  settlementSummary: WorkspaceSettlementSummary | null
   workItems: TradeWorkflowItemRecord[]
   formatCommodityClass: (value: string) => string
   formatMoney: (value: number | null, currencyCode?: string | null) => string
@@ -72,6 +74,7 @@ export function SettlementWorkspace({
   activeTrades,
   invoices,
   payments,
+  settlementSummary,
   workItems,
   formatCommodityClass,
   formatMoney,
@@ -130,20 +133,39 @@ export function SettlementWorkspace({
   )
   const invoiceQueueTradeIds = new Set(invoiceQueueTrades.map((trade) => trade.trade_id))
   const paymentQueueInvoices = invoices.filter((invoice) => invoiceQueueTradeIds.has(invoice.trade_id))
-  const invoicePendingCount = invoiceQueueTrades.filter((trade) => !invoiceCountByTradeId.has(trade.trade_id)).length
-  const paymentDueCount = activeTrades.filter((trade) => ['DUE', 'OVERDUE'].includes(trade.payment_status)).length
-  const settledCount = activeTrades.filter(
-    (trade) =>
-      trade.settlement_status === 'SETTLED' &&
-      ['PAID', 'NOT_REQUIRED'].includes(trade.payment_status),
-  ).length
-  const settlementBreakdown = ['PENDING', 'INVOICED', 'PARTIALLY_SETTLED', 'SETTLED', 'DISPUTED']
-    .map((status) => ({
-      status,
-      count: activeTrades.filter((trade) => trade.settlement_status === status).length,
-    }))
-    .filter((row) => row.count > 0)
+  const invoicePendingCount =
+    settlementSummary?.invoice_pending_count ??
+    invoiceQueueTrades.filter((trade) => !invoiceCountByTradeId.has(trade.trade_id)).length
+  const paymentDueCount =
+    settlementSummary?.payment_due_count ??
+    activeTrades.filter((trade) => ['DUE', 'OVERDUE'].includes(trade.payment_status)).length
+  const settledCount =
+    settlementSummary?.settled_count ??
+    activeTrades.filter(
+      (trade) =>
+        trade.settlement_status === 'SETTLED' &&
+        ['PAID', 'NOT_REQUIRED'].includes(trade.payment_status),
+    ).length
+  const settlementBreakdown =
+    settlementSummary?.breakdown.length
+      ? settlementSummary.breakdown
+      : ['PENDING', 'INVOICED', 'PARTIALLY_SETTLED', 'SETTLED', 'DISPUTED']
+          .map((status) => ({
+            status,
+            count: activeTrades.filter((trade) => trade.settlement_status === status).length,
+          }))
+          .filter((row) => row.count > 0)
+  const openSettlementCount = settlementSummary?.open_work_item_count ?? openSettlementWorkItems.length
+  const hasSettlementExceptions =
+    settlementSummary !== null
+      ? settlementSummary.trade_exception_count > 0 || settlementSummary.workflow_exception_count > 0
+      : settlementExceptionItems.length > 0 || disputedTrades.length > 0
+  const hasSettlementSummaryData =
+    settlementBreakdown.length > 0 || openSettlementCount > 0 || invoicePendingCount > 0 || paymentDueCount > 0 || settledCount > 0
+  const hasSettlementQueue = activeTrades.length > 0 || hasSettlementSummaryData
   const oldestOpenTrade = openSettlementTrades[0] ?? null
+  const settledOpenStateTitle = oldestOpenTrade ? `${oldestOpenTrade.trade_id} is leading the open queue` : 'Settlement Ladder'
+  const settlementExceptionTitle = hasSettlementExceptions ? 'Settlement Exceptions' : 'No active settlement exceptions'
 
   return (
     <TileLayout
@@ -159,11 +181,11 @@ export function SettlementWorkspace({
           span: 'full',
           availableSpans: ['full', 'wide'],
           content:
-            activeTrades.length > 0 ? (
+            hasSettlementQueue ? (
               <div className="dashboard-report-grid">
                 <article className="dashboard-report-card">
                   <span>Open Settlement</span>
-                  <strong>{formatNumber(openSettlementWorkItems.length, 0)}</strong>
+                  <strong>{formatNumber(openSettlementCount, 0)}</strong>
                   <p>Invoice and payment workflow tickets still open on the active trade book.</p>
                 </article>
                 <article className="dashboard-report-card">
@@ -192,7 +214,7 @@ export function SettlementWorkspace({
         {
           id: 'settlement-status',
           eyebrow: 'Ladder',
-          title: oldestOpenTrade ? `${oldestOpenTrade.trade_id} is leading the open queue` : 'Settlement Ladder',
+          title: settledOpenStateTitle,
           description: 'A status ladder showing how the active trade set is distributed across settlement stages.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
@@ -215,10 +237,7 @@ export function SettlementWorkspace({
         {
           id: 'settlement-disputes',
           eyebrow: 'Escalation',
-          title:
-            settlementExceptionItems.length > 0 || disputedTrades.length > 0
-              ? 'Settlement Exceptions'
-              : 'No active settlement exceptions',
+          title: settlementExceptionTitle,
           description: 'Disputed, overdue, or otherwise late settlement tasks that usually need direct human escalation.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
