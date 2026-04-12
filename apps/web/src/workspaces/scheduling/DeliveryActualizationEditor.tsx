@@ -124,7 +124,7 @@ export function DeliveryActualizationEditor({
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to record executed quantity and actual delivery timestamps.</p>
+        <p className="workflow-editor-note">Sign in to record executed quantity and actual delivery timestamps.</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
 

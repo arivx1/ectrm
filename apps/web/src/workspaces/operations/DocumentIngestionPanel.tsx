@@ -16,7 +16,7 @@ export function DocumentIngestionPanel({ authSession, formatDate, compact = fals
     return (
       <div className="empty-state">
         <strong>Document intake is protected</strong>
-        <p>Sign in from Settings to upload and review PDFs, page classifications, and extracted header or table scaffolding.</p>
+        <p>Sign in to upload and review PDFs, page classifications, and extracted header or table scaffolding.</p>
       </div>
     )
   }

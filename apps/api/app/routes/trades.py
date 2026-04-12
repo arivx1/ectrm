@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.trading.services.trade_metadata import build_trade_metadata_contract
 from apps.api.app.models.trade import Trade, trade_recency_order
-from apps.api.app.schemas.trade import TradeOut
+from apps.api.app.schemas.trade import TradeMetadataOut, TradeOut
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 
@@ -77,6 +78,11 @@ def list_trades(
         .limit(limit)
     ).scalars().all()
     return [_to_trade_out(row) for row in rows]
+
+
+@router.get("/metadata", response_model=TradeMetadataOut)
+def get_trade_metadata() -> TradeMetadataOut:
+    return build_trade_metadata_contract()
 
 
 @router.get("/{trade_id}", response_model=TradeOut)

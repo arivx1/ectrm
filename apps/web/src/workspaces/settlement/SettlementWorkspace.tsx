@@ -1,5 +1,5 @@
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
-import type { WorkspaceSettlementSummary } from '../../entities/app/api'
+import type { OperationalResourceDescriptor, WorkspaceSettlementSummary } from '../../entities/app/api'
 import type {
   CreateTradeInvoiceInput,
   CreateTradePaymentInput,
@@ -9,8 +9,12 @@ import type {
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { Trade, TradeInvoiceRecord, TradePaymentRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { OperationalBoardShell } from '../operations/OperationalBoardShell'
 import { SettlementInvoiceBoard } from './SettlementInvoiceBoard'
 import { SettlementPaymentBoard } from './SettlementPaymentBoard'
+import {
+  resolveOperationalWorkboardDefinition,
+} from '../operations/operationalWorkboardRegistry'
 
 type SettlementWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -19,6 +23,7 @@ type SettlementWorkspaceProps = {
   payments: TradePaymentRecord[]
   settlementSummary: WorkspaceSettlementSummary | null
   workItems: TradeWorkflowItemRecord[]
+  operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
   formatMoney: (value: number | null, currencyCode?: string | null) => string
   formatNumber: (value: number | null, digits?: number) => string
@@ -76,6 +81,7 @@ export function SettlementWorkspace({
   payments,
   settlementSummary,
   workItems,
+  operationalResourceDescriptors,
   formatCommodityClass,
   formatMoney,
   formatNumber,
@@ -166,6 +172,8 @@ export function SettlementWorkspace({
   const oldestOpenTrade = openSettlementTrades[0] ?? null
   const settledOpenStateTitle = oldestOpenTrade ? `${oldestOpenTrade.trade_id} is leading the open queue` : 'Settlement Ladder'
   const settlementExceptionTitle = hasSettlementExceptions ? 'Settlement Exceptions' : 'No active settlement exceptions'
+  const invoiceLedgerWorkboard = resolveOperationalWorkboardDefinition('invoiceLedger', operationalResourceDescriptors)
+  const paymentLedgerWorkboard = resolveOperationalWorkboardDefinition('paymentLedger', operationalResourceDescriptors)
 
   return (
     <TileLayout
@@ -288,13 +296,10 @@ export function SettlementWorkspace({
           content: invoiceQueueTrades.length > 0 || paymentQueueInvoices.length > 0 ? (
             <div className="settlement-queue-stack">
               {invoiceQueueTrades.length > 0 ? (
-                <section className="settlement-queue-section">
-                  <div className="scheduler-section-banner">
-                    <div className="scheduler-section-copy">
-                      <strong>Invoice Ledger</strong>
-                      <p>Dedicated invoice records now drive invoice and settlement rollups for each active trade.</p>
-                    </div>
-                  </div>
+                <OperationalBoardShell
+                  workboard={invoiceLedgerWorkboard}
+                  className="settlement-queue-section"
+                >
                   <SettlementInvoiceBoard
                     key={[
                       invoiceQueueTrades
@@ -316,16 +321,13 @@ export function SettlementWorkspace({
                     onOpenTrade={onOpenTrade}
                     onSaveInvoice={onSaveInvoice}
                   />
-                </section>
+                </OperationalBoardShell>
               ) : null}
               {paymentQueueInvoices.length > 0 ? (
-                <section className="settlement-queue-section">
-                  <div className="scheduler-section-banner">
-                    <div className="scheduler-section-copy">
-                      <strong>Payment Ledger</strong>
-                      <p>Cash collection and settlement now run from dedicated payment records instead of a status-only queue row.</p>
-                    </div>
-                  </div>
+                <OperationalBoardShell
+                  workboard={paymentLedgerWorkboard}
+                  className="settlement-queue-section"
+                >
                   <SettlementPaymentBoard
                     key={[
                       paymentQueueInvoices.map((invoice) => `${invoice.invoice_id}:${invoice.version}`).join('|'),
@@ -347,7 +349,7 @@ export function SettlementWorkspace({
                     onOpenTrade={onOpenTrade}
                     onSavePayment={onSavePayment}
                   />
-                </section>
+                </OperationalBoardShell>
               ) : null}
             </div>
           ) : (

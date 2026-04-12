@@ -1,14 +1,6 @@
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 
-import {
-  bootstrapAdminSession,
-  createAuthSession,
-  createGoogleAuthSession,
-  createSingleUserAuthSession,
-  logoutCurrentSession,
-  type SessionResponse,
-} from '../../entities/auth/api'
-import { loadGoogleIdentityScript } from '../../entities/auth/googleIdentity'
+import { logoutCurrentSession } from '../../entities/auth/api'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../entities/app/api'
 import {
   resolveAppearancePalette,
@@ -66,7 +58,7 @@ type FlashMessage = {
   message: string
 }
 
-type AuthAction = 'login' | 'single-user' | 'bootstrap' | 'logout' | 'google' | null
+type AuthAction = 'logout' | null
 
 const COLOR_MODE_OPTIONS: Array<{
   value: ColorModePreference
@@ -89,15 +81,6 @@ const COLOR_MODE_OPTIONS: Array<{
     detail: 'Keep the terminal-style night treatment active.',
   },
 ]
-
-function mapSession(session: SessionResponse): StoredAuthSession {
-  return {
-    sessionId: session.session_id,
-    accessToken: session.access_token,
-    expiresAt: session.expires_at,
-    user: session.user,
-  }
-}
 
 function SettingsValueRow({
   label,
@@ -218,14 +201,6 @@ export function SettingsWorkspace({
   onTradeCaptureSettingsReset,
   onSessionChange,
 }: SettingsWorkspaceProps) {
-  const [loginForm, setLoginForm] = useState({ identifier: '', password: '' })
-  const [bootstrapForm, setBootstrapForm] = useState({
-    bootstrap_token: '',
-    user_id: '',
-    email: '',
-    display_name: '',
-    password: '',
-  })
   const [runtimeOverrideForm, setRuntimeOverrideForm] = useState<ClientRuntimeOverrideSnapshot>(() =>
     getClientRuntimeOverrideSnapshot(),
   )
@@ -239,8 +214,6 @@ export function SettingsWorkspace({
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
-  const [googleSignInReady, setGoogleSignInReady] = useState(false)
-  const googleSignInContainerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -307,98 +280,6 @@ export function SettingsWorkspace({
 
     return () => window.cancelAnimationFrame(frameId)
   }, [])
-
-  async function handleLogin(event: React.FormEvent) {
-    event.preventDefault()
-    setAuthAction('login')
-    setAuthFlash(null)
-
-    try {
-      const session = await createAuthSession(appConfig.apiBase, loginForm)
-      await onSessionChange(mapSession(session))
-      setLoginForm({ identifier: loginForm.identifier.trim(), password: '' })
-      setAuthFlash({
-        tone: 'success',
-        message: `Signed in as ${session.user.display_name}. Protected writes now derive actor identity from the active session.`,
-      })
-    } catch (error) {
-      setAuthFlash({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in.',
-      })
-    } finally {
-      setAuthAction(null)
-    }
-  }
-
-  async function handleSingleUserLogin() {
-    setAuthAction('single-user')
-    setAuthFlash(null)
-
-    try {
-      const session = await createSingleUserAuthSession(appConfig.apiBase)
-      await onSessionChange(mapSession(session))
-      setAuthFlash({
-        tone: 'success',
-        message: `Signed in as ${session.user.display_name} through single-user access.`,
-      })
-    } catch (error) {
-      setAuthFlash({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in with single-user access.',
-      })
-    } finally {
-      setAuthAction(null)
-    }
-  }
-
-  const handleGoogleCredential = useEffectEvent(async (idToken: string) => {
-    setAuthAction('google')
-    setAuthFlash(null)
-
-    try {
-      const session = await createGoogleAuthSession(appConfig.apiBase, { id_token: idToken })
-      await onSessionChange(mapSession(session))
-      setAuthFlash({
-        tone: 'success',
-        message: `Signed in as ${session.user.display_name} through Google.`,
-      })
-    } catch (error) {
-      setAuthFlash({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in with Google.',
-      })
-    } finally {
-      setAuthAction(null)
-    }
-  })
-
-  async function handleBootstrapAdmin(event: React.FormEvent) {
-    event.preventDefault()
-    setAuthAction('bootstrap')
-    setAuthFlash(null)
-
-    try {
-      const session = await bootstrapAdminSession(appConfig.apiBase, bootstrapForm)
-      await onSessionChange(mapSession(session))
-      setBootstrapForm((current) => ({
-        ...current,
-        bootstrap_token: '',
-        password: '',
-      }))
-      setAuthFlash({
-        tone: 'success',
-        message: `Bootstrap complete. Signed in as ${session.user.display_name}.`,
-      })
-    } catch (error) {
-      setAuthFlash({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not bootstrap the initial admin account.',
-      })
-    } finally {
-      setAuthAction(null)
-    }
-  }
 
   async function handleLogout() {
     setAuthAction('logout')
@@ -565,7 +446,6 @@ export function SettingsWorkspace({
     }))
   }
 
-  const googleClientId = serverSettings?.google_auth.client_id?.trim() ?? ''
   const healthTone = health === 'ok' ? 'active' : 'cancelled'
   const authTone = authSession ? 'active' : 'cancelled'
   const authLoading = authAction !== null
@@ -576,86 +456,6 @@ export function SettingsWorkspace({
     (rule) => rule.visibility.optionDetails !== 'inherit' || rule.visibility.priceIndex !== 'inherit',
   ).length
   const availableCommodityClassOptions = commodityClassOptions.length > 0 ? commodityClassOptions : [...commodityClassOrder]
-  const singleUserAuthEnabled = Boolean(serverSettings?.single_user_auth_enabled)
-  const googleAuthEnabled = Boolean(serverSettings?.google_auth.enabled && googleClientId)
-  const googleAutoCreateUsers = Boolean(serverSettings?.google_auth.auto_create_users)
-
-  useEffect(() => {
-    const container = googleSignInContainerRef.current
-    if (!container) {
-      return
-    }
-    const containerElement: HTMLDivElement = container
-
-    if (authSession || !googleAuthEnabled) {
-      containerElement.innerHTML = ''
-      setGoogleSignInReady(false)
-      return
-    }
-
-    let cancelled = false
-    containerElement.innerHTML = ''
-    setGoogleSignInReady(false)
-
-    async function initializeGoogleSignIn() {
-      try {
-        await loadGoogleIdentityScript()
-        if (cancelled) {
-          return
-        }
-
-        const googleIdentityApi = window.google?.accounts?.id
-        if (!googleIdentityApi) {
-          throw new Error('Google sign-in is unavailable in this browser.')
-        }
-
-        googleIdentityApi.initialize({
-          client_id: googleClientId,
-          callback: (response) => {
-            if (cancelled) {
-              return
-            }
-            if (!response.credential) {
-              setAuthFlash({
-                tone: 'error',
-                message: 'Google did not return a sign-in token.',
-              })
-              return
-            }
-            void handleGoogleCredential(response.credential)
-          },
-          cancel_on_tap_outside: true,
-        })
-
-        googleIdentityApi.renderButton(containerElement, {
-          theme: 'outline',
-          size: 'large',
-          shape: 'pill',
-          text: 'continue_with',
-          width: Math.max(240, Math.min(containerElement.clientWidth || 320, 360)),
-        })
-        setGoogleSignInReady(true)
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setAuthFlash((current) =>
-          current ?? {
-            tone: 'error',
-            message: error instanceof Error ? error.message : 'Could not initialize Google sign-in.',
-          },
-        )
-      }
-    }
-
-    void initializeGoogleSignIn()
-
-    return () => {
-      cancelled = true
-      container.innerHTML = ''
-    }
-  }, [authSession, googleAuthEnabled, googleClientId])
 
   return (
     <div className="workspace-grid settings-grid">
@@ -664,7 +464,7 @@ export function SettingsWorkspace({
           <div className="section-head">
             <div>
               <span className="eyebrow">Browser Settings</span>
-              <h3>Write Access</h3>
+              <h3>Active Session</h3>
             </div>
             <p>The browser stores only the active session token locally. Protected writes derive actor identity from the signed-in session.</p>
           </div>
@@ -682,214 +482,47 @@ export function SettingsWorkspace({
             </article>
           </div>
 
-          {authSession ? (
-            <div className="stack-form settings-form">
-              <div className="settings-kv">
-                <SettingsValueRow label="User ID" value={authSession.user.user_id} />
-                <SettingsValueRow label="Display name" value={authSession.user.display_name} />
-                <SettingsValueRow label="Email" value={authSession.user.email} />
-                <SettingsValueRow label="Role" value={authSession.user.role} />
-                <SettingsValueRow label="Session expires" value={new Date(authSession.expiresAt).toLocaleString()} />
-                <SettingsValueRow
-                  label="Configured TTL"
-                  value={serverSettings ? `${serverSettings.session_ttl_hours}h` : 'Unknown'}
-                  detail="Read from the public runtime settings endpoint."
-                />
-              </div>
-
-              <div className="toolbar settings-actions">
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={handleLogout}
-                  disabled={authLoading}
-                >
-                  {authAction === 'logout' ? 'Signing Out...' : 'Sign Out'}
-                </button>
-              </div>
-
-              <p className={`form-note ${authFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
-                {authFlash?.message ?? 'Protected writes will use this session until it expires or you sign out.'}
-              </p>
-            </div>
-          ) : (
-            <div className="stack-form settings-form">
-              <form id="session-login" className="stack-form" onSubmit={handleLogin}>
-                <div className="section-head">
-                  <div>
-                    <span className="eyebrow">Sign In</span>
-                    <h3>Session Login</h3>
-                  </div>
-                  <p>
-                    Use a user ID or email plus password. Google sign-in appears below when the server is
-                    configured for it, and the local OPS_ADMIN shortcut remains available for development.
-                  </p>
-                </div>
-
-                <div className="mini-grid">
-                  <label className="field">
-                    <span>User ID or Email</span>
-                    <input
-                      className="control"
-                      value={loginForm.identifier}
-                      onChange={(event) => {
-                        setAuthFlash(null)
-                        setLoginForm((current) => ({ ...current, identifier: event.target.value }))
-                      }}
-                      placeholder="ops_admin"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Password</span>
-                    <input
-                      className="control"
-                      type="password"
-                      value={loginForm.password}
-                      onChange={(event) => {
-                        setAuthFlash(null)
-                        setLoginForm((current) => ({ ...current, password: event.target.value }))
-                      }}
-                      placeholder="Enter password"
-                    />
-                  </label>
+          <div className="stack-form settings-form">
+            {authSession ? (
+              <>
+                <div className="settings-kv">
+                  <SettingsValueRow label="User ID" value={authSession.user.user_id} />
+                  <SettingsValueRow label="Display name" value={authSession.user.display_name} />
+                  <SettingsValueRow label="Email" value={authSession.user.email} />
+                  <SettingsValueRow label="Role" value={authSession.user.role} />
+                  <SettingsValueRow label="Session expires" value={new Date(authSession.expiresAt).toLocaleString()} />
+                  <SettingsValueRow
+                    label="Configured TTL"
+                    value={serverSettings ? `${serverSettings.session_ttl_hours}h` : 'Unknown'}
+                    detail="Read from the public runtime settings endpoint."
+                  />
                 </div>
 
                 <div className="toolbar settings-actions">
-                  <button type="submit" className="button button-primary" disabled={authLoading}>
-                    {authAction === 'login' ? 'Signing In...' : 'Sign In'}
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    onClick={handleLogout}
+                    disabled={authLoading}
+                  >
+                    {authAction === 'logout' ? 'Signing Out...' : 'Sign Out'}
                   </button>
-                  {singleUserAuthEnabled ? (
-                    <button
-                      id="single-user-sign-in"
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => void handleSingleUserLogin()}
-                      disabled={authLoading}
-                    >
-                      {authAction === 'single-user' ? 'Signing In...' : 'Single-User Sign In'}
-                    </button>
-                  ) : null}
                 </div>
-              </form>
+              </>
+            ) : (
+              <div className="feedback-banner">
+                Sign out controls live here, but sign-in now happens on the dedicated locked screen shown
+                before the workspace shell loads.
+              </div>
+            )}
 
-              {googleAuthEnabled ? (
-                <div className="stack-form">
-                  <div className="section-head">
-                    <div>
-                      <span className="eyebrow">Federated Sign-In</span>
-                      <h3>Google Login</h3>
-                    </div>
-                    <p>
-                      Continue with Google using the configured client ID.
-                      {googleAutoCreateUsers
-                        ? ' New Google identities can create a local account automatically with the server default role.'
-                        : ' Your Google email must already map to a local user account.'}
-                    </p>
-                  </div>
-
-                  <div className="toolbar settings-actions">
-                    <div ref={googleSignInContainerRef} className="google-sign-in-button" />
-                  </div>
-
-                  <p className="form-note">
-                    {authAction === 'google'
-                      ? 'Completing Google sign-in...'
-                      : googleSignInReady
-                        ? 'Google issues the identity token in the browser, then the API exchanges it for the same local session token used by password sign-in.'
-                        : 'Loading Google sign-in...'}
-                  </p>
-                </div>
-              ) : null}
-
-              {serverSettings?.bootstrap_admin_enabled ? (
-                <form id="bootstrap-admin" className="stack-form" onSubmit={handleBootstrapAdmin}>
-                  <div className="section-head">
-                    <div>
-                      <span className="eyebrow">First Run</span>
-                      <h3>Bootstrap Admin</h3>
-                    </div>
-                    <p>Only available until the first user account exists. Use the configured bootstrap token once to create the initial admin.</p>
-                  </div>
-
-                  <div className="mini-grid">
-                    <label className="field">
-                      <span>Bootstrap Token</span>
-                      <input
-                        className="control"
-                        type="password"
-                        value={bootstrapForm.bootstrap_token}
-                        onChange={(event) => {
-                          setAuthFlash(null)
-                          setBootstrapForm((current) => ({ ...current, bootstrap_token: event.target.value }))
-                        }}
-                        placeholder="Server-provided token"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>User ID</span>
-                      <input
-                        className="control"
-                        value={bootstrapForm.user_id}
-                        onChange={(event) => {
-                          setAuthFlash(null)
-                          setBootstrapForm((current) => ({ ...current, user_id: event.target.value }))
-                        }}
-                        placeholder="ops_admin"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Email</span>
-                      <input
-                        className="control"
-                        type="email"
-                        value={bootstrapForm.email}
-                        onChange={(event) => {
-                          setAuthFlash(null)
-                          setBootstrapForm((current) => ({ ...current, email: event.target.value }))
-                        }}
-                        placeholder="ops@example.com"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Display Name</span>
-                      <input
-                        className="control"
-                        value={bootstrapForm.display_name}
-                        onChange={(event) => {
-                          setAuthFlash(null)
-                          setBootstrapForm((current) => ({ ...current, display_name: event.target.value }))
-                        }}
-                        placeholder="Ops Admin"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Password</span>
-                      <input
-                        className="control"
-                        type="password"
-                        value={bootstrapForm.password}
-                        onChange={(event) => {
-                          setAuthFlash(null)
-                          setBootstrapForm((current) => ({ ...current, password: event.target.value }))
-                        }}
-                        placeholder="Minimum 8 characters"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="toolbar settings-actions">
-                    <button type="submit" className="button button-primary" disabled={authLoading}>
-                      {authAction === 'bootstrap' ? 'Creating Admin...' : 'Create Initial Admin'}
-                    </button>
-                  </div>
-                </form>
-              ) : null}
-
-              <p className={`form-note ${authFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
-                {authFlash?.message ?? 'Sign in to unlock protected writes. Bootstrap is only available while no user accounts exist.'}
-              </p>
-            </div>
-          )}
+            <p className={`form-note ${authFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+              {authFlash?.message ??
+                (authSession
+                  ? 'Protected writes will use this session until it expires or you sign out.'
+                  : 'Sign in happens on the dedicated entry screen before the console opens.')}
+            </p>
+          </div>
         </article>
 
         <article className="surface">
@@ -2057,7 +1690,7 @@ export function SettingsWorkspace({
                   <strong>{serverSettings.single_user_auth_enabled ? 'Enabled' : 'Disabled'}</strong>
                   <p>
                     {serverSettings.single_user_auth_enabled
-                      ? 'One-click local OPS_ADMIN sign-in is available in the session login section.'
+                      ? 'One-click local OPS_ADMIN sign-in is available on the locked sign-in screen.'
                       : 'One-click single-user sign-in is not enabled on the server.'}
                   </p>
                 </article>

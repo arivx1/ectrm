@@ -15,6 +15,7 @@ import {
   loadReportsWorkspaceBootstrap,
   loadTradeConfirmationsWindow,
   loadTradeInvoicesWindow,
+  loadTradeMetadata,
   loadTradePaymentsWindow,
   loadTradesWorkspaceBootstrap,
   loadTradesWindow,
@@ -23,6 +24,7 @@ import {
   loadSettlementWorkspaceBootstrap,
   type WorkspaceBootstrapSummary,
   type WorkspaceCollectionWindow,
+  type OperationalResourceDescriptor,
 } from './api'
 import {
   buildMutationRefreshGroups,
@@ -44,6 +46,7 @@ import {
   decorateTradesWithWorkflowItems,
   decorateWorkflowItems,
   hasAdministrativeAccess,
+  isAuthenticationError,
   sessionHeaders,
 } from './workspaceDataShared'
 import { appConfig, bootstrapQueryLimits } from '../../shared/config'
@@ -53,6 +56,7 @@ import {
   saveStoredAuthSession,
   type StoredAuthSession,
 } from '../../shared/mutation'
+import { buildFallbackTradeMetadata, type TradeMetadata } from '../../shared/tradeMetadata'
 import {
   DEFAULT_COUNTERPARTY_STANDARDS,
   DEFAULT_LOCATION_STANDARDS,
@@ -86,6 +90,7 @@ import type {
   WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
+import type { AuthInterruptionReason } from '../../shared/authInterruptionResume'
 
 type LoadDataOptions = {
   sessionOverride?: StoredAuthSession | null
@@ -187,12 +192,17 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [weatherLocations, setWeatherLocations] = useState<WeatherLocationRecord[]>([])
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
   const [workspaceBootstrapSummary, setWorkspaceBootstrapSummary] = useState<WorkspaceBootstrapSummary | null>(null)
+  const [operationalResourceDescriptors, setOperationalResourceDescriptors] = useState<OperationalResourceDescriptor[]>([])
+  const [tradeMetadata, setTradeMetadata] = useState<TradeMetadata>(() => buildFallbackTradeMetadata())
+  const [tradeMetadataSource, setTradeMetadataSource] = useState<'server' | 'fallback'>('fallback')
+  const [tradeMetadataError, setTradeMetadataError] = useState<string>('')
   const [error, setError] = useState<string>('')
   const [appLoading, setAppLoading] = useState(true)
   const [groupLoaded, setGroupLoaded] = useState<AppDataGroupFlags>(() => ({ ...EMPTY_GROUP_FLAGS }))
   const [groupLoading, setGroupLoading] = useState<AppDataGroupFlags>(() => ({ ...EMPTY_GROUP_FLAGS }))
   const [groupErrors, setGroupErrors] = useState<AppDataGroupErrors>(() => ({ ...EMPTY_GROUP_ERRORS }))
   const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => getStoredAuthSession())
+  const [authInterruptionReason, setAuthInterruptionReason] = useState<AuthInterruptionReason | null>(null)
   const [collectionWindows, setCollectionWindows] = useState<WorkspaceCollectionWindows>(() =>
     createEmptyCollectionWindows(),
   )
@@ -304,6 +314,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setWeatherLocations([])
     setWeatherSyncStatus(null)
     setWorkspaceBootstrapSummary(null)
+    setOperationalResourceDescriptors([])
+    setTradeMetadata(buildFallbackTradeMetadata())
+    setTradeMetadataSource('fallback')
+    setTradeMetadataError('')
     setError('')
     setGroupLoaded({ ...EMPTY_GROUP_FLAGS })
     setGroupLoading({ ...EMPTY_GROUP_FLAGS })
@@ -311,6 +325,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setCollectionWindows(createEmptyCollectionWindows())
     setCollectionLoadingMore({ ...EMPTY_COLLECTION_LOADING })
     setCollectionErrors({ ...EMPTY_COLLECTION_ERRORS })
+  }
+
+  function handleAuthenticationInterruption(reason: AuthInterruptionReason) {
+    clearStoredAuthSession()
+    resetWorkspaceData()
+    setAuthSession(null)
+    setAuthInterruptionReason(reason)
+    setAppLoading(false)
   }
 
   async function loadData(options?: LoadDataOptions) {
@@ -335,12 +357,40 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
 
     const groupLoaders: Record<AppDataGroup, () => Promise<void>> = {
       core: async () => {
-        const { health: healthJson, workspaceSummary } = await loadCoreWorkspaceBootstrap(
-          appConfig.apiBase,
-          { readHeaders },
-        )
+        const [coreBootstrap, nextTradeMetadata] = await Promise.all([
+          loadCoreWorkspaceBootstrap(appConfig.apiBase, { readHeaders }),
+          readHeaders
+            ? loadTradeMetadata(appConfig.apiBase, { readHeaders })
+                .then((payload) => ({
+                  payload,
+                  source: 'server' as const,
+                  error: '',
+                }))
+                .catch((nextError) => ({
+                  payload: buildFallbackTradeMetadata(),
+                  source: 'fallback' as const,
+                  error:
+                    nextError instanceof Error
+                      ? nextError.message
+                      : 'Could not load server-owned trade metadata.',
+                }))
+            : Promise.resolve({
+                payload: buildFallbackTradeMetadata(),
+                source: 'fallback' as const,
+                error: '',
+              }),
+        ])
+        const {
+          health: healthJson,
+          workspaceSummary,
+          operationalResourceDescriptors: nextOperationalDescriptors,
+        } = coreBootstrap
         setHealth(healthJson.status ?? 'unknown')
         setWorkspaceBootstrapSummary(workspaceSummary)
+        setOperationalResourceDescriptors(nextOperationalDescriptors)
+        setTradeMetadata(nextTradeMetadata.payload)
+        setTradeMetadataSource(nextTradeMetadata.source)
+        setTradeMetadataError(nextTradeMetadata.error)
         setError('')
         markGroupLoaded('core', true)
       },
@@ -454,6 +504,11 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
       try {
         await groupLoaders[group]()
       } catch (nextError) {
+        if (currentSession && isAuthenticationError(nextError)) {
+          handleAuthenticationInterruption('session_expired')
+          return
+        }
+
         const message =
           nextError instanceof Error
             ? nextError.message
@@ -595,7 +650,16 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
       },
     }
 
-    await refreshLoaders[key]()
+    try {
+      await refreshLoaders[key]()
+    } catch (nextError) {
+      if (authSession && isAuthenticationError(nextError)) {
+        handleAuthenticationInterruption('session_expired')
+        return
+      }
+
+      throw nextError
+    }
   }
 
   async function handleLoadMoreWorkspaceCollection(key: WorkspaceCollectionKey) {
@@ -737,6 +801,11 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     try {
       await collectionLoaders[key]()
     } catch (nextError) {
+      if (authSession && isAuthenticationError(nextError)) {
+        handleAuthenticationInterruption('session_expired')
+        return
+      }
+
       setCollectionError(
         key,
         nextError instanceof Error
@@ -793,8 +862,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
       }
       saveStoredAuthSession(nextSession)
       setAuthSession(nextSession)
+      setAuthInterruptionReason(null)
       return nextSession
-    } catch {
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        handleAuthenticationInterruption('session_expired')
+        return null
+      }
+
       clearStoredAuthSession()
       setAuthSession(null)
       return null
@@ -811,6 +886,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setAppLoading(true)
     resetWorkspaceData()
     setAuthSession(nextSession)
+    setAuthInterruptionReason(null)
 
     try {
       await loadData({
@@ -842,7 +918,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   }, [])
 
   useEffect(() => {
-    if (appLoading || error) {
+    if (appLoading || error || !authSession) {
       return
     }
 
@@ -850,7 +926,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
       groups: VIEW_DATA_GROUPS[currentView],
       force: false,
     })
-  }, [appLoading, currentView, error])
+  }, [appLoading, authSession, currentView, error])
 
   useEffect(() => {
     if (!authSession) {
@@ -862,9 +938,9 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     async function heartbeat() {
       try {
         await sendSessionHeartbeat(appConfig.apiBase)
-      } catch {
-        if (!cancelled) {
-          // Presence refresh should stay quiet; the authenticated workspace already surfaces session failures elsewhere.
+      } catch (error) {
+        if (!cancelled && isAuthenticationError(error)) {
+          handleAuthenticationInterruption('session_expired')
         }
       }
     }
@@ -896,6 +972,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   }, [authSession])
 
   return {
+    authInterruptionReason,
     authSession,
     appLoading,
     books,
@@ -928,6 +1005,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     positions,
     priceIndices,
     refreshMutationData,
+    operationalResourceDescriptors,
+    tradeMetadata,
+    tradeMetadataError,
+    tradeMetadataSource,
     sessionResetKey: authSession?.sessionId ?? 'anonymous',
     setError,
     tradeInvoices,

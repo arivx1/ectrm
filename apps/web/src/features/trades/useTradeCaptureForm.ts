@@ -12,13 +12,15 @@ import type {
   UnitRecord,
 } from '../../shared/models'
 import {
+  resolveTradeFormMetadata,
+  tradeFormMetadataRequiresPriceIndex,
+  type TradeMetadata,
+} from '../../shared/tradeMetadata'
+import {
   buildDefaultTradeLegs,
-  defaultTradeSourceSystem,
-  pricingTypeRequiresPriceIndex,
   tradeHeaderDefaults,
   tradeFormDefaults,
   tradeInstrumentUsesOptionFields,
-  tradeSideOptions,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
 import {
@@ -33,6 +35,7 @@ import { findLatestPersistedLegs, makeLegDraft } from './tradeDraftUtils'
 import { buildSuggestedTradeId } from './tradeEventPayloads'
 
 export function useTradeCaptureForm(
+  tradeMetadata: TradeMetadata,
   activeBooks: ReferenceRecord[],
   commodityClassOptions: string[],
   activeCommodities: ReferenceRecord[],
@@ -45,7 +48,16 @@ export function useTradeCaptureForm(
   activeCurrencies: CurrencyRecord[],
   activeLocations: LocationRecord[],
 ) {
-  const captureDefaults = useMemo(() => tradeCaptureSettings.defaults, [tradeCaptureSettings])
+  const tradeFormMetadata = useMemo(() => resolveTradeFormMetadata(tradeMetadata), [tradeMetadata])
+  const captureDefaults = useMemo(
+    () => ({
+      ...tradeFormMetadata.defaults,
+      ...tradeCaptureSettings.defaults,
+    }),
+    [tradeCaptureSettings, tradeFormMetadata],
+  )
+  const primaryTradeSide = tradeFormMetadata.tradeSideOptions[0] ?? captureDefaults.tradeSide
+  const secondaryTradeSide = tradeFormMetadata.tradeSideOptions[1] ?? primaryTradeSide
   const initialRuleEvaluation = resolveTradeCaptureRuleEvaluation({
     context: {
       instrumentType: captureDefaults.instrumentType,
@@ -80,7 +92,7 @@ export function useTradeCaptureForm(
   const [priceInput, setPriceInput] = useState<string>(tradeFormDefaults.price)
   const [volumeInput, setVolumeInput] = useState<string>(tradeFormDefaults.volume)
   const [externalTradeIdInput, setExternalTradeIdInput] = useState<string>(tradeHeaderDefaults.external_trade_id)
-  const [sourceSystemInput] = useState<string>(defaultTradeSourceSystem)
+  const sourceSystemInput = tradeFormMetadata.sourceSystem
   const [executionTimestampInput, setExecutionTimestampInput] = useState<string>(tradeHeaderDefaults.execution_timestamp)
   const [tradeDateInput, setTradeDateInput] = useState<string>(tradeHeaderDefaults.trade_date)
   const [effectiveStartDateInput, setEffectiveStartDateInput] = useState<string>(tradeHeaderDefaults.effective_start_date)
@@ -103,7 +115,12 @@ export function useTradeCaptureForm(
     initialRuleDefaults.settlementStatus ?? captureDefaults.settlementStatus,
   )
   const [traderUserInput, setTraderUserInput] = useState<string>(tradeHeaderDefaults.trader_user)
-  const [createLegs, setCreateLegs] = useState<TradeLegDraft[]>(() => buildDefaultTradeLegs(makeLegDraft))
+  const [createLegs, setCreateLegs] = useState<TradeLegDraft[]>(() =>
+    buildDefaultTradeLegs(makeLegDraft, {
+      firstLeg: { side: primaryTradeSide },
+      secondLeg: { side: secondaryTradeSide },
+    }),
+  )
   const [duplicateSourceTradeId, setDuplicateSourceTradeId] = useState<string | null>(null)
 
   const resolvedBookInput = activeBooks.some((book) => book.code === bookInput)
@@ -162,7 +179,8 @@ export function useTradeCaptureForm(
     : ''
 
   const resolvedPriceIndexInput =
-    tradeInstrumentUsesOptionFields(tradeInstrumentTypeInput) || !pricingTypeRequiresPriceIndex(pricingTypeInput)
+    tradeInstrumentUsesOptionFields(tradeInstrumentTypeInput) ||
+    !tradeFormMetadataRequiresPriceIndex(tradeFormMetadata, pricingTypeInput)
       ? ''
       : createPriceIndexOptions.some((priceIndex) => priceIndex.code === priceIndexInput)
         ? priceIndexInput
@@ -173,6 +191,7 @@ export function useTradeCaptureForm(
     : ''
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Refresh the suggested identifier when the upstream trade id pool changes.
     setTradeIdInput((current) => (current === suggestedTradeId ? current : suggestedTradeId))
   }, [suggestedTradeId])
 
@@ -182,6 +201,7 @@ export function useTradeCaptureForm(
     }
 
     const nextBookSearchInput = buildReferenceSearchDisplayValue(selectedBook)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the visible search text aligned with external book selection changes.
     setBookSearchInput((current) => (current.trim().length === 0 || current === selectedBook.code ? nextBookSearchInput : current))
   }, [selectedBook])
 
@@ -191,6 +211,7 @@ export function useTradeCaptureForm(
     }
 
     const nextPortfolioSearchInput = buildReferenceSearchDisplayValue(selectedPortfolio)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the visible search text aligned with external portfolio selection changes.
     setPortfolioSearchInput((current) =>
       current.trim().length === 0 || current === selectedPortfolio.code ? nextPortfolioSearchInput : current,
     )
@@ -202,6 +223,7 @@ export function useTradeCaptureForm(
     }
 
     const nextCounterpartySearchInput = buildCounterpartySearchDisplayValue(selectedCounterparty)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the visible search text aligned with external counterparty selection changes.
     setCounterpartySearchInput((current) =>
       current.trim().length === 0 || current === selectedCounterparty.code ? nextCounterpartySearchInput : current,
     )
@@ -298,7 +320,10 @@ export function useTradeCaptureForm(
       setOptionStyleInput(ruleEvaluation.defaultOverrides.optionStyle)
     }
 
-    if (tradeInstrumentUsesOptionFields(nextInstrumentType) || !pricingTypeRequiresPriceIndex(nextPricingType)) {
+    if (
+      tradeInstrumentUsesOptionFields(nextInstrumentType) ||
+      !tradeFormMetadataRequiresPriceIndex(tradeFormMetadata, nextPricingType)
+    ) {
       setPriceIndexInput('')
     }
   }
@@ -350,7 +375,7 @@ export function useTradeCaptureForm(
       ...current,
       makeLegDraft({
         leg_no: current.length + 1,
-        side: current.length % 2 === 0 ? tradeSideOptions[0] : tradeSideOptions[1],
+        side: current.length % 2 === 0 ? primaryTradeSide : secondaryTradeSide,
       }),
     ])
   }
@@ -377,10 +402,14 @@ export function useTradeCaptureForm(
                 volume: selectedTrade.volume?.toString() ?? '',
               },
               secondLeg: {
+                side: secondaryTradeSide,
                 commodity_class: selectedTrade.commodity_class,
               },
             })
-          : buildDefaultTradeLegs(makeLegDraft)
+          : buildDefaultTradeLegs(makeLegDraft, {
+              firstLeg: { side: primaryTradeSide },
+              secondLeg: { side: secondaryTradeSide },
+            })
 
     setTradeIdInput(suggestedTradeId)
     setTradeInstrumentTypeInputState(selectedTrade.instrument_type ?? captureDefaults.instrumentType)
@@ -484,7 +513,12 @@ export function useTradeCaptureForm(
       resetRuleEvaluation.defaultOverrides.settlementStatus ?? captureDefaults.settlementStatus,
     )
     setTraderUserInput(tradeHeaderDefaults.trader_user)
-    setCreateLegs(buildDefaultTradeLegs(makeLegDraft))
+    setCreateLegs(
+      buildDefaultTradeLegs(makeLegDraft, {
+        firstLeg: { side: primaryTradeSide },
+        secondLeg: { side: secondaryTradeSide },
+      }),
+    )
     setDuplicateSourceTradeId(null)
   }
 

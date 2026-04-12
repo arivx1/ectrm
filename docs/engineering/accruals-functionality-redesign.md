@@ -293,6 +293,14 @@ Current branch progress:
 - backend accrual scaffolding exists with dedicated lot and entry tables
 - read-only APIs exist for lot listing, ledger entry inspection, and
   reconciliation projection
+- active physical trades now synchronize delivery-scoped accrual lots from
+  recorded actualizations and current pricing inputs
+- EIA price sync can rebuild affected index-priced accrual marks through the
+  accrual rebuild path
+- physical invoice issue and update now create explicit invoice-relief and
+  dispute ledger entries when matching accrual lots exist
+- older physical invoices can backfill onto delivery lots after later
+  actualization creates accrual capacity
 
 ### Phase 3: invoice-to-accrual linkage
 

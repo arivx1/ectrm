@@ -20,6 +20,7 @@ export function NavigationSectionWorkspace({
   onOpenView,
 }: NavigationSectionWorkspaceProps) {
   const section = primaryNavigationSectionByKey(sectionKey)
+  const recommendedViewKeys = new Set(section.startPaths.map((path) => path.view.key))
 
   function handleWorkspaceLinkClick(event: ReactMouseEvent<HTMLAnchorElement>, view: ViewKey) {
     if (!shouldHandleClientSideNavigation(event)) {
@@ -43,13 +44,35 @@ export function NavigationSectionWorkspace({
           </div>
 
           <div className="feedback-banner feedback-banner-success">
-            {section.views.length} workspace{section.views.length === 1 ? '' : 's'} live inside this section. Open the
-            one that matches the job you are doing right now.
+            Pick the job you are doing first, then jump into the workspace built for it. Every page in this section is
+            still available below if you already know the destination.
           </div>
         </article>
 
+        <div className="dashboard-report-grid section-start-grid">
+          {section.startPaths.map((path) => (
+            <article key={`${section.key}-${path.view.key}`} className="dashboard-report-card section-start-card">
+              <div className="section-start-card-copy">
+                <span>{path.view.kicker}</span>
+                <strong>{path.title}</strong>
+                <p>{path.detail}</p>
+              </div>
+              <div className="section-start-card-actions">
+                <span className="entity-chip entity-chip-soft">{path.view.label}</span>
+                <a
+                  href={getViewHref(path.view.key)}
+                  className="button button-secondary"
+                  onClick={(event) => handleWorkspaceLinkClick(event, path.view.key)}
+                >
+                  {path.actionLabel}
+                </a>
+              </div>
+            </article>
+          ))}
+        </div>
+
         <div className="dashboard-report-grid section-landing-grid">
-          {section.views.map((view, index) => (
+          {section.views.map((view) => (
             <article key={view.key} className="dashboard-report-card section-landing-card">
               <div className="section-landing-card-copy">
                 <span>{view.kicker}</span>
@@ -59,7 +82,7 @@ export function NavigationSectionWorkspace({
               <p>{HERO_BODY_BY_VIEW[view.key]}</p>
               <div className="section-landing-card-actions">
                 <span className="entity-chip entity-chip-soft">
-                  {index === 0 ? 'Suggested start' : `Page ${index + 1}`}
+                  {recommendedViewKeys.has(view.key) ? 'Common path' : 'Supporting workspace'}
                 </span>
                 <a
                   href={getViewHref(view.key)}
@@ -77,10 +100,10 @@ export function NavigationSectionWorkspace({
       <aside className="surface inspector-panel">
         <div className="section-head">
           <div>
-            <span className="eyebrow">Section Map</span>
+            <span className="eyebrow">All Workspaces</span>
             <h3>{section.label} Surfaces</h3>
           </div>
-          <p>Use these links when you know the destination already and just need a richer jump list than the left rail.</p>
+          <p>Use this jump list when you already know the destination and just want a richer map than the left rail.</p>
         </div>
 
         <div className="stack">

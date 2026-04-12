@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -20,8 +20,23 @@ from apps.api.app.domains.operations.services.actualizations import (
     list_trade_actualizations_by_delivery_id,
 )
 from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceDescriptor,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    load_operational_resource_items,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    paginate_operational_items,
+)
 from apps.api.app.domains.operations.services.trade_credit_hold import (
     build_trade_credit_hold_lookup,
+)
+from apps.api.app.domains.operations.services.trade_credit_hold import (
+    TradeCreditHoldState,
 )
 from apps.api.app.domains.operations.services.workflow_items import (
     is_workflow_item_closed,
@@ -209,6 +224,25 @@ class DeliveryEventProjection:
     execution_status: DeliveryExecutionStatus
     latest_event_type: str | None
     latest_event_at: datetime | None
+
+
+@dataclass(frozen=True)
+class DeliveryListRow:
+    trade: Trade
+    leg: TradeLeg | None
+    delivery_id: str
+
+
+@dataclass(frozen=True)
+class DeliveryListContext:
+    persisted_deliveries_by_id: dict[str, DeliveryObligation]
+    logistics_details_by_id: dict[str, DeliveryLogisticsDetail]
+    pipeline_details_by_id: dict[str, DeliveryPipelineDetail]
+    power_details_by_id: dict[str, DeliveryPowerDetail]
+    delivery_events_by_id: dict[str, list[DeliveryEvent]]
+    credit_hold_states: dict[str, TradeCreditHoldState]
+    actualizations_by_delivery_id: dict[str, TradeActualization]
+    scheduling_work_items_by_trade_id: dict[str, list[TradeWorkflowItem]]
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -1745,16 +1779,18 @@ def _delivery_sort_key(delivery: DeliveryObligationOut) -> tuple[int, str, str, 
     )
 
 
-def list_delivery_obligations_for_operations(
+def _synchronize_delivery_resource(
     db: Session,
-    *,
-    limit: int | None = None,
-    offset: int = 0,
-    now: Optional[datetime] = None,
-) -> list[DeliveryObligationOut]:
-    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
-    synchronize_active_trade_workflow_items(db, now=reference_time)
+    request: OperationalResourceListRequest,
+) -> None:
+    synchronize_active_trade_workflow_items(db, now=request.reference_time)
     db.flush()
+
+
+def _load_delivery_rows(
+    db: Session,
+    _request: OperationalResourceListRequest,
+) -> list[DeliveryListRow]:
     trades = db.execute(
         select(Trade)
         .where(
@@ -1774,74 +1810,139 @@ def list_delivery_obligations_for_operations(
         ).scalars().all()
         for leg in trade_legs:
             legs_by_trade_id.setdefault(leg.trade_id, []).append(leg)
-    delivery_ids = [
-        build_delivery_obligation_id(trade.trade_id, leg.leg_no if leg is not None else None)
-        for trade in trades
-        for leg in (legs_by_trade_id.get(trade.trade_id, []) or [None])
-    ]
+
+    rows: list[DeliveryListRow] = []
+    for trade in trades:
+        trade_legs = legs_by_trade_id.get(trade.trade_id, [])
+        if trade_legs:
+            for leg in trade_legs:
+                rows.append(
+                    DeliveryListRow(
+                        trade=trade,
+                        leg=leg,
+                        delivery_id=build_delivery_obligation_id(trade.trade_id, leg.leg_no),
+                    )
+                )
+            continue
+        rows.append(
+            DeliveryListRow(
+                trade=trade,
+                leg=None,
+                delivery_id=build_delivery_obligation_id(trade.trade_id),
+            )
+        )
+    return rows
+
+
+def _load_delivery_context(
+    db: Session,
+    rows: list[DeliveryListRow],
+    request: OperationalResourceListRequest,
+) -> DeliveryListContext:
+    trade_ids = [row.trade.trade_id for row in rows]
+    delivery_ids = [row.delivery_id for row in rows]
     (
         persisted_deliveries_by_id,
         logistics_details_by_id,
         pipeline_details_by_id,
         power_details_by_id,
     ) = _persisted_delivery_context_by_id(db, trade_ids=trade_ids)
-    delivery_events_by_id = _delivery_events_by_delivery_id(db, delivery_ids=delivery_ids)
-    credit_hold_states = build_trade_credit_hold_lookup(db, trade_ids=trade_ids)
-    actualizations_by_delivery_id = list_trade_actualizations_by_delivery_id(db, trade_ids=trade_ids)
-    scheduling_work_items_by_trade_id = _scheduling_workflow_items_by_trade_id(
-        db,
-        trade_ids=trade_ids,
-        reference_time=reference_time,
+    return DeliveryListContext(
+        persisted_deliveries_by_id=persisted_deliveries_by_id,
+        logistics_details_by_id=logistics_details_by_id,
+        pipeline_details_by_id=pipeline_details_by_id,
+        power_details_by_id=power_details_by_id,
+        delivery_events_by_id=_delivery_events_by_delivery_id(db, delivery_ids=delivery_ids),
+        credit_hold_states=build_trade_credit_hold_lookup(db, trade_ids=trade_ids),
+        actualizations_by_delivery_id=list_trade_actualizations_by_delivery_id(db, trade_ids=trade_ids),
+        scheduling_work_items_by_trade_id=_scheduling_workflow_items_by_trade_id(
+            db,
+            trade_ids=trade_ids,
+            reference_time=request.reference_time,
+        ),
     )
 
-    deliveries: list[DeliveryObligationOut] = []
-    for trade in trades:
-        credit_hold_state = credit_hold_states.get(trade.trade_id)
-        credit_hold_reason = credit_hold_state.hold_reason if credit_hold_state and credit_hold_state.hold_active else None
-        trade_legs = legs_by_trade_id.get(trade.trade_id, [])
-        if trade_legs:
-            for leg in trade_legs:
-                delivery_id = build_delivery_obligation_id(trade.trade_id, leg.leg_no)
-                deliveries.append(
-                    _build_delivery_obligation(
-                        trade=trade,
-                        leg=leg,
-                        actualization=actualizations_by_delivery_id.get(delivery_id),
-                        credit_hold_reason=credit_hold_reason,
-                        reference_time=reference_time,
-                        scheduling_work_items=scheduling_work_items_by_trade_id.get(trade.trade_id, []),
-                        persisted_delivery=persisted_deliveries_by_id.get(delivery_id),
-                        logistics_detail=logistics_details_by_id.get(delivery_id),
-                        pipeline_detail=pipeline_details_by_id.get(delivery_id),
-                        power_detail=power_details_by_id.get(delivery_id),
-                        delivery_events=delivery_events_by_id.get(delivery_id, []),
-                    )
-                )
-            continue
 
-        delivery_id = build_delivery_obligation_id(trade.trade_id)
-        deliveries.append(
-            _build_delivery_obligation(
-                trade=trade,
-                leg=None,
-                actualization=actualizations_by_delivery_id.get(delivery_id),
-                credit_hold_reason=credit_hold_reason,
-                reference_time=reference_time,
-                scheduling_work_items=scheduling_work_items_by_trade_id.get(trade.trade_id, []),
-                persisted_delivery=persisted_deliveries_by_id.get(delivery_id),
-                logistics_detail=logistics_details_by_id.get(delivery_id),
-                pipeline_detail=pipeline_details_by_id.get(delivery_id),
-                power_detail=power_details_by_id.get(delivery_id),
-                delivery_events=delivery_events_by_id.get(delivery_id, []),
-            )
-        )
+def _build_delivery_list_item(
+    row: DeliveryListRow,
+    context: DeliveryListContext,
+    request: OperationalResourceListRequest,
+) -> DeliveryObligationOut:
+    credit_hold_state = context.credit_hold_states.get(row.trade.trade_id)
+    credit_hold_reason = (
+        credit_hold_state.hold_reason
+        if credit_hold_state is not None and credit_hold_state.hold_active
+        else None
+    )
+    return _build_delivery_obligation(
+        trade=row.trade,
+        leg=row.leg,
+        actualization=context.actualizations_by_delivery_id.get(row.delivery_id),
+        credit_hold_reason=credit_hold_reason,
+        reference_time=request.reference_time,
+        scheduling_work_items=context.scheduling_work_items_by_trade_id.get(row.trade.trade_id, []),
+        persisted_delivery=context.persisted_deliveries_by_id.get(row.delivery_id),
+        logistics_detail=context.logistics_details_by_id.get(row.delivery_id),
+        pipeline_detail=context.pipeline_details_by_id.get(row.delivery_id),
+        power_detail=context.power_details_by_id.get(row.delivery_id),
+        delivery_events=context.delivery_events_by_id.get(row.delivery_id, []),
+    )
 
-    sorted_deliveries = sorted(deliveries, key=_delivery_sort_key)
-    if offset:
-        sorted_deliveries = sorted_deliveries[offset:]
-    if limit is not None:
-        return sorted_deliveries[:limit]
-    return sorted_deliveries
+
+def _finalize_delivery_list(
+    items: list[DeliveryObligationOut],
+    request: OperationalResourceListRequest,
+) -> list[DeliveryObligationOut]:
+    return paginate_operational_items(sorted(items, key=_delivery_sort_key), request)
+
+
+DELIVERY_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
+    OperationalResourceListRequest,
+    DeliveryListRow,
+    DeliveryListContext,
+    DeliveryObligationOut,
+](
+    resource_key="deliveries",
+    filters=(),
+    sort_fields=("delivery_status_rank", "delivery_start", "trade_id", "leg_no"),
+    actions=(
+        "sync_from_trades",
+        "update",
+        "update_logistics_detail",
+        "update_pipeline_detail",
+        "update_power_detail",
+        "append_event",
+    ),
+    load_rows=_load_delivery_rows,
+    load_context=_load_delivery_context,
+    build_item=_build_delivery_list_item,
+    synchronize=_synchronize_delivery_resource,
+    finalize_items=_finalize_delivery_list,
+)
+
+SHIPMENT_RESOURCE_DESCRIPTOR = replace(
+    DELIVERY_RESOURCE_DESCRIPTOR,
+    resource_key="shipments",
+    actions=("upsert_actualization",),
+)
+
+
+def list_delivery_obligations_for_operations(
+    db: Session,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+    now: Optional[datetime] = None,
+) -> list[DeliveryObligationOut]:
+    return load_operational_resource_items(
+        DELIVERY_RESOURCE_DESCRIPTOR,
+        db,
+        OperationalResourceListRequest(
+            reference_time=_coerce_utc(now) or datetime.now(timezone.utc),
+            limit=limit,
+            offset=offset,
+        ),
+    )
 
 
 def get_delivery_obligation_for_operations(
@@ -2768,4 +2869,10 @@ def synchronize_delivery_obligations_from_trades(
 
 
 def list_shipments_for_operations(db: Session, *, now: Optional[datetime] = None) -> list[DeliveryObligationOut]:
-    return list_delivery_obligations_for_operations(db, now=now)
+    return load_operational_resource_items(
+        SHIPMENT_RESOURCE_DESCRIPTOR,
+        db,
+        OperationalResourceListRequest(
+            reference_time=_coerce_utc(now) or datetime.now(timezone.utc),
+        ),
+    )

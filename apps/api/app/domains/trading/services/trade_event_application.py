@@ -22,6 +22,7 @@ from apps.api.app.domains.operations.services.trade_credit_hold import (
 from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
+from apps.api.app.domains.accruals.services import synchronize_trade_accruals
 from apps.api.app.domains.reports.services.counterparty_credit import (
     CounterpartyCreditTradeInput,
     evaluate_counterparty_credit_policy,
@@ -86,6 +87,12 @@ def apply_trade_event(context: TradeEventApplicationContext) -> None:
         before,
         after,
         context.recorded_at,
+    )
+    synchronize_trade_accruals(
+        context.db,
+        trade_id=context.event.aggregate_id,
+        actor_id=_workflow_actor_id(context.event),
+        now=context.recorded_at,
     )
 
 

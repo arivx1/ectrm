@@ -1326,6 +1326,21 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(payload["settlement"]["workflow_exception_count"], 0)
         self.assertEqual(payload["settlement"]["breakdown"], [{"status": "PENDING", "count": 1}])
 
+    def test_operational_resource_descriptors_endpoint_exposes_registry_metadata(self) -> None:
+        response = self.client.get("/operations/resources")
+
+        self.assertEqual(response.status_code, 200)
+        descriptors = {row["resource_key"]: row for row in response.json()}
+        self.assertEqual(
+            set(descriptors),
+            {"confirmations", "deliveries", "shipments", "invoices", "payments", "work_items"},
+        )
+        self.assertEqual(descriptors["confirmations"]["filters"], ["trade_id"])
+        self.assertEqual(descriptors["deliveries"]["actions"][0], "sync_from_trades")
+        self.assertIn("append_event", descriptors["deliveries"]["actions"])
+        self.assertEqual(descriptors["payments"]["sort_fields"], ["trade_id asc", "due_at asc", "id asc"])
+        self.assertEqual(descriptors["work_items"]["actions"], ["create", "update", "book_underlying"])
+
 
 if __name__ == "__main__":
     unittest.main()

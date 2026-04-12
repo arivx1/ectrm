@@ -24,9 +24,11 @@ class HttpRouterRegistryTests(unittest.TestCase):
         paths = {route.path for route in app.routes}
 
         self.assertIn("/operations/system-overview", paths)
+        self.assertIn("/operations/resources", paths)
         self.assertIn("/confirmations", paths)
         self.assertIn("/deliveries", paths)
         self.assertIn("/shipments", paths)
+        self.assertIn("/trades/metadata", paths)
         self.assertIn("/settlement/invoices", paths)
         self.assertIn("/reports/overview", paths)
         self.assertIn("/accruals/reconciliation", paths)

@@ -250,7 +250,7 @@ export function DeliveryDetailEditor({
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to maintain persisted delivery controls and manual overrides.</p>
+        <p className="workflow-editor-note">Sign in to maintain persisted delivery controls and manual overrides.</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
       {validationMessage ? <p className="field-error">{validationMessage}</p> : null}

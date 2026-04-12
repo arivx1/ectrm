@@ -1,11 +1,16 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 
 import { TradeLegEditor } from './TradeLegEditor'
+import { TradeFormDisclosure } from './TradeFormDisclosure'
 import {
   buildCounterpartyCreditRestrictionMessage,
   type CounterpartyCreditPolicyPreview,
 } from './counterpartyCredit'
-import { CounterpartySearchField, ReferenceSearchField } from './tradeSearchFields'
+import {
+  CounterpartySearchField,
+  ReferenceSearchField,
+  useReferenceSearchDisplayState,
+} from './tradeSearchFields'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
 import { FieldLabel } from '../../shared/ui/Tooltip'
@@ -13,8 +18,6 @@ import type { TradeCaptureAppliedRule } from '../../shared/tradeCaptureSettings'
 import {
   defaultTradeExecutionTime,
   getQualitySpecOptionsForCommodity,
-  pricingTypeRequiresExplicitPrice,
-  pricingTypeRequiresPriceIndex,
   tradeInstrumentUsesOptionFields,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
@@ -148,6 +151,8 @@ type TradeCaptureFormProps = {
   pricingTypeOptions: readonly string[]
   pricingStatusOptions: readonly string[]
   settlementStatusOptions: readonly string[]
+  pricingTypesRequiringExplicitPrice: readonly string[]
+  pricingTypesRequiringPriceIndex: readonly string[]
   formatCommodityClass: (value: string) => string
 }
 
@@ -281,6 +286,8 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     pricingTypeOptions,
     pricingStatusOptions,
     settlementStatusOptions,
+    pricingTypesRequiringExplicitPrice,
+    pricingTypesRequiringPriceIndex,
     formatCommodityClass,
   } = props
   const { date: executionDateInput, time: executionTimeInput } = splitLocalDateTimeInput(executionTimestampInput)
@@ -288,8 +295,21 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
   const qualitySpecListId = qualitySpecOptions.length > 0 ? 'trade-quality-spec-options' : undefined
   const optionTrade = tradeInstrumentUsesOptionFields(tradeInstrumentTypeInput)
   const structureUsesLegs = tradeStructureSupportsLegs(tradeStructureInput)
+  const pricingTypeNeedsExplicitPrice = pricingTypesRequiringExplicitPrice.includes(pricingTypeInput)
+  const pricingTypeNeedsPriceIndex = pricingTypesRequiringPriceIndex.includes(pricingTypeInput)
+  const selectedCommodity =
+    createCommodityOptions.find((commodity) => commodity.code === commodityInput) ?? null
   const selectedCounterparty =
     createCounterpartyOptions.find((counterparty) => counterparty.code === counterpartyInput) ?? null
+  const selectedLocation = createLocationOptions.find((location) => location.code === locationInput) ?? null
+  const [commoditySearchInput, setCommoditySearchInput] = useReferenceSearchDisplayState(
+    selectedCommodity,
+    commodityInput,
+  )
+  const [locationSearchInput, setLocationSearchInput] = useReferenceSearchDisplayState(
+    selectedLocation,
+    locationInput,
+  )
   const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
 
   const timingSummary = executionDateInput
@@ -300,6 +320,31 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     : commodityInput || 'Choose a commodity to define the ticket'
   const pricingSummary = [pricingTypeInput, pricingStatusInput, `Settlement ${settlementStatusInput}`].join(' • ')
   const activeRuleCount = activeRuleMatches.length
+  const showDeskMetadata = externalTradeIdInput.trim().length > 0 || traderUserInput.trim().length > 0
+  const showScheduleOverrides =
+    tradeDateInput.trim().length > 0 ||
+    effectiveStartDateInput.trim().length > 0 ||
+    effectiveEndDateInput.trim().length > 0
+
+  useEffect(() => {
+    if (!selectedCommodity && commodityInput.trim().length === 0) {
+      setCommoditySearchInput('')
+    }
+  }, [commodityInput, selectedCommodity, setCommoditySearchInput])
+
+  useEffect(() => {
+    if (!selectedLocation && locationInput.trim().length === 0) {
+      setLocationSearchInput('')
+    }
+  }, [locationInput, selectedLocation, setLocationSearchInput])
+
+  function handleCommodityClassSelection(value: string) {
+    if (value !== commodityClassInput) {
+      setCommoditySearchInput('')
+    }
+
+    setCommodityClassInput(value)
+  }
 
   return (
     <form className="trade-form trade-form-feature" onSubmit={onSubmit}>
@@ -310,7 +355,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           <div>
             <span className="eyebrow">Ticket Flow</span>
             <h3>{tradeIdInput}</h3>
-            <p>Capture the trade in four sections so the header, delivery, and pricing context stay easy to scan.</p>
+            <p>Capture the common path first. Desk metadata, schedule overrides, and workflow defaults stay tucked away until needed.</p>
           </div>
           <div className="trade-form-overview-meta">
             <span className="entity-chip">{duplicateSourceTradeId ? `Duplicating ${duplicateSourceTradeId}` : 'New Ticket'}</span>
@@ -409,26 +454,8 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
       <TradeCaptureSection
         step="1"
         title="Ticket Setup"
-        description="Start with the generated trade number, then define who owns the ticket and how the position is structured."
+        description="Shape the ticket first, then assign the desk. Source-system linkage and trader attribution stay collapsed unless you need them."
       >
-        <label className="field">
-          <div className="trade-form-field-title">
-            <span>Trade #</span>
-            <span className="entity-chip entity-chip-soft">Auto-generated</span>
-          </div>
-          <input className="control control-readonly" value={tradeIdInput} readOnly spellCheck={false} />
-          <p className="trade-form-helper">A fresh trade number is created automatically whenever you start over or duplicate a ticket.</p>
-        </label>
-        <label className="field">
-          <span>External Trade ID</span>
-          <input
-            className="control"
-            value={externalTradeIdInput}
-            onChange={(event) => setExternalTradeIdInput(event.target.value)}
-            placeholder="EXT-48291"
-            disabled={submitting}
-          />
-        </label>
         <label className="field">
           <FieldLabel label="Instrument" tooltip={tradeTooltipCopy.instrument} />
           <select
@@ -489,14 +516,6 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             ))}
           </select>
         </label>
-        <CounterpartySearchField
-          counterpartyInput={counterpartyInput}
-          setCounterpartyInput={setCounterpartyInput}
-          counterpartySearchInput={counterpartySearchInput}
-          setCounterpartySearchInput={setCounterpartySearchInput}
-          createCounterpartyOptions={createCounterpartyOptions}
-          disabled={submitting}
-        />
         <ReferenceSearchField
           label="Book"
           selectedCode={bookInput}
@@ -535,16 +554,50 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           selectedHelperText={(portfolio) => `Allocating to ${portfolio.code}.`}
           buildSecondaryLabel={(portfolio) => `${portfolio.code} · ${portfolio.book_code}`}
         />
-        <label className="field">
-          <span>Trader User</span>
-          <input
-            className="control"
-            value={traderUserInput}
-            onChange={(event) => setTraderUserInput(event.target.value)}
-            placeholder="trader.alpha"
-            disabled={submitting}
-          />
-        </label>
+        <CounterpartySearchField
+          counterpartyInput={counterpartyInput}
+          setCounterpartyInput={setCounterpartyInput}
+          counterpartySearchInput={counterpartySearchInput}
+          setCounterpartySearchInput={setCounterpartySearchInput}
+          createCounterpartyOptions={createCounterpartyOptions}
+          disabled={submitting}
+        />
+
+        <TradeFormDisclosure
+          title="Desk Metadata"
+          summary="External linkage and trader attribution"
+          description="The common path is already above. Open this only when the ticket needs a source-system ID or explicit trader ownership."
+          defaultOpen={showDeskMetadata}
+        >
+          <label className="field">
+            <div className="trade-form-field-title">
+              <span>Trade #</span>
+              <span className="entity-chip entity-chip-soft">Auto-generated</span>
+            </div>
+            <input className="control control-readonly" value={tradeIdInput} readOnly spellCheck={false} />
+            <p className="trade-form-helper">A fresh trade number is created automatically whenever you start over or duplicate a ticket.</p>
+          </label>
+          <label className="field">
+            <span>External Trade ID</span>
+            <input
+              className="control"
+              value={externalTradeIdInput}
+              onChange={(event) => setExternalTradeIdInput(event.target.value)}
+              placeholder="EXT-48291"
+              disabled={submitting}
+            />
+          </label>
+          <label className="field">
+            <span>Trader User</span>
+            <input
+              className="control"
+              value={traderUserInput}
+              onChange={(event) => setTraderUserInput(event.target.value)}
+              placeholder="trader.alpha"
+              disabled={submitting}
+            />
+          </label>
+        </TradeFormDisclosure>
 
         {counterpartyCreditWarning && (
           <div className="field-full">
@@ -569,7 +622,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
       <TradeCaptureSection
         step="2"
         title="Dates And Delivery"
-        description="Set the execution timestamp first, then layer in trade, effective, and delivery windows so downstream scheduling has clear anchors."
+        description="Anchor the live window here first. Trade date and effective-range overrides stay collapsed unless the default timeline needs help."
       >
         <label className="field">
           <span>Execution Date</span>
@@ -595,52 +648,24 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             disabled={submitting || executionDateInput === ''}
           />
         </label>
-        <label className="field">
-          <span>Trade Date</span>
-          <input
-            className="control"
-            type="date"
-            value={tradeDateInput}
-            onChange={(event) => setTradeDateInput(event.target.value)}
-            disabled={submitting}
-          />
-        </label>
-        <label className="field">
-          <span>Effective Start</span>
-          <input
-            className="control"
-            type="date"
-            value={effectiveStartDateInput}
-            onChange={(event) => setEffectiveStartDateInput(event.target.value)}
-            disabled={submitting}
-          />
-        </label>
-        <label className="field">
-          <span>Effective End</span>
-          <input
-            className="control"
-            type="date"
-            value={effectiveEndDateInput}
-            onChange={(event) => setEffectiveEndDateInput(event.target.value)}
-            disabled={submitting}
-          />
-        </label>
-        <label className="field">
-          <span>Location</span>
-          <select
-            className="control"
-            value={locationInput}
-            onChange={(event) => setLocationInput(event.target.value)}
-            disabled={submitting}
-          >
-            <option value="">No location</option>
-            {createLocationOptions.map((location) => (
-              <option key={location.code} value={location.code}>
-                {location.code} · {location.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ReferenceSearchField
+          label="Location"
+          selectedCode={locationInput}
+          setSelectedCode={setLocationInput}
+          searchInput={locationSearchInput}
+          setSearchInput={setLocationSearchInput}
+          options={createLocationOptions}
+          disabled={submitting}
+          allowEmpty
+          preserveSelectionWhileSearching
+          placeholder="Search by location name or code"
+          idleHelperText="Search by location name or code. Leave blank for no location."
+          unmatchedHelperText="No exact location is selected yet. Choose a result or clear the field for no location."
+          emptyStateText="No locations match that search yet."
+          selectedHelperText={(location) => `Delivering at ${location.code}.`}
+          searchingHelperText={(location) => `Current location stays ${location.code} until you choose a new result.`}
+          buildSecondaryLabel={(location) => location.code}
+        />
         <label className="field">
           <span>Delivery Start</span>
           <input
@@ -661,12 +686,50 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             disabled={submitting}
           />
         </label>
+
+        <TradeFormDisclosure
+          title="Schedule Overrides"
+          summary="Trade date and effective window"
+          description="Execution date normally sets the trade day. Open this only when you need an explicit trade date or a separate effective range."
+          defaultOpen={showScheduleOverrides}
+        >
+          <label className="field">
+            <span>Trade Date</span>
+            <input
+              className="control"
+              type="date"
+              value={tradeDateInput}
+              onChange={(event) => setTradeDateInput(event.target.value)}
+              disabled={submitting}
+            />
+          </label>
+          <label className="field">
+            <span>Effective Start</span>
+            <input
+              className="control"
+              type="date"
+              value={effectiveStartDateInput}
+              onChange={(event) => setEffectiveStartDateInput(event.target.value)}
+              disabled={submitting}
+            />
+          </label>
+          <label className="field">
+            <span>Effective End</span>
+            <input
+              className="control"
+              type="date"
+              value={effectiveEndDateInput}
+              onChange={(event) => setEffectiveEndDateInput(event.target.value)}
+              disabled={submitting}
+            />
+          </label>
+        </TradeFormDisclosure>
       </TradeCaptureSection>
 
       <TradeCaptureSection
         step="3"
         title="Market And Terms"
-        description="Pick the product and contract terms here. The section adapts when the ticket becomes a swap or an option."
+        description="Pick the product and contract terms here. The section still adapts when the ticket becomes a swap or an option."
       >
         {structureUsesLegs ? (
           <div className="field-full">
@@ -682,7 +745,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
               <select
                 className="control"
                 value={commodityClassInput}
-                onChange={(event) => setCommodityClassInput(event.target.value)}
+                onChange={(event) => handleCommodityClassSelection(event.target.value)}
                 disabled={submitting || referenceDataLoading || commodityClassOptions.length === 0}
               >
                 {commodityClassOptions.map((commodityClass) => (
@@ -692,21 +755,24 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Commodity</span>
-              <select
-                className="control control-highlight"
-                value={commodityInput}
-                onChange={(event) => setCommodityInput(event.target.value)}
-                disabled={submitting || referenceDataLoading || createCommodityOptions.length === 0}
-              >
-                {createCommodityOptions.map((commodity) => (
-                  <option key={commodity.code} value={commodity.code}>
-                    {commodity.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ReferenceSearchField
+              label="Commodity"
+              selectedCode={commodityInput}
+              setSelectedCode={setCommodityInput}
+              searchInput={commoditySearchInput}
+              setSearchInput={setCommoditySearchInput}
+              options={createCommodityOptions}
+              disabled={submitting || referenceDataLoading || createCommodityOptions.length === 0}
+              allowEmpty={false}
+              preserveSelectionWhileSearching
+              placeholder="Search by commodity name or code"
+              idleHelperText="Search by commodity name or code."
+              unmatchedHelperText="No exact commodity is selected yet. Choose a result to update the ticket."
+              emptyStateText="No commodities match that search yet."
+              selectedHelperText={(commodity) => `Ticketing ${commodity.code}.`}
+              searchingHelperText={(commodity) => `Current commodity stays ${commodity.code} until you choose a new result.`}
+              buildSecondaryLabel={(commodity) => commodity.code}
+            />
           </>
         )}
 
@@ -740,38 +806,6 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           <span>Quantity Unit</span>
           <select className="control" value={unitInput} onChange={(event) => setUnitInput(event.target.value)} disabled={submitting}>
             <option value="">Select unit</option>
-            {createUnitOptions.map((unit) => (
-              <option key={unit.code} value={unit.code}>
-                {unit.code} · {unit.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Trade Currency</span>
-          <select
-            className="control"
-            value={tradeCurrencyInput}
-            onChange={(event) => setTradeCurrencyInput(event.target.value)}
-            disabled={submitting}
-          >
-            <option value="">No currency</option>
-            {createCurrencyOptions.map((currency) => (
-              <option key={currency.code} value={currency.code}>
-                {currency.code} · {currency.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Price Unit</span>
-          <select
-            className="control"
-            value={priceUnitInput}
-            onChange={(event) => setPriceUnitInput(event.target.value)}
-            disabled={submitting}
-          >
-            <option value="">No price unit</option>
             {createUnitOptions.map((unit) => (
               <option key={unit.code} value={unit.code}>
                 {unit.code} · {unit.name}
@@ -854,18 +888,8 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
       <TradeCaptureSection
         step="4"
         title="Pricing And Settlement"
-        description="Finish the economic terms here, then review the pricing index and settlement posture before creating the trade."
+        description="Finish the economic terms here. Workflow defaults stay collapsed until the ticket needs a non-standard pricing or settlement posture."
       >
-        <label className="field">
-          <span>{optionTrade ? 'Premium' : pricingTypeRequiresExplicitPrice(pricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
-          <input className="control" inputMode="decimal" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} />
-        </label>
-        {!structureUsesLegs && (
-          <label className="field">
-            <span>{optionTrade ? 'Contracts' : 'Volume'}</span>
-            <input className="control" inputMode="decimal" value={volumeInput} onChange={(event) => setVolumeInput(event.target.value)} />
-          </label>
-        )}
         <label className="field">
           <FieldLabel label="Pricing" tooltip={tradeTooltipCopy.pricing} />
           <select className="control" value={pricingTypeInput} onChange={(event) => setPricingTypeInput(event.target.value)} disabled={optionTrade}>
@@ -877,21 +901,43 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>Pricing Status</span>
-          <select className="control" value={pricingStatusInput} onChange={(event) => setPricingStatusInput(event.target.value)}>
-            {pricingStatusOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
+          <span>{optionTrade ? 'Premium' : pricingTypeNeedsExplicitPrice ? 'Price Differential' : 'Price Differential (optional)'}</span>
+          <input className="control" inputMode="decimal" value={priceInput} onChange={(event) => setPriceInput(event.target.value)} />
+        </label>
+        {!structureUsesLegs && (
+          <label className="field">
+            <span>{optionTrade ? 'Contracts' : 'Volume'}</span>
+            <input className="control" inputMode="decimal" value={volumeInput} onChange={(event) => setVolumeInput(event.target.value)} />
+          </label>
+        )}
+        <label className="field">
+          <span>Trade Currency</span>
+          <select
+            className="control"
+            value={tradeCurrencyInput}
+            onChange={(event) => setTradeCurrencyInput(event.target.value)}
+            disabled={submitting}
+          >
+            <option value="">No currency</option>
+            {createCurrencyOptions.map((currency) => (
+              <option key={currency.code} value={currency.code}>
+                {currency.code} · {currency.name}
               </option>
             ))}
           </select>
         </label>
         <label className="field">
-          <span>Settlement Status</span>
-          <select className="control" value={settlementStatusInput} onChange={(event) => setSettlementStatusInput(event.target.value)}>
-            {settlementStatusOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
+          <span>Price Unit</span>
+          <select
+            className="control"
+            value={priceUnitInput}
+            onChange={(event) => setPriceUnitInput(event.target.value)}
+            disabled={submitting}
+          >
+            <option value="">No price unit</option>
+            {createUnitOptions.map((unit) => (
+              <option key={unit.code} value={unit.code}>
+                {unit.code} · {unit.name}
               </option>
             ))}
           </select>
@@ -903,7 +949,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
               className="control"
               value={priceIndexInput}
               onChange={(event) => setPriceIndexInput(event.target.value)}
-              disabled={optionTrade || !pricingTypeRequiresPriceIndex(pricingTypeInput) || createPriceIndexOptions.length === 0}
+              disabled={optionTrade || !pricingTypeNeedsPriceIndex || createPriceIndexOptions.length === 0}
             >
               <option value="">No price index</option>
               {createPriceIndexOptions.map((priceIndex) => (
@@ -914,6 +960,32 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             </select>
           </label>
         )}
+        <TradeFormDisclosure
+          title="Workflow Defaults"
+          summary="Pricing and settlement status"
+          description="Most tickets can keep the defaults shown in the overview. Open this only when the trade is already priced or settled on arrival."
+        >
+          <label className="field">
+            <span>Pricing Status</span>
+            <select className="control" value={pricingStatusInput} onChange={(event) => setPricingStatusInput(event.target.value)}>
+              {pricingStatusOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Settlement Status</span>
+            <select className="control" value={settlementStatusInput} onChange={(event) => setSettlementStatusInput(event.target.value)}>
+              {settlementStatusOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        </TradeFormDisclosure>
       </TradeCaptureSection>
 
       <section className="trade-form-actions field-full">

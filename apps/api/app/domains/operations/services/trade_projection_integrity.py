@@ -12,6 +12,8 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.trade import Trade, trade_recency_order
+from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
+from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
@@ -32,6 +34,8 @@ DEPENDENT_MODELS: tuple[tuple[str, object], ...] = (
     ("delivery_obligations", DeliveryObligation),
     ("option_exposures", OptionExposure),
     ("trade_actualizations", TradeActualization),
+    ("trade_accrual_entries", TradeAccrualEntry),
+    ("trade_accrual_lots", TradeAccrualLot),
     ("trade_confirmations", TradeConfirmation),
     ("trade_credit_approval_decisions", TradeCreditApprovalDecision),
     ("trade_credit_exceptions", TradeCreditException),

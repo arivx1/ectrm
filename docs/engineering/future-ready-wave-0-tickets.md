@@ -199,6 +199,16 @@ The main workspace bootstrap payload uses owned domain types instead of
 - typed bootstrap changes are covered by automated tests
 - the repo docs note which payload areas still need follow-on typing work
 
+### Follow-on note
+
+After the initial bootstrap ownership slice, follow-on typing work should focus
+on:
+
+- non-bootstrap API payloads that still rely on ad hoc nested objects
+- assistant and admin response areas with flexible tool or run snapshots
+- server-owned metadata surfaces that will be formalized in FR0-05 through
+  FR0-07
+
 ## FR0-05: Server-Owned Trade Metadata Endpoint
 
 ### Size
@@ -236,6 +246,14 @@ dedicated server-owned contract.
 - the backend publishes one authoritative trade metadata surface
 - automated tests verify the metadata contract
 - docs state that the selected metadata is server-owned
+
+### Implementation note
+
+- `GET /trades/metadata` is the selected Wave 0 contract surface
+- it owns backend-governed trade vocabulary, defaulted status behavior, and
+  option/pricing validation rules
+- browser-only conveniences should stay out of this contract unless the backend
+  actually governs them
 
 ## FR0-06: Consume Server-Owned Trade Metadata In The Web App
 

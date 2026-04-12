@@ -1,4 +1,5 @@
-import { useDeferredValue, useId, useMemo, useState } from 'react'
+/* eslint-disable react-refresh/only-export-components -- This module intentionally exports shared hooks alongside search field components. */
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import {
   buildCounterpartySearchDisplayValue,
@@ -38,6 +39,43 @@ type ReferenceSearchFieldProps<RecordType extends ReferenceSearchRecord> = {
   selectedHelperText: (record: RecordType) => string
   searchingHelperText?: (record: RecordType) => string
   buildSecondaryLabel: (record: RecordType) => string
+}
+
+export function useReferenceSearchDisplayState<RecordType extends ReferenceSearchRecord>(
+  selectedRecord: RecordType | null,
+  fallbackValue = '',
+) {
+  const [searchInput, setSearchInput] = useState(
+    () => buildReferenceSearchDisplayValue(selectedRecord) || fallbackValue,
+  )
+  const previousDisplayRef = useRef(buildReferenceSearchDisplayValue(selectedRecord))
+  const previousCodeRef = useRef(selectedRecord?.code ?? fallbackValue)
+
+  useEffect(() => {
+    const nextDisplayValue = buildReferenceSearchDisplayValue(selectedRecord)
+    const nextCode = selectedRecord?.code ?? ''
+    const previousDisplayValue = previousDisplayRef.current
+    const previousCode = previousCodeRef.current
+
+    setSearchInput((current) => {
+      if (selectedRecord) {
+        return current.trim().length === 0 ||
+          current === nextDisplayValue ||
+          current === nextCode ||
+          current === previousDisplayValue ||
+          current === previousCode
+          ? nextDisplayValue
+          : current
+      }
+
+      return current === previousDisplayValue || current === previousCode ? '' : current
+    })
+
+    previousDisplayRef.current = nextDisplayValue
+    previousCodeRef.current = nextCode
+  }, [selectedRecord])
+
+  return [searchInput, setSearchInput] as const
 }
 
 export function ReferenceSearchField<RecordType extends ReferenceSearchRecord>({

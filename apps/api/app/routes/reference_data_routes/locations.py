@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
@@ -25,13 +24,6 @@ from apps.api.app.domains.reference_data.services.location_standards import (
     normalize_subdivision_code,
     normalize_timezone_name,
 )
-from apps.api.app.domains.reference_data.services.records import (
-    create_reference_record,
-    get_reference_record,
-    list_reference_records,
-    set_reference_active_state,
-    update_reference_record,
-)
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.schemas.reference_data import (
     LocationCreate,
@@ -49,6 +41,12 @@ from .common import (
     to_out,
     validate_location_coordinates,
 )
+from .factory import create_reference_resource
+from .factory import get_reference_resource
+from .factory import list_reference_collection
+from .factory import ReferenceDataCrudSpec
+from .factory import set_reference_resource_active
+from .factory import update_reference_resource
 
 router = APIRouter()
 
@@ -146,6 +144,53 @@ def _update_location_fields(db: Session, record, payload, provided_fields: set[s
         record.timezone = next_timezone
 
 
+def _build_location_create_values(db: Session, payload: LocationCreate) -> dict[str, object]:
+    normalized_code = payload.code.strip().upper()
+    normalized_location_kind = normalize_location_kind(payload.location_kind)
+    normalized_location_type = normalize_location_type(
+        payload.location_type,
+        location_kind=normalized_location_kind,
+    )
+    normalized_parent_location_code = normalize_location_parent_code(
+        db,
+        record_code=normalized_code,
+        parent_location_code=payload.parent_location_code,
+    )
+    validate_location_coordinates(payload.latitude, payload.longitude)
+    normalized_country_code = normalize_country_code(payload.country_code)
+    normalized_subdivision_code = normalize_subdivision_code(
+        payload.subdivision_code,
+        country_code=normalized_country_code,
+    )
+    if normalized_country_code is None and normalized_subdivision_code is not None:
+        normalized_country_code = infer_country_code_from_subdivision(normalized_subdivision_code)
+
+    return {
+        "location_kind": normalized_location_kind,
+        "location_type": normalized_location_type,
+        "parent_location_code": normalized_parent_location_code,
+        "market": normalize_location_market(payload.market),
+        "city": clean_optional_text(payload.city),
+        "subdivision_code": normalized_subdivision_code,
+        "country_code": normalized_country_code,
+        "continent_code": normalize_continent_code(payload.continent_code),
+        "latitude": payload.latitude,
+        "longitude": payload.longitude,
+        "region": clean_optional_text(payload.region),
+        "timezone": normalize_timezone_name(payload.timezone),
+    }
+
+
+LOCATION_SPEC = ReferenceDataCrudSpec(
+    model=ReferenceLocation,
+    out_schema_cls=LocationOut,
+    duplicate_detail="Location already exists",
+    build_create_extra_values=_build_location_create_values,
+    update_extra_fields=_update_location_fields,
+    validate_deactivate=ensure_location_not_in_active_use,
+)
+
+
 @router.get("/locations", response_model=List[LocationOut])
 def list_locations(
     q: Optional[str] = None,
@@ -170,16 +215,15 @@ def list_locations(
             location_kind=normalized_location_kind,
         )
         extra_filters.append(ReferenceLocation.location_type == normalized_location_type)
-    rows = list_reference_records(
-        db,
-        ReferenceLocation,
-        q,
-        is_active,
-        limit,
-        offset,
+    return list_reference_collection(
+        LOCATION_SPEC,
+        db=db,
+        q=q,
+        is_active=is_active,
+        limit=limit,
+        offset=offset,
         extra_filters=extra_filters,
     )
-    return [to_out(row, LocationOut) for row in rows]
 
 
 @router.get("/locations/standards", response_model=LocationStandardsOut)
@@ -196,77 +240,17 @@ def list_location_standards() -> LocationStandardsOut:
 
 @router.post("/locations", response_model=LocationOut, status_code=201)
 def create_location(payload: LocationCreate, db: Session = Depends(get_db)) -> LocationOut:
-    existing = db.execute(
-        select(ReferenceLocation).where(ReferenceLocation.code == payload.code.strip().upper())
-    ).scalars().first()
-    if existing is not None:
-        raise HTTPException(status_code=409, detail="Location already exists")
-
-    normalized_code = payload.code.strip().upper()
-    normalized_location_kind = normalize_location_kind(payload.location_kind)
-    normalized_location_type = normalize_location_type(
-        payload.location_type,
-        location_kind=normalized_location_kind,
-    )
-    normalized_parent_location_code = normalize_location_parent_code(
-        db,
-        record_code=normalized_code,
-        parent_location_code=payload.parent_location_code,
-    )
-    validate_location_coordinates(payload.latitude, payload.longitude)
-    normalized_country_code = normalize_country_code(payload.country_code)
-    normalized_subdivision_code = normalize_subdivision_code(
-        payload.subdivision_code,
-        country_code=normalized_country_code,
-    )
-    if normalized_country_code is None and normalized_subdivision_code is not None:
-        normalized_country_code = infer_country_code_from_subdivision(normalized_subdivision_code)
-    normalized_continent_code = normalize_continent_code(payload.continent_code)
-
-    record = create_reference_record(
-        db,
-        ReferenceLocation,
-        payload,
-        extra_values={
-            "location_kind": normalized_location_kind,
-            "location_type": normalized_location_type,
-            "parent_location_code": normalized_parent_location_code,
-            "market": normalize_location_market(payload.market),
-            "city": clean_optional_text(payload.city),
-            "subdivision_code": normalized_subdivision_code,
-            "country_code": normalized_country_code,
-            "continent_code": normalized_continent_code,
-            "latitude": payload.latitude,
-            "longitude": payload.longitude,
-            "region": clean_optional_text(payload.region),
-            "timezone": normalize_timezone_name(payload.timezone),
-        },
-    )
-    return to_out(record, LocationOut)
+    return create_reference_resource(LOCATION_SPEC, payload, db=db)
 
 
 @router.get("/locations/{code}", response_model=LocationOut)
 def get_location(code: str, db: Session = Depends(get_db)) -> LocationOut:
-    record = get_reference_record(db, ReferenceLocation, code.strip().upper())
-    return to_out(record, LocationOut)
+    return get_reference_resource(LOCATION_SPEC, code, db=db)
 
 
 @router.put("/locations/{code}", response_model=LocationOut)
 def update_location(code: str, payload: LocationUpdate, db: Session = Depends(get_db)) -> LocationOut:
-    record = get_reference_record(db, ReferenceLocation, code.strip().upper())
-    update_reference_record(
-        record,
-        payload,
-        extra_updates=lambda current_record, current_payload, provided_fields: _update_location_fields(
-            db,
-            current_record,
-            current_payload,
-            provided_fields,
-        ),
-    )
-    db.commit()
-    db.refresh(record)
-    return to_out(record, LocationOut)
+    return update_reference_resource(LOCATION_SPEC, code, payload, db=db)
 
 
 @router.post("/locations/{code}/deactivate", response_model=LocationOut)
@@ -275,12 +259,13 @@ def deactivate_location(
     payload: LocationStatusUpdate,
     db: Session = Depends(get_db),
 ) -> LocationOut:
-    record = get_reference_record(db, ReferenceLocation, code.strip().upper())
-    ensure_location_not_in_active_use(db, record.code)
-    set_reference_active_state(record, False, payload.updated_by)
-    db.commit()
-    db.refresh(record)
-    return to_out(record, LocationOut)
+    return set_reference_resource_active(
+        LOCATION_SPEC,
+        code,
+        payload,
+        is_active=False,
+        db=db,
+    )
 
 
 @router.post("/locations/{code}/activate", response_model=LocationOut)
@@ -289,8 +274,10 @@ def activate_location(
     payload: LocationStatusUpdate,
     db: Session = Depends(get_db),
 ) -> LocationOut:
-    record = get_reference_record(db, ReferenceLocation, code.strip().upper())
-    set_reference_active_state(record, True, payload.updated_by)
-    db.commit()
-    db.refresh(record)
-    return to_out(record, LocationOut)
+    return set_reference_resource_active(
+        LOCATION_SPEC,
+        code,
+        payload,
+        is_active=True,
+        db=db,
+    )

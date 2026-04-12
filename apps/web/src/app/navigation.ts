@@ -6,48 +6,152 @@ export const MAX_PRIMARY_NAV_SECTIONS = 5
 const PRIMARY_NAV_SECTION_DEFINITIONS = [
   {
     key: 'overview',
-    label: 'Overview',
+    label: 'Start',
     kicker: 'Start here',
-    heroTitle: 'Overview surfaces and desk orientation',
-    heroBody: 'Start with the live desk picture, move into the operator guide for context, or run a scenario walkthrough before drilling into live workflows.',
-    landingBody: 'Use this section to get oriented quickly, whether you need the live desk view, product context, or a guided lifecycle demo.',
+    heroTitle: 'Start, learn, and orient quickly',
+    heroBody:
+      'Use the live desk, product guide, and guided walkthrough as your first stop before diving into a specific workflow.',
+    landingBody:
+      'This section answers the first question new or returning operators have: where should I start for the job in front of me?',
     viewKeys: ['dashboard', 'guide', 'demo'],
+    startPaths: [
+      {
+        title: 'Get oriented',
+        detail: 'Read the in-product handbook before you touch live workflows or need to explain the platform to someone new.',
+        viewKey: 'guide',
+        actionLabel: 'Open How It Works',
+      },
+      {
+        title: 'Watch the live desk',
+        detail: 'See desk health, recent activity, exposure, and open attention points on one screen.',
+        viewKey: 'dashboard',
+        actionLabel: 'Open Live Desk',
+      },
+      {
+        title: 'Run a safe walkthrough',
+        detail: 'Use a local-only scenario to understand the trade lifecycle without mutating live data.',
+        viewKey: 'demo',
+        actionLabel: 'Open Walkthrough',
+      },
+    ],
   },
   {
     key: 'trading',
-    label: 'Trading',
-    kicker: 'Front office',
-    heroTitle: 'Trading surfaces for capture and exposure context',
-    heroBody: 'Move from blotter entry into lifecycle review, exposure concentration, and positions without losing the active trading thread.',
-    landingBody: 'This section groups the front-office and near-trade surfaces operators use when entering, reviewing, and sizing exposure.',
+    label: 'Trade & Exposure',
+    kicker: 'Commercial',
+    heroTitle: 'Capture trades and understand exposure',
+    heroBody:
+      'Move from ticket entry into activity, exposure, and net positions without guessing which screen owns which job.',
+    landingBody:
+      'Use this section when the job is booking a trade, tracing its recent changes, or understanding where open exposure sits.',
     viewKeys: ['trades', 'events', 'risk', 'positions'],
+    startPaths: [
+      {
+        title: 'Capture a trade',
+        detail: 'Open the trade blotter and ticket-entry workflow when the desk needs to book or amend a position.',
+        viewKey: 'trades',
+        actionLabel: 'Open Trade Capture',
+      },
+      {
+        title: 'Check exposure',
+        detail: 'See concentration, unpriced risk, and the books carrying the most open exposure first.',
+        viewKey: 'risk',
+        actionLabel: 'Open Exposure',
+      },
+      {
+        title: 'Inspect net positions',
+        detail: 'Review commodity and book-level net positions when the question is inventory or directional balance.',
+        viewKey: 'positions',
+        actionLabel: 'Open Net Positions',
+      },
+    ],
   },
   {
     key: 'execution',
-    label: 'Execution',
-    kicker: 'Lifecycle',
-    heroTitle: 'Execution surfaces for post-trade flow',
-    heroBody: 'Follow obligations from deliveries into scheduling, operational queues, and settlement so post-trade work stays connected.',
-    landingBody: 'This section is where commodity movement, workflow readiness, and cash follow-through stay visible as one operating loop.',
+    label: 'Post-Trade',
+    kicker: 'Follow-through',
+    heroTitle: 'Deliveries, work queues, and settlement',
+    heroBody:
+      'Follow a trade from delivery readiness into operational queues and cash settlement without losing the story.',
+    landingBody:
+      'Use this section when the work has moved past capture and into delivery, coordination, exception clearing, or cash follow-through.',
     viewKeys: ['shipments', 'scheduling', 'operations', 'settlement'],
+    startPaths: [
+      {
+        title: 'Review delivery blockers',
+        detail: 'Start with delivery obligations when the question is what needs to move, schedule, or clear operationally.',
+        viewKey: 'shipments',
+        actionLabel: 'Open Deliveries',
+      },
+      {
+        title: 'Run the work queue',
+        detail: 'Use the operational queue when teams are working confirmations, blockers, approvals, and open handoffs.',
+        viewKey: 'operations',
+        actionLabel: 'Open Work Queue',
+      },
+      {
+        title: 'Check cash status',
+        detail: 'Open settlement when the question is invoicing, payment aging, or downstream cash exceptions.',
+        viewKey: 'settlement',
+        actionLabel: 'Open Settlement',
+      },
+    ],
   },
   {
     key: 'intelligence',
-    label: 'Intelligence',
-    kicker: 'Analyze',
-    heroTitle: 'Intelligence surfaces for analysis and support',
-    heroBody: 'Jump between reporting, reference maintenance, and the desk copilot when you need answers, master data, or grounded assistance.',
-    landingBody: 'Use this section for analyst-style work: reporting, registry maintenance, and AI-assisted desk investigation.',
+    label: 'Analysis',
+    kicker: 'Understand',
+    heroTitle: 'Reports, reference data, and desk support',
+    heroBody:
+      'Jump between reporting, reference data, and the assistant when you need answers faster than raw tables can give them.',
+    landingBody:
+      'Use this section for analyst-style work: reporting, desk reference maintenance, and grounded AI assistance.',
     viewKeys: ['reports', 'reference', 'assistant'],
+    startPaths: [
+      {
+        title: 'Run a report',
+        detail: 'Open curated desk reporting when someone needs an answer on exposure, activity, credit, or settlement.',
+        viewKey: 'reports',
+        actionLabel: 'Open Reports',
+      },
+      {
+        title: 'Maintain reference data',
+        detail: 'Update books, portfolios, commodities, locations, or counterparties without leaving the product.',
+        viewKey: 'reference',
+        actionLabel: 'Open Reference Data',
+      },
+      {
+        title: 'Ask for help',
+        detail: 'Use the assistant when you need grounded desk context or a quicker explanation of what is happening.',
+        viewKey: 'assistant',
+        actionLabel: 'Open Assistant',
+      },
+    ],
   },
   {
     key: 'administration',
-    label: 'Admin',
+    label: 'Settings & Admin',
     kicker: 'Control',
-    heroTitle: 'Administrative controls and runtime governance',
-    heroBody: 'Keep privileged controls, governance flows, and runtime configuration close together without burying them under trading screens.',
-    landingBody: 'This section is for operators and admins managing runtime access, governance, sync health, and privileged maintenance.',
+    heroTitle: 'Access, settings, and privileged controls',
+    heroBody:
+      'Keep sign-in, runtime settings, sync health, and privileged controls together without burying them under trading screens.',
+    landingBody:
+      'Use this section when the task is configuring the console, signing in, checking runtime health, or running privileged maintenance.',
     viewKeys: ['admin', 'settings'],
+    startPaths: [
+      {
+        title: 'Sign in or configure access',
+        detail: 'Open settings when you need to connect the app, manage session details, or adjust runtime behavior.',
+        viewKey: 'settings',
+        actionLabel: 'Open Settings',
+      },
+      {
+        title: 'Run admin controls',
+        detail: 'Open the admin console for governance, sync operations, privileged tooling, and runtime oversight.',
+        viewKey: 'admin',
+        actionLabel: 'Open Admin Console',
+      },
+    ],
   },
 ] satisfies Array<{
   key: string
@@ -57,6 +161,12 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
   heroBody: string
   landingBody: string
   viewKeys: ViewKey[]
+  startPaths: Array<{
+    title: string
+    detail: string
+    viewKey: ViewKey
+    actionLabel: string
+  }>
 }>
 
 export type PrimaryNavigationSectionKey = (typeof PRIMARY_NAV_SECTION_DEFINITIONS)[number]['key']
@@ -69,6 +179,12 @@ export type PrimaryNavigationSection = {
   heroBody: string
   landingBody: string
   views: typeof APP_VIEWS
+  startPaths: Array<{
+    title: string
+    detail: string
+    actionLabel: string
+    view: (typeof APP_VIEWS)[number]
+  }>
 }
 
 const APP_VIEW_BY_KEY = new Map(APP_VIEWS.map((view) => [view.key, view]))
@@ -90,6 +206,18 @@ export const PRIMARY_NAV_SECTIONS: PrimaryNavigationSection[] = PRIMARY_NAV_SECT
       throw new Error(`Missing view definition for ${viewKey}`)
     }
     return view
+  }),
+  startPaths: section.startPaths.map((path) => {
+    const view = APP_VIEW_BY_KEY.get(path.viewKey)
+    if (!view) {
+      throw new Error(`Missing view definition for ${path.viewKey}`)
+    }
+    return {
+      title: path.title,
+      detail: path.detail,
+      actionLabel: path.actionLabel,
+      view,
+    }
   }),
 }))
 PRIMARY_NAV_SECTIONS.forEach((section) => PRIMARY_NAV_SECTION_BY_KEY.set(section.key, section))

@@ -257,7 +257,7 @@ export function SettlementInvoiceBoard({
     <div className="workflow-editor-stack">
       {!authSession ? (
         <p className="workflow-editor-note">
-          Sign in from Settings to issue, approve, and dispute settlement invoices.
+          Sign in to issue, approve, and dispute settlement invoices.
         </p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}

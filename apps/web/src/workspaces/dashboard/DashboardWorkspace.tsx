@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import type { WorkspaceDashboardSummary } from '../../entities/app/api'
-import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord } from '../../shared/models'
+import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord, ViewKey } from '../../shared/models'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileLayout } from '../../shared/ui/TileLayout'
@@ -47,6 +47,7 @@ type PriceIndexRecord = {
 
 type DashboardWorkspaceProps = {
   authSession: StoredAuthSession | null
+  onOpenView: (view: ViewKey) => void
   appLoading: boolean
   activeTrades: TradeRecord[]
   dashboardSummary: WorkspaceDashboardSummary | null
@@ -491,6 +492,7 @@ function PnlTrendChart({
 export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const {
     authSession,
+    onOpenView,
     appLoading,
     activeTrades,
     dashboardSummary,
@@ -900,11 +902,42 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       ] as Array<{ label: string; count: number; detail: string; tone: 'active' | 'blocked' }>,
     }
   }, [activeTrades, dashboardSummary])
+  const quickStartActions = [
+    {
+      title: 'Capture a trade',
+      detail: 'Open the ticket-entry workflow when the desk needs to book, inspect, or amend a trade.',
+      view: 'trades',
+      actionLabel: 'Open Trade Capture',
+    },
+    {
+      title: 'Check exposure',
+      detail: 'Open the exposure workspace when the question is concentration, pricing coverage, or the biggest books.',
+      view: 'risk',
+      actionLabel: 'Open Exposure',
+    },
+    {
+      title: 'Run the work queue',
+      detail: 'Open operations when teams are working confirmations, blockers, approvals, and other open handoffs.',
+      view: 'operations',
+      actionLabel: 'Open Work Queue',
+    },
+    {
+      title: 'Learn the workflow',
+      detail: 'Open the in-product guide when someone needs onboarding help or a quick explanation of how the platform works.',
+      view: 'guide',
+      actionLabel: 'Open How It Works',
+    },
+  ] satisfies Array<{
+    title: string
+    detail: string
+    view: ViewKey
+    actionLabel: string
+  }>
 
   return (
     <TileLayout
       workspaceId="dashboard"
-      workspaceLabel="Dashboard"
+      workspaceLabel="Live Desk"
       authSession={authSession}
       tiles={[
         {
@@ -1151,6 +1184,32 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                   </p>
                 </article>
               </div>
+            </div>
+          ),
+        },
+        {
+          id: 'quick-start',
+          eyebrow: 'Start Here',
+          title: 'Common Starting Points',
+          description: 'Go straight to the workspace built for the job you are trying to do.',
+          span: 'half',
+          availableSpans: ['full', 'wide', 'half'],
+          content: (
+            <div className="dashboard-report-grid dashboard-start-grid">
+              {quickStartActions.map((action) => (
+                <article key={action.view} className="dashboard-report-card section-start-card dashboard-start-card">
+                  <div className="section-start-card-copy">
+                    <span>{action.actionLabel}</span>
+                    <strong>{action.title}</strong>
+                    <p>{action.detail}</p>
+                  </div>
+                  <div className="section-start-card-actions">
+                    <button type="button" className="button button-secondary" onClick={() => onOpenView(action.view)}>
+                      {action.actionLabel}
+                    </button>
+                  </div>
+                </article>
+              ))}
             </div>
           ),
         },

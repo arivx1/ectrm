@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.http import execute_http_action
+from apps.api.app.core.http import NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES
+from apps.api.app.core.http import NOT_FOUND_ERROR_STATUS_CODES
+from apps.api.app.core.http import require_authenticated_actor
+from apps.api.app.core.http import VALIDATION_ERROR_STATUS_CODES
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.documents.services.ingestion import get_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import get_document_page_preview_path
@@ -22,18 +27,11 @@ from apps.api.app.schemas.document import DocumentSchemaRegistryOut
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-def _require_authenticated_actor(request: Request) -> str:
-    actor_id = getattr(request.state, "actor_id", None)
-    if not actor_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
-    return actor_id
-
-
 @router.get("/schema-registry", response_model=DocumentSchemaRegistryOut)
 def get_document_schema_registry(
     request: Request,
 ) -> DocumentSchemaRegistryOut:
-    _require_authenticated_actor(request)
+    require_authenticated_actor(request)
     return list_document_schema_registry()
 
 
@@ -44,7 +42,7 @@ def get_documents(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[DocumentIngestionOut]:
-    _require_authenticated_actor(request)
+    require_authenticated_actor(request)
     return list_document_ingestions(db, limit=limit, offset=offset)
 
 
@@ -54,11 +52,16 @@ def get_document(
     request: Request,
     db: Session = Depends(get_db),
 ) -> DocumentIngestionOut:
-    _require_authenticated_actor(request)
-    try:
+    require_authenticated_actor(request)
+
+    def load_document() -> DocumentIngestionOut:
         return get_document_ingestion(db, document_id=document_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return execute_http_action(
+        db,
+        load_document,
+        handled_exceptions=NOT_FOUND_ERROR_STATUS_CODES,
+    )
 
 
 @router.patch("/{document_id}", response_model=DocumentIngestionOut)
@@ -68,26 +71,23 @@ def patch_document(
     request: Request,
     db: Session = Depends(get_db),
 ) -> DocumentIngestionOut:
-    actor_id = _require_authenticated_actor(request)
+    actor_id = require_authenticated_actor(request)
     changes = payload.model_dump(exclude_unset=True)
-    try:
-        document = update_document_ingestion(
+
+    def update_document() -> DocumentIngestionOut:
+        return update_document_ingestion(
             db,
             document_id=document_id,
             actor_id=actor_id,
             changes=changes,
         )
-        db.commit()
-        return document
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+
+    return execute_http_action(
+        db,
+        update_document,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
 
 
 @router.patch("/{document_id}/pages/{page_id}", response_model=DocumentIngestionOut)
@@ -98,27 +98,24 @@ def patch_document_page(
     request: Request,
     db: Session = Depends(get_db),
 ) -> DocumentIngestionOut:
-    actor_id = _require_authenticated_actor(request)
+    actor_id = require_authenticated_actor(request)
     changes = payload.model_dump(exclude_unset=True)
-    try:
-        document = update_document_ingestion_page(
+
+    def update_page() -> DocumentIngestionOut:
+        return update_document_ingestion_page(
             db,
             document_id=document_id,
             page_id=page_id,
             actor_id=actor_id,
             changes=changes,
         )
-        db.commit()
-        return document
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+
+    return execute_http_action(
+        db,
+        update_page,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
 
 
 @router.get("/{document_id}/pages/{page_id}/preview")
@@ -128,20 +125,25 @@ def get_document_page_preview(
     request: Request,
     db: Session = Depends(get_db),
 ) -> FileResponse:
-    _require_authenticated_actor(request)
-    try:
-        preview_path = get_document_page_preview_path(
+    require_authenticated_actor(request)
+
+    def load_preview_path() -> str:
+        return get_document_page_preview_path(
             db,
             document_id=document_id,
             page_id=page_id,
         )
-        return FileResponse(
-            preview_path,
-            media_type="image/png",
-            filename=f"document-{document_id}-page-{page_id}.png",
-        )
-    except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    preview_path = execute_http_action(
+        db,
+        load_preview_path,
+        handled_exceptions=NOT_FOUND_ERROR_STATUS_CODES,
+    )
+    return FileResponse(
+        preview_path,
+        media_type="image/png",
+        filename=f"document-{document_id}-page-{page_id}.png",
+    )
 
 
 @router.post("/uploads", response_model=DocumentIngestionOut, status_code=status.HTTP_201_CREATED)
@@ -152,10 +154,11 @@ async def post_document_upload(
     display_name: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> DocumentIngestionOut:
-    actor_id = _require_authenticated_actor(request)
-    try:
-        payload = await file.read()
-        document = ingest_pdf_document(
+    actor_id = require_authenticated_actor(request)
+    payload = await file.read()
+
+    def ingest_document() -> DocumentIngestionOut:
+        return ingest_pdf_document(
             db,
             actor_id=actor_id,
             filename=file.filename or "document.pdf",
@@ -163,19 +166,19 @@ async def post_document_upload(
             payload=payload,
             display_name=display_name,
         )
-        db.commit()
-        background_tasks.add_task(
-            run_document_processing_job,
-            request.app.state.session_factory,
-            document_id=document.document_id,
-        )
-        return document
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+
+    document = execute_http_action(
+        db,
+        ingest_document,
+        commit=True,
+        handled_exceptions=VALIDATION_ERROR_STATUS_CODES,
+    )
+    background_tasks.add_task(
+        run_document_processing_job,
+        request.app.state.session_factory,
+        document_id=document.document_id,
+    )
+    return document
 
 
 @router.post("/{document_id}/reprocess", response_model=DocumentIngestionOut, status_code=status.HTTP_202_ACCEPTED)
@@ -185,26 +188,24 @@ def post_document_reprocess(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> DocumentIngestionOut:
-    actor_id = _require_authenticated_actor(request)
-    try:
-        document = reprocess_document_ingestion(
+    actor_id = require_authenticated_actor(request)
+
+    def reprocess_document() -> DocumentIngestionOut:
+        return reprocess_document_ingestion(
             db,
             document_id=document_id,
             actor_id=actor_id,
         )
-        db.commit()
-        background_tasks.add_task(
-            run_document_processing_job,
-            request.app.state.session_factory,
-            document_id=document_id,
-        )
-        return document
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+
+    document = execute_http_action(
+        db,
+        reprocess_document,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+    background_tasks.add_task(
+        run_document_processing_job,
+        request.app.state.session_factory,
+        document_id=document_id,
+    )
+    return document

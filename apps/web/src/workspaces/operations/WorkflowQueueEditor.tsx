@@ -411,6 +411,7 @@ export function WorkflowQueueEditor({
     }
 
     if (createDraft.tradeId !== selectedCreateTrade.trade_id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset the create draft when the selected trade changes or becomes invalid.
       setCreateDraft((current) => ({
         ...current,
         tradeId: selectedCreateTrade.trade_id,
@@ -786,7 +787,7 @@ export function WorkflowQueueEditor({
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to edit workflow ownership, due dates, and statuses.</p>
+        <p className="workflow-editor-note">Sign in to edit workflow ownership, due dates, and statuses.</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
       {activeTrades.length > 0 ? (

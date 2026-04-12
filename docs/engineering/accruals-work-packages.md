@@ -287,6 +287,13 @@ Read-only backend scaffolding exists for the accrual domain:
 - `GET /accruals/lots/{accrual_lot_id}/entries`
 - `GET /accruals/reconciliation`
 
+Sync-managed accrual generation now covers:
+
+- delivery actualization quantity into accrual lots
+- fixed and index or hybrid price marks into accrued amount
+- append-only quantity true-up and price-mark entries
+- rebuild support via `apps/api/scripts/rebuild_trade_accruals_ledger.py`
+
 ### Outcome
 
 The codebase has a dedicated accruals domain that can own models, services, and
@@ -338,6 +345,16 @@ Backend/domain-model engineer
 
 P1
 
+### Current branch rule
+
+System-managed accrual sync currently populates:
+
+- actualized quantity
+- accrued amount
+- append-only actualization and price-mark entries
+- best-effort invoice relief backfill for existing invoices once matching lots
+  exist
+
 ### Outcome
 
 The platform can derive accrued quantity and amount from actualizations and
@@ -388,6 +405,21 @@ Backend engineer with strong operational-finance modeling skills
 ### Priority
 
 P1
+
+### Current branch rule
+
+Invoice-to-accrual linkage currently:
+
+- records append-only `INVOICE_APPLIED`, `DISPUTE_HOLD`, and
+  `DISPUTE_RELEASE` entries
+- updates lot `billed_quantity`, `billed_amount`, and `disputed_amount`
+- allocates amount-only invoices across open delivery lots in oldest-open-first
+  order
+- backfills older physical invoices onto lots when later actualization creates
+  matching accrual capacity
+
+Cash application remains out of this package and stays implicit until WP-08
+lands.
 
 ### Outcome
 

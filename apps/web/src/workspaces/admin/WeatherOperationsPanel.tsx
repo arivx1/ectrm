@@ -391,7 +391,7 @@ export function WeatherOperationsPanel({
       </div>
 
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to add, edit, deactivate, or reactivate tracked weather locations.</p>
+        <p className="workflow-editor-note">Sign in to add, edit, deactivate, or reactivate tracked weather locations.</p>
       ) : null}
       {weatherSyncError ? <div className="feedback-banner feedback-banner-error">{weatherSyncError}</div> : null}
       {weatherSyncSuccess ? <div className="feedback-banner feedback-banner-success">{weatherSyncSuccess}</div> : null}

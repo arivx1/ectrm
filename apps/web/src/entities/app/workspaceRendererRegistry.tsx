@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- This registry intentionally co-locates renderers with workspace metadata and helper exports. */
 import { lazy, type ReactNode } from 'react'
 
 import type { useAppAppearance } from './useAppAppearance'
@@ -18,23 +19,8 @@ import {
   formatNumber,
   statusTone,
 } from '../../shared/format'
-import {
-  allocationStatusOptions,
-  confirmationStatusOptions,
-  invoiceStatusOptions,
-  nominationStatusOptions,
-  optionStyleOptions,
-  optionTypeOptions,
-  paymentStatusOptions,
-  pricingStatusOptions,
-  pricingTypeOptions,
-  settlementStatusOptions,
-  tradeInstrumentTypeOptions,
-  tradeNatureOptions,
-  tradeSideOptions,
-  tradeStructureOptions,
-} from '../../shared/trading'
 import type { ViewKey } from '../../shared/models'
+import { resolveTradeFormMetadata } from '../../shared/tradeMetadata'
 import type { DocumentationDocumentKey } from '../../workspaces/docs/DocumentationWorkspace'
 
 const DocumentationWorkspace = lazy(() =>
@@ -227,6 +213,7 @@ export type WorkspaceDescriptor = WorkspaceDescriptorConfig & WorkspaceRendererD
 function buildTradeCaptureFormProps(context: WorkspaceViewRenderContext) {
   const { captureForm, summary, tradeActions, workspaceData } = context
   const referenceDataLoading = workspaceData.groupLoading.reference && !workspaceData.groupLoaded.reference
+  const tradeFormMetadata = resolveTradeFormMetadata(workspaceData.tradeMetadata)
 
   return {
     onSubmit: tradeActions.handleCreateTrade,
@@ -326,15 +313,17 @@ function buildTradeCaptureFormProps(context: WorkspaceViewRenderContext) {
     hasReferenceOptions: summary.hasReferenceOptions,
     createError: tradeActions.createError,
     counterpartyCreditPolicyPreview: tradeActions.createCounterpartyCreditPolicyPreview,
-    tradeInstrumentTypeOptions,
-    optionTypeOptions,
-    optionStyleOptions,
-    tradeNatureOptions,
-    tradeStructureOptions,
-    tradeSideOptions,
-    pricingTypeOptions,
-    pricingStatusOptions,
-    settlementStatusOptions,
+    tradeInstrumentTypeOptions: tradeFormMetadata.tradeInstrumentTypeOptions,
+    optionTypeOptions: tradeFormMetadata.optionTypeOptions,
+    optionStyleOptions: tradeFormMetadata.optionStyleOptions,
+    tradeNatureOptions: tradeFormMetadata.tradeNatureOptions,
+    tradeStructureOptions: tradeFormMetadata.tradeStructureOptions,
+    tradeSideOptions: tradeFormMetadata.tradeSideOptions,
+    pricingTypeOptions: tradeFormMetadata.pricingTypeOptions,
+    pricingStatusOptions: tradeFormMetadata.pricingStatusOptions,
+    settlementStatusOptions: tradeFormMetadata.settlementStatusOptions,
+    pricingTypesRequiringExplicitPrice: tradeFormMetadata.pricingTypesRequiringExplicitPrice,
+    pricingTypesRequiringPriceIndex: tradeFormMetadata.pricingTypesRequiringPriceIndex,
     formatCommodityClass,
   }
 }
@@ -662,41 +651,41 @@ function buildSettlementWindowNotices({
 const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = {
   dashboard: {
     key: 'dashboard',
-    label: 'Dashboard',
-    kicker: 'Desk',
-    heroTitle: 'Desk overview and market pulse',
+    label: 'Live Desk',
+    kicker: 'Monitor',
+    heroTitle: 'Live desk overview and market pulse',
     heroBody:
-      'Track the desk like a live terminal: health, market marks, positions, and operational attention stay on one screen.',
+      'Track desk health, market marks, exposure, and recent activity from one screen before you drill into a workflow.',
     dataGroups: ['trades', 'events', 'positions', 'reference'],
     blockingGroups: ['trades', 'events', 'positions', 'reference'],
   },
   guide: {
     key: 'guide',
-    label: 'Guide',
-    kicker: 'Playbook',
-    heroTitle: 'Playbooks inside the console',
+    label: 'How It Works',
+    kicker: 'Learn',
+    heroTitle: 'How the platform works',
     heroBody:
-      'Keep the operating model close to the product so onboarding, runbooks, and design notes stay in flow.',
+      'Keep onboarding, runbooks, and the operating model inside the product instead of off in separate docs.',
     dataGroups: [],
     blockingGroups: [],
   },
   demo: {
     key: 'demo',
-    label: 'Demo',
-    kicker: 'Walkthrough',
-    heroTitle: 'Scenario-driven trade walkthrough',
+    label: 'Walkthrough',
+    kicker: 'Practice',
+    heroTitle: 'Guided trade lifecycle walkthrough',
     heroBody:
-      'Define a commodity, inject realistic lifecycle friction, and walk through the exact workspaces used to manage the trade.',
+      'Run a safe scenario with realistic lifecycle friction and jump through the exact workspaces used to manage it.',
     dataGroups: [],
     blockingGroups: [],
   },
   trades: {
     key: 'trades',
-    label: 'Trading',
-    kicker: 'Blotter',
-    heroTitle: 'Trade blotter and ticket entry',
+    label: 'Trade Capture',
+    kicker: 'Capture',
+    heroTitle: 'Trade capture and blotter',
     heroBody:
-      'Enter tickets, inspect the active trade, and run lifecycle actions without losing the blotter context.',
+      'Book tickets, inspect the active trade, and run lifecycle actions without losing the blotter context.',
     dataGroups: ['trades', 'reference', 'operations'],
     blockingGroups: ['trades', 'reference'],
     mutationRefreshPlans: {
@@ -709,18 +698,18 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
   },
   events: {
     key: 'events',
-    label: 'Events',
-    kicker: 'Tape',
-    heroTitle: 'Lifecycle tape and chronology',
+    label: 'Activity Feed',
+    kicker: 'Activity',
+    heroTitle: 'Recent activity and lifecycle history',
     heroBody:
-      'Read the system as a tape instead of a log table, then narrow to the trade that needs attention.',
+      'Read recent trade and platform activity as a chronological feed, then narrow to the trade that needs attention.',
     dataGroups: ['events'],
     blockingGroups: ['events'],
   },
   risk: {
     key: 'risk',
-    label: 'Risk',
-    kicker: 'Exposure',
+    label: 'Exposure',
+    kicker: 'Watch',
     heroTitle: 'Exposure concentration and pricing quality',
     heroBody:
       'Focus the desk on concentration, unpriced exposure, and the books carrying the most open risk.',
@@ -730,11 +719,11 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
   },
   positions: {
     key: 'positions',
-    label: 'Positions',
-    kicker: 'Risk',
-    heroTitle: 'Risk buckets and net exposure',
+    label: 'Net Positions',
+    kicker: 'Balance',
+    heroTitle: 'Net positions by commodity and book',
     heroBody:
-      'Scan class-level risk first, then drop straight into the exact commodity rows carrying exposure.',
+      'Scan net positions by class, commodity, and book when the question is balance rather than workflow.',
     dataGroups: ['trades', 'positions', 'reference'],
     blockingGroups: ['trades', 'positions'],
     buildWindowNotices: buildPositionsWindowNotices,
@@ -779,9 +768,9 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
   },
   operations: {
     key: 'operations',
-    label: 'Operations',
-    kicker: 'Control',
-    heroTitle: 'Operational control and workflow coverage',
+    label: 'Work Queue',
+    kicker: 'Queue',
+    heroTitle: 'Operational queue and blocker coverage',
     heroBody:
       'Run the operational control loop from workflow queues, delivery blockers, and live platform health on one surface.',
     dataGroups: ['trades', 'deliveries', 'operations', 'admin'],
@@ -836,18 +825,18 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
   reference: {
     key: 'reference',
     label: 'Reference Data',
-    kicker: 'Master',
-    heroTitle: 'Reference master and mappings',
+    kicker: 'Data',
+    heroTitle: 'Reference data and mappings',
     heroBody:
-      'Maintain the desk registry for books, commodities, locations, and operational master data without leaving the app.',
+      'Maintain books, commodities, locations, and other desk reference records without leaving the app.',
     dataGroups: ['trades', 'reference'],
     blockingGroups: ['trades', 'reference'],
   },
   admin: {
     key: 'admin',
-    label: 'Admin',
-    kicker: 'Ops',
-    heroTitle: 'Operational controls and governance',
+    label: 'Admin Console',
+    kicker: 'Govern',
+    heroTitle: 'Governance, syncs, and privileged controls',
     heroBody:
       'Operate sync jobs, governance flows, and privileged maintenance from one controlled workspace.',
     dataGroups: ['trades', 'events', 'positions', 'reference', 'admin'],
@@ -870,10 +859,10 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
   settings: {
     key: 'settings',
     label: 'Settings',
-    kicker: 'Config',
-    heroTitle: 'Runtime profile and access',
+    kicker: 'Access',
+    heroTitle: 'Sign-in, access, and runtime settings',
     heroBody:
-      'Adjust runtime behavior, stored credentials, and client overrides without leaving the trading console.',
+      'Adjust sign-in, stored credentials, and runtime behavior without leaving the console.',
     dataGroups: [],
     blockingGroups: [],
   },
@@ -908,6 +897,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DashboardWorkspace
         authSession={context.workspaceData.authSession}
+        onOpenView={context.navigateToView}
         appLoading={context.workspaceData.appLoading}
         activeTrades={context.summary.activeTrades}
         dashboardSummary={context.workspaceData.workspaceBootstrapSummary?.dashboard ?? null}
@@ -928,9 +918,15 @@ export const WORKSPACE_RENDERERS: Record<
   },
   trades: {
     usesWindowNotices: true,
-    render: (context) => (
-      <TradingWorkspace
+    render: (context) => {
+      const tradeFormMetadata = resolveTradeFormMetadata(context.workspaceData.tradeMetadata)
+
+      return (
+        <TradingWorkspace
         authSession={context.workspaceData.authSession}
+        operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
+        tradeMetadataSource={context.workspaceData.tradeMetadataSource}
+        tradeMetadataError={context.workspaceData.tradeMetadataError}
         tradeCaptureFormProps={buildTradeCaptureFormProps(context)}
         trades={context.workspaceData.trades}
         tradeWorkflowItems={context.workspaceData.tradeWorkflowItems}
@@ -1049,20 +1045,22 @@ export const WORKSPACE_RENDERERS: Record<
         cancelling={context.tradeActions.cancelling}
         amendError={context.tradeActions.amendError}
         counterpartyCreditPolicyPreview={context.tradeActions.amendCounterpartyCreditPolicyPreview}
-        tradeInstrumentTypeOptions={tradeInstrumentTypeOptions}
-        optionTypeOptions={optionTypeOptions}
-        optionStyleOptions={optionStyleOptions}
-        tradeNatureOptions={tradeNatureOptions}
-        tradeStructureOptions={tradeStructureOptions}
-        tradeSideOptions={tradeSideOptions}
-        pricingTypeOptions={pricingTypeOptions}
-        pricingStatusOptions={pricingStatusOptions}
-        confirmationStatusOptions={confirmationStatusOptions}
-        nominationStatusOptions={nominationStatusOptions}
-        allocationStatusOptions={allocationStatusOptions}
-        invoiceStatusOptions={invoiceStatusOptions}
-        paymentStatusOptions={paymentStatusOptions}
-        settlementStatusOptions={settlementStatusOptions}
+        tradeInstrumentTypeOptions={tradeFormMetadata.tradeInstrumentTypeOptions}
+        optionTypeOptions={tradeFormMetadata.optionTypeOptions}
+        optionStyleOptions={tradeFormMetadata.optionStyleOptions}
+        tradeNatureOptions={tradeFormMetadata.tradeNatureOptions}
+        tradeStructureOptions={tradeFormMetadata.tradeStructureOptions}
+        tradeSideOptions={tradeFormMetadata.tradeSideOptions}
+        pricingTypeOptions={tradeFormMetadata.pricingTypeOptions}
+        pricingStatusOptions={tradeFormMetadata.pricingStatusOptions}
+        confirmationStatusOptions={tradeFormMetadata.confirmationStatusOptions}
+        nominationStatusOptions={tradeFormMetadata.nominationStatusOptions}
+        allocationStatusOptions={tradeFormMetadata.allocationStatusOptions}
+        invoiceStatusOptions={tradeFormMetadata.invoiceStatusOptions}
+        paymentStatusOptions={tradeFormMetadata.paymentStatusOptions}
+        settlementStatusOptions={tradeFormMetadata.settlementStatusOptions}
+        pricingTypesRequiringExplicitPrice={tradeFormMetadata.pricingTypesRequiringExplicitPrice}
+        pricingTypesRequiringPriceIndex={tradeFormMetadata.pricingTypesRequiringPriceIndex}
         formatCommodityClass={formatCommodityClass}
         formatMoney={formatMoney}
         formatNumber={formatNumber}
@@ -1070,7 +1068,8 @@ export const WORKSPACE_RENDERERS: Record<
         formatDateOnly={formatDateOnly}
         statusTone={statusTone}
       />
-    ),
+      )
+    },
   },
   events: {
     render: (context) => (
@@ -1130,6 +1129,7 @@ export const WORKSPACE_RENDERERS: Record<
       <DeliveryWorkspace
         authSession={context.workspaceData.authSession}
         deliveries={context.workspaceData.deliveries}
+        operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
         formatDate={formatDate}
         formatDateOnly={formatDateOnly}
@@ -1155,6 +1155,7 @@ export const WORKSPACE_RENDERERS: Record<
       <SchedulingWorkspace
         authSession={context.workspaceData.authSession}
         deliveries={context.workspaceData.deliveries}
+        operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
         formatNumber={formatNumber}
         formatDate={formatDate}
@@ -1183,6 +1184,7 @@ export const WORKSPACE_RENDERERS: Record<
         externalDataSyncStatus={context.workspaceData.externalDataSyncStatus}
         weatherSyncStatus={context.workspaceData.weatherSyncStatus}
         tradingSources={context.workspaceData.tradingSources}
+        operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
         formatNumber={formatNumber}
         formatDate={formatDate}
@@ -1216,6 +1218,7 @@ export const WORKSPACE_RENDERERS: Record<
         payments={context.workspaceData.tradePayments}
         settlementSummary={context.workspaceData.workspaceBootstrapSummary?.settlement ?? null}
         workItems={context.workspaceData.tradeWorkflowItems}
+        operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
         formatMoney={formatMoney}
         formatNumber={formatNumber}

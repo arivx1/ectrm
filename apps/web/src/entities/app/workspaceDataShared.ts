@@ -57,3 +57,15 @@ export function apiReachabilityMessage(error: unknown): string {
 
   return `Could not reach API. Make sure backend is running on ${appConfig.apiDisplayHost} and CORS is enabled.`
 }
+
+export function isAuthenticationError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status === 401 || /authentication is required|session expired|unauthorized/i.test(error.message)
+  }
+
+  if (error instanceof Error) {
+    return /authentication is required|session expired|unauthorized/i.test(error.message)
+  }
+
+  return false
+}

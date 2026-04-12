@@ -10,6 +10,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_admin_role
+from apps.api.app.core.http import authenticated_actor_role
+from apps.api.app.core.http import execute_http_action
+from apps.api.app.core.http import require_authenticated_actor
+from apps.api.app.core.http import VALIDATION_ERROR_STATUS_CODES
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reports.services.counterparty_credit import (
     build_counterparty_credit_report,
@@ -50,21 +54,6 @@ from apps.api.app.schemas.report import (
 router = APIRouter(prefix="/reports", tags=["reports"])
 SETTLEMENT_PRESET_KEY = "settlement"
 SETTLEMENT_SHARED_OWNER_KEY = "__shared__"
-
-
-def _require_authenticated_actor(request: Request) -> str:
-    actor_id = getattr(request.state, "actor_id", None)
-    if not actor_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
-    return actor_id
-
-
-def _authenticated_actor_role(request: Request) -> str | None:
-    actor_role = getattr(request.state, "actor_role", None)
-    if actor_role is None:
-        return None
-    normalized = str(actor_role).strip()
-    return normalized or None
 
 
 def _parse_settlement_common_filters(
@@ -246,7 +235,7 @@ def get_cash_forecast(
     filters: SettlementReportFilters = Depends(_parse_settlement_common_filters),
     db: Session = Depends(get_db),
 ) -> CashForecastReport:
-    try:
+    def build_cash_forecast() -> CashForecastReport:
         return CashForecastReport(
             **build_cash_forecast_report(
                 db,
@@ -257,11 +246,12 @@ def get_cash_forecast(
                 currency=filters.currency,
             )
         )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+
+    return execute_http_action(
+        db,
+        build_cash_forecast,
+        handled_exceptions=VALIDATION_ERROR_STATUS_CODES,
+    )
 
 
 @router.get("/settlement-exceptions", response_model=SettlementExceptionReport)
@@ -296,8 +286,8 @@ def get_settlement_presets(
     request: Request,
     db: Session = Depends(get_db),
 ) -> list[SettlementReportPresetOut]:
-    actor_id = _require_authenticated_actor(request)
-    actor_role = _authenticated_actor_role(request)
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
     records = db.execute(_visible_settlement_presets_stmt(actor_id).order_by(ReportPreset.scope.asc(), ReportPreset.name.asc())).scalars().all()
     return [
         _to_settlement_preset_out(record, actor_id=actor_id, actor_role=actor_role)
@@ -311,8 +301,8 @@ def create_settlement_preset(
     request: Request,
     db: Session = Depends(get_db),
 ) -> SettlementReportPresetOut:
-    actor_id = _require_authenticated_actor(request)
-    actor_role = _authenticated_actor_role(request)
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
     scope_owner_key = _settlement_preset_scope_owner_key(payload.scope, actor_id=actor_id)
     name_key = _preset_name_key(payload.name)
     existing = db.execute(
@@ -355,8 +345,8 @@ def update_settlement_preset(
     request: Request,
     db: Session = Depends(get_db),
 ) -> SettlementReportPresetOut:
-    actor_id = _require_authenticated_actor(request)
-    actor_role = _authenticated_actor_role(request)
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
     record = db.execute(_visible_settlement_presets_stmt(actor_id).where(ReportPreset.id == preset_id)).scalars().first()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Settlement preset was not found.")
@@ -405,8 +395,8 @@ def delete_settlement_preset(
     request: Request,
     db: Session = Depends(get_db),
 ) -> Response:
-    actor_id = _require_authenticated_actor(request)
-    actor_role = _authenticated_actor_role(request)
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
     record = db.execute(_visible_settlement_presets_stmt(actor_id).where(ReportPreset.id == preset_id)).scalars().first()
     if record is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)

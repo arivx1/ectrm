@@ -74,6 +74,24 @@ describe('mobile navigation helpers', () => {
     expect(new Set(sectionViewKeys)).toEqual(new Set(APP_VIEWS.map((view) => view.key)))
   })
 
+  it('defines clear start paths for each section landing', () => {
+    for (const section of PRIMARY_NAV_SECTIONS) {
+      expect(section.startPaths.length).toBeGreaterThan(0)
+
+      const sectionViewKeys = new Set(section.views.map((view) => view.key))
+      const startPathViewKeys = section.startPaths.map((path) => path.view.key)
+
+      expect(new Set(startPathViewKeys).size).toBe(section.startPaths.length)
+      startPathViewKeys.forEach((viewKey) => expect(sectionViewKeys.has(viewKey)).toBe(true))
+    }
+
+    expect(PRIMARY_NAV_SECTIONS.find((section) => section.key === 'trading')?.startPaths.map((path) => path.title)).toEqual([
+      'Capture a trade',
+      'Check exposure',
+      'Inspect net positions',
+    ])
+  })
+
   it('maps representative workspaces into their grouped nav sections', () => {
     expect(primaryNavigationSectionForView('dashboard').key).toBe('overview')
     expect(primaryNavigationSectionForView('demo').key).toBe('overview')

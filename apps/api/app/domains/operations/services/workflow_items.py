@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -22,6 +23,18 @@ from apps.api.app.domains.operations.services.actualizations import (
     trade_has_actualization_record,
 )
 from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceDescriptor,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    load_operational_resource_items,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    paginate_operational_items,
+)
 from apps.api.app.domains.reports.services.counterparty_credit import (
     CounterpartyCreditTradeInput,
 )
@@ -166,6 +179,21 @@ OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES = {
     TradeStatus.EXERCISED.value,
     TradeStatus.ASSIGNED.value,
 }
+
+
+@dataclass(frozen=True)
+class WorkflowItemListRequest(OperationalResourceListRequest):
+    queue: str | None = None
+    include_closed: bool = False
+    trade_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowItemListContext:
+    linked_trades_by_option_trade_id: dict[str, Trade]
+    credit_decision_history_by_item_id: dict[int, list[TradeCreditApprovalDecisionOut]]
+    active_credit_exception_by_trade_id: dict[str, TradeCreditExceptionOut]
+    credit_approval_freshness_by_trade_id: dict[str, TradeCreditApprovalFreshnessOut]
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -861,6 +889,7 @@ def set_trade_workflow_item_projection(
     status: object | None,
     actor_id: str,
     now: Optional[datetime] = None,
+    rollup_settlement_status: bool = True,
     due_at: datetime | None | object = _UNSET,
     notes: object | None | object = _UNSET,
 ) -> TradeWorkflowItem:
@@ -921,7 +950,12 @@ def set_trade_workflow_item_projection(
     workflow_items = db.execute(
         select(TradeWorkflowItem).where(TradeWorkflowItem.trade_id == trade.trade_id)
     ).scalars().all()
-    rollup_trade_workflow_statuses(trade, workflow_items, now=reference_time)
+    rollup_trade_workflow_statuses(
+        trade,
+        workflow_items,
+        now=reference_time,
+        rollup_settlement_status=rollup_settlement_status,
+    )
     db.flush()
     return item
 
@@ -993,25 +1027,26 @@ def _to_out(
     )
 
 
-def list_trade_workflow_items(
-    db: Session,
-    *,
-    queue: str | None = None,
-    include_closed: bool = False,
-    trade_id: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-    now: Optional[datetime] = None,
-) -> list[TradeWorkflowItemOut]:
-    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+def _normalize_workflow_queue(queue: str | None) -> str | None:
     normalized_queue = str(queue or "").strip().lower() or None
     if normalized_queue not in {None, "operations", "settlement"}:
         raise ValueError("Queue must be one of: operations, settlement.")
+    return normalized_queue
 
-    synchronize_active_trade_workflow_items(db, now=reference_time)
-    synchronize_option_settlement_workflow_items(db, now=reference_time)
+
+def _synchronize_workflow_item_resource(
+    db: Session,
+    request: WorkflowItemListRequest,
+) -> None:
+    synchronize_active_trade_workflow_items(db, now=request.reference_time)
+    synchronize_option_settlement_workflow_items(db, now=request.reference_time)
     db.flush()
 
+
+def _load_workflow_item_rows(
+    db: Session,
+    request: WorkflowItemListRequest,
+) -> list[tuple[TradeWorkflowItem, Trade]]:
     stmt = (
         select(TradeWorkflowItem, Trade)
         .join(Trade, Trade.trade_id == TradeWorkflowItem.trade_id)
@@ -1025,12 +1060,20 @@ def list_trade_workflow_items(
             )
         )
     )
-    if trade_id:
-        stmt = stmt.where(TradeWorkflowItem.trade_id == trade_id)
+    if request.trade_id:
+        stmt = stmt.where(TradeWorkflowItem.trade_id == request.trade_id)
+    return list(db.execute(stmt).all())
 
-    rows = db.execute(stmt).all()
+
+def _load_workflow_item_context(
+    db: Session,
+    rows: list[tuple[TradeWorkflowItem, Trade]],
+    request: WorkflowItemListRequest,
+) -> WorkflowItemListContext:
     option_settlement_trade_ids = [
-        trade.trade_id for item, trade in rows if item.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value
+        trade.trade_id
+        for item, trade in rows
+        if item.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value
     ]
     linked_trades_by_option_trade_id: dict[str, Trade] = {}
     if option_settlement_trade_ids:
@@ -1054,37 +1097,95 @@ def list_trade_workflow_items(
     active_credit_exception_by_trade_id = build_active_trade_credit_exception_lookup(
         db,
         trades=[trade for _item, trade in rows],
-        now=reference_time,
+        now=request.reference_time,
     )
     credit_approval_freshness_by_trade_id = build_trade_credit_approval_freshness_lookup(
         db,
         trades=[trade for item, trade in rows if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value],
-        as_of=reference_time,
+        as_of=request.reference_time,
     )
-    items = [
-        _to_out(
-            item,
-            trade,
-            now=reference_time,
-            linked_trade=linked_trades_by_option_trade_id.get(trade.trade_id)
-            if item.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value
-            else None,
-            credit_approval_freshness=credit_approval_freshness_by_trade_id.get(trade.trade_id),
-            active_credit_exception=active_credit_exception_by_trade_id.get(trade.trade_id),
-            credit_decision_history=credit_decision_history_by_item_id.get(item.id, []),
-        )
-        for item, trade in rows
-    ]
-    if normalized_queue is not None:
-        items = [item for item in items if item.queue == normalized_queue]
-    if not include_closed:
-        items = [item for item in items if not item.is_closed]
-    sorted_items = sorted(items, key=_workflow_attention_rank)
-    if offset:
-        sorted_items = sorted_items[offset:]
-    if limit is not None:
-        return sorted_items[:limit]
-    return sorted_items
+    return WorkflowItemListContext(
+        linked_trades_by_option_trade_id=linked_trades_by_option_trade_id,
+        credit_decision_history_by_item_id=credit_decision_history_by_item_id,
+        active_credit_exception_by_trade_id=active_credit_exception_by_trade_id,
+        credit_approval_freshness_by_trade_id=credit_approval_freshness_by_trade_id,
+    )
+
+
+def _build_workflow_item_list_item(
+    row: tuple[TradeWorkflowItem, Trade],
+    context: WorkflowItemListContext,
+    request: WorkflowItemListRequest,
+) -> TradeWorkflowItemOut:
+    item, trade = row
+    return _to_out(
+        item,
+        trade,
+        now=request.reference_time,
+        linked_trade=context.linked_trades_by_option_trade_id.get(trade.trade_id)
+        if item.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value
+        else None,
+        credit_approval_freshness=context.credit_approval_freshness_by_trade_id.get(trade.trade_id),
+        active_credit_exception=context.active_credit_exception_by_trade_id.get(trade.trade_id),
+        credit_decision_history=context.credit_decision_history_by_item_id.get(item.id, []),
+    )
+
+
+def _finalize_workflow_item_list(
+    items: list[TradeWorkflowItemOut],
+    request: WorkflowItemListRequest,
+) -> list[TradeWorkflowItemOut]:
+    filtered_items = items
+    if request.queue is not None:
+        filtered_items = [item for item in filtered_items if item.queue == request.queue]
+    if not request.include_closed:
+        filtered_items = [item for item in filtered_items if not item.is_closed]
+    return paginate_operational_items(
+        sorted(filtered_items, key=_workflow_attention_rank),
+        request,
+    )
+
+
+WORKFLOW_ITEM_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
+    WorkflowItemListRequest,
+    tuple[TradeWorkflowItem, Trade],
+    WorkflowItemListContext,
+    TradeWorkflowItemOut,
+](
+    resource_key="work_items",
+    filters=("queue", "include_closed", "trade_id"),
+    sort_fields=("attention_rank",),
+    actions=("create", "update", "book_underlying"),
+    load_rows=_load_workflow_item_rows,
+    load_context=_load_workflow_item_context,
+    build_item=_build_workflow_item_list_item,
+    synchronize=_synchronize_workflow_item_resource,
+    finalize_items=_finalize_workflow_item_list,
+)
+
+
+def list_trade_workflow_items(
+    db: Session,
+    *,
+    queue: str | None = None,
+    include_closed: bool = False,
+    trade_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    now: Optional[datetime] = None,
+) -> list[TradeWorkflowItemOut]:
+    return load_operational_resource_items(
+        WORKFLOW_ITEM_RESOURCE_DESCRIPTOR,
+        db,
+        WorkflowItemListRequest(
+            reference_time=_coerce_utc(now) or datetime.now(timezone.utc),
+            queue=_normalize_workflow_queue(queue),
+            include_closed=include_closed,
+            trade_id=trade_id,
+            limit=limit,
+            offset=offset,
+        ),
+    )
 
 
 def create_trade_workflow_item(

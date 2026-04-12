@@ -8,12 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
-from apps.api.app.core.http import authenticated_actor_role
-from apps.api.app.core.http import changes_from_payload
-from apps.api.app.core.http import require_authenticated_actor
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services import build_database_overview
+from apps.api.app.domains.operations.services.operational_resource_registry import (
+    OPERATIONAL_RESOURCE_DESCRIPTORS,
+)
 from apps.api.app.domains.operations.services import build_workspace_bootstrap_summary
 from apps.api.app.domains.operations.services.settlement_invoices import trade_has_invoice_record
 from apps.api.app.domains.operations.services.settlement_payments import trade_has_payment_records
@@ -29,11 +29,17 @@ from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas.operations import DependencyHealthOut
+from apps.api.app.schemas.operations import OperationalResourceDescriptorOut
 from apps.api.app.schemas.operations import SystemOverviewOut
 from apps.api.app.schemas.operations import TradeWorkflowItemCreate
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.schemas.operations import TradeWorkflowItemUpdate
 from apps.api.app.schemas.operations import WorkspaceBootstrapSummaryOut
+from .framework import AUTHENTICATED_WORK_ITEM_MUTATION_SPEC
+from .framework import execute_operational_mutation
+from .framework import execute_operational_patch_mutation
+from .framework import execute_operational_query_spec
+from .framework import OperationalQuerySpec
 
 router = APIRouter(prefix="/operations", tags=["operations"])
 
@@ -47,6 +53,7 @@ DEPENDENCY_DEFINITIONS = (
         "success_sla_hours": settings.NWS_SYNC_SUCCESS_SLA_HOURS,
     },
 )
+WORK_ITEM_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_trade_workflow_items, commit=True)
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -239,6 +246,19 @@ def get_workspace_bootstrap_summary(db: Session = Depends(get_db)) -> WorkspaceB
     )
 
 
+@router.get("/resources", response_model=list[OperationalResourceDescriptorOut])
+def get_operational_resource_descriptors() -> list[OperationalResourceDescriptorOut]:
+    return [
+        OperationalResourceDescriptorOut(
+            resource_key=descriptor.resource_key,
+            filters=list(descriptor.filters),
+            sort_fields=list(descriptor.sort_fields),
+            actions=list(descriptor.actions),
+        )
+        for descriptor in OPERATIONAL_RESOURCE_DESCRIPTORS.values()
+    ]
+
+
 @router.get("/work-items", response_model=list[TradeWorkflowItemOut])
 def get_work_items(
     queue: str | None = Query(default=None),
@@ -248,23 +268,15 @@ def get_work_items(
     offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[TradeWorkflowItemOut]:
-    try:
-        items = list_trade_workflow_items(
-            db,
-            queue=queue,
-            include_closed=include_closed,
-            trade_id=trade_id,
-            limit=limit,
-            offset=offset,
-        )
-        db.commit()
-        return items
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    return execute_operational_query_spec(
+        WORK_ITEM_LIST_QUERY_SPEC,
+        db,
+        queue=queue,
+        include_closed=include_closed,
+        trade_id=trade_id,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/work-items", response_model=TradeWorkflowItemOut, status_code=status.HTTP_201_CREATED)
@@ -273,33 +285,22 @@ def post_work_item(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TradeWorkflowItemOut:
-    actor_id = require_authenticated_actor(request)
-    try:
-        item = create_trade_workflow_item(
+    return execute_operational_mutation(
+        AUTHENTICATED_WORK_ITEM_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: create_trade_workflow_item(
             db,
             trade_id=payload.trade_id,
             workflow_type=payload.workflow_type,
-            actor_id=actor_id,
-            actor_role=authenticated_actor_role(request),
+            actor_id=actor.actor_id,
+            actor_role=actor.actor_role,
             status=payload.status,
             owner=payload.owner,
             due_at=payload.due_at,
             notes=payload.notes,
         )
-        db.commit()
-        return item
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except PermissionError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    )
 
 
 @router.patch("/work-items/{item_id}", response_model=TradeWorkflowItemOut)
@@ -309,31 +310,25 @@ def patch_work_item(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TradeWorkflowItemOut:
-    actor_id = require_authenticated_actor(request)
-    changes = changes_from_payload(payload, empty_detail="At least one workflow item field must be provided.")
-    _assert_workflow_status_is_not_ledger_managed(db, item_id=item_id, changes=changes)
-    try:
-        item = update_trade_workflow_item(
+    return execute_operational_patch_mutation(
+        AUTHENTICATED_WORK_ITEM_MUTATION_SPEC,
+        payload,
+        request,
+        db,
+        lambda actor, changes: update_trade_workflow_item(
             db,
             item_id=item_id,
-            actor_id=actor_id,
-            actor_role=authenticated_actor_role(request),
+            actor_id=actor.actor_id,
+            actor_role=actor.actor_role,
+            changes=changes,
+        ),
+        empty_detail="At least one workflow item field must be provided.",
+        before_action=lambda current_db, changes, _actor: _assert_workflow_status_is_not_ledger_managed(
+            current_db,
+            item_id=item_id,
             changes=changes,
         )
-        db.commit()
-        return item
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except PermissionError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    )
 
 
 @router.post("/work-items/{item_id}/book-underlying", response_model=TradeWorkflowItemOut)
@@ -342,34 +337,19 @@ def post_work_item_book_underlying(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TradeWorkflowItemOut:
-    actor_id = require_authenticated_actor(request)
     reference_time = datetime.now(timezone.utc)
-
-    try:
-        item = book_trade_workflow_item_underlying(
+    return execute_operational_mutation(
+        AUTHENTICATED_WORK_ITEM_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: book_trade_workflow_item_underlying(
             db,
             item_id=item_id,
-            actor_id=actor_id,
-            actor_role=authenticated_actor_role(request),
+            actor_id=actor.actor_id,
+            actor_role=actor.actor_role,
             now=reference_time,
         )
-        db.commit()
-        return item
-    except HTTPException:
-        db.rollback()
-        raise
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except PermissionError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    )
 
 
 __all__ = [

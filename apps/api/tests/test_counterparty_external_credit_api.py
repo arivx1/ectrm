@@ -239,6 +239,85 @@ class CounterpartyExternalCreditApiTests(unittest.TestCase):
             snapshots = list_counterparty_external_credit_snapshots(limit=20, offset=0, db=session)
             self.assertEqual(snapshots, [])
 
+    def test_external_credit_snapshot_list_reduces_to_latest_per_provider_and_supports_paging(self) -> None:
+        self._create_counterparty("ACME")
+        self._create_counterparty("BETA")
+        self._create_currency("USD")
+
+        with self.SessionLocal() as session:
+            trigger_counterparty_credit_import(
+                CounterpartyCreditImportRequest(
+                    provider="DNB",
+                    requested_by="credit-admin",
+                    snapshots=[
+                        CounterpartyCreditSnapshotImport(
+                            counterparty_code="ACME",
+                            as_of_date=date(2026, 4, 4),
+                            rating_value="3A2",
+                            recommended_limit_currency_code="USD",
+                            recommended_limit_amount=1500000,
+                        ),
+                        CounterpartyCreditSnapshotImport(
+                            counterparty_code="ACME",
+                            as_of_date=date(2026, 4, 5),
+                            rating_value="4A1",
+                            recommended_limit_currency_code="USD",
+                            recommended_limit_amount=2000000,
+                        ),
+                    ],
+                ),
+                db=session,
+            )
+            trigger_counterparty_credit_import(
+                CounterpartyCreditImportRequest(
+                    provider="CreditSafe",
+                    requested_by="credit-admin",
+                    snapshots=[
+                        CounterpartyCreditSnapshotImport(
+                            counterparty_code="ACME",
+                            as_of_date=date(2026, 4, 6),
+                            rating_value="A",
+                            recommended_limit_currency_code="USD",
+                            recommended_limit_amount=1750000,
+                        ),
+                        CounterpartyCreditSnapshotImport(
+                            counterparty_code="BETA",
+                            as_of_date=date(2026, 4, 6),
+                            rating_value="BBB",
+                            recommended_limit_currency_code="USD",
+                            recommended_limit_amount=1250000,
+                        ),
+                    ],
+                ),
+                db=session,
+            )
+
+            snapshots = list_counterparty_external_credit_snapshots(limit=10, offset=0, db=session)
+            self.assertEqual(
+                [(snapshot.counterparty_code, snapshot.provider, snapshot.rating_value) for snapshot in snapshots],
+                [
+                    ("ACME", "CREDITSAFE", "A"),
+                    ("ACME", "DNB", "4A1"),
+                    ("BETA", "CREDITSAFE", "BBB"),
+                ],
+            )
+
+            acme_snapshots = list_counterparty_external_credit_snapshots(
+                counterparty_code="acme",
+                limit=10,
+                offset=0,
+                db=session,
+            )
+            self.assertEqual(len(acme_snapshots), 2)
+            self.assertTrue(all(snapshot.counterparty_code == "ACME" for snapshot in acme_snapshots))
+
+            paged_snapshots = list_counterparty_external_credit_snapshots(limit=1, offset=1, db=session)
+            self.assertEqual(len(paged_snapshots), 1)
+            self.assertEqual(
+                (paged_snapshots[0].counterparty_code, paged_snapshots[0].provider),
+                ("ACME", "DNB"),
+            )
+
     def test_dnb_preview_matches_rows_by_identifier_and_blocks_unmatched_rows(self) -> None:
         with self.SessionLocal() as session:
             create_counterparty(
@@ -359,7 +438,27 @@ class CounterpartyExternalCreditApiTests(unittest.TestCase):
             self.assertEqual(promoted.limit_currency_code, "USD")
             self.assertEqual(promoted.limit_amount, 2000000)
             self.assertEqual(promoted.review_due_at, date(2026, 5, 1))
+            self.assertEqual(promoted.breach_action, "REQUIRE_APPROVAL")
+            self.assertEqual(promoted.version, 1)
             self.assertIn("DNB snapshot 2026-04-05 promoted", promoted.notes or "")
+
+            promoted_again = promote_counterparty_external_credit_snapshot(
+                "ACME",
+                snapshots[0].id,
+                CounterpartyExternalCreditPromotionRequest(
+                    promote_rating=False,
+                    promote_limit=False,
+                    append_commentary_to_notes=True,
+                    updated_by="credit-admin",
+                ),
+                db=session,
+            )
+
+            self.assertEqual(promoted_again.version, 2)
+            self.assertEqual(
+                (promoted_again.notes or "").count("DNB snapshot 2026-04-05 promoted"),
+                1,
+            )
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.app.models.event import Base
+from apps.api.app.models.event import Base, Event
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
@@ -31,9 +31,13 @@ from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.routes.events import append_event
 from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
 from apps.api.app.routes.reference_data import (
+    BookCreate,
+    BookStatusUpdate,
+    BookUpdate,
     CommodityCreate,
     CommodityStatusUpdate,
     CounterpartyCreate,
+    CounterpartyStatusUpdate,
     CounterpartyUpdate,
     CurrencyCreate,
     CurrencyStatusUpdate,
@@ -46,15 +50,23 @@ from apps.api.app.routes.reference_data import (
     PortfolioUpdate,
     UnitCreate,
     UnitStatusUpdate,
+    activate_book,
+    activate_counterparty,
+    activate_location,
     create_commodity,
     create_counterparty,
     create_currency,
     create_location,
+    create_book,
     create_portfolio,
     create_price_index,
     create_unit,
+    deactivate_book,
+    deactivate_counterparty,
     list_counterparties,
     list_counterparty_standards,
+    get_book,
+    list_books,
     deactivate_currency,
     deactivate_commodity,
     deactivate_location,
@@ -63,6 +75,7 @@ from apps.api.app.routes.reference_data import (
     list_location_standards,
     list_locations,
     list_price_indices,
+    update_book,
     update_counterparty,
     update_location,
     update_price_index,
@@ -95,6 +108,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.SessionLocal() as session:
+            session.query(Event).delete()
             session.query(ReferencePriceIndex).delete()
             session.query(ReferencePortfolio).delete()
             session.query(ReferenceLocation).delete()
@@ -176,6 +190,61 @@ class ReferenceDataApiTests(unittest.TestCase):
                 ),
                 db=session,
             )
+
+    def test_book_crud_normalizes_and_round_trips_through_shared_handlers(self) -> None:
+        with self.SessionLocal() as session:
+            created = create_book(
+                BookCreate(
+                    code=" crude_phys ",
+                    name=" Crude Physical ",
+                    description="test book",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(created.code, "CRUDE_PHYS")
+        self.assertEqual(created.name, "Crude Physical")
+        self.assertTrue(created.is_active)
+
+        with self.SessionLocal() as session:
+            fetched = get_book(" crude_phys ", db=session)
+            updated = update_book(
+                "crude_phys",
+                BookUpdate(
+                    name=" Physical Oil ",
+                    description="updated book",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+            deactivated = deactivate_book(
+                "CRUDE_PHYS",
+                BookStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+            reactivated = activate_book(
+                " crude_phys ",
+                BookStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+            listed = list_books(
+                q="Physical",
+                is_active=True,
+                limit=50,
+                offset=0,
+                db=session,
+            )
+
+        self.assertEqual(fetched.code, "CRUDE_PHYS")
+        self.assertEqual(updated.name, "Physical Oil")
+        self.assertEqual(updated.description, "updated book")
+        self.assertEqual(updated.version, 2)
+        self.assertFalse(deactivated.is_active)
+        self.assertEqual(deactivated.version, 3)
+        self.assertTrue(reactivated.is_active)
+        self.assertEqual(reactivated.version, 4)
+        self.assertEqual([book.code for book in listed], ["CRUDE_PHYS"])
 
     def _create_location(
         self,
@@ -303,6 +372,58 @@ class ReferenceDataApiTests(unittest.TestCase):
         with self.SessionLocal() as session:
             with self.assertRaisesRegex(Exception, "Location cannot be deactivated while active child locations reference it"):
                 deactivate_location("USGC", LocationStatusUpdate(updated_by="test-user"), db=session)
+
+    def test_location_crud_lifecycle_preserves_shared_behavior(self) -> None:
+        with self.SessionLocal() as session:
+            created = create_location(
+                LocationCreate(
+                    code="HSC",
+                    name="Houston Ship Channel",
+                    location_kind="POINT",
+                    location_type="TERMINAL",
+                    market="PHYSICAL",
+                    city="Houston",
+                    subdivision_code="US-TX",
+                    country_code="US",
+                    continent_code="NA",
+                    latitude=29.7285,
+                    longitude=-95.265,
+                    region="Gulf Coast",
+                    timezone="America/Chicago",
+                    description="test location",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+            updated = update_location(
+                "HSC",
+                LocationUpdate(
+                    city=" Pasadena ",
+                    region=" Gulf Coast East ",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+            deactivated = deactivate_location(
+                "HSC",
+                LocationStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+            reactivated = activate_location(
+                "HSC",
+                LocationStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+
+        self.assertEqual(created.city, "Houston")
+        self.assertEqual(created.version, 1)
+        self.assertEqual(updated.city, "Pasadena")
+        self.assertEqual(updated.region, "Gulf Coast East")
+        self.assertEqual(updated.version, 2)
+        self.assertFalse(deactivated.is_active)
+        self.assertEqual(deactivated.version, 3)
+        self.assertTrue(reactivated.is_active)
+        self.assertEqual(reactivated.version, 4)
 
     def test_create_location_rejects_invalid_standard_codes(self) -> None:
         with self.SessionLocal() as session:
@@ -1253,6 +1374,52 @@ class ReferenceDataApiTests(unittest.TestCase):
             )
 
         self.assertEqual(payload.credit_status, "REVIEW_REQUIRED")
+
+    def test_counterparty_crud_lifecycle_preserves_shared_behavior(self) -> None:
+        with self.SessionLocal() as session:
+            created = create_counterparty(
+                CounterpartyCreate(
+                    code="shell_trading",
+                    name="Shell Trading",
+                    short_name="Shell",
+                    legal_entity_name="Shell Trading US Company",
+                    counterparty_type="supplier",
+                    country_code="us",
+                    credit_status="approved",
+                    description="test counterparty",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+            updated = update_counterparty(
+                "SHELL_TRADING",
+                CounterpartyUpdate(
+                    short_name=" Shell US ",
+                    credit_status=" review required ",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+            deactivated = deactivate_counterparty(
+                "SHELL_TRADING",
+                CounterpartyStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+            reactivated = activate_counterparty(
+                "SHELL_TRADING",
+                CounterpartyStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+
+        self.assertEqual(created.short_name, "Shell")
+        self.assertEqual(created.version, 1)
+        self.assertEqual(updated.short_name, "Shell US")
+        self.assertEqual(updated.credit_status, "REVIEW_REQUIRED")
+        self.assertEqual(updated.version, 2)
+        self.assertFalse(deactivated.is_active)
+        self.assertEqual(deactivated.version, 3)
+        self.assertTrue(reactivated.is_active)
+        self.assertEqual(reactivated.version, 4)
 
     def test_create_counterparty_rejects_invalid_type_and_country(self) -> None:
         with self.SessionLocal() as session:

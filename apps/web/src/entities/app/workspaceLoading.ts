@@ -41,7 +41,7 @@ export const EMPTY_GROUP_ERRORS: AppDataGroupErrors = {
 export { VIEW_BLOCKING_GROUPS, VIEW_DATA_GROUPS } from './workspaceRegistry'
 
 export function isAuthenticationRequiredMessage(message: string): boolean {
-  return /authentication is required/i.test(message)
+  return /authentication is required|session expired|unauthorized/i.test(message)
 }
 
 type SettingsSignInStateArgs = {

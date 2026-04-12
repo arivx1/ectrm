@@ -416,13 +416,6 @@ export function UserManagementPanel({
     }
   }
 
-  function openSettingsSection(targetId: 'session-login' | 'single-user-sign-in' | 'bootstrap-admin') {
-    if (typeof window !== 'undefined') {
-      window.location.hash = targetId
-    }
-    onOpenSettings()
-  }
-
   if (!adminEnabled) {
     return (
       <section className="surface feature-panel">
@@ -438,8 +431,8 @@ export function UserManagementPanel({
           <strong>Administrative session required</strong>
           <p>
             {authSession
-              ? `Signed in as ${authSession.user.display_name} with role ${authSession.user.role}. Switch to an OPS_ADMIN or ADMIN session in Settings to manage users.`
-              : 'Sign in from Settings with an OPS_ADMIN or ADMIN account to load the user directory and unlock account changes.'}
+              ? `Signed in as ${authSession.user.display_name} with role ${authSession.user.role}. Use Sign Out, then sign back in with an OPS_ADMIN or ADMIN account to manage users.`
+              : 'Sign in with an OPS_ADMIN or ADMIN account to load the user directory and unlock account changes.'}
           </p>
         </div>
 
@@ -451,26 +444,12 @@ export function UserManagementPanel({
                 <h3>Unlock User Management</h3>
               </div>
               <p>
-                Use the single sign-in section in Settings for admin sessions. If the initial admin has not been
-                created yet, bootstrap the first OPS_ADMIN account there as well.
+                Admin authentication now lives on the locked sign-in screen shown before the workspace opens.
+                If you need to switch accounts, sign out first, then authenticate with an administrative role.
               </p>
             </div>
 
             <div className="toolbar user-management-empty-actions">
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => openSettingsSection(singleUserAuthEnabled ? 'single-user-sign-in' : 'session-login')}
-              >
-                {singleUserAuthEnabled ? 'Open Single-User Sign In' : 'Open Sign In'}
-              </button>
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => openSettingsSection('bootstrap-admin')}
-              >
-                Bootstrap Admin
-              </button>
               <button type="button" className="button button-ghost" onClick={onOpenSettings}>
                 Open Settings
               </button>
@@ -478,10 +457,10 @@ export function UserManagementPanel({
 
             <p className="form-note">
               {singleUserAuthEnabled
-                ? 'Settings now owns the only sign-in form. Single-User Sign In there will create or reuse the configured local OPS_ADMIN account and sign this browser in.'
+                ? 'Single-user OPS_ADMIN sign-in is available on the locked sign-in screen after you sign out.'
                 : bootstrapAdminEnabled
-                  ? 'Settings now owns the only sign-in form. Bootstrap Admin jumps to the first-run OPS_ADMIN setup there.'
-                  : 'Settings now owns the only sign-in form. Bootstrap Admin still jumps there, but the running API will need bootstrap enabled before it can create the first OPS_ADMIN account.'}
+                  ? 'Bootstrap Admin is available on the locked sign-in screen until the first administrative account exists.'
+                  : 'Use the locked sign-in screen after signing out to switch into an OPS_ADMIN or ADMIN session.'}
             </p>
           </article>
         </div>

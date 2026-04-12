@@ -5,6 +5,7 @@ import type {
   RespondTradeConfirmationInput,
   UpdateTradeConfirmationInput,
 } from '../../entities/confirmations/api'
+import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import { formatCurrencyAmount } from '../../shared/format'
 import { buildOpenOptionActionQueue, type OpenOptionValuation } from '../../shared/optionExposure'
@@ -23,7 +24,11 @@ import type { OptionLifecycleEventType } from '../../shared/trading'
 import { ConfirmationLedgerBoard } from './ConfirmationLedgerBoard'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 import { DocumentIngestionPanel } from './DocumentIngestionPanel'
+import { OperationalBoardShell } from './OperationalBoardShell'
 import { WorkflowQueueEditor } from './WorkflowQueueEditor'
+import {
+  resolveOperationalWorkboardDefinition,
+} from './operationalWorkboardRegistry'
 
 type OperationsWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -34,6 +39,7 @@ type OperationsWorkspaceProps = {
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
   weatherSyncStatus: WeatherSyncStatusRecord | null
   tradingSources: TradingSourceRecord[]
+  operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
@@ -162,6 +168,7 @@ export function OperationsWorkspace({
   externalDataSyncStatus,
   weatherSyncStatus,
   tradingSources,
+  operationalResourceDescriptors,
   formatCommodityClass,
   formatNumber,
   formatDate,
@@ -230,6 +237,14 @@ export function OperationsWorkspace({
       count: tradingSources.filter((source) => source.criticality === criticality).length,
     }))
     .filter((row) => row.count > 0)
+  const confirmationLedgerWorkboard = resolveOperationalWorkboardDefinition(
+    'confirmationLedger',
+    operationalResourceDescriptors,
+  )
+  const workflowQueueWorkboard = resolveOperationalWorkboardDefinition(
+    'workflowQueue',
+    operationalResourceDescriptors,
+  )
 
   return (
     <div className="stack operations-workspace">
@@ -401,33 +416,37 @@ export function OperationsWorkspace({
               'Manage drafted, confirmed, disputed, and amended confirmation records. Trade capture and booked economic amendments now auto-open a fresh draft version automatically.',
             span: 'full',
             availableSpans: ['full', 'wide'],
-            content: activeTrades.length > 0 ? (
-              <ConfirmationLedgerBoard
-                key={[
-                  activeTrades.map((trade) => trade.trade_id).join('|'),
-                  confirmations.map((confirmation) => `${confirmation.confirmation_id}:${confirmation.version}`).join('|'),
-                  confirmationWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
-                ].join('|')}
-                authSession={authSession}
-                trades={activeTrades}
-                confirmations={confirmations}
-                confirmationWorkItems={confirmationWorkItems}
-                saveError={confirmationMutationError}
-                savingKey={confirmationMutationPendingKey}
-                formatCommodityClass={formatCommodityClass}
-                formatDate={formatDate}
-                formatDateOnly={formatDateOnly}
-                onCreateConfirmation={onCreateConfirmation}
-                onIssueConfirmation={onIssueConfirmation}
-                onRespondConfirmation={onRespondConfirmation}
-                onOpenTrade={onOpenTrade}
-                onSaveConfirmation={onSaveConfirmation}
-              />
-            ) : (
-              <div className="empty-state">
-                <strong>No confirmation queue</strong>
-                <p>Active trades will appear here once there is confirmation work to manage.</p>
-              </div>
+            content: (
+              <OperationalBoardShell workboard={confirmationLedgerWorkboard} bannerVariant="chips">
+                {activeTrades.length > 0 ? (
+                  <ConfirmationLedgerBoard
+                    key={[
+                      activeTrades.map((trade) => trade.trade_id).join('|'),
+                      confirmations.map((confirmation) => `${confirmation.confirmation_id}:${confirmation.version}`).join('|'),
+                      confirmationWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
+                    ].join('|')}
+                    authSession={authSession}
+                    trades={activeTrades}
+                    confirmations={confirmations}
+                    confirmationWorkItems={confirmationWorkItems}
+                    saveError={confirmationMutationError}
+                    savingKey={confirmationMutationPendingKey}
+                    formatCommodityClass={formatCommodityClass}
+                    formatDate={formatDate}
+                    formatDateOnly={formatDateOnly}
+                    onCreateConfirmation={onCreateConfirmation}
+                    onIssueConfirmation={onIssueConfirmation}
+                    onRespondConfirmation={onRespondConfirmation}
+                    onOpenTrade={onOpenTrade}
+                    onSaveConfirmation={onSaveConfirmation}
+                  />
+                ) : (
+                  <div className="empty-state">
+                    <strong>No confirmation queue</strong>
+                    <p>Active trades will appear here once there is confirmation work to manage.</p>
+                  </div>
+                )}
+              </OperationalBoardShell>
             ),
           },
           {
@@ -437,30 +456,34 @@ export function OperationsWorkspace({
           description: 'Use the queue for owners, due dates, and downstream handoffs after confirmation records set the lifecycle status.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: activeTrades.length > 0 ? (
-              <WorkflowQueueEditor
-                key={openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
-                authSession={authSession}
-                activeTrades={activeTrades}
-                items={openOperationsWorkItems}
-                managedConfirmationTradeIds={managedConfirmationTradeIds}
-                creationPendingTradeId={workflowCreationPendingTradeId}
-                savingItemId={workflowMutationPendingId}
-                saveError={workflowMutationError}
-                formatCommodityClass={formatCommodityClass}
-                formatDate={formatDate}
-                formatDateOnly={formatDateOnly}
-                onCreateItem={onCreateWorkflowItem}
-                onOpenTrade={onOpenTrade}
-                onBookUnderlyingTrade={onBookUnderlyingTrade}
-                onSaveItem={onSaveWorkflowItem}
-              />
-            ) : (
-              <div className="empty-state">
-                <strong>No active operations context</strong>
-                <p>Create active trades to start opening confirmation, actualization, credit, or option-settlement work.</p>
-              </div>
-            ),
+          content: (
+            <OperationalBoardShell workboard={workflowQueueWorkboard} bannerVariant="chips">
+              {activeTrades.length > 0 ? (
+                <WorkflowQueueEditor
+                  key={openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
+                  authSession={authSession}
+                  activeTrades={activeTrades}
+                  items={openOperationsWorkItems}
+                  managedConfirmationTradeIds={managedConfirmationTradeIds}
+                  creationPendingTradeId={workflowCreationPendingTradeId}
+                  savingItemId={workflowMutationPendingId}
+                  saveError={workflowMutationError}
+                  formatCommodityClass={formatCommodityClass}
+                  formatDate={formatDate}
+                  formatDateOnly={formatDateOnly}
+                  onCreateItem={onCreateWorkflowItem}
+                  onOpenTrade={onOpenTrade}
+                  onBookUnderlyingTrade={onBookUnderlyingTrade}
+                  onSaveItem={onSaveWorkflowItem}
+                />
+              ) : (
+                <div className="empty-state">
+                  <strong>No active operations context</strong>
+                  <p>Create active trades to start opening confirmation, actualization, credit, or option-settlement work.</p>
+                </div>
+              )}
+            </OperationalBoardShell>
+          ),
           },
           {
             id: 'operations-documents',

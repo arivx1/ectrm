@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -17,6 +18,15 @@ from apps.api.app.domains.operations.services.trade_confirmation_comparison impo
 )
 from apps.api.app.domains.operations.services.trade_credit_hold import format_trade_credit_hold_message
 from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceDescriptor,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    load_operational_resource_items,
+)
 from apps.api.app.domains.operations.services.workflow_items import set_trade_workflow_item_projection
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
@@ -40,6 +50,16 @@ CONFIRMATION_RESPONSE_ACTIONS: tuple[str, ...] = (
 AUTO_GENERATED_CAPTURE_DRAFT_NOTE = (
     "Auto-generated draft from booked trade economics on trade capture."
 )
+
+
+@dataclass(frozen=True)
+class ConfirmationListRequest(OperationalResourceListRequest):
+    trade_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ConfirmationListContext:
+    pages_by_document_id: dict[str, list[DocumentIngestionPage]]
 
 
 def _audit_confirmation_payload(confirmation: TradeConfirmationOut) -> dict[str, object]:
@@ -390,6 +410,7 @@ def _sync_confirmation_projection(
         status=confirmation.status,
         actor_id=actor_id,
         now=now,
+        rollup_settlement_status=False,
         notes=_workflow_note_for_confirmation(confirmation, document=document),
     )
 
@@ -693,19 +714,14 @@ def _auto_generated_amendment_draft_note(
         return (
             f"Supersedes {superseded_confirmation_number} after booked economics changed "
             f"on trade amendment: {change_summary}."
-        )
+    )
     return f"Auto-generated draft after booked economics changed on trade amendment: {change_summary}."
 
 
-def list_trade_confirmations(
+def _load_confirmation_list_rows(
     db: Session,
-    *,
-    trade_id: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-    now: Optional[datetime] = None,
-) -> list[TradeConfirmationOut]:
-    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    request: ConfirmationListRequest,
+) -> list[tuple[TradeConfirmation, Trade, TradeWorkflowItem | None, DocumentIngestion | None, int | None]]:
     latest_confirmation_subquery = (
         select(
             TradeConfirmation.trade_id.label("trade_id"),
@@ -737,38 +753,87 @@ def list_trade_confirmations(
         .where(Trade.status == "ACTIVE")
         .order_by(TradeConfirmation.created_at.desc(), TradeConfirmation.id.desc())
     )
-    if trade_id:
-        stmt = stmt.where(TradeConfirmation.trade_id == trade_id)
-    if offset:
-        stmt = stmt.offset(offset)
-    if limit is not None:
-        stmt = stmt.limit(limit)
+    if request.trade_id:
+        stmt = stmt.where(TradeConfirmation.trade_id == request.trade_id)
+    if request.offset:
+        stmt = stmt.offset(request.offset)
+    if request.limit is not None:
+        stmt = stmt.limit(request.limit)
+    return list(db.execute(stmt).all())
 
-    rows = db.execute(stmt).all()
-    pages_by_document_id = _load_confirmation_pages_by_document_id(
-        db,
-        document_ids={
-            confirmation.source_document_id
-            for confirmation, _trade, _workflow_item, _source_document, _current_confirmation_id in rows
-            if confirmation.source_document_id
-        },
-    )
-    return [
-        _to_out(
-            confirmation,
-            trade,
-            workflow_item,
-            source_document,
-            comparison_result=build_trade_confirmation_comparison(
-                trade=trade,
-                confirmation_pages=pages_by_document_id.get(confirmation.source_document_id or "", []),
-                comparison_waiver_note=confirmation.comparison_waiver_note,
-            ),
-            now=reference_time,
-            is_current=confirmation.id == current_confirmation_id,
+
+def _load_confirmation_list_context(
+    db: Session,
+    rows: list[tuple[TradeConfirmation, Trade, TradeWorkflowItem | None, DocumentIngestion | None, int | None]],
+    _request: ConfirmationListRequest,
+) -> ConfirmationListContext:
+    return ConfirmationListContext(
+        pages_by_document_id=_load_confirmation_pages_by_document_id(
+            db,
+            document_ids={
+                confirmation.source_document_id
+                for confirmation, _trade, _workflow_item, _source_document, _current_confirmation_id in rows
+                if confirmation.source_document_id
+            },
         )
-        for confirmation, trade, workflow_item, source_document, current_confirmation_id in rows
-    ]
+    )
+
+
+def _build_confirmation_list_item(
+    row: tuple[TradeConfirmation, Trade, TradeWorkflowItem | None, DocumentIngestion | None, int | None],
+    context: ConfirmationListContext,
+    request: ConfirmationListRequest,
+) -> TradeConfirmationOut:
+    confirmation, trade, workflow_item, source_document, current_confirmation_id = row
+    return _to_out(
+        confirmation,
+        trade,
+        workflow_item,
+        source_document,
+        comparison_result=build_trade_confirmation_comparison(
+            trade=trade,
+            confirmation_pages=context.pages_by_document_id.get(confirmation.source_document_id or "", []),
+            comparison_waiver_note=confirmation.comparison_waiver_note,
+        ),
+        now=request.reference_time,
+        is_current=confirmation.id == current_confirmation_id,
+    )
+
+
+CONFIRMATION_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
+    ConfirmationListRequest,
+    tuple[TradeConfirmation, Trade, TradeWorkflowItem | None, DocumentIngestion | None, int | None],
+    ConfirmationListContext,
+    TradeConfirmationOut,
+](
+    resource_key="confirmations",
+    filters=("trade_id",),
+    sort_fields=("created_at desc", "id desc"),
+    actions=("create", "update", "issue", "record_response"),
+    load_rows=_load_confirmation_list_rows,
+    load_context=_load_confirmation_list_context,
+    build_item=_build_confirmation_list_item,
+)
+
+
+def list_trade_confirmations(
+    db: Session,
+    *,
+    trade_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    now: Optional[datetime] = None,
+) -> list[TradeConfirmationOut]:
+    return load_operational_resource_items(
+        CONFIRMATION_RESOURCE_DESCRIPTOR,
+        db,
+        ConfirmationListRequest(
+            reference_time=_coerce_utc(now) or datetime.now(timezone.utc),
+            trade_id=trade_id,
+            limit=limit,
+            offset=offset,
+        ),
+    )
 
 
 def create_trade_confirmation(

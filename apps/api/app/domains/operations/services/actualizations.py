@@ -396,6 +396,7 @@ def upsert_trade_actualization(
     actor_id: str,
     now: datetime | None = None,
 ) -> DeliveryActualizationOut:
+    from apps.api.app.domains.accruals.services import synchronize_trade_accruals
     from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
 
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
@@ -411,6 +412,12 @@ def upsert_trade_actualization(
         now=reference_time,
     )
     synchronize_trade_actualization_status(db, trade=target.trade, now=reference_time)
+    synchronize_trade_accruals(
+        db,
+        trade_id=target.trade.trade_id,
+        actor_id=actor_id,
+        now=reference_time,
+    )
     synchronize_trade_workflow_items(db, target.trade, actor_id=actor_id, now=reference_time)
     actualization_out = delivery_actualization_to_out(actualization, target=target)
     payload: dict[str, object] = {

@@ -1,22 +1,33 @@
 import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
+import type { TradeMetadata } from '../../shared/tradeMetadata'
 import { loadWeatherLocations } from '../weather/api'
 import type {
   AssistantRuntimeSettings,
+  CounterpartyRecord,
   CounterpartyCreditProfileRecord,
   CounterpartyCreditReportRow,
   CounterpartyExternalCreditSnapshotRecord,
   CounterpartyStandards,
+  CurrencyRecord,
   DeliveryRecord,
+  EventRow,
+  ExternalDataRunRecord,
   ExternalDataSyncStatusRecord,
   LocationStandards,
+  LocationRecord,
   OptionExposureRow,
+  PortfolioRecord,
   PositionRow,
+  PriceIndexRecord,
+  ReferenceRecord,
   Trade,
   TradeConfirmationRecord,
   TradeInvoiceRecord,
   TradePaymentRecord,
   TradeWorkflowItemRecord,
+  TradingSourceRecord,
+  UnitRecord,
   WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
@@ -92,6 +103,21 @@ export type WorkspaceSettlementSummary = {
   breakdown: WorkspaceSettlementBreakdownSummaryRow[]
 }
 
+export type OperationalResourceKey =
+  | 'confirmations'
+  | 'deliveries'
+  | 'shipments'
+  | 'invoices'
+  | 'payments'
+  | 'work_items'
+
+export type OperationalResourceDescriptor = {
+  resource_key: OperationalResourceKey
+  filters: string[]
+  sort_fields: string[]
+  actions: string[]
+}
+
 export type WorkspaceBootstrapSummary = {
   generated_at: string
   trades: WorkspaceTradeSummary
@@ -114,6 +140,7 @@ export type WindowedPage<T> = {
 export type CoreWorkspaceBootstrap = {
   health: { status?: string }
   workspaceSummary: WorkspaceBootstrapSummary | null
+  operationalResourceDescriptors: OperationalResourceDescriptor[]
 }
 
 export type TradesWorkspaceBootstrap = {
@@ -122,7 +149,7 @@ export type TradesWorkspaceBootstrap = {
 }
 
 export type EventsWorkspaceBootstrap = {
-  events: unknown[]
+  events: EventRow[]
 }
 
 export type PositionsWorkspaceBootstrap = {
@@ -157,18 +184,18 @@ export type SettlementWorkspaceBootstrap = {
 }
 
 export type ReferenceWorkspaceBootstrap = {
-  books: unknown[]
-  commodities: unknown[]
-  priceIndices: unknown[]
-  currencies: unknown[]
-  units: unknown[]
-  locations: unknown[]
+  books: ReferenceRecord[]
+  commodities: ReferenceRecord[]
+  priceIndices: PriceIndexRecord[]
+  currencies: CurrencyRecord[]
+  units: UnitRecord[]
+  locations: LocationRecord[]
   locationStandards: LocationStandards
-  counterparties: unknown[]
+  counterparties: CounterpartyRecord[]
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
   counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
   counterpartyStandards: CounterpartyStandards
-  portfolios: unknown[]
+  portfolios: PortfolioRecord[]
 }
 
 export type ReportsWorkspaceBootstrap = {
@@ -176,9 +203,9 @@ export type ReportsWorkspaceBootstrap = {
 }
 
 export type AdminWorkspaceBootstrap = {
-  externalDataRuns: unknown[]
+  externalDataRuns: ExternalDataRunRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
-  tradingSources: unknown[]
+  tradingSources: TradingSourceRecord[]
   weatherLocations: WeatherLocationRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
 }
@@ -451,19 +478,51 @@ async function loadWorkspaceBootstrapSummary(
   )
 }
 
+async function loadOperationalResourceDescriptors(
+  apiBase: string,
+  options?: ReadWorkspaceOptions,
+): Promise<OperationalResourceDescriptor[]> {
+  return fetchJson<OperationalResourceDescriptor[]>(
+    `${apiBase}/operations/resources`,
+    withReadHeaders({ cache: 'no-store' }, options),
+  )
+}
+
 export async function loadCoreWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<CoreWorkspaceBootstrap> {
-  const [health, workspaceSummary] = await Promise.all([
-    fetchJson<{ status?: string }>(`${apiBase}/health`),
+  const healthPromise = fetchJson<{ status?: string }>(`${apiBase}/health`)
+
+  if (!options?.readHeaders) {
+    return {
+      health: await healthPromise,
+      workspaceSummary: null,
+      operationalResourceDescriptors: [],
+    }
+  }
+
+  const [health, workspaceSummary, operationalResourceDescriptors] = await Promise.all([
+    healthPromise,
     loadWorkspaceBootstrapSummary(apiBase, options).catch(() => null),
+    loadOperationalResourceDescriptors(apiBase, options).catch(() => []),
   ])
 
   return {
     health,
     workspaceSummary,
+    operationalResourceDescriptors,
   }
+}
+
+export async function loadTradeMetadata(
+  apiBase: string,
+  options?: ReadWorkspaceOptions,
+): Promise<TradeMetadata> {
+  return fetchJson<TradeMetadata>(
+    `${apiBase}/trades/metadata`,
+    withReadHeaders({ cache: 'no-store' }, options),
+  )
 }
 
 export async function loadTradesWorkspaceBootstrap(
@@ -482,7 +541,7 @@ export async function loadEventsWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<EventsWorkspaceBootstrap> {
-  const events = await fetchJson<unknown[]>(
+  const events = await fetchJson<EventRow[]>(
     `${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`,
     withReadHeaders(undefined, options),
   )
@@ -579,27 +638,27 @@ export async function loadReferenceWorkspaceBootstrap(
     counterpartyStandards,
     portfolios,
   ] = await Promise.all([
-    fetchJson<unknown[]>(
+    fetchJson<ReferenceRecord[]>(
       `${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
-    fetchJson<unknown[]>(
+    fetchJson<ReferenceRecord[]>(
       `${apiBase}${withLimit('/reference/commodities', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
-    fetchJson<unknown[]>(
+    fetchJson<PriceIndexRecord[]>(
       `${apiBase}${withLimit('/reference/price-indices', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
-    fetchJson<unknown[]>(
+    fetchJson<CurrencyRecord[]>(
       `${apiBase}${withLimit('/reference/currencies', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
-    fetchJson<unknown[]>(
+    fetchJson<UnitRecord[]>(
       `${apiBase}${withLimit('/reference/units', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
-    fetchJson<unknown[]>(
+    fetchJson<LocationRecord[]>(
       `${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
@@ -607,7 +666,7 @@ export async function loadReferenceWorkspaceBootstrap(
       `${apiBase}/reference/locations/standards`,
       withReadHeaders(undefined, options),
     ),
-    fetchJson<unknown[]>(
+    fetchJson<CounterpartyRecord[]>(
       `${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
@@ -615,7 +674,7 @@ export async function loadReferenceWorkspaceBootstrap(
       `${apiBase}/reference/counterparties/standards`,
       withReadHeaders(undefined, options),
     ),
-    fetchJson<unknown[]>(
+    fetchJson<PortfolioRecord[]>(
       `${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`,
       withReadHeaders(undefined, options),
     ),
@@ -685,15 +744,15 @@ export async function loadAdminWorkspaceBootstrap(
     }
   }
 
-  let externalDataRuns: unknown[] = []
+  let externalDataRuns: ExternalDataRunRecord[] = []
   let externalDataSyncStatus: ExternalDataSyncStatusRecord | null = null
-  let tradingSources: unknown[] = []
+  let tradingSources: TradingSourceRecord[] = []
   let weatherLocations: WeatherLocationRecord[] = []
   let weatherSyncStatus: WeatherSyncStatusRecord | null = null
 
   const [externalDataRunsResult, externalDataSyncStatusResult, tradingSourcesResult, weatherLocationsResult, weatherSyncStatusResult] =
     await Promise.allSettled([
-      fetchJson<unknown[]>(
+      fetchJson<ExternalDataRunRecord[]>(
         `${apiBase}${withLimit('/admin/external-data/runs', bootstrapQueryLimits.externalDataRuns)}`,
         { headers: options.adminHeaders },
       ),
@@ -701,7 +760,7 @@ export async function loadAdminWorkspaceBootstrap(
         headers: options.adminHeaders,
         cache: 'no-store',
       }),
-      fetchJson<unknown[]>(
+      fetchJson<TradingSourceRecord[]>(
         `${apiBase}${withLimit('/admin/trading-sources', bootstrapQueryLimits.tradingSources)}`,
         { headers: options.adminHeaders },
       ),

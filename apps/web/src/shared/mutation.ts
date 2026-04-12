@@ -76,7 +76,7 @@ export function clearStoredAuthSession(): void {
 export function getMutationContext(): MutationContext {
   const session = getStoredAuthSession()
   if (!session) {
-    throw new Error('Sign in from Settings before performing protected actions.')
+    throw new Error('Sign in before performing protected actions.')
   }
 
   return {

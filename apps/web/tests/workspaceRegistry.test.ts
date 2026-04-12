@@ -27,7 +27,7 @@ describe('workspace registry', () => {
 
   it('preserves labels and hero copy through the registry', () => {
     expect(workspaceLabel('assistant')).toBe('Assistant')
-    expect(HERO_TITLE_BY_VIEW.dashboard).toBe('Desk overview and market pulse')
-    expect(HERO_BODY_BY_VIEW.reference).toContain('registry')
+    expect(HERO_TITLE_BY_VIEW.dashboard).toBe('Live desk overview and market pulse')
+    expect(HERO_BODY_BY_VIEW.reference).toContain('books')
   })
 })

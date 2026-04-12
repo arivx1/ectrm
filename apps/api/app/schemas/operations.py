@@ -123,6 +123,13 @@ class WorkspaceBootstrapSummaryOut(BaseModel):
     settlement: WorkspaceSettlementSummaryOut
 
 
+class OperationalResourceDescriptorOut(BaseModel):
+    resource_key: str
+    filters: list[str] = Field(default_factory=list)
+    sort_fields: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+
+
 class TradeCreditApprovalDecisionOut(BaseModel):
     decision_id: int
     trade_id: str

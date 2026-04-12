@@ -7,14 +7,20 @@ import type {
   UpdateDeliveryPipelineDetailInput,
   UpdateDeliveryPowerDetailInput,
 } from '../../entities/shipments/api'
+import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { DeliveryRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import {
+  resolveOperationalWorkboardDefinition,
+} from '../operations/operationalWorkboardRegistry'
+import { OperationalWorkboardBanner } from '../operations/OperationalWorkboardBanner'
 import { DeliveryDetailEditor } from './DeliveryDetailEditor'
 
 type DeliveryWorkspaceProps = {
   authSession: StoredAuthSession | null
   deliveries: DeliveryRecord[]
+  operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
@@ -145,6 +151,7 @@ function hasManualSharedOverrides(delivery: DeliveryRecord): boolean {
 export function DeliveryWorkspace({
   authSession,
   deliveries,
+  operationalResourceDescriptors,
   formatCommodityClass,
   formatDate,
   formatDateOnly,
@@ -207,6 +214,10 @@ export function DeliveryWorkspace({
     blockedDeliveries[0] ??
     deliveries[0] ??
     null
+  const deliveryBoardWorkboard = resolveOperationalWorkboardDefinition(
+    'deliveryBoard',
+    operationalResourceDescriptors,
+  )
 
   return (
     <TileLayout
@@ -382,6 +393,7 @@ export function DeliveryWorkspace({
           content:
             deliveries.length > 0 ? (
               <div className="shipment-queue-stack">
+                <OperationalWorkboardBanner workboard={deliveryBoardWorkboard} />
                 <div className="shipment-card-actions shipment-sync-actions">
                   <span>Resync obligations after trade capture, amendments, or leg changes reshape the physical delivery book.</span>
                   <button

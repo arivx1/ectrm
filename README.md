@@ -73,9 +73,7 @@ docker compose up -d
 ### 2. Create the Python environment and install backend dependencies
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r apps/api/requirements.txt
+make api-install
 ```
 
 ### 3. Apply database migrations
@@ -87,14 +85,14 @@ alembic -c apps/api/alembic.ini upgrade head
 ### 4. Run the API
 
 ```bash
-uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --reload
+make api-dev
 ```
 
 ### 5. Run the web app in a second terminal
 
 ```bash
+make web-install
 cd apps/web
-npm install
 npm run dev
 ```
 
@@ -113,6 +111,28 @@ PYTHONPATH=. python apps/api/scripts/seed_demo_data.py --target all --action rep
 
 This loads reference data and sample transactions so the workspaces are easier
 to explore.
+
+## Verification
+
+Run these commands from the repo root:
+
+```bash
+make api-test
+make web-build
+make web-lint
+make web-test
+make verify
+```
+
+`make verify` assumes the Python virtual environment already exists and the web
+dependencies have already been installed. On a clean checkout, run:
+
+```bash
+make api-install
+make web-install
+```
+
+before the verification targets.
 
 ## Environment Notes
 

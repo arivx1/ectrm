@@ -21,7 +21,9 @@ project locally.
 
 ## Canonical local commands
 
-These are the commands the IDE configurations should wrap.
+These are the commands the IDE configurations should wrap. Verification runs
+from the repo root through the `Makefile` so local checks and CI can share the
+same entrypoints.
 
 ### API
 
@@ -57,3 +59,38 @@ PYTHONPATH=. python apps/api/scripts/rebuild_trades_projection.py
 ```bash
 PYTHONPATH=. python apps/api/scripts/rebuild_positions_projection.py
 ```
+
+## Canonical verification commands
+
+Run these from the repo root:
+
+```bash
+make api-test
+make web-build
+make web-lint
+make web-test
+make verify
+```
+
+`make verify` is the aggregate Wave 0 verification path. It assumes:
+
+- `.venv` already exists for the backend
+- web dependencies are already installed under `apps/web`
+
+On a clean checkout, run these first:
+
+```bash
+make api-install
+make web-install
+```
+
+The CI workflows introduced under the future-ready Wave 0 plan should reuse
+these same verification targets instead of redefining parallel command sets.
+
+The first backend CI lane runs on Python `3.12` and currently does not start a
+PostgreSQL service container, because the checked-in backend suite is using
+self-contained test database fixtures for the default pull-request path.
+
+The first web CI lane now uses `make web-install`, `make web-lint`,
+`make web-build`, and `make web-test` as the blocking pull-request path so the
+frontend verification contract matches the repo-level Make targets.

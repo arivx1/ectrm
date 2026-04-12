@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 
 import './App.css'
 import './appearance.css'
@@ -9,6 +9,7 @@ import {
   primaryNavigationSectionByKey,
   primaryNavigationSectionForView,
 } from './app/navigation'
+import { AppStartHereOverlay } from './entities/app/AppStartHereOverlay'
 import { AppWorkspaceContent } from './entities/app/AppWorkspaceContent'
 import {
   APP_VIEWS,
@@ -16,23 +17,39 @@ import {
   HERO_TITLE_BY_VIEW,
   workspaceLabel,
 } from './entities/app/appViews'
-import { useAppAppearance } from './entities/app/useAppAppearance'
-import { useAppTradeCaptureSettings } from './entities/app/useAppTradeCaptureSettings'
 import { useAppRouteState } from './entities/app/useAppRouteState'
 import { useAppShellState } from './entities/app/useAppShellState'
+import { useAppStartHere } from './entities/app/useAppStartHere'
 import { useAppTradeActions } from './entities/app/useAppTradeActions'
+import { useAppAppearance } from './entities/app/useAppAppearance'
+import { useAppTradeCaptureSettings } from './entities/app/useAppTradeCaptureSettings'
 import { useAppWorkspaceData } from './entities/app/useAppWorkspaceData'
 import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
 import {
   deriveWorkspaceStatus,
   isAuthenticationRequiredMessage,
-  shouldPresentSettingsSignInState,
   VIEW_DATA_GROUPS,
 } from './entities/app/workspaceLoading'
+import { logoutCurrentSession } from './entities/auth/api'
+import { AuthGate } from './entities/auth/AuthGate'
 import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import { appConfig } from './shared/config'
+import type { ViewKey } from './shared/models'
+import {
+  clearAuthInterruptionResumeSnapshot,
+  getAuthInterruptionResumeSnapshot,
+  saveAuthInterruptionResumeSnapshot,
+  type AuthInterruptionResumeSnapshot,
+} from './shared/authInterruptionResume'
+import {
+  clearStartHereReturnIntent,
+  formatStartHereReturnIntentLabel,
+  getStartHereReturnIntent,
+  saveStartHereReturnIntent,
+  type StartHereReturnView,
+} from './shared/startHereReturnIntent'
 import { commodityClassOrder } from './shared/trading'
 
 function WorkspaceLoadState({
@@ -72,13 +89,23 @@ function WorkspaceErrorState({
 
 export default function App() {
   const route = useAppRouteState()
+  const [authInterruptionResume, setAuthInterruptionResume] =
+    useState<AuthInterruptionResumeSnapshot | null>(() => getAuthInterruptionResumeSnapshot())
   const [openNavSectionKeys, setOpenNavSectionKeys] = useState<PrimaryNavigationSectionKey[]>(() => [
     route.activeNavigationSectionKey ?? primaryNavigationSectionForView(route.currentView).key,
   ])
-  const shell = useAppShellState(route.currentView)
+  const shell = useAppShellState(
+    route.currentView,
+    route.currentView === 'trades' ? authInterruptionResume?.inspectorTab ?? null : null,
+  )
   const appearance = useAppAppearance()
   const tradeCapturePreferences = useAppTradeCaptureSettings()
   const workspaceData = useAppWorkspaceData(route.currentView)
+  const startHere = useAppStartHere(workspaceData.authSession)
+  const [startHereReturnIntent, setStartHereReturnIntent] = useState<StartHereReturnView | null>(() =>
+    getStartHereReturnIntent(),
+  )
+  const previousAuthSessionIdRef = useRef<string | null>(workspaceData.authSession?.sessionId ?? null)
 
   function toggleNavSection(sectionKey: PrimaryNavigationSectionKey) {
     setOpenNavSectionKeys((current) =>
@@ -116,6 +143,7 @@ export default function App() {
   })
 
   const captureForm = useTradeCaptureForm(
+    workspaceData.tradeMetadata,
     summary.activeBooks,
     summary.commodityClassOptions,
     summary.activeCommodities,
@@ -132,6 +160,7 @@ export default function App() {
   const amendForm = useTradeAmendForm(
     summary.selectedTrade,
     summary.selectedTradeEvents,
+    workspaceData.tradeMetadata,
     summary.activeBooks,
     summary.commodityClassOptions,
     summary.activeCommodities,
@@ -203,6 +232,8 @@ export default function App() {
     groupLoaded: workspaceData.groupLoaded,
     groupLoading: workspaceData.groupLoading,
   })
+  const [signOutPending, setSignOutPending] = useState(false)
+  const [signOutError, setSignOutError] = useState('')
 
   function handleRetryCurrentWorkspace() {
     void workspaceData.loadData({
@@ -211,6 +242,32 @@ export default function App() {
     })
   }
 
+  async function handleSignOut() {
+    setSignOutPending(true)
+    setSignOutError('')
+    clearAuthInterruptionResumeSnapshot()
+    setAuthInterruptionResume(null)
+
+    try {
+      await logoutCurrentSession(appConfig.apiBase)
+    } catch {
+      // Clear the browser session even if the server-side session is already gone.
+    } finally {
+      try {
+        await workspaceData.handleSessionChange(null)
+      } catch (error) {
+        setSignOutError(
+          error instanceof Error
+            ? error.message
+            : 'Signed out locally, but the workspace could not be refreshed.',
+        )
+      } finally {
+        setSignOutPending(false)
+      }
+    }
+  }
+
+  const authSession = workspaceData.authSession
   const selectedTrade = summary.selectedTrade
   const showingNavigationSectionLanding = route.activeNavigationSectionKey !== null
   const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[route.currentView]
@@ -218,27 +275,174 @@ export default function App() {
   const hasAuthenticationIssue =
     isAuthenticationRequiredMessage(workspaceData.error) ||
     Object.values(workspaceData.groupErrors).some((message) => isAuthenticationRequiredMessage(message))
-  const showingSettingsSignInState = shouldPresentSettingsSignInState({
-    currentView: route.currentView,
-    error: workspaceData.error,
-    hasAuthSession: workspaceData.authSession !== null,
-    showingNavigationSectionLanding,
-  })
-  const signedOutStartupNeedsSettings =
-    !workspaceData.authSession &&
-    !showingNavigationSectionLanding &&
-    route.currentView !== 'settings' &&
-    hasAuthenticationIssue
-  const effectiveSystemStateLabel = showingSettingsSignInState ? 'Needs sign-in' : systemStateLabel
-  const effectiveSystemStateTone = showingSettingsSignInState ? 'active' : systemStateTone
+  const effectiveSystemStateLabel = !authSession && hasAuthenticationIssue ? 'Needs sign-in' : systemStateLabel
+  const effectiveSystemStateTone = !authSession && hasAuthenticationIssue ? 'active' : systemStateTone
+
+  function handleStartHereOpenView(view: ViewKey, returnIntentView: StartHereReturnView | null = null) {
+    if (!authSession && returnIntentView) {
+      setStartHereReturnIntent(saveStartHereReturnIntent(returnIntentView))
+    }
+
+    route.navigateToView(view)
+  }
+
+  function currentAppUrl(): string {
+    if (typeof window === 'undefined') {
+      return '/'
+    }
+
+    return `${window.location.pathname}${window.location.search}${window.location.hash}`
+  }
+
+  function interruptionContinueLabel(): string {
+    if (route.currentView === 'trades') {
+      if (route.selectedTradeId && shell.inspectorTab === 'amend') {
+        return `the amendment for trade ${route.selectedTradeId}`
+      }
+
+      if (route.selectedTradeId) {
+        return `trade ${route.selectedTradeId} in Trade Capture`
+      }
+
+      return 'Trade Capture'
+    }
+
+    if (route.activeNavigationSectionKey !== null) {
+      return activePrimarySection.label
+    }
+
+    return workspaceLabel(route.currentView)
+  }
+
+  function clearAuthInterruptionResume() {
+    clearAuthInterruptionResumeSnapshot()
+    setAuthInterruptionResume(null)
+  }
+
+  function restoreAuthInterruptionRoute(snapshot: AuthInterruptionResumeSnapshot) {
+    if (typeof window !== 'undefined' && currentAppUrl() !== snapshot.url) {
+      window.history.replaceState(null, '', snapshot.url)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }
+  }
 
   useEffect(() => {
-    if (!signedOutStartupNeedsSettings) {
+    if (authSession || workspaceData.authInterruptionReason !== 'session_expired') {
       return
     }
 
-    route.replaceView('settings')
-  }, [route, signedOutStartupNeedsSettings])
+    const nextSnapshot = saveAuthInterruptionResumeSnapshot({
+      reason: 'session_expired',
+      url: currentAppUrl(),
+      continueLabel: interruptionContinueLabel(),
+      inspectorTab: route.currentView === 'trades' ? shell.inspectorTab : null,
+    })
+
+    setAuthInterruptionResume(nextSnapshot)
+  }, [
+    authSession,
+    activePrimarySection.label,
+    route.activeNavigationSectionKey,
+    route.currentView,
+    route.selectedTradeId,
+    shell.inspectorTab,
+    workspaceData.authInterruptionReason,
+  ])
+
+  useEffect(() => {
+    if (!authSession || authInterruptionResume === null) {
+      return
+    }
+
+    if (currentAppUrl() !== authInterruptionResume.url) {
+      restoreAuthInterruptionRoute(authInterruptionResume)
+      return
+    }
+
+    if (authInterruptionResume.inspectorTab) {
+      if (route.currentView !== 'trades') {
+        return
+      }
+
+      if (
+        route.selectedTradeId !== null &&
+        selectedTrade?.trade_id !== route.selectedTradeId
+      ) {
+        return
+      }
+
+      if (shell.inspectorTab !== authInterruptionResume.inspectorTab) {
+        shell.setInspectorTab(authInterruptionResume.inspectorTab)
+        return
+      }
+    }
+
+    clearAuthInterruptionResume()
+  }, [
+    authInterruptionResume,
+    authSession,
+    route.currentView,
+    route.selectedTradeId,
+    selectedTrade?.trade_id,
+    shell.inspectorTab,
+    shell.setInspectorTab,
+  ])
+
+  useEffect(() => {
+    const previousAuthSessionId = previousAuthSessionIdRef.current
+    const nextAuthSessionId = authSession?.sessionId ?? null
+    const justSignedIn = previousAuthSessionId === null && nextAuthSessionId !== null
+    previousAuthSessionIdRef.current = nextAuthSessionId
+
+    if (!authSession || authInterruptionResume !== null || startHereReturnIntent === null) {
+      return
+    }
+
+    if (justSignedIn || route.currentView === 'settings') {
+      startHere.dismissStartHere()
+      clearStartHereReturnIntent()
+      setStartHereReturnIntent(null)
+      route.replaceView(startHereReturnIntent)
+      return
+    }
+
+    clearStartHereReturnIntent()
+    setStartHereReturnIntent(null)
+  }, [authInterruptionResume, authSession, route.currentView, route.replaceView, startHere, startHereReturnIntent])
+
+  const showStartHereOverlay =
+    startHere.showStartHere &&
+    !(authSession && startHereReturnIntent) &&
+    workspaceData.authInterruptionReason !== 'session_expired' &&
+    authInterruptionResume === null
+  const pendingStartHereReturnLabel = startHereReturnIntent
+    ? formatStartHereReturnIntentLabel(startHereReturnIntent)
+    : null
+  const authInterruptionMessage = authInterruptionResume
+    ? `Session expired. Sign in to continue to ${authInterruptionResume.continueLabel}.`
+    : null
+  const signedOutNeedsAuthGate = !authSession && route.currentView !== 'guide'
+
+  if (signedOutNeedsAuthGate) {
+    return (
+      <div className="app-shell auth-gate-shell">
+        <div className="app-aura app-aura-left" />
+        <div className="app-aura app-aura-right" />
+        <AuthGate
+          authInterruptionMessage={authInterruptionMessage}
+          onSessionChange={workspaceData.handleSessionChange}
+          pendingStartHereReturnLabel={pendingStartHereReturnLabel}
+        />
+        {showStartHereOverlay ? (
+          <AppStartHereOverlay
+            authSession={authSession}
+            onDismiss={startHere.dismissStartHere}
+            onOpenView={handleStartHereOpenView}
+          />
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="app-shell">
@@ -386,6 +590,14 @@ export default function App() {
       </aside>
 
       <main className="main-stage">
+        {showStartHereOverlay ? (
+          <AppStartHereOverlay
+            authSession={authSession}
+            onDismiss={startHere.dismissStartHere}
+            onOpenView={handleStartHereOpenView}
+          />
+        ) : null}
+
         <header className="hero">
           <div className="hero-copy">
             <div className="hero-heading-row">
@@ -414,10 +626,26 @@ export default function App() {
                 ? `${selectedTrade.commodity} • ${selectedTrade.book}`
                 : `${workspaceData.events.length} loaded events across the current session`}
             </small>
+            {authSession ? (
+              <div className="hero-badge-actions">
+                <small className="hero-badge-session">
+                  Signed in as {authSession.user.display_name}
+                </small>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void handleSignOut()}
+                  disabled={signOutPending}
+                >
+                  {signOutPending ? 'Signing Out...' : 'Sign Out'}
+                </button>
+                {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
+              </div>
+            ) : null}
           </div>
         </header>
 
-        {!showingNavigationSectionLanding && workspaceData.error && !showingSettingsSignInState ? (
+        {!showingNavigationSectionLanding && workspaceData.error ? (
           <div className="error-banner">{workspaceData.error}</div>
         ) : null}
         {!showingNavigationSectionLanding && workspaceWarning ? (

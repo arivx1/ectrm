@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.logging import get_logger
+from apps.api.app.domains.accruals.services import rebuild_trade_accruals_ledger
 from apps.api.app.domains.reference_data.services.external_data.eia_client import (
     EIAClient,
     EIAClientError,
@@ -49,6 +50,7 @@ def sync_eia_series(
 
         downloaded_at = datetime.now(timezone.utc)
         total_observations = 0
+        changed_price_index_codes: set[str] = set()
         for mapping in mappings:
             start = build_start_argument(mapping.frequency, lookback_days, today=today)
             payload = eia_client.fetch_series(
@@ -61,10 +63,20 @@ def sync_eia_series(
                 payload=payload,
                 downloaded_at=downloaded_at,
             )
-            total_observations += _upsert_observations(
+            written_count, changed_codes = _upsert_observations(
                 db,
                 run_id=run.id,
                 observations=observations,
+            )
+            total_observations += written_count
+            changed_price_index_codes.update(changed_codes)
+
+        if changed_price_index_codes:
+            rebuild_trade_accruals_ledger(
+                db,
+                price_index_codes=sorted(changed_price_index_codes),
+                actor_id=requested_by or "external_data:eia_sync",
+                now=downloaded_at,
             )
 
         run.status = "SUCCEEDED"
@@ -139,8 +151,9 @@ def _upsert_observations(
     *,
     run_id: int,
     observations: list[NormalizedObservation],
-) -> int:
+) -> tuple[int, set[str]]:
     written = 0
+    changed_price_index_codes: set[str] = set()
     for item in observations:
         existing = db.execute(
             select(PriceIndexObservation).where(
@@ -172,6 +185,7 @@ def _upsert_observations(
                 )
             )
             written += 1
+            changed_price_index_codes.add(item.price_index_code)
             continue
 
         if _observation_changed(existing, item):
@@ -186,9 +200,10 @@ def _upsert_observations(
             existing.raw_payload = item.raw_payload
             existing.updated_at = item.downloaded_at
             written += 1
+            changed_price_index_codes.add(item.price_index_code)
 
     db.commit()
-    return written
+    return written, changed_price_index_codes
 
 
 def _observation_changed(

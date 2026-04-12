@@ -404,6 +404,7 @@ export function ConfirmationLedgerBoard({
 
   useEffect(() => {
     if (!authSession) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Clear stale document state immediately when the session disappears.
       setDocuments([])
       setDocumentLoadError('')
       return
@@ -556,7 +557,7 @@ export function ConfirmationLedgerBoard({
     <div className="workflow-editor-stack">
       {!authSession ? (
         <p className="workflow-editor-note">
-          Sign in from Settings to issue, confirm, dispute, or amend confirmation records.
+          Sign in to issue, confirm, dispute, or amend confirmation records.
         </p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}

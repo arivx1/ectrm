@@ -12,11 +12,14 @@ import type {
   TradeLegDraft,
   UnitRecord,
 } from '../../shared/models'
+import {
+  resolveTradeFormMetadata,
+  tradeFormMetadataRequiresPriceIndex,
+  type TradeMetadata,
+} from '../../shared/tradeMetadata'
 import { ensureCurrentOption } from '../../shared/reference'
 import {
-  pricingTypeRequiresPriceIndex,
   tradeInstrumentUsesOptionFields,
-  tradeSideOptions,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
 import { type AmendDraft, buildAmendDraft } from './amendDraft.ts'
@@ -27,6 +30,7 @@ const EMPTY_TRADE_KEY = '__none__'
 export function useTradeAmendForm(
   selectedTrade: Trade | null,
   selectedTradeEvents: EventRow[],
+  tradeMetadata: TradeMetadata,
   activeBooks: ReferenceRecord[],
   commodityClassOptions: string[],
   activeCommodities: ReferenceRecord[],
@@ -37,6 +41,9 @@ export function useTradeAmendForm(
   activeCurrencies: CurrencyRecord[],
   activeLocations: LocationRecord[],
 ) {
+  const tradeFormMetadata = useMemo(() => resolveTradeFormMetadata(tradeMetadata), [tradeMetadata])
+  const primaryTradeSide = tradeFormMetadata.tradeSideOptions[0] ?? 'BUY'
+  const secondaryTradeSide = tradeFormMetadata.tradeSideOptions[1] ?? primaryTradeSide
   const selectedTradeKey = selectedTrade?.trade_id ?? EMPTY_TRADE_KEY
   const baseDraft = useMemo(
     () => buildAmendDraft(selectedTrade, selectedTradeEvents, activeBooks, commodityClassOptions),
@@ -159,7 +166,8 @@ export function useTradeAmendForm(
   )
 
   const resolvedPriceIndexInput =
-    tradeInstrumentUsesOptionFields(draft.tradeInstrumentTypeInput) || !pricingTypeRequiresPriceIndex(draft.pricingTypeInput)
+    tradeInstrumentUsesOptionFields(draft.tradeInstrumentTypeInput) ||
+    !tradeFormMetadataRequiresPriceIndex(tradeFormMetadata, draft.pricingTypeInput)
       ? ''
       : amendPriceIndexOptions.some((priceIndex) => priceIndex.code === draft.priceIndexInput)
         ? draft.priceIndexInput
@@ -220,7 +228,7 @@ export function useTradeAmendForm(
         ...current.legs,
         makeLegDraft({
           leg_no: current.legs.length + 1,
-          side: current.legs.length % 2 === 0 ? tradeSideOptions[0] : tradeSideOptions[1],
+          side: current.legs.length % 2 === 0 ? primaryTradeSide : secondaryTradeSide,
         }),
       ],
     }))

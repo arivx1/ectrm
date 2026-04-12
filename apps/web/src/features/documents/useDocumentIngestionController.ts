@@ -348,7 +348,7 @@ export function useDocumentIngestionController({
     event.preventDefault()
     const formElement = event.currentTarget
     if (!authSession) {
-      setUploadError('Sign in from Settings before uploading protected documents.')
+      setUploadError('Sign in before uploading protected documents.')
       return
     }
     const session = authSession

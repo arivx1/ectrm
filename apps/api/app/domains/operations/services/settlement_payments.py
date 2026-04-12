@@ -10,6 +10,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceDescriptor,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    load_operational_resource_items,
+)
 from apps.api.app.domains.operations.services.workflow_items import SYSTEM_WORKFLOW_ACTOR
 from apps.api.app.domains.operations.services.workflow_items import set_trade_workflow_item_projection
 from apps.api.app.models.trade import Trade
@@ -23,6 +32,17 @@ from apps.api.app.shared.enums import SettlementStatus
 from apps.api.app.shared.enums import TradeWorkflowType
 
 ZERO = Decimal("0")
+
+
+@dataclass(frozen=True)
+class PaymentListRequest(OperationalResourceListRequest):
+    trade_id: str | None = None
+    invoice_id: int | None = None
+
+
+@dataclass(frozen=True)
+class PaymentListContext:
+    payments_by_invoice_id: dict[int, list[TradePayment]]
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -533,16 +553,10 @@ def _to_out(
     )
 
 
-def list_trade_payments(
+def _load_trade_payment_rows(
     db: Session,
-    *,
-    trade_id: str | None = None,
-    invoice_id: int | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-    now: Optional[datetime] = None,
-) -> list[TradePaymentOut]:
-    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    request: PaymentListRequest,
+) -> list[tuple[TradePayment, TradeInvoice, Trade, TradeWorkflowItem | None]]:
     stmt = (
         select(TradePayment, TradeInvoice, Trade, TradeWorkflowItem)
         .join(TradeInvoice, TradeInvoice.id == TradePayment.invoice_id)
@@ -555,17 +569,23 @@ def list_trade_payments(
         .where(Trade.status == "ACTIVE")
         .order_by(Trade.trade_id.asc(), TradePayment.due_at.asc(), TradePayment.id.asc())
     )
-    if trade_id:
-        stmt = stmt.where(TradePayment.trade_id == trade_id)
-    if invoice_id is not None:
-        stmt = stmt.where(TradePayment.invoice_id == invoice_id)
-    if offset:
-        stmt = stmt.offset(offset)
-    if limit is not None:
-        stmt = stmt.limit(limit)
+    if request.trade_id:
+        stmt = stmt.where(TradePayment.trade_id == request.trade_id)
+    if request.invoice_id is not None:
+        stmt = stmt.where(TradePayment.invoice_id == request.invoice_id)
+    if request.offset:
+        stmt = stmt.offset(request.offset)
+    if request.limit is not None:
+        stmt = stmt.limit(request.limit)
+    return list(db.execute(stmt).all())
 
-    rows = db.execute(stmt).all()
-    invoice_ids = sorted({invoice.id for _, invoice, _, _ in rows})
+
+def _load_trade_payment_context(
+    db: Session,
+    rows: list[tuple[TradePayment, TradeInvoice, Trade, TradeWorkflowItem | None]],
+    _request: PaymentListRequest,
+) -> PaymentListContext:
+    invoice_ids = sorted({invoice.id for _payment, invoice, _trade, _workflow_item in rows})
     payments_by_invoice_id: dict[int, list[TradePayment]] = {}
     if invoice_ids:
         all_invoice_payments = db.execute(
@@ -575,18 +595,61 @@ def list_trade_payments(
         ).scalars().all()
         for payment in all_invoice_payments:
             payments_by_invoice_id.setdefault(payment.invoice_id, []).append(payment)
+    return PaymentListContext(payments_by_invoice_id=payments_by_invoice_id)
 
-    return [
-        _to_out(
-            payment,
-            invoice,
-            trade,
-            workflow_item,
-            payments_for_invoice=payments_by_invoice_id.get(invoice.id, [payment]),
-            now=reference_time,
-        )
-        for payment, invoice, trade, workflow_item in rows
-    ]
+
+def _build_trade_payment_item(
+    row: tuple[TradePayment, TradeInvoice, Trade, TradeWorkflowItem | None],
+    context: PaymentListContext,
+    request: PaymentListRequest,
+) -> TradePaymentOut:
+    payment, invoice, trade, workflow_item = row
+    return _to_out(
+        payment,
+        invoice,
+        trade,
+        workflow_item,
+        payments_for_invoice=context.payments_by_invoice_id.get(invoice.id, [payment]),
+        now=request.reference_time,
+    )
+
+
+TRADE_PAYMENT_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
+    PaymentListRequest,
+    tuple[TradePayment, TradeInvoice, Trade, TradeWorkflowItem | None],
+    PaymentListContext,
+    TradePaymentOut,
+](
+    resource_key="payments",
+    filters=("trade_id", "invoice_id"),
+    sort_fields=("trade_id asc", "due_at asc", "id asc"),
+    actions=("create", "update"),
+    load_rows=_load_trade_payment_rows,
+    load_context=_load_trade_payment_context,
+    build_item=_build_trade_payment_item,
+)
+
+
+def list_trade_payments(
+    db: Session,
+    *,
+    trade_id: str | None = None,
+    invoice_id: int | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    now: Optional[datetime] = None,
+) -> list[TradePaymentOut]:
+    return load_operational_resource_items(
+        TRADE_PAYMENT_RESOURCE_DESCRIPTOR,
+        db,
+        PaymentListRequest(
+            reference_time=_coerce_utc(now) or datetime.now(timezone.utc),
+            trade_id=trade_id,
+            invoice_id=invoice_id,
+            limit=limit,
+            offset=offset,
+        ),
+    )
 
 
 def create_trade_payment(

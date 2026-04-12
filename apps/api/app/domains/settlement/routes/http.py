@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_settlement_role
-from apps.api.app.core.http import changes_from_payload
-from apps.api.app.core.http import require_actor_role
+from apps.api.app.core.http import NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.operations.routes.framework import build_role_mutation_spec
+from apps.api.app.domains.operations.routes.framework import execute_operational_mutation
+from apps.api.app.domains.operations.routes.framework import execute_operational_patch_mutation
+from apps.api.app.domains.operations.routes.framework import execute_operational_query_spec
+from apps.api.app.domains.operations.routes.framework import OperationalQuerySpec
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
 from apps.api.app.domains.operations.services.settlement_invoices import list_trade_invoices
 from apps.api.app.domains.operations.services.settlement_invoices import update_trade_invoice
@@ -23,6 +27,14 @@ from apps.api.app.schemas.settlement import TradePaymentUpdate
 
 router = APIRouter(prefix="/settlement", tags=["settlement"])
 
+SETTLEMENT_RESOURCE_MUTATION_SPEC = build_role_mutation_spec(
+    predicate=is_settlement_role,
+    detail="Only ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can manage settlement.",
+    handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+)
+INVOICE_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_trade_invoices)
+PAYMENT_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_trade_payments)
+
 
 @router.get("/invoices", response_model=list[TradeInvoiceOut])
 def get_trade_invoices(
@@ -31,10 +43,13 @@ def get_trade_invoices(
     offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[TradeInvoiceOut]:
-    try:
-        return list_trade_invoices(db, trade_id=trade_id, limit=limit, offset=offset)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return execute_operational_query_spec(
+        INVOICE_LIST_QUERY_SPEC,
+        db,
+        trade_id=trade_id,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/invoices", response_model=TradeInvoiceOut, status_code=status.HTTP_201_CREATED)
@@ -43,16 +58,14 @@ def post_trade_invoice(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TradeInvoiceOut:
-    actor_id = require_actor_role(
+    return execute_operational_mutation(
+        SETTLEMENT_RESOURCE_MUTATION_SPEC,
         request,
-        predicate=is_settlement_role,
-        detail="Only ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can manage settlement.",
-    )
-    try:
-        invoice = issue_trade_invoice(
+        db,
+        lambda actor: issue_trade_invoice(
             db,
             trade_id=payload.trade_id,
-            actor_id=actor_id,
+            actor_id=actor.actor_id,
             leg_no=payload.leg_no,
             invoice_number=payload.invoice_number,
             invoice_currency_code=payload.invoice_currency_code,
@@ -62,17 +75,7 @@ def post_trade_invoice(
             due_at=payload.due_at,
             notes=payload.notes,
         )
-        db.commit()
-        return invoice
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    )
 
 
 @router.patch("/invoices/{invoice_id}", response_model=TradeInvoiceOut)
@@ -82,30 +85,18 @@ def patch_trade_invoice(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TradeInvoiceOut:
-    actor_id = require_actor_role(
+    return execute_operational_patch_mutation(
+        SETTLEMENT_RESOURCE_MUTATION_SPEC,
+        payload,
         request,
-        predicate=is_settlement_role,
-        detail="Only ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can manage settlement.",
-    )
-    changes = changes_from_payload(payload)
-    try:
-        invoice = update_trade_invoice(
+        db,
+        lambda actor, changes: update_trade_invoice(
             db,
             invoice_id=invoice_id,
-            actor_id=actor_id,
+            actor_id=actor.actor_id,
             changes=changes,
         )
-        db.commit()
-        return invoice
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    )
 
 
 @router.get("/payments", response_model=list[TradePaymentOut])
@@ -116,10 +107,14 @@ def get_trade_payments(
     offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[TradePaymentOut]:
-    try:
-        return list_trade_payments(db, trade_id=trade_id, invoice_id=invoice_id, limit=limit, offset=offset)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return execute_operational_query_spec(
+        PAYMENT_LIST_QUERY_SPEC,
+        db,
+        trade_id=trade_id,
+        invoice_id=invoice_id,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/payments", response_model=TradePaymentOut, status_code=status.HTTP_201_CREATED)
@@ -128,16 +123,14 @@ def post_trade_payment(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TradePaymentOut:
-    actor_id = require_actor_role(
+    return execute_operational_mutation(
+        SETTLEMENT_RESOURCE_MUTATION_SPEC,
         request,
-        predicate=is_settlement_role,
-        detail="Only ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can manage settlement.",
-    )
-    try:
-        payment = create_trade_payment(
+        db,
+        lambda actor: create_trade_payment(
             db,
             invoice_id=payload.invoice_id,
-            actor_id=actor_id,
+            actor_id=actor.actor_id,
             payment_reference=payload.payment_reference,
             payment_currency_code=payload.payment_currency_code,
             payment_amount=payload.payment_amount,
@@ -146,17 +139,7 @@ def post_trade_payment(
             received_at=payload.received_at,
             notes=payload.notes,
         )
-        db.commit()
-        return payment
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    )
 
 
 @router.patch("/payments/{payment_id}", response_model=TradePaymentOut)
@@ -166,30 +149,18 @@ def patch_trade_payment(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TradePaymentOut:
-    actor_id = require_actor_role(
+    return execute_operational_patch_mutation(
+        SETTLEMENT_RESOURCE_MUTATION_SPEC,
+        payload,
         request,
-        predicate=is_settlement_role,
-        detail="Only ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can manage settlement.",
-    )
-    changes = changes_from_payload(payload)
-    try:
-        payment = update_trade_payment(
+        db,
+        lambda actor, changes: update_trade_payment(
             db,
             payment_id=payment_id,
-            actor_id=actor_id,
+            actor_id=actor.actor_id,
             changes=changes,
         )
-        db.commit()
-        return payment
-    except LookupError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except Exception:
-        db.rollback()
-        raise
+    )
 
 
 __all__ = [

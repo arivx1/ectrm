@@ -16,6 +16,15 @@ from apps.api.app.domains.operations.services.audit_events import append_trade_a
 from apps.api.app.domains.operations.services.actualizations import delivery_targets_for_trade
 from apps.api.app.domains.operations.services.actualizations import list_trade_actualizations_by_delivery_id
 from apps.api.app.domains.operations.services.actualizations import load_delivery_target
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceDescriptor,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    load_operational_resource_items,
+)
 from apps.api.app.domains.operations.services.settlement_payments import (
     derive_invoice_payment_projection,
 )
@@ -55,6 +64,16 @@ class TradeInvoiceProjection:
     status: str
     due_at: datetime | None
     notes: str | None
+
+
+@dataclass(frozen=True)
+class InvoiceListRequest(OperationalResourceListRequest):
+    trade_id: str | None = None
+
+
+@dataclass(frozen=True)
+class InvoiceListContext:
+    payments_by_invoice_id: dict[int, list[TradePayment]]
 
 
 def _audit_invoice_payload(invoice: TradeInvoiceOut) -> dict[str, object]:
@@ -557,15 +576,10 @@ def trade_has_invoice_record(db: Session, *, trade_id: str) -> bool:
     )
 
 
-def list_trade_invoices(
+def _load_trade_invoice_rows(
     db: Session,
-    *,
-    trade_id: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-    now: Optional[datetime] = None,
-) -> list[TradeInvoiceOut]:
-    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    request: InvoiceListRequest,
+) -> list[tuple[TradeInvoice, Trade, TradeWorkflowItem | None]]:
     stmt = (
         select(TradeInvoice, Trade, TradeWorkflowItem)
         .join(Trade, Trade.trade_id == TradeInvoice.trade_id)
@@ -577,28 +591,77 @@ def list_trade_invoices(
         .where(Trade.status == "ACTIVE")
         .order_by(TradeInvoice.due_at.asc(), TradeInvoice.updated_at.desc(), TradeInvoice.id.desc())
     )
-    if trade_id:
-        stmt = stmt.where(TradeInvoice.trade_id == trade_id)
-    if offset:
-        stmt = stmt.offset(offset)
-    if limit is not None:
-        stmt = stmt.limit(limit)
+    if request.trade_id:
+        stmt = stmt.where(TradeInvoice.trade_id == request.trade_id)
+    if request.offset:
+        stmt = stmt.offset(request.offset)
+    if request.limit is not None:
+        stmt = stmt.limit(request.limit)
+    return list(db.execute(stmt).all())
 
-    rows = db.execute(stmt).all()
-    payments_by_invoice_id = _load_payments_by_invoice_id(
-        db,
-        invoice_ids=[invoice.id for invoice, _, _ in rows],
-    )
-    return [
-        _to_out(
-            invoice,
-            trade,
-            workflow_item,
-            payments_for_invoice=payments_by_invoice_id.get(invoice.id, []),
-            now=reference_time,
+
+def _load_trade_invoice_context(
+    db: Session,
+    rows: list[tuple[TradeInvoice, Trade, TradeWorkflowItem | None]],
+    _request: InvoiceListRequest,
+) -> InvoiceListContext:
+    return InvoiceListContext(
+        payments_by_invoice_id=_load_payments_by_invoice_id(
+            db,
+            invoice_ids=[invoice.id for invoice, _trade, _workflow_item in rows],
         )
-        for invoice, trade, workflow_item in rows
-    ]
+    )
+
+
+def _build_trade_invoice_item(
+    row: tuple[TradeInvoice, Trade, TradeWorkflowItem | None],
+    context: InvoiceListContext,
+    request: InvoiceListRequest,
+) -> TradeInvoiceOut:
+    invoice, trade, workflow_item = row
+    return _to_out(
+        invoice,
+        trade,
+        workflow_item,
+        payments_for_invoice=context.payments_by_invoice_id.get(invoice.id, []),
+        now=request.reference_time,
+    )
+
+
+TRADE_INVOICE_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
+    InvoiceListRequest,
+    tuple[TradeInvoice, Trade, TradeWorkflowItem | None],
+    InvoiceListContext,
+    TradeInvoiceOut,
+](
+    resource_key="invoices",
+    filters=("trade_id",),
+    sort_fields=("due_at asc", "updated_at desc", "id desc"),
+    actions=("create", "update"),
+    load_rows=_load_trade_invoice_rows,
+    load_context=_load_trade_invoice_context,
+    build_item=_build_trade_invoice_item,
+)
+
+
+def list_trade_invoices(
+    db: Session,
+    *,
+    trade_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    now: Optional[datetime] = None,
+) -> list[TradeInvoiceOut]:
+    return load_operational_resource_items(
+        TRADE_INVOICE_RESOURCE_DESCRIPTOR,
+        db,
+        InvoiceListRequest(
+            reference_time=_coerce_utc(now) or datetime.now(timezone.utc),
+            trade_id=trade_id,
+            limit=limit,
+            offset=offset,
+        ),
+    )
 
 
 def issue_trade_invoice(
@@ -616,6 +679,11 @@ def issue_trade_invoice(
     notes: object | None = None,
     now: Optional[datetime] = None,
 ) -> TradeInvoiceOut:
+    from apps.api.app.domains.accruals.services import (
+        synchronize_trade_accruals,
+        synchronize_trade_invoice_relief,
+    )
+
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     trade = db.execute(
         select(Trade).where(Trade.trade_id == trade_id, Trade.status == "ACTIVE")
@@ -686,6 +754,20 @@ def issue_trade_invoice(
     )
     db.add(invoice)
     db.flush()
+    if trade.trade_nature == TradeNature.PHYSICAL.value:
+        synchronize_trade_accruals(
+            db,
+            trade_id=trade.trade_id,
+            actor_id=actor_id,
+            now=reference_time,
+        )
+        synchronize_trade_invoice_relief(
+            db,
+            invoice_id=invoice.id,
+            actor_id=actor_id,
+            now=reference_time,
+            strict=True,
+        )
 
     workflow_item = synchronize_trade_invoice_projection(
         db,
@@ -739,6 +821,11 @@ def update_trade_invoice(
     changes: dict[str, object | None],
     now: Optional[datetime] = None,
 ) -> TradeInvoiceOut:
+    from apps.api.app.domains.accruals.services import (
+        synchronize_trade_accruals,
+        synchronize_trade_invoice_relief,
+    )
+
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     row = _invoice_row(db, invoice_id=invoice_id)
     if row is None:
@@ -832,6 +919,20 @@ def update_trade_invoice(
         invoice.updated_at = reference_time
         invoice.updated_by = actor_id
         invoice.version += 1
+    if trade.trade_nature == TradeNature.PHYSICAL.value:
+        synchronize_trade_accruals(
+            db,
+            trade_id=trade.trade_id,
+            actor_id=actor_id,
+            now=reference_time,
+        )
+        synchronize_trade_invoice_relief(
+            db,
+            invoice_id=invoice.id,
+            actor_id=actor_id,
+            now=reference_time,
+            strict=True,
+        )
 
     workflow_item = synchronize_trade_invoice_projection(
         db,

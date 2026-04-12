@@ -37,6 +37,24 @@ npm test
 npm run preview
 ```
 
+From the repo root, the canonical verification wrappers are:
+
+```bash
+make web-install
+make web-build
+make web-lint
+make web-test
+```
+
+The first GitHub Actions web lane uses the same shared entrypoints:
+
+```bash
+make web-install
+make web-lint
+make web-build
+make web-test
+```
+
 The default local URL is `http://localhost:5173`.
 
 ## API Connection

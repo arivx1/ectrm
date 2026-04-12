@@ -361,8 +361,52 @@
   box-shadow: 0 24px 60px rgba(17, 30, 41, 0.08);
 }
 
+:root[data-color-mode='light'] .auth-gate-hero {
+  color: #13293d;
+  background:
+    radial-gradient(circle at top right, rgb(var(--theme-highlight-rgb) / 0.2), transparent 34%),
+    radial-gradient(circle at bottom left, rgb(var(--theme-accent-rgb) / 0.16), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(242, 247, 251, 0.96));
+  box-shadow: 0 24px 60px rgba(17, 30, 41, 0.08);
+}
+
+:root[data-color-mode='light'] .auth-gate-hero::before {
+  background:
+    linear-gradient(rgba(18, 42, 56, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(18, 42, 56, 0.04) 1px, transparent 1px);
+  opacity: 0.28;
+}
+
 :root[data-color-mode='light'] .hero p {
   color: #53616d;
+}
+
+:root[data-color-mode='light'] .auth-gate-status {
+  color: #103045;
+}
+
+:root[data-color-mode='light'] .auth-gate-title-block p,
+:root[data-color-mode='light'] .auth-gate-signal-card p,
+:root[data-color-mode='light'] .auth-gate-step p {
+  color: #5c6975;
+}
+
+:root[data-color-mode='light'] .auth-gate-title-block h1,
+:root[data-color-mode='light'] .auth-gate-signal-card strong,
+:root[data-color-mode='light'] .auth-gate-step strong {
+  color: #13293d;
+}
+
+:root[data-color-mode='light'] .auth-gate-chip {
+  border-color: rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.74);
+  color: #13293d;
+}
+
+:root[data-color-mode='light'] .auth-gate-signal-card,
+:root[data-color-mode='light'] .auth-gate-step {
+  border-color: rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.68);
 }
 
 :root[data-color-mode='light'] .hero-badge {
@@ -381,6 +425,43 @@
 
 :root[data-color-mode='light'] .hero-session-pill-cancelled {
   background: rgba(255, 139, 127, 0.08);
+}
+
+:root[data-color-mode='dark'] .auth-gate-panel {
+  border-color: rgba(126, 154, 184, 0.14);
+  background:
+    radial-gradient(circle at top right, rgb(var(--theme-highlight-rgb) / 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(9, 17, 27, 0.98), rgba(14, 28, 42, 0.96));
+  box-shadow: 0 24px 60px rgba(7, 16, 24, 0.18);
+}
+
+:root[data-color-mode='dark'] .auth-gate-panel-head h3,
+:root[data-color-mode='dark'] .auth-gate-method-card strong,
+:root[data-color-mode='dark'] .auth-gate-bootstrap-copy strong,
+:root[data-color-mode='dark'] .auth-gate-method-card,
+:root[data-color-mode='dark'] .auth-gate-bootstrap-toggle {
+  color: #ecf3ff;
+}
+
+:root[data-color-mode='dark'] .auth-gate-primary-note,
+:root[data-color-mode='dark'] .auth-gate-method-card p,
+:root[data-color-mode='dark'] .auth-gate-method-note,
+:root[data-color-mode='dark'] .auth-gate-bootstrap-copy p,
+:root[data-color-mode='dark'] .auth-gate-panel-head p {
+  color: rgba(213, 228, 242, 0.72);
+}
+
+:root[data-color-mode='dark'] .auth-gate-method-card,
+:root[data-color-mode='dark'] .auth-gate-bootstrap-toggle {
+  border-color: rgba(126, 154, 184, 0.14);
+  background:
+    linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(17, 31, 46, 0.78));
+  box-shadow: 0 18px 44px rgba(7, 16, 24, 0.16);
+}
+
+:root[data-color-mode='dark'] .auth-gate-bootstrap-indicator {
+  color: #ecf3ff;
+  background: rgb(var(--theme-highlight-rgb) / 0.16);
 }
 
 :root[data-color-mode='light'] .error-banner {

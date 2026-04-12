@@ -5,17 +5,20 @@ import {
   type CounterpartyCreditPolicyPreview,
 } from './counterpartyCredit'
 import { buildCounterpartySearchDisplayValue } from './counterpartySearch'
+import { TradeFormDisclosure } from './TradeFormDisclosure'
 import { buildReferenceSearchDisplayValue } from './referenceSearch'
 import { TradeLegEditor } from './TradeLegEditor'
-import { CounterpartySearchField, ReferenceSearchField } from './tradeSearchFields'
+import {
+  CounterpartySearchField,
+  ReferenceSearchField,
+  useReferenceSearchDisplayState,
+} from './tradeSearchFields'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
 import { FieldLabel } from '../../shared/ui/Tooltip'
 import {
   defaultTradeExecutionTime,
   getQualitySpecOptionsForCommodity,
-  pricingTypeRequiresExplicitPrice,
-  pricingTypeRequiresPriceIndex,
   tradeInstrumentUsesOptionFields,
   tradeStructureSupportsLegs,
 } from '../../shared/trading'
@@ -157,6 +160,8 @@ type TradeAmendFormProps = {
   invoiceStatusOptions: readonly string[]
   paymentStatusOptions: readonly string[]
   settlementStatusOptions: readonly string[]
+  pricingTypesRequiringExplicitPrice: readonly string[]
+  pricingTypesRequiringPriceIndex: readonly string[]
   formatCommodityClass: (value: string) => string
 }
 
@@ -276,6 +281,8 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     invoiceStatusOptions,
     paymentStatusOptions,
     settlementStatusOptions,
+    pricingTypesRequiringExplicitPrice,
+    pricingTypesRequiringPriceIndex,
     formatCommodityClass,
   } = props
 
@@ -285,11 +292,17 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
   const qualitySpecOptions = getQualitySpecOptionsForCommodity(amendCommodityInput)
   const qualitySpecListId = qualitySpecOptions.length > 0 ? `trade-quality-spec-options-${selectedTradeId}` : undefined
   const optionTrade = tradeInstrumentUsesOptionFields(amendTradeInstrumentTypeInput)
+  const pricingTypeNeedsExplicitPrice = pricingTypesRequiringExplicitPrice.includes(amendPricingTypeInput)
+  const pricingTypeNeedsPriceIndex = pricingTypesRequiringPriceIndex.includes(amendPricingTypeInput)
   const selectedBook = amendBookOptions.find((book) => book.code === amendBookInput) ?? null
   const selectedPortfolio =
     amendPortfolioOptions.find((portfolio) => portfolio.code === amendPortfolioInput) ?? null
   const selectedCounterparty =
     amendCounterpartyOptions.find((counterparty) => counterparty.code === amendCounterpartyInput) ?? null
+  const selectedCommodity =
+    amendCommodityOptions.find((commodity) => commodity.code === amendCommodityInput) ?? null
+  const selectedLocation =
+    amendLocationOptions.find((location) => location.code === amendLocationInput) ?? null
   const [amendBookSearchInput, setAmendBookSearchInput] = useState(
     () => buildReferenceSearchDisplayValue(selectedBook) || amendBookInput,
   )
@@ -299,7 +312,31 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
   const [amendCounterpartySearchInput, setAmendCounterpartySearchInput] = useState(
     () => buildCounterpartySearchDisplayValue(selectedCounterparty) || amendCounterpartyInput,
   )
+  const [amendCommoditySearchInput, setAmendCommoditySearchInput] = useReferenceSearchDisplayState(
+    selectedCommodity,
+    amendCommodityInput,
+  )
+  const [amendLocationSearchInput, setAmendLocationSearchInput] = useReferenceSearchDisplayState(
+    selectedLocation,
+    amendLocationInput,
+  )
   const counterpartyCreditWarning = buildCounterpartyCreditRestrictionMessage(selectedCounterparty)
+  const workflowStatusFields = [
+    'Pricing Status',
+    'Confirmation',
+    'Nomination',
+    'Allocation',
+    'Invoice',
+    'Payment',
+    'Settlement Status',
+  ]
+  const showDeskMetadata = amendmentPreviewFields.some(
+    (field) => field === 'External Trade ID' || field === 'Trader User',
+  )
+  const showScheduleOverrides = amendmentPreviewFields.some(
+    (field) => field === 'Trade Date' || field === 'Effective Start' || field === 'Effective End',
+  )
+  const showWorkflowStatuses = amendmentPreviewFields.some((field) => workflowStatusFields.includes(field))
 
   useEffect(() => {
     if (!selectedBook) {
@@ -307,6 +344,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     }
 
     const nextBookSearchInput = buildReferenceSearchDisplayValue(selectedBook)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the visible search text aligned with external book selection changes.
     setAmendBookSearchInput((current) =>
       current.trim().length === 0 || current === selectedBook.code ? nextBookSearchInput : current,
     )
@@ -318,6 +356,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     }
 
     const nextPortfolioSearchInput = buildReferenceSearchDisplayValue(selectedPortfolio)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the visible search text aligned with external portfolio selection changes.
     setAmendPortfolioSearchInput((current) =>
       current.trim().length === 0 || current === selectedPortfolio.code ? nextPortfolioSearchInput : current,
     )
@@ -329,6 +368,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     }
 
     const nextCounterpartySearchInput = buildCounterpartySearchDisplayValue(selectedCounterparty)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the visible search text aligned with external counterparty selection changes.
     setAmendCounterpartySearchInput((current) =>
       current.trim().length === 0 || current === selectedCounterparty.code ? nextCounterpartySearchInput : current,
     )
@@ -345,14 +385,18 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
     setAmendBookInput(value)
   }
 
+  function handleAmendCommodityClassSelection(value: string) {
+    if (value !== amendCommodityClassInput) {
+      setAmendCommoditySearchInput('')
+    }
+
+    setAmendCommodityClassInput(value)
+  }
+
   return (
     <form key={selectedTradeId} className="stack-form" onSubmit={onSubmit}>
       <input type="hidden" value={amendSourceSystemInput || ''} readOnly />
       <div className="mini-grid">
-        <label className="field">
-          <span>External Trade ID</span>
-          <input className="control" value={amendExternalTradeIdInput} onChange={(event) => setAmendExternalTradeIdInput(event.target.value)} disabled={amending || cancelling} />
-        </label>
         <label className="field">
           <span>Execution Date</span>
           <input
@@ -377,36 +421,70 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             disabled={amending || cancelling || executionDateInput === ''}
           />
         </label>
-        <label className="field">
-          <span>Trade Date</span>
-          <input
-            className="control"
-            type="date"
-            value={amendTradeDateInput}
-            onChange={(event) => setAmendTradeDateInput(event.target.value)}
-            disabled={amending || cancelling}
-          />
-        </label>
-        <label className="field">
-          <span>Effective Start</span>
-          <input
-            className="control"
-            type="date"
-            value={amendEffectiveStartDateInput}
-            onChange={(event) => setAmendEffectiveStartDateInput(event.target.value)}
-            disabled={amending || cancelling}
-          />
-        </label>
-        <label className="field">
-          <span>Effective End</span>
-          <input
-            className="control"
-            type="date"
-            value={amendEffectiveEndDateInput}
-            onChange={(event) => setAmendEffectiveEndDateInput(event.target.value)}
-            disabled={amending || cancelling}
-          />
-        </label>
+
+        <TradeFormDisclosure
+          title="Desk Metadata"
+          summary="External linkage and trader attribution"
+          description="Most amendments do not need source-system IDs or trader re-assignment. Open this only when desk metadata is part of the change."
+          defaultOpen={showDeskMetadata}
+        >
+          <label className="field">
+            <span>External Trade ID</span>
+            <input
+              className="control"
+              value={amendExternalTradeIdInput}
+              onChange={(event) => setAmendExternalTradeIdInput(event.target.value)}
+              disabled={amending || cancelling}
+            />
+          </label>
+          <label className="field">
+            <span>Trader User</span>
+            <input
+              className="control"
+              value={amendTraderUserInput}
+              onChange={(event) => setAmendTraderUserInput(event.target.value)}
+              disabled={amending || cancelling}
+            />
+          </label>
+        </TradeFormDisclosure>
+
+        <TradeFormDisclosure
+          title="Schedule Overrides"
+          summary="Trade date and effective window"
+          description="Execution timing usually carries the amendment. Open this only when the trade date or effective range is changing too."
+          defaultOpen={showScheduleOverrides}
+        >
+          <label className="field">
+            <span>Trade Date</span>
+            <input
+              className="control"
+              type="date"
+              value={amendTradeDateInput}
+              onChange={(event) => setAmendTradeDateInput(event.target.value)}
+              disabled={amending || cancelling}
+            />
+          </label>
+          <label className="field">
+            <span>Effective Start</span>
+            <input
+              className="control"
+              type="date"
+              value={amendEffectiveStartDateInput}
+              onChange={(event) => setAmendEffectiveStartDateInput(event.target.value)}
+              disabled={amending || cancelling}
+            />
+          </label>
+          <label className="field">
+            <span>Effective End</span>
+            <input
+              className="control"
+              type="date"
+              value={amendEffectiveEndDateInput}
+              onChange={(event) => setAmendEffectiveEndDateInput(event.target.value)}
+              disabled={amending || cancelling}
+            />
+          </label>
+        </TradeFormDisclosure>
       </div>
 
       <div className="mini-grid">
@@ -541,7 +619,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           <>
             <label className="field">
               <span>Commodity Class</span>
-              <select className="control" value={amendCommodityClassInput} onChange={(event) => setAmendCommodityClassInput(event.target.value)} disabled={amending || cancelling || commodityClassOptions.length === 0}>
+              <select className="control" value={amendCommodityClassInput} onChange={(event) => handleAmendCommodityClassSelection(event.target.value)} disabled={amending || cancelling || commodityClassOptions.length === 0}>
                 {commodityClassOptions.map((commodityClass) => (
                   <option key={commodityClass} value={commodityClass}>
                     {formatCommodityClass(commodityClass)}
@@ -550,16 +628,24 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
               </select>
             </label>
 
-            <label className="field">
-              <span>Commodity</span>
-              <select className="control control-highlight" value={amendCommodityInput} onChange={(event) => setAmendCommodityInput(event.target.value)} disabled={amending || cancelling || amendCommodityOptions.length === 0}>
-                {amendCommodityOptions.map((commodity) => (
-                  <option key={commodity.code} value={commodity.code}>
-                    {commodity.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ReferenceSearchField
+              label="Commodity"
+              selectedCode={amendCommodityInput}
+              setSelectedCode={setAmendCommodityInput}
+              searchInput={amendCommoditySearchInput}
+              setSearchInput={setAmendCommoditySearchInput}
+              options={amendCommodityOptions}
+              disabled={amending || cancelling || amendCommodityOptions.length === 0}
+              allowEmpty={false}
+              preserveSelectionWhileSearching
+              placeholder="Search by commodity name or code"
+              idleHelperText="Search by commodity name or code."
+              unmatchedHelperText="No exact commodity is selected yet. Choose a result to amend the ticket."
+              emptyStateText="No commodities match that search yet."
+              selectedHelperText={(commodity) => `Amending commodity to ${commodity.code}.`}
+              searchingHelperText={(commodity) => `Current commodity stays ${commodity.code} until you choose a new result.`}
+              buildSecondaryLabel={(commodity) => commodity.code}
+            />
           </>
         )}
         {optionTrade && (
@@ -684,22 +770,24 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>Location</span>
-          <select
-            className="control"
-            value={amendLocationInput}
-            onChange={(event) => setAmendLocationInput(event.target.value)}
-            disabled={amending || cancelling}
-          >
-            <option value="">No location</option>
-            {amendLocationOptions.map((location) => (
-              <option key={location.code} value={location.code}>
-                {location.code} · {location.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ReferenceSearchField
+          label="Location"
+          selectedCode={amendLocationInput}
+          setSelectedCode={setAmendLocationInput}
+          searchInput={amendLocationSearchInput}
+          setSearchInput={setAmendLocationSearchInput}
+          options={amendLocationOptions}
+          disabled={amending || cancelling}
+          allowEmpty
+          preserveSelectionWhileSearching
+          placeholder="Search by location name or code"
+          idleHelperText="Search by location name or code. Leave blank for no location."
+          unmatchedHelperText="No exact location is selected yet. Choose a result or clear the field for no location."
+          emptyStateText="No locations match that search yet."
+          selectedHelperText={(location) => `Amending location to ${location.code}.`}
+          searchingHelperText={(location) => `Current location stays ${location.code} until you choose a new result.`}
+          buildSecondaryLabel={(location) => location.code}
+        />
         <label className="field">
           <span>Delivery Start</span>
           <input
@@ -731,22 +819,12 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>Pricing Status</span>
-          <select className="control" value={amendPricingStatusInput} onChange={(event) => setAmendPricingStatusInput(event.target.value)} disabled={amending || cancelling}>
-            {pricingStatusOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
           <FieldLabel label="Price Index" tooltip={tradeTooltipCopy.priceIndex} />
           <select
             className="control"
             value={amendPriceIndexInput}
             onChange={(event) => setAmendPriceIndexInput(event.target.value)}
-            disabled={amending || cancelling || optionTrade || !pricingTypeRequiresPriceIndex(amendPricingTypeInput) || amendPriceIndexOptions.length === 0}
+            disabled={amending || cancelling || optionTrade || !pricingTypeNeedsPriceIndex || amendPriceIndexOptions.length === 0}
           >
             <option value="">No price index</option>
             {amendPriceIndexOptions.map((priceIndex) => (
@@ -757,7 +835,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
           </select>
         </label>
         <label className="field">
-          <span>{optionTrade ? 'Premium' : pricingTypeRequiresExplicitPrice(amendPricingTypeInput) ? 'Price Differential' : 'Price Differential (optional)'}</span>
+          <span>{optionTrade ? 'Premium' : pricingTypeNeedsExplicitPrice ? 'Price Differential' : 'Price Differential (optional)'}</span>
           <input className="control" inputMode="decimal" value={amendPriceInput} onChange={(event) => setAmendPriceInput(event.target.value)} />
         </label>
         {!tradeStructureSupportsLegs(amendTradeStructureInput) && (
@@ -768,7 +846,22 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
         )}
       </div>
 
-      <div className="mini-grid">
+      <TradeFormDisclosure
+        title="Workflow Statuses"
+        summary="Pricing, confirmation, and settlement state"
+        description="Leave this collapsed for commercial edits. Open it when the amendment is explicitly changing downstream workflow posture."
+        defaultOpen={showWorkflowStatuses}
+      >
+        <label className="field">
+          <span>Pricing Status</span>
+          <select className="control" value={amendPricingStatusInput} onChange={(event) => setAmendPricingStatusInput(event.target.value)} disabled={amending || cancelling}>
+            {pricingStatusOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field">
           <span>Confirmation</span>
           <select
@@ -844,9 +937,6 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             ))}
           </select>
         </label>
-      </div>
-
-      <div className="mini-grid">
         <label className="field">
           <span>Settlement Status</span>
           <select className="control" value={amendSettlementStatusInput} onChange={(event) => setAmendSettlementStatusInput(event.target.value)} disabled={amending || cancelling}>
@@ -857,11 +947,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>Trader User</span>
-          <input className="control" value={amendTraderUserInput} onChange={(event) => setAmendTraderUserInput(event.target.value)} disabled={amending || cancelling} />
-        </label>
-      </div>
+      </TradeFormDisclosure>
 
       <section className="feedback-banner trade-review-card">
         <strong>{amendmentPreviewFields.length > 0 ? `Amendment Preview (${amendmentPreviewFields.length})` : 'No changes staged yet'}</strong>

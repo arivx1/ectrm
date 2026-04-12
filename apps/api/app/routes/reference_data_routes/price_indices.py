@@ -2,20 +2,12 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
-from apps.api.app.domains.reference_data.services.records import (
-    create_reference_record,
-    get_reference_record,
-    list_reference_records,
-    normalize_code,
-    set_reference_active_state,
-    update_reference_record,
-)
+from apps.api.app.domains.reference_data.services.records import normalize_code
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.schemas.reference_data import (
     PriceIndexCreate,
@@ -30,13 +22,36 @@ from .common import (
     ensure_active_location_exists,
     ensure_active_unit_exists,
     ensure_price_index_not_in_active_use,
-    to_out,
+    clean_optional_code,
+    clean_optional_text,
 )
+from .factory import create_reference_resource
+from .factory import get_reference_resource
+from .factory import list_reference_collection
+from .factory import ReferenceDataCrudSpec
+from .factory import set_reference_resource_active
+from .factory import update_reference_resource
 
 router = APIRouter()
 
 
-def _update_price_index_fields(record, payload, provided_fields: set[str]) -> None:
+def _build_price_index_create_values(db: Session, payload: PriceIndexCreate) -> dict[str, object]:
+    return {
+        "commodity_code": ensure_active_commodity_exists(db, payload.commodity_code),
+        "currency_code": ensure_active_currency_exists(db, payload.currency_code),
+        "unit_code": ensure_active_unit_exists(db, payload.unit_code),
+        "provider": payload.provider.strip(),
+        "market": clean_optional_text(payload.market),
+        "location_code": (
+            ensure_active_location_exists(db, payload.location_code)
+            if payload.location_code
+            else None
+        ),
+        "calendar_code": clean_optional_code(payload.calendar_code),
+    }
+
+
+def _update_price_index_fields(_db: Session, record, payload, provided_fields: set[str]) -> None:
     if "commodity_code" in provided_fields and payload.commodity_code is not None:
         record.commodity_code = normalize_code(payload.commodity_code)
     if "currency_code" in provided_fields and payload.currency_code is not None:
@@ -46,11 +61,33 @@ def _update_price_index_fields(record, payload, provided_fields: set[str]) -> No
     if "provider" in provided_fields and payload.provider is not None:
         record.provider = payload.provider.strip()
     if "market" in provided_fields:
-        record.market = payload.market.strip() if payload.market is not None else None
+        record.market = clean_optional_text(payload.market)
     if "location_code" in provided_fields:
-        record.location_code = normalize_code(payload.location_code) if payload.location_code else None
+        record.location_code = clean_optional_code(payload.location_code)
     if "calendar_code" in provided_fields:
-        record.calendar_code = normalize_code(payload.calendar_code) if payload.calendar_code else None
+        record.calendar_code = clean_optional_code(payload.calendar_code)
+
+
+def _validate_price_index_update(db: Session, payload: PriceIndexUpdate) -> None:
+    if "commodity_code" in payload.model_fields_set and payload.commodity_code is not None:
+        ensure_active_commodity_exists(db, payload.commodity_code)
+    if "currency_code" in payload.model_fields_set and payload.currency_code is not None:
+        ensure_active_currency_exists(db, payload.currency_code)
+    if "unit_code" in payload.model_fields_set and payload.unit_code is not None:
+        ensure_active_unit_exists(db, payload.unit_code)
+    if "location_code" in payload.model_fields_set and payload.location_code:
+        ensure_active_location_exists(db, payload.location_code)
+
+
+PRICE_INDEX_SPEC = ReferenceDataCrudSpec(
+    model=ReferencePriceIndex,
+    out_schema_cls=PriceIndexOut,
+    duplicate_detail="Price index already exists",
+    build_create_extra_values=_build_price_index_create_values,
+    validate_update=_validate_price_index_update,
+    update_extra_fields=_update_price_index_fields,
+    validate_deactivate=ensure_price_index_not_in_active_use,
+)
 
 
 @router.get("/price-indices", response_model=List[PriceIndexOut])
@@ -65,52 +102,25 @@ def list_price_indices(
     extra_filters = []
     if commodity_code:
         extra_filters.append(ReferencePriceIndex.commodity_code == normalize_code(commodity_code))
-
-    rows = list_reference_records(
-        db,
-        ReferencePriceIndex,
-        q,
-        is_active,
-        limit,
-        offset,
+    return list_reference_collection(
+        PRICE_INDEX_SPEC,
+        db=db,
+        q=q,
+        is_active=is_active,
+        limit=limit,
+        offset=offset,
         extra_filters=extra_filters,
     )
-    return [to_out(row, PriceIndexOut) for row in rows]
 
 
 @router.post("/price-indices", response_model=PriceIndexOut, status_code=201)
 def create_price_index(payload: PriceIndexCreate, db: Session = Depends(get_db)) -> PriceIndexOut:
-    existing = db.execute(
-        select(ReferencePriceIndex).where(ReferencePriceIndex.code == normalize_code(payload.code))
-    ).scalars().first()
-    if existing is not None:
-        raise HTTPException(status_code=409, detail="Price index already exists")
-
-    commodity_code = ensure_active_commodity_exists(db, payload.commodity_code)
-    currency_code = ensure_active_currency_exists(db, payload.currency_code)
-    unit_code = ensure_active_unit_exists(db, payload.unit_code)
-    location_code = ensure_active_location_exists(db, payload.location_code) if payload.location_code else None
-    record = create_reference_record(
-        db,
-        ReferencePriceIndex,
-        payload,
-        extra_values={
-            "commodity_code": commodity_code,
-            "currency_code": currency_code,
-            "unit_code": unit_code,
-            "provider": payload.provider.strip(),
-            "market": payload.market.strip() if payload.market is not None else None,
-            "location_code": location_code,
-            "calendar_code": normalize_code(payload.calendar_code) if payload.calendar_code else None,
-        },
-    )
-    return to_out(record, PriceIndexOut)
+    return create_reference_resource(PRICE_INDEX_SPEC, payload, db=db)
 
 
 @router.get("/price-indices/{code}", response_model=PriceIndexOut)
 def get_price_index(code: str, db: Session = Depends(get_db)) -> PriceIndexOut:
-    record = get_reference_record(db, ReferencePriceIndex, code.strip().upper())
-    return to_out(record, PriceIndexOut)
+    return get_reference_resource(PRICE_INDEX_SPEC, code, db=db)
 
 
 @router.put("/price-indices/{code}", response_model=PriceIndexOut)
@@ -119,19 +129,7 @@ def update_price_index(
     payload: PriceIndexUpdate,
     db: Session = Depends(get_db),
 ) -> PriceIndexOut:
-    record = get_reference_record(db, ReferencePriceIndex, code.strip().upper())
-    if "commodity_code" in payload.model_fields_set and payload.commodity_code is not None:
-        ensure_active_commodity_exists(db, payload.commodity_code)
-    if "currency_code" in payload.model_fields_set and payload.currency_code is not None:
-        ensure_active_currency_exists(db, payload.currency_code)
-    if "unit_code" in payload.model_fields_set and payload.unit_code is not None:
-        ensure_active_unit_exists(db, payload.unit_code)
-    if "location_code" in payload.model_fields_set and payload.location_code:
-        ensure_active_location_exists(db, payload.location_code)
-    update_reference_record(record, payload, extra_updates=_update_price_index_fields)
-    db.commit()
-    db.refresh(record)
-    return to_out(record, PriceIndexOut)
+    return update_reference_resource(PRICE_INDEX_SPEC, code, payload, db=db)
 
 
 @router.post("/price-indices/{code}/deactivate", response_model=PriceIndexOut)
@@ -140,12 +138,13 @@ def deactivate_price_index(
     payload: PriceIndexStatusUpdate,
     db: Session = Depends(get_db),
 ) -> PriceIndexOut:
-    record = get_reference_record(db, ReferencePriceIndex, code.strip().upper())
-    ensure_price_index_not_in_active_use(db, record.code)
-    set_reference_active_state(record, False, payload.updated_by)
-    db.commit()
-    db.refresh(record)
-    return to_out(record, PriceIndexOut)
+    return set_reference_resource_active(
+        PRICE_INDEX_SPEC,
+        code,
+        payload,
+        is_active=False,
+        db=db,
+    )
 
 
 @router.post("/price-indices/{code}/activate", response_model=PriceIndexOut)
@@ -154,8 +153,10 @@ def activate_price_index(
     payload: PriceIndexStatusUpdate,
     db: Session = Depends(get_db),
 ) -> PriceIndexOut:
-    record = get_reference_record(db, ReferencePriceIndex, code.strip().upper())
-    set_reference_active_state(record, True, payload.updated_by)
-    db.commit()
-    db.refresh(record)
-    return to_out(record, PriceIndexOut)
+    return set_reference_resource_active(
+        PRICE_INDEX_SPEC,
+        code,
+        payload,
+        is_active=True,
+        db=db,
+    )

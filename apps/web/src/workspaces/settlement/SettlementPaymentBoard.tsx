@@ -218,7 +218,7 @@ export function SettlementPaymentBoard({
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to schedule, receive, and reconcile settlement payments.</p>
+        <p className="workflow-editor-note">Sign in to schedule, receive, and reconcile settlement payments.</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
       <div className="position-list">

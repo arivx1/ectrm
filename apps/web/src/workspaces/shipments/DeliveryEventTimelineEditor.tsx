@@ -218,7 +218,7 @@ export function DeliveryEventTimelineEditor({
       </div>
 
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to record delivery milestones and drive system-managed execution status.</p>
+        <p className="workflow-editor-note">Sign in to record delivery milestones and drive system-managed execution status.</p>
       ) : null}
       {delivery.execution_status_source === 'MANUAL' ? (
         <p className="workflow-editor-note">

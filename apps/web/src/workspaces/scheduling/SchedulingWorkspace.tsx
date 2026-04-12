@@ -5,6 +5,10 @@ import type { SaveDeliveryActualizationInput } from '../../entities/shipments/ap
 import type { DeliveryRecord, DeliverySchedulingWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import type { OperationalResourceDescriptor } from '../../entities/app/api'
+import { OperationalBoardShell } from '../operations/OperationalBoardShell'
+import { OperationalWorkboardBanner } from '../operations/OperationalWorkboardBanner'
+import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
 import { DeliveryActualizationEditor } from './DeliveryActualizationEditor'
 import { SchedulingWorkflowEditor } from './SchedulingWorkflowEditor'
 import type {
@@ -27,6 +31,7 @@ import {
 type SchedulingWorkspaceProps = {
   authSession: StoredAuthSession | null
   deliveries: DeliveryRecord[]
+  operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
@@ -230,6 +235,7 @@ function schedulerOwnerLabel(row: SchedulingWorkbenchRow): string {
 export function SchedulingWorkspace({
   authSession,
   deliveries,
+  operationalResourceDescriptors,
   formatCommodityClass,
   formatNumber,
   formatDate,
@@ -290,6 +296,7 @@ export function SchedulingWorkspace({
 
   useEffect(() => {
     if (filteredRows.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Drop the selection when the filtered workbench no longer has rows.
       setSelectedDeliveryId(null)
       return
     }
@@ -377,6 +384,18 @@ export function SchedulingWorkspace({
     },
   ]
   const upcomingWindows = selectUpcomingSchedulingWindows(filteredOpenDeliveries)
+  const schedulingWorkbenchWorkboard = resolveOperationalWorkboardDefinition(
+    'schedulingWorkbench',
+    operationalResourceDescriptors,
+  )
+  const actualizationWorkbench = resolveOperationalWorkboardDefinition(
+    'actualizationWorkbench',
+    operationalResourceDescriptors,
+  )
+  const schedulerWorkflowWorkbench = resolveOperationalWorkboardDefinition(
+    'schedulerWorkflow',
+    operationalResourceDescriptors,
+  )
 
   function resetFilters() {
     setModeFilter('ALL')
@@ -399,6 +418,7 @@ export function SchedulingWorkspace({
           content:
             openDeliveries.length > 0 ? (
               <div className="scheduler-board">
+                <OperationalWorkboardBanner workboard={schedulingWorkbenchWorkboard} />
                 <div className="scheduler-board-head">
                   <div className="scheduler-board-copy">
                     <strong>
@@ -506,103 +526,29 @@ export function SchedulingWorkspace({
           span: 'full',
           availableSpans: ['full', 'wide'],
           content: filteredRows.length > 0 ? (
-            <div className="scheduler-workbench">
-              <div className="scheduler-workbench-queue">
-                <div className="scheduler-section-banner">
-                  <div className="scheduler-section-copy">
-                    <strong>{formatNumber(filteredRows.length, 0)} rows in the active scheduler workbench</strong>
-                    <p>
-                      Queue rows by stage so the desk can clear blockers, move ready work, and monitor in-flight schedules
-                      without leaving this screen.
-                    </p>
+            <OperationalBoardShell
+              workboard={schedulingWorkbenchWorkboard}
+              className="scheduler-workbench"
+              mainClassName="scheduler-workbench-queue"
+              detailClassName="scheduler-detail-panel"
+              summary={
+                <div className="shipment-card-actions">
+                  <span>{formatNumber(filteredRows.length, 0)} rows in the active scheduler workbench</span>
+                  <div className="shipment-card-meta">
+                    <span className="entity-chip entity-chip-soft">
+                      {activeViewOption.label} • {activeModeLabel}
+                    </span>
+                    <span className="entity-chip entity-chip-soft">
+                      {formatNumber(blockedRows.length, 0)} blocked
+                    </span>
+                    <span className="entity-chip entity-chip-soft">
+                      {formatNumber(dueSoonRows.length, 0)} hot window
+                    </span>
                   </div>
-                  <span className="entity-chip entity-chip-soft">
-                    {activeViewOption.label} • {activeModeLabel}
-                  </span>
                 </div>
-
-                <div className="scheduler-stage-stack">
-                  {stageSections.map((section) => (
-                    <section key={section.stage} className="scheduler-stage-section">
-                      <div className="scheduler-stage-head">
-                        <div className="scheduler-stage-copy">
-                          <strong>{STAGE_META[section.stage].label}</strong>
-                          <p>{STAGE_META[section.stage].description}</p>
-                        </div>
-                        <span className={`status-pill status-pill-${STAGE_META[section.stage].tone}`}>
-                          {formatNumber(section.rows.length, 0)}
-                        </span>
-                      </div>
-
-                      <div className="scheduler-stage-list">
-                        {section.rows.map((row) => {
-                          const band = WINDOW_BAND_META[row.windowBand]
-                          const isSelected = selectedRow?.delivery.delivery_id === row.delivery.delivery_id
-
-                          return (
-                            <button
-                              key={row.delivery.delivery_id}
-                              type="button"
-                              className={`scheduler-queue-card ${isSelected ? 'is-active' : ''}`}
-                              onClick={() => setSelectedDeliveryId(row.delivery.delivery_id)}
-                              aria-pressed={isSelected}
-                            >
-                              <div className="scheduler-queue-card-head">
-                                <div className="scheduler-queue-card-copy">
-                                  <strong>{tradeReferenceLabel(row.delivery)}</strong>
-                                  <span>
-                                    {row.delivery.commodity} • {row.delivery.location_code ?? 'Location TBD'} •{' '}
-                                    {MODE_LABELS[row.delivery.mode_family]}
-                                  </span>
-                                </div>
-                                <span className={`status-pill status-pill-${STAGE_META[row.stage].tone}`}>
-                                  {STAGE_META[row.stage].label}
-                                </span>
-                              </div>
-
-                              <div className="shipment-card-meta">
-                                <span className="entity-chip entity-chip-soft">
-                                  {formatCommodityClass(row.delivery.commodity_class)}
-                                </span>
-                                <span className={`scheduler-window-band scheduler-window-band-${band.className}`}>
-                                  {band.label}
-                                </span>
-                                <span className="entity-chip entity-chip-soft">{nextActionText(row)}</span>
-                                <span className="entity-chip entity-chip-soft">
-                                  {schedulerOwnerLabel(row)}
-                                </span>
-                              </div>
-
-                              {row.delivery.blockers.length > 0 ? (
-                                <div className="scheduler-blocker-cluster">
-                                  {row.delivery.blockers.slice(0, 2).map((blocker) => (
-                                    <span key={blocker} className="scheduler-blocker-chip">
-                                      {blocker}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : null}
-
-                              <div className="scheduler-card-footer">
-                                <div className="scheduler-card-footer-copy">
-                                  <span>{deliveryWindowLabel(row.delivery, formatDateOnly)}</span>
-                                  <small>
-                                    {row.dueAt ? `Workflow due ${formatDateOnly(row.dueAt)}` : 'No workflow due date'}
-                                  </small>
-                                </div>
-                                <small>Updated {formatDate(row.delivery.last_updated_at)}</small>
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              </div>
-
-              <div className="scheduler-detail-panel">
-                {selectedRow ? (
+              }
+              detail={
+                selectedRow ? (
                   <div className="scheduler-detail-stack">
                     <div className="scheduler-detail-card">
                       <div className="scheduler-detail-head">
@@ -702,6 +648,7 @@ export function SchedulingWorkspace({
                           <span>Record actualized quantity and timestamp once the physical movement is complete.</span>
                         </div>
                       </div>
+                      <OperationalWorkboardBanner workboard={actualizationWorkbench} variant="chips" />
 
                       <DeliveryActualizationEditor
                         authSession={authSession}
@@ -721,6 +668,7 @@ export function SchedulingWorkspace({
                           <span>Assign work, set due dates, and advance the open lifecycle items for this row.</span>
                         </div>
                       </div>
+                      <OperationalWorkboardBanner workboard={schedulerWorkflowWorkbench} variant="chips" />
 
                       <SchedulingWorkflowEditor
                         authSession={authSession}
@@ -742,9 +690,88 @@ export function SchedulingWorkspace({
                     <strong>No row selected</strong>
                     <p>Choose a row from the stage queue to inspect its scheduler detail and workflow actions.</p>
                   </div>
-                )}
-              </div>
-            </div>
+                )
+              }
+            >
+                <div className="scheduler-stage-stack">
+                  {stageSections.map((section) => (
+                    <section key={section.stage} className="scheduler-stage-section">
+                      <div className="scheduler-stage-head">
+                        <div className="scheduler-stage-copy">
+                          <strong>{STAGE_META[section.stage].label}</strong>
+                          <p>{STAGE_META[section.stage].description}</p>
+                        </div>
+                        <span className={`status-pill status-pill-${STAGE_META[section.stage].tone}`}>
+                          {formatNumber(section.rows.length, 0)}
+                        </span>
+                      </div>
+
+                      <div className="scheduler-stage-list">
+                        {section.rows.map((row) => {
+                          const band = WINDOW_BAND_META[row.windowBand]
+                          const isSelected = selectedRow?.delivery.delivery_id === row.delivery.delivery_id
+
+                          return (
+                            <button
+                              key={row.delivery.delivery_id}
+                              type="button"
+                              className={`scheduler-queue-card ${isSelected ? 'is-active' : ''}`}
+                              onClick={() => setSelectedDeliveryId(row.delivery.delivery_id)}
+                              aria-pressed={isSelected}
+                            >
+                              <div className="scheduler-queue-card-head">
+                                <div className="scheduler-queue-card-copy">
+                                  <strong>{tradeReferenceLabel(row.delivery)}</strong>
+                                  <span>
+                                    {row.delivery.commodity} • {row.delivery.location_code ?? 'Location TBD'} •{' '}
+                                    {MODE_LABELS[row.delivery.mode_family]}
+                                  </span>
+                                </div>
+                                <span className={`status-pill status-pill-${STAGE_META[row.stage].tone}`}>
+                                  {STAGE_META[row.stage].label}
+                                </span>
+                              </div>
+
+                              <div className="shipment-card-meta">
+                                <span className="entity-chip entity-chip-soft">
+                                  {formatCommodityClass(row.delivery.commodity_class)}
+                                </span>
+                                <span className={`scheduler-window-band scheduler-window-band-${band.className}`}>
+                                  {band.label}
+                                </span>
+                                <span className="entity-chip entity-chip-soft">{nextActionText(row)}</span>
+                                <span className="entity-chip entity-chip-soft">
+                                  {schedulerOwnerLabel(row)}
+                                </span>
+                              </div>
+
+                              {row.delivery.blockers.length > 0 ? (
+                                <div className="scheduler-blocker-cluster">
+                                  {row.delivery.blockers.slice(0, 2).map((blocker) => (
+                                    <span key={blocker} className="scheduler-blocker-chip">
+                                      {blocker}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              <div className="scheduler-card-footer">
+                                <div className="scheduler-card-footer-copy">
+                                  <span>{deliveryWindowLabel(row.delivery, formatDateOnly)}</span>
+                                  <small>
+                                    {row.dueAt ? `Workflow due ${formatDateOnly(row.dueAt)}` : 'No workflow due date'}
+                                  </small>
+                                </div>
+                                <small>Updated {formatDate(row.delivery.last_updated_at)}</small>
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+            </OperationalBoardShell>
           ) : (
             <div className="empty-state">
               <strong>No scheduler rows in this view</strong>

@@ -1,5 +1,6 @@
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
+import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
 import { formatCurrencyAmount } from '../../shared/format'
@@ -18,6 +19,9 @@ import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
+import { OperationalBoardShell } from '../operations/OperationalBoardShell'
+import { OperationalInspectorShell } from '../operations/OperationalInspectorShell'
+import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
 import {
   buildCreditApprovalFreshnessBlockerSummary,
   type OptionLifecycleEventType,
@@ -309,6 +313,9 @@ function settlementMarkToMarketLabel(
 
 type TradingWorkspaceProps = {
   authSession: StoredAuthSession | null
+  operationalResourceDescriptors: OperationalResourceDescriptor[]
+  tradeMetadataSource: 'server' | 'fallback'
+  tradeMetadataError: string
   tradeCaptureFormProps: TradeCaptureFormProps
   trades: Trade[]
   tradeWorkflowItems: TradeWorkflowItemRecord[]
@@ -441,6 +448,8 @@ type TradingWorkspaceProps = {
   invoiceStatusOptions: readonly string[]
   paymentStatusOptions: readonly string[]
   settlementStatusOptions: readonly string[]
+  pricingTypesRequiringExplicitPrice: readonly string[]
+  pricingTypesRequiringPriceIndex: readonly string[]
   formatCommodityClass: (value: string) => string
   formatMoney: (value: number | null) => string
   formatNumber: (value: number | null, digits?: number) => string
@@ -452,6 +461,9 @@ type TradingWorkspaceProps = {
 export function TradingWorkspace(props: TradingWorkspaceProps) {
   const {
     authSession,
+    operationalResourceDescriptors,
+    tradeMetadataSource,
+    tradeMetadataError,
     tradeCaptureFormProps,
     trades,
     tradeWorkflowItems,
@@ -584,6 +596,8 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     invoiceStatusOptions,
     paymentStatusOptions,
     settlementStatusOptions,
+    pricingTypesRequiringExplicitPrice,
+    pricingTypesRequiringPriceIndex,
     formatCommodityClass,
     formatMoney,
     formatNumber,
@@ -682,6 +696,14 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   const selectedTradeOpenOptionValuation =
     selectedTrade && selectedTradeIsOption && selectedTradeIsActive
       ? buildOpenOptionValuation(selectedTrade, selectedTradeLatestMarksByCode)
+      : null
+  const tradeOperationalProjectionWorkboard = resolveOperationalWorkboardDefinition(
+    'tradeOperationalProjection',
+    operationalResourceDescriptors,
+  )
+  const tradeMetadataFallbackNotice =
+    tradeMetadataSource === 'fallback' && tradeMetadataError
+      ? `Using built-in trade metadata fallback while the server metadata contract is unavailable: ${tradeMetadataError}`
       : null
 
   const tradeBoardColumns: DataSheetColumn<Trade>[] = [
@@ -786,7 +808,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           description: 'Enter a ticket on the left and keep the blotter plus inspector docked beside it while you work.',
           span: 'wide',
           availableSpans: ['full', 'wide'],
-          content: <TradeCaptureForm {...tradeCaptureFormProps} />,
+          content: (
+            <>
+              {tradeMetadataFallbackNotice ? <p className="form-note">{tradeMetadataFallbackNotice}</p> : null}
+              <TradeCaptureForm {...tradeCaptureFormProps} />
+            </>
+          ),
         },
         {
           id: 'trade-inspector',
@@ -798,8 +825,9 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           span: 'side',
           availableSpans: ['wide', 'half', 'side'],
           content: (
-            <div className="workspace-tile-inspector">
-              {selectedTrade && (
+            <OperationalInspectorShell
+              actions={
+                selectedTrade ? (
                 <div className="stack-actions">
                   <button type="button" className="button button-secondary" onClick={handleDuplicateTrade}>
                     Duplicate Into Form
@@ -836,19 +864,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     </>
                   ) : null}
                 </div>
-              )}
-
-              {selectedTrade && (
-                <section className="trade-inspector-summary">
-                  <div className="trade-inspector-summary-copy">
-                    <span className="eyebrow">Active Ticket</span>
-                    <strong>{selectedTrade.commodity}</strong>
-                    <p>
-                      {selectedTrade.trade_side ?? 'LEG-DEFINED'} • {selectedTrade.instrument_type} • {selectedTrade.trade_nature} • {selectedTrade.book}
-                    </p>
-                  </div>
-
-                  <div className="trade-inspector-pill-row">
+                ) : null
+              }
+              eyebrow={selectedTrade ? 'Active Ticket' : undefined}
+              title={selectedTrade ? selectedTrade.commodity : null}
+              subtitle={
+                selectedTrade
+                  ? `${selectedTrade.trade_side ?? 'LEG-DEFINED'} • ${selectedTrade.instrument_type} • ${selectedTrade.trade_nature} • ${selectedTrade.book}`
+                  : undefined
+              }
+              statusRow={
+                selectedTrade ? (
+                  <>
                     <span className={`status-pill status-pill-${statusTone(selectedTrade.status)}`}>{selectedTrade.status}</span>
                     {selectedTrade.credit_hold_active ? (
                       <span className="status-pill status-pill-blocked">
@@ -871,99 +898,106 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     </span>
                     <span className="entity-chip entity-chip-soft">Settlement {selectedTrade.settlement_status}</span>
                     <span className="entity-chip entity-chip-soft">Payment {selectedTrade.payment_status}</span>
-                  </div>
-                  {selectedTrade.credit_hold_active ? (
-                    <p className="field-error">
-                      {selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}
-                    </p>
-                  ) : null}
-                  {selectedTrade.active_credit_exception?.revalidation_required ? (
-                    <p className="field-error">
-                      Credit exception needs fresh review: {creditExceptionReasonLabel(selectedTrade.active_credit_exception.revalidation_reason) ?? 'revalidation required'}.
-                    </p>
-                  ) : null}
-                  {selectedTradeCreditFreshnessSummary ? (
-                    <p className="field-error">
-                      Credit approval is blocked until fresh credit data is loaded: {selectedTradeCreditFreshnessSummary}
-                    </p>
-                  ) : null}
-                  {selectedTradeIsOption ? (
-                    <p className="form-note">
-                      {selectedTradeIsActive ? optionLifecycleGuidance : `This option is already closed as ${selectedTrade.status}.`}
-                    </p>
-                  ) : null}
-                  {selectedTradeIsOption && selectedTradeOpenOptionValuation ? (
-                    <p className={selectedTradeOpenOptionValuation.decisionTone === 'blocked' ? 'field-error' : 'form-note'}>
-                      {selectedTradeOpenOptionValuation.decisionLabel}: {selectedTradeOpenOptionValuation.decisionReason}
-                    </p>
-                  ) : null}
-                  {selectedTradeOptionSettlementItem ? (
-                    <p className="form-note">
-                      Operations workflow: {selectedTradeOptionSettlementItem.status.replaceAll('_', ' ')}
-                      {selectedTradeOptionSettlementItem.due_at
-                        ? ` due ${formatDateOnly(selectedTradeOptionSettlementItem.due_at)}.`
-                        : '.'}{' '}
-                      {selectedTradeOptionSettlementItem.notes ?? 'Book the resulting underlying handoff from this lifecycle event.'}
-                      {selectedTradeOptionSettlementItem.linked_trade_id
-                        ? ` Linked trade ${selectedTradeOptionSettlementItem.linked_trade_id} is ${selectedTradeOptionSettlementItem.linked_trade_status ?? 'ACTIVE'}.`
-                        : ''}
-                    </p>
-                  ) : null}
-                  {selectedTradeLinkedUnderlying ? (
-                    <div className="shipment-card-meta">
-                      <span className="entity-chip entity-chip-soft">
-                        Linked Underlying {selectedTradeLinkedUnderlying.trade_id}
-                      </span>
-                      <span className="entity-chip entity-chip-soft">{selectedTradeLinkedUnderlying.status}</span>
-                      <button
-                        type="button"
-                        className="button button-ghost"
-                        onClick={() => setSelectedTradeId(selectedTradeLinkedUnderlying.trade_id)}
-                      >
-                        Open Underlying
-                      </button>
-                    </div>
-                  ) : null}
-                  {selectedTradeOriginatingOption ? (
-                    <div className="shipment-card-meta">
-                      <span className="entity-chip entity-chip-soft">
-                        Originating Option {selectedTradeOriginatingOption.trade_id}
-                      </span>
-                      <span className="entity-chip entity-chip-soft">{selectedTradeOriginatingOption.status}</span>
-                      <button
-                        type="button"
-                        className="button button-ghost"
-                        onClick={() => setSelectedTradeId(selectedTradeOriginatingOption.trade_id)}
-                      >
-                        Open Option
-                      </button>
-                    </div>
-                  ) : null}
-
-                  <div className="trade-inspector-summary-grid">
-                    <article>
-                      <span>{selectedTradePriceLabel}</span>
-                      <strong>{formatMoney(selectedTrade.price)}</strong>
-                    </article>
-                    <article>
-                      <span>{selectedTradeVolumeLabel}</span>
-                      <strong>{formatNumber(selectedTrade.volume, 0)}</strong>
-                    </article>
-                    <article>
-                      <span>Notional</span>
-                      <strong>
-                        {selectedTrade.price !== null && selectedTrade.volume !== null
-                          ? formatMoney(selectedTrade.price * selectedTrade.volume)
-                          : '—'}
-                      </strong>
-                    </article>
-                    <article>
-                      <span>Trader</span>
-                      <strong>{selectedTrade.trader_user ?? 'TBD'}</strong>
-                    </article>
-                  </div>
-                </section>
-              )}
+                  </>
+                ) : null
+              }
+              workboard={selectedTrade ? tradeOperationalProjectionWorkboard : null}
+              notices={
+                selectedTrade ? (
+                  <>
+                    {selectedTrade.credit_hold_active ? (
+                      <p className="field-error">
+                        {selectedTrade.credit_hold_reason ?? 'Credit approval is pending review.'}
+                      </p>
+                    ) : null}
+                    {selectedTrade.active_credit_exception?.revalidation_required ? (
+                      <p className="field-error">
+                        Credit exception needs fresh review: {creditExceptionReasonLabel(selectedTrade.active_credit_exception.revalidation_reason) ?? 'revalidation required'}.
+                      </p>
+                    ) : null}
+                    {selectedTradeCreditFreshnessSummary ? (
+                      <p className="field-error">
+                        Credit approval is blocked until fresh credit data is loaded: {selectedTradeCreditFreshnessSummary}
+                      </p>
+                    ) : null}
+                    {selectedTradeIsOption ? (
+                      <p className="form-note">
+                        {selectedTradeIsActive ? optionLifecycleGuidance : `This option is already closed as ${selectedTrade.status}.`}
+                      </p>
+                    ) : null}
+                    {selectedTradeIsOption && selectedTradeOpenOptionValuation ? (
+                      <p className={selectedTradeOpenOptionValuation.decisionTone === 'blocked' ? 'field-error' : 'form-note'}>
+                        {selectedTradeOpenOptionValuation.decisionLabel}: {selectedTradeOpenOptionValuation.decisionReason}
+                      </p>
+                    ) : null}
+                    {selectedTradeOptionSettlementItem ? (
+                      <p className="form-note">
+                        Operations workflow: {selectedTradeOptionSettlementItem.status.replaceAll('_', ' ')}
+                        {selectedTradeOptionSettlementItem.due_at
+                          ? ` due ${formatDateOnly(selectedTradeOptionSettlementItem.due_at)}.`
+                          : '.'}{' '}
+                        {selectedTradeOptionSettlementItem.notes ?? 'Book the resulting underlying handoff from this lifecycle event.'}
+                        {selectedTradeOptionSettlementItem.linked_trade_id
+                          ? ` Linked trade ${selectedTradeOptionSettlementItem.linked_trade_id} is ${selectedTradeOptionSettlementItem.linked_trade_status ?? 'ACTIVE'}.`
+                          : ''}
+                      </p>
+                    ) : null}
+                  </>
+                ) : null
+              }
+              related={
+                selectedTrade ? (
+                  <>
+                    {selectedTradeLinkedUnderlying ? (
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">
+                          Linked Underlying {selectedTradeLinkedUnderlying.trade_id}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">{selectedTradeLinkedUnderlying.status}</span>
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => setSelectedTradeId(selectedTradeLinkedUnderlying.trade_id)}
+                        >
+                          Open Underlying
+                        </button>
+                      </div>
+                    ) : null}
+                    {selectedTradeOriginatingOption ? (
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">
+                          Originating Option {selectedTradeOriginatingOption.trade_id}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">{selectedTradeOriginatingOption.status}</span>
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => setSelectedTradeId(selectedTradeOriginatingOption.trade_id)}
+                        >
+                          Open Option
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null
+              }
+              metrics={
+                selectedTrade
+                  ? [
+                      { label: selectedTradePriceLabel, value: formatMoney(selectedTrade.price) },
+                      { label: selectedTradeVolumeLabel, value: formatNumber(selectedTrade.volume, 0) },
+                      {
+                        label: 'Notional',
+                        value:
+                          selectedTrade.price !== null && selectedTrade.volume !== null
+                            ? formatMoney(selectedTrade.price * selectedTrade.volume)
+                            : '—',
+                      },
+                      { label: 'Trader', value: selectedTrade.trader_user ?? 'TBD' },
+                    ]
+                  : []
+              }
+            >
 
               <div className="tab-row">
                 {INSPECTOR_TABS.map((tab) => (
@@ -1430,6 +1464,8 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   invoiceStatusOptions={invoiceStatusOptions}
                   paymentStatusOptions={paymentStatusOptions}
                   settlementStatusOptions={settlementStatusOptions}
+                  pricingTypesRequiringExplicitPrice={pricingTypesRequiringExplicitPrice}
+                  pricingTypesRequiringPriceIndex={pricingTypesRequiringPriceIndex}
                   formatCommodityClass={formatCommodityClass}
                 />
               )}
@@ -1735,7 +1771,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   </div>
                 </div>
               )}
-            </div>
+            </OperationalInspectorShell>
           ),
         },
         {
@@ -1830,20 +1866,22 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           span: 'full',
           availableSpans: ['full', 'wide'],
           content: (
-            <DataSheet
-              label="Trade Blotter"
-              description="Browse the live trade projection like a terminal blotter. Arrow between cells to keep the inspector synced to the active row."
-              columns={tradeBoardColumns}
-              rows={trades}
-              getRowId={(trade) => trade.trade_id}
-              getRowLabel={(trade) => `${trade.trade_id} ${trade.commodity} ${trade.trade_structure}`}
-              selectedRowId={selectedTradeId}
-              onSelectRow={(trade) => {
-                setSelectedTradeId(trade.trade_id)
-                setInspectorTab('overview')
-              }}
-              emptyMessage="Capture a trade or refresh the workspace once trade projection data is available."
-            />
+            <OperationalBoardShell workboard={tradeOperationalProjectionWorkboard} bannerVariant="chips">
+              <DataSheet
+                label="Trade Blotter"
+                description="Browse the live trade projection like a terminal blotter. Arrow between cells to keep the inspector synced to the active row."
+                columns={tradeBoardColumns}
+                rows={trades}
+                getRowId={(trade) => trade.trade_id}
+                getRowLabel={(trade) => `${trade.trade_id} ${trade.commodity} ${trade.trade_structure}`}
+                selectedRowId={selectedTradeId}
+                onSelectRow={(trade) => {
+                  setSelectedTradeId(trade.trade_id)
+                  setInspectorTab('overview')
+                }}
+                emptyMessage="Capture a trade or refresh the workspace once trade projection data is available."
+              />
+            </OperationalBoardShell>
           ),
         },
       ]}

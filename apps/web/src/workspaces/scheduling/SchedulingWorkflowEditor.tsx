@@ -140,10 +140,12 @@ export function SchedulingWorkflowEditor({
   })
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Rebuild editable workflow drafts when the backing items change.
     setDrafts(Object.fromEntries(items.map((item) => [item.item_id, buildDraft(item)])))
   }, [items])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset the create form when the selected delivery context changes.
     setCreateDraft({
       workflowType: delivery.next_scheduling_workflow_type ?? 'CONFIRMATION',
       owner: '',
@@ -190,7 +192,7 @@ export function SchedulingWorkflowEditor({
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in from Settings to edit scheduler workflow ownership, due dates, and statuses.</p>
+        <p className="workflow-editor-note">Sign in to edit scheduler workflow ownership, due dates, and statuses.</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
       <article className="position-card shipment-card workflow-item-card workflow-item-card-compact">

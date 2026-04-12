@@ -19,9 +19,12 @@ function detectMobileViewport(): boolean {
   return window.innerWidth < 1080
 }
 
-export function useAppShellState(currentView: ViewKey) {
+export function useAppShellState(
+  currentView: ViewKey,
+  initialInspectorTab: InspectorTab | null = null,
+) {
   const [roadmapRefreshVersion, setRoadmapRefreshVersion] = useState(0)
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview')
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initialInspectorTab ?? 'overview')
   const [mobileNavState, setMobileNavState] = useState({ open: false, view: currentView })
   const [isMobileViewport, setIsMobileViewport] = useState(() => detectMobileViewport())
   const [eventFilter, setEventFilter] = useState('ALL')
