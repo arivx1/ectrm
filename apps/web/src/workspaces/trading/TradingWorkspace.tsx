@@ -1,8 +1,11 @@
+import { useMemo, useState } from 'react'
+
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
+import { matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import type { TradeCreditExceptionRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
@@ -17,9 +20,10 @@ import {
 } from '../../shared/optionExposure'
 import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
-import { OperationalBoardShell } from '../operations/OperationalBoardShell'
+import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { OperationalInspectorShell } from '../operations/OperationalInspectorShell'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
 import {
@@ -278,6 +282,50 @@ function openOptionExpiryStateLabel(
     default:
       return 'Open'
   }
+}
+
+function matchesTradeScreenFilter(trade: Trade, query: string): boolean {
+  return matchesTextFilter(query, [
+    trade.trade_id,
+    trade.originating_option_trade_id,
+    trade.external_trade_id,
+    trade.source_system,
+    trade.trade_date,
+    trade.effective_start_date,
+    trade.effective_end_date,
+    trade.quality_spec,
+    trade.unit_of_measure,
+    trade.trade_currency_code,
+    trade.location_code,
+    trade.delivery_start,
+    trade.delivery_end,
+    trade.price_unit_code,
+    trade.instrument_type,
+    trade.option_type,
+    trade.option_style,
+    trade.trade_nature,
+    trade.trade_structure,
+    trade.trade_side,
+    trade.book,
+    trade.portfolio,
+    trade.counterparty,
+    trade.commodity_class,
+    trade.commodity,
+    trade.pricing_type,
+    trade.pricing_status,
+    trade.confirmation_status,
+    trade.nomination_status,
+    trade.allocation_status,
+    trade.actualization_status,
+    trade.price_index_code,
+    trade.invoice_status,
+    trade.payment_status,
+    trade.settlement_status,
+    trade.trader_user,
+    trade.status,
+    trade.credit_approval_status,
+    trade.credit_hold_reason,
+  ])
 }
 
 function optionLifecycleActionLabel(
@@ -605,6 +653,38 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     formatDateOnly,
     statusTone,
   } = props
+  const [screenFilter, setScreenFilter] = useState('')
+  const visibleTrades = useMemo(
+    () => trades.filter((trade) => matchesTradeScreenFilter(trade, screenFilter)),
+    [screenFilter, trades],
+  )
+  const hasScreenFilter = screenFilter.trim().length > 0
+  const visibleActiveTrades = useMemo(
+    () => visibleTrades.filter((trade) => tradeStatusIsActive(trade.status)),
+    [visibleTrades],
+  )
+  const visibleActiveTradeCount = hasScreenFilter ? visibleActiveTrades.length : activeTradeCount
+  const visibleTotalActiveVolume = hasScreenFilter
+    ? visibleActiveTrades.reduce((sum, trade) => sum + (trade.volume ?? 0), 0)
+    : totalActiveVolume
+  const visiblePricedActiveTrades = hasScreenFilter
+    ? visibleActiveTrades.filter((trade) => trade.price !== null).length
+    : pricedActiveTrades
+  const visiblePendingPricingTrades = hasScreenFilter
+    ? visibleActiveTrades.filter((trade) => trade.pricing_status === 'PENDING').length
+    : pendingPricingTrades
+  const visibleTrackedBooks = hasScreenFilter
+    ? new Set(visibleActiveTrades.map((trade) => trade.book)).size
+    : trackedBooks
+  const visiblePricingCoverage = hasScreenFilter
+    ? visibleActiveTradeCount === 0
+      ? null
+      : Math.round((visiblePricedActiveTrades / visibleActiveTradeCount) * 100)
+    : pricingCoverage
+  const selectedTradeHiddenByFilter =
+    hasScreenFilter &&
+    selectedTrade !== null &&
+    !visibleTrades.some((trade) => trade.trade_id === selectedTrade.trade_id)
   const selectedTradeIsOption = selectedTrade
     ? tradeInstrumentUsesOptionFields(selectedTrade.instrument_type)
     : false
@@ -800,6 +880,22 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
       workspaceId="trades"
       workspaceLabel="Trading"
       authSession={authSession}
+      headerContent={
+        <WorkspaceLocalFilterBar
+          value={screenFilter}
+          onChange={setScreenFilter}
+          placeholder="Trade ID, counterparty, commodity, book, lifecycle status, or trader"
+          description="Keep the blotter filter local to trade capture so you can narrow this screen without shifting anything in the rest of the console."
+          totalCount={trades.length}
+          matchedCount={visibleTrades.length}
+          resultLabel="trades"
+          note={
+            selectedTradeHiddenByFilter
+              ? `Selected trade ${selectedTrade?.trade_id} is still open in the inspector, but it is outside the current blotter filter.`
+              : undefined
+          }
+        />
+      }
       tiles={[
         {
           id: 'create-trade',
@@ -1783,7 +1879,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           availableSpans: ['wide', 'half', 'side'],
           content: (
             <TradingMetricTileContent
-              value={formatNumber(activeTradeCount, 0)}
+              value={formatNumber(visibleActiveTradeCount, 0)}
               detail="Trades currently carrying exposure"
             />
           ),
@@ -1797,7 +1893,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           availableSpans: ['wide', 'half', 'side'],
           content: (
             <TradingMetricTileContent
-              value={formatNumber(totalActiveVolume, 0)}
+              value={formatNumber(visibleTotalActiveVolume, 0)}
               detail="Total active volume across uncancelled trades"
             />
           ),
@@ -1811,8 +1907,8 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           availableSpans: ['wide', 'half', 'side'],
           content: (
             <TradingMetricTileContent
-              value={pricingCoverage === null ? '0%' : `${pricingCoverage}%`}
-              detail={`${pricedActiveTrades} of ${activeTradeCount} active ticket${activeTradeCount === 1 ? '' : 's'} priced`}
+              value={visiblePricingCoverage === null ? '0%' : `${visiblePricingCoverage}%`}
+              detail={`${visiblePricedActiveTrades} of ${visibleActiveTradeCount} active ticket${visibleActiveTradeCount === 1 ? '' : 's'} priced`}
             />
           ),
         },
@@ -1825,7 +1921,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           availableSpans: ['wide', 'half', 'side'],
           content: (
             <TradingMetricTileContent
-              value={formatNumber(pendingPricingTrades, 0)}
+              value={formatNumber(visiblePendingPricingTrades, 0)}
               detail="Trades still waiting on explicit pricing state"
             />
           ),
@@ -1839,7 +1935,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           availableSpans: ['wide', 'half', 'side'],
           content: (
             <TradingMetricTileContent
-              value={formatNumber(trackedBooks, 0)}
+              value={formatNumber(visibleTrackedBooks, 0)}
               detail="Distinct books carrying active exposure"
             />
           ),
@@ -1866,12 +1962,22 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           span: 'full',
           availableSpans: ['full', 'wide'],
           content: (
-            <OperationalBoardShell workboard={tradeOperationalProjectionWorkboard} bannerVariant="chips">
+            <OperationalBoardController
+              workboard={tradeOperationalProjectionWorkboard}
+              bannerVariant="chips"
+              isEmpty={visibleTrades.length === 0}
+              emptyStateTitle={hasScreenFilter ? 'No trades match the current view' : 'No trade blotter yet'}
+              emptyStateDetail={
+                hasScreenFilter
+                  ? 'Clear the local filter to reopen the broader blotter and resync the inspector with active rows.'
+                  : 'Capture a trade or refresh the workspace once trade projection data is available.'
+              }
+            >
               <DataSheet
                 label="Trade Blotter"
                 description="Browse the live trade projection like a terminal blotter. Arrow between cells to keep the inspector synced to the active row."
                 columns={tradeBoardColumns}
-                rows={trades}
+                rows={visibleTrades}
                 getRowId={(trade) => trade.trade_id}
                 getRowLabel={(trade) => `${trade.trade_id} ${trade.commodity} ${trade.trade_structure}`}
                 selectedRowId={selectedTradeId}
@@ -1879,9 +1985,13 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                   setSelectedTradeId(trade.trade_id)
                   setInspectorTab('overview')
                 }}
-                emptyMessage="Capture a trade or refresh the workspace once trade projection data is available."
+                emptyMessage={
+                  hasScreenFilter
+                    ? 'No trades match the current local filter.'
+                    : 'Capture a trade or refresh the workspace once trade projection data is available.'
+                }
               />
-            </OperationalBoardShell>
+            </OperationalBoardController>
           ),
         },
       ]}

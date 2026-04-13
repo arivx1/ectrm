@@ -111,11 +111,38 @@ export type OperationalResourceKey =
   | 'payments'
   | 'work_items'
 
+export type OperationalResourcePrimaryAction = {
+  key: string
+  label: string
+  detail: string
+}
+
+export type OperationalResourceSummaryStat = {
+  key: string
+  label: string
+  detail: string
+}
+
+export type OperationalResourceEmptyState = {
+  title: string
+  detail: string
+}
+
+export type OperationalResourceSurface = {
+  title: string
+  description: string
+  board_section: string
+  primary_action: OperationalResourcePrimaryAction | null
+  empty_state: OperationalResourceEmptyState | null
+  summary_stats: OperationalResourceSummaryStat[]
+}
+
 export type OperationalResourceDescriptor = {
   resource_key: OperationalResourceKey
   filters: string[]
   sort_fields: string[]
   actions: string[]
+  surface?: OperationalResourceSurface | null
 }
 
 export type WorkspaceBootstrapSummary = {

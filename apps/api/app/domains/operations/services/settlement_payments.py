@@ -14,7 +14,19 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceEmptyState,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourcePrimaryAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSummaryStat,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
@@ -624,6 +636,39 @@ TRADE_PAYMENT_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
     filters=("trade_id", "invoice_id"),
     sort_fields=("trade_id asc", "due_at asc", "id asc"),
     actions=("create", "update"),
+    surface=OperationalResourceSurface(
+        title="Payment Ledger",
+        description=(
+            "Cash collection and settlement now run from dedicated payment records instead of a status-only queue row."
+        ),
+        board_section="Queue",
+        primary_action=OperationalResourcePrimaryAction(
+            key="record_payment",
+            label="Record payment",
+            detail="Capture due dates, receipts, and reconciliation state directly against the invoice payment chain.",
+        ),
+        empty_state=OperationalResourceEmptyState(
+            title="No payment ledger",
+            detail="Issued invoices will populate payment records here as collection and reconciliation work opens.",
+        ),
+        summary_stats=(
+            OperationalResourceSummaryStat(
+                key="cash_due",
+                label="Cash due",
+                detail="Keep due and upcoming receipts visible before collection timing slips through the queue.",
+            ),
+            OperationalResourceSummaryStat(
+                key="overdue_receipts",
+                label="Overdue receipts",
+                detail="Escalate late payments and missing receipts inside the same ledger that tracks updates and notes.",
+            ),
+            OperationalResourceSummaryStat(
+                key="reconciliation_state",
+                label="Reconciliation",
+                detail="Treat received, cleared, and disputed cash as explicit records instead of derived payment status only.",
+            ),
+        ),
+    ),
     load_rows=_load_trade_payment_rows,
     load_context=_load_trade_payment_context,
     build_item=_build_trade_payment_item,

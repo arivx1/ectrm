@@ -268,6 +268,24 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
                 "risk-exposure": "wide",
                 "risk-pricing": "wide",
             },
+            "sections": {
+                "risk-summary-cards": [
+                    "pricing-coverage",
+                    "gross-linear-exposure",
+                    "largest-linear-class",
+                    "largest-linear-ticket",
+                    "open-option-tickets",
+                    "net-option-delta-proxy",
+                    "premium-at-risk",
+                    "marked-open-options",
+                    "itm-open-options",
+                    "profitable-at-mark",
+                    "expiry-alerts",
+                    "booked-option-pairs",
+                    "net-package-cashflow",
+                    "next-option-expiry",
+                ]
+            },
         }
         save_risk = self.client.put(
             "/layout-definitions/risk",
@@ -277,6 +295,7 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(save_risk.status_code, 200)
         self.assertEqual(save_risk.json()["workspace_id"], "risk")
         self.assertEqual(save_risk.json()["spans"], risk_payload["spans"])
+        self.assertEqual(save_risk.json()["sections"], risk_payload["sections"])
 
         admin_trades = self.client.get(
             "/layout-definitions/trades",
@@ -313,12 +332,75 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(get_events.status_code, 200)
         self.assertEqual(get_events.json()["order"], events_payload["order"])
 
+        settlement_payload = {
+            "order": ["settlement-summary", "settlement-status", "settlement-disputes", "settlement-queue"],
+            "hidden": ["settlement-queue"],
+            "spans": {
+                "settlement-status": "wide",
+            },
+            "sections": {
+                "settlement-summary-cards": [
+                    "due-overdue",
+                    "open-settlement",
+                    "unissued-invoices",
+                    "fully-settled",
+                ]
+            },
+        }
+        save_settlement = self.client.put(
+            "/layout-definitions/settlement",
+            json=settlement_payload,
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(save_settlement.status_code, 200)
+        self.assertEqual(save_settlement.json()["workspace_id"], "settlement")
+        self.assertEqual(save_settlement.json()["sections"], settlement_payload["sections"])
+
+        reports_payload = {
+            "order": ["reports-overview", "reports-exposure", "reports-activity", "reports-credit"],
+            "hidden": [],
+            "spans": {
+                "reports-exposure": "wide",
+            },
+            "sections": {
+                "reports-overview-cards": [
+                    "pnl-snapshot",
+                    "active-trades",
+                    "tracked-commodities",
+                    "gross-net-volume",
+                ]
+            },
+        }
+        save_reports = self.client.put(
+            "/layout-definitions/reports",
+            json=reports_payload,
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(save_reports.status_code, 200)
+        self.assertEqual(save_reports.json()["workspace_id"], "reports")
+        self.assertEqual(save_reports.json()["sections"], reports_payload["sections"])
+
         get_risk = self.client.get(
             "/layout-definitions/risk",
             headers={"Authorization": f"Bearer {trader_token}"},
         )
         self.assertEqual(get_risk.status_code, 200)
         self.assertEqual(get_risk.json()["order"], risk_payload["order"])
+        self.assertEqual(get_risk.json()["sections"], risk_payload["sections"])
+
+        get_settlement = self.client.get(
+            "/layout-definitions/settlement",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(get_settlement.status_code, 200)
+        self.assertEqual(get_settlement.json()["sections"], settlement_payload["sections"])
+
+        get_reports = self.client.get(
+            "/layout-definitions/reports",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(get_reports.status_code, 200)
+        self.assertEqual(get_reports.json()["sections"], reports_payload["sections"])
 
         update_dashboard = self.client.put(
             "/layout-definitions/dashboard",
@@ -371,6 +453,24 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         )
         self.assertEqual(invalid_span.status_code, 422)
         self.assertIn("not supported for tile 'desk-snapshot'", invalid_span.text)
+
+        invalid_section = self.client.put(
+            "/layout-definitions/risk",
+            json={
+                "order": list(WORKSPACE_TILE_IDS["risk"]),
+                "hidden": [],
+                "spans": {},
+                "sections": {
+                    "risk-summary-cards": [
+                        "gross-linear-exposure",
+                        "pricing-coverage",
+                    ]
+                },
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(invalid_section.status_code, 422)
+        self.assertIn("risk-summary-cards", invalid_section.text)
 
     def test_layout_definition_can_be_reset(self) -> None:
         admin_session = self._bootstrap_admin()

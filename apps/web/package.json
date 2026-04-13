@@ -8,6 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:browser-smoke": "npm run test:smoke",
+    "test:smoke": "playwright test --config=playwright.config.ts",
+    "test:smoke:headed": "playwright test --config=playwright.config.ts --headed",
     "test:watch": "vitest",
     "preview": "vite preview"
   },

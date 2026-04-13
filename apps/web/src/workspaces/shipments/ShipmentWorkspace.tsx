@@ -8,12 +8,13 @@ import type {
   UpdateDeliveryPowerDetailInput,
 } from '../../entities/shipments/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
+import { matchesTextFilter } from '../../shared/filtering'
 import type { DeliveryRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
-import {
-  resolveOperationalWorkboardDefinition,
-} from '../operations/operationalWorkboardRegistry'
+import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
+import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
 import { OperationalWorkboardBanner } from '../operations/OperationalWorkboardBanner'
 import { DeliveryDetailEditor } from './DeliveryDetailEditor'
 
@@ -148,6 +149,42 @@ function hasManualSharedOverrides(delivery: DeliveryRecord): boolean {
   )
 }
 
+function matchesDeliveryScreenFilter(delivery: DeliveryRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    delivery.delivery_id,
+    delivery.trade_id,
+    delivery.external_trade_id,
+    delivery.book,
+    delivery.portfolio,
+    delivery.counterparty,
+    delivery.commodity_class,
+    delivery.commodity,
+    delivery.status,
+    delivery.mode_family,
+    delivery.transport_mode,
+    delivery.delivery_profile,
+    delivery.location_code,
+    delivery.origin_location_code,
+    delivery.destination_location_code,
+    delivery.receipt_location_code,
+    delivery.delivery_location_code,
+    delivery.pipeline_system,
+    delivery.market_operator,
+    delivery.execution_status,
+    delivery.pricing_status,
+    delivery.confirmation_status,
+    delivery.nomination_status,
+    delivery.allocation_status,
+    delivery.actualization_status,
+    delivery.invoice_status,
+    delivery.payment_status,
+    delivery.settlement_status,
+    delivery.operations_owner,
+    delivery.external_reference,
+    delivery.ops_notes,
+  ])
+}
+
 export function DeliveryWorkspace({
   authSession,
   deliveries,
@@ -169,15 +206,17 @@ export function DeliveryWorkspace({
   onSaveDeliveryPowerDetails,
   onCreateDeliveryEvent,
 }: DeliveryWorkspaceProps) {
+  const [screenFilter, setScreenFilter] = useState('')
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null)
+  const visibleDeliveries = deliveries.filter((delivery) => matchesDeliveryScreenFilter(delivery, screenFilter))
 
-  const openDeliveries = deliveries.filter((delivery) => delivery.status !== 'COMPLETED')
-  const blockedDeliveries = deliveries.filter((delivery) => delivery.status === 'BLOCKED')
-  const readyDeliveries = deliveries.filter((delivery) => delivery.status === 'READY')
-  const inProgressDeliveries = deliveries.filter((delivery) => delivery.status === 'IN_PROGRESS')
-  const logisticsDeliveries = deliveries.filter((delivery) => delivery.mode_family === 'LOGISTICS')
-  const networkDeliveries = deliveries.filter((delivery) => delivery.mode_family === 'NETWORK_FLOW')
-  const powerDeliveries = deliveries.filter((delivery) => delivery.mode_family === 'POWER_SCHEDULE')
+  const openDeliveries = visibleDeliveries.filter((delivery) => delivery.status !== 'COMPLETED')
+  const blockedDeliveries = visibleDeliveries.filter((delivery) => delivery.status === 'BLOCKED')
+  const readyDeliveries = visibleDeliveries.filter((delivery) => delivery.status === 'READY')
+  const inProgressDeliveries = visibleDeliveries.filter((delivery) => delivery.status === 'IN_PROGRESS')
+  const logisticsDeliveries = visibleDeliveries.filter((delivery) => delivery.mode_family === 'LOGISTICS')
+  const networkDeliveries = visibleDeliveries.filter((delivery) => delivery.mode_family === 'NETWORK_FLOW')
+  const powerDeliveries = visibleDeliveries.filter((delivery) => delivery.mode_family === 'POWER_SCHEDULE')
   const pricingPendingOpen = openDeliveries.filter((delivery) => delivery.pricing_status !== 'PRICED').length
   const confirmationPendingOpen = openDeliveries.filter((delivery) => delivery.confirmation_status !== 'CONFIRMED').length
   const nominationPendingOpen = openDeliveries.filter(
@@ -188,7 +227,7 @@ export function DeliveryWorkspace({
   ).length
   const overduePayments = openDeliveries.filter((delivery) => delivery.payment_status === 'OVERDUE').length
   const explicitModeMissing = logisticsDeliveries.filter((delivery) => delivery.transport_mode === 'UNSPECIFIED').length
-  const manualOverrideCount = deliveries.filter((delivery) => hasManualSharedOverrides(delivery)).length
+  const manualOverrideCount = visibleDeliveries.filter((delivery) => hasManualSharedOverrides(delivery)).length
   const nearestWindow = openDeliveries.reduce<DeliveryRecord | null>((earliest, delivery) => {
     if (!delivery.delivery_start) {
       return earliest
@@ -198,32 +237,106 @@ export function DeliveryWorkspace({
     }
     return earliest
   }, null)
-  const latestDeliveryUpdate = deliveries.reduce<DeliveryRecord | null>((latest, delivery) => {
+  const latestDeliveryUpdate = visibleDeliveries.reduce<DeliveryRecord | null>((latest, delivery) => {
     if (!latest || delivery.last_updated_at > latest.last_updated_at) {
       return delivery
     }
     return latest
   }, null)
-  const defaultSelectedDeliveryId = blockedDeliveries[0]?.delivery_id ?? deliveries[0]?.delivery_id ?? null
+  const defaultSelectedDeliveryId = blockedDeliveries[0]?.delivery_id ?? visibleDeliveries[0]?.delivery_id ?? null
   const effectiveSelectedDeliveryId =
-    selectedDeliveryId && deliveries.some((delivery) => delivery.delivery_id === selectedDeliveryId)
+    selectedDeliveryId && visibleDeliveries.some((delivery) => delivery.delivery_id === selectedDeliveryId)
       ? selectedDeliveryId
       : defaultSelectedDeliveryId
   const selectedDelivery =
-    deliveries.find((delivery) => delivery.delivery_id === effectiveSelectedDeliveryId) ??
+    visibleDeliveries.find((delivery) => delivery.delivery_id === effectiveSelectedDeliveryId) ??
     blockedDeliveries[0] ??
-    deliveries[0] ??
+    visibleDeliveries[0] ??
     null
   const deliveryBoardWorkboard = resolveOperationalWorkboardDefinition(
     'deliveryBoard',
     operationalResourceDescriptors,
   )
+  const shipmentSummaryCards: TileSectionGridItem[] = [
+    {
+      id: 'tracked-deliveries',
+      title: 'Tracked Deliveries',
+      content: (
+        <>
+          <span>Tracked Deliveries</span>
+          <strong>{formatNumber(visibleDeliveries.length, 0)}</strong>
+          <p>Every active physical obligation currently surfaced from trades and trade legs.</p>
+        </>
+      ),
+    },
+    {
+      id: 'logistics-moves',
+      title: 'Logistics Moves',
+      content: (
+        <>
+          <span>Logistics Moves</span>
+          <strong>{formatNumber(logisticsDeliveries.length, 0)}</strong>
+          <p>Discrete physical deliveries that still need an explicit truck, rail, barge, or vessel mode.</p>
+        </>
+      ),
+    },
+    {
+      id: 'pipeline-flows',
+      title: 'Pipeline Flows',
+      content: (
+        <>
+          <span>Pipeline Flows</span>
+          <strong>{formatNumber(networkDeliveries.length, 0)}</strong>
+          <p>Network-style flow obligations inferred from gas-style delivery characteristics.</p>
+        </>
+      ),
+    },
+    {
+      id: 'power-schedules',
+      title: 'Power Schedules',
+      content: (
+        <>
+          <span>Power Schedules</span>
+          <strong>{formatNumber(powerDeliveries.length, 0)}</strong>
+          <p>Grid-delivery obligations shaped around delivery windows rather than physical shipment assets.</p>
+        </>
+      ),
+    },
+    {
+      id: 'manual-overrides',
+      title: 'Manual Overrides',
+      content: (
+        <>
+          <span>Manual Overrides</span>
+          <strong>{formatNumber(manualOverrideCount, 0)}</strong>
+          <p>Delivery records where ops has taken ownership of shared fields beyond the trade-derived defaults.</p>
+        </>
+      ),
+    },
+  ]
 
   return (
     <TileLayout
       workspaceId="shipments"
       workspaceLabel="Deliveries"
       authSession={authSession}
+      headerContent={
+        <WorkspaceLocalFilterBar
+          value={screenFilter}
+          onChange={setScreenFilter}
+          placeholder="Delivery ID, trade ID, commodity, book, mode, status, or location"
+          description="Keep delivery filtering local to this execution screen so you can tighten the queue without changing any other workspace."
+          totalCount={deliveries.length}
+          matchedCount={visibleDeliveries.length}
+          resultLabel="deliveries"
+        />
+      }
+      sections={[
+        {
+          id: 'shipment-summary-cards',
+          itemIds: shipmentSummaryCards.map((card) => card.id),
+        },
+      ]}
       tiles={[
         {
           id: 'shipment-summary',
@@ -234,34 +347,8 @@ export function DeliveryWorkspace({
           span: 'full',
           availableSpans: ['full', 'wide'],
           content:
-            deliveries.length > 0 ? (
-              <div className="dashboard-report-grid">
-                <article className="dashboard-report-card">
-                  <span>Tracked Deliveries</span>
-                  <strong>{formatNumber(deliveries.length, 0)}</strong>
-                  <p>Every active physical obligation currently surfaced from trades and trade legs.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Logistics Moves</span>
-                  <strong>{formatNumber(logisticsDeliveries.length, 0)}</strong>
-                  <p>Discrete physical deliveries that still need an explicit truck, rail, barge, or vessel mode.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Pipeline Flows</span>
-                  <strong>{formatNumber(networkDeliveries.length, 0)}</strong>
-                  <p>Network-style flow obligations inferred from gas-style delivery characteristics.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Power Schedules</span>
-                  <strong>{formatNumber(powerDeliveries.length, 0)}</strong>
-                  <p>Grid-delivery obligations shaped around delivery windows rather than physical shipment assets.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Manual Overrides</span>
-                  <strong>{formatNumber(manualOverrideCount, 0)}</strong>
-                  <p>Delivery records where ops has taken ownership of shared fields beyond the trade-derived defaults.</p>
-                </article>
-              </div>
+            visibleDeliveries.length > 0 ? (
+              <TileSectionGrid sectionId="shipment-summary-cards" items={shipmentSummaryCards} />
             ) : (
               <div className="empty-state">
                 <strong>No delivery activity</strong>
@@ -278,7 +365,7 @@ export function DeliveryWorkspace({
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
           content:
-            deliveries.length > 0 ? (
+            visibleDeliveries.length > 0 ? (
               <div className="shipment-kpi-stack">
                 <div className="shipment-kpi-row">
                   <span>In Progress</span>
@@ -391,7 +478,7 @@ export function DeliveryWorkspace({
           span: 'full',
           availableSpans: ['full', 'wide'],
           content:
-            deliveries.length > 0 ? (
+            visibleDeliveries.length > 0 ? (
               <div className="shipment-queue-stack">
                 <OperationalWorkboardBanner workboard={deliveryBoardWorkboard} />
                 <div className="shipment-card-actions shipment-sync-actions">
@@ -411,7 +498,7 @@ export function DeliveryWorkspace({
 
                 <div className="shipment-queue-layout">
                   <div className="position-list">
-                  {deliveries.map((delivery) => {
+                  {visibleDeliveries.map((delivery) => {
                     const isSelected = selectedDelivery?.delivery_id === delivery.delivery_id
 
                     return (

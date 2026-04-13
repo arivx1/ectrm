@@ -19,6 +19,7 @@ export type WorkspaceLayoutState = {
   order: string[]
   hidden: string[]
   spans: Record<string, WorkspaceTileSpan>
+  sections: Record<string, string[]>
 }
 
 export type WorkspaceLayoutDefinition = WorkspaceLayoutState & {

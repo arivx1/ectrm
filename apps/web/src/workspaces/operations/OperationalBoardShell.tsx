@@ -18,6 +18,14 @@ function joinClassNames(...values: Array<string | null | undefined | false>): st
   return values.filter(Boolean).join(' ')
 }
 
+function visiblePrimaryActions(workboard: ResolvedOperationalWorkboardDefinition) {
+  return workboard.primaryActions.slice(0, 4)
+}
+
+function visibleSummaryStats(workboard: ResolvedOperationalWorkboardDefinition) {
+  return workboard.summaryStats.slice(0, 4)
+}
+
 export function OperationalBoardShell({
   workboard,
   children,
@@ -28,6 +36,9 @@ export function OperationalBoardShell({
   detailClassName,
   bannerVariant = 'section',
 }: OperationalBoardShellProps) {
+  const primaryActions = visiblePrimaryActions(workboard)
+  const summaryStats = visibleSummaryStats(workboard)
+
   return (
     <div
       className={joinClassNames(
@@ -40,6 +51,32 @@ export function OperationalBoardShell({
         <div className="operational-board-shell-header">
           <OperationalWorkboardBanner workboard={workboard} variant={bannerVariant} />
           {summary}
+          {!summary && primaryActions.length > 0 ? (
+            <div className="shipment-card-actions">
+              <span>Primary actions</span>
+              <div className="shipment-card-meta">
+                {primaryActions.map((action) => (
+                  <span key={`${action.resource_key}-${action.key}`} className="entity-chip entity-chip-soft">
+                    {action.resource_label}: {action.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {!summary && summaryStats.length > 0 ? (
+            <div className="dashboard-report-grid operational-summary-grid">
+              {summaryStats.map((summaryStat) => (
+                <article
+                  key={`${summaryStat.resource_key}-${summaryStat.key}`}
+                  className="dashboard-report-card operational-summary-card"
+                >
+                  <span>{summaryStat.resource_label}</span>
+                  <strong>{summaryStat.label}</strong>
+                  <p>{summaryStat.detail}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </div>
         {children}
       </div>

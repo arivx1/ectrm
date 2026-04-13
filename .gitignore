@@ -18,6 +18,8 @@ __pycache__/
 node_modules/
 dist/
 *.tsbuildinfo
+playwright-report/
+test-results/
 
 # IDEs
 .idea/

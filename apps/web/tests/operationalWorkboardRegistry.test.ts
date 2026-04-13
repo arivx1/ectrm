@@ -80,4 +80,43 @@ describe('operational workboard registry', () => {
       'work items action book underlying',
     ])
   })
+
+  it('prefers backend surface metadata for single-resource workboards', () => {
+    const workboard = resolveOperationalWorkboardDefinition('confirmationLedger', [
+      {
+        resource_key: 'confirmations',
+        filters: ['trade_id'],
+        sort_fields: ['created_at desc'],
+        actions: ['create', 'issue'],
+        surface: {
+          title: 'Confirmation Ledger',
+          description: 'Descriptor-owned copy from the backend.',
+          board_section: 'Trade Confirmation',
+          primary_action: {
+            key: 'issue_current_draft',
+            label: 'Issue current draft',
+            detail: 'Promote the latest ready draft.',
+          },
+          empty_state: {
+            title: 'No confirmation queue',
+            detail: 'There is no current confirmation work.',
+          },
+          summary_stats: [
+            {
+              key: 'draft_versions',
+              label: 'Draft versions',
+              detail: 'Track draft and amended versions inside one ledger.',
+            },
+          ],
+        },
+      },
+    ])
+
+    expect(workboard.title).toBe('Confirmation Ledger')
+    expect(workboard.description).toBe('Descriptor-owned copy from the backend.')
+    expect(workboard.boardSections).toEqual(['Trade Confirmation'])
+    expect(workboard.primaryActions[0]?.label).toBe('Issue current draft')
+    expect(workboard.summaryStats[0]?.label).toBe('Draft versions')
+    expect(workboard.emptyState?.title).toBe('No confirmation queue')
+  })
 })

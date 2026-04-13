@@ -80,6 +80,7 @@ The default API base URL is `http://127.0.0.1:8000`.
 From the repo root, the canonical backend verification wrapper is:
 
 ```bash
+make api-contract-check
 make api-test
 ```
 
@@ -95,6 +96,7 @@ The first GitHub Actions backend lane uses the same commands:
 
 ```bash
 make api-install
+make api-contract-check
 make api-test
 ```
 
@@ -108,6 +110,14 @@ for the default CI path.
 trade vocabulary, server-defaulted status behavior, and option/pricing
 validation rules. Web clients should consume that endpoint instead of
 re-declaring the same semantics locally.
+
+The committed contract artifact for that seam lives at
+`apps/api/contracts/trade-metadata.contract.json`. Refresh it after intentional
+backend contract changes with:
+
+```bash
+make api-contract-refresh
+```
 
 ## Helpful Local Scripts
 

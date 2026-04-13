@@ -1,4 +1,4 @@
-.PHONY: db-up db-down api-install api-dev api-test web-install web-build web-lint web-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
+.PHONY: db-up db-down api-install api-dev api-test api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
 
 VENV_PYTHON := ./.venv/bin/python
 WEB_DIR := apps/web
@@ -19,6 +19,14 @@ api-test:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
 	PYTHONPATH=. $(VENV_PYTHON) -m unittest discover -s apps/api/tests -p 'test_*.py'
 
+api-contract-refresh:
+	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
+	PYTHONPATH=. $(VENV_PYTHON) apps/api/scripts/export_trade_metadata_contract.py
+
+api-contract-check:
+	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
+	PYTHONPATH=. $(VENV_PYTHON) apps/api/scripts/export_trade_metadata_contract.py --check
+
 web-install:
 	npm --prefix $(WEB_DIR) ci
 
@@ -31,7 +39,16 @@ web-lint:
 web-test:
 	npm --prefix $(WEB_DIR) run test
 
-verify-wave0: api-test web-build web-lint web-test
+web-smoke-install:
+	npm --prefix $(WEB_DIR) exec playwright install chromium
+
+web-smoke-install-ci:
+	npm --prefix $(WEB_DIR) exec playwright install --with-deps chromium
+
+web-smoke-test:
+	npm --prefix $(WEB_DIR) run test:smoke
+
+verify-wave0: api-contract-check api-test web-build web-lint web-test
 
 verify: verify-wave0
 

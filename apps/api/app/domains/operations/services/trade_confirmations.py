@@ -22,7 +22,19 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceEmptyState,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourcePrimaryAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSummaryStat,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
@@ -810,6 +822,40 @@ CONFIRMATION_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
     filters=("trade_id",),
     sort_fields=("created_at desc", "id desc"),
     actions=("create", "update", "issue", "record_response"),
+    surface=OperationalResourceSurface(
+        title="Confirmation Ledger",
+        description=(
+            "Dedicated confirmation records drive draft, issue, dispute, and amendment handling "
+            "straight from the operational record set."
+        ),
+        board_section="Trade Confirmation",
+        primary_action=OperationalResourcePrimaryAction(
+            key="issue_current_draft",
+            label="Issue current draft",
+            detail="Promote the latest confirmation version once terms and comparison results are clean.",
+        ),
+        empty_state=OperationalResourceEmptyState(
+            title="No confirmation queue",
+            detail="Active trades will appear here once there is confirmation work to manage.",
+        ),
+        summary_stats=(
+            OperationalResourceSummaryStat(
+                key="draft_versions",
+                label="Draft versions",
+                detail="Keep draft and amended confirmation versions inside one auditable ledger.",
+            ),
+            OperationalResourceSummaryStat(
+                key="issue_responses",
+                label="Issue and response loop",
+                detail="Track issue timing, counterparty responses, and reconciliation without leaving the board.",
+            ),
+            OperationalResourceSummaryStat(
+                key="comparison_exceptions",
+                label="Document comparison",
+                detail="Surface mismatches between booked economics and verified confirmation pages before issue.",
+            ),
+        ),
+    ),
     load_rows=_load_confirmation_list_rows,
     load_context=_load_confirmation_list_context,
     build_item=_build_confirmation_list_item,

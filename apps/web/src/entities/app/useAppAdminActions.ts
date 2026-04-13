@@ -8,10 +8,19 @@ import {
   type CreateWeatherLocationInput,
   type UpdateWeatherLocationInput,
 } from '../weather/api'
-import { type CounterpartyCreditPreviewRecord, type ExternalDataRunRecord } from '../../shared/models'
-import { postJson } from '../../shared/api'
+import {
+  type CounterpartyCreditPreviewRecord,
+  type CounterpartyCreditSnapshotCandidate,
+} from '../../shared/models'
 import { appConfig } from '../../shared/config'
-import { buildMutationHeaders, getMutationContext } from '../../shared/mutation'
+import { getMutationContext } from '../../shared/mutation'
+import {
+  importCounterpartyCreditSnapshots,
+  previewCounterpartyCreditImport,
+  runExternalDataSync,
+  runNwsWeatherSync,
+  seedTradingSources,
+} from './adminApi'
 import { type ExternalDataSyncProvider } from './workspaceDataShared'
 
 type RefreshMutationData = (
@@ -78,28 +87,7 @@ export function useAppAdminActions(args: {
     setExternalDataError('')
     setExternalDataSuccess('')
     try {
-      const { actorId } = getMutationContext()
-      const routeByProvider: Record<typeof provider, string> = {
-        EIA: 'eia',
-        EIA_FUNDAMENTALS: 'eia-fundamentals',
-        FRED: 'fred',
-        CFTC: 'cftc',
-        CAISO: 'caiso',
-        ERCOT: 'ercot',
-        KALSHI: 'kalshi',
-      }
-      const response = await fetch(`${appConfig.apiBase}/admin/external-data/${routeByProvider[provider]}/sync`, {
-        method: 'POST',
-        headers: buildMutationHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ requested_by: actorId }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || `Failed to run ${provider} sync.`)
-      }
-
-      const payload = (await response.json()) as ExternalDataRunRecord
+      const payload = await runExternalDataSync(appConfig.apiBase, provider)
       await refreshMutationData('admin-external-data')
       setExternalDataSuccess(
         `${provider} sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.observation_count} observations.`,
@@ -141,14 +129,7 @@ export function useAppAdminActions(args: {
     setCounterpartyCreditImportError('')
     setCounterpartyCreditImportSuccess('')
     try {
-      const payload = await postJson<CounterpartyCreditPreviewRecord>(
-        `${appConfig.apiBase}/admin/external-data/dnb/counterparty-credit/preview`,
-        {
-          rows,
-          default_limit_currency_code: 'USD',
-        },
-        { headers: buildMutationHeaders() },
-      )
+      const payload = await previewCounterpartyCreditImport(appConfig.apiBase, rows)
 
       setCounterpartyCreditPreview(payload)
       setCounterpartyCreditPreviewSuccess(
@@ -177,7 +158,10 @@ export function useAppAdminActions(args: {
     const snapshots =
       counterpartyCreditPreview?.rows
         .filter((row) => row.ready_to_import && row.snapshot)
-        .map((row) => row.snapshot) ?? []
+        .map((row) => row.snapshot)
+        .filter(
+          (snapshot): snapshot is CounterpartyCreditSnapshotCandidate => Boolean(snapshot),
+        ) ?? []
 
     if (snapshots.length === 0) {
       setCounterpartyCreditImportError('Preview D&B rows first and make sure at least one row is ready to import.')
@@ -189,16 +173,7 @@ export function useAppAdminActions(args: {
     setCounterpartyCreditImportError('')
     setCounterpartyCreditImportSuccess('')
     try {
-      const { actorId } = getMutationContext()
-      const payload = await postJson<ExternalDataRunRecord>(
-        `${appConfig.apiBase}/admin/external-data/counterparty-credit/import`,
-        {
-          provider: 'DNB',
-          snapshots,
-          requested_by: actorId,
-        },
-        { headers: buildMutationHeaders() },
-      )
+      const payload = await importCounterpartyCreditSnapshots(appConfig.apiBase, snapshots)
 
       await refreshMutationData('admin-counterparty-credit')
       if (payload.status === 'FAILED') {
@@ -225,12 +200,7 @@ export function useAppAdminActions(args: {
     setTradingSourcesError('')
     setTradingSourcesSuccess('')
     try {
-      const { actorId } = getMutationContext()
-      const payload = await postJson<{ total_rows: number; created_count: number; updated_count: number }>(
-        `${appConfig.apiBase}/admin/trading-sources/seed`,
-        { requested_by: actorId, replace_existing: true },
-        { headers: buildMutationHeaders() },
-      )
+      const payload = await seedTradingSources(appConfig.apiBase, { replaceExisting: true })
 
       await refreshMutationData('admin-external-data')
       setTradingSourcesSuccess(
@@ -248,19 +218,7 @@ export function useAppAdminActions(args: {
     setWeatherSyncError('')
     setWeatherSyncSuccess('')
     try {
-      const { actorId } = getMutationContext()
-      const response = await fetch(`${appConfig.apiBase}/admin/weather/sync/nws`, {
-        method: 'POST',
-        headers: buildMutationHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ requested_by: actorId }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || 'Failed to run NWS weather sync.')
-      }
-
-      const payload = (await response.json()) as ExternalDataRunRecord
+      const payload = await runNwsWeatherSync(appConfig.apiBase)
       await refreshMutationData('admin-weather-sync')
       setWeatherSyncSuccess(
         `NWS sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.series_count} series and ${payload.observation_count} observations.`,

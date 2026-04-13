@@ -117,6 +117,7 @@ to explore.
 Run these commands from the repo root:
 
 ```bash
+make api-contract-check
 make api-test
 make web-build
 make web-lint
@@ -132,7 +133,28 @@ make api-install
 make web-install
 ```
 
+If the backend-owned trade metadata contract changes intentionally, refresh the
+committed artifact before pushing:
+
+```bash
+make api-contract-refresh
+```
+
 before the verification targets.
+
+For the seeded browser smoke harness, install Chromium once and run:
+
+```bash
+make web-smoke-install
+make web-smoke-test
+```
+
+The browser smoke path is intentionally separate from `make verify` during Wave
+0. It boots a Vite app server plus a deterministic mock API fixture inside the
+test process, so it does not require a separately running backend. GitHub
+Actions has a matching manual `Browser Smoke` workflow that uses the same
+`make web-smoke-test` entrypoint after installing Playwright's Linux browser
+dependencies.
 
 ## Environment Notes
 

@@ -20,11 +20,42 @@ class OperationalResourceListRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class OperationalResourcePrimaryAction:
+    key: str
+    label: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalResourceSummaryStat:
+    key: str
+    label: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalResourceEmptyState:
+    title: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalResourceSurface:
+    title: str
+    description: str
+    board_section: str
+    primary_action: OperationalResourcePrimaryAction | None = None
+    empty_state: OperationalResourceEmptyState | None = None
+    summary_stats: tuple[OperationalResourceSummaryStat, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class OperationalResourceDescriptor(Generic[RequestT, RowT, ContextT, ItemT]):
     resource_key: str
     filters: tuple[str, ...]
     sort_fields: tuple[str, ...]
     actions: tuple[str, ...]
+    surface: OperationalResourceSurface
     load_rows: Callable[[Session, RequestT], list[RowT]]
     load_context: Callable[[Session, list[RowT], RequestT], ContextT]
     build_item: Callable[[RowT, ContextT, RequestT], ItemT]

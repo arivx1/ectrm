@@ -1,5 +1,5 @@
 import type { ViewKey } from '../../shared/models'
-import { fetchJson, putJson } from '../../shared/api'
+import { fetchJson, postJson, putJson } from '../../shared/api'
 
 export type RoadmapStatus = 'planned' | 'in_progress' | 'blocked' | 'shipped'
 export type RoadmapHorizonKey = 'now' | 'next' | 'later'
@@ -107,12 +107,9 @@ export async function restoreAdminRoadmapRevision(
   revisionId: number,
   updatedBy: string,
 ): Promise<AdminRoadmapDocumentData> {
-  return fetchJson<AdminRoadmapDocumentData>(`${apiBase}/admin/roadmap/revisions/${revisionId}/restore`, {
-    method: 'POST',
-    headers: new Headers({
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    }),
-    body: JSON.stringify({ updated_by: updatedBy }),
-  })
+  return postJson<AdminRoadmapDocumentData>(
+    `${apiBase}/admin/roadmap/revisions/${revisionId}/restore`,
+    { updated_by: updatedBy },
+    { headers: authorizationHeaders(accessToken) },
+  )
 }

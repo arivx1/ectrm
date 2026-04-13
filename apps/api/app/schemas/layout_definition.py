@@ -56,12 +56,35 @@ def _normalize_span_overrides(value: Any) -> dict[str, str]:
     return normalized
 
 
+def _normalize_section_orders(value: Any) -> dict[str, list[str]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("sections must be an object keyed by section id")
+
+    normalized: dict[str, list[str]] = {}
+    for raw_section_id, raw_item_ids in value.items():
+        if not isinstance(raw_section_id, str):
+            raise ValueError("sections must use string section ids")
+        if not isinstance(raw_item_ids, list):
+            raise ValueError("section orders must use lists of item ids")
+
+        section_id = normalize_required_text(raw_section_id, field_name="sections key", lowercase=True)
+        if section_id in normalized:
+            raise ValueError("sections must not contain duplicate section ids")
+
+        normalized[section_id] = _normalize_tile_ids(raw_item_ids, field_name=f"sections[{section_id}]")
+
+    return normalized
+
+
 class LayoutDefinitionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     order: list[str] = Field(..., min_length=1)
     hidden: list[str] = Field(default_factory=list)
     spans: dict[str, LayoutTileSpan] = Field(default_factory=dict)
+    sections: dict[str, list[str]] = Field(default_factory=dict)
 
     @field_validator("order")
     @classmethod
@@ -77,6 +100,11 @@ class LayoutDefinitionUpdate(BaseModel):
     @classmethod
     def normalize_spans(cls, value: Any) -> dict[str, str]:
         return _normalize_span_overrides(value)
+
+    @field_validator("sections", mode="before")
+    @classmethod
+    def normalize_sections(cls, value: Any) -> dict[str, list[str]]:
+        return _normalize_section_orders(value)
 
 
 class LayoutDefinitionOut(LayoutDefinitionUpdate):

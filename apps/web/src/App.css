@@ -320,6 +320,8 @@
   gap: 1.25rem;
   grid-template-columns: minmax(0, 1.22fr) minmax(32rem, 0.92fr);
   align-items: start;
+  position: relative;
+  z-index: 1;
 }
 
 .auth-gate-hero {
@@ -519,6 +521,8 @@
 }
 
 .auth-gate-panel {
+  position: relative;
+  overflow: hidden;
   display: grid;
   gap: 1rem;
   align-content: start;
@@ -526,6 +530,26 @@
   border-radius: 1.9rem;
   animation: auth-gate-rise 520ms ease both;
   animation-delay: 70ms;
+}
+
+.auth-gate-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  opacity: 0.72;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--theme-accent-rgb, 61 214 160) / 0.72),
+    rgb(var(--theme-highlight-rgb, 78 167 255) / 0.6),
+    transparent
+  );
+}
+
+.auth-gate-panel > * {
+  position: relative;
+  z-index: 1;
 }
 
 .auth-gate-panel-head {
@@ -1281,6 +1305,36 @@
 
 .workspace-tile-body {
   min-width: 0;
+}
+
+.tile-section-card {
+  transition:
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.tile-section-card.is-dragging {
+  z-index: 2;
+  opacity: 0.94;
+  box-shadow: 0 24px 60px rgba(17, 30, 41, 0.14);
+}
+
+.tile-section-card-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.tile-section-card-handle {
+  padding: 0.45rem 0.78rem;
+  font-size: 0.82rem;
+  cursor: grab;
+  touch-action: none;
+}
+
+.tile-section-card-handle:active {
+  cursor: grabbing;
 }
 
 .workspace-tile-inspector {
@@ -6198,6 +6252,51 @@
 
 .button-ghost:hover:not(:disabled) {
   background: rgba(14, 26, 40, 0.98);
+}
+
+.workspace-local-filter {
+  display: grid;
+  gap: 1rem;
+  padding: 1.1rem 1.2rem;
+  border-radius: 1.3rem;
+}
+
+.workspace-local-filter-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.workspace-local-filter-copy h3 {
+  margin: 0.2rem 0 0;
+  color: var(--terminal-text);
+}
+
+.workspace-local-filter-copy p,
+.workspace-local-filter-note {
+  margin: 0;
+  color: var(--terminal-dim);
+  line-height: 1.5;
+}
+
+.workspace-local-filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.workspace-local-filter-field {
+  flex: 1 1 26rem;
+  max-width: 42rem;
+}
+
+.workspace-local-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: end;
+  gap: 0.65rem;
 }
 
 .start-here-dialog {

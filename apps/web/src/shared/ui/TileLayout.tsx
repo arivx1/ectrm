@@ -15,13 +15,22 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 
 import {
   loadPersonalWorkspaceLayout,
   resetPersonalWorkspaceLayout,
   savePersonalWorkspaceLayout,
 } from '../../entities/layouts/api'
+import { TileLayoutSectionContext, type TileLayoutSectionContextValue } from './tileLayoutSections'
 import { appConfig } from '../config'
 import type { PersonalizableWorkspaceId, WorkspaceLayoutState, WorkspaceTileSpan } from '../layouts'
 import type { StoredAuthSession } from '../mutation'
@@ -38,16 +47,24 @@ export type WorkspaceTile = {
   content: ReactNode
 }
 
+export type WorkspaceTileSection = {
+  id: string
+  itemIds: string[]
+}
+
 type TileLayoutProps = {
   workspaceId: PersonalizableWorkspaceId
   workspaceLabel: string
   tiles: WorkspaceTile[]
+  sections?: WorkspaceTileSection[]
   authSession: StoredAuthSession | null
+  headerContent?: ReactNode
   toolbarDescription?: string
 }
 
 type TileLayoutState = WorkspaceLayoutState
 type WorkspaceTileLayoutSpec = Pick<WorkspaceTile, 'id' | 'span' | 'availableSpans'>
+type WorkspaceTileSectionLayoutSpec = WorkspaceTileSection
 
 const STORAGE_VERSION = 'v1'
 const TILE_SPAN_LABELS: Record<TileSpan, string> = {
@@ -71,11 +88,38 @@ function availableSpansForTile(tile: Pick<WorkspaceTile, 'span' | 'availableSpan
   return configuredSpans.includes(defaultSpan) ? configuredSpans : uniqueValues([defaultSpan, ...configuredSpans])
 }
 
-function createDefaultLayout(tileIds: string[]): TileLayoutState {
+function sanitizeSectionOrder(itemIds: string[], candidate: unknown): string[] {
+  const knownIds = new Set(itemIds)
+  const candidateOrder = Array.isArray(candidate) ? candidate.filter((value): value is string => typeof value === 'string') : []
+  const knownOrder = uniqueValues(candidateOrder.filter((value) => knownIds.has(value)))
+
+  return [...knownOrder, ...itemIds.filter((itemId) => !knownOrder.includes(itemId))]
+}
+
+function normalizeSectionOrders(
+  sections: WorkspaceTileSectionLayoutSpec[],
+  candidate: unknown,
+): Record<string, string[]> {
+  const defaultSections = Object.fromEntries(sections.map((section) => [section.id, [...section.itemIds]]))
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return defaultSections
+  }
+
+  const candidateRecord = candidate as Record<string, unknown>
+  return Object.fromEntries(
+    sections.map((section) => [section.id, sanitizeSectionOrder(section.itemIds, candidateRecord[section.id])]),
+  )
+}
+
+function createDefaultLayout(
+  tileIds: string[],
+  sections: WorkspaceTileSectionLayoutSpec[] = [],
+): TileLayoutState {
   return {
     order: [...tileIds],
     hidden: [],
     spans: {},
+    sections: Object.fromEntries(sections.map((section) => [section.id, [...section.itemIds]])),
   }
 }
 
@@ -111,9 +155,13 @@ function normalizeSpanOverrides(
   return spansById
 }
 
-function sanitizeLayout(tiles: WorkspaceTileLayoutSpec[], candidate: unknown): TileLayoutState {
+function sanitizeLayout(
+  tiles: WorkspaceTileLayoutSpec[],
+  sections: WorkspaceTileSectionLayoutSpec[],
+  candidate: unknown,
+): TileLayoutState {
   const tileIds = tiles.map((tile) => tile.id)
-  const defaultLayout = createDefaultLayout(tileIds)
+  const defaultLayout = createDefaultLayout(tileIds, sections)
   if (!candidate || typeof candidate !== 'object') {
     return defaultLayout
   }
@@ -133,6 +181,7 @@ function sanitizeLayout(tiles: WorkspaceTileLayoutSpec[], candidate: unknown): T
     order: fullOrder,
     hidden: uniqueValues(candidateHidden.filter((value) => knownIds.has(value))),
     spans: normalizeSpanOverrides(tiles, candidateRecord.spans),
+    sections: normalizeSectionOrders(sections, candidateRecord.sections),
   }
 }
 
@@ -146,6 +195,25 @@ function layoutsMatch(left: TileLayoutState, right: TileLayoutState): boolean {
   }
 
   if (left.hidden.some((tileId, index) => tileId !== right.hidden[index])) {
+    return false
+  }
+
+  const leftSections = Object.entries(left.sections).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
+  const rightSections = Object.entries(right.sections).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
+  if (leftSections.length !== rightSections.length) {
+    return false
+  }
+
+  if (
+    leftSections.some(([sectionId, itemIds], index) => {
+      const matchingSection = rightSections[index]
+      if (!matchingSection || sectionId !== matchingSection[0] || itemIds.length !== matchingSection[1].length) {
+        return true
+      }
+
+      return itemIds.some((itemId, itemIndex) => itemId !== matchingSection[1][itemIndex])
+    })
+  ) {
     return false
   }
 
@@ -172,20 +240,33 @@ function hasStoredLayout(workspaceId: string): boolean {
   return window.localStorage.getItem(storageKey(workspaceId)) !== null
 }
 
-function readStoredLayout(workspaceId: string, tiles: WorkspaceTileLayoutSpec[]): TileLayoutState {
+function readStoredLayout(
+  workspaceId: string,
+  tiles: WorkspaceTileLayoutSpec[],
+  sections: WorkspaceTileSectionLayoutSpec[],
+): TileLayoutState {
   if (typeof window === 'undefined') {
-    return createDefaultLayout(tiles.map((tile) => tile.id))
+    return createDefaultLayout(
+      tiles.map((tile) => tile.id),
+      sections,
+    )
   }
 
   try {
     const rawValue = window.localStorage.getItem(storageKey(workspaceId))
     if (!rawValue) {
-      return createDefaultLayout(tiles.map((tile) => tile.id))
+      return createDefaultLayout(
+        tiles.map((tile) => tile.id),
+        sections,
+      )
     }
 
-    return sanitizeLayout(tiles, JSON.parse(rawValue))
+    return sanitizeLayout(tiles, sections, JSON.parse(rawValue))
   } catch {
-    return createDefaultLayout(tiles.map((tile) => tile.id))
+    return createDefaultLayout(
+      tiles.map((tile) => tile.id),
+      sections,
+    )
   }
 }
 
@@ -280,7 +361,9 @@ export function TileLayout({
   workspaceId,
   workspaceLabel,
   tiles,
+  sections = [],
   authSession,
+  headerContent,
   toolbarDescription,
 }: TileLayoutProps) {
   const tileDefinitionSignature = JSON.stringify(
@@ -294,8 +377,18 @@ export function TileLayout({
     () => JSON.parse(tileDefinitionSignature) as WorkspaceTileLayoutSpec[],
     [tileDefinitionSignature],
   )
+  const sectionDefinitionSignature = JSON.stringify(
+    sections.map((section) => ({
+      id: section.id,
+      itemIds: uniqueValues(section.itemIds),
+    })),
+  )
+  const sectionLayoutSpec = useMemo<WorkspaceTileSectionLayoutSpec[]>(
+    () => JSON.parse(sectionDefinitionSignature) as WorkspaceTileSectionLayoutSpec[],
+    [sectionDefinitionSignature],
+  )
   const tileIds = tileLayoutSpec.map((tile) => tile.id)
-  const [layout, setLayout] = useState<TileLayoutState>(() => readStoredLayout(workspaceId, tileLayoutSpec))
+  const [layout, setLayout] = useState<TileLayoutState>(() => readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec))
   const toolbarDescriptionId = useId()
   const remoteHydrationInFlightRef = useRef(false)
   const remoteSnapshotRef = useRef<string | null>(null)
@@ -313,10 +406,10 @@ export function TileLayout({
 
   useEffect(() => {
     setLayout((current) => {
-      const nextLayout = sanitizeLayout(tileLayoutSpec, current)
+      const nextLayout = sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, current)
       return layoutsMatch(current, nextLayout) ? current : nextLayout
     })
-  }, [tileLayoutSpec])
+  }, [sectionLayoutSpec, tileLayoutSpec])
 
   useEffect(() => {
     if (!accessToken) {
@@ -337,13 +430,13 @@ export function TileLayout({
         }
 
         if (record) {
-          const nextLayout = sanitizeLayout(tileLayoutSpec, record)
+          const nextLayout = sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, record)
           setLayout(nextLayout)
           remoteSnapshotRef.current = JSON.stringify(nextLayout)
           return
         }
 
-        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec)
+        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec)
         setLayout(fallbackLayout)
         remoteSnapshotRef.current = hasStoredLayout(workspaceId) ? null : JSON.stringify(fallbackLayout)
       } catch {
@@ -351,7 +444,7 @@ export function TileLayout({
           return
         }
 
-        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec)
+        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec)
         setLayout(fallbackLayout)
         remoteSnapshotRef.current = JSON.stringify(fallbackLayout)
       } finally {
@@ -366,7 +459,7 @@ export function TileLayout({
     return () => {
       cancelled = true
     }
-  }, [accessToken, tileLayoutSpec, workspaceId])
+  }, [accessToken, sectionLayoutSpec, tileLayoutSpec, workspaceId])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -504,8 +597,31 @@ export function TileLayout({
     })
   }
 
+  function handleMoveSectionItem(sectionId: string, itemIds: string[], activeId: string, overId: string) {
+    if (activeId === overId) {
+      return
+    }
+
+    setLayout((current) => {
+      const currentOrder = sanitizeSectionOrder(itemIds, current.sections[sectionId])
+      const oldIndex = currentOrder.indexOf(activeId)
+      const newIndex = currentOrder.indexOf(overId)
+      if (oldIndex === -1 || newIndex === -1) {
+        return current
+      }
+
+      return {
+        ...current,
+        sections: {
+          ...current.sections,
+          [sectionId]: arrayMove(currentOrder, oldIndex, newIndex),
+        },
+      }
+    })
+  }
+
   function handleResetLayout() {
-    const defaultLayout = createDefaultLayout(tileIds)
+    const defaultLayout = createDefaultLayout(tileIds, sectionLayoutSpec)
     setLayout(defaultLayout)
 
     if (accessToken) {
@@ -521,56 +637,64 @@ export function TileLayout({
     }
   }
 
-  return (
-    <div className="tile-layout-shell">
-      <section className="surface tile-layout-toolbar">
-        <div className="tile-layout-toolbar-head">
-          <div>
-            <span className="eyebrow">Layout</span>
-            <h3>{workspaceLabel} Tiles</h3>
-          </div>
-          <span className="entity-chip entity-chip-soft">
-            {visibleTiles.length} of {tiles.length} on screen
-          </span>
-        </div>
-        <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
-        <div className="tile-layout-toolbar-actions">
-          {hiddenTiles.length > 0 ? (
-            hiddenTiles.map((tile) => (
-              <button
-                key={tile.id}
-                type="button"
-                className="button button-ghost tile-layout-add-button"
-                onClick={() => handleShowTile(tile.id)}
-              >
-                Add {tile.title}
-              </button>
-            ))
-          ) : (
-            <span className="entity-chip">All tiles are visible</span>
-          )}
-          <button type="button" className="button button-secondary tile-layout-reset-button" onClick={handleResetLayout}>
-            Reset layout
-          </button>
-        </div>
-      </section>
+  const sectionContextValue: TileLayoutSectionContextValue = {
+    getSectionOrder: (sectionId, itemIds) => sanitizeSectionOrder(itemIds, layout.sections[sectionId]),
+    moveSectionItem: handleMoveSectionItem,
+  }
 
-      {visibleTiles.length > 0 ? (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={visibleTiles.map((tile) => tile.id)} strategy={rectSortingStrategy}>
-            <div className="tile-workspace-grid" aria-describedby={toolbarDescriptionId}>
-              {visibleTiles.map((tile) => (
-                <SortableTileCard key={tile.id} tile={tile} onHide={handleHideTile} onSpanChange={handleSetTileSpan} />
-              ))}
+  return (
+    <TileLayoutSectionContext.Provider value={sectionContextValue}>
+      <div className="tile-layout-shell">
+        {headerContent}
+        <section className="surface tile-layout-toolbar">
+          <div className="tile-layout-toolbar-head">
+            <div>
+              <span className="eyebrow">Layout</span>
+              <h3>{workspaceLabel} Tiles</h3>
             </div>
-          </SortableContext>
-        </DndContext>
-      ) : (
-        <section className="surface empty-state workspace-tile-empty-state">
-          <strong>No tiles on screen</strong>
-          <p>Use the add buttons above to bring tiles back or reset the workspace layout.</p>
+            <span className="entity-chip entity-chip-soft">
+              {visibleTiles.length} of {tiles.length} on screen
+            </span>
+          </div>
+          <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
+          <div className="tile-layout-toolbar-actions">
+            {hiddenTiles.length > 0 ? (
+              hiddenTiles.map((tile) => (
+                <button
+                  key={tile.id}
+                  type="button"
+                  className="button button-ghost tile-layout-add-button"
+                  onClick={() => handleShowTile(tile.id)}
+                >
+                  Add {tile.title}
+                </button>
+              ))
+            ) : (
+              <span className="entity-chip">All tiles are visible</span>
+            )}
+            <button type="button" className="button button-secondary tile-layout-reset-button" onClick={handleResetLayout}>
+              Reset layout
+            </button>
+          </div>
         </section>
-      )}
-    </div>
+
+        {visibleTiles.length > 0 ? (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={visibleTiles.map((tile) => tile.id)} strategy={rectSortingStrategy}>
+              <div className="tile-workspace-grid" aria-describedby={toolbarDescriptionId}>
+                {visibleTiles.map((tile) => (
+                  <SortableTileCard key={tile.id} tile={tile} onHide={handleHideTile} onSpanChange={handleSetTileSpan} />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        ) : (
+          <section className="surface empty-state workspace-tile-empty-state">
+            <strong>No tiles on screen</strong>
+            <p>Use the add buttons above to bring tiles back or reset the workspace layout.</p>
+          </section>
+        )}
+      </div>
+    </TileLayoutSectionContext.Provider>
   )
 }

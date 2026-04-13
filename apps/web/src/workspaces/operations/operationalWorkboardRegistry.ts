@@ -1,4 +1,9 @@
-import type { OperationalResourceDescriptor, OperationalResourceKey } from '../../entities/app/api'
+import type {
+  OperationalResourceDescriptor,
+  OperationalResourceKey,
+  OperationalResourcePrimaryAction,
+  OperationalResourceSummaryStat,
+} from '../../entities/app/api'
 
 export type OperationalWorkboardKey =
   | 'confirmationLedger'
@@ -24,6 +29,20 @@ export type ResolvedOperationalWorkboardDefinition = OperationalWorkboardDefinit
   key: OperationalWorkboardKey
   resources: OperationalResourceDescriptor[]
   metadataChips: string[]
+  boardSections: string[]
+  primaryActions: Array<
+    OperationalResourcePrimaryAction & {
+      resource_key: OperationalResourceKey
+      resource_label: string
+    }
+  >
+  summaryStats: Array<
+    OperationalResourceSummaryStat & {
+      resource_key: OperationalResourceKey
+      resource_label: string
+    }
+  >
+  emptyState: { title: string; detail: string } | null
 }
 
 export const OPERATIONAL_WORKBOARD_REGISTRY: Record<
@@ -98,6 +117,14 @@ function formatResourceLabel(resourceKey: OperationalResourceKey): string {
   return formatToken(resourceKey)
 }
 
+function preferredResourceLabel(resource: OperationalResourceDescriptor): string {
+  return resource.surface?.title ?? formatResourceLabel(resource.resource_key)
+}
+
+function uniqueValues(values: string[]): string[] {
+  return [...new Set(values)]
+}
+
 function buildMetadataChips(
   resources: OperationalResourceDescriptor[],
   metadataMode: OperationalWorkboardMetadataMode,
@@ -133,6 +160,52 @@ function buildMetadataChips(
   return chips
 }
 
+function buildPrimaryActions(resources: OperationalResourceDescriptor[]) {
+  const actions: ResolvedOperationalWorkboardDefinition['primaryActions'] = []
+  const seen = new Set<string>()
+
+  for (const resource of resources) {
+    const primaryAction = resource.surface?.primary_action
+    if (!primaryAction) {
+      continue
+    }
+    const key = `${resource.resource_key}:${primaryAction.key}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    actions.push({
+      ...primaryAction,
+      resource_key: resource.resource_key,
+      resource_label: preferredResourceLabel(resource),
+    })
+  }
+
+  return actions
+}
+
+function buildSummaryStats(resources: OperationalResourceDescriptor[]) {
+  const summaryStats: ResolvedOperationalWorkboardDefinition['summaryStats'] = []
+  const seen = new Set<string>()
+
+  for (const resource of resources) {
+    for (const summaryStat of resource.surface?.summary_stats ?? []) {
+      const key = `${resource.resource_key}:${summaryStat.key}`
+      if (seen.has(key)) {
+        continue
+      }
+      seen.add(key)
+      summaryStats.push({
+        ...summaryStat,
+        resource_key: resource.resource_key,
+        resource_label: preferredResourceLabel(resource),
+      })
+    }
+  }
+
+  return summaryStats
+}
+
 export function resolveOperationalWorkboardDefinition(
   key: OperationalWorkboardKey,
   operationalResourceDescriptors: OperationalResourceDescriptor[],
@@ -142,11 +215,25 @@ export function resolveOperationalWorkboardDefinition(
     const descriptor = operationalResourceDescriptors.find((item) => item.resource_key === resourceKey)
     return descriptor ? [descriptor] : []
   })
+  const primaryResource = resources.length === 1 ? resources[0] : null
+  const boardSections = uniqueValues(
+    resources
+      .map((resource) => resource.surface?.board_section ?? '')
+      .filter((value) => value.length > 0),
+  )
+  const primaryActions = buildPrimaryActions(resources)
+  const summaryStats = buildSummaryStats(resources)
 
   return {
     ...definition,
     key,
+    title: primaryResource?.surface?.title ?? definition.title,
+    description: primaryResource?.surface?.description ?? definition.description,
     resources,
     metadataChips: buildMetadataChips(resources, definition.metadataMode ?? 'all'),
+    boardSections,
+    primaryActions,
+    summaryStats,
+    emptyState: primaryResource?.surface?.empty_state ?? null,
   }
 }

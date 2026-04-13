@@ -1340,6 +1340,20 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertIn("append_event", descriptors["deliveries"]["actions"])
         self.assertEqual(descriptors["payments"]["sort_fields"], ["trade_id asc", "due_at asc", "id asc"])
         self.assertEqual(descriptors["work_items"]["actions"], ["create", "update", "book_underlying"])
+        self.assertEqual(descriptors["confirmations"]["surface"]["title"], "Confirmation Ledger")
+        self.assertEqual(descriptors["work_items"]["surface"]["board_section"], "Critical Path")
+        self.assertEqual(
+            descriptors["payments"]["surface"]["primary_action"]["label"],
+            "Record payment",
+        )
+        self.assertEqual(
+            descriptors["deliveries"]["surface"]["empty_state"]["title"],
+            "No delivery board",
+        )
+        self.assertEqual(
+            len(descriptors["invoices"]["surface"]["summary_stats"]),
+            3,
+        )
 
 
 if __name__ == "__main__":

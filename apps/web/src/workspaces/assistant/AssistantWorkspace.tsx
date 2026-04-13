@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import {
   approveAssistantActionRequest,
@@ -15,6 +15,7 @@ import {
 } from '../../entities/assistant/api'
 import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
 import { appConfig } from '../../shared/config'
+import { matchesTextFilter } from '../../shared/filtering'
 import type {
   AssistantActionRequest,
   AssistantAgent,
@@ -31,6 +32,7 @@ import type {
   Trade,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 
 type AssistantWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -171,6 +173,82 @@ function formatTraceTimestamp(value: string | null | undefined): string {
   return date.toLocaleString()
 }
 
+function matchesAssistantMessageFilter(message: ChatMessage, query: string): boolean {
+  return matchesTextFilter(query, [
+    message.role,
+    message.content,
+    message.provider,
+    message.model,
+    message.runId,
+    message.runRecordedAt,
+    ...(message.warnings ?? []),
+    ...(message.toolCalls?.flatMap((toolCall) => [toolCall.tool_name, toolCall.summary]) ?? []),
+    ...(message.actionRequests?.flatMap((actionRequest) => [
+      actionRequest.action_request_id,
+      actionRequest.status,
+      actionRequest.summary,
+      actionRequest.description,
+    ]) ?? []),
+  ])
+}
+
+function matchesAssistantConversationFilter(conversation: AssistantConversationSummary, query: string): boolean {
+  return matchesTextFilter(query, [
+    conversation.conversation_id,
+    conversation.title,
+    conversation.workspace,
+    conversation.agent_id,
+    conversation.agent_name,
+    conversation.provider,
+    conversation.model,
+    conversation.run_count,
+    conversation.latest_run_id,
+    conversation.latest_user_message,
+    conversation.latest_assistant_message,
+    conversation.updated_at,
+  ])
+}
+
+function matchesAssistantActionRequestFilter(actionRequest: AssistantActionRequest, query: string): boolean {
+  return matchesTextFilter(query, [
+    actionRequest.action_request_id,
+    actionRequest.run_id,
+    actionRequest.workspace,
+    actionRequest.agent_id,
+    actionRequest.agent_name,
+    actionRequest.action_type,
+    actionRequest.status,
+    actionRequest.summary,
+    actionRequest.description,
+    actionRequest.user_id,
+    actionRequest.error_detail,
+    actionRequest.created_at,
+    actionRequest.decided_at,
+    actionRequest.decided_by,
+  ])
+}
+
+function matchesAssistantRunFilter(run: AssistantRunSummary, query: string): boolean {
+  return matchesTextFilter(query, [
+    run.conversation_id,
+    run.run_id,
+    run.status,
+    run.workspace,
+    run.agent_id,
+    run.agent_name,
+    run.provider,
+    run.model,
+    run.use_live_tools,
+    run.warning_count,
+    run.tool_call_count,
+    run.latest_user_message,
+    run.assistant_message,
+    run.error_detail,
+    run.created_at,
+    run.completed_at,
+  ])
+}
+
 function summarizeRunCard(run: AssistantRunSummary): string {
   const pieces = [run.provider, run.model]
   if (run.agent_name) {
@@ -245,6 +323,7 @@ export function AssistantWorkspace({
   const [selectedRun, setSelectedRun] = useState<AssistantRun | null>(null)
   const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [runDetailError, setRunDetailError] = useState('')
+  const [screenFilter, setScreenFilter] = useState('')
 
   const contextSummary = buildAssistantContext({
     health,
@@ -254,6 +333,23 @@ export function AssistantWorkspace({
     selectedTrade,
     selectedTradeEvents,
   })
+  const hasScreenFilter = screenFilter.trim().length > 0
+  const visibleMessages = useMemo(
+    () => messages.filter((message) => matchesAssistantMessageFilter(message, screenFilter)),
+    [messages, screenFilter],
+  )
+  const visibleRecentConversations = useMemo(
+    () => recentConversations.filter((conversation) => matchesAssistantConversationFilter(conversation, screenFilter)),
+    [recentConversations, screenFilter],
+  )
+  const visiblePendingActionRequests = useMemo(
+    () => pendingActionRequests.filter((actionRequest) => matchesAssistantActionRequestFilter(actionRequest, screenFilter)),
+    [pendingActionRequests, screenFilter],
+  )
+  const visibleRecentRuns = useMemo(
+    () => recentRuns.filter((run) => matchesAssistantRunFilter(run, screenFilter)),
+    [recentRuns, screenFilter],
+  )
 
   function clearConversationSelection() {
     setSelectedConversationId(null)
@@ -281,7 +377,7 @@ export function AssistantWorkspace({
 
       try {
         const conversationPayload = await listAssistantConversations(appConfig.apiBase, {
-          headers: { Authorization: `Bearer ${authSession.accessToken}` },
+          accessToken: authSession.accessToken,
           limit: 12,
         })
         setRecentConversations(conversationPayload)
@@ -326,7 +422,7 @@ export function AssistantWorkspace({
 
       try {
         const runPayload = await listAssistantRuns(appConfig.apiBase, {
-          headers: { Authorization: `Bearer ${authSession.accessToken}` },
+          accessToken: authSession.accessToken,
           limit: 12,
         })
         setRecentRuns(runPayload)
@@ -362,7 +458,7 @@ export function AssistantWorkspace({
 
     try {
       const actionRequestPayload = await listAssistantActionRequests(appConfig.apiBase, {
-        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        accessToken: authSession.accessToken,
         status: 'PENDING',
         limit: 12,
       })
@@ -481,7 +577,7 @@ export function AssistantWorkspace({
           appConfig.apiBase,
           selectedConversationId,
           {
-            headers: { Authorization: `Bearer ${authSession.accessToken}` },
+            accessToken: authSession.accessToken,
           },
         )
 
@@ -539,7 +635,7 @@ export function AssistantWorkspace({
             use_live_tools: useLiveTools,
           },
           {
-            headers: { Authorization: `Bearer ${authSession.accessToken}` },
+            accessToken: authSession.accessToken,
           },
         )
 
@@ -581,7 +677,7 @@ export function AssistantWorkspace({
 
       try {
         const runPayload = await getAssistantRun(appConfig.apiBase, selectedRunId, {
-          headers: { Authorization: `Bearer ${authSession.accessToken}` },
+          accessToken: authSession.accessToken,
         })
 
         if (!cancelled) {
@@ -644,7 +740,7 @@ export function AssistantWorkspace({
       }
 
       await streamAssistantResponse(appConfig.apiBase, payload, {
-        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        accessToken: authSession.accessToken,
         onEvent: (streamEvent) => {
           if (streamEvent.event === 'conversation') {
             const conversationId = Number(streamEvent.data.conversation_id)
@@ -844,6 +940,24 @@ export function AssistantWorkspace({
   const selectedConversationSummary =
     recentConversations.find((conversation) => conversation.conversation_id === selectedConversationId) ?? null
   const selectedRunSummary = recentRuns.find((run) => run.run_id === selectedRunId) ?? null
+  const assistantArtifactTotalCount =
+    messages.length + recentConversations.length + pendingActionRequests.length + recentRuns.length
+  const assistantArtifactMatchedCount =
+    visibleMessages.length +
+    visibleRecentConversations.length +
+    visiblePendingActionRequests.length +
+    visibleRecentRuns.length
+  const selectedConversationHiddenByFilter =
+    hasScreenFilter &&
+    selectedConversationSummary !== null &&
+    !visibleRecentConversations.some(
+      (conversation) => conversation.conversation_id === selectedConversationSummary.conversation_id,
+    ) &&
+    visibleMessages.length === 0
+  const selectedRunHiddenByFilter =
+    hasScreenFilter &&
+    selectedRunSummary !== null &&
+    !visibleRecentRuns.some((run) => run.run_id === selectedRunSummary.run_id)
   const assistantReady = Boolean(runtimeSettings?.enabled && authSession && selectedProviderDetails?.enabled)
   const previewText = renderPromptPreview(promptPreview)
   const activeConversationTitle =
@@ -855,10 +969,27 @@ export function AssistantWorkspace({
       : messages.length > 0
         ? 'No saved thread is selected. Sending now will create a brand-new chat.'
         : 'Choose a saved chat from the sidebar or send a first prompt to start a new one.'
+  const assistantFilterNote = selectedConversationHiddenByFilter
+    ? 'The active chat stays open even when it falls outside the current local filter.'
+    : selectedRunHiddenByFilter
+      ? 'The selected run trace stays open even when it falls outside the current local filter.'
+      : undefined
 
   return (
-    <div className="workspace-grid assistant-grid">
-      <section className="stack">
+    <div className="stack">
+      <WorkspaceLocalFilterBar
+        value={screenFilter}
+        onChange={setScreenFilter}
+        placeholder="Message text, chat title, approval summary, run ID, provider, or agent"
+        description="Keep assistant filtering local to this screen so you can search messages, saved chats, pending approvals, and run traces without changing anything else in the app."
+        totalCount={assistantArtifactTotalCount}
+        matchedCount={assistantArtifactMatchedCount}
+        resultLabel="assistant artifacts"
+        note={assistantFilterNote}
+      />
+
+      <div className="workspace-grid assistant-grid">
+        <section className="stack">
         <article className="surface">
           <div className="section-head">
             <div>
@@ -1008,16 +1139,17 @@ export function AssistantWorkspace({
           </div>
 
           <div className="assistant-chat-log">
-            {messages.length === 0 ? (
+            {visibleMessages.length === 0 ? (
               <div className="empty-state assistant-empty-state">
-                <strong>No chat selected</strong>
+                <strong>{messages.length > 0 && hasScreenFilter ? 'No chat messages match the filter' : 'No chat selected'}</strong>
                 <p>
-                  Reopen a stored conversation from the sidebar or send a first request here to
-                  begin a separate chat.
+                  {messages.length > 0 && hasScreenFilter
+                    ? 'Broaden the local search to bring the current chat transcript back into view.'
+                    : 'Reopen a stored conversation from the sidebar or send a first request here to begin a separate chat.'}
                 </p>
               </div>
             ) : (
-              messages.map((message) => (
+              visibleMessages.map((message) => (
                 <article
                   key={message.id}
                   className={`assistant-message assistant-message-${message.role}`}
@@ -1278,18 +1410,20 @@ export function AssistantWorkspace({
               Start new chat
             </button>
           </div>
-          <p>
-            {conversationHistoryLoading
-              ? 'Refreshing your recent assistant conversations.'
-              : conversationHistoryError
-                ? conversationHistoryError
-                : recentConversations.length > 0
-                  ? `${recentConversations.length} recent conversation${recentConversations.length === 1 ? '' : 's'} are available for reload.`
-                  : 'No stored conversations yet.'}
-          </p>
-          {recentConversations.length > 0 ? (
+            <p>
+              {conversationHistoryLoading
+                ? 'Refreshing your recent assistant conversations.'
+                : conversationHistoryError
+                  ? conversationHistoryError
+                : visibleRecentConversations.length > 0
+                  ? `${visibleRecentConversations.length} recent conversation${visibleRecentConversations.length === 1 ? '' : 's'} are available for reload.`
+                  : hasScreenFilter
+                    ? 'No stored conversations match the current local filter.'
+                    : 'No stored conversations yet.'}
+            </p>
+          {visibleRecentConversations.length > 0 ? (
             <div className="assistant-run-list">
-              {recentConversations.map((conversation) => (
+              {visibleRecentConversations.map((conversation) => (
                 <button
                   key={conversation.conversation_id}
                   type="button"
@@ -1334,17 +1468,19 @@ export function AssistantWorkspace({
 
         <div className="assistant-sidebar-block">
           <strong>Pending approvals</strong>
-          <p>
-            {pendingActionRequestsLoading
-              ? 'Refreshing your pending assistant approvals.'
+            <p>
+              {pendingActionRequestsLoading
+                ? 'Refreshing your pending assistant approvals.'
               : pendingActionRequestsError
                 ? pendingActionRequestsError
-                : pendingActionRequests.length > 0
-                  ? `${pendingActionRequests.length} pending assistant action request${pendingActionRequests.length === 1 ? '' : 's'} can be reviewed outside the original chat turn.`
-                  : 'No pending assistant action requests are waiting in your inbox.'}
-          </p>
+                : visiblePendingActionRequests.length > 0
+                  ? `${visiblePendingActionRequests.length} pending assistant action request${visiblePendingActionRequests.length === 1 ? '' : 's'} can be reviewed outside the original chat turn.`
+                  : hasScreenFilter
+                    ? 'No pending assistant approvals match the current local filter.'
+                    : 'No pending assistant action requests are waiting in your inbox.'}
+            </p>
           <AssistantActionRequestList
-            actionRequests={pendingActionRequests}
+            actionRequests={visiblePendingActionRequests}
             actionRequestIdsInFlight={actionRequestIdsInFlight}
             formatDate={formatTraceTimestamp}
             onDecision={handleActionRequestDecision}
@@ -1354,18 +1490,20 @@ export function AssistantWorkspace({
 
         <div className="assistant-sidebar-block">
           <strong>Recent run traces</strong>
-          <p>
-            {runHistoryLoading
-              ? 'Refreshing your recent assistant runs.'
+            <p>
+              {runHistoryLoading
+                ? 'Refreshing your recent assistant runs.'
               : runHistoryError
                 ? runHistoryError
-                : recentRuns.length > 0
-                  ? `${recentRuns.length} recent runs are available for inspection.`
-                  : 'No stored runs yet in this session history.'}
-          </p>
-          {recentRuns.length > 0 ? (
+                : visibleRecentRuns.length > 0
+                  ? `${visibleRecentRuns.length} recent runs are available for inspection.`
+                  : hasScreenFilter
+                    ? 'No stored runs match the current local filter.'
+                    : 'No stored runs yet in this session history.'}
+            </p>
+          {visibleRecentRuns.length > 0 ? (
             <div className="assistant-run-list">
-              {recentRuns.map((run) => (
+              {visibleRecentRuns.map((run) => (
                 <button
                   key={run.run_id}
                   type="button"
@@ -1516,7 +1654,8 @@ export function AssistantWorkspace({
         <div className="assistant-context-preview">
           <pre>{contextSummary}</pre>
         </div>
-      </aside>
+        </aside>
+      </div>
     </div>
   )
 }

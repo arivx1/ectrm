@@ -82,6 +82,69 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
 WORKSPACE_TILE_IDS: dict[str, tuple[str, ...]] = {
     workspace_id: tuple(tile_spans.keys()) for workspace_id, tile_spans in WORKSPACE_TILE_SPANS.items()
 }
+WORKSPACE_SECTION_IDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "operations": {
+        "operations-snapshot-cards": (
+            "open-workflow",
+            "unassigned",
+            "due-next-48h",
+            "blocked-queue",
+            "active-credit-exceptions",
+            "option-expiry-alerts",
+        ),
+    },
+    "positions": {
+        "positions-summary-cards": (
+            "gross-exposure",
+            "open-positions",
+            "largest-class",
+            "freshest-update",
+        ),
+    },
+    "reports": {
+        "reports-overview-cards": (
+            "active-trades",
+            "tracked-commodities",
+            "gross-net-volume",
+            "pnl-snapshot",
+        ),
+    },
+    "risk": {
+        "risk-summary-cards": (
+            "gross-linear-exposure",
+            "pricing-coverage",
+            "largest-linear-class",
+            "largest-linear-ticket",
+            "open-option-tickets",
+            "net-option-delta-proxy",
+            "premium-at-risk",
+            "marked-open-options",
+            "itm-open-options",
+            "profitable-at-mark",
+            "expiry-alerts",
+            "booked-option-pairs",
+            "net-package-cashflow",
+            "next-option-expiry",
+        ),
+    },
+    "settlement": {
+        "settlement-summary-cards": (
+            "open-settlement",
+            "unissued-invoices",
+            "due-overdue",
+            "fully-settled",
+        ),
+    },
+    "shipments": {
+        "shipment-summary-cards": (
+            "tracked-deliveries",
+            "logistics-moves",
+            "pipeline-flows",
+            "power-schedules",
+            "manual-overrides",
+        ),
+    },
+}
 
 
 def _require_authenticated_actor(request: Request) -> str:
@@ -111,10 +174,16 @@ def _workspace_tile_spans(workspace_id: str) -> dict[str, tuple[LayoutTileSpan, 
     return tile_spans
 
 
+def _workspace_section_ids(workspace_id: str) -> dict[str, tuple[str, ...]]:
+    _workspace_tile_ids(workspace_id)
+    return WORKSPACE_SECTION_IDS.get(workspace_id, {})
+
+
 def _validate_layout_payload(workspace_id: str, payload: LayoutDefinitionUpdate) -> None:
     tile_spans = _workspace_tile_spans(workspace_id)
     allowed_tile_ids = set(tile_spans)
     tile_ids = tuple(tile_spans.keys())
+    section_ids = _workspace_section_ids(workspace_id)
 
     if set(payload.order) != allowed_tile_ids or len(payload.order) != len(tile_ids):
         raise HTTPException(
@@ -147,6 +216,24 @@ def _validate_layout_payload(workspace_id: str, payload: LayoutDefinitionUpdate)
                 ),
             )
 
+    unknown_sections = [section_id for section_id in payload.sections if section_id not in section_ids]
+    if unknown_sections:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Nested sections are not supported for workspace '{workspace_id}': {', '.join(unknown_sections)}.",
+        )
+
+    for section_id, item_order in payload.sections.items():
+        allowed_item_ids = section_ids[section_id]
+        if set(item_order) != set(allowed_item_ids) or len(item_order) != len(allowed_item_ids):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Section '{section_id}' order must include each supported item exactly once "
+                    f"for workspace '{workspace_id}'."
+                ),
+            )
+
 
 def _to_out(record: LayoutDefinition) -> LayoutDefinitionOut:
     return LayoutDefinitionOut(
@@ -154,6 +241,7 @@ def _to_out(record: LayoutDefinition) -> LayoutDefinitionOut:
         order=list(record.tile_order),
         hidden=list(record.hidden_tiles),
         spans=dict(record.tile_spans or {}),
+        sections=dict(record.tile_sections or {}),
         updated_at=record.updated_at,
         updated_by=record.updated_by,
         version=record.version,
@@ -206,6 +294,7 @@ def upsert_layout_definition(
             tile_order=payload.order,
             hidden_tiles=payload.hidden,
             tile_spans=dict(payload.spans),
+            tile_sections={section_id: list(item_ids) for section_id, item_ids in payload.sections.items()},
             created_at=now,
             created_by=actor_id,
             updated_at=now,
@@ -217,6 +306,7 @@ def upsert_layout_definition(
         record.tile_order = payload.order
         record.hidden_tiles = payload.hidden
         record.tile_spans = dict(payload.spans)
+        record.tile_sections = {section_id: list(item_ids) for section_id, item_ids in payload.sections.items()}
         record.updated_at = now
         record.updated_by = actor_id
         record.version += 1

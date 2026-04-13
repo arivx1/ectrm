@@ -20,7 +20,19 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceEmptyState,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourcePrimaryAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSummaryStat,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
@@ -638,6 +650,39 @@ TRADE_INVOICE_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
     filters=("trade_id",),
     sort_fields=("due_at asc", "updated_at desc", "id desc"),
     actions=("create", "update"),
+    surface=OperationalResourceSurface(
+        title="Invoice Ledger",
+        description=(
+            "Dedicated invoice records drive invoice issuance, updates, and settlement rollups for each active trade."
+        ),
+        board_section="Queue",
+        primary_action=OperationalResourcePrimaryAction(
+            key="issue_invoice",
+            label="Issue invoice",
+            detail="Create the first invoice record as soon as commercial settlement moves out of status-only tracking.",
+        ),
+        empty_state=OperationalResourceEmptyState(
+            title="No invoice ledger",
+            detail="Trades that need invoicing will appear here once settlement work opens on the active book.",
+        ),
+        summary_stats=(
+            OperationalResourceSummaryStat(
+                key="first_issue",
+                label="First issue pending",
+                detail="Spot trades that still need their first invoice record before cash collection can begin.",
+            ),
+            OperationalResourceSummaryStat(
+                key="invoice_disputes",
+                label="Invoice disputes",
+                detail="Keep disputed invoice terms inside the same ledger as issuance and amendment history.",
+            ),
+            OperationalResourceSummaryStat(
+                key="settlement_aging",
+                label="Settlement aging",
+                detail="Track due dates and late updates before invoice aging turns into payment delay.",
+            ),
+        ),
+    ),
     load_rows=_load_trade_invoice_rows,
     load_context=_load_trade_invoice_context,
     build_item=_build_trade_invoice_item,

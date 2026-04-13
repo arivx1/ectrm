@@ -1,8 +1,13 @@
+import { useMemo, useState } from 'react'
+
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
+import { matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import { buildUnitLabelByCommodityClass, normalizeUnitLabel, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
+import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import {
   buildOpenOptionActionQueue,
   buildOpenOptionValuationSummary,
@@ -228,6 +233,57 @@ function optionLifecyclePendingLabel(action: OptionLifecycleEventType): string {
   }
 }
 
+function matchesRiskTradeFilter(trade: Trade, query: string): boolean {
+  return matchesTextFilter(query, [
+    trade.trade_id,
+    trade.book,
+    trade.portfolio,
+    trade.counterparty,
+    trade.commodity_class,
+    trade.commodity,
+    trade.trade_side,
+    trade.instrument_type,
+    trade.option_type,
+    trade.option_style,
+    trade.price_index_code,
+    trade.pricing_status,
+    trade.settlement_status,
+    trade.status,
+  ])
+}
+
+function matchesRiskPositionFilter(position: PositionRow, relatedTrades: Trade[], query: string): boolean {
+  return matchesTextFilter(query, [
+    position.commodity,
+    position.commodity_class,
+    position.updated_at,
+    ...relatedTrades.flatMap((trade) => [
+      trade.trade_id,
+      trade.book,
+      trade.portfolio,
+      trade.counterparty,
+      trade.status,
+    ]),
+  ])
+}
+
+function matchesRiskOptionExposureFilter(exposure: OptionExposureRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    exposure.trade_id,
+    exposure.book,
+    exposure.portfolio,
+    exposure.counterparty,
+    exposure.commodity_class,
+    exposure.commodity,
+    exposure.trade_side,
+    exposure.option_type,
+    exposure.option_style,
+    exposure.option_expiration_date,
+    exposure.trade_currency_code,
+    exposure.price_unit_code,
+  ])
+}
+
 export function RiskWorkspace({
   authSession,
   trades,
@@ -245,34 +301,87 @@ export function RiskWorkspace({
   optionLifecycleSubmittingEvent,
   optionLifecycleSubmittingTradeId,
 }: RiskWorkspaceProps) {
-  const linearActiveTrades = activeTrades.filter((trade) => trade.instrument_type !== 'OPTION')
-  const activeOptionTrades = activeTrades.filter((trade) => trade.instrument_type === 'OPTION')
+  const [screenFilter, setScreenFilter] = useState('')
+  const directlyMatchedTrades = useMemo(
+    () => trades.filter((trade) => matchesRiskTradeFilter(trade, screenFilter)),
+    [screenFilter, trades],
+  )
+  const directlyMatchedOptionExposures = useMemo(
+    () => optionExposures.filter((exposure) => matchesRiskOptionExposureFilter(exposure, screenFilter)),
+    [optionExposures, screenFilter],
+  )
+  const visibleTradeIds = useMemo(
+    () =>
+      new Set([
+        ...directlyMatchedTrades.map((trade) => trade.trade_id),
+        ...directlyMatchedOptionExposures.map((exposure) => exposure.trade_id),
+      ]),
+    [directlyMatchedOptionExposures, directlyMatchedTrades],
+  )
+  const visibleTrades = useMemo(
+    () => trades.filter((trade) => visibleTradeIds.has(trade.trade_id)),
+    [trades, visibleTradeIds],
+  )
+  const visibleActiveTrades = useMemo(
+    () => activeTrades.filter((trade) => visibleTradeIds.has(trade.trade_id)),
+    [activeTrades, visibleTradeIds],
+  )
+  const visiblePositionRows = useMemo(
+    () =>
+      positionsWithClass.filter((position) => {
+        const relatedTrades = visibleActiveTrades.filter(
+          (trade) => trade.commodity === position.commodity && trade.commodity_class === position.commodity_class,
+        )
+        return matchesRiskPositionFilter(position, relatedTrades, screenFilter)
+      }),
+    [positionsWithClass, screenFilter, visibleActiveTrades],
+  )
+  const visiblePositionsByClass = useMemo(() => {
+    const visiblePositionClasses = new Set(visiblePositionRows.map((position) => position.commodity_class))
+    const totals = new Map<string, number>()
+    for (const position of visiblePositionRows) {
+      totals.set(position.commodity_class, (totals.get(position.commodity_class) ?? 0) + position.net_volume)
+    }
+
+    return positionsByClass
+      .filter((row) => visiblePositionClasses.has(row.commodityClass))
+      .map((row) => ({
+        commodityClass: row.commodityClass,
+        netVolume: totals.get(row.commodityClass) ?? 0,
+      }))
+  }, [positionsByClass, visiblePositionRows])
+  const visibleOptionExposures = useMemo(
+    () => optionExposures.filter((exposure) => visibleTradeIds.has(exposure.trade_id)),
+    [optionExposures, visibleTradeIds],
+  )
+  const linearActiveTrades = visibleActiveTrades.filter((trade) => trade.instrument_type !== 'OPTION')
+  const activeOptionTrades = visibleActiveTrades.filter((trade) => trade.instrument_type === 'OPTION')
   const {
     latestMarksByCode,
     loading: latestMarksLoading,
     error: latestMarksError,
   } = useLatestPriceIndexMarks(
-    trades
+    visibleTrades
       .filter((trade) => trade.instrument_type === 'OPTION' || trade.originating_option_trade_id !== null)
       .map((trade) => trade.price_index_code),
   )
-  const grossExposure = positionsWithClass.reduce((total, position) => total + Math.abs(position.net_volume), 0)
-  const pricedTradeCount = activeTrades.filter((trade) => trade.pricing_status === 'PRICED').length
+  const grossExposure = visiblePositionRows.reduce((total, position) => total + Math.abs(position.net_volume), 0)
+  const pricedTradeCount = visibleActiveTrades.filter((trade) => trade.pricing_status === 'PRICED').length
   const pricingCoverage =
-    activeTrades.length > 0 ? Math.round((pricedTradeCount / activeTrades.length) * 100) : null
-  const optionExposureSummary = buildOptionExposureSummary(optionExposures)
+    visibleActiveTrades.length > 0 ? Math.round((pricedTradeCount / visibleActiveTrades.length) * 100) : null
+  const optionExposureSummary = buildOptionExposureSummary(visibleOptionExposures)
   const openOptionValuationSummary = buildOpenOptionValuationSummary(activeOptionTrades, latestMarksByCode)
   const openOptionActionQueue = buildOpenOptionActionQueue(activeOptionTrades, latestMarksByCode)
-  const optionSettlementSummary = buildOptionSettlementSummary(trades, latestMarksByCode)
-  const tradesById = new Map(trades.map((trade) => [trade.trade_id, trade] as const))
+  const optionSettlementSummary = buildOptionSettlementSummary(visibleTrades, latestMarksByCode)
+  const tradesById = new Map(visibleTrades.map((trade) => [trade.trade_id, trade] as const))
   const linearUnitLabelsByClass = buildUnitLabelByCommodityClass(linearActiveTrades)
   const optionUnitLabelsByClass = buildUnitLabelByCommodityClass(activeOptionTrades)
   const grossLinearExposureUnitLabel = summarizeUnitLabels(linearActiveTrades.map((trade) => trade.unit_of_measure))
   const netOptionExposureUnitLabel = summarizeUnitLabels(activeOptionTrades.map((trade) => trade.unit_of_measure))
-  const pricingAttentionTrades = [...activeTrades]
+  const pricingAttentionTrades = [...visibleActiveTrades]
     .filter((trade) => trade.pricing_status !== 'PRICED')
     .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
-  const largestExposureClass = positionsByClass.reduce<{ commodityClass: string; netVolume: number } | null>(
+  const largestExposureClass = visiblePositionsByClass.reduce<{ commodityClass: string; netVolume: number } | null>(
     (largest, row) =>
       largest === null || Math.abs(row.netVolume) > Math.abs(largest.netVolume) ? row : largest,
     null,
@@ -305,7 +414,7 @@ export function RiskWorkspace({
   }, [])
   linearBookConcentration.sort((left, right) => right.grossVolume - left.grossVolume)
 
-  const optionBookConcentration = optionExposures.reduce<
+  const optionBookConcentration = visibleOptionExposures.reduce<
     Array<{
       book: string
       tradeCount: number
@@ -348,12 +457,218 @@ export function RiskWorkspace({
     (sum, valuation) => sum + (valuation.packageMarkToMarket ?? 0),
     0,
   )
+  const riskSummaryCards: TileSectionGridItem[] = [
+    {
+      id: 'gross-linear-exposure',
+      title: 'Gross Linear Exposure',
+      content: (
+        <>
+          <span>Gross Linear Exposure</span>
+          <MetricValue value={formatNumber(grossExposure, 0)} unit={grossLinearExposureUnitLabel} />
+          <p>Absolute net volume across every currently projected commodity row.</p>
+        </>
+      ),
+    },
+    {
+      id: 'pricing-coverage',
+      title: 'Pricing Coverage',
+      content: (
+        <>
+          <span>Pricing Coverage</span>
+          <strong>{pricingCoverage === null ? '—' : `${pricingCoverage}%`}</strong>
+          <p>
+            {pricedTradeCount} of {visibleActiveTrades.length} active trade
+            {visibleActiveTrades.length === 1 ? '' : 's'} are fully marked as priced.
+          </p>
+        </>
+      ),
+    },
+    {
+      id: 'largest-linear-class',
+      title: 'Largest Linear Class',
+      content: (
+        <>
+          <span>Largest Linear Class</span>
+          {largestExposureClass && largestLinearClassUnitLabel ? (
+            <MetricValue value={formatNumber(largestExposureClass.netVolume, 0)} unit={largestLinearClassUnitLabel} />
+          ) : (
+            <strong>—</strong>
+          )}
+          <p>
+            {largestExposureClass
+              ? `${formatCommodityClass(largestExposureClass.commodityClass)} is the biggest class-level concentration by absolute linear exposure.`
+              : 'Class-level linear exposure will appear as positions are projected.'}
+          </p>
+        </>
+      ),
+    },
+    {
+      id: 'largest-linear-ticket',
+      title: 'Largest Linear Ticket',
+      content: (
+        <>
+          <span>Largest Linear Ticket</span>
+          {largestLinearTrade ? (
+            <MetricValue
+              value={`${largestLinearTrade.trade_id} · ${formatNumber(absoluteVolume(largestLinearTrade.volume), 0)}`}
+              unit={normalizeUnitLabel(largestLinearTrade.unit_of_measure)}
+            />
+          ) : (
+            <strong>—</strong>
+          )}
+          <p>
+            {largestLinearTrade
+              ? `${largestLinearTrade.commodity} in ${largestLinearTrade.book} currently carries the largest linear ticket volume.`
+              : 'No open linear trade ticket is available yet.'}
+          </p>
+        </>
+      ),
+    },
+    {
+      id: 'open-option-tickets',
+      title: 'Open Option Tickets',
+      content: (
+        <>
+          <span>Open Option Tickets</span>
+          <strong>{formatNumber(optionExposureSummary.optionCount, 0)}</strong>
+          <p>Active option trades currently represented in the dedicated optionality projection.</p>
+        </>
+      ),
+    },
+    {
+      id: 'net-option-delta-proxy',
+      title: 'Net Option Delta Proxy',
+      content: (
+        <>
+          <span>Net Option Delta Proxy</span>
+          <MetricValue
+            value={formatNumber(optionExposureSummary.netUnderlyingEquivalentVolume, 0)}
+            unit={netOptionExposureUnitLabel}
+          />
+          <p>A simple underlying-equivalent direction view based on trade side, call-put, and contracts.</p>
+        </>
+      ),
+    },
+    {
+      id: 'premium-at-risk',
+      title: 'Premium at Risk',
+      content: (
+        <>
+          <span>Premium at Risk</span>
+          <strong>{formatMoney(optionExposureSummary.grossPremiumAtRisk)}</strong>
+          <p>Absolute premium cashflow proxy across currently open option tickets.</p>
+        </>
+      ),
+    },
+    {
+      id: 'marked-open-options',
+      title: 'Marked Open Options',
+      content: (
+        <>
+          <span>Marked Open Options</span>
+          <strong>{`${formatNumber(openOptionValuationSummary.markedCount, 0)} / ${formatNumber(openOptionValuationSummary.optionCount, 0)}`}</strong>
+          <p>Open option tickets that already have a live linked reference mark available.</p>
+        </>
+      ),
+    },
+    {
+      id: 'itm-open-options',
+      title: 'ITM Open Options',
+      content: (
+        <>
+          <span>ITM Open Options</span>
+          <strong>{formatNumber(openOptionValuationSummary.inTheMoneyCount, 0)}</strong>
+          <p>Active option tickets currently in the money on the latest linked market mark.</p>
+        </>
+      ),
+    },
+    {
+      id: 'profitable-at-mark',
+      title: 'Profitable at Mark',
+      content: (
+        <>
+          <span>Profitable at Mark</span>
+          <strong>{formatNumber(openOptionValuationSummary.profitableCount, 0)}</strong>
+          <p>Open options whose expiry payoff currently clears premium cost at the live mark.</p>
+        </>
+      ),
+    },
+    {
+      id: 'expiry-alerts',
+      title: 'Expiry Alerts',
+      content: (
+        <>
+          <span>Expiry Alerts</span>
+          <strong>{formatNumber(openOptionActionQueue.length, 0)}</strong>
+          <p>Open options inside the expiry management window or already past expiry.</p>
+        </>
+      ),
+    },
+    {
+      id: 'booked-option-pairs',
+      title: 'Booked Option Pairs',
+      content: (
+        <>
+          <span>Booked Option Pairs</span>
+          <strong>{formatNumber(optionSettlementSummary.pairCount, 0)}</strong>
+          <p>Closed exercised or assigned options that already have a linked resulting underlying trade.</p>
+        </>
+      ),
+    },
+    {
+      id: 'net-package-cashflow',
+      title: 'Net Package Cashflow',
+      content: (
+        <>
+          <span>Net Package Cashflow</span>
+          <strong>{cashflowSummaryLabel(optionSettlementSummary.netPackageCashflow, formatMoney)}</strong>
+          <p>Premium plus linked underlying booking cashflow across the currently linked option settlement pairs.</p>
+        </>
+      ),
+    },
+    {
+      id: 'next-option-expiry',
+      title: 'Next Option Expiry',
+      content: (
+        <>
+          <span>Next Option Expiry</span>
+          <strong>
+            {optionExposureSummary.soonestExpirationTradeId
+              ? `${optionExposureSummary.soonestExpirationTradeId} · ${optionExposureSummary.soonestExpirationDays}d`
+              : '—'}
+          </strong>
+          <p>
+            {optionExposureSummary.soonestExpirationTradeId
+              ? `Expires ${formatDateOnly(optionExposureSummary.soonestExpirationDate)} and should be reviewed first for exercise, expiry, or roll decisions.`
+              : 'No active option expiry is currently loaded.'}
+          </p>
+        </>
+      ),
+    },
+  ]
 
   return (
     <TileLayout
       workspaceId="risk"
       workspaceLabel="Risk"
       authSession={authSession}
+      headerContent={
+        <WorkspaceLocalFilterBar
+          value={screenFilter}
+          onChange={setScreenFilter}
+          placeholder="Trade ID, commodity, class, book, counterparty, or option style"
+          description="Focus this risk screen locally so you can narrow exposure analysis without changing any other workspace."
+          totalCount={trades.length + positionsWithClass.length + optionExposures.length}
+          matchedCount={visibleTrades.length + visiblePositionRows.length + visibleOptionExposures.length}
+          resultLabel="risk records"
+        />
+      }
+      sections={[
+        {
+          id: 'risk-summary-cards',
+          itemIds: riskSummaryCards.map((card) => card.id),
+        },
+      ]}
       tiles={[
         {
           id: 'risk-summary',
@@ -363,112 +678,8 @@ export function RiskWorkspace({
           span: 'full',
           availableSpans: ['full', 'wide'],
           content:
-            activeTrades.length > 0 || positionsWithClass.length > 0 || optionExposures.length > 0 ? (
-              <div className="dashboard-report-grid">
-                <article className="dashboard-report-card">
-                  <span>Gross Linear Exposure</span>
-                  <MetricValue value={formatNumber(grossExposure, 0)} unit={grossLinearExposureUnitLabel} />
-                  <p>Absolute net volume across every currently projected commodity row.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Pricing Coverage</span>
-                  <strong>{pricingCoverage === null ? '—' : `${pricingCoverage}%`}</strong>
-                  <p>
-                    {pricedTradeCount} of {activeTrades.length} active trade
-                    {activeTrades.length === 1 ? '' : 's'} are fully marked as priced.
-                  </p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Largest Linear Class</span>
-                  {largestExposureClass && largestLinearClassUnitLabel ? (
-                    <MetricValue value={formatNumber(largestExposureClass.netVolume, 0)} unit={largestLinearClassUnitLabel} />
-                  ) : (
-                    <strong>—</strong>
-                  )}
-                  <p>
-                    {largestExposureClass
-                      ? `${formatCommodityClass(largestExposureClass.commodityClass)} is the biggest class-level concentration by absolute linear exposure.`
-                      : 'Class-level linear exposure will appear as positions are projected.'}
-                  </p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Largest Linear Ticket</span>
-                  {largestLinearTrade ? (
-                    <MetricValue
-                      value={`${largestLinearTrade.trade_id} · ${formatNumber(absoluteVolume(largestLinearTrade.volume), 0)}`}
-                      unit={normalizeUnitLabel(largestLinearTrade.unit_of_measure)}
-                    />
-                  ) : (
-                    <strong>—</strong>
-                  )}
-                  <p>
-                    {largestLinearTrade
-                      ? `${largestLinearTrade.commodity} in ${largestLinearTrade.book} currently carries the largest linear ticket volume.`
-                      : 'No open linear trade ticket is available yet.'}
-                  </p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Open Option Tickets</span>
-                  <strong>{formatNumber(optionExposureSummary.optionCount, 0)}</strong>
-                  <p>Active option trades currently represented in the dedicated optionality projection.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Net Option Delta Proxy</span>
-                  <MetricValue
-                    value={formatNumber(optionExposureSummary.netUnderlyingEquivalentVolume, 0)}
-                    unit={netOptionExposureUnitLabel}
-                  />
-                  <p>A simple underlying-equivalent direction view based on trade side, call-put, and contracts.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Premium at Risk</span>
-                  <strong>{formatMoney(optionExposureSummary.grossPremiumAtRisk)}</strong>
-                  <p>Absolute premium cashflow proxy across currently open option tickets.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Marked Open Options</span>
-                  <strong>{`${formatNumber(openOptionValuationSummary.markedCount, 0)} / ${formatNumber(openOptionValuationSummary.optionCount, 0)}`}</strong>
-                  <p>Open option tickets that already have a live linked reference mark available.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>ITM Open Options</span>
-                  <strong>{formatNumber(openOptionValuationSummary.inTheMoneyCount, 0)}</strong>
-                  <p>Active option tickets currently in the money on the latest linked market mark.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Profitable at Mark</span>
-                  <strong>{formatNumber(openOptionValuationSummary.profitableCount, 0)}</strong>
-                  <p>Open options whose expiry payoff currently clears premium cost at the live mark.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Expiry Alerts</span>
-                  <strong>{formatNumber(openOptionActionQueue.length, 0)}</strong>
-                  <p>Open options inside the expiry management window or already past expiry.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Booked Option Pairs</span>
-                  <strong>{formatNumber(optionSettlementSummary.pairCount, 0)}</strong>
-                  <p>Closed exercised or assigned options that already have a linked resulting underlying trade.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Net Package Cashflow</span>
-                  <strong>{cashflowSummaryLabel(optionSettlementSummary.netPackageCashflow, formatMoney)}</strong>
-                  <p>Premium plus linked underlying booking cashflow across the currently linked option settlement pairs.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Next Option Expiry</span>
-                  <strong>
-                    {optionExposureSummary.soonestExpirationTradeId
-                      ? `${optionExposureSummary.soonestExpirationTradeId} · ${optionExposureSummary.soonestExpirationDays}d`
-                      : '—'}
-                  </strong>
-                  <p>
-                    {optionExposureSummary.soonestExpirationTradeId
-                      ? `Expires ${formatDateOnly(optionExposureSummary.soonestExpirationDate)} and should be reviewed first for exercise, expiry, or roll decisions.`
-                      : 'No active option expiry is currently loaded.'}
-                  </p>
-                </article>
-              </div>
+            visibleActiveTrades.length > 0 || visiblePositionRows.length > 0 || visibleOptionExposures.length > 0 ? (
+              <TileSectionGrid sectionId="risk-summary-cards" items={riskSummaryCards} />
             ) : (
               <div className="empty-state">
                 <strong>No risk surface yet</strong>
@@ -483,13 +694,13 @@ export function RiskWorkspace({
           description: 'Read linear net exposure first, then compare the option delta proxy by commodity class.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
-          content: positionsByClass.length > 0 || optionExposureSummary.exposureByClass.length > 0 ? (
+          content: visiblePositionsByClass.length > 0 || optionExposureSummary.exposureByClass.length > 0 ? (
             <div className="detail-list">
               <div>
                 <strong>Linear Net Exposure</strong>
-                {positionsByClass.length > 0 ? (
+                {visiblePositionsByClass.length > 0 ? (
                   <div className="position-class-grid">
-                    {positionsByClass.map((row) => (
+                    {visiblePositionsByClass.map((row) => (
                       <article key={row.commodityClass} className="position-class-card">
                         <span>{formatCommodityClass(row.commodityClass)}</span>
                         <MetricValue

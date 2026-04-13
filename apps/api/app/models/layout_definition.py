@@ -25,6 +25,7 @@ class LayoutDefinition(Base):
     tile_order: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     hidden_tiles: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     tile_spans: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+    tile_sections: Mapped[dict[str, list[str]]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

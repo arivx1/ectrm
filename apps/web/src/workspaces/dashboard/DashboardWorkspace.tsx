@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import type { WorkspaceDashboardSummary } from '../../entities/app/api'
+import { matchesTextFilter } from '../../shared/filtering'
 import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord, ViewKey } from '../../shared/models'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { loadDashboardPnlHistory } from './pnlHistoryLoader'
 import { ExternalSeriesTileContent } from './ExternalSeriesPanel'
@@ -92,6 +94,61 @@ function tradeDirection(trade: TradeRecord): number {
   }
 
   return trade.trade_side === 'SELL' ? -1 : 1
+}
+
+function matchesDashboardTradeFilter(trade: TradeRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    trade.trade_id,
+    trade.book,
+    trade.portfolio,
+    trade.counterparty,
+    trade.commodity_class,
+    trade.commodity,
+    trade.instrument_type,
+    trade.trade_nature,
+    trade.trade_structure,
+    trade.trade_side,
+    trade.pricing_type,
+    trade.pricing_status,
+    trade.confirmation_status,
+    trade.nomination_status,
+    trade.allocation_status,
+    trade.actualization_status,
+    trade.invoice_status,
+    trade.payment_status,
+    trade.settlement_status,
+    trade.price_index_code,
+    trade.status,
+  ])
+}
+
+function matchesDashboardPositionFilter(position: PositionRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    position.commodity,
+    position.commodity_class,
+    position.net_volume,
+  ])
+}
+
+function matchesDashboardEventFilter(event: EventRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    event.event_id,
+    event.aggregate_id,
+    event.aggregate_type,
+    event.event_type,
+    event.recorded_at,
+  ])
+}
+
+function matchesDashboardPriceIndexFilter(priceIndex: PriceIndexRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    priceIndex.code,
+    priceIndex.name,
+    priceIndex.provider,
+    priceIndex.unit_code,
+    priceIndex.currency_code,
+    priceIndex.is_active,
+  ])
 }
 
 type TrendTone = 'up' | 'down' | 'flat'
@@ -511,15 +568,111 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const [selectedCommodityClassFilter, setSelectedCommodityClassFilter] = useState('')
   const [dateFromFilter, setDateFromFilter] = useState('')
   const [dateToFilter, setDateToFilter] = useState('')
+  const [screenFilter, setScreenFilter] = useState('')
+  const hasScreenFilter = screenFilter.trim().length > 0
+
+  const directlyMatchedTrades = useMemo(
+    () => activeTrades.filter((trade) => matchesDashboardTradeFilter(trade, screenFilter)),
+    [activeTrades, screenFilter],
+  )
+  const directlyMatchedEvents = useMemo(
+    () => events.filter((event) => matchesDashboardEventFilter(event, screenFilter)),
+    [events, screenFilter],
+  )
+  const directlyMatchedPositions = useMemo(
+    () => positionsWithClass.filter((position) => matchesDashboardPositionFilter(position, screenFilter)),
+    [positionsWithClass, screenFilter],
+  )
+  const directlyMatchedPriceIndices = useMemo(
+    () => priceIndices.filter((priceIndex) => matchesDashboardPriceIndexFilter(priceIndex, screenFilter)),
+    [priceIndices, screenFilter],
+  )
+  const directlyMatchedPositionCommodities = useMemo(
+    () => new Set(directlyMatchedPositions.map((position) => position.commodity)),
+    [directlyMatchedPositions],
+  )
+  const directlyMatchedPriceIndexCodes = useMemo(
+    () => new Set(directlyMatchedPriceIndices.map((priceIndex) => priceIndex.code)),
+    [directlyMatchedPriceIndices],
+  )
+  const visibleTradeIds = useMemo(() => {
+    if (!hasScreenFilter) {
+      return new Set(activeTrades.map((trade) => trade.trade_id))
+    }
+
+    return new Set(
+      activeTrades
+        .filter(
+          (trade) =>
+            directlyMatchedPriceIndexCodes.has(trade.price_index_code ?? '') ||
+            directlyMatchedPositionCommodities.has(trade.commodity) ||
+            directlyMatchedTrades.some((matchedTrade) => matchedTrade.trade_id === trade.trade_id) ||
+            directlyMatchedEvents.some((event) => event.aggregate_id === trade.trade_id),
+        )
+        .map((trade) => trade.trade_id),
+    )
+  }, [
+    activeTrades,
+    directlyMatchedEvents,
+    directlyMatchedPositionCommodities,
+    directlyMatchedPriceIndexCodes,
+    directlyMatchedTrades,
+    hasScreenFilter,
+  ])
+  const visibleActiveTrades = useMemo(
+    () => activeTrades.filter((trade) => visibleTradeIds.has(trade.trade_id)),
+    [activeTrades, visibleTradeIds],
+  )
+  const visiblePositionCommodityCodes = useMemo(() => {
+    if (!hasScreenFilter) {
+      return new Set(positionsWithClass.map((position) => position.commodity))
+    }
+
+    return new Set([
+      ...directlyMatchedPositionCommodities,
+      ...visibleActiveTrades.map((trade) => trade.commodity),
+    ])
+  }, [directlyMatchedPositionCommodities, hasScreenFilter, positionsWithClass, visibleActiveTrades])
+  const visiblePositionsWithClass = useMemo(
+    () => positionsWithClass.filter((position) => visiblePositionCommodityCodes.has(position.commodity)),
+    [positionsWithClass, visiblePositionCommodityCodes],
+  )
+  const visiblePriceIndexCodes = useMemo(() => {
+    if (!hasScreenFilter) {
+      return new Set(priceIndices.map((priceIndex) => priceIndex.code))
+    }
+
+    return new Set([
+      ...directlyMatchedPriceIndexCodes,
+      ...visibleActiveTrades
+        .map((trade) => trade.price_index_code)
+        .filter((priceIndexCode): priceIndexCode is string => Boolean(priceIndexCode)),
+    ])
+  }, [directlyMatchedPriceIndexCodes, hasScreenFilter, priceIndices, visibleActiveTrades])
+  const visiblePriceIndices = useMemo(
+    () => priceIndices.filter((priceIndex) => visiblePriceIndexCodes.has(priceIndex.code)),
+    [priceIndices, visiblePriceIndexCodes],
+  )
+  const directlyMatchedEventIds = useMemo(
+    () => new Set(directlyMatchedEvents.map((event) => event.event_id)),
+    [directlyMatchedEvents],
+  )
+  const visibleEvents = useMemo(
+    () =>
+      events.filter(
+        (event) => visibleTradeIds.has(event.aggregate_id) || directlyMatchedEventIds.has(event.event_id),
+      ),
+    [directlyMatchedEventIds, events, visibleTradeIds],
+  )
 
   const bookFilterOptions = useMemo(
-    () => [...new Set(activeTrades.map((trade) => trade.book).filter((value) => value.trim() !== ''))].sort(),
-    [activeTrades],
+    () => [...new Set(visibleActiveTrades.map((trade) => trade.book).filter((value) => value.trim() !== ''))].sort(),
+    [visibleActiveTrades],
   )
   const commodityClassFilterOptions = useMemo(
     () =>
-      [...new Set(activeTrades.map((trade) => trade.commodity_class).filter((value) => value.trim() !== ''))].sort(),
-    [activeTrades],
+      [...new Set(visibleActiveTrades.map((trade) => trade.commodity_class).filter((value) => value.trim() !== ''))].sort(),
+    [visibleActiveTrades],
   )
   const pnlFilterError =
     dateFromFilter && dateToFilter && dateFromFilter > dateToFilter
@@ -602,9 +755,10 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   ])
 
   const unitLabelByCommodity = useMemo(() => buildUnitLabelByCommodity(activeTrades), [activeTrades])
+  const canUseDashboardSummary = !hasScreenFilter && dashboardSummary !== null
 
   const exposureByClass = useMemo(() => {
-    if (dashboardSummary?.positions.buckets.length) {
+    if (canUseDashboardSummary && dashboardSummary?.positions.buckets.length) {
       return dashboardSummary.positions.buckets.map((row) => ({
         commodityClass: row.commodity_class,
         unitLabel: row.unit_label,
@@ -614,7 +768,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     }
 
     const totals = new Map<string, { commodityClass: string; unitLabel: string; netVolume: number; commodityCount: number }>()
-    for (const position of positionsWithClass) {
+    for (const position of visiblePositionsWithClass) {
       const unitLabel = unitLabelByCommodity.get(position.commodity) ?? 'Unit TBD'
       const key = `${position.commodity_class}::${unitLabel}`
       const current = totals.get(key) ?? {
@@ -637,33 +791,33 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
 
       return left.unitLabel.localeCompare(right.unitLabel)
     })
-  }, [dashboardSummary, positionsWithClass, unitLabelByCommodity])
+  }, [canUseDashboardSummary, dashboardSummary, unitLabelByCommodity, visiblePositionsWithClass])
 
   const grossExposureUnitLabel = useMemo(
     () =>
       summarizeUnitLabels(
-        dashboardSummary?.positions.buckets.length
+        canUseDashboardSummary && dashboardSummary?.positions.buckets.length
           ? dashboardSummary.positions.buckets.map((bucket) => bucket.unit_label)
-          : activeTrades.map((trade) => trade.unit_of_measure),
+          : visibleActiveTrades.map((trade) => trade.unit_of_measure),
       ),
-    [activeTrades, dashboardSummary],
+    [canUseDashboardSummary, dashboardSummary, visibleActiveTrades],
   )
 
   const markedPnlProxy = useMemo(
     () =>
-      activeTrades.reduce((sum, trade) => {
+      visibleActiveTrades.reduce((sum, trade) => {
         if (trade.price === null || trade.volume === null) {
           return sum
         }
 
         return sum + trade.price * Math.abs(trade.volume) * tradeDirection(trade)
       }, 0),
-    [activeTrades],
+    [visibleActiveTrades],
   )
 
   const pricedTradeCount = useMemo(
-    () => activeTrades.filter((trade) => trade.price !== null && trade.volume !== null).length,
-    [activeTrades],
+    () => visibleActiveTrades.filter((trade) => trade.price !== null && trade.volume !== null).length,
+    [visibleActiveTrades],
   )
   const effectivePnlHistoryReport = pnlFilterError ? null : pnlHistoryReport
   const pnlTrendPoints = effectivePnlHistoryReport?.points ?? []
@@ -675,8 +829,10 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     pnlTrendStart && pnlTrendEnd ? pnlTrendEnd.total_pnl - pnlTrendStart.total_pnl : 0
   const pnlTrendTone = trendTone(pnlTrendStart?.total_pnl ?? null, pnlTrendEnd?.total_pnl ?? null)
   const reportSummary = effectivePnlHistoryReport?.summary ?? null
-  const currentPnlProxy = reportSummary?.total_pnl ?? markedPnlProxy
-  const currentPricedTradeCount = reportSummary?.priced_trade_count ?? pricedTradeCount
+  const currentPnlProxy = hasScreenFilter ? markedPnlProxy : reportSummary?.total_pnl ?? markedPnlProxy
+  const currentPricedTradeCount = hasScreenFilter
+    ? pricedTradeCount
+    : reportSummary?.priced_trade_count ?? pricedTradeCount
   const activeDatePreset =
     datePresets.find((preset) => preset.dateFrom === dateFromFilter && preset.dateTo === dateToFilter)?.id ?? null
   const visibleDateWindowLabel =
@@ -686,10 +842,10 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const pnlTrendSubtitle = pnlHistoryError
     ? pnlHistoryError
     : pnlTrendPoints.length > 0
-      ? `${countLabel(pnlTrendPoints.length, 'marked day')} across ${countLabel(currentPricedTradeCount, 'priced trade')} in view.`
+      ? `${countLabel(pnlTrendPoints.length, 'marked day')} across ${countLabel(currentPricedTradeCount, 'priced trade')} in view.${hasScreenFilter ? ' Local screen search does not change the historical report window.' : ''}`
       : hasActivePnlFilters
         ? 'No marked history matches the current filter scope yet.'
-        : activeTrades.length > 0
+        : visibleActiveTrades.length > 0
           ? 'Mark-to-market daily history will fill in as priced trades and observations arrive.'
           : 'Create active trades to start building desk P&L history.'
   const activeFilterLabels = [
@@ -698,18 +854,24 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     dateFromFilter || dateToFilter ? `Window · ${formatDateWindowLabel(dateFromFilter, dateToFilter)}` : null,
   ].filter((value): value is string => Boolean(value))
 
-  const positionRowCount = dashboardSummary?.positions.position_count ?? positionsWithClass.length
-  const positionBucketCount = dashboardSummary?.positions.bucket_count ?? exposureByClass.length
+  const positionRowCount = canUseDashboardSummary
+    ? dashboardSummary?.positions.position_count ?? visiblePositionsWithClass.length
+    : visiblePositionsWithClass.length
+  const positionBucketCount = canUseDashboardSummary
+    ? dashboardSummary?.positions.bucket_count ?? exposureByClass.length
+    : exposureByClass.length
   const grossExposure = useMemo(
     () =>
-      dashboardSummary?.positions.gross_exposure ??
-      positionsWithClass.reduce((sum, position) => sum + Math.abs(position.net_volume), 0),
-    [dashboardSummary, positionsWithClass],
+      canUseDashboardSummary
+        ? dashboardSummary?.positions.gross_exposure ??
+          visiblePositionsWithClass.reduce((sum, position) => sum + Math.abs(position.net_volume), 0)
+        : visiblePositionsWithClass.reduce((sum, position) => sum + Math.abs(position.net_volume), 0),
+    [canUseDashboardSummary, dashboardSummary, visiblePositionsWithClass],
   )
 
   const largestExposureBucket = useMemo(
     () => {
-      if (dashboardSummary?.positions.largest_bucket) {
+      if (canUseDashboardSummary && dashboardSummary?.positions.largest_bucket) {
         return {
           commodityClass: dashboardSummary.positions.largest_bucket.commodity_class,
           unitLabel: dashboardSummary.positions.largest_bucket.unit_label,
@@ -729,11 +891,11 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
         null,
       )
     },
-    [dashboardSummary, exposureByClass],
+    [canUseDashboardSummary, dashboardSummary, exposureByClass],
   )
 
   const dashboardIssues = useMemo(() => {
-    if (dashboardSummary?.attention) {
+    if (canUseDashboardSummary && dashboardSummary?.attention) {
       const attention = dashboardSummary.attention
       return {
         total: attention.total_count,
@@ -784,11 +946,11 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       }
     }
 
-    const confirmationBacklog = activeTrades.filter((trade) => {
+    const confirmationBacklog = visibleActiveTrades.filter((trade) => {
       const ageDays = ageInDays(trade.execution_timestamp)
       return ageDays !== null && ageDays >= 1 && trade.confirmation_status !== 'CONFIRMED'
     })
-    const nominationBacklog = activeTrades.filter((trade) => {
+    const nominationBacklog = visibleActiveTrades.filter((trade) => {
       const daysUntilDelivery = daysUntilDate(trade.delivery_start)
       return (
         trade.trade_nature === 'PHYSICAL' &&
@@ -797,13 +959,13 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
         !['NOT_REQUIRED', 'SCHEDULED', 'NOMINATED', 'COMPLETED'].includes(trade.nomination_status)
       )
     })
-    const allocationBacklog = activeTrades.filter(
+    const allocationBacklog = visibleActiveTrades.filter(
       (trade) =>
         trade.trade_nature === 'PHYSICAL' &&
         ['NOMINATED', 'COMPLETED'].includes(trade.nomination_status) &&
         !['NOT_REQUIRED', 'ALLOCATED', 'COMPLETED'].includes(trade.allocation_status),
     )
-    const invoiceBacklog = activeTrades.filter((trade) => {
+    const invoiceBacklog = visibleActiveTrades.filter((trade) => {
       const ageDays = ageInDays(trade.execution_timestamp)
       return (
         trade.trade_nature === 'PHYSICAL' &&
@@ -812,7 +974,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
         !['NOT_REQUIRED', 'ISSUED', 'APPROVED'].includes(trade.invoice_status)
       )
     })
-    const overduePayments = activeTrades.filter((trade) => {
+    const overduePayments = visibleActiveTrades.filter((trade) => {
       if (trade.payment_status === 'OVERDUE') {
         return true
       }
@@ -828,11 +990,11 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
         !['NOT_REQUIRED', 'PAID'].includes(trade.payment_status)
       )
     })
-    const stalePricing = activeTrades.filter((trade) => {
+    const stalePricing = visibleActiveTrades.filter((trade) => {
       const ageDays = ageInDays(trade.execution_timestamp)
       return ageDays !== null && ageDays >= 2 && ['PENDING', 'PARTIALLY_PRICED'].includes(trade.pricing_status)
     })
-    const incompleteOperationalData = activeTrades.filter(
+    const incompleteOperationalData = visibleActiveTrades.filter(
       (trade) =>
         !trade.execution_timestamp ||
         !trade.external_trade_id ||
@@ -901,7 +1063,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
         },
       ] as Array<{ label: string; count: number; detail: string; tone: 'active' | 'blocked' }>,
     }
-  }, [activeTrades, dashboardSummary])
+  }, [canUseDashboardSummary, dashboardSummary, visibleActiveTrades])
   const quickStartActions = [
     {
       title: 'Capture a trade',
@@ -939,6 +1101,23 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       workspaceId="dashboard"
       workspaceLabel="Live Desk"
       authSession={authSession}
+      headerContent={
+        <WorkspaceLocalFilterBar
+          value={screenFilter}
+          onChange={setScreenFilter}
+          placeholder="Trade, commodity, event, book, counterparty, price index, or workflow status"
+          description="Keep dashboard filtering local to this screen so you can narrow live desk context without changing any other workspace."
+          totalCount={activeTrades.length + positionsWithClass.length + events.length + priceIndices.length}
+          matchedCount={
+            visibleActiveTrades.length +
+            visiblePositionsWithClass.length +
+            visibleEvents.length +
+            visiblePriceIndices.length
+          }
+          resultLabel="dashboard records"
+          note="The local search narrows the live snapshot, exposure, market-price, and timeline cards. The P&L history module keeps using its own book, class, and date controls."
+        />
+      }
       tiles={[
         {
           id: 'desk-snapshot',
@@ -1130,7 +1309,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                           ? pnlFilterError
                           : pnlHistoryError
                           ? pnlHistoryError
-                          : activeTrades.length > 0
+                          : visibleActiveTrades.length > 0
                           ? hasActivePnlFilters
                             ? 'No active trades matched the current report filters yet.'
                             : 'Price the active trades to populate the P&L history.'
@@ -1268,8 +1447,8 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           content: (
             <MarketPricesTileContent
               appLoading={appLoading}
-              activeTrades={activeTrades}
-              priceIndices={priceIndices}
+              activeTrades={visibleActiveTrades}
+              priceIndices={visiblePriceIndices}
               formatNumber={formatNumber}
             />
           ),
@@ -1301,8 +1480,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             </div>
           ) : (
             <div className="empty-state">
-              <strong>No open exposure</strong>
-              <p>The system is healthy, but there are no active trades contributing exposure yet.</p>
+              <strong>{hasScreenFilter ? 'No exposure matches the filter' : 'No open exposure'}</strong>
+              <p>
+                {hasScreenFilter
+                  ? 'Try a broader local search to bring more commodity exposure back into the dashboard.'
+                  : 'The system is healthy, but there are no active trades contributing exposure yet.'}
+              </p>
             </div>
           ),
         },
@@ -1333,8 +1516,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             </div>
           ) : (
             <div className="empty-state">
-              <strong>No active operational issues</strong>
-              <p>The live trades are confirmed, scheduled, invoiced, and populated well enough that nothing is currently flagged here.</p>
+              <strong>{hasScreenFilter ? 'No attention items match the filter' : 'No active operational issues'}</strong>
+              <p>
+                {hasScreenFilter
+                  ? 'Nothing in the filtered live trade set is currently triggering the watchlist.'
+                  : 'The live trades are confirmed, scheduled, invoiced, and populated well enough that nothing is currently flagged here.'}
+              </p>
             </div>
           ),
         },
@@ -1351,8 +1538,8 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                 <div className="skeleton-stack">
                   <div className="skeleton-block" />
                 </div>
-              ) : events.slice(0, 5).length > 0 ? (
-                events.slice(0, 5).map((event) => (
+              ) : visibleEvents.slice(0, 5).length > 0 ? (
+                visibleEvents.slice(0, 5).map((event) => (
                   <article key={event.event_id} className="timeline-item">
                     <div className="timeline-dot" />
                     <div className="timeline-body">
@@ -1368,8 +1555,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                 ))
               ) : (
                 <div className="empty-state">
-                  <strong>No recent events</strong>
-                  <p>Create or amend a trade to start building the operational timeline.</p>
+                  <strong>{hasScreenFilter ? 'No recent events match the filter' : 'No recent events'}</strong>
+                  <p>
+                    {hasScreenFilter
+                      ? 'Try a broader local search to bring more workflow activity back into the dashboard timeline.'
+                      : 'Create or amend a trade to start building the operational timeline.'}
+                  </p>
                 </div>
               )}
             </div>

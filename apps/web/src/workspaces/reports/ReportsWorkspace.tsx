@@ -24,6 +24,7 @@ import type {
 import type { StoredAuthSession } from '../../shared/mutation'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
+import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { reportErrorState } from './reportTileScaffold'
 import { buildSettlementReportTiles } from './settlementReportTiles'
@@ -449,11 +450,64 @@ export function ReportsWorkspace({
     setComparisonEndDate(latestAvailableSnapshotDate)
   }
 
+  const reportsOverviewCards: TileSectionGridItem[] = [
+    {
+      id: 'active-trades',
+      title: 'Active Trades',
+      content: (
+        <>
+          <span>Active Trades</span>
+          <strong>{formatNumber(overview?.active_trade_count ?? 0, 0)}</strong>
+          <p>Trade count represented in the reporting overview.</p>
+        </>
+      ),
+    },
+    {
+      id: 'tracked-commodities',
+      title: 'Tracked Commodities',
+      content: (
+        <>
+          <span>Tracked Commodities</span>
+          <strong>{formatNumber(overview?.tracked_commodity_count ?? 0, 0)}</strong>
+          <p>Distinct commodities currently represented in the reporting layer.</p>
+        </>
+      ),
+    },
+    {
+      id: 'gross-net-volume',
+      title: 'Gross Net Volume',
+      content: (
+        <>
+          <span>Gross Net Volume</span>
+          <MetricValue value={formatNumber(overview?.gross_net_volume ?? 0, 0)} unit={grossNetVolumeUnitLabel} />
+          <p>Absolute reported volume across the exposure summary output.</p>
+        </>
+      ),
+    },
+    {
+      id: 'pnl-snapshot',
+      title: 'P&L Snapshot',
+      content: (
+        <>
+          <span>P&amp;L Snapshot</span>
+          <strong>{formatMoney(pnlHistory?.summary.total_pnl ?? null)}</strong>
+          <p>{pnlHistory?.basis ?? 'P&L reporting basis unavailable'}.</p>
+        </>
+      ),
+    },
+  ]
+
   return (
     <TileLayout
       workspaceId="reports"
       workspaceLabel="Reports"
       authSession={authSession}
+      sections={[
+        {
+          id: 'reports-overview-cards',
+          itemIds: reportsOverviewCards.map((card) => card.id),
+        },
+      ]}
       tiles={[
         {
           id: 'reports-overview',
@@ -470,28 +524,7 @@ export function ReportsWorkspace({
           ) : error ? (
             reportErrorState(error)
           ) : overview ? (
-            <div className="dashboard-report-grid">
-              <article className="dashboard-report-card">
-                <span>Active Trades</span>
-                <strong>{formatNumber(overview.active_trade_count, 0)}</strong>
-                <p>Trade count represented in the reporting overview.</p>
-              </article>
-              <article className="dashboard-report-card">
-                <span>Tracked Commodities</span>
-                <strong>{formatNumber(overview.tracked_commodity_count, 0)}</strong>
-                <p>Distinct commodities currently represented in the reporting layer.</p>
-              </article>
-              <article className="dashboard-report-card">
-                <span>Gross Net Volume</span>
-                <MetricValue value={formatNumber(overview.gross_net_volume, 0)} unit={grossNetVolumeUnitLabel} />
-                <p>Absolute reported volume across the exposure summary output.</p>
-              </article>
-              <article className="dashboard-report-card">
-                <span>P&amp;L Snapshot</span>
-                <strong>{formatMoney(pnlHistory?.summary.total_pnl ?? null)}</strong>
-                <p>{pnlHistory?.basis ?? 'P&L reporting basis unavailable'}.</p>
-              </article>
-            </div>
+            <TileSectionGrid sectionId="reports-overview-cards" items={reportsOverviewCards} />
           ) : (
             <div className="empty-state">
               <strong>No reporting overview</strong>

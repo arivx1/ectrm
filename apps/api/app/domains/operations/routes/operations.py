@@ -30,6 +30,10 @@ from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas.operations import DependencyHealthOut
 from apps.api.app.schemas.operations import OperationalResourceDescriptorOut
+from apps.api.app.schemas.operations import OperationalResourceEmptyStateOut
+from apps.api.app.schemas.operations import OperationalResourcePrimaryActionOut
+from apps.api.app.schemas.operations import OperationalResourceSummaryStatOut
+from apps.api.app.schemas.operations import OperationalResourceSurfaceOut
 from apps.api.app.schemas.operations import SystemOverviewOut
 from apps.api.app.schemas.operations import TradeWorkflowItemCreate
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
@@ -254,6 +258,36 @@ def get_operational_resource_descriptors() -> list[OperationalResourceDescriptor
             filters=list(descriptor.filters),
             sort_fields=list(descriptor.sort_fields),
             actions=list(descriptor.actions),
+            surface=OperationalResourceSurfaceOut(
+                title=descriptor.surface.title,
+                description=descriptor.surface.description,
+                board_section=descriptor.surface.board_section,
+                primary_action=(
+                    OperationalResourcePrimaryActionOut(
+                        key=descriptor.surface.primary_action.key,
+                        label=descriptor.surface.primary_action.label,
+                        detail=descriptor.surface.primary_action.detail,
+                    )
+                    if descriptor.surface.primary_action is not None
+                    else None
+                ),
+                empty_state=(
+                    OperationalResourceEmptyStateOut(
+                        title=descriptor.surface.empty_state.title,
+                        detail=descriptor.surface.empty_state.detail,
+                    )
+                    if descriptor.surface.empty_state is not None
+                    else None
+                ),
+                summary_stats=[
+                    OperationalResourceSummaryStatOut(
+                        key=stat.key,
+                        label=stat.label,
+                        detail=stat.detail,
+                    )
+                    for stat in descriptor.surface.summary_stats
+                ],
+            ),
         )
         for descriptor in OPERATIONAL_RESOURCE_DESCRIPTORS.values()
     ]

@@ -29,5 +29,8 @@ jobs:
       - name: Install backend dependencies
         run: make api-install
 
+      - name: Verify committed API contract artifacts
+        run: make api-contract-check
+
       - name: Run backend verification
         run: make api-test

@@ -34,6 +34,7 @@ Useful companion commands:
 npm run build
 npm run lint
 npm test
+npm run test:smoke
 npm run preview
 ```
 
@@ -44,6 +45,7 @@ make web-install
 make web-build
 make web-lint
 make web-test
+make web-smoke-test
 ```
 
 The first GitHub Actions web lane uses the same shared entrypoints:
@@ -56,6 +58,24 @@ make web-test
 ```
 
 The default local URL is `http://localhost:5173`.
+
+## Browser Smoke Harness
+
+The repo now has a dedicated Playwright smoke harness for high-visibility
+browser flows. It uses a self-hosted Vite app server plus deterministic fixture
+data from `tests/browser/support` instead of depending on a separately started
+API or demo database.
+
+Run it from the repo root:
+
+```bash
+make web-smoke-install
+make web-smoke-test
+```
+
+On GitHub Actions, the manual `Browser Smoke` workflow uses the same
+`make web-smoke-test` command after installing Chromium with Linux system
+dependencies.
 
 ## API Connection
 

@@ -44,8 +44,17 @@ export type AssistantStreamEvent = {
   data: Record<string, unknown>
 }
 
-function assistantHeaders(): Headers {
+function assistantMutationHeaders(): Headers {
   return buildMutationHeaders()
+}
+
+function assistantReadHeaders(accessToken?: string): Headers | undefined {
+  const normalizedAccessToken = accessToken?.trim()
+  if (!normalizedAccessToken) {
+    return undefined
+  }
+
+  return new Headers({ Authorization: `Bearer ${normalizedAccessToken}` })
 }
 
 function actionRequestQuery(init?: {
@@ -76,7 +85,7 @@ export async function listAssistantAgents(apiBase: string): Promise<AssistantAge
 
 export async function listAssistantConversations(
   apiBase: string,
-  init?: { headers?: HeadersInit; limit?: number },
+  init?: { accessToken?: string; limit?: number },
 ): Promise<AssistantConversationSummary[]> {
   const params = new URLSearchParams()
   if (typeof init?.limit === 'number') {
@@ -84,26 +93,26 @@ export async function listAssistantConversations(
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : ''
   return fetchJson<AssistantConversationSummary[]>(`${apiBase}/assistant/conversations${suffix}`, {
-    headers: init?.headers,
+    headers: assistantReadHeaders(init?.accessToken),
   })
 }
 
 export async function getAssistantConversation(
   apiBase: string,
   conversationId: number,
-  init?: { headers?: HeadersInit },
+  init?: { accessToken?: string },
 ): Promise<AssistantConversation> {
   return fetchJson<AssistantConversation>(
     `${apiBase}/assistant/conversations/${encodeURIComponent(String(conversationId))}`,
     {
-      headers: init?.headers,
+      headers: assistantReadHeaders(init?.accessToken),
     },
   )
 }
 
 export async function listAssistantRuns(
   apiBase: string,
-  init?: { headers?: HeadersInit; limit?: number },
+  init?: { accessToken?: string; limit?: number },
 ): Promise<AssistantRunSummary[]> {
   const params = new URLSearchParams()
   if (typeof init?.limit === 'number') {
@@ -111,24 +120,24 @@ export async function listAssistantRuns(
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : ''
   return fetchJson<AssistantRunSummary[]>(`${apiBase}/assistant/runs${suffix}`, {
-    headers: init?.headers,
+    headers: assistantReadHeaders(init?.accessToken),
   })
 }
 
 export async function getAssistantRun(
   apiBase: string,
   runId: number,
-  init?: { headers?: HeadersInit },
+  init?: { accessToken?: string },
 ): Promise<AssistantRun> {
   return fetchJson<AssistantRun>(`${apiBase}/assistant/runs/${encodeURIComponent(String(runId))}`, {
-    headers: init?.headers,
+    headers: assistantReadHeaders(init?.accessToken),
   })
 }
 
 export async function listAssistantActionRequests(
   apiBase: string,
   init?: {
-    headers?: HeadersInit
+    accessToken?: string
     status?: AssistantActionRequestStatus
     limit?: number
     offset?: number
@@ -137,7 +146,7 @@ export async function listAssistantActionRequests(
   return fetchJson<AssistantActionRequest[]>(
     `${apiBase}/assistant/action-requests${actionRequestQuery(init)}`,
     {
-      headers: init?.headers,
+      headers: assistantReadHeaders(init?.accessToken),
     },
   )
 }
@@ -145,12 +154,12 @@ export async function listAssistantActionRequests(
 export async function requestAssistantResponse(
   apiBase: string,
   payload: AssistantPromptRequest,
-  init?: { headers?: HeadersInit },
+  init?: { accessToken?: string },
 ): Promise<AssistantPromptResponse> {
   return postJson<AssistantPromptResponse>(
     `${apiBase}/assistant/respond`,
     payload as unknown as Record<string, unknown>,
-    { headers: init?.headers },
+    { headers: assistantReadHeaders(init?.accessToken) },
   )
 }
 
@@ -158,11 +167,11 @@ export async function streamAssistantResponse(
   apiBase: string,
   payload: AssistantPromptRequest,
   init: {
-    headers?: HeadersInit
+    accessToken?: string
     onEvent: (event: AssistantStreamEvent) => void
   },
 ): Promise<void> {
-  const headers = new Headers(init.headers)
+  const headers = assistantReadHeaders(init.accessToken) ?? new Headers()
   headers.set('Content-Type', 'application/json')
 
   const response = await requestOk(`${apiBase}/assistant/respond/stream`, {
@@ -229,12 +238,12 @@ export async function streamAssistantResponse(
 export async function previewAssistantPromptContext(
   apiBase: string,
   payload: AssistantPromptContextRequest,
-  init?: { headers?: HeadersInit },
+  init?: { accessToken?: string },
 ): Promise<AssistantPromptContext> {
   return postJson<AssistantPromptContext>(
     `${apiBase}/assistant/context`,
     payload as unknown as Record<string, unknown>,
-    { headers: init?.headers },
+    { headers: assistantReadHeaders(init?.accessToken) },
   )
 }
 
@@ -281,7 +290,7 @@ export async function approveAssistantActionRequest(
     `${apiBase}/assistant/action-requests/${actionRequestId}/approve`,
     {},
     {
-      headers: assistantHeaders(),
+      headers: assistantMutationHeaders(),
     },
   )
 }
@@ -294,7 +303,7 @@ export async function rejectAssistantActionRequest(
     `${apiBase}/assistant/action-requests/${actionRequestId}/reject`,
     {},
     {
-      headers: assistantHeaders(),
+      headers: assistantMutationHeaders(),
     },
   )
 }
@@ -310,14 +319,14 @@ export async function listAdminAssistantActionRequests(
   return fetchJson<AssistantActionRequest[]>(
     `${apiBase}/admin/assistant/action-requests${actionRequestQuery(init)}`,
     {
-      headers: assistantHeaders(),
+      headers: assistantMutationHeaders(),
     },
   )
 }
 
 export async function listAdminAssistantAgents(apiBase: string): Promise<AssistantAdminAgent[]> {
   return fetchJson<AssistantAdminAgent[]>(`${apiBase}/admin/assistant/agents`, {
-    headers: assistantHeaders(),
+    headers: assistantMutationHeaders(),
   })
 }
 
@@ -334,7 +343,7 @@ export async function createAssistantAgent(
       created_by: actorId,
     },
     {
-      headers: assistantHeaders(),
+      headers: assistantMutationHeaders(),
     },
   )
 }
@@ -353,7 +362,7 @@ export async function updateAssistantAgent(
       updated_by: actorId,
     },
     {
-      headers: assistantHeaders(),
+      headers: assistantMutationHeaders(),
     },
   )
 }

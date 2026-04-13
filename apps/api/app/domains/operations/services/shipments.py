@@ -24,7 +24,19 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceEmptyState,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourcePrimaryAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSummaryStat,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
@@ -1913,6 +1925,40 @@ DELIVERY_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
         "update_power_detail",
         "append_event",
     ),
+    surface=OperationalResourceSurface(
+        title="Delivery Board",
+        description=(
+            "One cross-mode board spans delivery obligations, shipment detail, event history, and "
+            "trade-derived resync behavior."
+        ),
+        board_section="Logistics",
+        primary_action=OperationalResourcePrimaryAction(
+            key="sync_trade_obligations",
+            label="Sync trade obligations",
+            detail="Refresh the delivery projection from the active trade book before operators edit mode-specific detail.",
+        ),
+        empty_state=OperationalResourceEmptyState(
+            title="No delivery board",
+            detail="Create active physical trades to start populating the delivery board.",
+        ),
+        summary_stats=(
+            OperationalResourceSummaryStat(
+                key="hot_windows",
+                label="Hot windows",
+                detail="Keep the next live and near-term delivery windows visible across every operating mode.",
+            ),
+            OperationalResourceSummaryStat(
+                key="blocked_obligations",
+                label="Blocked obligations",
+                detail="Surface blockers, missing master data, and stale logistics detail before execution slips.",
+            ),
+            OperationalResourceSummaryStat(
+                key="mode_specific_detail",
+                label="Mode-specific detail",
+                detail="Preserve distinct logistics, pipeline, and power scheduling controls on one shared board.",
+            ),
+        ),
+    ),
     load_rows=_load_delivery_rows,
     load_context=_load_delivery_context,
     build_item=_build_delivery_list_item,
@@ -1924,6 +1970,40 @@ SHIPMENT_RESOURCE_DESCRIPTOR = replace(
     DELIVERY_RESOURCE_DESCRIPTOR,
     resource_key="shipments",
     actions=("upsert_actualization",),
+    surface=OperationalResourceSurface(
+        title="Execution Actualization",
+        description=(
+            "Execution actualization is treated as a first-class operational resource with quantity, "
+            "timing, and variance updates on the same contract as the delivery board."
+        ),
+        board_section="Execution",
+        primary_action=OperationalResourcePrimaryAction(
+            key="record_actualization",
+            label="Record actualization",
+            detail="Capture executed quantity and timestamp once the physical movement is complete.",
+        ),
+        empty_state=OperationalResourceEmptyState(
+            title="No execution actuals",
+            detail="Completed and in-flight delivery obligations will expose actualization controls here.",
+        ),
+        summary_stats=(
+            OperationalResourceSummaryStat(
+                key="pending_actualization",
+                label="Pending actualization",
+                detail="Highlight obligations still missing executed quantity or final delivery timing.",
+            ),
+            OperationalResourceSummaryStat(
+                key="execution_variance",
+                label="Execution variance",
+                detail="Call out quantity or timing variance between planned delivery and executed movement.",
+            ),
+            OperationalResourceSummaryStat(
+                key="final_capture",
+                label="Final capture",
+                detail="Finish the downstream settlement chain with operator-owned actuals instead of inferred status alone.",
+            ),
+        ),
+    ),
 )
 
 

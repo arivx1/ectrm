@@ -5,9 +5,11 @@ import type {
   WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
+import { matchesTextFilter } from '../../shared/filtering'
 import { formatDateOnly } from '../../shared/format'
 import { tradeStatusIsActive } from '../../shared/trading'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
@@ -74,6 +76,7 @@ type TradingSourceRecord = {
 }
 
 type ExternalDataProviderStatusRecord = ExternalDataSyncStatusRecord['providers'][number]
+type CounterpartyCreditPreviewRow = CounterpartyCreditPreviewRecord['rows'][number]
 type ExternalDataSyncProvider = 'EIA' | 'EIA_FUNDAMENTALS' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT' | 'KALSHI'
 
 type SchemaEntityKey =
@@ -363,6 +366,148 @@ function marketDataCategoryLabel(value: string): string {
   }
 }
 
+function matchesAdminTradeFilter(trade: Trade, query: string): boolean {
+  return matchesTextFilter(query, [
+    trade.trade_id,
+    trade.book,
+    trade.commodity_class,
+    trade.commodity,
+    trade.price,
+    trade.status,
+    trade.updated_at,
+  ])
+}
+
+function matchesAdminEventFilter(event: EventRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    event.aggregate_id,
+    event.event_id,
+    event.event_type,
+    event.occurred_at,
+    event.recorded_at,
+    event.schema_version,
+  ])
+}
+
+function matchesAdminPositionFilter(position: PositionRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    position.commodity,
+    position.net_volume,
+    position.updated_at,
+  ])
+}
+
+function matchesReferenceFilter(record: ReferenceRecord, query: string): boolean {
+  return matchesTextFilter(query, [record.code, record.is_active])
+}
+
+function matchesExternalDataRunFilter(run: ExternalDataRunRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    run.id,
+    run.provider,
+    run.job_name,
+    run.status,
+    run.started_at,
+    run.finished_at,
+    run.requested_by,
+    run.series_count,
+    run.observation_count,
+    run.error_summary,
+  ])
+}
+
+function matchesExternalDataProviderFilter(provider: ExternalDataProviderStatusRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    provider.provider,
+    provider.label,
+    provider.category,
+    provider.health_status,
+    provider.latest_run_status,
+    provider.latest_observation_at,
+    provider.last_success_at,
+    provider.error_summary,
+    provider.latest_run?.id,
+    provider.latest_run?.status,
+  ])
+}
+
+function matchesTradingSourceFilter(source: TradingSourceRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    source.source_id,
+    source.source_name,
+    source.source_category,
+    source.business_owner,
+    source.system_owner,
+    source.criticality,
+    source.status,
+    source.update_frequency,
+    source.last_reviewed_at,
+  ])
+}
+
+function matchesWeatherLocationFilter(location: WeatherLocationRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    location.code,
+    location.name,
+    location.reference_location_code,
+    location.timezone,
+    location.source_provider,
+    location.cwa,
+    location.grid_id,
+    location.station_id,
+    location.description,
+    location.is_active,
+  ])
+}
+
+function matchesCounterpartyCreditPreviewRowFilter(row: CounterpartyCreditPreviewRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    row.row_number,
+    row.source_entity_id,
+    row.source_entity_name,
+    row.matched_counterparty_code,
+    row.matched_counterparty_name,
+    row.match_status,
+    row.match_basis,
+    row.matched_identifier_value,
+    row.rating_scale,
+    row.rating_value,
+    row.rating_outlook,
+    row.credit_score,
+    row.probability_of_default,
+    row.recommended_limit_currency_code,
+    row.recommended_limit_amount,
+    row.commentary,
+    row.ready_to_import,
+    row.snapshot?.counterparty_code,
+    row.snapshot?.source_entity_name,
+    row.snapshot?.as_of_date,
+    ...row.issues.flatMap((issue) => [issue.severity, issue.code, issue.message]),
+  ])
+}
+
+function matchesAdminDomainFilter(domain: (typeof ADMIN_DOMAIN_MAP)[number], query: string): boolean {
+  return matchesTextFilter(query, [domain.label, domain.summary, ...domain.entities])
+}
+
+function matchesSchemaEntityFilter(entity: (typeof SCHEMA_ENTITIES)[number], query: string): boolean {
+  return matchesTextFilter(query, [
+    entity.label,
+    entity.status,
+    entity.purpose,
+    ...entity.fields,
+    ...entity.relationships,
+    ...entity.consumers,
+  ])
+}
+
+function matchesLifecycleStepFilter(
+  step: { title: string; detail: string; meta: string[] },
+  query: string,
+): boolean {
+  return matchesTextFilter(query, [step.title, step.detail, ...step.meta])
+}
+
 export function AdminWorkspace({
   authSession,
   onOpenSettings,
@@ -418,29 +563,84 @@ export function AdminWorkspace({
   formatCommodityClass,
 }: AdminWorkspaceProps) {
   const [selectedSchemaEntity, setSelectedSchemaEntity] = useState<SchemaEntityKey>('events')
+  const [screenFilter, setScreenFilter] = useState('')
+  const hasScreenFilter = screenFilter.trim().length > 0
+
+  const visibleEvents = useMemo(
+    () => events.filter((event) => matchesAdminEventFilter(event, screenFilter)),
+    [events, screenFilter],
+  )
+  const visibleTrades = useMemo(
+    () => trades.filter((trade) => matchesAdminTradeFilter(trade, screenFilter)),
+    [screenFilter, trades],
+  )
+  const visiblePositions = useMemo(
+    () => positions.filter((position) => matchesAdminPositionFilter(position, screenFilter)),
+    [positions, screenFilter],
+  )
+  const visibleActiveBooks = useMemo(
+    () => activeBooks.filter((record) => matchesReferenceFilter(record, screenFilter)),
+    [activeBooks, screenFilter],
+  )
+  const visibleActiveCommodities = useMemo(
+    () => activeCommodities.filter((record) => matchesReferenceFilter(record, screenFilter)),
+    [activeCommodities, screenFilter],
+  )
+  const visiblePriceIndices = useMemo(
+    () => priceIndices.filter((record) => matchesReferenceFilter(record, screenFilter)),
+    [priceIndices, screenFilter],
+  )
+  const visibleExternalDataRuns = useMemo(
+    () => externalDataRuns.filter((run) => matchesExternalDataRunFilter(run, screenFilter)),
+    [externalDataRuns, screenFilter],
+  )
+  const visibleTradingSources = useMemo(
+    () => tradingSources.filter((source) => matchesTradingSourceFilter(source, screenFilter)),
+    [screenFilter, tradingSources],
+  )
+  const visibleWeatherLocations = useMemo(
+    () => weatherLocations.filter((location) => matchesWeatherLocationFilter(location, screenFilter)),
+    [screenFilter, weatherLocations],
+  )
+  const visibleCounterpartyCreditPreviewRows = useMemo(
+    () => counterpartyCreditPreview?.rows.filter((row) => matchesCounterpartyCreditPreviewRowFilter(row, screenFilter)) ?? [],
+    [counterpartyCreditPreview, screenFilter],
+  )
+  const visibleAdminDomains = useMemo(
+    () => ADMIN_DOMAIN_MAP.filter((domain) => matchesAdminDomainFilter(domain, screenFilter)),
+    [screenFilter],
+  )
+  const visibleSchemaEntities = useMemo(
+    () => SCHEMA_ENTITIES.filter((entity) => matchesSchemaEntityFilter(entity, screenFilter)),
+    [screenFilter],
+  )
+
+  const latestEventSource = hasScreenFilter ? visibleEvents : events
+  const latestTradeProjectionSource = hasScreenFilter ? visibleTrades : trades
+  const latestPositionProjectionSource = hasScreenFilter ? visiblePositions : positions
 
   const latestEvent = useMemo(
     () =>
-      [...events].sort(
+      [...latestEventSource].sort(
         (left, right) => new Date(right.recorded_at).getTime() - new Date(left.recorded_at).getTime(),
       )[0] ?? null,
-    [events],
+    [latestEventSource],
   )
 
   const latestTradeProjectionUpdate = useMemo(
     () =>
-      [...trades].sort(
+      [...latestTradeProjectionSource].sort(
         (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
       )[0] ?? null,
-    [trades],
+    [latestTradeProjectionSource],
   )
 
   const latestPositionProjectionUpdate = useMemo(
     () =>
-      [...positions].sort(
+      [...latestPositionProjectionSource].sort(
         (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
       )[0] ?? null,
-    [positions],
+    [latestPositionProjectionSource],
   )
 
   const projectionFreshnessLabel = useMemo(() => {
@@ -538,17 +738,25 @@ export function AdminWorkspace({
     selectedTradeEvents,
     selectedTradePositions,
   ])
+  const visibleLifecycleSteps = useMemo(
+    () => lifecycleSteps.filter((step) => matchesLifecycleStepFilter(step, screenFilter)),
+    [lifecycleSteps, screenFilter],
+  )
+  const effectiveSelectedSchemaEntity =
+    visibleSchemaEntities.some((entity) => entity.key === selectedSchemaEntity)
+      ? selectedSchemaEntity
+      : visibleSchemaEntities[0]?.key ?? selectedSchemaEntity
 
   const selectedSchemaDetail = useMemo(
-    () => SCHEMA_ENTITIES.find((entity) => entity.key === selectedSchemaEntity) ?? SCHEMA_ENTITIES[0],
-    [selectedSchemaEntity],
+    () => visibleSchemaEntities.find((entity) => entity.key === effectiveSelectedSchemaEntity) ?? null,
+    [effectiveSelectedSchemaEntity, visibleSchemaEntities],
   )
 
   const adminSummaryCards = useMemo(
     () => [
       {
         label: 'Events Recorded',
-        value: `${events.length}`,
+        value: `${hasScreenFilter ? visibleEvents.length : events.length}`,
         note: latestEvent ? `Latest ${formatDate(latestEvent.recorded_at)}` : 'No events loaded yet',
         tooltip: 'Count of event rows currently loaded into the admin workspace session.',
       },
@@ -561,34 +769,48 @@ export function AdminWorkspace({
       },
       {
         label: 'Reference Records',
-        value: `${activeBooks.length + activeCommodities.length + priceIndices.filter((row) => row.is_active).length}`,
-        note: `${activeBooks.length} books, ${activeCommodities.length} commodities, ${priceIndices.filter((row) => row.is_active).length} price indices`,
+        value: `${visibleActiveBooks.length + visibleActiveCommodities.length + visiblePriceIndices.filter((row) => row.is_active).length}`,
+        note: `${visibleActiveBooks.length} books, ${visibleActiveCommodities.length} commodities, ${visiblePriceIndices.filter((row) => row.is_active).length} price indices`,
         tooltip: 'Total active master-data records currently supporting trading and pricing workflows.',
       },
     ],
     [
-      activeBooks.length,
-      activeCommodities.length,
       events.length,
       formatDate,
+      hasScreenFilter,
       latestEvent,
       latestTradeProjectionUpdate,
-      priceIndices,
       projectionFreshnessLabel,
+      visibleActiveBooks.length,
+      visibleActiveCommodities.length,
+      visibleEvents.length,
+      visiblePriceIndices,
     ],
   )
 
   const marketDataProviders = useMemo(
-    () => externalDataSyncStatus?.providers ?? [],
-    [externalDataSyncStatus],
+    () =>
+      (externalDataSyncStatus?.providers ?? []).filter((provider) =>
+        matchesExternalDataProviderFilter(provider, screenFilter),
+      ),
+    [externalDataSyncStatus, screenFilter],
   )
   const marketDataProviderCodes = useMemo(
     () => new Set(marketDataProviders.map((provider) => provider.provider)),
     [marketDataProviders],
   )
+  const allMarketDataProviderCodes = useMemo(
+    () => new Set((externalDataSyncStatus?.providers ?? []).map((provider) => provider.provider)),
+    [externalDataSyncStatus],
+  )
   const marketDataRuns = useMemo(
-    () => externalDataRuns.filter((run) => marketDataProviderCodes.has(run.provider)),
-    [externalDataRuns, marketDataProviderCodes],
+    () =>
+      externalDataRuns.filter(
+        (run) =>
+          allMarketDataProviderCodes.has(run.provider) &&
+          (marketDataProviderCodes.has(run.provider) || matchesExternalDataRunFilter(run, screenFilter)),
+      ),
+    [allMarketDataProviderCodes, externalDataRuns, marketDataProviderCodes, screenFilter],
   )
   const latestMarketDataRun = useMemo(() => marketDataRuns[0] ?? null, [marketDataRuns])
   const latestFreshMarketDataProvider = useMemo(() => {
@@ -605,38 +827,82 @@ export function AdminWorkspace({
     () => marketDataProviders.filter((provider) => provider.category === 'power'),
     [marketDataProviders],
   )
-  const marketDataAttentionCount =
-    (externalDataSyncStatus?.stale_provider_count ?? 0) +
-    (externalDataSyncStatus?.failed_provider_count ?? 0) +
-    (externalDataSyncStatus?.unknown_provider_count ?? 0)
+  const marketDataAttentionCount = marketDataProviders.filter((provider) =>
+    ['failed', 'stale', 'missing', 'degraded'].includes(provider.health_status),
+  ).length
   const counterpartyCreditImportRuns = useMemo(
-    () => externalDataRuns.filter((run) => run.job_name === 'import_counterparty_credit_snapshots'),
-    [externalDataRuns],
+    () => visibleExternalDataRuns.filter((run) => run.job_name === 'import_counterparty_credit_snapshots'),
+    [visibleExternalDataRuns],
   )
   const latestCounterpartyCreditImportRun = useMemo(
     () => counterpartyCreditImportRuns[0] ?? null,
     [counterpartyCreditImportRuns],
   )
   const readyCounterpartyCreditPreviewRows = useMemo(
-    () => counterpartyCreditPreview?.rows.filter((row) => row.ready_to_import) ?? [],
-    [counterpartyCreditPreview],
+    () => visibleCounterpartyCreditPreviewRows.filter((row) => row.ready_to_import),
+    [visibleCounterpartyCreditPreviewRows],
   )
-  const previewBlockedRowCount = counterpartyCreditPreview?.blocked_rows ?? 0
-  const previewWarningRowCount = counterpartyCreditPreview?.warning_rows ?? 0
+  const previewBlockedRowCount = visibleCounterpartyCreditPreviewRows.filter(
+    (row) => row.issues.some((issue) => issue.severity === 'error'),
+  ).length
+  const previewWarningRowCount = visibleCounterpartyCreditPreviewRows.filter(
+    (row) => row.issues.some((issue) => issue.severity !== 'error'),
+  ).length
+  const previewMatchedRowCount = visibleCounterpartyCreditPreviewRows.filter(
+    (row) => Boolean(row.matched_counterparty_code),
+  ).length
 
   const tradingSourcesByCriticality = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const row of tradingSources) {
+    for (const row of visibleTradingSources) {
       counts.set(row.criticality, (counts.get(row.criticality) ?? 0) + 1)
     }
     return ['tier_0', 'tier_1', 'tier_2', 'tier_3']
       .map((key) => ({ key, count: counts.get(key) ?? 0 }))
       .filter((row) => row.count > 0)
-  }, [tradingSources])
+  }, [visibleTradingSources])
+  const selectedTradeHiddenByFilter =
+    hasScreenFilter && selectedTrade !== null && !matchesAdminTradeFilter(selectedTrade, screenFilter)
 
   return (
     <div className="stack">
       <SystemStatusPanel />
+      <WorkspaceLocalFilterBar
+        value={screenFilter}
+        onChange={setScreenFilter}
+        placeholder="Trade, event, provider, weather location, D&B preview row, source register, or schema concept"
+        description="Keep admin filtering local to this screen so you can narrow live operational records and explainability cards without changing the rest of the app."
+        totalCount={
+          events.length +
+          trades.length +
+          positions.length +
+          activeBooks.length +
+          activeCommodities.length +
+          priceIndices.length +
+          externalDataRuns.length +
+          tradingSources.length +
+          weatherLocations.length +
+          (counterpartyCreditPreview?.rows.length ?? 0)
+        }
+        matchedCount={
+          visibleEvents.length +
+          visibleTrades.length +
+          visiblePositions.length +
+          visibleActiveBooks.length +
+          visibleActiveCommodities.length +
+          visiblePriceIndices.length +
+          visibleExternalDataRuns.length +
+          visibleTradingSources.length +
+          visibleWeatherLocations.length +
+          visibleCounterpartyCreditPreviewRows.length
+        }
+        resultLabel="admin records"
+        note={
+          selectedTradeHiddenByFilter
+            ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filter. Dedicated admin sub-panels below keep their own controls.`
+            : 'Dedicated admin sub-panels below keep their own controls.'
+        }
+      />
 
       <section className="surface feature-panel admin-hero-surface">
         <div className="section-head">
@@ -669,7 +935,7 @@ export function AdminWorkspace({
 
         <WeatherOperationsPanel
           authSession={authSession}
-          weatherLocations={weatherLocations}
+          weatherLocations={visibleWeatherLocations}
           weatherSyncStatus={weatherSyncStatus}
           weatherSyncing={weatherSyncing}
           weatherSyncError={weatherSyncError}
@@ -712,12 +978,12 @@ export function AdminWorkspace({
               />
               <p>
                 {externalDataSyncStatus
-                  ? `${externalDataSyncStatus.healthy_provider_count} of ${externalDataSyncStatus.provider_count} providers are healthy.`
+                  ? `${marketDataProviders.filter((provider) => provider.health_status === 'healthy').length} of ${marketDataProviders.length} providers are healthy.`
                   : 'Market-data sync status has not been loaded yet.'}
               </p>
               <span>
                 {externalDataSyncStatus
-                  ? `${externalDataSyncStatus.failed_provider_count} failed · ${externalDataSyncStatus.stale_provider_count} stale · ${externalDataSyncStatus.unknown_provider_count} unknown`
+                  ? `${marketDataProviders.filter((provider) => provider.health_status === 'failed').length} failed · ${marketDataProviders.filter((provider) => provider.health_status === 'stale').length} stale · ${marketDataProviders.filter((provider) => provider.health_status === 'missing').length} missing`
                   : 'Awaiting first status snapshot'}
               </span>
             </article>
@@ -749,7 +1015,7 @@ export function AdminWorkspace({
               </p>
               <span>
                 {externalDataSyncStatus
-                  ? `${externalDataSyncStatus.running_provider_count} running · ${marketDataProviders.filter((provider) => provider.due_for_sync).length} due for sync`
+                  ? `${marketDataProviders.filter((provider) => provider.health_status === 'running').length} running · ${marketDataProviders.filter((provider) => provider.due_for_sync).length} due for sync`
                   : 'No scheduler state loaded'}
               </span>
             </article>
@@ -777,7 +1043,7 @@ export function AdminWorkspace({
           <div className="admin-run-list">
             {marketDataProviders.length === 0 ? (
               <div className="detail-row">
-                <span>No market-data provider status is loaded yet.</span>
+                <span>{hasScreenFilter ? 'No market-data providers match the current local filter.' : 'No market-data provider status is loaded yet.'}</span>
               </div>
             ) : (
               marketDataProviders.map((provider: ExternalDataProviderStatusRecord) => (
@@ -817,7 +1083,7 @@ export function AdminWorkspace({
           <div className="admin-run-list">
             {marketDataRuns.length === 0 ? (
               <div className="detail-row">
-                <span>No market-data sync runs are loaded yet.</span>
+                <span>{hasScreenFilter ? 'No market-data sync runs match the current local filter.' : 'No market-data sync runs are loaded yet.'}</span>
               </div>
             ) : (
               marketDataRuns.slice(0, 8).map((run) => (
@@ -915,7 +1181,7 @@ export function AdminWorkspace({
               </p>
               <span>
                 {counterpartyCreditPreview
-                  ? `${counterpartyCreditPreview.matched_rows} matched of ${counterpartyCreditPreview.total_rows}`
+                  ? `${previewMatchedRowCount} matched of ${visibleCounterpartyCreditPreviewRows.length}`
                   : 'Awaiting preview'}
               </span>
             </article>
@@ -955,10 +1221,10 @@ export function AdminWorkspace({
             <div className="stack">
               <div className="chip-row">
                 <span className="entity-chip entity-chip-soft">
-                  {counterpartyCreditPreview.total_rows} row{counterpartyCreditPreview.total_rows === 1 ? '' : 's'}
+                  {visibleCounterpartyCreditPreviewRows.length} row{visibleCounterpartyCreditPreviewRows.length === 1 ? '' : 's'}
                 </span>
                 <span className="entity-chip entity-chip-soft">
-                  {counterpartyCreditPreview.matched_rows} matched
+                  {previewMatchedRowCount} matched
                 </span>
                 <span className="entity-chip entity-chip-soft">
                   {readyCounterpartyCreditPreviewRows.length} ready
@@ -972,7 +1238,12 @@ export function AdminWorkspace({
               </div>
 
               <div className="admin-run-list">
-                {counterpartyCreditPreview.rows.map((row) => {
+                {visibleCounterpartyCreditPreviewRows.length === 0 ? (
+                  <div className="detail-row">
+                    <span>No D&amp;B preview rows match the current local filter.</span>
+                  </div>
+                ) : (
+                  visibleCounterpartyCreditPreviewRows.map((row) => {
                   const recommendedLimit =
                     row.recommended_limit_amount != null
                       ? `${row.recommended_limit_currency_code ?? '—'} ${formatNumber(row.recommended_limit_amount, 2)}`
@@ -1027,7 +1298,8 @@ export function AdminWorkspace({
                       </div>
                     </article>
                   )
-                })}
+                  })
+                )}
               </div>
             </div>
           ) : null}
@@ -1035,7 +1307,7 @@ export function AdminWorkspace({
           <div className="admin-run-list">
             {counterpartyCreditImportRuns.length === 0 ? (
               <div className="detail-row">
-                <span>No counterparty credit import runs are loaded yet.</span>
+                <span>{hasScreenFilter ? 'No counterparty credit import runs match the current local filter.' : 'No counterparty credit import runs are loaded yet.'}</span>
               </div>
             ) : (
               counterpartyCreditImportRuns.slice(0, 8).map((run) => (
@@ -1082,8 +1354,8 @@ export function AdminWorkspace({
                 label="Loaded Sources"
                 tooltip="Current number of source-governance records seeded into the live database."
               />
-              <p>{tradingSources.length === 0 ? 'No trading-source metadata has been seeded yet.' : `${tradingSources.length} sources are available in the live register.`}</p>
-              <span>{tradingSources.length === 0 ? 'Seed the register to activate this surface' : `${tradingSources.filter((row) => row.status === 'active').length} active records`}</span>
+              <p>{visibleTradingSources.length === 0 ? 'No trading-source metadata is currently in view.' : `${visibleTradingSources.length} sources are available in the current admin view.`}</p>
+              <span>{visibleTradingSources.length === 0 ? 'Seed the register to activate this surface' : `${visibleTradingSources.filter((row) => row.status === 'active').length} active records`}</span>
             </article>
             <article className="admin-card">
               <AdminCardTitle
@@ -1095,7 +1367,7 @@ export function AdminWorkspace({
                   ? 'Criticality will populate after the first seed.'
                   : tradingSourcesByCriticality.map((row) => `${row.key}: ${row.count}`).join(' · ')}
               </p>
-              <span>{tradingSources.length === 0 ? 'Awaiting seed' : 'Derived from live table rows'}</span>
+              <span>{visibleTradingSources.length === 0 ? 'Awaiting seed' : 'Derived from live table rows'}</span>
             </article>
           </div>
 
@@ -1103,12 +1375,12 @@ export function AdminWorkspace({
           {tradingSourcesSuccess ? <div className="feedback-banner feedback-banner-success">{tradingSourcesSuccess}</div> : null}
 
           <div className="admin-run-list">
-            {tradingSources.length === 0 ? (
+            {visibleTradingSources.length === 0 ? (
               <div className="detail-row">
-                <span>No trading sources loaded.</span>
+                <span>{hasScreenFilter ? 'No trading sources match the current local filter.' : 'No trading sources loaded.'}</span>
               </div>
             ) : (
-              tradingSources.slice(0, 10).map((row) => (
+              visibleTradingSources.slice(0, 10).map((row) => (
                 <article key={row.source_id} className="admin-run-row">
                   <div>
                     <strong>{row.source_name}</strong>
@@ -1138,22 +1410,29 @@ export function AdminWorkspace({
           </div>
 
           <div className="domain-map-grid">
-            {ADMIN_DOMAIN_MAP.map((domain) => (
-              <article key={domain.key} className="domain-card">
-                <div className="domain-card-head">
-                  <strong>{domain.label}</strong>
-                  <span>{domain.entities.length} entities</span>
-                </div>
-                <p>{domain.summary}</p>
-                <div className="chip-row">
-                  {domain.entities.map((entity) => (
-                    <span key={entity} className="entity-chip">
-                      {entity}
-                    </span>
-                  ))}
-                </div>
-              </article>
-            ))}
+            {visibleAdminDomains.length === 0 ? (
+              <div className="empty-state">
+                <strong>No domain concepts match the filter</strong>
+                <p>Try a broader local search to bring more architecture slices back into view.</p>
+              </div>
+            ) : (
+              visibleAdminDomains.map((domain) => (
+                <article key={domain.key} className="domain-card">
+                  <div className="domain-card-head">
+                    <strong>{domain.label}</strong>
+                    <span>{domain.entities.length} entities</span>
+                  </div>
+                  <p>{domain.summary}</p>
+                  <div className="chip-row">
+                    {domain.entities.map((entity) => (
+                      <span key={entity} className="entity-chip">
+                        {entity}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              ))
+            )}
           </div>
         </article>
 
@@ -1167,22 +1446,29 @@ export function AdminWorkspace({
           </div>
 
           <div className="timeline timeline-large">
-            {lifecycleSteps.map((step) => (
-              <article key={step.key} className="timeline-item timeline-item-card">
-                <div className="timeline-dot" />
-                <div className="timeline-body">
-                  <div className="timeline-head">
-                    <strong>{step.title}</strong>
+            {visibleLifecycleSteps.length === 0 ? (
+              <div className="empty-state">
+                <strong>No lifecycle steps match the filter</strong>
+                <p>The selected trade trace stays available, but nothing in the current step copy matches this local search.</p>
+              </div>
+            ) : (
+              visibleLifecycleSteps.map((step) => (
+                <article key={step.key} className="timeline-item timeline-item-card">
+                  <div className="timeline-dot" />
+                  <div className="timeline-body">
+                    <div className="timeline-head">
+                      <strong>{step.title}</strong>
+                    </div>
+                    <p>{step.detail}</p>
+                    <div className="timeline-meta">
+                      {step.meta.map((item) => (
+                        <span key={item}>{item}</span>
+                      ))}
+                    </div>
                   </div>
-                  <p>{step.detail}</p>
-                  <div className="timeline-meta">
-                    {step.meta.map((item) => (
-                      <span key={item}>{item}</span>
-                    ))}
-                  </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              ))
+            )}
           </div>
         </article>
       </section>
@@ -1199,11 +1485,11 @@ export function AdminWorkspace({
 
           <div className="schema-explorer-grid">
             <div className="schema-entity-list">
-              {SCHEMA_ENTITIES.map((entity) => (
+              {visibleSchemaEntities.map((entity) => (
                 <button
                   key={entity.key}
                   type="button"
-                  className={`schema-entity-button ${selectedSchemaEntity === entity.key ? 'is-active' : ''}`}
+                  className={`schema-entity-button ${effectiveSelectedSchemaEntity === entity.key ? 'is-active' : ''}`}
                   onClick={() => setSelectedSchemaEntity(entity.key)}
                 >
                   <strong>{entity.label}</strong>
@@ -1212,61 +1498,68 @@ export function AdminWorkspace({
               ))}
             </div>
 
-            <div className="schema-detail-card">
-              <div className="schema-detail-head">
-                <div>
-                  <span className="eyebrow">Entity</span>
-                  <h4>{selectedSchemaDetail.label}</h4>
+            {selectedSchemaDetail ? (
+              <div className="schema-detail-card">
+                <div className="schema-detail-head">
+                  <div>
+                    <span className="eyebrow">Entity</span>
+                    <h4>{selectedSchemaDetail.label}</h4>
+                  </div>
+                  <Tooltip
+                    content={
+                      selectedSchemaDetail.status === 'Current'
+                        ? 'This entity already exists in the current product model and runtime.'
+                        : 'This entity is planned for a future iteration and is not live yet.'
+                    }
+                    focusable
+                  >
+                    <span className="schema-status tooltip-trigger-hint">{selectedSchemaDetail.status}</span>
+                  </Tooltip>
                 </div>
-                <Tooltip
-                  content={
-                    selectedSchemaDetail.status === 'Current'
-                      ? 'This entity already exists in the current product model and runtime.'
-                      : 'This entity is planned for a future iteration and is not live yet.'
-                  }
-                  focusable
-                >
-                  <span className="schema-status tooltip-trigger-hint">{selectedSchemaDetail.status}</span>
-                </Tooltip>
+
+                <p>{selectedSchemaDetail.purpose}</p>
+
+                <div className="schema-columns">
+                  <div className="schema-column">
+                    <span className="schema-label">Key Fields</span>
+                    <div className="chip-row">
+                      {selectedSchemaDetail.fields.map((field) => (
+                        <span key={field} className="entity-chip">
+                          {field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="schema-column">
+                    <span className="schema-label">Relationships</span>
+                    <div className="stack">
+                      {selectedSchemaDetail.relationships.map((relationship) => (
+                        <div key={relationship} className="detail-row">
+                          <span>{relationship}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="schema-column">
+                    <span className="schema-label">Consumers</span>
+                    <div className="chip-row">
+                      {selectedSchemaDetail.consumers.map((consumer) => (
+                        <span key={consumer} className="entity-chip entity-chip-soft">
+                          {consumer}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
-
-              <p>{selectedSchemaDetail.purpose}</p>
-
-              <div className="schema-columns">
-                <div className="schema-column">
-                  <span className="schema-label">Key Fields</span>
-                  <div className="chip-row">
-                    {selectedSchemaDetail.fields.map((field) => (
-                      <span key={field} className="entity-chip">
-                        {field}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="schema-column">
-                  <span className="schema-label">Relationships</span>
-                  <div className="stack">
-                    {selectedSchemaDetail.relationships.map((relationship) => (
-                      <div key={relationship} className="detail-row">
-                        <span>{relationship}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="schema-column">
-                  <span className="schema-label">Consumers</span>
-                  <div className="chip-row">
-                    {selectedSchemaDetail.consumers.map((consumer) => (
-                      <span key={consumer} className="entity-chip entity-chip-soft">
-                        {consumer}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No schema entities match the filter</strong>
+                <p>Try a broader local search to bring the entity explorer back into view.</p>
               </div>
-            </div>
+            )}
           </div>
         </article>
 

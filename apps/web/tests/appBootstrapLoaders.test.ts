@@ -291,12 +291,54 @@ test('loadCoreWorkspaceBootstrap fetches only the shell-critical datasets', asyn
           filters: ['trade_id'],
           sort_fields: ['created_at desc', 'id desc'],
           actions: ['create', 'update', 'issue', 'record_response'],
+          surface: {
+            title: 'Confirmation Ledger',
+            description: 'Dedicated confirmation records drive draft and issue handling.',
+            board_section: 'Trade Confirmation',
+            primary_action: {
+              key: 'issue_current_draft',
+              label: 'Issue current draft',
+              detail: 'Promote the latest confirmation version once the draft is ready.',
+            },
+            empty_state: {
+              title: 'No confirmation queue',
+              detail: 'Active trades will appear here once there is confirmation work to manage.',
+            },
+            summary_stats: [
+              {
+                key: 'draft_versions',
+                label: 'Draft versions',
+                detail: 'Track draft and amended versions inside one ledger.',
+              },
+            ],
+          },
         },
         {
           resource_key: 'work_items',
           filters: ['queue', 'include_closed', 'trade_id'],
           sort_fields: ['attention_rank'],
           actions: ['create', 'update', 'book_underlying'],
+          surface: {
+            title: 'Operational Work Queue',
+            description: 'The queue stays focused on owner, due date, and downstream handoff decisions.',
+            board_section: 'Critical Path',
+            primary_action: {
+              key: 'create_handoff',
+              label: 'Create handoff',
+              detail: 'Open the next operational workflow item as soon as the desk needs one.',
+            },
+            empty_state: {
+              title: 'No open work queue',
+              detail: 'Create active trades to start opening confirmation, actualization, credit, or settlement handoffs.',
+            },
+            summary_stats: [
+              {
+                key: 'unassigned_handoffs',
+                label: 'Unassigned handoffs',
+                detail: 'Keep ownerless tasks visible before they age into operational risk.',
+              },
+            ],
+          },
         },
       ]
     }
@@ -313,12 +355,54 @@ test('loadCoreWorkspaceBootstrap fetches only the shell-critical datasets', asyn
         filters: ['trade_id'],
         sort_fields: ['created_at desc', 'id desc'],
         actions: ['create', 'update', 'issue', 'record_response'],
+        surface: {
+          title: 'Confirmation Ledger',
+          description: 'Dedicated confirmation records drive draft and issue handling.',
+          board_section: 'Trade Confirmation',
+          primary_action: {
+            key: 'issue_current_draft',
+            label: 'Issue current draft',
+            detail: 'Promote the latest confirmation version once the draft is ready.',
+          },
+          empty_state: {
+            title: 'No confirmation queue',
+            detail: 'Active trades will appear here once there is confirmation work to manage.',
+          },
+          summary_stats: [
+            {
+              key: 'draft_versions',
+              label: 'Draft versions',
+              detail: 'Track draft and amended versions inside one ledger.',
+            },
+          ],
+        },
       },
       {
         resource_key: 'work_items',
         filters: ['queue', 'include_closed', 'trade_id'],
         sort_fields: ['attention_rank'],
         actions: ['create', 'update', 'book_underlying'],
+        surface: {
+          title: 'Operational Work Queue',
+          description: 'The queue stays focused on owner, due date, and downstream handoff decisions.',
+          board_section: 'Critical Path',
+          primary_action: {
+            key: 'create_handoff',
+            label: 'Create handoff',
+            detail: 'Open the next operational workflow item as soon as the desk needs one.',
+          },
+          empty_state: {
+            title: 'No open work queue',
+            detail: 'Create active trades to start opening confirmation, actualization, credit, or settlement handoffs.',
+          },
+          summary_stats: [
+            {
+              key: 'unassigned_handoffs',
+              label: 'Unassigned handoffs',
+              detail: 'Keep ownerless tasks visible before they age into operational risk.',
+            },
+          ],
+        },
       },
     ],
     workspaceSummary: {

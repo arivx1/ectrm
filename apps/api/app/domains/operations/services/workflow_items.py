@@ -27,7 +27,19 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceEmptyState,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceListRequest,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourcePrimaryAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSummaryStat,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
@@ -1156,6 +1168,40 @@ WORKFLOW_ITEM_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
     filters=("queue", "include_closed", "trade_id"),
     sort_fields=("attention_rank",),
     actions=("create", "update", "book_underlying"),
+    surface=OperationalResourceSurface(
+        title="Operational Work Queue",
+        description=(
+            "The queue stays focused on owner, due date, and downstream handoff decisions after "
+            "record-managed ledgers set lifecycle state."
+        ),
+        board_section="Critical Path",
+        primary_action=OperationalResourcePrimaryAction(
+            key="create_handoff",
+            label="Create handoff",
+            detail="Open the next operational workflow item as soon as the desk needs a named owner and due date.",
+        ),
+        empty_state=OperationalResourceEmptyState(
+            title="No open work queue",
+            detail="Create active trades to start opening confirmation, actualization, credit, or settlement handoffs.",
+        ),
+        summary_stats=(
+            OperationalResourceSummaryStat(
+                key="unassigned_handoffs",
+                label="Unassigned handoffs",
+                detail="Keep ownerless tasks visible before they age into hidden operational risk.",
+            ),
+            OperationalResourceSummaryStat(
+                key="due_and_overdue",
+                label="Due and overdue",
+                detail="Rank the queue by attention so near-term handoffs rise above passive backlog.",
+            ),
+            OperationalResourceSummaryStat(
+                key="exception_path",
+                label="Exception path",
+                detail="Use the same queue to route credit, dispute, and option settlement exceptions through operations.",
+            ),
+        ),
+    ),
     load_rows=_load_workflow_item_rows,
     load_context=_load_workflow_item_context,
     build_item=_build_workflow_item_list_item,

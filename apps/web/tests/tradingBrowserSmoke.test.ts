@@ -19,9 +19,25 @@ type RecordedRequest = {
 type MockApiServer = {
   baseUrl: string
   expireSession: () => void
+  layoutRequests: RecordedRequest[]
   mutationRequests: RecordedRequest[]
   unexpectedRequests: RecordedRequest[]
   close: () => Promise<void>
+}
+
+type StartMockApiServerOptions = {
+  singleUserAuthEnabled?: boolean
+}
+
+type StoredLayoutResponse = {
+  workspace_id: string
+  order: string[]
+  hidden: string[]
+  spans: Record<string, string>
+  sections: Record<string, string[]>
+  updated_at: string
+  updated_by: string
+  version: number
 }
 
 const webRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -29,7 +45,7 @@ const smokeAccessToken = 'smoke-access-token'
 const smokeSession = {
   sessionId: 'smoke-session-1',
   accessToken: smokeAccessToken,
-  expiresAt: '2026-04-12T18:00:00Z',
+  expiresAt: '2026-04-20T18:00:00Z',
   user: {
     user_id: 'ops_admin',
     email: 'ops@example.com',
@@ -305,6 +321,23 @@ function writeNoContent(response: ServerResponse): void {
   response.end()
 }
 
+function normalizeStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function normalizeSections(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([sectionId, itemIds]) => [
+      sectionId,
+      normalizeStringList(itemIds),
+    ]),
+  )
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = []
   for await (const chunk of request) {
@@ -397,10 +430,27 @@ function buildWorkspaceSummary() {
   }
 }
 
-async function startMockApiServer(): Promise<MockApiServer> {
+async function startMockApiServer(
+  options: StartMockApiServerOptions = {},
+): Promise<MockApiServer> {
+  const layoutRequests: RecordedRequest[] = []
   const mutationRequests: RecordedRequest[] = []
   const unexpectedRequests: RecordedRequest[] = []
+  const layoutDefinitions: Record<string, StoredLayoutResponse | null> = {
+    dashboard: null,
+    operations: null,
+    positions: null,
+    reports: null,
+    risk: null,
+    settlement: null,
+    shipments: null,
+    trades: null,
+  }
   let sessionExpired = false
+  const runtimeSettings = {
+    ...publicRuntimeSettings,
+    single_user_auth_enabled: options.singleUserAuthEnabled ?? publicRuntimeSettings.single_user_auth_enabled,
+  }
 
   const server = createHttpServer(async (request, response) => {
     const method = request.method ?? 'GET'
@@ -411,12 +461,16 @@ async function startMockApiServer(): Promise<MockApiServer> {
       search: url.search,
     }
 
+    if (method === 'PUT' && url.pathname.startsWith('/layout-definitions/')) {
+      layoutRequests.push(record)
+    }
+
     if (
       method !== 'GET' &&
       !(method === 'POST' && url.pathname === '/auth/heartbeat') &&
       !(method === 'POST' && url.pathname === '/auth/session') &&
-      !(method === 'PUT' && url.pathname === '/layout-definitions/trades') &&
-      !(method === 'PUT' && url.pathname === '/layout-definitions/dashboard')
+      !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
+      !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
     ) {
       mutationRequests.push(record)
     }
@@ -427,7 +481,7 @@ async function startMockApiServer(): Promise<MockApiServer> {
     }
 
     if (url.pathname === '/settings/public' && method === 'GET') {
-      writeJson(response, publicRuntimeSettings)
+      writeJson(response, runtimeSettings)
       return
     }
 
@@ -444,6 +498,17 @@ async function startMockApiServer(): Promise<MockApiServer> {
       assert.equal(typeof sessionRequest.password, 'string')
       sessionExpired = false
 
+      writeJson(response, {
+        session_id: smokeSession.sessionId,
+        access_token: smokeSession.accessToken,
+        expires_at: smokeSession.expiresAt,
+        user: smokeSession.user,
+      })
+      return
+    }
+
+    if (url.pathname === '/auth/single-user-session' && method === 'POST') {
+      sessionExpired = false
       writeJson(response, {
         session_id: smokeSession.sessionId,
         access_token: smokeSession.accessToken,
@@ -644,23 +709,22 @@ async function startMockApiServer(): Promise<MockApiServer> {
       return
     }
 
-    if (url.pathname === '/layout-definitions/trades' && method === 'GET') {
+    if (url.pathname.startsWith('/layout-definitions/') && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
-      writeJson(response, null)
-      return
-    }
 
-    if (url.pathname === '/layout-definitions/dashboard' && method === 'GET') {
-      if (!requireAuthorization(request, response, sessionExpired)) {
+      const workspaceId = url.pathname.slice('/layout-definitions/'.length)
+      if (!(workspaceId in layoutDefinitions)) {
+        writeJson(response, { detail: `Unknown layout workspace: ${workspaceId}` }, 404)
         return
       }
-      writeJson(response, null)
+
+      writeJson(response, layoutDefinitions[workspaceId])
       return
     }
 
-    if (url.pathname === '/layout-definitions/trades' && method === 'PUT') {
+    if (url.pathname.startsWith('/layout-definitions/') && method === 'PUT') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
@@ -668,47 +732,31 @@ async function startMockApiServer(): Promise<MockApiServer> {
       const payload = await readJsonBody(request)
       assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
 
-      const layout = payload as {
-        order?: unknown
-        hidden?: unknown
-        spans?: unknown
-      }
-
-      writeJson(response, {
-        workspace_id: 'trades',
-        order: Array.isArray(layout.order) ? layout.order : [],
-        hidden: Array.isArray(layout.hidden) ? layout.hidden : [],
-        spans: layout.spans && typeof layout.spans === 'object' && !Array.isArray(layout.spans) ? layout.spans : {},
-        updated_at: '2026-04-11T00:00:00Z',
-        updated_by: smokeSession.user.user_id,
-        version: 1,
-      })
-      return
-    }
-
-    if (url.pathname === '/layout-definitions/dashboard' && method === 'PUT') {
-      if (!requireAuthorization(request, response, sessionExpired)) {
+      const workspaceId = url.pathname.slice('/layout-definitions/'.length)
+      if (!(workspaceId in layoutDefinitions)) {
+        writeJson(response, { detail: `Unknown layout workspace: ${workspaceId}` }, 404)
         return
       }
 
-      const payload = await readJsonBody(request)
-      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
-
       const layout = payload as {
         order?: unknown
         hidden?: unknown
         spans?: unknown
+        sections?: unknown
       }
-
-      writeJson(response, {
-        workspace_id: 'dashboard',
-        order: Array.isArray(layout.order) ? layout.order : [],
-        hidden: Array.isArray(layout.hidden) ? layout.hidden : [],
+      const nextLayout: StoredLayoutResponse = {
+        workspace_id: workspaceId,
+        order: normalizeStringList(layout.order),
+        hidden: normalizeStringList(layout.hidden),
         spans: layout.spans && typeof layout.spans === 'object' && !Array.isArray(layout.spans) ? layout.spans : {},
+        sections: normalizeSections(layout.sections),
         updated_at: '2026-04-11T00:00:00Z',
         updated_by: smokeSession.user.user_id,
-        version: 1,
-      })
+        version: (layoutDefinitions[workspaceId]?.version ?? 0) + 1,
+      }
+
+      layoutDefinitions[workspaceId] = nextLayout
+      writeJson(response, nextLayout)
       return
     }
 
@@ -861,6 +909,7 @@ async function startMockApiServer(): Promise<MockApiServer> {
     expireSession: () => {
       sessionExpired = true
     },
+    layoutRequests,
     mutationRequests,
     unexpectedRequests,
     close: () =>
@@ -941,10 +990,89 @@ async function dismissStartHereOverlay(page: Page): Promise<void> {
   await overlay.waitFor({ state: 'hidden' })
 }
 
+async function dismissStartHereOverlayIfPresent(page: Page): Promise<void> {
+  const overlay = page.locator('.start-here-dialog')
+  try {
+    await overlay.waitFor({ state: 'visible', timeout: 2000 })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      return
+    }
+    throw error
+  }
+
+  await overlay.getByRole('button', { name: 'Not Now' }).click()
+  await overlay.waitFor({ state: 'hidden' })
+}
+
+async function dragBetweenLocators(page: Page, source: Locator, target: Locator): Promise<void> {
+  await source.scrollIntoViewIfNeeded()
+  await target.scrollIntoViewIfNeeded()
+
+  const sourceBox = await source.boundingBox()
+  const targetBox = await target.boundingBox()
+
+  assert.ok(sourceBox, 'Expected drag source to be visible.')
+  assert.ok(targetBox, 'Expected drag target to be visible.')
+
+  const sourceX = sourceBox.x + sourceBox.width / 2
+  const sourceY = sourceBox.y + sourceBox.height / 2
+  const targetX = targetBox.x + targetBox.width / 2
+  const targetY = targetBox.y + targetBox.height / 2
+
+  await page.mouse.move(sourceX, sourceY)
+  await page.mouse.down()
+  await page.mouse.move(sourceX + 12, sourceY + 12, { steps: 6 })
+  await page.mouse.move(targetX, targetY, { steps: 20 })
+  await page.mouse.up()
+}
+
+async function waitForRecordedRequest(
+  requests: RecordedRequest[],
+  predicate: (request: RecordedRequest) => boolean,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const startedAt = Date.now()
+  while (!requests.some(predicate)) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out waiting for recorded request.\n${formatRecordedRequests(requests)}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
 async function triggerSessionExpiry(page: Page, mockApi: MockApiServer): Promise<void> {
   mockApi.expireSession()
   await page.evaluate(() => {
     window.dispatchEvent(new Event('focus'))
+  })
+}
+
+async function readMobileShellMetrics(page: Page): Promise<{
+  mainStageWidth: number
+  shellTrackCount: number
+  sideRailHidden: boolean
+  sideRailVisible: boolean
+  mobileTopbarVisible: boolean
+  viewportWidth: number
+}> {
+  return page.evaluate(() => {
+    const shell = document.querySelector('.app-shell')
+    const mainStage = document.querySelector('.main-stage')
+    const sideRail = document.querySelector('.side-rail')
+    const mobileTopbar = document.querySelector('.mobile-topbar')
+    if (!(shell instanceof HTMLElement) || !(mainStage instanceof HTMLElement) || !(sideRail instanceof HTMLElement) || !(mobileTopbar instanceof HTMLElement)) {
+      throw new Error('Expected shell elements were not rendered.')
+    }
+
+    return {
+      mainStageWidth: Math.round(mainStage.getBoundingClientRect().width),
+      shellTrackCount: getComputedStyle(shell).gridTemplateColumns.split(/\s+/).filter(Boolean).length,
+      sideRailHidden: sideRail.hasAttribute('hidden'),
+      sideRailVisible: getComputedStyle(sideRail).display !== 'none' && !sideRail.hasAttribute('hidden'),
+      mobileTopbarVisible: getComputedStyle(mobileTopbar).display !== 'none',
+      viewportWidth: window.innerWidth,
+    }
   })
 }
 
@@ -1140,6 +1268,91 @@ test(
       assert.match(amendPreviewText, /Location/)
       assert.match(amendPreviewText, /Commodity/)
 
+      assert.equal(
+        mockApi.unexpectedRequests.length,
+        0,
+        `Unhandled mock API requests:\n${formatRecordedRequests(mockApi.unexpectedRequests)}`,
+      )
+      assert.equal(
+        mockApi.mutationRequests.length,
+        0,
+        `Unexpected mutation requests:\n${formatRecordedRequests(mockApi.mutationRequests)}`,
+      )
+    } finally {
+      await browser.close()
+      await appServer.close()
+      await mockApi.close()
+    }
+  },
+)
+
+test(
+  'mobile shell keeps the main stage full-width and the nav drawer behaves like an overlay',
+  { timeout: 120_000 },
+  async () => {
+    const mockApi = await startMockApiServer()
+    const appServer = await startViteAppServer(mockApi.baseUrl)
+    const browser = await chromium.launch({ headless: true })
+
+    try {
+      const page = await browser.newPage({
+        viewport: {
+          width: 390,
+          height: 844,
+        },
+      })
+      await page.addInitScript(
+        ({ apiBaseOverride, session }) => {
+          window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
+          window.localStorage.setItem('ectrm.auth-session', JSON.stringify(session))
+        },
+        {
+          apiBaseOverride: `${appServer.origin}/api`,
+          session: smokeSession,
+        },
+      )
+
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await dismissStartHereOverlayIfPresent(page)
+
+      const closedMetrics = await readMobileShellMetrics(page)
+      assert.equal(closedMetrics.mobileTopbarVisible, true)
+      assert.equal(closedMetrics.sideRailHidden, true)
+      assert.equal(closedMetrics.sideRailVisible, false)
+      assert.equal(closedMetrics.shellTrackCount, 1)
+      assert.ok(
+        closedMetrics.mainStageWidth >= closedMetrics.viewportWidth - 48,
+        `Expected full-width main stage on mobile, received ${closedMetrics.mainStageWidth}px for a ${closedMetrics.viewportWidth}px viewport.`,
+      )
+
+      await page.getByRole('button', { name: 'Open navigation menu' }).click()
+      await page.waitForFunction(() => {
+        const sideRail = document.querySelector('.side-rail')
+        return sideRail instanceof HTMLElement && !sideRail.hasAttribute('hidden')
+      })
+
+      const openMetrics = await readMobileShellMetrics(page)
+      assert.equal(openMetrics.sideRailHidden, false)
+      assert.equal(openMetrics.sideRailVisible, true)
+      assert.ok(
+        Math.abs(openMetrics.mainStageWidth - closedMetrics.mainStageWidth) <= 16,
+        `Expected drawer open state to preserve main-stage width, changed from ${closedMetrics.mainStageWidth}px to ${openMetrics.mainStageWidth}px.`,
+      )
+
+      await page.getByRole('button', { name: 'Close navigation menu' }).click()
+      await page.waitForFunction(() => {
+        const sideRail = document.querySelector('.side-rail')
+        return sideRail instanceof HTMLElement && sideRail.hasAttribute('hidden')
+      })
+
+      const restoredMetrics = await readMobileShellMetrics(page)
+      assert.equal(restoredMetrics.sideRailHidden, true)
+      assert.ok(
+        restoredMetrics.mainStageWidth >= restoredMetrics.viewportWidth - 48,
+        `Expected restored mobile width after closing drawer, received ${restoredMetrics.mainStageWidth}px for a ${restoredMetrics.viewportWidth}px viewport.`,
+      )
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,
@@ -1355,6 +1568,158 @@ test(
 
       assert.match(page.url(), /\?view=trades(?:&|$)/)
       assert.equal(await page.locator('form.trade-form.trade-form-feature').isVisible(), true)
+      assert.equal(
+        mockApi.unexpectedRequests.length,
+        0,
+        `Unhandled mock API requests:\n${formatRecordedRequests(mockApi.unexpectedRequests)}`,
+      )
+      assert.equal(
+        mockApi.mutationRequests.length,
+        0,
+        `Unexpected mutation requests:\n${formatRecordedRequests(mockApi.mutationRequests)}`,
+      )
+    } finally {
+      await browser.close()
+      await appServer.close()
+      await mockApi.close()
+    }
+  },
+)
+
+test(
+  'risk browser smoke persists nested summary card order after refresh',
+  { timeout: 120_000 },
+  async () => {
+    const mockApi = await startMockApiServer()
+    const appServer = await startViteAppServer(mockApi.baseUrl)
+    const browser = await chromium.launch({ headless: true })
+
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(
+        ({ apiBaseOverride, session }) => {
+          window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
+          window.localStorage.setItem('ectrm.auth-session', JSON.stringify(session))
+        },
+        {
+          apiBaseOverride: `${appServer.origin}/api`,
+          session: smokeSession,
+        },
+      )
+
+      await page.goto(`${appServer.origin}/?view=risk`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await dismissStartHereOverlay(page)
+      await page.locator('.workspace-tile').first().waitFor()
+
+      const riskSummaryTile = page.locator('.workspace-tile', {
+        hasText: 'Risk Snapshot',
+      })
+      await riskSummaryTile.waitFor()
+
+      const cards = riskSummaryTile.locator('.dashboard-report-card')
+      await cards.first().waitFor()
+
+      assert.equal((await cards.nth(0).locator('span').first().textContent())?.trim(), 'Gross Linear Exposure')
+      assert.equal((await cards.nth(1).locator('span').first().textContent())?.trim(), 'Pricing Coverage')
+
+      const pricingCoverageHandle = cards.nth(1).getByRole('button', { name: 'Drag Pricing Coverage' })
+      await dragBetweenLocators(page, pricingCoverageHandle, cards.nth(0))
+
+      await page.waitForFunction(() => {
+        const tile = Array.from(document.querySelectorAll('.workspace-tile')).find((candidate) =>
+          candidate.textContent?.includes('Risk Snapshot'),
+        )
+        const firstLabel = tile?.querySelector('.dashboard-report-card span')
+        return firstLabel?.textContent?.trim() === 'Pricing Coverage'
+      })
+
+      await waitForRecordedRequest(
+        mockApi.layoutRequests,
+        (request) => request.method === 'PUT' && request.path === '/layout-definitions/risk',
+      )
+
+      await page.evaluate(() => {
+        window.localStorage.removeItem('ectrm.tile-layout.risk.v1')
+      })
+
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
+      await page.locator('.workspace-tile').first().waitFor()
+
+      const refreshedTile = page.locator('.workspace-tile', {
+        hasText: 'Risk Snapshot',
+      })
+      await refreshedTile.waitFor()
+
+      const refreshedCards = refreshedTile.locator('.dashboard-report-card')
+      await refreshedCards.first().waitFor()
+      assert.equal((await refreshedCards.nth(0).locator('span').first().textContent())?.trim(), 'Pricing Coverage')
+      assert.equal((await refreshedCards.nth(1).locator('span').first().textContent())?.trim(), 'Gross Linear Exposure')
+
+      assert.ok(
+        mockApi.layoutRequests.some(
+          (request) => request.method === 'PUT' && request.path === '/layout-definitions/risk',
+        ),
+        `Expected nested layout persistence request.\n${formatRecordedRequests(mockApi.layoutRequests)}`,
+      )
+      assert.equal(
+        mockApi.unexpectedRequests.length,
+        0,
+        `Unhandled mock API requests:\n${formatRecordedRequests(mockApi.unexpectedRequests)}`,
+      )
+    } finally {
+      await browser.close()
+      await appServer.close()
+      await mockApi.close()
+    }
+  },
+)
+
+test(
+  'single-user auth signs into the dashboard when the API enables one-click access',
+  { timeout: 120_000 },
+  async () => {
+    const mockApi = await startMockApiServer({ singleUserAuthEnabled: true })
+    const appServer = await startViteAppServer(mockApi.baseUrl)
+    const browser = await chromium.launch({ headless: true })
+
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(({ apiBaseOverride }) => {
+        window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
+      }, { apiBaseOverride: `${appServer.origin}/api` })
+
+      await page.goto(appServer.origin, {
+        waitUntil: 'domcontentloaded',
+      })
+
+      const signedOutOverlay = page.locator('.start-here-dialog')
+      await signedOutOverlay.waitFor()
+      await signedOutOverlay.getByRole('button', { name: 'Not Now' }).click()
+      await signedOutOverlay.waitFor({ state: 'hidden' })
+
+      const authGate = page.locator('.auth-gate-stage')
+      await authGate.waitFor()
+      await authGate.getByText('Password · Single-user').waitFor()
+
+      await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+
+      const signedInOverlay = page.locator('.start-here-dialog')
+      await signedInOverlay.waitFor()
+      await signedInOverlay.getByText('Signed in as Ops Admin').waitFor()
+      await signedInOverlay.getByRole('button', { name: 'Not Now' }).click()
+      await signedInOverlay.waitFor({ state: 'hidden' })
+
+      await page.waitForFunction(() => !document.querySelector('.auth-gate-stage'))
+      await page.getByText('Common Starting Points').waitFor()
+      await page.getByText('Signed in as Ops Admin').waitFor()
+
+      assert.ok(
+        page.url() === `${appServer.origin}/` || page.url() === `${appServer.origin}/?view=dashboard`,
+        `Expected the single-user flow to land on the dashboard, received ${page.url()}.`,
+      )
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,

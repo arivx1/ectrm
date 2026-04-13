@@ -358,6 +358,15 @@ the targeted Wave 0 seams.
 - developers have a documented way to refresh the contract state
 - the first contract-sensitive seam is guarded automatically
 
+### Implementation note
+
+- the selected first drift check is a committed trade metadata artifact at
+  `apps/api/contracts/trade-metadata.contract.json`
+- `make api-contract-check` verifies that the backend-owned
+  `GET /trades/metadata` payload still matches that artifact
+- `make api-contract-refresh` rewrites the artifact after intentional contract
+  changes
+
 ## Browser Smoke Coverage Tickets
 
 ## FR0-09: Browser Smoke Harness And Seeded Environment
@@ -393,6 +402,17 @@ documented startup path.
 - the repo can run one browser smoke test from a documented setup path
 - the smoke environment uses deterministic seeded or fixture data
 - the framework choice and startup contract are documented
+
+### Implementation note
+
+- Wave 0 chooses Playwright Test as the browser harness
+- the initial seeded environment is a self-hosted Vite app server plus an
+  in-process mock API with deterministic fixture data under
+  `apps/web/tests/browser/support`
+- `make web-smoke-install` and `make web-smoke-test` are the canonical local
+  entrypoints
+- the matching CI startup path is the manual `Browser Smoke` workflow, which
+  uses `make web-smoke-install-ci` and `make web-smoke-test`
 
 ## FR0-10: Mobile Shell And Signed-Out Entry Smoke Flow
 

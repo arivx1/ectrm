@@ -128,6 +128,33 @@ class OperationalResourceDescriptorOut(BaseModel):
     filters: list[str] = Field(default_factory=list)
     sort_fields: list[str] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
+    surface: "OperationalResourceSurfaceOut"
+
+
+class OperationalResourcePrimaryActionOut(BaseModel):
+    key: str
+    label: str
+    detail: str
+
+
+class OperationalResourceSummaryStatOut(BaseModel):
+    key: str
+    label: str
+    detail: str
+
+
+class OperationalResourceEmptyStateOut(BaseModel):
+    title: str
+    detail: str
+
+
+class OperationalResourceSurfaceOut(BaseModel):
+    title: str
+    description: str
+    board_section: str
+    primary_action: OperationalResourcePrimaryActionOut | None = None
+    empty_state: OperationalResourceEmptyStateOut | None = None
+    summary_stats: list[OperationalResourceSummaryStatOut] = Field(default_factory=list)
 
 
 class TradeCreditApprovalDecisionOut(BaseModel):

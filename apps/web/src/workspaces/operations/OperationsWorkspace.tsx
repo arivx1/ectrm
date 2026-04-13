@@ -1,3 +1,5 @@
+import { useMemo, useState } from 'react'
+
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
 import type {
   CreateTradeConfirmationInput,
@@ -7,9 +9,12 @@ import type {
 } from '../../entities/confirmations/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
+import { matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import { buildOpenOptionActionQueue, type OpenOptionValuation } from '../../shared/optionExposure'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type {
   DeliveryRecord,
   ExternalDataSyncStatusRecord,
@@ -24,11 +29,9 @@ import type { OptionLifecycleEventType } from '../../shared/trading'
 import { ConfirmationLedgerBoard } from './ConfirmationLedgerBoard'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 import { DocumentIngestionPanel } from './DocumentIngestionPanel'
-import { OperationalBoardShell } from './OperationalBoardShell'
+import { OperationalBoardController } from './OperationalBoardController'
 import { WorkflowQueueEditor } from './WorkflowQueueEditor'
-import {
-  resolveOperationalWorkboardDefinition,
-} from './operationalWorkboardRegistry'
+import { resolveOperationalWorkboardDefinition } from './operationalWorkboardRegistry'
 
 type OperationsWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -159,6 +162,102 @@ function optionLifecyclePendingLabel(action: OptionLifecycleEventType): string {
   }
 }
 
+function matchesOperationsTradeFilter(trade: Trade, query: string): boolean {
+  return matchesTextFilter(query, [
+    trade.trade_id,
+    trade.book,
+    trade.portfolio,
+    trade.counterparty,
+    trade.commodity_class,
+    trade.commodity,
+    trade.instrument_type,
+    trade.pricing_status,
+    trade.confirmation_status,
+    trade.nomination_status,
+    trade.allocation_status,
+    trade.actualization_status,
+    trade.settlement_status,
+    trade.status,
+  ])
+}
+
+function matchesConfirmationScreenFilter(confirmation: TradeConfirmationRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    confirmation.confirmation_id,
+    confirmation.trade_id,
+    confirmation.confirmation_number,
+    confirmation.status,
+    confirmation.receipt_status,
+    confirmation.comparison_status,
+    confirmation.book,
+    confirmation.portfolio,
+    confirmation.counterparty,
+    confirmation.commodity_class,
+    confirmation.commodity,
+    confirmation.workflow_owner,
+    confirmation.source_document_display_name,
+    confirmation.last_issue_recipient,
+    confirmation.notes,
+  ])
+}
+
+function matchesDeliveryScreenFilter(delivery: DeliveryRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    delivery.delivery_id,
+    delivery.trade_id,
+    delivery.book,
+    delivery.portfolio,
+    delivery.counterparty,
+    delivery.commodity_class,
+    delivery.commodity,
+    delivery.mode_family,
+    delivery.transport_mode,
+    delivery.status,
+    delivery.execution_status,
+    delivery.location_code,
+    delivery.operations_owner,
+    delivery.external_reference,
+    delivery.ops_notes,
+  ])
+}
+
+function matchesWorkflowItemScreenFilter(item: TradeWorkflowItemRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    item.item_id,
+    item.trade_id,
+    item.linked_trade_id,
+    item.queue,
+    item.workflow_type,
+    item.status,
+    item.owner,
+    item.book,
+    item.portfolio,
+    item.counterparty,
+    item.commodity_class,
+    item.commodity,
+    item.notes,
+    item.credit_approval_status,
+    item.credit_hold_reason,
+  ])
+}
+
+function matchesTradingSourceScreenFilter(source: TradingSourceRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    source.source_id,
+    source.source_name,
+    source.source_category,
+    source.dataset_name,
+    source.business_purpose,
+    source.asset_classes,
+    source.products_or_regions,
+    source.system_owner,
+    source.business_owner,
+    source.vendor_or_origin,
+    source.criticality,
+    source.status,
+  ])
+}
+
 export function OperationsWorkspace({
   authSession,
   activeTrades,
@@ -190,19 +289,66 @@ export function OperationsWorkspace({
   onSaveConfirmation,
   onSaveWorkflowItem,
 }: OperationsWorkspaceProps) {
-  const activeOptionTrades = activeTrades.filter((trade) => trade.instrument_type === 'OPTION')
+  const [screenFilter, setScreenFilter] = useState('')
+  const directlyMatchedTrades = useMemo(
+    () => activeTrades.filter((trade) => matchesOperationsTradeFilter(trade, screenFilter)),
+    [activeTrades, screenFilter],
+  )
+  const directlyMatchedConfirmations = useMemo(
+    () => confirmations.filter((confirmation) => matchesConfirmationScreenFilter(confirmation, screenFilter)),
+    [confirmations, screenFilter],
+  )
+  const directlyMatchedDeliveries = useMemo(
+    () => deliveries.filter((delivery) => matchesDeliveryScreenFilter(delivery, screenFilter)),
+    [deliveries, screenFilter],
+  )
+  const directlyMatchedWorkItems = useMemo(
+    () => workItems.filter((item) => matchesWorkflowItemScreenFilter(item, screenFilter)),
+    [screenFilter, workItems],
+  )
+  const visibleTradeIds = useMemo(
+    () =>
+      new Set([
+        ...directlyMatchedTrades.map((trade) => trade.trade_id),
+        ...directlyMatchedConfirmations.map((confirmation) => confirmation.trade_id),
+        ...directlyMatchedDeliveries.map((delivery) => delivery.trade_id),
+        ...directlyMatchedWorkItems.map((item) => item.trade_id),
+      ]),
+    [directlyMatchedConfirmations, directlyMatchedDeliveries, directlyMatchedTrades, directlyMatchedWorkItems],
+  )
+  const visibleActiveTrades = useMemo(
+    () => activeTrades.filter((trade) => visibleTradeIds.has(trade.trade_id)),
+    [activeTrades, visibleTradeIds],
+  )
+  const visibleConfirmations = useMemo(
+    () => confirmations.filter((confirmation) => visibleTradeIds.has(confirmation.trade_id)),
+    [confirmations, visibleTradeIds],
+  )
+  const visibleDeliveries = useMemo(
+    () => deliveries.filter((delivery) => visibleTradeIds.has(delivery.trade_id)),
+    [deliveries, visibleTradeIds],
+  )
+  const visibleWorkItems = useMemo(
+    () => workItems.filter((item) => visibleTradeIds.has(item.trade_id)),
+    [visibleTradeIds, workItems],
+  )
+  const visibleTradingSources = useMemo(
+    () => tradingSources.filter((source) => matchesTradingSourceScreenFilter(source, screenFilter)),
+    [screenFilter, tradingSources],
+  )
+  const activeOptionTrades = visibleActiveTrades.filter((trade) => trade.instrument_type === 'OPTION')
   const {
     latestMarksByCode,
     loading: latestMarksLoading,
     error: latestMarksError,
   } = useLatestPriceIndexMarks(activeOptionTrades.map((trade) => trade.price_index_code))
   const openOptionActionQueue = buildOpenOptionActionQueue(activeOptionTrades, latestMarksByCode)
-  const openDeliveries = deliveries.filter((delivery) => delivery.status !== 'COMPLETED')
-  const blockedDeliveries = deliveries.filter((delivery) => delivery.status === 'BLOCKED')
-  const operationsWorkItems = workItems.filter((item) => item.queue === 'operations')
+  const openDeliveries = visibleDeliveries.filter((delivery) => delivery.status !== 'COMPLETED')
+  const blockedDeliveries = visibleDeliveries.filter((delivery) => delivery.status === 'BLOCKED')
+  const operationsWorkItems = visibleWorkItems.filter((item) => item.queue === 'operations')
   const confirmationWorkItems = operationsWorkItems.filter((item) => item.workflow_type === 'CONFIRMATION')
   const openOperationsWorkItems = operationsWorkItems.filter((item) => !item.is_closed)
-  const managedConfirmationTradeIds = confirmations
+  const managedConfirmationTradeIds = visibleConfirmations
     .filter((confirmation) => confirmation.is_current)
     .map((confirmation) => confirmation.trade_id)
   const unassignedWorkflowItems = openOperationsWorkItems.filter((item) => !item.owner?.trim()).length
@@ -228,13 +374,13 @@ export function OperationsWorkspace({
   const modeCoverage = ['LOGISTICS', 'NETWORK_FLOW', 'POWER_SCHEDULE']
     .map((modeFamily) => ({
       modeFamily,
-      count: deliveries.filter((delivery) => delivery.mode_family === modeFamily).length,
+      count: visibleDeliveries.filter((delivery) => delivery.mode_family === modeFamily).length,
     }))
     .filter((row) => row.count > 0)
   const tradingSourceCounts = ['tier_0', 'tier_1', 'tier_2', 'tier_3']
     .map((criticality) => ({
       criticality,
-      count: tradingSources.filter((source) => source.criticality === criticality).length,
+      count: visibleTradingSources.filter((source) => source.criticality === criticality).length,
     }))
     .filter((row) => row.count > 0)
   const confirmationLedgerWorkboard = resolveOperationalWorkboardDefinition(
@@ -245,6 +391,74 @@ export function OperationsWorkspace({
     'workflowQueue',
     operationalResourceDescriptors,
   )
+  const operationsSnapshotCards: TileSectionGridItem[] = [
+    {
+      id: 'open-workflow',
+      title: 'Open Workflow',
+      content: (
+        <>
+          <span>Open Workflow</span>
+          <strong>{formatNumber(openOperationsWorkItems.length, 0)}</strong>
+          <p>Confirmation, nomination, allocation, and option settlement tasks still open on the live book.</p>
+        </>
+      ),
+    },
+    {
+      id: 'unassigned',
+      title: 'Unassigned',
+      content: (
+        <>
+          <span>Unassigned</span>
+          <strong>{formatNumber(unassignedWorkflowItems, 0)}</strong>
+          <p>Open post-trade tickets that still need a named owner.</p>
+        </>
+      ),
+    },
+    {
+      id: 'due-next-48h',
+      title: 'Due Next 48h',
+      content: (
+        <>
+          <span>Due Next 48h</span>
+          <strong>{formatNumber(dueSoonWorkflowItems, 0)}</strong>
+          <p>Near-term operational handoffs likely to hit the desk this week.</p>
+        </>
+      ),
+    },
+    {
+      id: 'blocked-queue',
+      title: 'Blocked Queue',
+      content: (
+        <>
+          <span>Blocked Queue</span>
+          <strong>{formatNumber(Math.max(blockedDeliveries.length, blockedWorkflowItems), 0)}</strong>
+          <p>Either the delivery projection or the workflow queue is currently carrying an execution blocker.</p>
+        </>
+      ),
+    },
+    {
+      id: 'active-credit-exceptions',
+      title: 'Active Credit Exceptions',
+      content: (
+        <>
+          <span>Active Credit Exceptions</span>
+          <strong>{formatNumber(activeCreditExceptions.length, 0)}</strong>
+          <p>Trades running under an approved credit envelope that still need expiry and headroom monitoring.</p>
+        </>
+      ),
+    },
+    {
+      id: 'option-expiry-alerts',
+      title: 'Option Expiry Alerts',
+      content: (
+        <>
+          <span>Option Expiry Alerts</span>
+          <strong>{formatNumber(openOptionActionQueue.length, 0)}</strong>
+          <p>Open options inside the expiry window or still unresolved after expiry.</p>
+        </>
+      ),
+    },
+  ]
 
   return (
     <div className="stack operations-workspace">
@@ -252,6 +466,29 @@ export function OperationsWorkspace({
         workspaceId="operations"
         workspaceLabel="Operations"
         authSession={authSession}
+        headerContent={
+          <WorkspaceLocalFilterBar
+            value={screenFilter}
+            onChange={setScreenFilter}
+            placeholder="Trade ID, workflow owner, queue status, delivery mode, or source"
+            description="Filter the operations control loop locally so confirmations, deliveries, and queue work stay in sync on this screen only."
+            totalCount={activeTrades.length + confirmations.length + deliveries.length + workItems.length + tradingSources.length}
+            matchedCount={
+              visibleActiveTrades.length +
+              visibleConfirmations.length +
+              visibleDeliveries.length +
+              visibleWorkItems.length +
+              visibleTradingSources.length
+            }
+            resultLabel="operations records"
+          />
+        }
+        sections={[
+          {
+            id: 'operations-snapshot-cards',
+            itemIds: operationsSnapshotCards.map((card) => card.id),
+          },
+        ]}
         toolbarDescription={`Drag tiles to reorder, resize, or hide them for your control loop. ${
           authSession ? 'Layout changes save to your account.' : 'Layouts stay in this browser until you sign in.'
         }`}
@@ -268,44 +505,13 @@ export function OperationsWorkspace({
           {
             id: 'operations-snapshot',
             eyebrow: 'Workflow',
-          title: 'Operations Snapshot',
-          description: 'The counts that matter right now across open handoffs and blockers.',
-          span: 'half',
-          availableSpans: ['full', 'wide', 'half'],
-          content:
+            title: 'Operations Snapshot',
+            description: 'The counts that matter right now across open handoffs and blockers.',
+            span: 'half',
+            availableSpans: ['full', 'wide', 'half'],
+            content:
               openDeliveries.length > 0 || openOperationsWorkItems.length > 0 || openOptionActionQueue.length > 0 ? (
-                <div className="dashboard-report-grid">
-                  <article className="dashboard-report-card">
-                    <span>Open Workflow</span>
-                    <strong>{formatNumber(openOperationsWorkItems.length, 0)}</strong>
-                    <p>Confirmation, nomination, allocation, and option settlement tasks still open on the live book.</p>
-                  </article>
-                  <article className="dashboard-report-card">
-                    <span>Unassigned</span>
-                    <strong>{formatNumber(unassignedWorkflowItems, 0)}</strong>
-                    <p>Open post-trade tickets that still need a named owner.</p>
-                  </article>
-                  <article className="dashboard-report-card">
-                    <span>Due Next 48h</span>
-                    <strong>{formatNumber(dueSoonWorkflowItems, 0)}</strong>
-                    <p>Near-term operational handoffs likely to hit the desk this week.</p>
-                  </article>
-                  <article className="dashboard-report-card">
-                    <span>Blocked Queue</span>
-                    <strong>{formatNumber(Math.max(blockedDeliveries.length, blockedWorkflowItems), 0)}</strong>
-                    <p>Either the delivery projection or the workflow queue is currently carrying an execution blocker.</p>
-                  </article>
-                  <article className="dashboard-report-card">
-                    <span>Active Credit Exceptions</span>
-                    <strong>{formatNumber(activeCreditExceptions.length, 0)}</strong>
-                    <p>Trades running under an approved credit envelope that still need expiry and headroom monitoring.</p>
-                  </article>
-                  <article className="dashboard-report-card">
-                    <span>Option Expiry Alerts</span>
-                    <strong>{formatNumber(openOptionActionQueue.length, 0)}</strong>
-                    <p>Open options inside the expiry window or still unresolved after expiry.</p>
-                  </article>
-                </div>
+                <TileSectionGrid sectionId="operations-snapshot-cards" items={operationsSnapshotCards} />
               ) : (
                 <div className="empty-state">
                   <strong>No operational queue</strong>
@@ -417,52 +623,52 @@ export function OperationsWorkspace({
             span: 'full',
             availableSpans: ['full', 'wide'],
             content: (
-              <OperationalBoardShell workboard={confirmationLedgerWorkboard} bannerVariant="chips">
-                {activeTrades.length > 0 ? (
-                  <ConfirmationLedgerBoard
-                    key={[
-                      activeTrades.map((trade) => trade.trade_id).join('|'),
-                      confirmations.map((confirmation) => `${confirmation.confirmation_id}:${confirmation.version}`).join('|'),
-                      confirmationWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
-                    ].join('|')}
-                    authSession={authSession}
-                    trades={activeTrades}
-                    confirmations={confirmations}
-                    confirmationWorkItems={confirmationWorkItems}
-                    saveError={confirmationMutationError}
-                    savingKey={confirmationMutationPendingKey}
-                    formatCommodityClass={formatCommodityClass}
-                    formatDate={formatDate}
-                    formatDateOnly={formatDateOnly}
-                    onCreateConfirmation={onCreateConfirmation}
-                    onIssueConfirmation={onIssueConfirmation}
-                    onRespondConfirmation={onRespondConfirmation}
-                    onOpenTrade={onOpenTrade}
-                    onSaveConfirmation={onSaveConfirmation}
-                  />
-                ) : (
-                  <div className="empty-state">
-                    <strong>No confirmation queue</strong>
-                    <p>Active trades will appear here once there is confirmation work to manage.</p>
-                  </div>
-                )}
-              </OperationalBoardShell>
+              <OperationalBoardController
+                workboard={confirmationLedgerWorkboard}
+                bannerVariant="chips"
+                isEmpty={visibleActiveTrades.length === 0}
+              >
+                <ConfirmationLedgerBoard
+                  key={[
+                    visibleActiveTrades.map((trade) => trade.trade_id).join('|'),
+                    visibleConfirmations.map((confirmation) => `${confirmation.confirmation_id}:${confirmation.version}`).join('|'),
+                    confirmationWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
+                  ].join('|')}
+                  authSession={authSession}
+                  trades={visibleActiveTrades}
+                  confirmations={visibleConfirmations}
+                  confirmationWorkItems={confirmationWorkItems}
+                  saveError={confirmationMutationError}
+                  savingKey={confirmationMutationPendingKey}
+                  formatCommodityClass={formatCommodityClass}
+                  formatDate={formatDate}
+                  formatDateOnly={formatDateOnly}
+                  onCreateConfirmation={onCreateConfirmation}
+                  onIssueConfirmation={onIssueConfirmation}
+                  onRespondConfirmation={onRespondConfirmation}
+                  onOpenTrade={onOpenTrade}
+                  onSaveConfirmation={onSaveConfirmation}
+                />
+              </OperationalBoardController>
             ),
           },
           {
             id: 'operations-queue',
             eyebrow: 'Critical Path',
-          title: openOperationsWorkItems.length > 0 ? 'Operational Work Queue' : 'No open work queue',
-          description: 'Use the queue for owners, due dates, and downstream handoffs after confirmation records set the lifecycle status.',
-          span: 'full',
-          availableSpans: ['full', 'wide'],
-          content: (
-            <OperationalBoardShell workboard={workflowQueueWorkboard} bannerVariant="chips">
-              {activeTrades.length > 0 ? (
+            title: openOperationsWorkItems.length > 0 ? 'Operational Work Queue' : 'No open work queue',
+            description: 'Use the queue for owners, due dates, and downstream handoffs after confirmation records set the lifecycle status.',
+            span: 'full',
+            availableSpans: ['full', 'wide'],
+            content: (
+              <OperationalBoardController
+                workboard={workflowQueueWorkboard}
+                bannerVariant="chips"
+                isEmpty={visibleActiveTrades.length === 0}
+              >
                 <WorkflowQueueEditor
                   key={openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
                   authSession={authSession}
-                  activeTrades={activeTrades}
+                  activeTrades={visibleActiveTrades}
                   items={openOperationsWorkItems}
                   managedConfirmationTradeIds={managedConfirmationTradeIds}
                   creationPendingTradeId={workflowCreationPendingTradeId}
@@ -476,14 +682,8 @@ export function OperationsWorkspace({
                   onBookUnderlyingTrade={onBookUnderlyingTrade}
                   onSaveItem={onSaveWorkflowItem}
                 />
-              ) : (
-                <div className="empty-state">
-                  <strong>No active operations context</strong>
-                  <p>Create active trades to start opening confirmation, actualization, credit, or option-settlement work.</p>
-                </div>
-              )}
-            </OperationalBoardShell>
-          ),
+              </OperationalBoardController>
+            ),
           },
           {
             id: 'operations-documents',
@@ -619,7 +819,7 @@ export function OperationsWorkspace({
                 </div>
                 <div className="shipment-kpi-row">
                   <span>Trading Sources</span>
-                  <strong>{formatNumber(tradingSources.length, 0)}</strong>
+                  <strong>{formatNumber(visibleTradingSources.length, 0)}</strong>
                 </div>
                 {tradingSourceCounts.length > 0 ? tradingSourceCounts.map((row) => (
                   <div key={row.criticality} className="shipment-kpi-row">

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 if not hasattr(enum, "StrEnum"):
     class _CompatStrEnum(str, enum.Enum):
@@ -299,11 +299,12 @@ class SettlementPaymentsApiTests(unittest.TestCase):
     def test_partial_payment_rolls_trade_to_partially_settled_until_fully_paid(self) -> None:
         admin_token = self._bootstrap_admin()
         self._seed_trade(trade_id="T-PMT-2")
+        due_at = (datetime.now(timezone.utc) + timedelta(days=7)).replace(microsecond=0)
         invoice_id = self._issue_invoice(
             admin_token,
             trade_id="T-PMT-2",
             invoice_amount=1000,
-            due_at="2026-04-12T12:00:00Z",
+            due_at=due_at.isoformat().replace("+00:00", "Z"),
         )
 
         first_payment = self.client.post(

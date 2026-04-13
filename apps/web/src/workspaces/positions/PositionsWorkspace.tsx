@@ -1,3 +1,6 @@
+import { useMemo, useState } from 'react'
+
+import { matchesTextFilter } from '../../shared/filtering'
 import type { Trade } from '../../shared/models'
 import {
   buildUnitLabelByCommodity,
@@ -5,7 +8,9 @@ import {
   summarizeUnitLabels,
 } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
+import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { buildPositionTradeContext } from './positionHelpers'
 
@@ -14,6 +19,26 @@ type PositionRow = {
   commodity_class: string
   net_volume: number
   updated_at: string
+}
+
+function matchesPositionScreenFilter(
+  position: PositionRow & { tradeContext: ReturnType<typeof buildPositionTradeContext> },
+  query: string,
+): boolean {
+  return matchesTextFilter(query, [
+    position.commodity,
+    position.commodity_class,
+    position.updated_at,
+    ...position.tradeContext.matchingTrades.flatMap((trade) => [
+      trade.trade_id,
+      trade.book,
+      trade.portfolio,
+      trade.counterparty,
+      trade.commodity,
+      trade.commodity_class,
+      trade.status,
+    ]),
+  ])
 }
 
 type PositionsWorkspaceProps = {
@@ -39,22 +64,49 @@ export function PositionsWorkspace({
   formatNumber,
   formatDate,
 }: PositionsWorkspaceProps) {
-  const positionRowsWithTradeContext = positionsWithClass.map((position) => ({
-    ...position,
-    tradeContext: buildPositionTradeContext(position, activeTrades),
-  }))
+  const [screenFilter, setScreenFilter] = useState('')
+  const positionRowsWithTradeContext = useMemo(
+    () =>
+      positionsWithClass.map((position) => ({
+        ...position,
+        tradeContext: buildPositionTradeContext(position, activeTrades),
+      })),
+    [activeTrades, positionsWithClass],
+  )
+  const filteredPositionRows = useMemo(
+    () =>
+      positionRowsWithTradeContext.filter((position) => matchesPositionScreenFilter(position, screenFilter)),
+    [positionRowsWithTradeContext, screenFilter],
+  )
+  const visiblePositionsWithClass = screenFilter.trim().length > 0 ? filteredPositionRows : positionRowsWithTradeContext
+  const visiblePositionsByClass = useMemo(() => {
+    if (screenFilter.trim().length === 0) {
+      return positionsByClass
+    }
+
+    const visibleCommodityClasses = new Set(visiblePositionsWithClass.map((position) => position.commodity_class))
+    const totals = new Map<string, number>()
+    for (const position of visiblePositionsWithClass) {
+      totals.set(position.commodity_class, (totals.get(position.commodity_class) ?? 0) + position.net_volume)
+    }
+
+    return positionsByClass.filter((row) => visibleCommodityClasses.has(row.commodityClass)).map((row) => ({
+      commodityClass: row.commodityClass,
+      netVolume: totals.get(row.commodityClass) ?? 0,
+    }))
+  }, [positionsByClass, screenFilter, visiblePositionsWithClass])
   const commodityUnitLabels = buildUnitLabelByCommodity(activeTrades)
   const commodityClassUnitLabels = buildUnitLabelByCommodityClass(activeTrades)
-  const grossExposure = positionsWithClass.reduce((total, position) => total + Math.abs(position.net_volume), 0)
+  const grossExposure = visiblePositionsWithClass.reduce((total, position) => total + Math.abs(position.net_volume), 0)
   const grossExposureUnitLabel = summarizeUnitLabels(activeTrades.map((trade) => trade.unit_of_measure))
-  const largestCommodityPosition = positionsWithClass.reduce<PositionRow | null>((largest, position) => {
+  const largestCommodityPosition = visiblePositionsWithClass.reduce<(typeof visiblePositionsWithClass)[number] | null>((largest, position) => {
     if (!largest || Math.abs(position.net_volume) > Math.abs(largest.net_volume)) {
       return position
     }
 
     return largest
   }, null)
-  const largestCommodityClass = positionsByClass.reduce<{ commodityClass: string; netVolume: number } | null>(
+  const largestCommodityClass = visiblePositionsByClass.reduce<{ commodityClass: string; netVolume: number } | null>(
     (largest, positionClass) => {
       if (!largest || Math.abs(positionClass.netVolume) > Math.abs(largest.netVolume)) {
         return positionClass
@@ -64,25 +116,101 @@ export function PositionsWorkspace({
     },
     null,
   )
-  const freshestPosition = positionsWithClass.reduce<PositionRow | null>((latest, position) => {
+  const freshestPosition = visiblePositionsWithClass.reduce<(typeof visiblePositionsWithClass)[number] | null>((latest, position) => {
     if (!latest || position.updated_at > latest.updated_at) {
       return position
     }
 
     return latest
   }, null)
-  const largestCommodityTrade = largestCommodityPosition
-    ? buildPositionTradeContext(largestCommodityPosition, activeTrades).primaryTrade
-    : null
+  const largestCommodityTrade = largestCommodityPosition?.tradeContext.primaryTrade ?? null
   const largestCommodityClassUnitLabel = largestCommodityClass
     ? commodityClassUnitLabels.get(largestCommodityClass.commodityClass) ?? 'Unit TBD'
     : null
+  const positionsSummaryCards: TileSectionGridItem[] = [
+    {
+      id: 'gross-exposure',
+      title: 'Gross Exposure',
+      content: (
+        <>
+          <span>Gross Exposure</span>
+          <MetricValue value={formatNumber(grossExposure, 0)} unit={grossExposureUnitLabel} />
+          <p>Absolute net volume rolled up across every commodity row in the current positions projection.</p>
+        </>
+      ),
+    },
+    {
+      id: 'open-positions',
+      title: 'Open Positions',
+      content: (
+        <>
+          <span>Open Positions</span>
+          <strong>{formatNumber(visiblePositionsWithClass.length, 0)}</strong>
+          <p>Commodity rows now contributing to the live position projection.</p>
+        </>
+      ),
+    },
+    {
+      id: 'largest-class',
+      title: 'Largest Class',
+      content: (
+        <>
+          <span>Largest Class</span>
+          {largestCommodityClass && largestCommodityClassUnitLabel ? (
+            <MetricValue
+              value={formatNumber(largestCommodityClass.netVolume, 0)}
+              unit={largestCommodityClassUnitLabel}
+            />
+          ) : (
+            <strong>—</strong>
+          )}
+          <p>
+            {largestCommodityClass
+              ? `${formatCommodityClass(largestCommodityClass.commodityClass)} is carrying the largest absolute exposure right now.`
+              : 'No class-level exposure is available yet.'}
+          </p>
+        </>
+      ),
+    },
+    {
+      id: 'freshest-update',
+      title: 'Freshest Update',
+      content: (
+        <>
+          <span>Freshest Update</span>
+          <strong>{freshestPosition ? formatDate(freshestPosition.updated_at) : '—'}</strong>
+          <p>
+            {freshestPosition
+              ? `${freshestPosition.commodity} was the latest commodity row updated in the projection.`
+              : 'There are no position updates to review yet.'}
+          </p>
+        </>
+      ),
+    },
+  ]
 
   return (
     <TileLayout
       workspaceId="positions"
       workspaceLabel="Positions"
       authSession={authSession}
+      headerContent={
+        <WorkspaceLocalFilterBar
+          value={screenFilter}
+          onChange={setScreenFilter}
+          placeholder="Commodity, class, trade ID, book, or counterparty"
+          description="Narrow the positions view locally without changing the rest of the desk surfaces."
+          totalCount={positionRowsWithTradeContext.length}
+          matchedCount={visiblePositionsWithClass.length}
+          resultLabel="commodity rows"
+        />
+      }
+      sections={[
+        {
+          id: 'positions-summary-cards',
+          itemIds: positionsSummaryCards.map((card) => card.id),
+        },
+      ]}
       tiles={[
         {
           id: 'positions-summary',
@@ -91,45 +219,9 @@ export function PositionsWorkspace({
           description: 'A fast read on how much exposure is open and where the biggest concentrations currently sit.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: positionsWithClass.length > 0 ? (
+          content: visiblePositionsWithClass.length > 0 ? (
             <div className="stack">
-              <div className="dashboard-report-grid">
-                <article className="dashboard-report-card">
-                  <span>Gross Exposure</span>
-                  <MetricValue value={formatNumber(grossExposure, 0)} unit={grossExposureUnitLabel} />
-                  <p>Absolute net volume rolled up across every commodity row in the current positions projection.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Open Positions</span>
-                  <strong>{formatNumber(positionsWithClass.length, 0)}</strong>
-                  <p>Commodity rows now contributing to the live position projection.</p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Largest Class</span>
-                  {largestCommodityClass && largestCommodityClassUnitLabel ? (
-                    <MetricValue
-                      value={formatNumber(largestCommodityClass.netVolume, 0)}
-                      unit={largestCommodityClassUnitLabel}
-                    />
-                  ) : (
-                    <strong>—</strong>
-                  )}
-                  <p>
-                    {largestCommodityClass
-                      ? `${formatCommodityClass(largestCommodityClass.commodityClass)} is carrying the largest absolute exposure right now.`
-                      : 'No class-level exposure is available yet.'}
-                  </p>
-                </article>
-                <article className="dashboard-report-card">
-                  <span>Freshest Update</span>
-                  <strong>{freshestPosition ? formatDate(freshestPosition.updated_at) : '—'}</strong>
-                  <p>
-                    {freshestPosition
-                      ? `${freshestPosition.commodity} was the latest commodity row updated in the projection.`
-                      : 'There are no position updates to review yet.'}
-                  </p>
-                </article>
-              </div>
+              <TileSectionGrid sectionId="positions-summary-cards" items={positionsSummaryCards} />
               <div className="stack-actions">
                 <button type="button" className="button button-secondary" onClick={onOpenRisk}>
                   Open Risk Workspace
@@ -159,9 +251,9 @@ export function PositionsWorkspace({
           description: 'A class-level view for seeing concentration before drilling into exact commodity rows.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
-          content: positionsByClass.length > 0 ? (
+          content: visiblePositionsByClass.length > 0 ? (
             <div className="position-class-grid">
-              {positionsByClass.map((row) => (
+              {visiblePositionsByClass.map((row) => (
                 <article key={row.commodityClass} className="position-class-card">
                   <span>{formatCommodityClass(row.commodityClass)}</span>
                   <MetricValue
@@ -187,9 +279,9 @@ export function PositionsWorkspace({
             : 'Exact commodity-level net volume currently held in the projection.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
-          content: positionRowsWithTradeContext.length > 0 ? (
+          content: visiblePositionsWithClass.length > 0 ? (
             <div className="position-list">
-              {positionRowsWithTradeContext.map((position) => (
+              {visiblePositionsWithClass.map((position) => (
                 <article key={position.commodity} className="position-card position-card-drilldown">
                   <div className="position-card-head">
                     <div className="position-card-copy">
