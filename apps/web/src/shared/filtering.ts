@@ -34,3 +34,10 @@ export function matchesTextFilter(query: string, values: readonly SearchFilterVa
   const haystack = normalizedSearchHaystack(values)
   return tokens.every((token) => haystack.includes(token))
 }
+
+export function combineTextFilters(...queries: Array<string | null | undefined>): string {
+  return queries
+    .map((query) => query?.trim() ?? '')
+    .filter(Boolean)
+    .join(' ')
+}

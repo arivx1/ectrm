@@ -18,6 +18,7 @@ import type {
   AssistantPromptContextRequest,
   AssistantPromptRequest,
   AssistantPromptResponse,
+  AssistantProvider,
   AssistantRun,
   AssistantRunSummary,
   AssistantRuntimeSettings,
@@ -34,10 +35,37 @@ export type CreateAssistantAgentInput = {
   allowed_workspaces: AssistantAdminAgent['allowed_workspaces']
   capabilities: AssistantAdminAgent['capabilities']
   allowed_tools: AssistantAdminAgent['allowed_tools']
+  allowed_action_types: AssistantAdminAgent['allowed_action_types']
   system_prompt: string
 }
 
 export type UpdateAssistantAgentInput = Omit<CreateAssistantAgentInput, 'agent_id'>
+
+export type BuildAssistantAgentDraftInput = {
+  brief: string
+  current_draft?: {
+    agent_id?: string
+    name?: string
+    description?: string
+    status?: AssistantAdminAgent['status']
+    scope?: AssistantAdminAgent['scope']
+    provider?: AssistantAdminAgent['provider']
+    model?: AssistantAdminAgent['model']
+    allowed_workspaces?: AssistantAdminAgent['allowed_workspaces']
+    capabilities?: AssistantAdminAgent['capabilities']
+    allowed_tools?: AssistantAdminAgent['allowed_tools']
+    allowed_action_types?: AssistantAdminAgent['allowed_action_types']
+    system_prompt?: string
+  }
+}
+
+export type BuildAssistantAgentDraftResult = Omit<CreateAssistantAgentInput, 'provider' | 'model'> & {
+  provider: AssistantProvider
+  model: string
+  builder_provider: AssistantProvider
+  builder_model: string
+  warnings: string[]
+}
 
 export type AssistantStreamEvent = {
   event: string
@@ -360,6 +388,45 @@ export async function updateAssistantAgent(
     {
       ...payload,
       updated_by: actorId,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function buildAssistantAgentDraft(
+  apiBase: string,
+  payload: BuildAssistantAgentDraftInput,
+): Promise<BuildAssistantAgentDraftResult> {
+  const normalizedDraft = payload.current_draft
+    ? {
+        ...(payload.current_draft.agent_id?.trim()
+          ? { agent_id: payload.current_draft.agent_id.trim() }
+          : {}),
+        ...(payload.current_draft.name?.trim() ? { name: payload.current_draft.name.trim() } : {}),
+        ...(payload.current_draft.description?.trim()
+          ? { description: payload.current_draft.description.trim() }
+          : {}),
+        ...(payload.current_draft.status ? { status: payload.current_draft.status } : {}),
+        ...(payload.current_draft.scope ? { scope: payload.current_draft.scope } : {}),
+        ...(payload.current_draft.provider ? { provider: payload.current_draft.provider } : {}),
+        ...(payload.current_draft.model?.trim() ? { model: payload.current_draft.model.trim() } : {}),
+        allowed_workspaces: payload.current_draft.allowed_workspaces ?? [],
+        capabilities: payload.current_draft.capabilities ?? [],
+        allowed_tools: payload.current_draft.allowed_tools ?? [],
+        allowed_action_types: payload.current_draft.allowed_action_types ?? [],
+        ...(payload.current_draft.system_prompt?.trim()
+          ? { system_prompt: payload.current_draft.system_prompt.trim() }
+          : {}),
+      }
+    : undefined
+
+  return postJson<BuildAssistantAgentDraftResult>(
+    `${apiBase}/admin/assistant/agents/build`,
+    {
+      brief: payload.brief.trim(),
+      ...(normalizedDraft ? { current_draft: normalizedDraft } : {}),
     },
     {
       headers: assistantMutationHeaders(),

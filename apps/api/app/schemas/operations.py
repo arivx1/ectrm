@@ -131,6 +131,22 @@ class OperationalResourceDescriptorOut(BaseModel):
     surface: "OperationalResourceSurfaceOut"
 
 
+class OperationalRowActionStateOut(BaseModel):
+    key: str
+    available: bool = True
+    blocked_reason: str | None = None
+    label: str | None = None
+
+
+class OperationalResourceSurfaceActionOut(BaseModel):
+    key: str
+    label: str
+    detail: str
+    permission_message: str | None = None
+    comment_required: bool = False
+    comment_hint: str | None = None
+
+
 class OperationalResourcePrimaryActionOut(BaseModel):
     key: str
     label: str
@@ -152,6 +168,7 @@ class OperationalResourceSurfaceOut(BaseModel):
     title: str
     description: str
     board_section: str
+    actions: list[OperationalResourceSurfaceActionOut] = Field(default_factory=list)
     primary_action: OperationalResourcePrimaryActionOut | None = None
     empty_state: OperationalResourceEmptyStateOut | None = None
     summary_stats: list[OperationalResourceSummaryStatOut] = Field(default_factory=list)
@@ -231,6 +248,7 @@ class TradeWorkflowItemOut(BaseModel):
     trade_date: Optional[date]
     delivery_start: Optional[date]
     delivery_end: Optional[date]
+    action_states: list[OperationalRowActionStateOut] = Field(default_factory=list)
     credit_approval_freshness: Optional[TradeCreditApprovalFreshnessOut] = None
     active_credit_exception: Optional[TradeCreditExceptionOut] = None
     credit_decision_history: list[TradeCreditApprovalDecisionOut] = Field(default_factory=list)

@@ -1,10 +1,15 @@
 import type { DragEvent, FormEvent, KeyboardEvent, MutableRefObject } from 'react'
-import type { DocumentSchemaRegistryRecord } from '../../shared/models'
+import type {
+  DocumentProcessorRuntimeSettingsRecord,
+  DocumentSchemaRegistryRecord,
+} from '../../shared/models'
 import { formatBytes } from './documentIngestionUtils'
 
 type DocumentIngestionUploadFormProps = {
   compact?: boolean
   displayName: string
+  processorSettings: DocumentProcessorRuntimeSettingsRecord | null
+  selectedProcessorProvider: 'builtin' | 'openai' | 'anthropic' | 'google' | ''
   selectedFile: File | null
   schemaRegistry: DocumentSchemaRegistryRecord | null
   uploading: boolean
@@ -12,6 +17,7 @@ type DocumentIngestionUploadFormProps = {
   isDragActive: boolean
   fileInputRef: MutableRefObject<HTMLInputElement | null>
   onDisplayNameChange: (value: string) => void
+  onProcessorProviderChange: (value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
   onFileChange: (file: File | null) => void
   onOpenFilePicker: () => void
   onDropzoneKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
@@ -25,6 +31,8 @@ type DocumentIngestionUploadFormProps = {
 export function DocumentIngestionUploadForm({
   compact = false,
   displayName,
+  processorSettings,
+  selectedProcessorProvider,
   selectedFile,
   schemaRegistry,
   uploading,
@@ -32,6 +40,7 @@ export function DocumentIngestionUploadForm({
   isDragActive,
   fileInputRef,
   onDisplayNameChange,
+  onProcessorProviderChange,
   onFileChange,
   onOpenFilePicker,
   onDropzoneKeyDown,
@@ -41,6 +50,10 @@ export function DocumentIngestionUploadForm({
   onDropzoneDrop,
   onSubmit,
 }: DocumentIngestionUploadFormProps) {
+  const configuredProviders = processorSettings?.providers.filter((provider) => provider.configured) ?? []
+  const selectedProvider = configuredProviders.find((provider) => provider.provider === selectedProcessorProvider) ?? null
+  const shouldShowProviderSelector = configuredProviders.length > 0
+
   return (
     <form className={`document-ingestion-form${compact ? ' document-ingestion-form-compact' : ''}`} onSubmit={onSubmit}>
       <div className="document-ingestion-form-grid">
@@ -92,6 +105,26 @@ export function DocumentIngestionUploadForm({
             disabled={uploading}
           />
         </label>
+        {shouldShowProviderSelector ? (
+          <label>
+            <span>Processing API</span>
+            <select
+              className="control"
+              value={selectedProcessorProvider}
+              onChange={(event) =>
+                onProcessorProviderChange(event.target.value as 'builtin' | 'openai' | 'anthropic' | 'google' | '')
+              }
+              disabled={uploading}
+            >
+              <option value="builtin">Built-in Parser Only</option>
+              {configuredProviders.map((provider) => (
+                <option key={provider.provider} value={provider.provider}>
+                  {provider.label} ({provider.default_model})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
       <div className="document-ingestion-form-actions">
         <button type="submit" className="button button-primary" disabled={uploading || !selectedFile}>
@@ -101,6 +134,11 @@ export function DocumentIngestionUploadForm({
           {compact
             ? 'Upload stores the source PDF and queues page analysis.'
             : 'Upload stores the source PDF, creates one record per page, and queues background classification plus extraction.'}
+          {selectedProcessorProvider === 'builtin'
+            ? ' Built-in parsing only will run for this upload.'
+            : selectedProvider
+            ? ` ${selectedProvider.label} will be used for document processing when the background job runs.`
+            : ' No document-processing APIs are configured on this API yet, so the built-in parser will run.'}
           {schemaRegistry ? ` Review contract ${schemaRegistry.version}.` : ''}
         </span>
       </div>

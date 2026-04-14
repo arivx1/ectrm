@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 
+import { combineTextFilters } from '../../shared/filtering'
 import { classForCommodity } from '../../shared/reference'
 import type {
   BookForm,
@@ -149,6 +150,7 @@ type UseReferenceDataWorkspaceArgs = {
   locationStandards: LocationStandards
   counterpartyStandards: CounterpartyStandards
   commodityClassOrder: readonly string[]
+  externalReferenceSearch?: string
 }
 
 export function useReferenceDataWorkspace({
@@ -168,6 +170,7 @@ export function useReferenceDataWorkspace({
   locationStandards,
   counterpartyStandards,
   commodityClassOrder,
+  externalReferenceSearch,
 }: UseReferenceDataWorkspaceArgs) {
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>('books')
   const [referenceSearch, setReferenceSearch] = useState('')
@@ -197,6 +200,7 @@ export function useReferenceDataWorkspace({
   const [locationFormMode, setLocationFormMode] = useState<'create' | 'edit'>('create')
   const [counterpartyFormMode, setCounterpartyFormMode] = useState<'create' | 'edit'>('create')
   const [portfolioFormMode, setPortfolioFormMode] = useState<'create' | 'edit'>('create')
+  const effectiveReferenceSearch = combineTextFilters(referenceSearch, externalReferenceSearch)
 
   const resolvedSelectedBookCode = resolveSelectedCode(selectedBookCode, books, { preserveMissingSelection: true })
   const resolvedSelectedCommodityCode = resolveSelectedCode(selectedCommodityCode, commodities)
@@ -241,7 +245,7 @@ export function useReferenceDataWorkspace({
   )
 
   const filteredBooks = useMemo(() => {
-    const query = referenceSearch.trim().toLowerCase()
+    const query = effectiveReferenceSearch.trim().toLowerCase()
     return books.filter((book) => {
       if (!query) return true
       return (
@@ -250,7 +254,7 @@ export function useReferenceDataWorkspace({
         (book.description ?? '').toLowerCase().includes(query)
       )
     })
-  }, [books, referenceSearch])
+  }, [books, effectiveReferenceSearch])
 
   const referenceCommodityGroups = useMemo(
     () =>
@@ -259,7 +263,7 @@ export function useReferenceDataWorkspace({
         items: commodities
           .filter((commodity) => commodity.commodity_class === commodityClass)
           .filter((commodity) => {
-            const query = referenceSearch.trim().toLowerCase()
+            const query = effectiveReferenceSearch.trim().toLowerCase()
             if (!query) return true
             return (
               commodity.code.toLowerCase().includes(query) ||
@@ -268,11 +272,11 @@ export function useReferenceDataWorkspace({
             )
           }),
       })).filter((group) => group.items.length > 0),
-    [commodities, commodityClassOrder, referenceSearch],
+    [commodities, commodityClassOrder, effectiveReferenceSearch],
   )
 
   const filteredPriceIndices = useMemo(() => {
-    const query = referenceSearch.trim().toLowerCase()
+    const query = effectiveReferenceSearch.trim().toLowerCase()
     return priceIndices.filter((priceIndex) => {
       if (!query) return true
       return (
@@ -286,10 +290,10 @@ export function useReferenceDataWorkspace({
         (priceIndex.description ?? '').toLowerCase().includes(query)
       )
     })
-  }, [priceIndices, referenceSearch])
+  }, [effectiveReferenceSearch, priceIndices])
 
   const filteredCurrencies = useMemo(() => {
-    const query = referenceSearch.trim().toLowerCase()
+    const query = effectiveReferenceSearch.trim().toLowerCase()
     return currencies.filter((currency) => {
       if (!query) return true
       return (
@@ -299,10 +303,10 @@ export function useReferenceDataWorkspace({
         (currency.description ?? '').toLowerCase().includes(query)
       )
     })
-  }, [currencies, referenceSearch])
+  }, [currencies, effectiveReferenceSearch])
 
   const filteredUnits = useMemo(() => {
-    const query = referenceSearch.trim().toLowerCase()
+    const query = effectiveReferenceSearch.trim().toLowerCase()
     return units.filter((unit) => {
       if (!query) return true
       return (
@@ -313,10 +317,10 @@ export function useReferenceDataWorkspace({
         (unit.description ?? '').toLowerCase().includes(query)
       )
     })
-  }, [referenceSearch, units])
+  }, [effectiveReferenceSearch, units])
 
   const filteredLocations = useMemo(() => {
-    const query = referenceSearch.trim().toLowerCase()
+    const query = effectiveReferenceSearch.trim().toLowerCase()
     return locations.filter((location) => {
       if (!query) return true
       return (
@@ -334,10 +338,10 @@ export function useReferenceDataWorkspace({
         (location.description ?? '').toLowerCase().includes(query)
       )
     })
-  }, [locations, referenceSearch])
+  }, [effectiveReferenceSearch, locations])
 
   const filteredCounterparties = useMemo(() => {
-    const query = referenceSearch.trim().toLowerCase()
+    const query = effectiveReferenceSearch.trim().toLowerCase()
     return counterparties.filter((counterparty) => {
       if (!query) return true
       return (
@@ -354,10 +358,10 @@ export function useReferenceDataWorkspace({
         (counterparty.description ?? '').toLowerCase().includes(query)
       )
     })
-  }, [counterparties, referenceSearch])
+  }, [counterparties, effectiveReferenceSearch])
 
   const filteredPortfolios = useMemo(() => {
-    const query = referenceSearch.trim().toLowerCase()
+    const query = effectiveReferenceSearch.trim().toLowerCase()
     return portfolios.filter((portfolio) => {
       if (!query) return true
       return (
@@ -369,7 +373,7 @@ export function useReferenceDataWorkspace({
         (portfolio.description ?? '').toLowerCase().includes(query)
       )
     })
-  }, [portfolios, referenceSearch])
+  }, [effectiveReferenceSearch, portfolios])
 
   const resolvedPriceIndexCommodityCode = priceIndexForm.commodity_code || activeCommodities[0]?.code || ''
   const selectablePriceIndexUnits = useMemo(() => {

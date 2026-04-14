@@ -1018,6 +1018,9 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             "overdue",
             " ".join(work_item["credit_approval_freshness"]["blocking_reasons"]).lower(),
         )
+        action_states = {row["key"]: row for row in work_item["action_states"]}
+        self.assertFalse(action_states["approve"]["available"])
+        self.assertIn("overdue", (action_states["approve"]["blocked_reason"] or "").lower())
 
         response = self.client.patch(
             f"/operations/work-items/{work_item['item_id']}",
@@ -1340,6 +1343,25 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertIn("append_event", descriptors["deliveries"]["actions"])
         self.assertEqual(descriptors["payments"]["sort_fields"], ["trade_id asc", "due_at asc", "id asc"])
         self.assertEqual(descriptors["work_items"]["actions"], ["create", "update", "book_underlying"])
+        confirmation_surface_actions = {
+            row["key"]: row for row in descriptors["confirmations"]["surface"]["actions"]
+        }
+        self.assertEqual(
+            confirmation_surface_actions["issue"]["label"],
+            "Issue Confirmation",
+        )
+        self.assertTrue(confirmation_surface_actions["disputed"]["comment_required"])
+        self.assertEqual(
+            confirmation_surface_actions["disputed"]["comment_hint"],
+            "Add a dispute reason or response note before marking the confirmation as disputed.",
+        )
+        workflow_surface_actions = {
+            row["key"]: row for row in descriptors["work_items"]["surface"]["actions"]
+        }
+        self.assertEqual(
+            workflow_surface_actions["approve"]["permission_message"],
+            "Only authorized credit approvers can approve credit workflow items.",
+        )
         self.assertEqual(descriptors["confirmations"]["surface"]["title"], "Confirmation Ledger")
         self.assertEqual(descriptors["work_items"]["surface"]["board_section"], "Critical Path")
         self.assertEqual(

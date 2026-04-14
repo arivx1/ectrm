@@ -8,18 +8,19 @@ import type {
   UpdateDeliveryPowerDetailInput,
 } from '../../entities/shipments/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
-import { matchesTextFilter } from '../../shared/filtering'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type { DeliveryRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
+import { OperationalBoardController } from '../operations/OperationalBoardController'
+import { renderOperationalActionPanel } from '../operations/operationalActionPanelRegistry'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
-import { OperationalWorkboardBanner } from '../operations/OperationalWorkboardBanner'
-import { DeliveryDetailEditor } from './DeliveryDetailEditor'
 
 type DeliveryWorkspaceProps = {
   authSession: StoredAuthSession | null
+  globalFilter: string
   deliveries: DeliveryRecord[]
   operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
@@ -187,6 +188,7 @@ function matchesDeliveryScreenFilter(delivery: DeliveryRecord, query: string): b
 
 export function DeliveryWorkspace({
   authSession,
+  globalFilter,
   deliveries,
   operationalResourceDescriptors,
   formatCommodityClass,
@@ -208,7 +210,10 @@ export function DeliveryWorkspace({
 }: DeliveryWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null)
-  const visibleDeliveries = deliveries.filter((delivery) => matchesDeliveryScreenFilter(delivery, screenFilter))
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
+  const visibleDeliveries = deliveries.filter((delivery) =>
+    matchesDeliveryScreenFilter(delivery, effectiveScreenFilter),
+  )
 
   const openDeliveries = visibleDeliveries.filter((delivery) => delivery.status !== 'COMPLETED')
   const blockedDeliveries = visibleDeliveries.filter((delivery) => delivery.status === 'BLOCKED')
@@ -329,6 +334,7 @@ export function DeliveryWorkspace({
           totalCount={deliveries.length}
           matchedCount={visibleDeliveries.length}
           resultLabel="deliveries"
+          globalValue={globalFilter}
         />
       }
       sections={[
@@ -477,148 +483,153 @@ export function DeliveryWorkspace({
             'A cross-mode operational board ordered so the riskiest delivery obligations surface first, paired with a persisted control editor for the selected delivery.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content:
-            visibleDeliveries.length > 0 ? (
-              <div className="shipment-queue-stack">
-                <OperationalWorkboardBanner workboard={deliveryBoardWorkboard} />
-                <div className="shipment-card-actions shipment-sync-actions">
-                  <span>Resync obligations after trade capture, amendments, or leg changes reshape the physical delivery book.</span>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={() => void onSyncDeliveriesFromTrades()}
-                    disabled={!authSession || deliveriesSyncing}
-                  >
-                    {deliveriesSyncing ? 'Syncing…' : 'Sync From Trades'}
-                  </button>
-                </div>
-
-                {deliverySyncError ? <p className="field-error workflow-item-save-error">{deliverySyncError}</p> : null}
-                {deliverySyncSuccess ? <p className="workflow-editor-note">{deliverySyncSuccess}</p> : null}
-
-                <div className="shipment-queue-layout">
-                  <div className="position-list">
-                  {visibleDeliveries.map((delivery) => {
-                    const isSelected = selectedDelivery?.delivery_id === delivery.delivery_id
-
-                    return (
-                      <article
-                        key={delivery.delivery_id}
-                        className={`position-card shipment-card ${isSelected ? 'shipment-card-selected' : ''}`}
+          content: (
+            <OperationalBoardController
+              workboard={deliveryBoardWorkboard}
+              className="shipment-queue-stack shipment-workbench"
+              detailClassName="shipment-editor-panel"
+              isEmpty={visibleDeliveries.length === 0}
+              summary={
+                visibleDeliveries.length > 0 ? (
+                  <>
+                    <div className="shipment-card-actions shipment-sync-actions">
+                      <span>Resync obligations after trade capture, amendments, or leg changes reshape the physical delivery book.</span>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void onSyncDeliveriesFromTrades()}
+                        disabled={!authSession || deliveriesSyncing}
                       >
-                        <div className="shipment-card-head">
-                          <div className="shipment-card-copy">
-                            <strong>{delivery.commodity}</strong>
-                            <span>
-                              {tradeReferenceLabel(delivery)}
-                              {delivery.external_trade_id ? ` • ${delivery.external_trade_id}` : ''}
-                            </span>
-                          </div>
-                          <span className={`status-pill status-pill-${deliveryTone(delivery.status)}`}>
-                            {formatDeliveryStatus(delivery.status)}
-                          </span>
-                        </div>
+                        {deliveriesSyncing ? 'Syncing…' : 'Sync From Trades'}
+                      </button>
+                    </div>
+                    {deliverySyncError ? <p className="field-error workflow-item-save-error">{deliverySyncError}</p> : null}
+                    {deliverySyncSuccess ? <p className="workflow-editor-note">{deliverySyncSuccess}</p> : null}
+                  </>
+                ) : (
+                  <></>
+                )
+              }
+              detail={
+                visibleDeliveries.length > 0 ? (
+                  selectedDelivery ? (
+                    renderOperationalActionPanel('deliveryControl', operationalResourceDescriptors, {
+                      authSession,
+                      delivery: selectedDelivery,
+                      saveError: deliveryMutationError,
+                      savingDeliveryId: deliveryMutationPendingId,
+                      formatDate,
+                      onOpenTrade,
+                      onSaveShared: onSaveDelivery,
+                      onSaveLogisticsDetails: onSaveDeliveryLogisticsDetails,
+                      onSavePipelineDetails: onSaveDeliveryPipelineDetails,
+                      onSavePowerDetails: onSaveDeliveryPowerDetails,
+                      onCreateEvent: onCreateDeliveryEvent,
+                    })
+                  ) : (
+                    <div className="empty-state">
+                      <strong>No delivery selected</strong>
+                      <p>Pick a delivery from the queue to edit controls, mode-specific instructions, and manual overrides.</p>
+                    </div>
+                  )
+                ) : undefined
+              }
+              emptyStateTitle="No delivery queue"
+              emptyStateDetail="The board will populate automatically from active physical trades once obligations are captured."
+            >
+              <div className="position-list">
+                {visibleDeliveries.map((delivery) => {
+                  const isSelected = selectedDelivery?.delivery_id === delivery.delivery_id
 
-                        <div className="shipment-card-meta">
-                          <span className="entity-chip entity-chip-soft">{formatCommodityClass(delivery.commodity_class)}</span>
-                          <span className="entity-chip entity-chip-soft">{formatModeFamily(delivery.mode_family)}</span>
-                          <span className="entity-chip entity-chip-soft">
-                            {delivery.transport_mode === 'UNSPECIFIED' ? 'Mode TBD' : formatTransportMode(delivery.transport_mode)}
-                          </span>
-                          <span className="entity-chip entity-chip-soft">{formatDeliveryProfile(delivery.delivery_profile)}</span>
-                          <span className="entity-chip entity-chip-soft">
-                            Execution {delivery.execution_status.replaceAll('_', ' ')}
-                          </span>
-                          {hasManualSharedOverrides(delivery) ? (
-                            <span className="entity-chip entity-chip-soft">Manual Overrides</span>
-                          ) : null}
-                          <span className="entity-chip entity-chip-soft">Pricing {delivery.pricing_status}</span>
-                          <span className="entity-chip entity-chip-soft">Confirmation {delivery.confirmation_status}</span>
-                          <span className="entity-chip entity-chip-soft">Nomination {delivery.nomination_status}</span>
-                          <span className="entity-chip entity-chip-soft">Allocation {delivery.allocation_status}</span>
-                          <span className="entity-chip entity-chip-soft">
-                            Actualization {delivery.actualization_status.replaceAll('_', ' ')}
-                          </span>
-                          <span className="entity-chip entity-chip-soft">Invoice {delivery.invoice_status}</span>
-                          <span className="entity-chip entity-chip-soft">Payment {delivery.payment_status}</span>
-                          <span className="entity-chip entity-chip-soft">Settlement {delivery.settlement_status}</span>
-                        </div>
-
+                  return (
+                    <article
+                      key={delivery.delivery_id}
+                      className={`position-card shipment-card ${isSelected ? 'shipment-card-selected' : ''}`}
+                    >
+                      <div className="shipment-card-head">
                         <div className="shipment-card-copy">
-                          <p>{deliveryNarrative(delivery)}</p>
-                          <p>
-                            {volumeLabel(delivery, formatNumber)} • {delivery.location_code ?? 'Location TBD'} •{' '}
-                            {windowLabel(delivery, formatDateOnly)}
-                          </p>
-                          <p>
-                            {delivery.actualized_quantity !== null
-                              ? `Actualized ${formatNumber(delivery.actualized_quantity, 2)} ${delivery.unit_of_measure ?? ''} on ${formatDate(delivery.actualized_at)}`
-                              : 'Execution actuals have not been recorded yet.'}
-                          </p>
-                          <p>
-                            Booked {formatDate(delivery.booked_at)} • Updated {formatDate(delivery.last_updated_at)} • Open{' '}
-                            {delivery.age_days}d
-                          </p>
+                          <strong>{delivery.commodity}</strong>
+                          <span>
+                            {tradeReferenceLabel(delivery)}
+                            {delivery.external_trade_id ? ` • ${delivery.external_trade_id}` : ''}
+                          </span>
                         </div>
-
-                        {delivery.blockers.length > 0 ? (
-                          <ul className="shipment-blocker-list">
-                            {delivery.blockers.map((blocker) => (
-                              <li key={blocker}>{blocker}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-
-                        <div className="shipment-card-actions">
-                          <span>{delivery.counterparty ?? 'Counterparty TBD'}</span>
-                          <div className="workflow-item-button-row">
-                            <button
-                              type="button"
-                              className="button button-ghost"
-                              onClick={() => setSelectedDeliveryId(delivery.delivery_id)}
-                            >
-                              {isSelected ? 'Editing' : 'Edit Controls'}
-                            </button>
-                            <button type="button" className="button button-ghost" onClick={() => onOpenTrade(delivery.trade_id)}>
-                              Open Trade
-                            </button>
-                          </div>
-                        </div>
-                      </article>
-                    )
-                  })}
-                  </div>
-
-                  <div className="shipment-editor-panel">
-                    {selectedDelivery ? (
-                      <DeliveryDetailEditor
-                        authSession={authSession}
-                        delivery={selectedDelivery}
-                        saveError={deliveryMutationError}
-                        savingDeliveryId={deliveryMutationPendingId}
-                        formatDate={formatDate}
-                        onOpenTrade={onOpenTrade}
-                        onSaveShared={onSaveDelivery}
-                        onSaveLogisticsDetails={onSaveDeliveryLogisticsDetails}
-                        onSavePipelineDetails={onSaveDeliveryPipelineDetails}
-                        onSavePowerDetails={onSaveDeliveryPowerDetails}
-                        onCreateEvent={onCreateDeliveryEvent}
-                      />
-                    ) : (
-                      <div className="empty-state">
-                        <strong>No delivery selected</strong>
-                        <p>Pick a delivery from the queue to edit controls, mode-specific instructions, and manual overrides.</p>
+                        <span className={`status-pill status-pill-${deliveryTone(delivery.status)}`}>
+                          {formatDeliveryStatus(delivery.status)}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                </div>
+
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">{formatCommodityClass(delivery.commodity_class)}</span>
+                        <span className="entity-chip entity-chip-soft">{formatModeFamily(delivery.mode_family)}</span>
+                        <span className="entity-chip entity-chip-soft">
+                          {delivery.transport_mode === 'UNSPECIFIED' ? 'Mode TBD' : formatTransportMode(delivery.transport_mode)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">{formatDeliveryProfile(delivery.delivery_profile)}</span>
+                        <span className="entity-chip entity-chip-soft">
+                          Execution {delivery.execution_status.replaceAll('_', ' ')}
+                        </span>
+                        {hasManualSharedOverrides(delivery) ? (
+                          <span className="entity-chip entity-chip-soft">Manual Overrides</span>
+                        ) : null}
+                        <span className="entity-chip entity-chip-soft">Pricing {delivery.pricing_status}</span>
+                        <span className="entity-chip entity-chip-soft">Confirmation {delivery.confirmation_status}</span>
+                        <span className="entity-chip entity-chip-soft">Nomination {delivery.nomination_status}</span>
+                        <span className="entity-chip entity-chip-soft">Allocation {delivery.allocation_status}</span>
+                        <span className="entity-chip entity-chip-soft">
+                          Actualization {delivery.actualization_status.replaceAll('_', ' ')}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">Invoice {delivery.invoice_status}</span>
+                        <span className="entity-chip entity-chip-soft">Payment {delivery.payment_status}</span>
+                        <span className="entity-chip entity-chip-soft">Settlement {delivery.settlement_status}</span>
+                      </div>
+
+                      <div className="shipment-card-copy">
+                        <p>{deliveryNarrative(delivery)}</p>
+                        <p>
+                          {volumeLabel(delivery, formatNumber)} • {delivery.location_code ?? 'Location TBD'} •{' '}
+                          {windowLabel(delivery, formatDateOnly)}
+                        </p>
+                        <p>
+                          {delivery.actualized_quantity !== null
+                            ? `Actualized ${formatNumber(delivery.actualized_quantity, 2)} ${delivery.unit_of_measure ?? ''} on ${formatDate(delivery.actualized_at)}`
+                            : 'Execution actuals have not been recorded yet.'}
+                        </p>
+                        <p>
+                          Booked {formatDate(delivery.booked_at)} • Updated {formatDate(delivery.last_updated_at)} • Open{' '}
+                          {delivery.age_days}d
+                        </p>
+                      </div>
+
+                      {delivery.blockers.length > 0 ? (
+                        <ul className="shipment-blocker-list">
+                          {delivery.blockers.map((blocker) => (
+                            <li key={blocker}>{blocker}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+
+                      <div className="shipment-card-actions">
+                        <span>{delivery.counterparty ?? 'Counterparty TBD'}</span>
+                        <div className="workflow-item-button-row">
+                          <button
+                            type="button"
+                            className="button button-ghost"
+                            onClick={() => setSelectedDeliveryId(delivery.delivery_id)}
+                          >
+                            {isSelected ? 'Editing' : 'Edit Controls'}
+                          </button>
+                          <button type="button" className="button button-ghost" onClick={() => onOpenTrade(delivery.trade_id)}>
+                            Open Trade
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
               </div>
-            ) : (
-              <div className="empty-state">
-                <strong>No delivery queue</strong>
-                <p>The board will populate automatically from active physical trades once obligations are captured.</p>
-              </div>
-            ),
+            </OperationalBoardController>
+          ),
         },
       ]}
     />

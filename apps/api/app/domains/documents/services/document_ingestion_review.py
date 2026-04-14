@@ -9,6 +9,7 @@ from apps.api.app.schemas.document import DocumentExtractedFieldOut
 from apps.api.app.schemas.document import DocumentReviewStatus
 from apps.api.app.schemas.document import DocumentTableBlockOut
 
+from .document_routing import build_document_routing_assessment
 from .document_ingestion_common import clean_optional_text
 from .document_ingestion_common import humanize_key
 from .document_ingestion_common import normalize_key
@@ -19,6 +20,7 @@ def build_document_summary(
     *,
     review_status: DocumentReviewStatus | str,
 ) -> dict[str, object]:
+    routing_assessment = build_document_routing_assessment(pages, review_status=str(review_status))
     kind_counts = Counter(page.document_kind for page in pages)
     dominant_document_kind = "UNKNOWN"
     for kind, _count in kind_counts.most_common():
@@ -49,6 +51,10 @@ def build_document_summary(
         "unreviewed_page_count": max(len(pages) - reviewed_page_count, 0),
         "review_ready": bool(pages) and reviewed_page_count == len(pages) and review_blockers == 0,
         "review_blocker_count": review_blockers,
+        "routing_strategy": routing_assessment.routing_strategy,
+        "routing_status": routing_assessment.status,
+        "routing_primary_record_type": routing_assessment.primary_record_type,
+        "routing_assessment": routing_assessment.model_dump(),
     }
 
 

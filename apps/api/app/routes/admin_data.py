@@ -5,12 +5,15 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import resolve_audit_actor_id
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.admin.services.seed_assistant_agents import seed_assistant_agents
 from apps.api.app.domains.admin.services.seed_reference_data import seed_reference_master_data
 from apps.api.app.domains.admin.services.seed_transactions import (
     list_transaction_scenarios,
     seed_transaction_data,
 )
 from apps.api.app.schemas.admin_seed import (
+    AssistantAgentSeedRequest,
+    AssistantAgentSeedResult,
     ReferenceSeedRequest,
     ReferenceSeedResult,
     TransactionScenarioOut,
@@ -76,4 +79,20 @@ def seed_admin_reference_data(
         replace_existing=summary.replace_existing,
         entity_counts=summary.entity_counts,
         total_records=summary.total_records,
+    )
+
+
+@admin_router.post("/assistant-agents/seed", response_model=AssistantAgentSeedResult)
+def seed_admin_assistant_agents(
+    payload: AssistantAgentSeedRequest,
+    db: Session = Depends(get_db),
+) -> AssistantAgentSeedResult:
+    actor_id = resolve_audit_actor_id(payload.requested_by)
+    summary = seed_assistant_agents(db, requested_by=actor_id)
+    return AssistantAgentSeedResult(
+        requested_by=actor_id,
+        total_templates=summary.total_templates,
+        created_count=summary.created_count,
+        updated_count=summary.updated_count,
+        agent_ids=summary.agent_ids,
     )

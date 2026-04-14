@@ -4,7 +4,18 @@ import type {
   DocumentKindSchemaRecord,
   DocumentSchemaRegistryRecord,
 } from '../../shared/models'
-import { PAGE_REVIEW_STATUS_OPTIONS, pageTextSourceLabel, pageTextSourceTone } from './documentIngestionUtils'
+import {
+  pageProcessorTrace,
+  PAGE_REVIEW_STATUS_OPTIONS,
+  processorLabel,
+  processorTraceTone,
+  pageRoutingAssessment,
+  pageTextSourceLabel,
+  pageTextSourceTone,
+  routingPrimaryLabel,
+  routingStatusTone,
+  routingStrategyLabel,
+} from './documentIngestionUtils'
 import { DocumentIngestionHeaderFieldsEditor } from './DocumentIngestionHeaderFieldsEditor'
 import { DocumentIngestionTableBlocksEditor } from './DocumentIngestionTableBlocksEditor'
 import type { DocumentIngestionController } from './useDocumentIngestionController'
@@ -29,6 +40,9 @@ export function DocumentIngestionPageEditor({
   const pagePreviewUrl = controller.pagePreviewUrls[page.page_id] ?? ''
   const pagePreviewError = controller.pagePreviewErrors[page.page_id] ?? ''
   const pagePreviewIsLoading = controller.pagePreviewLoading[page.page_id] === true
+  const routingAssessment = pageRoutingAssessment(page)
+  const processorTrace = pageProcessorTrace(page)
+  const nonProcessorWarnings = page.processing_warnings.filter((warning) => !processorTrace?.warnings.includes(warning))
 
   return (
     <section className="document-ingestion-page document-ingestion-page-editor">
@@ -137,6 +151,48 @@ export function DocumentIngestionPageEditor({
               <p>{schema.review_guidance}</p>
             </div>
           ) : null}
+          {routingAssessment ? (
+            <div className="document-schema-note">
+              <div className="document-ingestion-chip-row">
+                <span className={`status-pill status-pill-${routingStatusTone(routingAssessment)}`}>
+                  {routingAssessment.status.replaceAll('_', ' ')}
+                </span>
+                <span className="entity-chip entity-chip-soft">{routingStrategyLabel(routingAssessment)}</span>
+                <span className="entity-chip entity-chip-soft">{routingPrimaryLabel(routingAssessment)}</span>
+              </div>
+              {routingAssessment.reasons.map((reason) => (
+                <p key={reason}>{reason}</p>
+              ))}
+            </div>
+          ) : null}
+          {processorTrace ? (
+            <div className="document-schema-note">
+              <div className="document-ingestion-chip-row">
+                <span className={`status-pill status-pill-${processorTraceTone(processorTrace)}`}>
+                  {processorTrace.partial ? 'AI PARTIAL' : processorTrace.applied ? 'AI APPLIED' : 'AI READY'}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  {processorLabel(processorTrace.provider)}
+                  {processorTrace.model ? ` • ${processorTrace.model}` : ''}
+                </span>
+                {processorTrace.overrode_heuristics ? (
+                  <span className="entity-chip entity-chip-soft">Heuristic Classification Overridden</span>
+                ) : null}
+              </div>
+              {processorTrace.heuristic_document_kind ? (
+                <p>
+                  Heuristic classification started at {processorTrace.heuristic_document_kind.replaceAll('_', ' ')}
+                  {processorTrace.heuristic_document_subtype ? ` • ${processorTrace.heuristic_document_subtype}` : ''}
+                  {processorTrace.overrode_heuristics
+                    ? ` and was updated to ${page.document_kind.replaceAll('_', ' ')}${page.document_subtype ? ` • ${page.document_subtype}` : ''}.`
+                    : '.'}
+                </p>
+              ) : null}
+              {processorTrace.warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -168,8 +224,8 @@ export function DocumentIngestionPageEditor({
         />
       </label>
 
-      {page.processing_warnings.length > 0 ? (
-        <p className="workflow-editor-note">{page.processing_warnings.join(' ')}</p>
+      {nonProcessorWarnings.length > 0 ? (
+        <p className="workflow-editor-note">{nonProcessorWarnings.join(' ')}</p>
       ) : null}
       {page.processing_errors.length > 0 ? <p className="field-error">{page.processing_errors.join(' ')}</p> : null}
       {pageError ? <p className="field-error">{pageError}</p> : null}

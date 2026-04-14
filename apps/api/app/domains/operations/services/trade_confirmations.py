@@ -37,6 +37,9 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurfaceAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
 )
 from apps.api.app.domains.operations.services.workflow_items import set_trade_workflow_item_projection
@@ -51,6 +54,7 @@ from apps.api.app.schemas.confirmation import TradeConfirmationMismatchOut
 from apps.api.app.shared.enums import ConfirmationReceiptStatus
 from apps.api.app.shared.enums import ConfirmationStatus
 from apps.api.app.shared.enums import TradeWorkflowType
+from apps.api.app.schemas.operations import OperationalRowActionStateOut
 
 CONFIRMATION_ISSUE_METHODS: tuple[str, ...] = ("EMAIL", "EDI", "PORTAL", "MANUAL", "OTHER")
 CONFIRMATION_RESPONSE_METHODS: tuple[str, ...] = ("EMAIL", "EDI", "PORTAL", "PHONE", "MANUAL", "OTHER")
@@ -61,6 +65,9 @@ CONFIRMATION_RESPONSE_ACTIONS: tuple[str, ...] = (
 )
 AUTO_GENERATED_CAPTURE_DRAFT_NOTE = (
     "Auto-generated draft from booked trade economics on trade capture."
+)
+CONFIRMATION_PERMISSION_MESSAGE = (
+    "Sign in to create, issue, respond to, and revise confirmation records."
 )
 
 
@@ -513,6 +520,70 @@ def _apply_comparison_waiver_state(
     confirmation.comparison_waived_by = None
 
 
+def _confirmation_response_blocked_reason(confirmation: TradeConfirmation) -> str | None:
+    if confirmation.status != ConfirmationStatus.SENT.value:
+        return "Only sent confirmation versions can record a counterparty response."
+    if confirmation.issue_count <= 0:
+        return "Issue the confirmation before recording a counterparty response."
+    return None
+
+
+def _confirmation_action_states(
+    confirmation: TradeConfirmation,
+    *,
+    comparison_result: TradeConfirmationComparisonResult,
+) -> list[OperationalRowActionStateOut]:
+    response_blocked_reason = _confirmation_response_blocked_reason(confirmation)
+    confirmed_blocked_reason = response_blocked_reason
+    if confirmed_blocked_reason is None and comparison_result.has_blocking_mismatches and not confirmation.comparison_waiver_note:
+        confirmed_blocked_reason = (
+            "Resolve blocking comparison mismatches or add a waiver note before marking the confirmation as confirmed."
+        )
+    issue_blocked_reason = None
+    if confirmation.status not in {ConfirmationStatus.PENDING.value, ConfirmationStatus.SENT.value}:
+        issue_blocked_reason = "Only pending or sent confirmation versions can be issued."
+
+    save_blocked_reason = None
+    if (
+        confirmation.status == ConfirmationStatus.CONFIRMED.value
+        and comparison_result.has_blocking_mismatches
+        and not confirmation.comparison_waiver_note
+    ):
+        save_blocked_reason = (
+            "Resolve blocking comparison mismatches or add a waiver note before saving a confirmed confirmation version."
+        )
+
+    return [
+        OperationalRowActionStateOut(
+            key="issue",
+            available=issue_blocked_reason is None,
+            blocked_reason=issue_blocked_reason,
+            label="Reissue Confirmation" if confirmation.issue_count > 0 else None,
+        ),
+        OperationalRowActionStateOut(
+            key="received",
+            available=response_blocked_reason is None,
+            blocked_reason=response_blocked_reason,
+        ),
+        OperationalRowActionStateOut(
+            key="confirmed",
+            available=confirmed_blocked_reason is None,
+            blocked_reason=confirmed_blocked_reason,
+        ),
+        OperationalRowActionStateOut(
+            key="disputed",
+            available=response_blocked_reason is None,
+            blocked_reason=response_blocked_reason,
+        ),
+        OperationalRowActionStateOut(
+            key="save",
+            available=save_blocked_reason is None,
+            blocked_reason=save_blocked_reason,
+        ),
+        OperationalRowActionStateOut(key="newVersion"),
+    ]
+
+
 def _to_out(
     confirmation: TradeConfirmation,
     trade: Trade,
@@ -584,6 +655,10 @@ def _to_out(
             )
             for mismatch in comparison_result.mismatches
         ],
+        action_states=_confirmation_action_states(
+            confirmation,
+            comparison_result=comparison_result,
+        ),
     )
 
 
@@ -829,6 +904,52 @@ CONFIRMATION_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
             "straight from the operational record set."
         ),
         board_section="Trade Confirmation",
+        actions=(
+            OperationalResourceSurfaceAction(
+                key="create",
+                label="Create Confirmation",
+                detail="Create the first managed confirmation record for the trade.",
+                permission_message=CONFIRMATION_PERMISSION_MESSAGE,
+            ),
+            OperationalResourceSurfaceAction(
+                key="issue",
+                label="Issue Confirmation",
+                detail="Issue the current confirmation draft once terms and comparison results are clean.",
+                permission_message=CONFIRMATION_PERMISSION_MESSAGE,
+            ),
+            OperationalResourceSurfaceAction(
+                key="received",
+                label="Mark Received",
+                detail="Record receipt of the counterparty response without resolving it as confirmed or disputed.",
+                permission_message=CONFIRMATION_PERMISSION_MESSAGE,
+            ),
+            OperationalResourceSurfaceAction(
+                key="confirmed",
+                label="Counterparty Confirmed",
+                detail="Record a clean counterparty confirmation response on the current issued record.",
+                permission_message=CONFIRMATION_PERMISSION_MESSAGE,
+            ),
+            OperationalResourceSurfaceAction(
+                key="disputed",
+                label="Counterparty Disputed",
+                detail="Record a disputed response on the current issued confirmation version.",
+                permission_message=CONFIRMATION_PERMISSION_MESSAGE,
+                comment_required=True,
+                comment_hint="Add a dispute reason or response note before marking the confirmation as disputed.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="save",
+                label="Save Current",
+                detail="Persist edits to the current confirmation version without creating a new version.",
+                permission_message=CONFIRMATION_PERMISSION_MESSAGE,
+            ),
+            OperationalResourceSurfaceAction(
+                key="newVersion",
+                label="Log New Version",
+                detail="Create a fresh managed version when economics or supporting documents change.",
+                permission_message=CONFIRMATION_PERMISSION_MESSAGE,
+            ),
+        ),
         primary_action=OperationalResourcePrimaryAction(
             key="issue_current_draft",
             label="Issue current draft",

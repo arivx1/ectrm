@@ -39,6 +39,9 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurfaceAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
 )
 from apps.api.app.domains.operations.services.resource_views import (
@@ -1932,6 +1935,44 @@ DELIVERY_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
             "trade-derived resync behavior."
         ),
         board_section="Logistics",
+        actions=(
+            OperationalResourceSurfaceAction(
+                key="sync_from_trades",
+                label="Sync Trade Obligations",
+                detail="Refresh the delivery projection from the booked trade set before editing downstream detail.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="update",
+                label="Update Delivery Controls",
+                detail="Update shared delivery controls for the selected obligation.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="update_logistics_detail",
+                label="Update Logistics Detail",
+                detail="Persist truck, vessel, or rail specific execution detail for the selected obligation.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="update_pipeline_detail",
+                label="Update Pipeline Detail",
+                detail="Persist pipeline scheduling and balancing detail for the selected obligation.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="update_power_detail",
+                label="Update Power Detail",
+                detail="Persist power scheduling detail for the selected delivery obligation.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="append_event",
+                label="Append Delivery Event",
+                detail="Add an execution event to the delivery history timeline.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+        ),
         primary_action=OperationalResourcePrimaryAction(
             key="sync_trade_obligations",
             label="Sync trade obligations",
@@ -1977,6 +2018,14 @@ SHIPMENT_RESOURCE_DESCRIPTOR = replace(
             "timing, and variance updates on the same contract as the delivery board."
         ),
         board_section="Execution",
+        actions=(
+            OperationalResourceSurfaceAction(
+                key="upsert_actualization",
+                label="Record Actualization",
+                detail="Capture actualized quantity, execution timestamp, and variance notes for the selected obligation.",
+                permission_message="Sign in to record and revise execution actualization.",
+            ),
+        ),
         primary_action=OperationalResourcePrimaryAction(
             key="record_actualization",
             label="Record actualization",

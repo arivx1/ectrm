@@ -9,7 +9,8 @@ import type {
 } from '../../entities/confirmations/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
-import { matchesTextFilter } from '../../shared/filtering'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import { buildOpenOptionActionQueue, type OpenOptionValuation } from '../../shared/optionExposure'
 import { TileLayout } from '../../shared/ui/TileLayout'
@@ -26,15 +27,17 @@ import type {
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type { OptionLifecycleEventType } from '../../shared/trading'
-import { ConfirmationLedgerBoard } from './ConfirmationLedgerBoard'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
+import { describeEventWorkspaceHandoff } from '../events/eventHelpers'
 import { DocumentIngestionPanel } from './DocumentIngestionPanel'
 import { OperationalBoardController } from './OperationalBoardController'
-import { WorkflowQueueEditor } from './WorkflowQueueEditor'
+import { renderOperationalInlineBoard } from './operationalInlineBoardRegistry'
 import { resolveOperationalWorkboardDefinition } from './operationalWorkboardRegistry'
 
 type OperationsWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff: AppRouteHandoff | null
+  globalFilter: string
   activeTrades: Trade[]
   confirmations: TradeConfirmationRecord[]
   deliveries: DeliveryRecord[]
@@ -260,6 +263,8 @@ function matchesTradingSourceScreenFilter(source: TradingSourceRecord, query: st
 
 export function OperationsWorkspace({
   authSession,
+  routeHandoff,
+  globalFilter,
   activeTrades,
   confirmations,
   deliveries,
@@ -290,21 +295,23 @@ export function OperationsWorkspace({
   onSaveWorkflowItem,
 }: OperationsWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const directlyMatchedTrades = useMemo(
-    () => activeTrades.filter((trade) => matchesOperationsTradeFilter(trade, screenFilter)),
-    [activeTrades, screenFilter],
+    () => activeTrades.filter((trade) => matchesOperationsTradeFilter(trade, effectiveScreenFilter)),
+    [activeTrades, effectiveScreenFilter],
   )
   const directlyMatchedConfirmations = useMemo(
-    () => confirmations.filter((confirmation) => matchesConfirmationScreenFilter(confirmation, screenFilter)),
-    [confirmations, screenFilter],
+    () =>
+      confirmations.filter((confirmation) => matchesConfirmationScreenFilter(confirmation, effectiveScreenFilter)),
+    [confirmations, effectiveScreenFilter],
   )
   const directlyMatchedDeliveries = useMemo(
-    () => deliveries.filter((delivery) => matchesDeliveryScreenFilter(delivery, screenFilter)),
-    [deliveries, screenFilter],
+    () => deliveries.filter((delivery) => matchesDeliveryScreenFilter(delivery, effectiveScreenFilter)),
+    [deliveries, effectiveScreenFilter],
   )
   const directlyMatchedWorkItems = useMemo(
-    () => workItems.filter((item) => matchesWorkflowItemScreenFilter(item, screenFilter)),
-    [screenFilter, workItems],
+    () => workItems.filter((item) => matchesWorkflowItemScreenFilter(item, effectiveScreenFilter)),
+    [effectiveScreenFilter, workItems],
   )
   const visibleTradeIds = useMemo(
     () =>
@@ -333,8 +340,8 @@ export function OperationsWorkspace({
     [visibleTradeIds, workItems],
   )
   const visibleTradingSources = useMemo(
-    () => tradingSources.filter((source) => matchesTradingSourceScreenFilter(source, screenFilter)),
-    [screenFilter, tradingSources],
+    () => tradingSources.filter((source) => matchesTradingSourceScreenFilter(source, effectiveScreenFilter)),
+    [effectiveScreenFilter, tradingSources],
   )
   const activeOptionTrades = visibleActiveTrades.filter((trade) => trade.instrument_type === 'OPTION')
   const {
@@ -391,6 +398,10 @@ export function OperationsWorkspace({
     'workflowQueue',
     operationalResourceDescriptors,
   )
+  const workspaceFocusBanner =
+    routeHandoff?.source === 'events'
+      ? describeEventWorkspaceHandoff('operations', routeHandoff.tradeId, routeHandoff.eventType)
+      : null
   const operationsSnapshotCards: TileSectionGridItem[] = [
     {
       id: 'open-workflow',
@@ -467,21 +478,32 @@ export function OperationsWorkspace({
         workspaceLabel="Operations"
         authSession={authSession}
         headerContent={
-          <WorkspaceLocalFilterBar
-            value={screenFilter}
-            onChange={setScreenFilter}
-            placeholder="Trade ID, workflow owner, queue status, delivery mode, or source"
-            description="Filter the operations control loop locally so confirmations, deliveries, and queue work stay in sync on this screen only."
-            totalCount={activeTrades.length + confirmations.length + deliveries.length + workItems.length + tradingSources.length}
-            matchedCount={
-              visibleActiveTrades.length +
-              visibleConfirmations.length +
-              visibleDeliveries.length +
-              visibleWorkItems.length +
-              visibleTradingSources.length
-            }
-            resultLabel="operations records"
-          />
+          <>
+            {workspaceFocusBanner ? (
+              <section className="feedback-banner feedback-banner-success workspace-focus-banner">
+                <div className="workspace-handoff-banner-copy">
+                  <strong>{workspaceFocusBanner.title}</strong>
+                  <p>{workspaceFocusBanner.detail}</p>
+                </div>
+              </section>
+            ) : null}
+            <WorkspaceLocalFilterBar
+              value={screenFilter}
+              onChange={setScreenFilter}
+              placeholder="Trade ID, workflow owner, queue status, delivery mode, or source"
+              description="Filter the operations control loop locally so confirmations, deliveries, and queue work stay in sync on this screen only."
+              totalCount={activeTrades.length + confirmations.length + deliveries.length + workItems.length + tradingSources.length}
+              matchedCount={
+                visibleActiveTrades.length +
+                visibleConfirmations.length +
+                visibleDeliveries.length +
+                visibleWorkItems.length +
+                visibleTradingSources.length
+              }
+              resultLabel="operations records"
+              globalValue={globalFilter}
+            />
+          </>
         }
         sections={[
           {
@@ -515,7 +537,7 @@ export function OperationsWorkspace({
               ) : (
                 <div className="empty-state">
                   <strong>No operational queue</strong>
-                  <p>Create active physical trades, workflow handoffs, or near-expiry options to populate the operations workspace.</p>
+                  <p>Once trades need confirmations, blocker clearing, or expiry decisions, the operational control loop will fill in here.</p>
                 </div>
               ),
           },
@@ -628,27 +650,31 @@ export function OperationsWorkspace({
                 bannerVariant="chips"
                 isEmpty={visibleActiveTrades.length === 0}
               >
-                <ConfirmationLedgerBoard
-                  key={[
+                {renderOperationalInlineBoard(
+                  'confirmationLedger',
+                  {
+                  authSession,
+                  trades: visibleActiveTrades,
+                  confirmations: visibleConfirmations,
+                  confirmationWorkItems,
+                  saveError: confirmationMutationError,
+                  savingKey: confirmationMutationPendingKey,
+                  operationalResourceDescriptor: confirmationLedgerWorkboard.resources[0] ?? null,
+                  formatCommodityClass,
+                  formatDate,
+                  formatDateOnly,
+                  onCreateConfirmation,
+                  onIssueConfirmation,
+                  onRespondConfirmation,
+                  onOpenTrade,
+                  onSaveConfirmation,
+                  },
+                  [
                     visibleActiveTrades.map((trade) => trade.trade_id).join('|'),
                     visibleConfirmations.map((confirmation) => `${confirmation.confirmation_id}:${confirmation.version}`).join('|'),
                     confirmationWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
-                  ].join('|')}
-                  authSession={authSession}
-                  trades={visibleActiveTrades}
-                  confirmations={visibleConfirmations}
-                  confirmationWorkItems={confirmationWorkItems}
-                  saveError={confirmationMutationError}
-                  savingKey={confirmationMutationPendingKey}
-                  formatCommodityClass={formatCommodityClass}
-                  formatDate={formatDate}
-                  formatDateOnly={formatDateOnly}
-                  onCreateConfirmation={onCreateConfirmation}
-                  onIssueConfirmation={onIssueConfirmation}
-                  onRespondConfirmation={onRespondConfirmation}
-                  onOpenTrade={onOpenTrade}
-                  onSaveConfirmation={onSaveConfirmation}
-                />
+                  ].join('|'),
+                )}
               </OperationalBoardController>
             ),
           },
@@ -665,23 +691,27 @@ export function OperationsWorkspace({
                 bannerVariant="chips"
                 isEmpty={visibleActiveTrades.length === 0}
               >
-                <WorkflowQueueEditor
-                  key={openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|')}
-                  authSession={authSession}
-                  activeTrades={visibleActiveTrades}
-                  items={openOperationsWorkItems}
-                  managedConfirmationTradeIds={managedConfirmationTradeIds}
-                  creationPendingTradeId={workflowCreationPendingTradeId}
-                  savingItemId={workflowMutationPendingId}
-                  saveError={workflowMutationError}
-                  formatCommodityClass={formatCommodityClass}
-                  formatDate={formatDate}
-                  formatDateOnly={formatDateOnly}
-                  onCreateItem={onCreateWorkflowItem}
-                  onOpenTrade={onOpenTrade}
-                  onBookUnderlyingTrade={onBookUnderlyingTrade}
-                  onSaveItem={onSaveWorkflowItem}
-                />
+                {renderOperationalInlineBoard(
+                  'workflowQueue',
+                  {
+                  authSession,
+                  activeTrades: visibleActiveTrades,
+                  items: openOperationsWorkItems,
+                  managedConfirmationTradeIds,
+                  creationPendingTradeId: workflowCreationPendingTradeId,
+                  savingItemId: workflowMutationPendingId,
+                  saveError: workflowMutationError,
+                  operationalResourceDescriptor: workflowQueueWorkboard.resources[0] ?? null,
+                  formatCommodityClass,
+                  formatDate,
+                  formatDateOnly,
+                  onCreateItem: onCreateWorkflowItem,
+                  onOpenTrade,
+                  onBookUnderlyingTrade,
+                  onSaveItem: onSaveWorkflowItem,
+                  },
+                  openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
+                )}
               </OperationalBoardController>
             ),
           },

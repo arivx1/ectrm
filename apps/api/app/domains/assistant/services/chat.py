@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Iterable, cast
+from typing import Any, Iterable, cast, get_args
 
 import httpx
 from sqlalchemy.orm import Session
@@ -22,6 +22,12 @@ from apps.api.app.domains.assistant.services.tools import (
     json_dumps,
 )
 from apps.api.app.schemas.assistant import (
+    AssistantActionDefinitionOut,
+    AssistantActionType,
+    AssistantAgentBuildRequest,
+    AssistantAgentBuildSuggestionOut,
+    AssistantAgentCapability,
+    AssistantAgentScope,
     AssistantMessageIn,
     AssistantMessageOut,
     AssistantPromptContextRequest,
@@ -31,6 +37,7 @@ from apps.api.app.schemas.assistant import (
     AssistantProviderStatusOut,
     AssistantRuntimeSettingsOut,
     AssistantUsageOut,
+    AssistantWorkspace,
 )
 
 PROVIDER_LABELS: dict[AssistantProvider, str] = {
@@ -47,6 +54,44 @@ PROVIDER_SETUP_ENV_VARS: dict[AssistantProvider, str] = {
 
 VALID_PROVIDERS: tuple[AssistantProvider, ...] = ("openai", "anthropic", "google")
 logger = get_logger(__name__)
+
+ASSISTANT_ACTION_DEFINITIONS: tuple[AssistantActionDefinitionOut, ...] = (
+    AssistantActionDefinitionOut(
+        name="cancel_trade",
+        label="Cancel trade",
+        description="Cancel a trade through the approval queue when the user explicitly requests an unwind or void and the live trade evidence supports it.",
+    ),
+    AssistantActionDefinitionOut(
+        name="issue_trade_confirmation",
+        label="Issue confirmation",
+        description="Issue a trade confirmation for a selected trade when operations is ready to send it for review or acknowledgement.",
+    ),
+    AssistantActionDefinitionOut(
+        name="record_trade_confirmation_response",
+        label="Record confirmation response",
+        description="Capture a received confirmation response such as agreed, disputed, or acknowledged when the outcome is supported by the current workflow context.",
+    ),
+    AssistantActionDefinitionOut(
+        name="update_trade_workflow_item",
+        label="Update workflow item",
+        description="Reassign, reprioritize, close, or otherwise update a workflow item when the requested change is specific and grounded in the open queue state.",
+    ),
+    AssistantActionDefinitionOut(
+        name="issue_trade_invoice",
+        label="Issue invoice",
+        description="Create or issue a trade invoice through approval when settlement evidence supports the amount, timing, and trade linkage.",
+    ),
+    AssistantActionDefinitionOut(
+        name="create_trade_payment",
+        label="Create payment",
+        description="Record a trade payment through approval when the payment details are sufficiently specified and tied to the correct trade or invoice.",
+    ),
+    AssistantActionDefinitionOut(
+        name="reprocess_document_ingestion",
+        label="Reprocess document ingestion",
+        description="Re-run document ingestion and extraction when a document needs another pass because routing, classification, or linkage signals look incomplete.",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -160,6 +205,110 @@ class AssistantService:
             warnings=_dedupe_preserving_order([*combined_warnings, *(completion.warnings or [])]),
             tool_calls=[trace.to_out() for trace in (completion.tool_calls or [])],
         )
+
+    async def build_agent_draft_with_openai(
+        self,
+        payload: AssistantAgentBuildRequest,
+    ) -> AssistantAgentBuildSuggestionOut:
+        provider = resolve_provider_config("openai")
+        builder_model = settings.OPENAI_AGENT_BUILDER_MODEL.strip() or provider.model
+        current_draft = payload.current_draft.model_dump(mode="json", exclude_none=True) if payload.current_draft else {}
+        published_tool_names = [tool.name for tool in self._tool_definitions]
+        runtime_model = _resolve_openai_runtime_model(payload, provider.model)
+        warnings = _collect_agent_builder_warnings(payload, runtime_model)
+
+        response_payload = await _post_json(
+            url=f"{provider.base_url.rstrip('/')}/responses",
+            headers={
+                "Authorization": f"Bearer {provider.api_key}",
+                "Content-Type": "application/json",
+            },
+            payload={
+                "model": builder_model,
+                "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
+                "instructions": _build_openai_agent_builder_instructions(),
+                "input": json_dumps(
+                    {
+                        "brief": payload.brief,
+                        "current_draft": current_draft,
+                        "runtime_target": {
+                            "provider": "openai",
+                            "model": runtime_model,
+                        },
+                        "workspace_options": list(get_args(AssistantWorkspace)),
+                        "capability_options": list(get_args(AssistantAgentCapability)),
+                        "action_type_options": list(get_args(AssistantActionType)),
+                        "tool_catalog": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                            }
+                            for tool in self._tool_definitions
+                        ],
+                    }
+                ),
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "assistant_agent_builder_draft",
+                        "strict": True,
+                        "schema": _build_openai_agent_builder_schema(published_tool_names),
+                    }
+                },
+            },
+            provider_label="OpenAI Agent Builder",
+        )
+
+        generated_payload = _parse_openai_agent_builder_output(response_payload)
+        invalid_tool_names = [
+            tool_name
+            for tool_name in generated_payload.get("allowed_tools", [])
+            if tool_name not in set(published_tool_names)
+        ]
+        if invalid_tool_names:
+            warnings.append(
+                f"OpenAI suggested unpublished live tools ({', '.join(invalid_tool_names)}), so they were removed from the draft."
+            )
+            generated_payload["allowed_tools"] = [
+                tool_name
+                for tool_name in generated_payload.get("allowed_tools", [])
+                if tool_name in set(published_tool_names)
+            ]
+        if "READ" not in {capability.upper() for capability in generated_payload.get("capabilities", [])}:
+            if generated_payload.get("allowed_tools"):
+                warnings.append(
+                    "OpenAI suggested live tools without the READ capability, so the tool allowlist was cleared."
+                )
+            generated_payload["allowed_tools"] = []
+        if "ACTION" not in {capability.upper() for capability in generated_payload.get("capabilities", [])}:
+            if generated_payload.get("allowed_action_types"):
+                warnings.append(
+                    "OpenAI suggested governed actions without the ACTION capability, so the action allowlist was cleared."
+                )
+            generated_payload["allowed_action_types"] = []
+
+        suggestion = AssistantAgentBuildSuggestionOut(
+            agent_id=str(generated_payload["agent_id"]),
+            name=str(generated_payload["name"]),
+            description=str(generated_payload["description"]),
+            status=(
+                payload.current_draft.status
+                if payload.current_draft is not None and payload.current_draft.status is not None
+                else "DRAFT"
+            ),
+            scope=generated_payload["scope"],
+            provider="openai",
+            model=runtime_model,
+            allowed_workspaces=generated_payload["allowed_workspaces"],
+            capabilities=generated_payload["capabilities"],
+            allowed_tools=generated_payload["allowed_tools"],
+            allowed_action_types=generated_payload["allowed_action_types"],
+            system_prompt=str(generated_payload["system_prompt"]),
+            builder_provider="openai",
+            builder_model=builder_model,
+            warnings=warnings,
+        )
+        return suggestion
 
     async def _generate_openai(
         self,
@@ -826,6 +975,15 @@ def build_system_prompt(
         prompt_parts.append(base_prompt)
     if agent_definition is not None:
         allowed_tools = ", ".join(agent_definition.allowed_tools) if agent_definition.allowed_tools else "all published read-only tools"
+        allowed_action_types = (
+            ", ".join(agent_definition.allowed_action_types)
+            if agent_definition.allowed_action_types
+            else (
+                "all published approval-gated actions"
+                if "ACTION" in {capability.upper() for capability in agent_definition.capabilities}
+                else "none"
+            )
+        )
         prompt_parts.append(
             "Managed agent profile:\n"
             f"- id: {agent_definition.agent_id}\n"
@@ -833,7 +991,8 @@ def build_system_prompt(
             f"- scope: {agent_definition.scope}\n"
             f"- capabilities: {', '.join(agent_definition.capabilities)}\n"
             f"- allowed workspaces: {', '.join(agent_definition.allowed_workspaces)}\n"
-            f"- allowed live tools: {allowed_tools}"
+            f"- allowed live tools: {allowed_tools}\n"
+            f"- allowed actions: {allowed_action_types}"
         )
         prompt_parts.append(f"Agent instructions:\n{agent_definition.system_prompt}")
     if payload.workspace:
@@ -841,6 +1000,174 @@ def build_system_prompt(
     if payload.context:
         prompt_parts.append(f"Application context:\n{payload.context}")
     return "\n\n".join(prompt_parts)
+
+
+def _build_openai_agent_builder_instructions() -> str:
+    return "\n".join(
+        [
+            "You are designing a managed assistant agent for the ECTRM operator console.",
+            "Return only JSON that matches the requested schema.",
+            "Generate a concise agent_id using lowercase letters, numbers, and hyphens.",
+            "Choose the smallest workspace list and live-tool subset that still lets the agent do its job well.",
+            "If the role does not need live reads, omit READ and return an empty allowed_tools array.",
+            "If the role needs all published read-only tools, keep READ and still return an empty allowed_tools array.",
+            "If the role does not need approval-gated mutations, omit ACTION and return an empty allowed_action_types array.",
+            "If the role needs all published approval-gated mutations, keep ACTION and still return an empty allowed_action_types array.",
+            "Write a concrete system_prompt that explains mission, evidence standards, style, and guardrails.",
+            "This generated agent will be pinned to the OpenAI provider for runtime use.",
+        ]
+    )
+
+
+def _resolve_openai_runtime_model(
+    payload: AssistantAgentBuildRequest,
+    default_model: str,
+) -> str:
+    current_draft = payload.current_draft
+    if current_draft is None:
+        return default_model
+
+    draft_model = (current_draft.model or "").strip()
+    if not draft_model:
+        return default_model
+
+    if current_draft.provider is None or current_draft.provider == "openai":
+        return draft_model
+    return default_model
+
+
+def _collect_agent_builder_warnings(
+    payload: AssistantAgentBuildRequest,
+    runtime_model: str,
+) -> list[str]:
+    current_draft = payload.current_draft
+    if current_draft is None:
+        return []
+
+    warnings: list[str] = []
+    if current_draft.provider and current_draft.provider != "openai":
+        warnings.append(
+            f"Runtime provider was pinned to OpenAI instead of {current_draft.provider} so the built agent can answer through the existing OpenAI integration."
+        )
+    if current_draft.model and current_draft.provider and current_draft.provider != "openai":
+        warnings.append(
+            f"Runtime model was reset to {runtime_model} because the previous model only applied to {current_draft.provider}."
+        )
+    return warnings
+
+
+def _build_openai_agent_builder_schema(published_tool_names: list[str]) -> dict[str, Any]:
+    tool_items_schema: dict[str, Any]
+    if published_tool_names:
+        tool_items_schema = {
+            "type": "string",
+            "enum": published_tool_names,
+        }
+    else:
+        tool_items_schema = {"type": "string"}
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "agent_id": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 64,
+                "pattern": r"^[a-z0-9][a-z0-9_-]{1,63}$",
+            },
+            "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+            },
+            "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+            },
+            "scope": {
+                "type": "string",
+                "enum": list(get_args(AssistantAgentScope)),
+            },
+            "allowed_workspaces": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "enum": list(get_args(AssistantWorkspace)),
+                },
+            },
+            "capabilities": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "enum": list(get_args(AssistantAgentCapability)),
+                },
+            },
+            "allowed_tools": {
+                "type": "array",
+                "maxItems": 16,
+                "uniqueItems": True,
+                "items": tool_items_schema,
+            },
+            "allowed_action_types": {
+                "type": "array",
+                "maxItems": 16,
+                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "enum": list(get_args(AssistantActionType)),
+                },
+            },
+            "system_prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20_000,
+            },
+        },
+        "required": [
+            "agent_id",
+            "name",
+            "description",
+            "scope",
+            "allowed_workspaces",
+            "capabilities",
+            "allowed_tools",
+            "allowed_action_types",
+            "system_prompt",
+        ],
+    }
+
+
+def _parse_openai_agent_builder_output(response_payload: dict[str, Any]) -> dict[str, Any]:
+    response_text = _extract_openai_text(response_payload)
+    if not response_text:
+        raise AssistantServiceError(
+            status_code=502,
+            detail="OpenAI Agent Builder returned an empty response.",
+        )
+
+    try:
+        parsed_payload = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        raise AssistantServiceError(
+            status_code=502,
+            detail="OpenAI Agent Builder returned invalid JSON.",
+        ) from exc
+
+    if not isinstance(parsed_payload, dict):
+        raise AssistantServiceError(
+            status_code=502,
+            detail="OpenAI Agent Builder returned an unexpected payload shape.",
+        )
+
+    return cast(dict[str, Any], parsed_payload)
 
 
 def _build_provider_config(

@@ -5,7 +5,7 @@ import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
-import { matchesTextFilter } from '../../shared/filtering'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import type { TradeCreditExceptionRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
@@ -361,6 +361,7 @@ function settlementMarkToMarketLabel(
 
 type TradingWorkspaceProps = {
   authSession: StoredAuthSession | null
+  globalFilter: string
   operationalResourceDescriptors: OperationalResourceDescriptor[]
   tradeMetadataSource: 'server' | 'fallback'
   tradeMetadataError: string
@@ -509,6 +510,7 @@ type TradingWorkspaceProps = {
 export function TradingWorkspace(props: TradingWorkspaceProps) {
   const {
     authSession,
+    globalFilter,
     operationalResourceDescriptors,
     tradeMetadataSource,
     tradeMetadataError,
@@ -654,11 +656,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     statusTone,
   } = props
   const [screenFilter, setScreenFilter] = useState('')
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const visibleTrades = useMemo(
-    () => trades.filter((trade) => matchesTradeScreenFilter(trade, screenFilter)),
-    [screenFilter, trades],
+    () => trades.filter((trade) => matchesTradeScreenFilter(trade, effectiveScreenFilter)),
+    [effectiveScreenFilter, trades],
   )
-  const hasScreenFilter = screenFilter.trim().length > 0
+  const hasScreenFilter = effectiveScreenFilter.trim().length > 0
   const visibleActiveTrades = useMemo(
     () => visibleTrades.filter((trade) => tradeStatusIsActive(trade.status)),
     [visibleTrades],
@@ -889,9 +892,10 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
           totalCount={trades.length}
           matchedCount={visibleTrades.length}
           resultLabel="trades"
+          globalValue={globalFilter}
           note={
             selectedTradeHiddenByFilter
-              ? `Selected trade ${selectedTrade?.trade_id} is still open in the inspector, but it is outside the current blotter filter.`
+              ? `Selected trade ${selectedTrade?.trade_id} is still open in the inspector, but it is outside the current trade filters.`
               : undefined
           }
         />
@@ -1113,7 +1117,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
               {!selectedTrade && (
                 <div className="empty-state empty-state-tall">
                   <strong>No trade selected</strong>
-                  <p>Use the trade board to open a focused inspector.</p>
+                  <p>Select a blotter row to inspect economics, lifecycle history, and next actions for a single trade.</p>
                 </div>
               )}
 
@@ -1970,7 +1974,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
               emptyStateDetail={
                 hasScreenFilter
                   ? 'Clear the local filter to reopen the broader blotter and resync the inspector with active rows.'
-                  : 'Capture a trade or refresh the workspace once trade projection data is available.'
+                  : 'Book a trade or open the walkthrough to seed the blotter and inspector with live-looking trade context.'
               }
             >
               <DataSheet
@@ -1988,7 +1992,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                 emptyMessage={
                   hasScreenFilter
                     ? 'No trades match the current local filter.'
-                    : 'Capture a trade or refresh the workspace once trade projection data is available.'
+                    : 'Book a trade or open the walkthrough to seed the blotter and inspector with trade context.'
                 }
               />
             </OperationalBoardController>

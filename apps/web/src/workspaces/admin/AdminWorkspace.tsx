@@ -5,7 +5,7 @@ import type {
   WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
-import { matchesTextFilter } from '../../shared/filtering'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatDateOnly } from '../../shared/format'
 import { tradeStatusIsActive } from '../../shared/trading'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
@@ -89,6 +89,7 @@ type SchemaEntityKey =
 
 type AdminWorkspaceProps = {
   authSession: StoredAuthSession | null
+  globalFilter: string
   onOpenSettings: () => void
   onRoadmapPublished: () => void
   selectedTrade: Trade | null
@@ -510,6 +511,7 @@ function matchesLifecycleStepFilter(
 
 export function AdminWorkspace({
   authSession,
+  globalFilter,
   onOpenSettings,
   onRoadmapPublished,
   selectedTrade,
@@ -564,55 +566,59 @@ export function AdminWorkspace({
 }: AdminWorkspaceProps) {
   const [selectedSchemaEntity, setSelectedSchemaEntity] = useState<SchemaEntityKey>('events')
   const [screenFilter, setScreenFilter] = useState('')
-  const hasScreenFilter = screenFilter.trim().length > 0
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
+  const hasScreenFilter = effectiveScreenFilter.trim().length > 0
 
   const visibleEvents = useMemo(
-    () => events.filter((event) => matchesAdminEventFilter(event, screenFilter)),
-    [events, screenFilter],
+    () => events.filter((event) => matchesAdminEventFilter(event, effectiveScreenFilter)),
+    [effectiveScreenFilter, events],
   )
   const visibleTrades = useMemo(
-    () => trades.filter((trade) => matchesAdminTradeFilter(trade, screenFilter)),
-    [screenFilter, trades],
+    () => trades.filter((trade) => matchesAdminTradeFilter(trade, effectiveScreenFilter)),
+    [effectiveScreenFilter, trades],
   )
   const visiblePositions = useMemo(
-    () => positions.filter((position) => matchesAdminPositionFilter(position, screenFilter)),
-    [positions, screenFilter],
+    () => positions.filter((position) => matchesAdminPositionFilter(position, effectiveScreenFilter)),
+    [effectiveScreenFilter, positions],
   )
   const visibleActiveBooks = useMemo(
-    () => activeBooks.filter((record) => matchesReferenceFilter(record, screenFilter)),
-    [activeBooks, screenFilter],
+    () => activeBooks.filter((record) => matchesReferenceFilter(record, effectiveScreenFilter)),
+    [activeBooks, effectiveScreenFilter],
   )
   const visibleActiveCommodities = useMemo(
-    () => activeCommodities.filter((record) => matchesReferenceFilter(record, screenFilter)),
-    [activeCommodities, screenFilter],
+    () => activeCommodities.filter((record) => matchesReferenceFilter(record, effectiveScreenFilter)),
+    [activeCommodities, effectiveScreenFilter],
   )
   const visiblePriceIndices = useMemo(
-    () => priceIndices.filter((record) => matchesReferenceFilter(record, screenFilter)),
-    [priceIndices, screenFilter],
+    () => priceIndices.filter((record) => matchesReferenceFilter(record, effectiveScreenFilter)),
+    [effectiveScreenFilter, priceIndices],
   )
   const visibleExternalDataRuns = useMemo(
-    () => externalDataRuns.filter((run) => matchesExternalDataRunFilter(run, screenFilter)),
-    [externalDataRuns, screenFilter],
+    () => externalDataRuns.filter((run) => matchesExternalDataRunFilter(run, effectiveScreenFilter)),
+    [effectiveScreenFilter, externalDataRuns],
   )
   const visibleTradingSources = useMemo(
-    () => tradingSources.filter((source) => matchesTradingSourceFilter(source, screenFilter)),
-    [screenFilter, tradingSources],
+    () => tradingSources.filter((source) => matchesTradingSourceFilter(source, effectiveScreenFilter)),
+    [effectiveScreenFilter, tradingSources],
   )
   const visibleWeatherLocations = useMemo(
-    () => weatherLocations.filter((location) => matchesWeatherLocationFilter(location, screenFilter)),
-    [screenFilter, weatherLocations],
+    () => weatherLocations.filter((location) => matchesWeatherLocationFilter(location, effectiveScreenFilter)),
+    [effectiveScreenFilter, weatherLocations],
   )
   const visibleCounterpartyCreditPreviewRows = useMemo(
-    () => counterpartyCreditPreview?.rows.filter((row) => matchesCounterpartyCreditPreviewRowFilter(row, screenFilter)) ?? [],
-    [counterpartyCreditPreview, screenFilter],
+    () =>
+      counterpartyCreditPreview?.rows.filter((row) =>
+        matchesCounterpartyCreditPreviewRowFilter(row, effectiveScreenFilter),
+      ) ?? [],
+    [counterpartyCreditPreview, effectiveScreenFilter],
   )
   const visibleAdminDomains = useMemo(
-    () => ADMIN_DOMAIN_MAP.filter((domain) => matchesAdminDomainFilter(domain, screenFilter)),
-    [screenFilter],
+    () => ADMIN_DOMAIN_MAP.filter((domain) => matchesAdminDomainFilter(domain, effectiveScreenFilter)),
+    [effectiveScreenFilter],
   )
   const visibleSchemaEntities = useMemo(
-    () => SCHEMA_ENTITIES.filter((entity) => matchesSchemaEntityFilter(entity, screenFilter)),
-    [screenFilter],
+    () => SCHEMA_ENTITIES.filter((entity) => matchesSchemaEntityFilter(entity, effectiveScreenFilter)),
+    [effectiveScreenFilter],
   )
 
   const latestEventSource = hasScreenFilter ? visibleEvents : events
@@ -739,8 +745,8 @@ export function AdminWorkspace({
     selectedTradePositions,
   ])
   const visibleLifecycleSteps = useMemo(
-    () => lifecycleSteps.filter((step) => matchesLifecycleStepFilter(step, screenFilter)),
-    [lifecycleSteps, screenFilter],
+    () => lifecycleSteps.filter((step) => matchesLifecycleStepFilter(step, effectiveScreenFilter)),
+    [effectiveScreenFilter, lifecycleSteps],
   )
   const effectiveSelectedSchemaEntity =
     visibleSchemaEntities.some((entity) => entity.key === selectedSchemaEntity)
@@ -791,9 +797,9 @@ export function AdminWorkspace({
   const marketDataProviders = useMemo(
     () =>
       (externalDataSyncStatus?.providers ?? []).filter((provider) =>
-        matchesExternalDataProviderFilter(provider, screenFilter),
+        matchesExternalDataProviderFilter(provider, effectiveScreenFilter),
       ),
-    [externalDataSyncStatus, screenFilter],
+    [effectiveScreenFilter, externalDataSyncStatus],
   )
   const marketDataProviderCodes = useMemo(
     () => new Set(marketDataProviders.map((provider) => provider.provider)),
@@ -808,9 +814,9 @@ export function AdminWorkspace({
       externalDataRuns.filter(
         (run) =>
           allMarketDataProviderCodes.has(run.provider) &&
-          (marketDataProviderCodes.has(run.provider) || matchesExternalDataRunFilter(run, screenFilter)),
+          (marketDataProviderCodes.has(run.provider) || matchesExternalDataRunFilter(run, effectiveScreenFilter)),
       ),
-    [allMarketDataProviderCodes, externalDataRuns, marketDataProviderCodes, screenFilter],
+    [allMarketDataProviderCodes, effectiveScreenFilter, externalDataRuns, marketDataProviderCodes],
   )
   const latestMarketDataRun = useMemo(() => marketDataRuns[0] ?? null, [marketDataRuns])
   const latestFreshMarketDataProvider = useMemo(() => {
@@ -862,7 +868,7 @@ export function AdminWorkspace({
       .filter((row) => row.count > 0)
   }, [visibleTradingSources])
   const selectedTradeHiddenByFilter =
-    hasScreenFilter && selectedTrade !== null && !matchesAdminTradeFilter(selectedTrade, screenFilter)
+    hasScreenFilter && selectedTrade !== null && !matchesAdminTradeFilter(selectedTrade, effectiveScreenFilter)
 
   return (
     <div className="stack">
@@ -897,9 +903,10 @@ export function AdminWorkspace({
           visibleCounterpartyCreditPreviewRows.length
         }
         resultLabel="admin records"
+        globalValue={globalFilter}
         note={
           selectedTradeHiddenByFilter
-            ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filter. Dedicated admin sub-panels below keep their own controls.`
+            ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filters. Dedicated admin sub-panels below keep their own controls.`
             : 'Dedicated admin sub-panels below keep their own controls.'
         }
       />

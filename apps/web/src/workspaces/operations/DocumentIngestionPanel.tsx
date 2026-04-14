@@ -26,6 +26,8 @@ export function DocumentIngestionPanel({ authSession, formatDate, compact = fals
       <DocumentIngestionUploadForm
         compact={compact}
         displayName={controller.displayName}
+        processorSettings={controller.processorSettings}
+        selectedProcessorProvider={controller.selectedProcessorProvider}
         selectedFile={controller.selectedFile}
         schemaRegistry={controller.schemaRegistry}
         uploading={controller.uploading}
@@ -33,6 +35,7 @@ export function DocumentIngestionPanel({ authSession, formatDate, compact = fals
         isDragActive={controller.isDragActive}
         fileInputRef={controller.fileInputRef}
         onDisplayNameChange={controller.setDisplayName}
+        onProcessorProviderChange={controller.setSelectedProcessorProvider}
         onFileChange={controller.updateSelectedFile}
         onOpenFilePicker={controller.openFilePicker}
         onDropzoneKeyDown={controller.handleDropzoneKeyDown}

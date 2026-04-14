@@ -1,5 +1,11 @@
 import type {
+  DocumentActionPlanRecord,
   DocumentExtractedFieldRecord,
+  DocumentLinkageAssessmentRecord,
+  DocumentProcessorDocumentTraceRecord,
+  DocumentProcessorPageTraceRecord,
+  DocumentRecordLinkRecord,
+  DocumentRoutingAssessmentRecord,
   DocumentIngestionPageRecord,
   DocumentIngestionRecord,
   DocumentTableBlockRecord,
@@ -51,6 +57,146 @@ export function dominantDocumentKind(document: DocumentIngestionRecord): string 
 export function reviewedPageCount(document: DocumentIngestionRecord): number {
   const candidate = document.analysis_summary.reviewed_page_count
   return typeof candidate === 'number' ? candidate : 0
+}
+
+export function documentRoutingAssessment(document: DocumentIngestionRecord): DocumentRoutingAssessmentRecord | null {
+  return document.routing_assessment
+}
+
+export function documentLinkageAssessment(document: DocumentIngestionRecord): DocumentLinkageAssessmentRecord | null {
+  return document.linkage_assessment
+}
+
+export function documentActionPlan(document: DocumentIngestionRecord): DocumentActionPlanRecord | null {
+  return document.action_plan
+}
+
+export function documentRecordLinks(document: DocumentIngestionRecord): DocumentRecordLinkRecord[] {
+  return document.record_links
+}
+
+export function documentProcessorTrace(document: DocumentIngestionRecord): DocumentProcessorDocumentTraceRecord | null {
+  return document.processor_trace
+}
+
+export function pageProcessorTrace(page: DocumentIngestionPageRecord): DocumentProcessorPageTraceRecord | null {
+  return page.processor_trace
+}
+
+export function pageRoutingAssessment(page: DocumentIngestionPageRecord): DocumentRoutingAssessmentRecord | null {
+  return page.routing_assessment
+}
+
+export function processorLabel(provider: 'builtin' | 'openai' | 'anthropic' | 'google' | null | undefined): string {
+  if (provider === 'builtin') {
+    return 'Built-in Parser'
+  }
+  if (provider === 'openai') {
+    return 'GPT'
+  }
+  if (provider === 'anthropic') {
+    return 'Claude'
+  }
+  if (provider === 'google') {
+    return 'Gemini'
+  }
+  return 'Built-in Parser'
+}
+
+export function processorTraceTone(
+  trace: DocumentProcessorDocumentTraceRecord | DocumentProcessorPageTraceRecord | null | undefined,
+): 'active' | 'in-progress' | 'planned' {
+  if (trace?.partial) {
+    return 'in-progress'
+  }
+  if (trace?.applied) {
+    return 'active'
+  }
+  return 'planned'
+}
+
+export function routingStrategyLabel(assessment: DocumentRoutingAssessmentRecord | null | undefined): string {
+  const candidate = assessment?.routing_strategy ?? 'MANUAL_REVIEW'
+  return candidate.replaceAll('_', ' ')
+}
+
+export function routingStatusTone(
+  assessment: DocumentRoutingAssessmentRecord | null | undefined,
+): 'active' | 'in-progress' | 'planned' | 'blocked' {
+  if (assessment?.status === 'READY') {
+    return 'active'
+  }
+  if (assessment?.status === 'PARTIAL') {
+    return 'in-progress'
+  }
+  if (assessment?.status === 'INSUFFICIENT') {
+    return 'blocked'
+  }
+  return 'planned'
+}
+
+export function routingPrimaryLabel(assessment: DocumentRoutingAssessmentRecord | null | undefined): string {
+  return assessment?.primary_label?.trim() || 'Manual Review'
+}
+
+export function linkageStatusTone(
+  assessment: DocumentLinkageAssessmentRecord | null | undefined,
+): 'active' | 'in-progress' | 'planned' | 'blocked' {
+  if (assessment?.status === 'READY') {
+    return 'active'
+  }
+  if (assessment?.status === 'CREATE') {
+    return 'planned'
+  }
+  if (assessment?.status === 'CANDIDATE') {
+    return 'in-progress'
+  }
+  return 'blocked'
+}
+
+export function linkagePrimaryLabel(assessment: DocumentLinkageAssessmentRecord | null | undefined): string {
+  return assessment?.primary_record_label?.trim() || 'Manual Review'
+}
+
+export function actionPlanTone(
+  plan: DocumentActionPlanRecord | null | undefined,
+): 'active' | 'in-progress' | 'planned' | 'blocked' {
+  if (plan?.status === 'READY') {
+    return 'active'
+  }
+  if (plan?.status === 'REVIEW') {
+    return 'in-progress'
+  }
+  if (plan?.status === 'BLOCKED') {
+    return 'blocked'
+  }
+  return 'planned'
+}
+
+export function actionPlanPrimaryLabel(plan: DocumentActionPlanRecord | null | undefined): string {
+  return plan?.target?.record_label?.trim() || plan?.title?.trim() || 'Manual Review Required'
+}
+
+export function actionPlanExecutable(plan: DocumentActionPlanRecord | null | undefined): boolean {
+  return Boolean(
+    plan &&
+      plan.status === 'READY' &&
+      plan.operation_type &&
+      ['link_document_to_record', 'create_trade_confirmation', 'issue_trade_invoice', 'create_trade_payment'].includes(
+        plan.operation_type,
+      ),
+  )
+}
+
+export function documentActionAlreadyApplied(document: DocumentIngestionRecord): boolean {
+  const plan = document.action_plan
+  const target = plan?.target
+  if (!plan || !target?.record_id) {
+    return false
+  }
+  return document.record_links.some(
+    (link) => link.record_type === target.record_type && link.record_id === target.record_id,
+  )
 }
 
 export function reviewReady(document: DocumentIngestionRecord): boolean {

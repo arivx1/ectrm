@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type { Trade, TradeCreditApprovalDecisionRecord, TradeWorkflowItemRecord } from '../../shared/models'
@@ -14,6 +15,19 @@ import {
   optionSettlementStatusOptions,
   paymentStatusOptions,
 } from '../../shared/trading'
+import {
+  OperationalFormActions,
+} from './operationalFormPrimitives'
+import {
+  OperationalDescriptorForm,
+  OperationalDescriptorFormFeedback,
+  resolveOperationalFormDefinition,
+} from './operationalFormRegistry'
+import {
+  OperationalDescriptorActionRow,
+  resolveOperationalResourcePermissionMessage,
+  resolveOperationalFormActionSet,
+} from './operationalFormActionRegistry'
 
 type WorkflowQueueEditorProps = {
   authSession: StoredAuthSession | null
@@ -23,6 +37,7 @@ type WorkflowQueueEditorProps = {
   creationPendingTradeId: string | null
   savingItemId: number | null
   saveError: string
+  operationalResourceDescriptor?: OperationalResourceDescriptor | null
   formatCommodityClass: (value: string) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
@@ -382,6 +397,7 @@ export function WorkflowQueueEditor({
   creationPendingTradeId,
   savingItemId,
   saveError,
+  operationalResourceDescriptor = null,
   formatCommodityClass,
   formatDate,
   formatDateOnly,
@@ -394,12 +410,20 @@ export function WorkflowQueueEditor({
     Object.fromEntries(items.map((item) => [item.item_id, buildDraft(item)])),
   )
   const [createDraft, setCreateDraft] = useState<CreateWorkflowDraft>(() => buildCreateDraft(activeTrades))
+  const permissionMessage =
+    resolveOperationalResourcePermissionMessage(operationalResourceDescriptor) ??
+    'Sign in to edit workflow ownership, due dates, and statuses.'
   const creditApprovalAuthorized = hasCreditApprovalAccess(authSession)
   const managedConfirmationTradeIdSet = new Set(managedConfirmationTradeIds)
   const groupedItems = buildWorkflowTradeGroups(items)
-  const selectedCreateTrade =
-    activeTrades.find((trade) => trade.trade_id === createDraft.tradeId) ?? activeTrades[0] ?? null
-  const createWorkflowOptions = selectedCreateTrade ? availableManualWorkflowOptions(selectedCreateTrade) : []
+  const selectedCreateTrade = useMemo(
+    () => activeTrades.find((trade) => trade.trade_id === createDraft.tradeId) ?? activeTrades[0] ?? null,
+    [activeTrades, createDraft.tradeId],
+  )
+  const createWorkflowOptions = useMemo(
+    () => (selectedCreateTrade ? availableManualWorkflowOptions(selectedCreateTrade) : []),
+    [selectedCreateTrade],
+  )
 
   useEffect(() => {
     if (!selectedCreateTrade) {
@@ -426,7 +450,7 @@ export function WorkflowQueueEditor({
         workflowType: createWorkflowOptions[0].value,
       }))
     }
-  }, [activeTrades, createDraft.tradeId, createDraft.workflowType, createWorkflowOptions, selectedCreateTrade])
+  }, [createDraft.tradeId, createDraft.workflowType, createWorkflowOptions, selectedCreateTrade])
 
   function updateDraft(itemId: number, patch: Partial<WorkflowDraft>) {
     setDrafts((current) => ({
@@ -506,18 +530,49 @@ export function WorkflowQueueEditor({
       item.workflow_type === 'CREDIT_APPROVAL' ? buildPayload(item, { ...draft, status: 'APPROVED' }) : null
     const rejectPayload =
       item.workflow_type === 'CREDIT_APPROVAL' ? buildPayload(item, { ...draft, status: 'REJECTED' }) : null
-    const canBookUnderlying = item.workflow_type === 'OPTION_SETTLEMENT' && !item.is_closed
-    const saveDisabled =
-      savingItemId === item.item_id ||
-      !authSession ||
-      Object.keys(buildPayload(item, draft)).length === 0 ||
-      creditDecisionCommentRequired ||
-      creditApprovalFreshnessBlocked
-    const assignSelfDisabled =
-      !authSession ||
-      authSession.user.user_id === (item.owner ?? '') ||
-      savingItemId === item.item_id
     const statusOptions = WORKFLOW_STATUS_OPTIONS[item.workflow_type]
+    const workflowEditForm = resolveOperationalFormDefinition('workflowItemEdit', {
+      creditApprovalFreshnessSummary,
+      creditDecisionCommentRequired,
+      creditStatusLocked,
+      draft,
+      hasAuthenticatedSession: Boolean(authSession),
+      item,
+      lifecycleStatusLocked,
+      lockReason: creditHoldSummary.credit_hold_reason ?? 'Credit approval is pending review.',
+      savingItemId,
+      statusOptions,
+      updateDraft: (patch) => updateDraft(item.item_id, patch),
+      workflowStatusManaged: confirmationStatusManaged,
+    })
+    const workflowActionSet = resolveOperationalFormActionSet('workflowItemActions', {
+      actionStates: item.action_states ?? [],
+      approvePayloadEmpty: !approvePayload || Object.keys(approvePayload).length === 0,
+      creditApprovalAuthorized,
+      creditDecisionCommentRequired,
+      creditDecisionNoteAvailable,
+      currentUserId: authSession?.user.user_id ?? null,
+      hasAuthenticatedSession: Boolean(authSession),
+      isSaving: savingItemId === item.item_id,
+      item,
+      itemOwner: item.owner ?? null,
+      onApprove: () => {
+        if (approvePayload) {
+          void onSaveItem(item.item_id, approvePayload)
+        }
+      },
+      onAssignSelf: () => handleAssignSelf(item),
+      onBookUnderlying: () => onBookUnderlyingTrade(item.item_id),
+      onOpenUnderlying: () => onOpenTrade(item.linked_trade_id!),
+      onReject: () => {
+        if (rejectPayload) {
+          void onSaveItem(item.item_id, rejectPayload)
+        }
+      },
+      onSave: () => handleSave(item),
+      rejectPayloadEmpty: !rejectPayload || Object.keys(rejectPayload).length === 0,
+      savePayloadEmpty: Object.keys(buildPayload(item, draft)).length === 0,
+    }, operationalResourceDescriptor)
 
     return (
       <section
@@ -564,88 +619,8 @@ export function WorkflowQueueEditor({
             </span>
           </div>
         ) : null}
-        <div className="workflow-item-grid">
-          <label className="field">
-            <span>Status</span>
-            <select
-              className="control control-compact"
-              value={draft.status}
-              onChange={(event) => updateDraft(item.item_id, { status: event.target.value })}
-              disabled={
-                savingItemId === item.item_id ||
-                lifecycleStatusLocked ||
-                creditStatusLocked ||
-                confirmationStatusManaged
-              }
-            >
-              {statusOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option.replaceAll('_', ' ')}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Owner</span>
-            <input
-              className="control control-compact"
-              value={draft.owner}
-              onChange={(event) => updateDraft(item.item_id, { owner: event.target.value })}
-              placeholder="Unassigned"
-              disabled={savingItemId === item.item_id}
-            />
-          </label>
-          <label className="field">
-            <span>Due</span>
-            <input
-              type="date"
-              className="control control-compact"
-              value={draft.dueAt}
-              onChange={(event) => updateDraft(item.item_id, { dueAt: event.target.value })}
-              disabled={savingItemId === item.item_id}
-            />
-          </label>
-          <label className="field field-wide">
-            <span>Notes</span>
-            <textarea
-              className="control control-textarea"
-              value={draft.notes}
-              onChange={(event) => updateDraft(item.item_id, { notes: event.target.value })}
-              placeholder={
-                item.workflow_type === 'OPTION_SETTLEMENT'
-                  ? 'Track the resulting underlying booking or settlement handoff.'
-                  : item.workflow_type === 'ACTUALIZATION'
-                    ? 'Track meter tickets, terminal statements, or execution follow-up.'
-                  : 'Add an operational handoff note or settlement comment.'
-              }
-              rows={1}
-              disabled={savingItemId === item.item_id}
-            />
-          </label>
-        </div>
-        {lifecycleStatusLocked ? (
-          <p className="field-error">
-            {creditHoldSummary.credit_hold_reason ?? 'Credit approval is pending review.'}
-          </p>
-        ) : null}
-        {confirmationStatusManaged ? (
-          <p className="workflow-editor-note">
-            Confirmation status is managed from the Confirmation Ledger. Owner, due date, and notes can still be updated here.
-          </p>
-        ) : null}
-        {creditStatusLocked && authSession ? (
-          <p className="workflow-editor-note">
-            Only `CREDIT_APPROVER`, `OPS_ADMIN`, or `ADMIN` sessions can change credit approval status.
-          </p>
-        ) : null}
-        {item.workflow_type === 'CREDIT_APPROVAL' && creditApprovalFreshnessSummary ? (
-          <p className="field-error">
-            Credit approval is blocked until fresh credit data is loaded: {creditApprovalFreshnessSummary}
-          </p>
-        ) : null}
-        {creditDecisionCommentRequired ? (
-          <p className="field-error">Approval and rejection decisions require a comment in notes.</p>
-        ) : null}
+        <OperationalDescriptorForm form={workflowEditForm} />
+        <OperationalDescriptorFormFeedback form={workflowEditForm} />
         {creditApprovalFreshnessBlocked ? (
           <p className="field-error">
             Status cannot be saved as APPROVED until the stale credit blockers above are cleared.
@@ -691,103 +666,35 @@ export function WorkflowQueueEditor({
             </span>
           </div>
         ) : null}
-        <div className="workflow-item-actions workflow-step-card-actions">
-          <div className="workflow-item-button-row">
-            {canBookUnderlying ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => void onBookUnderlyingTrade(item.item_id)}
-                disabled={!authSession || savingItemId === item.item_id}
-              >
-                {savingItemId === item.item_id
-                  ? item.linked_trade_id
-                    ? 'Finishing...'
-                    : 'Booking...'
-                  : item.linked_trade_id
-                    ? 'Mark Booked'
-                    : 'Book Underlying'}
-              </button>
-            ) : null}
-            {item.workflow_type === 'OPTION_SETTLEMENT' && item.linked_trade_id ? (
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={() => onOpenTrade(item.linked_trade_id!)}
-                disabled={savingItemId === item.item_id}
-              >
-                Open Underlying
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="button button-ghost"
-              onClick={() => void handleAssignSelf(item)}
-              disabled={assignSelfDisabled}
-            >
-              Assign Me
-            </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => void handleSave(item)}
-              disabled={saveDisabled}
-            >
-              {savingItemId === item.item_id ? 'Saving…' : 'Save'}
-            </button>
-            {item.workflow_type === 'CREDIT_APPROVAL' ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => {
-                  if (approvePayload) {
-                    void onSaveItem(item.item_id, approvePayload)
-                  }
-                }}
-                disabled={
-                  !authSession ||
-                  !creditApprovalAuthorized ||
-                  savingItemId === item.item_id ||
-                  !approvePayload ||
-                  Object.keys(approvePayload).length === 0 ||
-                  !creditDecisionNoteAvailable ||
-                  Boolean(item.credit_approval_freshness?.approval_blocked)
-                }
-              >
-                Approve With Comment
-              </button>
-            ) : null}
-            {item.workflow_type === 'CREDIT_APPROVAL' ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => {
-                  if (rejectPayload) {
-                    void onSaveItem(item.item_id, rejectPayload)
-                  }
-                }}
-                disabled={
-                  !authSession ||
-                  !creditApprovalAuthorized ||
-                  savingItemId === item.item_id ||
-                  !rejectPayload ||
-                  Object.keys(rejectPayload).length === 0 ||
-                  !creditDecisionNoteAvailable
-                }
-              >
-                Reject With Comment
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <OperationalFormActions className="workflow-step-card-actions">
+          <OperationalDescriptorActionRow actionSet={workflowActionSet} />
+        </OperationalFormActions>
       </section>
     )
   }
 
+  const workflowCreateForm = resolveOperationalFormDefinition('workflowItemCreate', {
+    createWorkflowOptions,
+    creationPending: creationPendingTradeId !== null,
+    draft: createDraft,
+    initialWorkflowTypeForTrade: (trade) =>
+      trade ? availableManualWorkflowOptions(trade)[0]?.value ?? '' : '',
+    selectedTrade: selectedCreateTrade,
+    trades: activeTrades,
+    updateDraft: (patch) => updateCreateDraft(patch),
+  })
+  const workflowCreateActionSet = resolveOperationalFormActionSet('workflowCreateActions', {
+    creationPending: creationPendingTradeId !== null,
+    hasAuthenticatedSession: Boolean(authSession),
+    onCreate: () => handleCreate(),
+    tradeId: createDraft.tradeId,
+    workflowType: createDraft.workflowType,
+  }, operationalResourceDescriptor)
+
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in to edit workflow ownership, due dates, and statuses.</p>
+        <p className="workflow-editor-note">{permissionMessage}</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
       {activeTrades.length > 0 ? (
@@ -798,95 +705,11 @@ export function WorkflowQueueEditor({
               <span>Open an actualization, credit, or option-settlement handoff when the workflow projection needs a manual nudge.</span>
             </div>
           </div>
-          <div className="workflow-item-grid">
-            <label className="field">
-              <span>Trade</span>
-              <select
-                className="control control-compact"
-                value={createDraft.tradeId}
-                onChange={(event) => {
-                  const nextTrade =
-                    activeTrades.find((trade) => trade.trade_id === event.target.value) ?? activeTrades[0] ?? null
-                  const nextWorkflowType = nextTrade ? availableManualWorkflowOptions(nextTrade)[0]?.value ?? '' : ''
-                  updateCreateDraft({
-                    tradeId: event.target.value,
-                    workflowType: nextWorkflowType,
-                  })
-                }}
-                disabled={creationPendingTradeId !== null}
-              >
-                {activeTrades.map((trade) => (
-                  <option key={trade.trade_id} value={trade.trade_id}>
-                    {trade.trade_id} • {trade.commodity} • {trade.book}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Workflow Type</span>
-              <select
-                className="control control-compact"
-                value={createDraft.workflowType}
-                onChange={(event) => updateCreateDraft({ workflowType: event.target.value })}
-                disabled={creationPendingTradeId !== null || createWorkflowOptions.length === 0}
-              >
-                {createWorkflowOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Owner</span>
-              <input
-                className="control control-compact"
-                value={createDraft.owner}
-                onChange={(event) => updateCreateDraft({ owner: event.target.value })}
-                placeholder="Unassigned"
-                disabled={creationPendingTradeId !== null}
-              />
-            </label>
-            <label className="field">
-              <span>Due</span>
-              <input
-                type="date"
-                className="control control-compact"
-                value={createDraft.dueAt}
-                onChange={(event) => updateCreateDraft({ dueAt: event.target.value })}
-                disabled={creationPendingTradeId !== null}
-              />
-            </label>
-            <label className="field field-wide">
-              <span>Notes</span>
-              <textarea
-                className="control control-textarea"
-                value={createDraft.notes}
-                onChange={(event) => updateCreateDraft({ notes: event.target.value })}
-                rows={1}
-                placeholder={
-                  createWorkflowOptions.find((option) => option.value === createDraft.workflowType)?.detail ??
-                  'Describe why this handoff needs to exist and what the desk should do next.'
-                }
-                disabled={creationPendingTradeId !== null}
-              />
-            </label>
-          </div>
-          <div className="shipment-card-actions workflow-item-actions">
-            <span>
-              {selectedCreateTrade
-                ? `${selectedCreateTrade.commodity} • ${selectedCreateTrade.counterparty ?? 'Counterparty TBD'} • ${selectedCreateTrade.book}`
-                : 'Select a trade to open a manual work item.'}
-            </span>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => void handleCreate()}
-              disabled={!authSession || !createDraft.tradeId || !createDraft.workflowType || creationPendingTradeId !== null}
-            >
-              {creationPendingTradeId === createDraft.tradeId ? 'Creating…' : 'Create Work Item'}
-            </button>
-          </div>
+          <OperationalDescriptorForm form={workflowCreateForm} />
+          <OperationalFormActions className="shipment-card-actions">
+            <span>{workflowCreateForm.helpText}</span>
+            <OperationalDescriptorActionRow actionSet={workflowCreateActionSet} />
+          </OperationalFormActions>
         </article>
       ) : null}
       <div className="position-list operations-workflow-list">

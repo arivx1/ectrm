@@ -66,6 +66,25 @@ browser flows. It uses a self-hosted Vite app server plus deterministic fixture
 data from `tests/browser/support` instead of depending on a separately started
 API or demo database.
 
+The current Wave 0 smoke suite covers:
+
+- seeded dashboard boot
+- mobile shell drawer behavior at phone width
+- signed-out start-here routing into the auth gate
+- signed-in trade capture through one deterministic create-ticket path
+- admin-governed assistant approval rejection through the seeded inbox
+
+The signed-in trade capture smoke uses the seeded local `OPS_ADMIN` session and
+captures one fixed-price natural gas ticket against the deterministic
+`WEST_POWER` / `WAHA_GAS` fixture set. The harness creates `TRD-10001` and
+expects the form to reset to the next suggested identifier after the mutation
+lands.
+
+The first governance smoke targets the assistant approval inbox rather than a
+generic admin CRUD surface because it exercises the clearest trust boundary in
+the current product: a cross-user assistant action that must be reviewed and
+explicitly rejected or executed by an administrative human.
+
 Run it from the repo root:
 
 ```bash
@@ -118,15 +137,16 @@ If the current session has admin access, it also loads:
 
 ## Authentication Behavior
 
-- read-only browsing works for most standard data
-- signing in unlocks write operations
+- service metadata such as runtime health can load without signing in
+- signing in unlocks the protected workspace reads and all write operations
 - admin-capable sessions unlock protected admin panels
 - the browser stores the active session locally so page refreshes can restore
   it
 
 The Settings workspace is the main place to sign in, sign out, or bootstrap the
 first admin user. The Assistant workspace also requires a signed-in session
-because prompt submission is protected server-side.
+because prompt submission is protected server-side. Most operator-facing
+workspaces now expect an authenticated session before they can load their data.
 
 ## Key Source Areas
 

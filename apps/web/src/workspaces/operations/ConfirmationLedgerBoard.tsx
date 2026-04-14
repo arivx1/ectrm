@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import {
   type CreateTradeConfirmationInput,
   type IssueTradeConfirmationInput,
@@ -16,6 +17,20 @@ import type {
   TradeWorkflowItemRecord,
 } from '../../shared/models'
 import { confirmationStatusOptions } from '../../shared/trading'
+import {
+  OperationalFormActions,
+  OperationalFormActionsCopy,
+} from './operationalFormPrimitives'
+import {
+  OperationalDescriptorForm,
+  OperationalDescriptorFormFeedback,
+  resolveOperationalFormDefinition,
+} from './operationalFormRegistry'
+import {
+  OperationalDescriptorActionRow,
+  resolveOperationalResourcePermissionMessage,
+  resolveOperationalFormActionSet,
+} from './operationalFormActionRegistry'
 
 type ConfirmationLedgerBoardProps = {
   authSession: StoredAuthSession | null
@@ -24,6 +39,7 @@ type ConfirmationLedgerBoardProps = {
   confirmationWorkItems: TradeWorkflowItemRecord[]
   saveError: string
   savingKey: string | null
+  operationalResourceDescriptor?: OperationalResourceDescriptor | null
   formatCommodityClass: (value: string) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
@@ -51,9 +67,6 @@ type ConfirmationDraft = {
   disputeReason: string
   comparisonWaiverNote: string
 }
-
-const confirmationIssueMethodOptions = ['EMAIL', 'EDI', 'PORTAL', 'MANUAL', 'OTHER'] as const
-const confirmationResponseMethodOptions = ['EMAIL', 'EDI', 'PORTAL', 'PHONE', 'MANUAL', 'OTHER'] as const
 
 function updateIsoDate(value: string): string | null {
   return value ? `${value}T12:00:00.000Z` : null
@@ -390,6 +403,7 @@ export function ConfirmationLedgerBoard({
   confirmationWorkItems,
   saveError,
   savingKey,
+  operationalResourceDescriptor = null,
   formatCommodityClass,
   formatDate,
   formatDateOnly,
@@ -401,6 +415,9 @@ export function ConfirmationLedgerBoard({
 }: ConfirmationLedgerBoardProps) {
   const [documents, setDocuments] = useState<DocumentIngestionRecord[]>([])
   const [documentLoadError, setDocumentLoadError] = useState('')
+  const permissionMessage =
+    resolveOperationalResourcePermissionMessage(operationalResourceDescriptor) ??
+    'Sign in to create, issue, respond to, and revise confirmation records.'
 
   useEffect(() => {
     if (!authSession) {
@@ -557,7 +574,7 @@ export function ConfirmationLedgerBoard({
     <div className="workflow-editor-stack">
       {!authSession ? (
         <p className="workflow-editor-note">
-          Sign in to issue, confirm, dispute, or amend confirmation records.
+          {permissionMessage}
         </p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
@@ -600,14 +617,47 @@ export function ConfirmationLedgerBoard({
             comparisonMismatchCount > 0 &&
             effectiveDraftStatus === 'CONFIRMED' &&
             !comparisonWaiverDraftNote
-          const confirmBlockedByComparison =
-            comparisonMismatchCount > 0 && !comparisonWaiverDraftNote
           const responseActionBlocked =
             !currentConfirmation ||
             currentConfirmation.status !== 'SENT' ||
             currentConfirmation.issue_count <= 0
+          const responseDisputeNeedsComment =
+            !responseActionBlocked && !draft.disputeReason.trim() && !draft.responseNote.trim()
           const responseDisputeBlocked =
-            responseActionBlocked || (!draft.disputeReason.trim() && !draft.responseNote.trim())
+            responseActionBlocked || responseDisputeNeedsComment
+          const confirmationForm = resolveOperationalFormDefinition('confirmationLedgerRecord', {
+            candidateDocuments,
+            comparisonMismatchCount,
+            currentConfirmation,
+            draft,
+            hasAuthenticatedSession: Boolean(authSession),
+            isSaving,
+            onSourceDocumentChange: (value) => handleSourceDocumentChange(trade, value),
+            responseDisputeNeedsComment,
+            selectedDocumentMissing,
+            statusOptions,
+            updateDraft: (patch) => updateDraft(trade.trade_id, patch),
+            workflowOwner: workflowItem?.owner ?? '',
+          })
+          const confirmationActionSet = resolveOperationalFormActionSet('confirmationLedgerActions', {
+            actionStates: currentConfirmation?.action_states ?? [],
+            currentConfirmation,
+            hasAuthenticatedSession: Boolean(authSession),
+            isSaving,
+            onCounterpartyConfirmed: () =>
+              handleResponse(currentConfirmation!, trade, 'COUNTERPARTY_CONFIRMED'),
+            onCounterpartyDisputed: () =>
+              handleResponse(currentConfirmation!, trade, 'COUNTERPARTY_DISPUTED'),
+            onCreateVersion: () => handleCreate(trade, currentConfirmation),
+            onIssue: () => handleIssue(currentConfirmation!, trade),
+            onMarkReceived: () => handleResponse(currentConfirmation!, trade, 'RECEIVED'),
+            onOpenTrade: () => onOpenTrade(trade.trade_id),
+            onSaveCurrent: () => handleSave(currentConfirmation!, trade),
+            responseDisputeBlocked,
+            responseDisputeNeedsComment,
+            saveBlockedByComparison,
+            savePayloadEmpty: Object.keys(savePayload ?? {}).length === 0,
+          }, operationalResourceDescriptor)
 
           return (
             <article key={trade.trade_id} className="position-card shipment-card workflow-item-card settlement-invoice-card">
@@ -685,203 +735,11 @@ export function ConfirmationLedgerBoard({
                     : 'Create the first managed confirmation record to move this trade out of status-only confirmation tracking.'}
                 </p>
               </div>
-              <div className="workflow-item-grid settlement-invoice-grid">
-                <label className="field">
-                  <span>Confirmation Number</span>
-                  <input
-                    className="control control-compact"
-                    value={draft.confirmationNumber}
-                    onChange={(event) => updateDraft(trade.trade_id, { confirmationNumber: event.target.value })}
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field">
-                  <span>Source Document</span>
-                  <select
-                    className="control control-compact"
-                    value={draft.sourceDocumentId}
-                    onChange={(event) => handleSourceDocumentChange(trade, event.target.value)}
-                    disabled={isSaving || !authSession}
-                  >
-                    <option value="">Manual / no linked document</option>
-                    {selectedDocumentMissing ? (
-                      <option value={draft.sourceDocumentId}>
-                        {currentConfirmation?.source_document_display_name ?? draft.sourceDocumentId}
-                      </option>
-                    ) : null}
-                    {candidateDocuments.map((document) => (
-                      <option key={document.document_id} value={document.document_id}>
-                        {document.display_name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Status</span>
-                  <select
-                    className="control control-compact"
-                    value={draft.status}
-                    onChange={(event) => updateDraft(trade.trade_id, { status: event.target.value })}
-                    disabled={isSaving || statusLockedToResponseWorkflow}
-                  >
-                    {statusOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option.replaceAll('_', ' ')}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Sent</span>
-                  <input
-                    className="control control-compact"
-                    type="date"
-                    value={draft.sentAt}
-                    onChange={(event) => updateDraft(trade.trade_id, { sentAt: event.target.value })}
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field">
-                  <span>Confirmed</span>
-                  <input
-                    className="control control-compact"
-                    type="date"
-                    value={draft.confirmedAt}
-                    onChange={(event) => updateDraft(trade.trade_id, { confirmedAt: event.target.value })}
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field">
-                  <span>Received</span>
-                  <input
-                    className="control control-compact"
-                    type="date"
-                    value={draft.receivedAt}
-                    onChange={(event) => updateDraft(trade.trade_id, { receivedAt: event.target.value })}
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field">
-                  <span>Workflow Owner</span>
-                  <input
-                    className="control control-compact"
-                    value={workflowItem?.owner ?? ''}
-                    disabled
-                  />
-                </label>
-                <label className="field">
-                  <span>Issue Method</span>
-                  <select
-                    className="control control-compact"
-                    value={draft.issueMethod}
-                    onChange={(event) => updateDraft(trade.trade_id, { issueMethod: event.target.value })}
-                    disabled={isSaving}
-                  >
-                    {confirmationIssueMethodOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Recipient</span>
-                  <input
-                    className="control control-compact"
-                    value={draft.issueRecipient}
-                    onChange={(event) => updateDraft(trade.trade_id, { issueRecipient: event.target.value })}
-                    placeholder="email, portal user, or counterparty contact"
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field field-wide">
-                  <span>Latest Issue Note</span>
-                  <textarea
-                    className="control control-compact"
-                    rows={2}
-                    value={draft.issueNote}
-                    onChange={(event) => updateDraft(trade.trade_id, { issueNote: event.target.value })}
-                    placeholder="Optional dispatch note for the latest issue or resend."
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field">
-                  <span>Response Method</span>
-                  <select
-                    className="control control-compact"
-                    value={draft.responseMethod}
-                    onChange={(event) => updateDraft(trade.trade_id, { responseMethod: event.target.value })}
-                    disabled={isSaving}
-                  >
-                    {confirmationResponseMethodOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Response Reference</span>
-                  <input
-                    className="control control-compact"
-                    value={draft.responseReference}
-                    onChange={(event) => updateDraft(trade.trade_id, { responseReference: event.target.value })}
-                    placeholder="email thread, portal id, or call note ref"
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field field-wide">
-                  <span>Response Note</span>
-                  <textarea
-                    className="control control-compact"
-                    rows={2}
-                    value={draft.responseNote}
-                    onChange={(event) => updateDraft(trade.trade_id, { responseNote: event.target.value })}
-                    placeholder="Counterparty acknowledgement, confirm text, or dispute context."
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field field-wide">
-                  <span>Notes</span>
-                  <textarea
-                    className="control control-compact"
-                    rows={3}
-                    value={draft.notes}
-                    onChange={(event) => updateDraft(trade.trade_id, { notes: event.target.value })}
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field field-wide">
-                  <span>Dispute Reason</span>
-                  <textarea
-                    className="control control-compact"
-                    rows={2}
-                    value={draft.disputeReason}
-                    onChange={(event) => updateDraft(trade.trade_id, { disputeReason: event.target.value })}
-                    disabled={isSaving}
-                  />
-                </label>
-                <label className="field field-wide">
-                  <span>Comparison Waiver Note</span>
-                  <textarea
-                    className="control control-compact"
-                    rows={2}
-                    value={draft.comparisonWaiverNote}
-                    onChange={(event) => updateDraft(trade.trade_id, { comparisonWaiverNote: event.target.value })}
-                    placeholder="Required only when confirming a linked document that still has unresolved mismatches."
-                    disabled={isSaving}
-                  />
-                </label>
-              </div>
+              <OperationalDescriptorForm className="settlement-invoice-grid" form={confirmationForm} />
+              <OperationalDescriptorFormFeedback form={confirmationForm} />
               {trade.credit_hold_active ? (
                 <p className="field-error">
                   {trade.credit_hold_reason ?? 'Credit approval is pending review.'}
-                </p>
-              ) : null}
-              {currentConfirmation?.comparison_status === 'MISMATCHED' ? (
-                <p className="field-error">
-                  Linked confirmation economics do not match the booked trade. `Counterparty Confirmed` stays blocked
-                  until the mismatches are resolved or a comparison waiver note is recorded.
                 </p>
               ) : null}
               {currentConfirmation?.comparison_status === 'WAIVED' && currentConfirmation.comparison_waiver_note ? (
@@ -958,101 +816,12 @@ export function ConfirmationLedgerBoard({
                   ))}
                 </div>
               ) : null}
-              <div className="workflow-item-actions">
-                <div className="shipment-card-copy">
-                  <p>
-                    {currentConfirmation
-                      ? currentConfirmation.comparison_status === 'MISMATCHED'
-                        ? 'Resolve the mismatches, record a waiver, or log a new version when a reissued confirmation arrives. Use the response actions to track receipt, confirmation, and disputes from the counterparty.'
-                        : 'Save the latest record in place, issue or reissue it outbound, and use the response actions to track receipt, confirmation, or dispute. Trade capture and booked economic amendments now auto-open a fresh draft version automatically.'
-                      : 'Manual confirmations can be logged directly, or linked to a verified TRADE_CONFIRMATION document from document intake.'}
-                  </p>
-                </div>
-                <div className="workflow-item-button-row">
-                  {!currentConfirmation ? (
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      onClick={() => void handleCreate(trade, currentConfirmation)}
-                      disabled={!authSession || isSaving}
-                    >
-                      {isSaving ? 'Creating...' : 'Create Confirmation'}
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="button button-primary"
-                        onClick={() => void handleIssue(currentConfirmation, trade)}
-                        disabled={
-                          !authSession ||
-                          isSaving ||
-                          !['PENDING', 'SENT'].includes(currentConfirmation.status)
-                        }
-                      >
-                        {isSaving
-                          ? 'Issuing...'
-                          : currentConfirmation.issue_count > 0
-                            ? 'Reissue Confirmation'
-                            : 'Issue Confirmation'}
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => void handleResponse(currentConfirmation, trade, 'RECEIVED')}
-                        disabled={!authSession || isSaving || responseActionBlocked}
-                      >
-                        Mark Received
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => void handleResponse(currentConfirmation, trade, 'COUNTERPARTY_CONFIRMED')}
-                        disabled={
-                          !authSession ||
-                          isSaving ||
-                          responseActionBlocked ||
-                          confirmBlockedByComparison
-                        }
-                      >
-                        Counterparty Confirmed
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => void handleResponse(currentConfirmation, trade, 'COUNTERPARTY_DISPUTED')}
-                        disabled={!authSession || isSaving || responseDisputeBlocked}
-                      >
-                        Counterparty Disputed
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-ghost"
-                        onClick={() => void handleSave(currentConfirmation, trade)}
-                        disabled={
-                          !authSession ||
-                          isSaving ||
-                          saveBlockedByComparison ||
-                          Object.keys(savePayload ?? {}).length === 0
-                        }
-                      >
-                        {isSaving ? 'Saving...' : 'Save Current'}
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-primary"
-                        onClick={() => void handleCreate(trade, currentConfirmation)}
-                        disabled={!authSession || isSaving}
-                      >
-                        Log New Version
-                      </button>
-                    </>
-                  )}
-                  <button type="button" className="button button-ghost" onClick={() => onOpenTrade(trade.trade_id)}>
-                    Open Trade
-                  </button>
-                </div>
-              </div>
+              <OperationalFormActions>
+                <OperationalFormActionsCopy>
+                  <p>{confirmationForm.helpText}</p>
+                </OperationalFormActionsCopy>
+                <OperationalDescriptorActionRow actionSet={confirmationActionSet} />
+              </OperationalFormActions>
               {tradeConfirmations.length > 0 ? (
                 <div className="timeline">
                   {tradeConfirmations.slice(0, 3).map((confirmation) => (

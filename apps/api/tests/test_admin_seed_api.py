@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.event import Base
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
@@ -30,11 +31,16 @@ from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.routes.admin_data import (
     list_admin_transaction_scenarios,
+    seed_admin_assistant_agents,
     seed_admin_reference_data,
     seed_admin_transactions,
 )
 from apps.api.app.routes.reports import get_activity_summary, get_exposure_summary, get_reporting_overview
-from apps.api.app.schemas.admin_seed import ReferenceSeedRequest, TransactionSeedRequest
+from apps.api.app.schemas.admin_seed import (
+    AssistantAgentSeedRequest,
+    ReferenceSeedRequest,
+    TransactionSeedRequest,
+)
 
 
 class AdminSeedApiTests(unittest.TestCase):
@@ -55,6 +61,7 @@ class AdminSeedApiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.SessionLocal() as session:
+            session.query(AssistantAgent).delete()
             session.query(TradePriceTerm).delete()
             session.query(TradeLeg).delete()
             session.query(Position).delete()
@@ -70,6 +77,56 @@ class AdminSeedApiTests(unittest.TestCase):
             session.query(ReferenceCommodity).delete()
             session.query(ReferenceBook).delete()
             session.commit()
+
+    def test_assistant_agent_seed_upserts_curated_defaults(self) -> None:
+        with self.SessionLocal() as session:
+            first = seed_admin_assistant_agents(
+                AssistantAgentSeedRequest(requested_by="ops-admin"),
+                db=session,
+            )
+
+            self.assertEqual(first.total_templates, 3)
+            self.assertEqual(first.created_count, 3)
+            self.assertEqual(first.updated_count, 0)
+            self.assertEqual(
+                first.agent_ids,
+                ["trade-ops-copilot", "settlement-copilot", "trade-governor"],
+            )
+
+            governor = session.get(AssistantAgent, "trade-governor")
+            self.assertIsNotNone(governor)
+            assert governor is not None
+            self.assertEqual(governor.status, "ACTIVE")
+            self.assertEqual(governor.scope, "ORGANIZATION")
+            self.assertEqual(governor.allowed_action_types, ["cancel_trade"])
+            self.assertEqual(governor.allowed_tools[0], "get_trade_by_id")
+            self.assertEqual(governor.created_by, "ops-admin")
+            self.assertEqual(governor.version, 1)
+
+            governor.description = "Outdated scope"
+            governor.allowed_action_types = []
+            governor.updated_by = "manual-edit"
+            governor.version = 7
+            session.commit()
+
+            second = seed_admin_assistant_agents(
+                AssistantAgentSeedRequest(requested_by="ops-admin"),
+                db=session,
+            )
+
+            self.assertEqual(second.created_count, 0)
+            self.assertEqual(second.updated_count, 1)
+
+            refreshed_governor = session.get(AssistantAgent, "trade-governor")
+            self.assertIsNotNone(refreshed_governor)
+            assert refreshed_governor is not None
+            self.assertEqual(
+                refreshed_governor.description,
+                "Focuses on high-sensitivity trade governance with a tightly constrained cancel-only action scope.",
+            )
+            self.assertEqual(refreshed_governor.allowed_action_types, ["cancel_trade"])
+            self.assertEqual(refreshed_governor.updated_by, "ops-admin")
+            self.assertEqual(refreshed_governor.version, 8)
 
     def test_reference_seed_populates_master_data(self) -> None:
         with self.SessionLocal() as session:

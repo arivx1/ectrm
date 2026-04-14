@@ -35,6 +35,9 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurfaceAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
 )
 from apps.api.app.domains.operations.services.settlement_payments import (
@@ -53,6 +56,7 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.schemas.operations import OperationalRowActionStateOut
 from apps.api.app.schemas.settlement import TradeInvoiceOut
 from apps.api.app.shared.enums import InvoiceStatus
 from apps.api.app.shared.enums import PaymentStatus
@@ -495,6 +499,9 @@ def _to_out(
         payments=payments_for_invoice,
         now=reference_time,
     )
+    credit_hold_blocked_reason = None
+    if bool(getattr(trade, "credit_hold_active", False)):
+        credit_hold_blocked_reason = format_trade_credit_hold_message(get_trade_credit_hold_state(trade))
 
     return TradeInvoiceOut(
         invoice_id=invoice.id,
@@ -534,6 +541,23 @@ def _to_out(
         settlement_status=payment_projection.settlement_status,
         total_paid_amount=float(payment_projection.total_paid_amount),
         outstanding_amount=float(payment_projection.outstanding_amount),
+        action_states=[
+            OperationalRowActionStateOut(
+                key="save",
+                available=credit_hold_blocked_reason is None,
+                blocked_reason=credit_hold_blocked_reason,
+            ),
+            OperationalRowActionStateOut(
+                key="approve",
+                available=credit_hold_blocked_reason is None,
+                blocked_reason=credit_hold_blocked_reason,
+            ),
+            OperationalRowActionStateOut(
+                key="dispute",
+                available=credit_hold_blocked_reason is None,
+                blocked_reason=credit_hold_blocked_reason,
+            ),
+        ],
     )
 
 
@@ -656,6 +680,34 @@ TRADE_INVOICE_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
             "Dedicated invoice records drive invoice issuance, updates, and settlement rollups for each active trade."
         ),
         board_section="Queue",
+        actions=(
+            OperationalResourceSurfaceAction(
+                key="issue",
+                label="Issue Invoice",
+                detail="Create the next invoice record for the selected trade or delivery scope.",
+                permission_message="Sign in to issue, approve, and dispute settlement invoices.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="save",
+                label="Save",
+                detail="Persist invoice date, amount, note, and scope changes without changing the status.",
+                permission_message="Sign in to issue, approve, and dispute settlement invoices.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="approve",
+                label="Approve",
+                detail="Approve the invoice record once terms, quantities, and notes are ready to lock in.",
+                permission_message="Sign in to issue, approve, and dispute settlement invoices.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="dispute",
+                label="Mark Disputed",
+                detail="Move the invoice into dispute status and preserve the dispute rationale on the ledger.",
+                permission_message="Sign in to issue, approve, and dispute settlement invoices.",
+                comment_required=True,
+                comment_hint="Add a dispute reason before marking the invoice as disputed.",
+            ),
+        ),
         primary_action=OperationalResourcePrimaryAction(
             key="issue_invoice",
             label="Issue invoice",

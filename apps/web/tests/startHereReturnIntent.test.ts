@@ -54,6 +54,9 @@ test('start-here return intent stores only supported workspace targets', () => {
   saveStartHereReturnIntent('trades')
   assert.equal(getStartHereReturnIntent(), 'trades')
 
+  saveStartHereReturnIntent('events')
+  assert.equal(getStartHereReturnIntent(), 'events')
+
   window.localStorage.setItem('ectrm.start-here-return-intent', 'dashboard')
   assert.equal(getStartHereReturnIntent(), null)
 
@@ -63,6 +66,7 @@ test('start-here return intent stores only supported workspace targets', () => {
 
 test('start-here return intent labels stay user-facing', () => {
   assert.equal(formatStartHereReturnIntentLabel('trades'), 'Trade Capture')
+  assert.equal(formatStartHereReturnIntentLabel('events'), 'Activity Feed')
   assert.equal(formatStartHereReturnIntentLabel('risk'), 'Exposure')
   assert.equal(formatStartHereReturnIntentLabel('operations'), 'Work Queue')
 })

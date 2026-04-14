@@ -111,7 +111,10 @@ export function useAppWorkspaceSummary({
     }
   }, [authSession, selectedTrade?.last_event_id, selectedTradeId])
 
-  const selectedTradeEvents = selectedTradeId ? storedSelectedTradeEvents : []
+  const selectedTradeEvents = useMemo(
+    () => (selectedTradeId ? storedSelectedTradeEvents : []),
+    [selectedTradeId, storedSelectedTradeEvents],
+  )
 
   const activeBooks = useMemo(() => books.filter((book) => book.is_active), [books])
   const activeCommodities = useMemo(() => commodities.filter((commodity) => commodity.is_active), [commodities])

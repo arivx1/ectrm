@@ -41,3 +41,15 @@ class ReferenceSeedResult(BaseModel):
     replace_existing: bool
     entity_counts: dict[str, int]
     total_records: int
+
+
+class AssistantAgentSeedRequest(BaseModel):
+    requested_by: str = Field(..., min_length=1, max_length=128)
+
+
+class AssistantAgentSeedResult(BaseModel):
+    requested_by: str
+    total_templates: int
+    created_count: int
+    updated_count: int
+    agent_ids: list[str]

@@ -12,12 +12,18 @@ import {
   isDocumentationDocumentKey,
   isViewKey,
 } from './appViews'
+import {
+  type AppRouteHandoff,
+  readAppRouteHandoff,
+  writeAppRouteHandoff,
+} from '../../shared/appRouteHandoff'
 
 export type AppRouteState = {
   section: PrimaryNavigationSectionKey | null
   view: ViewKey
   docsDocumentKey: DocumentationDocumentKey
   tradeId: string | null
+  handoff: AppRouteHandoff | null
 }
 
 function readAppRouteState(): AppRouteState {
@@ -27,6 +33,7 @@ function readAppRouteState(): AppRouteState {
       view: 'dashboard',
       docsDocumentKey: DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
       tradeId: null,
+      handoff: null,
     }
   }
 
@@ -44,6 +51,7 @@ function readAppRouteState(): AppRouteState {
         ? docsParam
         : DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
     tradeId: view === 'trades' ? params.get('trade')?.trim() || null : null,
+    handoff: readAppRouteHandoff(params),
   }
 }
 
@@ -69,6 +77,7 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
     if (route.view === 'trades' && route.tradeId) {
       params.set('trade', route.tradeId)
     }
+    writeAppRouteHandoff(params, route.handoff)
   }
 
   const query = params.toString()
@@ -83,6 +92,7 @@ export function useAppRouteState() {
   const [activeDocumentationDocumentKey, setActiveDocumentationDocumentKey] =
     useState<DocumentationDocumentKey>(initialRoute.docsDocumentKey)
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(initialRoute.tradeId)
+  const [routeHandoff, setRouteHandoff] = useState<AppRouteHandoff | null>(initialRoute.handoff)
 
   function syncRouteState(route: AppRouteState, historyMode: 'push' | 'replace', preserveHash = false) {
     const nextHash = preserveHash ? window.location.hash : ''
@@ -95,27 +105,33 @@ export function useAppRouteState() {
     window.history[historyMethod](null, '', nextUrl)
   }
 
-  function navigateToView(view: ViewKey) {
-    applyViewNavigation(view, 'push')
+  function navigateToView(view: ViewKey, handoff: AppRouteHandoff | null = null) {
+    applyViewNavigation(view, 'push', handoff)
   }
 
-  function replaceView(view: ViewKey) {
-    applyViewNavigation(view, 'replace')
+  function replaceView(view: ViewKey, handoff: AppRouteHandoff | null = null) {
+    applyViewNavigation(view, 'replace', handoff)
   }
 
-  function applyViewNavigation(view: ViewKey, historyMode: 'push' | 'replace') {
+  function applyViewNavigation(
+    view: ViewKey,
+    historyMode: 'push' | 'replace',
+    handoff: AppRouteHandoff | null = null,
+  ) {
     syncRouteState(
       {
         section: null,
         view,
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
+        handoff,
       },
       historyMode,
       view === 'settings',
     )
     setActiveNavigationSectionKey(null)
     setCurrentView(view)
+    setRouteHandoff(handoff)
   }
 
   function hrefForView(view: ViewKey) {
@@ -125,6 +141,7 @@ export function useAppRouteState() {
         view,
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
+        handoff: null,
       },
       view === 'settings' ? window.location.hash : '',
     )
@@ -147,25 +164,30 @@ export function useAppRouteState() {
         view: currentView,
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
+        handoff: null,
       },
       'push',
     )
     setActiveNavigationSectionKey(sectionKey)
+    setRouteHandoff(null)
   }
 
-  function navigateToTrade(tradeId: string) {
+  function navigateToTrade(tradeId: string, handoff: AppRouteHandoff | null = null) {
+    const nextHandoff = handoff ? { ...handoff, tradeId } : null
     syncRouteState(
       {
         section: null,
         view: 'trades',
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId,
+        handoff: nextHandoff,
       },
       'push',
     )
     setActiveNavigationSectionKey(null)
     setSelectedTradeId(tradeId)
     setCurrentView('trades')
+    setRouteHandoff(nextHandoff)
   }
 
   function handleDocumentationDocumentChange(nextDocumentKey: DocumentationDocumentKey) {
@@ -179,6 +201,7 @@ export function useAppRouteState() {
         view: 'guide',
         docsDocumentKey: nextDocumentKey,
         tradeId: selectedTradeId,
+        handoff: null,
       },
       'push',
       currentView === 'guide' && nextDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
@@ -186,6 +209,7 @@ export function useAppRouteState() {
     setActiveNavigationSectionKey(null)
     setActiveDocumentationDocumentKey(nextDocumentKey)
     setCurrentView('guide')
+    setRouteHandoff(null)
   }
 
   useEffect(() => {
@@ -193,6 +217,7 @@ export function useAppRouteState() {
       const nextRoute = readAppRouteState()
       setActiveNavigationSectionKey(nextRoute.section)
       setCurrentView(nextRoute.view)
+      setRouteHandoff(nextRoute.handoff)
       if (nextRoute.view === 'guide') {
         setActiveDocumentationDocumentKey(nextRoute.docsDocumentKey)
       }
@@ -212,12 +237,13 @@ export function useAppRouteState() {
         view: currentView,
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
+        handoff: routeHandoff,
       },
       'replace',
       currentView === 'settings' ||
         (currentView === 'guide' && activeDocumentationDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY),
     )
-  }, [activeNavigationSectionKey, currentView, activeDocumentationDocumentKey, selectedTradeId])
+  }, [activeNavigationSectionKey, currentView, activeDocumentationDocumentKey, selectedTradeId, routeHandoff])
 
   return {
     activeDocumentationDocumentKey,
@@ -230,6 +256,7 @@ export function useAppRouteState() {
     navigateToTrade,
     navigateToView,
     replaceView,
+    routeHandoff,
     selectedTradeId,
     setSelectedTradeId,
   }

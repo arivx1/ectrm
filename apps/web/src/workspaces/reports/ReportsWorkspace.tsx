@@ -13,7 +13,9 @@ import type {
   ActivitySummaryRow,
   CounterpartyCreditReportRow,
   ExposureSummaryRow,
+  PnlAttributionBreakdown,
   PnlComparisonReport,
+  PnlHistorySummary,
   PnlTradeAttributionRow,
   PnlTradeValuation,
   PnlHistoryReport,
@@ -22,6 +24,7 @@ import type {
   Trade,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { matchesTextFilter } from '../../shared/filtering'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
@@ -41,6 +44,7 @@ import { useSettlementReportLens } from './useSettlementReportLens'
 type ReportsWorkspaceProps = {
   activeTrades: Trade[]
   authSession: StoredAuthSession | null
+  globalFilter: string
   counterpartyCreditReport: CounterpartyCreditReportRow[]
   portfolios: PortfolioRecord[]
   formatNumber: (value: number | null, digits?: number) => string
@@ -113,9 +117,205 @@ function attributionLabel(category: string): string {
   }
 }
 
+function matchesReportsTradeFilter(trade: Trade, query: string): boolean {
+  return matchesTextFilter(query, [
+    trade.trade_id,
+    trade.book,
+    trade.portfolio,
+    trade.counterparty,
+    trade.commodity_class,
+    trade.commodity,
+    trade.instrument_type,
+    trade.trade_structure,
+    trade.trade_side,
+    trade.pricing_type,
+    trade.price_index_code,
+    trade.status,
+    trade.settlement_status,
+  ])
+}
+
+function matchesExposureSummaryFilter(row: ExposureSummaryRow, query: string): boolean {
+  return matchesTextFilter(query, [row.commodity, row.net_volume, row.active_trade_count, row.updated_at])
+}
+
+function matchesActivitySummaryFilter(row: ActivitySummaryRow, query: string): boolean {
+  return matchesTextFilter(query, [row.event_type, row.event_count, row.last_occurred_at])
+}
+
+function matchesCounterpartyCreditFilter(row: CounterpartyCreditReportRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    row.counterparty_code,
+    row.counterparty_name,
+    row.counterparty_type,
+    row.credit_status,
+    row.active_trade_count,
+    row.exposure_currency_code,
+    row.exposure_amount,
+    row.limit_currency_code,
+    row.limit_amount,
+    row.limit_utilization_percent,
+    row.limit_breached,
+    row.credit_rating,
+    row.review_due_at,
+    row.review_is_due,
+    row.breach_action,
+    row.latest_trade_updated_at,
+  ])
+}
+
+function matchesPnlTradeValuationFilter(valuation: PnlTradeValuation, query: string): boolean {
+  return matchesTextFilter(query, [
+    valuation.trade_id,
+    valuation.book,
+    valuation.portfolio,
+    valuation.commodity_class,
+    valuation.instrument_type,
+    valuation.trade_structure,
+    valuation.trade_side,
+    valuation.settlement_status,
+    valuation.pnl_bucket,
+    valuation.pricing_type,
+    valuation.pricing_source,
+    valuation.price_index_code,
+    valuation.valuation_status,
+    valuation.valuation_status_reason,
+    valuation.trade_currency_code,
+    valuation.price_unit_code,
+    valuation.fixed_price,
+    valuation.market_price,
+    valuation.effective_mark,
+    valuation.quantity,
+    valuation.pnl_contribution,
+    valuation.included_in_totals,
+  ])
+}
+
+function matchesPortfolioValuationRollupFilter(rollup: PortfolioValuationRollup, query: string): boolean {
+  return matchesTextFilter(query, [
+    rollup.portfolio,
+    rollup.totalPnl,
+    rollup.realizedPnl,
+    rollup.unrealizedPnl,
+    rollup.pricedTradeCount,
+  ])
+}
+
+function matchesPortfolioDeltaFilter(
+  row: PnlComparisonReport['portfolio_deltas'][number],
+  query: string,
+): boolean {
+  return matchesTextFilter(query, [
+    row.portfolio,
+    row.from_snapshot.total_pnl,
+    row.to_snapshot.total_pnl,
+    row.delta.total_pnl,
+    row.delta.realized_pnl,
+    row.delta.unrealized_pnl,
+  ])
+}
+
+function matchesComparisonBridgeDayFilter(
+  day: PnlComparisonReport['daily_bridge'][number],
+  query: string,
+): boolean {
+  return matchesTextFilter(query, [
+    day.from_as_of,
+    day.to_as_of,
+    day.delta.total_pnl,
+    day.changed_trade_count,
+    day.top_driver_trade_id,
+    day.top_driver_category,
+    day.top_driver_pnl_delta,
+    day.top_driver_summary,
+  ])
+}
+
+function matchesTradeAttributionFilter(row: PnlTradeAttributionRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    row.trade_id,
+    row.attribution_category,
+    row.pnl_delta,
+    row.driver_summary,
+    row.from_valuation?.book,
+    row.from_valuation?.portfolio,
+    row.from_valuation?.commodity_class,
+    row.from_valuation?.price_index_code,
+    row.to_valuation?.book,
+    row.to_valuation?.portfolio,
+    row.to_valuation?.commodity_class,
+    row.to_valuation?.price_index_code,
+    ...row.driver_events.flatMap((event) => [
+      event.event_id,
+      event.event_type,
+      event.occurred_at,
+      event.actor_id,
+      event.summary,
+    ]),
+  ])
+}
+
+function summarizeValuationRows(valuations: PnlTradeValuation[]): PnlHistorySummary {
+  return valuations.reduce<PnlHistorySummary>(
+    (summary, valuation) => {
+      const pnlContribution = valuation.pnl_contribution ?? 0
+      summary.total_pnl += pnlContribution
+      summary.priced_trade_count += 1
+
+      if (valuation.pnl_bucket === 'REALIZED') {
+        summary.realized_pnl += pnlContribution
+        summary.realized_trade_count += 1
+      } else {
+        summary.unrealized_pnl += pnlContribution
+        summary.unrealized_trade_count += 1
+      }
+
+      return summary
+    },
+    {
+      total_pnl: 0,
+      realized_pnl: 0,
+      unrealized_pnl: 0,
+      priced_trade_count: 0,
+      realized_trade_count: 0,
+      unrealized_trade_count: 0,
+    },
+  )
+}
+
+function summarizeAttributionRows(rows: PnlTradeAttributionRow[]): {
+  totalPnl: number
+  breakdown: PnlAttributionBreakdown
+} {
+  return rows.reduce(
+    (summary, row) => {
+      summary.totalPnl += row.pnl_delta
+      summary.breakdown.market_move_pnl += row.breakdown.market_move_pnl
+      summary.breakdown.quantity_change_pnl += row.breakdown.quantity_change_pnl
+      summary.breakdown.coverage_change_pnl += row.breakdown.coverage_change_pnl
+      summary.breakdown.other_change_pnl += row.breakdown.other_change_pnl
+      summary.breakdown.realization_transfer_pnl += row.breakdown.realization_transfer_pnl
+      summary.breakdown.reconciled_pnl_delta += row.breakdown.reconciled_pnl_delta
+      return summary
+    },
+    {
+      totalPnl: 0,
+      breakdown: {
+        market_move_pnl: 0,
+        quantity_change_pnl: 0,
+        coverage_change_pnl: 0,
+        other_change_pnl: 0,
+        realization_transfer_pnl: 0,
+        reconciled_pnl_delta: 0,
+      },
+    },
+  )
+}
+
 export function ReportsWorkspace({
   activeTrades,
   authSession,
+  globalFilter,
   counterpartyCreditReport,
   portfolios,
   formatNumber,
@@ -126,6 +326,7 @@ export function ReportsWorkspace({
   onOpenTrade,
 }: ReportsWorkspaceProps) {
   const reportAccessToken = authSession?.accessToken
+  const hasGlobalFilter = globalFilter.trim().length > 0
   const [overview, setOverview] = useState<ReportingOverview | null>(null)
   const [exposureSummary, setExposureSummary] = useState<ExposureSummaryRow[]>([])
   const [activitySummary, setActivitySummary] = useState<ActivitySummaryRow[]>([])
@@ -202,10 +403,31 @@ export function ReportsWorkspace({
       return right.active_trade_count - left.active_trade_count
     })
   }, [counterpartyCreditReport])
+  const visibleActiveTrades = useMemo(
+    () => activeTrades.filter((trade) => matchesReportsTradeFilter(trade, globalFilter)),
+    [activeTrades, globalFilter],
+  )
+  const visibleExposureSummary = useMemo(
+    () => exposureSummary.filter((row) => matchesExposureSummaryFilter(row, globalFilter)),
+    [exposureSummary, globalFilter],
+  )
+  const visibleActivitySummary = useMemo(
+    () => activitySummary.filter((row) => matchesActivitySummaryFilter(row, globalFilter)),
+    [activitySummary, globalFilter],
+  )
+  const visibleRankedCounterparties = useMemo(
+    () => rankedCounterparties.filter((row) => matchesCounterpartyCreditFilter(row, globalFilter)),
+    [globalFilter, rankedCounterparties],
+  )
   const commodityUnitLabels = useMemo(() => buildUnitLabelByCommodity(activeTrades), [activeTrades])
+  const visibleCommodityUnitLabels = useMemo(() => buildUnitLabelByCommodity(visibleActiveTrades), [visibleActiveTrades])
   const grossNetVolumeUnitLabel = useMemo(
     () => summarizeUnitLabels(activeTrades.map((trade) => trade.unit_of_measure)),
     [activeTrades],
+  )
+  const visibleGrossNetVolumeUnitLabel = useMemo(
+    () => summarizeUnitLabels(visibleActiveTrades.map((trade) => trade.unit_of_measure)),
+    [visibleActiveTrades],
   )
 
   const availableSnapshotDates = useMemo(
@@ -334,10 +556,17 @@ export function ReportsWorkspace({
   }, [comparisonDateError, comparisonEndDate, comparisonPortfolioFilter, comparisonStartDate, reportAccessToken])
 
   const valuationSummary = valuationSnapshot?.summary ?? null
-  const snapshotValuations = useMemo(() => valuationSnapshot?.valuations ?? [], [valuationSnapshot])
+  const snapshotValuations = useMemo(
+    () => (valuationSnapshot?.valuations ?? []).filter((valuation) => matchesPnlTradeValuationFilter(valuation, globalFilter)),
+    [globalFilter, valuationSnapshot],
+  )
   const includedSnapshotValuations = useMemo(
     () => snapshotValuations.filter((valuation) => valuation.included_in_totals && valuation.pnl_contribution !== null),
     [snapshotValuations],
+  )
+  const visibleSnapshotSummary = useMemo(
+    () => summarizeValuationRows(includedSnapshotValuations),
+    [includedSnapshotValuations],
   )
   const excludedSnapshotValuationCount = Math.max(snapshotValuations.length - includedSnapshotValuations.length, 0)
   const snapshotPortfolioRollups = useMemo(() => {
@@ -372,6 +601,10 @@ export function ReportsWorkspace({
       return left.portfolio.localeCompare(right.portfolio)
     })
   }, [includedSnapshotValuations])
+  const visibleSnapshotPortfolioRollups = useMemo(
+    () => snapshotPortfolioRollups.filter((rollup) => matchesPortfolioValuationRollupFilter(rollup, globalFilter)),
+    [globalFilter, snapshotPortfolioRollups],
+  )
   const topSnapshotValuations = useMemo(() => {
     return [...snapshotValuations]
       .sort((left, right) => {
@@ -389,19 +622,25 @@ export function ReportsWorkspace({
   const comparisonSummary = valuationComparison?.delta ?? null
   const comparisonAttributionSummary = valuationComparison?.attribution_summary ?? null
   const comparisonPortfolioDeltas = useMemo(
-    () => valuationComparison?.portfolio_deltas ?? [],
-    [valuationComparison],
+    () =>
+      (valuationComparison?.portfolio_deltas ?? []).filter((row) => matchesPortfolioDeltaFilter(row, globalFilter)),
+    [globalFilter, valuationComparison],
   )
   const comparisonDailyBridge = useMemo(
-    () => valuationComparison?.daily_bridge ?? [],
-    [valuationComparison],
+    () =>
+      (valuationComparison?.daily_bridge ?? []).filter((day) => matchesComparisonBridgeDayFilter(day, globalFilter)),
+    [globalFilter, valuationComparison],
   )
   const changedAttributionRows = useMemo(() => {
-    const rows = valuationComparison?.attributions ?? []
+    const rows = (valuationComparison?.attributions ?? []).filter((row) => matchesTradeAttributionFilter(row, globalFilter))
     return rows.filter(
       (row) => Math.abs(row.pnl_delta) > 0.0001 || !['CARRY', 'OUTSIDE_TOTALS'].includes(row.attribution_category),
     )
-  }, [valuationComparison])
+  }, [globalFilter, valuationComparison])
+  const visibleComparisonSummary = useMemo(
+    () => summarizeAttributionRows(changedAttributionRows),
+    [changedAttributionRows],
+  )
   const topChangedAttributions = useMemo<TradeAttributionDisplayRow[]>(() => {
     return [...changedAttributionRows]
       .sort((left, right) => {
@@ -457,8 +696,8 @@ export function ReportsWorkspace({
       content: (
         <>
           <span>Active Trades</span>
-          <strong>{formatNumber(overview?.active_trade_count ?? 0, 0)}</strong>
-          <p>Trade count represented in the reporting overview.</p>
+          <strong>{formatNumber(hasGlobalFilter ? visibleActiveTrades.length : (overview?.active_trade_count ?? 0), 0)}</strong>
+          <p>{hasGlobalFilter ? 'Active trades still visible inside the current global report filter.' : 'Trade count represented in the reporting overview.'}</p>
         </>
       ),
     },
@@ -468,8 +707,15 @@ export function ReportsWorkspace({
       content: (
         <>
           <span>Tracked Commodities</span>
-          <strong>{formatNumber(overview?.tracked_commodity_count ?? 0, 0)}</strong>
-          <p>Distinct commodities currently represented in the reporting layer.</p>
+          <strong>
+            {formatNumber(
+              hasGlobalFilter
+                ? new Set(visibleActiveTrades.map((trade) => trade.commodity)).size
+                : overview?.tracked_commodity_count ?? 0,
+              0,
+            )}
+          </strong>
+          <p>{hasGlobalFilter ? 'Distinct commodities represented by the currently visible report rows.' : 'Distinct commodities currently represented in the reporting layer.'}</p>
         </>
       ),
     },
@@ -479,8 +725,16 @@ export function ReportsWorkspace({
       content: (
         <>
           <span>Gross Net Volume</span>
-          <MetricValue value={formatNumber(overview?.gross_net_volume ?? 0, 0)} unit={grossNetVolumeUnitLabel} />
-          <p>Absolute reported volume across the exposure summary output.</p>
+          <MetricValue
+            value={formatNumber(
+              hasGlobalFilter
+                ? visibleExposureSummary.reduce((sum, row) => sum + Math.abs(row.net_volume), 0)
+                : (overview?.gross_net_volume ?? 0),
+              0,
+            )}
+            unit={hasGlobalFilter ? visibleGrossNetVolumeUnitLabel || grossNetVolumeUnitLabel : grossNetVolumeUnitLabel}
+          />
+          <p>{hasGlobalFilter ? 'Absolute net volume across the currently visible exposure rows.' : 'Absolute reported volume across the exposure summary output.'}</p>
         </>
       ),
     },
@@ -490,8 +744,18 @@ export function ReportsWorkspace({
       content: (
         <>
           <span>P&amp;L Snapshot</span>
-          <strong>{formatMoney(pnlHistory?.summary.total_pnl ?? null)}</strong>
-          <p>{pnlHistory?.basis ?? 'P&L reporting basis unavailable'}.</p>
+          <strong>
+            {formatMoney(
+              hasGlobalFilter && valuationSnapshot
+                ? visibleSnapshotSummary.total_pnl
+                : (pnlHistory?.summary.total_pnl ?? null),
+            )}
+          </strong>
+          <p>
+            {hasGlobalFilter && valuationSnapshot
+              ? `${formatNumber(visibleSnapshotSummary.priced_trade_count, 0)} visible priced trade valuation${visibleSnapshotSummary.priced_trade_count === 1 ? '' : 's'} in the current report filter.`
+              : `${pnlHistory?.basis ?? 'P&L reporting basis unavailable'}.`}
+          </p>
         </>
       ),
     },
@@ -502,6 +766,22 @@ export function ReportsWorkspace({
       workspaceId="reports"
       workspaceLabel="Reports"
       authSession={authSession}
+      headerContent={
+        hasGlobalFilter ? (
+          <section className="surface workspace-local-filter">
+            <div className="workspace-local-filter-copy">
+              <div>
+                <span className="eyebrow">Filter</span>
+                <h3>Global Report Filter</h3>
+              </div>
+              <p>
+                Global nav filter “{globalFilter.trim()}” is also narrowing the exposure, activity, valuation, and
+                credit slices on this screen. Existing date and portfolio controls still apply inside each report module.
+              </p>
+            </div>
+          </section>
+        ) : undefined
+      }
       sections={[
         {
           id: 'reports-overview-cards',
@@ -545,9 +825,9 @@ export function ReportsWorkspace({
             </div>
           ) : error ? (
             reportErrorState(error)
-          ) : exposureSummary.length > 0 ? (
+          ) : visibleExposureSummary.length > 0 ? (
             <div className="position-list">
-              {exposureSummary.map((row) => (
+              {visibleExposureSummary.map((row) => (
                 <article key={row.commodity} className="position-card">
                   <div>
                     <strong>{row.commodity}</strong>
@@ -557,7 +837,7 @@ export function ReportsWorkspace({
                     <MetricValue
                       as="b"
                       value={formatNumber(row.net_volume, 0)}
-                      unit={commodityUnitLabels.get(row.commodity) ?? 'Unit TBD'}
+                      unit={(hasGlobalFilter ? visibleCommodityUnitLabels : commodityUnitLabels).get(row.commodity) ?? 'Unit TBD'}
                     />
                     <span>{formatDate(row.updated_at)}</span>
                   </div>
@@ -584,9 +864,9 @@ export function ReportsWorkspace({
             </div>
           ) : error ? (
             reportErrorState(error)
-          ) : activitySummary.length > 0 ? (
+          ) : visibleActivitySummary.length > 0 ? (
             <div className="position-list">
-              {activitySummary.map((row) => (
+              {visibleActivitySummary.map((row) => (
                 <article key={row.event_type} className="position-card">
                   <div>
                     <strong>{row.event_type}</strong>
@@ -703,29 +983,29 @@ export function ReportsWorkspace({
               <div className="pnl-trend-summary-grid">
                 <article className="pnl-trend-stat-card pnl-trend-stat-card-emphasis">
                   <span>Total Value</span>
-                  <strong>{formatMoney(valuationSummary?.total_pnl ?? 0)}</strong>
+                  <strong>{formatMoney(hasGlobalFilter ? visibleSnapshotSummary.total_pnl : valuationSummary?.total_pnl ?? 0)}</strong>
                   <p>{valuationSnapshotDate ? formatDateOnly(valuationSnapshotDate) : 'Snapshot date TBD'}</p>
                 </article>
 
                 <article className="pnl-trend-stat-card">
                   <span>Open Value</span>
-                  <strong>{formatMoney(valuationSummary?.unrealized_pnl ?? 0)}</strong>
-                  <p>{formatNumber(valuationSummary?.unrealized_trade_count ?? 0, 0)} open trade snapshots in totals.</p>
+                  <strong>{formatMoney(hasGlobalFilter ? visibleSnapshotSummary.unrealized_pnl : valuationSummary?.unrealized_pnl ?? 0)}</strong>
+                  <p>{formatNumber(hasGlobalFilter ? visibleSnapshotSummary.unrealized_trade_count : valuationSummary?.unrealized_trade_count ?? 0, 0)} open trade snapshots in totals.</p>
                 </article>
 
                 <article className="pnl-trend-stat-card">
                   <span>Realized Value</span>
-                  <strong>{formatMoney(valuationSummary?.realized_pnl ?? 0)}</strong>
-                  <p>{formatNumber(valuationSummary?.realized_trade_count ?? 0, 0)} settled trade snapshots in totals.</p>
+                  <strong>{formatMoney(hasGlobalFilter ? visibleSnapshotSummary.realized_pnl : valuationSummary?.realized_pnl ?? 0)}</strong>
+                  <p>{formatNumber(hasGlobalFilter ? visibleSnapshotSummary.realized_trade_count : valuationSummary?.realized_trade_count ?? 0, 0)} settled trade snapshots in totals.</p>
                 </article>
 
                 <article className="pnl-trend-stat-card">
                   <span>Portfolios in Totals</span>
-                  <strong>{formatNumber(snapshotPortfolioRollups.length, 0)}</strong>
+                  <strong>{formatNumber(visibleSnapshotPortfolioRollups.length, 0)}</strong>
                   <p>
                     {excludedSnapshotValuationCount > 0
                       ? `${formatNumber(excludedSnapshotValuationCount, 0)} trade valuation${excludedSnapshotValuationCount === 1 ? '' : 's'} remain outside totals.`
-                      : `${formatNumber(valuationSummary?.priced_trade_count ?? 0, 0)} priced trade valuation${(valuationSummary?.priced_trade_count ?? 0) === 1 ? '' : 's'} included.`}
+                      : `${formatNumber(hasGlobalFilter ? visibleSnapshotSummary.priced_trade_count : valuationSummary?.priced_trade_count ?? 0, 0)} priced trade valuation${(hasGlobalFilter ? visibleSnapshotSummary.priced_trade_count : valuationSummary?.priced_trade_count ?? 0) === 1 ? '' : 's'} included.`}
                   </p>
                 </article>
               </div>
@@ -747,9 +1027,9 @@ export function ReportsWorkspace({
                 </div>
               </div>
 
-              {snapshotPortfolioRollups.length > 0 ? (
+              {visibleSnapshotPortfolioRollups.length > 0 ? (
                 <div className="dashboard-report-grid">
-                  {snapshotPortfolioRollups.map((rollup) => (
+                  {visibleSnapshotPortfolioRollups.map((rollup) => (
                     <article key={rollup.portfolio} className="dashboard-report-card">
                       <span>{rollup.portfolio}</span>
                       <strong>{formatMoney(rollup.totalPnl)}</strong>
@@ -913,7 +1193,7 @@ export function ReportsWorkspace({
                 <article className="pnl-trend-stat-card pnl-trend-stat-card-emphasis">
                   <span>Net Change</span>
                   <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone(comparisonSummary?.total_pnl ?? 0)}`}>
-                    {formatSignedMoney(comparisonSummary?.total_pnl ?? 0, formatMoney)}
+                    {formatSignedMoney(hasGlobalFilter ? visibleComparisonSummary.totalPnl : comparisonSummary?.total_pnl ?? 0, formatMoney)}
                   </strong>
                   <p>
                     {formatMoney(valuationComparison.from_snapshot.total_pnl)} to {formatMoney(valuationComparison.to_snapshot.total_pnl)}
@@ -922,40 +1202,40 @@ export function ReportsWorkspace({
 
                 <article className="pnl-trend-stat-card">
                   <span>Market / Mark Move</span>
-                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone(comparisonAttributionSummary?.market_move_pnl ?? 0)}`}>
-                    {formatSignedMoney(comparisonAttributionSummary?.market_move_pnl ?? 0, formatMoney)}
+                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone((hasGlobalFilter ? visibleComparisonSummary.breakdown.market_move_pnl : comparisonAttributionSummary?.market_move_pnl) ?? 0)}`}>
+                    {formatSignedMoney((hasGlobalFilter ? visibleComparisonSummary.breakdown.market_move_pnl : comparisonAttributionSummary?.market_move_pnl) ?? 0, formatMoney)}
                   </strong>
                   <p>Comparable market or mark movement applied to start-of-window quantity.</p>
                 </article>
 
                 <article className="pnl-trend-stat-card">
                   <span>Quantity Change</span>
-                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone(comparisonAttributionSummary?.quantity_change_pnl ?? 0)}`}>
-                    {formatSignedMoney(comparisonAttributionSummary?.quantity_change_pnl ?? 0, formatMoney)}
+                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone((hasGlobalFilter ? visibleComparisonSummary.breakdown.quantity_change_pnl : comparisonAttributionSummary?.quantity_change_pnl) ?? 0)}`}>
+                    {formatSignedMoney((hasGlobalFilter ? visibleComparisonSummary.breakdown.quantity_change_pnl : comparisonAttributionSummary?.quantity_change_pnl) ?? 0, formatMoney)}
                   </strong>
                   <p>New, removed, or resized exposure at the ending valuation mark.</p>
                 </article>
 
                 <article className="pnl-trend-stat-card">
                   <span>Coverage Change</span>
-                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone(comparisonAttributionSummary?.coverage_change_pnl ?? 0)}`}>
-                    {formatSignedMoney(comparisonAttributionSummary?.coverage_change_pnl ?? 0, formatMoney)}
+                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone((hasGlobalFilter ? visibleComparisonSummary.breakdown.coverage_change_pnl : comparisonAttributionSummary?.coverage_change_pnl) ?? 0)}`}>
+                    {formatSignedMoney((hasGlobalFilter ? visibleComparisonSummary.breakdown.coverage_change_pnl : comparisonAttributionSummary?.coverage_change_pnl) ?? 0, formatMoney)}
                   </strong>
                   <p>Trades entering or exiting totals because valuation support changed.</p>
                 </article>
 
                 <article className="pnl-trend-stat-card">
                   <span>Realization Transfer</span>
-                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone(comparisonAttributionSummary?.realization_transfer_pnl ?? 0)}`}>
-                    {formatSignedMoney(comparisonAttributionSummary?.realization_transfer_pnl ?? 0, formatMoney)}
+                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone((hasGlobalFilter ? visibleComparisonSummary.breakdown.realization_transfer_pnl : comparisonAttributionSummary?.realization_transfer_pnl) ?? 0)}`}>
+                    {formatSignedMoney((hasGlobalFilter ? visibleComparisonSummary.breakdown.realization_transfer_pnl : comparisonAttributionSummary?.realization_transfer_pnl) ?? 0, formatMoney)}
                   </strong>
                   <p>Movement between unrealized and realized buckets, separate from net P&amp;L.</p>
                 </article>
 
                 <article className="pnl-trend-stat-card">
                   <span>Other Change</span>
-                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone(comparisonAttributionSummary?.other_change_pnl ?? 0)}`}>
-                    {formatSignedMoney(comparisonAttributionSummary?.other_change_pnl ?? 0, formatMoney)}
+                  <strong className={`pnl-trend-stat-value pnl-trend-stat-value-${deltaTone((hasGlobalFilter ? visibleComparisonSummary.breakdown.other_change_pnl : comparisonAttributionSummary?.other_change_pnl) ?? 0)}`}>
+                    {formatSignedMoney((hasGlobalFilter ? visibleComparisonSummary.breakdown.other_change_pnl : comparisonAttributionSummary?.other_change_pnl) ?? 0, formatMoney)}
                   </strong>
                   <p>Residual move from pricing-term or other non-market changes.</p>
                 </article>
@@ -974,7 +1254,7 @@ export function ReportsWorkspace({
                     {formatNumber(valuationComparison.to_snapshot.priced_trade_count, 0)} priced trade snapshots at end date
                   </span>
                   <span className="entity-chip entity-chip-soft">
-                    Reconciled {formatSignedMoney(comparisonAttributionSummary?.reconciled_pnl_delta ?? 0, formatMoney)}
+                    Reconciled {formatSignedMoney((hasGlobalFilter ? visibleComparisonSummary.breakdown.reconciled_pnl_delta : comparisonAttributionSummary?.reconciled_pnl_delta) ?? 0, formatMoney)}
                   </span>
                 </div>
               </div>
@@ -1125,9 +1405,9 @@ export function ReportsWorkspace({
           description: 'Credit, exposure, and review posture on one desk-facing report surface.',
           span: 'full',
           availableSpans: ['full', 'wide'],
-          content: rankedCounterparties.length > 0 ? (
+          content: visibleRankedCounterparties.length > 0 ? (
             <div className="position-list">
-              {rankedCounterparties.slice(0, 8).map((row) => (
+              {visibleRankedCounterparties.slice(0, 8).map((row) => (
                 <article key={row.counterparty_code} className="position-card shipment-card">
                   <div className="shipment-card-head">
                     <div className="shipment-card-copy">

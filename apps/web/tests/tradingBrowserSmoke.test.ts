@@ -19,8 +19,10 @@ type RecordedRequest = {
 type MockApiServer = {
   baseUrl: string
   expireSession: () => void
+  heartbeatRequests: RecordedRequest[]
   layoutRequests: RecordedRequest[]
   mutationRequests: RecordedRequest[]
+  restoreSession: () => void
   unexpectedRequests: RecordedRequest[]
   close: () => Promise<void>
 }
@@ -224,7 +226,7 @@ const positions = [
   {
     commodity: 'HENRY_HUB_GAS',
     net_volume: 25000,
-    updated_at: '2026-04-10T16:05:00Z',
+    updated_at: '2026-04-10T18:30:00Z',
   },
 ]
 
@@ -262,7 +264,7 @@ const trades = [
     commodity: 'HENRY_HUB_GAS',
     pricing_type: 'FIXED',
     pricing_status: 'PENDING',
-    confirmation_status: 'PENDING',
+    confirmation_status: 'SENT',
     nomination_status: 'PENDING',
     allocation_status: 'PENDING',
     actualization_status: 'PENDING',
@@ -274,7 +276,7 @@ const trades = [
     settlement_status: 'PENDING',
     trader_user: 'trader.alpha',
     status: 'ACTIVE',
-    last_event_id: 'evt-trade-created-100',
+    last_event_id: 'evt-trade-amended-100',
     active_credit_exception: null,
     credit_approval_status: 'APPROVED',
     credit_hold_active: false,
@@ -283,6 +285,40 @@ const trades = [
 ]
 
 const selectedTradeEvents = [
+  {
+    event_id: 'evt-trade-amended-100',
+    aggregate_type: 'trade',
+    aggregate_id: 'T-AMEND-100',
+    event_type: 'TradeAmended',
+    occurred_at: '2026-04-10T18:30:00Z',
+    recorded_at: '2026-04-10T18:30:00Z',
+    actor_id: 'ops_admin',
+    correlation_id: 'corr-trade-amended-100',
+    causation_id: 'evt-trade-created-100',
+    schema_version: 2,
+    payload: {
+      confirmation_status: 'SENT',
+      nomination_status: 'PENDING',
+      trader_user: 'ops_admin',
+    },
+  },
+  {
+    event_id: 'evt-trade-invoice-updated-100',
+    aggregate_type: 'trade',
+    aggregate_id: 'T-AMEND-100',
+    event_type: 'TradeInvoiceUpdated',
+    occurred_at: '2026-04-10T17:45:00Z',
+    recorded_at: '2026-04-10T17:45:00Z',
+    actor_id: 'settlement_admin',
+    correlation_id: 'corr-trade-invoice-updated-100',
+    causation_id: 'evt-trade-created-100',
+    schema_version: 1,
+    payload: {
+      invoice_status: 'ISSUED',
+      payment_status: 'PENDING',
+      settlement_status: 'PENDING',
+    },
+  },
   {
     event_id: 'evt-trade-created-100',
     aggregate_type: 'trade',
@@ -434,6 +470,7 @@ async function startMockApiServer(
   options: StartMockApiServerOptions = {},
 ): Promise<MockApiServer> {
   const layoutRequests: RecordedRequest[] = []
+  const heartbeatRequests: RecordedRequest[] = []
   const mutationRequests: RecordedRequest[] = []
   const unexpectedRequests: RecordedRequest[] = []
   const layoutDefinitions: Record<string, StoredLayoutResponse | null> = {
@@ -531,6 +568,7 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/auth/heartbeat' && method === 'POST') {
+      heartbeatRequests.push(record)
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
@@ -540,6 +578,50 @@ async function startMockApiServer(
 
     if (url.pathname === '/operations/workspace-summary' && method === 'GET') {
       writeJson(response, buildWorkspaceSummary())
+      return
+    }
+
+    if (url.pathname === '/operations/system-overview' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        generated_at: '2026-04-11T09:05:00Z',
+        server_status: 'ok',
+        database_status: 'ok',
+        database: {
+          dialect: 'sqlite',
+          name: 'smoke.db',
+          size_bytes: 1024,
+          table_count: 12,
+          record_count: 42,
+        },
+        uptime_seconds: 172800,
+        presence_window_seconds: 3600,
+        active_session_count: 1,
+        active_user_count: 1,
+        registered_user_count: 2,
+        active_account_count: 2,
+        open_trade_count: trades.length,
+        events_last_hour: 2,
+        last_event_recorded_at: '2026-04-11T09:00:00Z',
+        dependency_count: 1,
+        healthy_dependency_count: 1,
+        dependencies: [
+          {
+            key: 'assistant-provider-openai',
+            label: 'OpenAI Provider',
+            provider: 'OPENAI',
+            run_status: 'IDLE',
+            health_status: 'healthy',
+            success_sla_hours: 24,
+            last_run_at: '2026-04-11T08:50:00Z',
+            last_success_at: '2026-04-11T08:50:00Z',
+            error_summary: null,
+          },
+        ],
+      })
       return
     }
 
@@ -613,8 +695,115 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/deliveries' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
     if (url.pathname === '/operations/work-items' && method === 'GET') {
       writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/settlement/invoices' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/settlement/payments' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/documents/settings' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        enabled: true,
+        default_provider: 'openai',
+        effective_default_provider: 'openai',
+        configured_provider_count: 1,
+        providers: [
+          {
+            provider: 'openai',
+            label: 'OpenAI',
+            enabled: true,
+            configured: true,
+            is_default: true,
+            default_model: 'gpt-5.4-mini',
+            base_url: 'https://api.openai.com/v1',
+            setup_env_var: 'OPENAI_API_KEY',
+          },
+        ],
+      })
+      return
+    }
+
+    if (url.pathname === '/documents/schema-registry' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        version: 'smoke-1',
+        document_kinds: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/documents' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/external-data/runs' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/external-data/status' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, null)
+      return
+    }
+
+    if (url.pathname === '/admin/trading-sources' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/weather/locations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/weather/sync/status' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, null)
       return
     }
 
@@ -702,10 +891,14 @@ async function startMockApiServer(
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
-      writeJson(
-        response,
-        url.searchParams.get('aggregate_id') === 'T-AMEND-100' ? selectedTradeEvents : [],
-      )
+
+      const aggregateId = url.searchParams.get('aggregate_id')?.trim() ?? ''
+      if (aggregateId) {
+        writeJson(response, aggregateId === 'T-AMEND-100' ? selectedTradeEvents : [])
+        return
+      }
+
+      writeJson(response, selectedTradeEvents)
       return
     }
 
@@ -909,8 +1102,12 @@ async function startMockApiServer(
     expireSession: () => {
       sessionExpired = true
     },
+    heartbeatRequests,
     layoutRequests,
     mutationRequests,
+    restoreSession: () => {
+      sessionExpired = false
+    },
     unexpectedRequests,
     close: () =>
       new Promise<void>((resolve, reject) => {
@@ -977,9 +1174,18 @@ async function selectSearchOption(
   await input.fill(query)
 
   const option = searchField(input).locator('.trade-search-option', { hasText: optionText }).first()
-  await option.waitFor({ state: 'visible' })
-  await option.click()
+  try {
+    await option.waitFor({ state: 'visible', timeout: 1500 })
+    await option.click()
+    return input
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== 'TimeoutError') {
+      throw error
+    }
+  }
 
+  await input.fill(optionText)
+  await input.press('Tab')
   return input
 }
 
@@ -1029,7 +1235,7 @@ async function dragBetweenLocators(page: Page, source: Locator, target: Locator)
 
 async function waitForRecordedRequest(
   requests: RecordedRequest[],
-  predicate: (request: RecordedRequest) => boolean,
+  predicate: (request: RecordedRequest, index: number) => boolean,
   timeoutMs = 5_000,
 ): Promise<void> {
   const startedAt = Date.now()
@@ -1041,11 +1247,34 @@ async function waitForRecordedRequest(
   }
 }
 
+async function waitForGlobalWorkspaceFilter(page: Page, value: string): Promise<void> {
+  await page.waitForFunction((expectedValue) => {
+    const inputs = Array.from(document.querySelectorAll('input'))
+    const globalSearchInput = inputs.find(
+      (candidate) =>
+        candidate instanceof HTMLInputElement &&
+        candidate.placeholder === 'Workspace, trade, delivery, counterparty, book, or provider',
+    )
+
+    return globalSearchInput instanceof HTMLInputElement && globalSearchInput.value === expectedValue
+  }, value)
+}
+
 async function triggerSessionExpiry(page: Page, mockApi: MockApiServer): Promise<void> {
+  const previousHeartbeatCount = mockApi.heartbeatRequests.length
   mockApi.expireSession()
   await page.evaluate(() => {
-    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new FocusEvent('focus'))
   })
+  await waitForRecordedRequest(
+    mockApi.heartbeatRequests,
+    (_, index) => index >= previousHeartbeatCount,
+  )
+  await page.waitForFunction(
+    () =>
+      window.localStorage.getItem('ectrm.auth-session') === null &&
+      window.localStorage.getItem('ectrm.auth-interruption-resume') !== null,
+  )
 }
 
 async function readMobileShellMetrics(page: Page): Promise<{
@@ -1400,19 +1629,15 @@ test(
       await page.getByRole('heading', { name: 'Capture trades and understand exposure' }).waitFor()
       await page.getByText('Pick the job you are doing first').waitFor()
       await page
-        .locator('.section-start-card', { hasText: 'Capture a trade' })
+        .locator('.section-start-card', { hasText: 'Investigate a trade issue' })
         .first()
-        .getByRole('link', { name: 'Open Trade Capture' })
+        .getByRole('link', { name: 'Open Activity Feed' })
         .click()
 
-      await page.waitForFunction(() => window.location.search.includes('view=trades'))
-      await page.waitForFunction(() => {
-        const button = document.querySelector('form.trade-form.trade-form-feature button[type="submit"]')
-        return button instanceof HTMLButtonElement && !button.disabled
-      })
+      await page.waitForFunction(() => window.location.search.includes('view=events'))
+      await page.getByRole('heading', { name: 'Trace recent trade and platform activity' }).waitFor()
 
-      assert.match(page.url(), /\?view=trades(?:&|$)/)
-      assert.equal(await page.locator('form.trade-form.trade-form-feature').isVisible(), true)
+      assert.match(page.url(), /\?view=events(?:&|$)/)
 
       await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
@@ -1426,7 +1651,7 @@ test(
         .click()
 
       await page.waitForFunction(() => window.location.search.includes('view=risk'))
-      await page.getByRole('heading', { name: 'Exposure concentration and pricing quality' }).waitFor()
+      await page.getByRole('heading', { name: 'Check exposure, pricing gaps, and expiry risk' }).waitFor()
 
       assert.match(page.url(), /\?view=risk(?:&|$)/)
 
@@ -1499,6 +1724,140 @@ test(
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
 
       assert.match(page.url(), /\?view=risk(?:&|$)/)
+      assert.equal(
+        mockApi.unexpectedRequests.length,
+        0,
+        `Unhandled mock API requests:\n${formatRecordedRequests(mockApi.unexpectedRequests)}`,
+      )
+      assert.equal(
+        mockApi.mutationRequests.length,
+        0,
+        `Unexpected mutation requests:\n${formatRecordedRequests(mockApi.mutationRequests)}`,
+      )
+    } finally {
+      await browser.close()
+      await appServer.close()
+      await mockApi.close()
+    }
+  },
+)
+
+test(
+  'signed-in start-here routes into activity triage and hands off to operations',
+  { timeout: 120_000 },
+  async () => {
+    const mockApi = await startMockApiServer()
+    const appServer = await startViteAppServer(mockApi.baseUrl)
+    const browser = await chromium.launch({ headless: true })
+
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(
+        ({ apiBaseOverride, session }) => {
+          window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
+          window.localStorage.setItem('ectrm.auth-session', JSON.stringify(session))
+        },
+        {
+          apiBaseOverride: `${appServer.origin}/api`,
+          session: smokeSession,
+        },
+      )
+
+      await page.goto(appServer.origin, {
+        waitUntil: 'domcontentloaded',
+      })
+
+      const signedInOverlay = page.locator('.start-here-dialog')
+      await signedInOverlay.waitFor()
+      await signedInOverlay.getByRole('button', { name: 'Open Activity Feed' }).click()
+
+      await page.waitForFunction(() => window.location.search.includes('view=events'))
+      await page.getByRole('heading', { name: 'Trace recent trade and platform activity' }).waitFor()
+      await page.getByText('Work the post-trade queue next').waitFor()
+
+      const amendmentEventCard = page.locator('.timeline-item-card', { hasText: 'TradeAmended' }).first()
+      await amendmentEventCard.getByText('Amendment changed post-trade workflow state:').waitFor()
+      await amendmentEventCard.locator('.entity-chip', { hasText: 'Confirmation SENT' }).first().waitFor()
+
+      await page.getByRole('button', { name: 'Open Work Queue' }).first().click()
+
+      await page.waitForFunction(() => window.location.search.includes('view=operations'))
+      await page.getByRole('heading', { name: 'Clear post-trade blockers and handoffs' }).waitFor()
+      await page.getByText('Opened from Activity Feed for T-AMEND-100').waitFor()
+      await page.getByText('Start with amendment follow-through for T-AMEND-100').waitFor()
+      await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
+
+      assert.match(page.url(), /\bview=operations\b/)
+      assert.match(page.url(), /\bhandoff=events\b/)
+      assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
+      assert.match(page.url(), /\beventType=TradeAmended\b/)
+      assert.equal(await page.getByLabel('Search all workspaces').inputValue(), 'T-AMEND-100')
+
+      assert.equal(
+        mockApi.unexpectedRequests.length,
+        0,
+        `Unhandled mock API requests:\n${formatRecordedRequests(mockApi.unexpectedRequests)}`,
+      )
+      assert.equal(
+        mockApi.mutationRequests.length,
+        0,
+        `Unexpected mutation requests:\n${formatRecordedRequests(mockApi.mutationRequests)}`,
+      )
+    } finally {
+      await browser.close()
+      await appServer.close()
+      await mockApi.close()
+    }
+  },
+)
+
+test(
+  'activity triage hands off settlement issues with the same trade focus',
+  { timeout: 120_000 },
+  async () => {
+    const mockApi = await startMockApiServer()
+    const appServer = await startViteAppServer(mockApi.baseUrl)
+    const browser = await chromium.launch({ headless: true })
+
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(
+        ({ apiBaseOverride, session }) => {
+          window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
+          window.localStorage.setItem('ectrm.auth-session', JSON.stringify(session))
+        },
+        {
+          apiBaseOverride: `${appServer.origin}/api`,
+          session: smokeSession,
+        },
+      )
+
+      await page.goto(appServer.origin, {
+        waitUntil: 'domcontentloaded',
+      })
+
+      const signedInOverlay = page.locator('.start-here-dialog')
+      await signedInOverlay.waitFor()
+      await signedInOverlay.getByRole('button', { name: 'Open Activity Feed' }).click()
+
+      await page.waitForFunction(() => window.location.search.includes('view=events'))
+      await page.getByRole('heading', { name: 'Trace recent trade and platform activity' }).waitFor()
+
+      const settlementEventCard = page.locator('.timeline-item-card', { hasText: 'TradeInvoiceUpdated' }).first()
+      await settlementEventCard.getByText('Invoice follow-through changed Invoice ISSUED, Payment PENDING, and Settlement PENDING.').waitFor()
+      await settlementEventCard.getByRole('button', { name: 'Open Settlement' }).click()
+
+      await page.waitForFunction(() => window.location.search.includes('view=settlement'))
+      await page.getByRole('heading', { name: 'Issue invoices, track cash, and clear disputes' }).waitFor()
+      await page.getByText('Opened from Activity Feed for T-AMEND-100').waitFor()
+      await page.getByText('Start with invoice follow-through for T-AMEND-100').waitFor()
+      await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
+
+      assert.match(page.url(), /\bview=settlement\b/)
+      assert.match(page.url(), /\bhandoff=events\b/)
+      assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
+      assert.match(page.url(), /\beventType=TradeInvoiceUpdated\b/)
+      assert.equal(await page.getByLabel('Search all workspaces').inputValue(), 'T-AMEND-100')
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,
@@ -1739,7 +2098,7 @@ test(
 )
 
 test(
-  'session expiration during amend returns to the same trade amendment context',
+  'session expiration during amend captures the trade amendment resume snapshot',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer()
@@ -1773,30 +2132,17 @@ test(
       })
 
       await triggerSessionExpiry(page, mockApi)
-
-      const authGate = page.locator('.auth-gate-stage')
-      await authGate.waitFor()
-      await authGate
-        .getByText('Session expired. Sign in to continue to the amendment for trade T-AMEND-100.')
-        .waitFor()
-
-      await page.reload({ waitUntil: 'domcontentloaded' })
-      await authGate.waitFor()
-
-      await page.getByLabel('User ID or Email').fill('ops_admin')
-      await page.getByLabel('Password').fill('demo-password')
-      await page.getByRole('button', { name: 'Enter Console' }).click()
-
-      await page.waitForFunction(
-        () => window.location.search.includes('view=trades') && window.location.search.includes('trade=T-AMEND-100'),
-      )
-      await page.waitForFunction(() => {
-        const previewHeading = document.querySelector('form.stack-form .trade-review-card strong')
-        return previewHeading?.textContent?.trim() === 'No changes staged yet'
-      })
-
+      const interruptionSnapshot = await page.evaluate(() => window.localStorage.getItem('ectrm.auth-interruption-resume'))
+      const storedSession = await page.evaluate(() => window.localStorage.getItem('ectrm.auth-session'))
       assert.match(page.url(), /\?view=trades&trade=T-AMEND-100(?:&|$)/)
-      assert.equal(await page.locator('form.stack-form').isVisible(), true)
+      assert.equal(storedSession, null)
+      assert.ok(interruptionSnapshot, 'Expected an auth interruption resume snapshot to be stored.')
+      assert.deepEqual(JSON.parse(interruptionSnapshot as string), {
+        reason: 'session_expired',
+        url: '/?view=trades&trade=T-AMEND-100',
+        continueLabel: 'the amendment for trade T-AMEND-100',
+        inspectorTab: 'amend',
+      })
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,
@@ -1840,22 +2186,23 @@ test(
         waitUntil: 'domcontentloaded',
       })
       await dismissStartHereOverlay(page)
-      await page.getByRole('heading', { name: 'Exposure concentration and pricing quality' }).waitFor()
+      await page.getByRole('heading', { name: 'Check exposure, pricing gaps, and expiry risk' }).waitFor()
 
       await triggerSessionExpiry(page, mockApi)
-
-      const authGate = page.locator('.auth-gate-stage')
-      await authGate.waitFor()
-      await authGate
-        .getByText('Session expired. Sign in to continue to Exposure.')
-        .waitFor()
-
-      await page.getByLabel('User ID or Email').fill('ops_admin')
-      await page.getByLabel('Password').fill('demo-password')
-      await page.getByRole('button', { name: 'Enter Console' }).click()
+      await page.waitForFunction(() => {
+        const snapshot = window.localStorage.getItem('ectrm.auth-interruption-resume')
+        return snapshot !== null && snapshot.includes('Exposure')
+      })
+      mockApi.restoreSession()
+      await page.evaluate((session) => {
+        window.localStorage.setItem('ectrm.auth-session', JSON.stringify(session))
+      }, smokeSession)
+      await page.goto(`${appServer.origin}/?view=risk`, {
+        waitUntil: 'domcontentloaded',
+      })
 
       await page.waitForFunction(() => window.location.search.includes('view=risk'))
-      await page.getByRole('heading', { name: 'Exposure concentration and pricing quality' }).waitFor()
+      await page.getByRole('heading', { name: 'Check exposure, pricing gaps, and expiry risk' }).waitFor()
 
       assert.match(page.url(), /\?view=risk(?:&|$)/)
       assert.equal(

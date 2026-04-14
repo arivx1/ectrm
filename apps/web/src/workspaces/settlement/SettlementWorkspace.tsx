@@ -2,25 +2,28 @@ import { useMemo, useState } from 'react'
 
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import type { OperationalResourceDescriptor, WorkspaceSettlementSummary } from '../../entities/app/api'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   CreateTradeInvoiceInput,
   CreateTradePaymentInput,
   UpdateTradeInvoiceInput,
   UpdateTradePaymentInput,
 } from '../../entities/settlement/api'
-import { matchesTextFilter } from '../../shared/filtering'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type { Trade, TradeInvoiceRecord, TradePaymentRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { describeEventWorkspaceHandoff } from '../events/eventHelpers'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
-import { SettlementInvoiceBoard } from './SettlementInvoiceBoard'
-import { SettlementPaymentBoard } from './SettlementPaymentBoard'
+import { renderOperationalInlineBoard } from '../operations/operationalInlineBoardRegistry'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
 
 type SettlementWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff: AppRouteHandoff | null
+  globalFilter: string
   activeTrades: Trade[]
   invoices: TradeInvoiceRecord[]
   payments: TradePaymentRecord[]
@@ -149,6 +152,8 @@ function matchesSettlementWorkflowFilter(item: TradeWorkflowItemRecord, query: s
 
 export function SettlementWorkspace({
   authSession,
+  routeHandoff,
+  globalFilter,
   activeTrades,
   invoices,
   payments,
@@ -171,22 +176,23 @@ export function SettlementWorkspace({
   onSavePayment,
 }: SettlementWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
-  const hasScreenFilter = screenFilter.trim().length > 0
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
+  const hasScreenFilter = effectiveScreenFilter.trim().length > 0
   const directlyMatchedTrades = useMemo(
-    () => activeTrades.filter((trade) => matchesSettlementTradeFilter(trade, screenFilter)),
-    [activeTrades, screenFilter],
+    () => activeTrades.filter((trade) => matchesSettlementTradeFilter(trade, effectiveScreenFilter)),
+    [activeTrades, effectiveScreenFilter],
   )
   const directlyMatchedInvoices = useMemo(
-    () => invoices.filter((invoice) => matchesInvoiceScreenFilter(invoice, screenFilter)),
-    [invoices, screenFilter],
+    () => invoices.filter((invoice) => matchesInvoiceScreenFilter(invoice, effectiveScreenFilter)),
+    [effectiveScreenFilter, invoices],
   )
   const directlyMatchedPayments = useMemo(
-    () => payments.filter((payment) => matchesPaymentScreenFilter(payment, screenFilter)),
-    [payments, screenFilter],
+    () => payments.filter((payment) => matchesPaymentScreenFilter(payment, effectiveScreenFilter)),
+    [effectiveScreenFilter, payments],
   )
   const directlyMatchedWorkItems = useMemo(
-    () => workItems.filter((item) => matchesSettlementWorkflowFilter(item, screenFilter)),
-    [screenFilter, workItems],
+    () => workItems.filter((item) => matchesSettlementWorkflowFilter(item, effectiveScreenFilter)),
+    [effectiveScreenFilter, workItems],
   )
   const visibleTradeIds = useMemo(
     () =>
@@ -297,6 +303,10 @@ export function SettlementWorkspace({
   const settlementExceptionTitle = hasSettlementExceptions ? 'Settlement Exceptions' : 'No active settlement exceptions'
   const invoiceLedgerWorkboard = resolveOperationalWorkboardDefinition('invoiceLedger', operationalResourceDescriptors)
   const paymentLedgerWorkboard = resolveOperationalWorkboardDefinition('paymentLedger', operationalResourceDescriptors)
+  const workspaceFocusBanner =
+    routeHandoff?.source === 'events'
+      ? describeEventWorkspaceHandoff('settlement', routeHandoff.tradeId, routeHandoff.eventType)
+      : null
   const settlementSummaryCards: TileSectionGridItem[] = [
     {
       id: 'open-settlement',
@@ -350,20 +360,31 @@ export function SettlementWorkspace({
       workspaceLabel="Settlement"
       authSession={authSession}
       headerContent={
-        <WorkspaceLocalFilterBar
-          value={screenFilter}
-          onChange={setScreenFilter}
-          placeholder="Trade ID, invoice number, payment reference, counterparty, or status"
-          description="Keep invoice and payment filtering local to settlement so you can narrow cash workflow without disturbing the rest of the app."
-          totalCount={activeTrades.length + invoices.length + payments.length + workItems.length}
-          matchedCount={
-            visibleActiveTrades.length +
-            visibleInvoices.length +
-            visiblePayments.length +
-            visibleWorkItems.length
-          }
-          resultLabel="settlement records"
-        />
+        <>
+          {workspaceFocusBanner ? (
+            <section className="feedback-banner feedback-banner-success workspace-focus-banner">
+              <div className="workspace-handoff-banner-copy">
+                <strong>{workspaceFocusBanner.title}</strong>
+                <p>{workspaceFocusBanner.detail}</p>
+              </div>
+            </section>
+          ) : null}
+          <WorkspaceLocalFilterBar
+            value={screenFilter}
+            onChange={setScreenFilter}
+            placeholder="Trade ID, invoice number, payment reference, counterparty, or status"
+            description="Keep invoice and payment filtering local to settlement so you can narrow cash workflow without disturbing the rest of the app."
+            totalCount={activeTrades.length + invoices.length + payments.length + workItems.length}
+            matchedCount={
+              visibleActiveTrades.length +
+              visibleInvoices.length +
+              visiblePayments.length +
+              visibleWorkItems.length
+            }
+            resultLabel="settlement records"
+            globalValue={globalFilter}
+          />
+        </>
       }
       sections={[
         {
@@ -385,7 +406,7 @@ export function SettlementWorkspace({
             ) : (
               <div className="empty-state">
                 <strong>No settlement queue</strong>
-                <p>Create active trades to populate the settlement workspace.</p>
+                <p>Once a trade reaches invoice-ready or payment follow-through, this workspace becomes the cash control board.</p>
               </div>
             ),
         },
@@ -470,60 +491,68 @@ export function SettlementWorkspace({
                 className="settlement-queue-section"
                 isEmpty={invoiceQueueTrades.length === 0}
               >
-                <SettlementInvoiceBoard
-                  key={[
+                {renderOperationalInlineBoard(
+                  'invoiceLedger',
+                  {
+                    authSession,
+                    trades: invoiceQueueTrades,
+                    invoices: visibleInvoices,
+                    invoiceWorkItems,
+                    saveError: invoiceMutationError,
+                    savingKey: invoiceMutationPendingKey,
+                    operationalResourceDescriptor: invoiceLedgerWorkboard.resources[0] ?? null,
+                    formatCommodityClass,
+                    formatDate,
+                    formatDateOnly,
+                    formatMoney,
+                    onIssueInvoice,
+                    onOpenTrade,
+                    onSaveInvoice,
+                  },
+                  [
                     invoiceQueueTrades
                       .map((trade) => `${trade.trade_id}:${invoiceCountByTradeId.get(trade.trade_id) ?? 0}`)
                       .join('|'),
                     visibleInvoices.map((invoice) => `${invoice.invoice_id}:${invoice.version}`).join('|'),
-                  ].join('|')}
-                  authSession={authSession}
-                  trades={invoiceQueueTrades}
-                  invoices={visibleInvoices}
-                  invoiceWorkItems={invoiceWorkItems}
-                  saveError={invoiceMutationError}
-                  savingKey={invoiceMutationPendingKey}
-                  formatCommodityClass={formatCommodityClass}
-                  formatDate={formatDate}
-                  formatDateOnly={formatDateOnly}
-                  formatMoney={formatMoney}
-                  onIssueInvoice={onIssueInvoice}
-                  onOpenTrade={onOpenTrade}
-                  onSaveInvoice={onSaveInvoice}
-                />
+                  ].join('|'),
+                )}
               </OperationalBoardController>
               <OperationalBoardController
                 workboard={paymentLedgerWorkboard}
                 className="settlement-queue-section"
                 isEmpty={paymentQueueInvoices.length === 0}
               >
-                <SettlementPaymentBoard
-                  key={[
+                {renderOperationalInlineBoard(
+                  'paymentLedger',
+                  {
+                    authSession,
+                    invoices: paymentQueueInvoices,
+                    payments: visiblePayments.filter((payment) =>
+                      paymentQueueInvoices.some((invoice) => invoice.invoice_id === payment.invoice_id),
+                    ),
+                    paymentWorkItems,
+                    saveError: paymentMutationError,
+                    savingKey: paymentMutationPendingKey,
+                    operationalResourceDescriptor: paymentLedgerWorkboard.resources[0] ?? null,
+                    formatCommodityClass,
+                    formatDate,
+                    formatDateOnly,
+                    formatMoney,
+                    onCreatePayment,
+                    onOpenTrade,
+                    onSavePayment,
+                  },
+                  [
                     paymentQueueInvoices.map((invoice) => `${invoice.invoice_id}:${invoice.version}`).join('|'),
                     visiblePayments.map((payment) => `${payment.payment_id}:${payment.version}`).join('|'),
-                  ].join('|')}
-                  authSession={authSession}
-                  invoices={paymentQueueInvoices}
-                  payments={visiblePayments.filter((payment) =>
-                    paymentQueueInvoices.some((invoice) => invoice.invoice_id === payment.invoice_id),
-                  )}
-                  paymentWorkItems={paymentWorkItems}
-                  saveError={paymentMutationError}
-                  savingKey={paymentMutationPendingKey}
-                  formatCommodityClass={formatCommodityClass}
-                  formatDate={formatDate}
-                  formatDateOnly={formatDateOnly}
-                  formatMoney={formatMoney}
-                  onCreatePayment={onCreatePayment}
-                  onOpenTrade={onOpenTrade}
-                  onSavePayment={onSavePayment}
-                />
+                  ].join('|'),
+                )}
               </OperationalBoardController>
             </div>
           ) : (
             <div className="empty-state">
               <strong>No open settlement rows</strong>
-              <p>The settlement queue clears once active trades are fully invoiced, paid, and settled.</p>
+              <p>The queue appears when open trades need invoice issuance, payment follow-up, or dispute handling.</p>
             </div>
           ),
         },

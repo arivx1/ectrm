@@ -23,6 +23,7 @@ class ManagedAssistantAgent:
     allowed_workspaces: tuple[AssistantWorkspace, ...]
     capabilities: tuple[str, ...]
     allowed_tools: tuple[str, ...]
+    allowed_action_types: tuple[str, ...]
     system_prompt: str
 
 
@@ -56,6 +57,7 @@ def to_public_agent_out(record: AssistantAgent) -> AssistantAgentOut:
         allowed_workspaces=list(record.allowed_workspaces or []),
         capabilities=list(record.capabilities or []),
         allowed_tools=list(record.allowed_tools or []),
+        allowed_action_types=list(record.allowed_action_types or []),
     )
 
 
@@ -71,6 +73,7 @@ def to_admin_agent_out(record: AssistantAgent) -> AssistantAgentAdminOut:
         allowed_workspaces=list(record.allowed_workspaces or []),
         capabilities=list(record.capabilities or []),
         allowed_tools=list(record.allowed_tools or []),
+        allowed_action_types=list(record.allowed_action_types or []),
         system_prompt=record.system_prompt,
         created_at=record.created_at,
         created_by=record.created_by,
@@ -92,5 +95,6 @@ def to_managed_agent(record: AssistantAgent) -> ManagedAssistantAgent:
         allowed_workspaces=tuple(record.allowed_workspaces or []),
         capabilities=tuple(record.capabilities or []),
         allowed_tools=tuple(record.allowed_tools or []),
+        allowed_action_types=tuple(record.allowed_action_types or []),
         system_prompt=record.system_prompt,
     )

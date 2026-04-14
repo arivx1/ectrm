@@ -6,6 +6,7 @@ type WorkspaceLocalFilterBarProps = {
   totalCount: number
   matchedCount: number
   resultLabel: string
+  globalValue?: string
   note?: string
 }
 
@@ -17,10 +18,13 @@ export function WorkspaceLocalFilterBar({
   totalCount,
   matchedCount,
   resultLabel,
+  globalValue,
   note,
 }: WorkspaceLocalFilterBarProps) {
-  const hasQuery = value.trim().length > 0
-  const statusLabel = hasQuery
+  const hasLocalQuery = value.trim().length > 0
+  const normalizedGlobalValue = globalValue?.trim() ?? ''
+  const hasGlobalQuery = normalizedGlobalValue.length > 0
+  const statusLabel = hasLocalQuery || hasGlobalQuery
     ? `${matchedCount.toLocaleString()} of ${totalCount.toLocaleString()} ${resultLabel} match`
     : `All ${totalCount.toLocaleString()} ${resultLabel} in view`
 
@@ -48,7 +52,7 @@ export function WorkspaceLocalFilterBar({
 
         <div className="workspace-local-filter-actions">
           <span className="entity-chip entity-chip-soft">{statusLabel}</span>
-          {hasQuery ? (
+          {hasLocalQuery ? (
             <button type="button" className="button button-ghost" onClick={() => onChange('')}>
               Clear Filter
             </button>
@@ -56,7 +60,16 @@ export function WorkspaceLocalFilterBar({
         </div>
       </div>
 
-      {note ? <p className="workspace-local-filter-note">{note}</p> : null}
+      {hasGlobalQuery || note ? (
+        <div className="workspace-local-filter-notes">
+          {hasGlobalQuery ? (
+            <p className="workspace-local-filter-note">
+              Global nav filter is also active: “{normalizedGlobalValue}”.
+            </p>
+          ) : null}
+          {note ? <p className="workspace-local-filter-note">{note}</p> : null}
+        </div>
+      ) : null}
     </section>
   )
 }

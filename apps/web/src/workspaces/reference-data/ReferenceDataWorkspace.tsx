@@ -7,10 +7,11 @@ type ReferenceDataWorkspaceProps = {
   controller: ReturnType<typeof useReferenceDataController>
   formatCommodityClass: (value: string) => string
   formatDate: (value: string | null | undefined) => string
+  globalFilter: string
 }
 
 export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
-  const { controller, formatCommodityClass, formatDate } = props
+  const { controller, formatCommodityClass, formatDate, globalFilter } = props
   const {
     referenceTab,
     setReferenceTab,
@@ -44,6 +45,10 @@ export function ReferenceDataWorkspace(props: ReferenceDataWorkspaceProps) {
             {Toolbar ? <Toolbar {...tabProps} /> : null}
           </div>
         </div>
+
+        {globalFilter.trim().length > 0 ? (
+          <p className="form-note">Global nav filter “{globalFilter.trim()}” is also narrowing this directory.</p>
+        ) : null}
 
         <div className="tab-row">
           {REFERENCE_TAB_ORDER.map((tab) => {

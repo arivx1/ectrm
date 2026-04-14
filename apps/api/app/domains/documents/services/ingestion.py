@@ -13,11 +13,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.domains.documents.services.document_processor import (
+    build_document_processor_runtime_settings as _build_document_processor_runtime_settings,
+)
+from apps.api.app.domains.documents.services.document_processor import DocumentProcessorOutcome
+from apps.api.app.domains.documents.services.document_processor import resolve_requested_document_processor
+from apps.api.app.domains.documents.services.document_processor import run_document_processor_analysis
 from apps.api.app.domains.documents.services.schema_registry import build_document_schema_registry
 from apps.api.app.domains.documents.services.schema_registry import list_supported_document_kinds
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.schemas.document import DocumentIngestionOut
+from apps.api.app.schemas.document import DocumentProcessorSelection
+from apps.api.app.schemas.document import DocumentProcessorRuntimeSettingsOut
 from apps.api.app.schemas.document import DocumentSchemaRegistryOut
 
 from .document_ingestion_analysis import build_page_warnings
@@ -63,6 +71,10 @@ def list_document_schema_registry() -> DocumentSchemaRegistryOut:
     return build_document_schema_registry()
 
 
+def build_document_processor_runtime_settings() -> DocumentProcessorRuntimeSettingsOut:
+    return _build_document_processor_runtime_settings()
+
+
 def list_document_ingestions(
     db: Session,
     *,
@@ -99,6 +111,7 @@ def ingest_pdf_document(
     content_type: str | None,
     payload: bytes,
     display_name: str | None = None,
+    processor_provider: DocumentProcessorSelection | None = None,
 ) -> DocumentIngestionOut:
     if not payload:
         raise ValueError("The uploaded PDF was empty")
@@ -109,6 +122,7 @@ def ingest_pdf_document(
     normalized_filename = normalize_filename(filename)
     normalized_display_name = normalize_display_name(display_name, normalized_filename)
     normalized_content_type = (content_type or "application/pdf").strip() or "application/pdf"
+    resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(processor_provider)
     if normalized_content_type.lower() != "application/pdf" and not normalized_filename.lower().endswith(".pdf"):
         raise ValueError("Only PDF uploads are supported")
     if not payload.lstrip().startswith(b"%PDF-"):
@@ -162,6 +176,8 @@ def ingest_pdf_document(
         size_bytes=len(payload),
         page_count=len(page_records),
         status="UPLOADED",
+        processor_provider=resolved_processor_provider,
+        processor_model=resolved_processor_model,
         classifier_version=CLASSIFIER_VERSION,
         extractor_version=EXTRACTOR_VERSION,
         analysis_summary=build_document_summary(page_records, review_status="UNREVIEWED"),
@@ -251,6 +267,27 @@ def process_document_ingestion(
             if rendered_document is not None:
                 rendered_document.close()
 
+        processor_outcome, processor_warnings = run_document_processor_analysis(
+            filename=document.original_filename,
+            payload=payload,
+            pages=pages,
+            processor_provider=document.processor_provider,
+        )
+        if processor_outcome is not None:
+            document.processor_provider = processor_outcome.provider
+            document.processor_model = processor_outcome.model
+            _apply_document_processor_outcome(
+                pages=pages,
+                outcome=processor_outcome,
+            )
+        if processor_warnings:
+            _apply_document_processor_warnings(
+                pages=pages,
+                provider=document.processor_provider,
+                model=document.processor_model,
+                warnings=processor_warnings,
+            )
+
         document.status = "FAILED" if page_errors and len(page_errors) == len(pages) else "ANALYZED"
         document.processing_errors = page_errors
         document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
@@ -275,9 +312,15 @@ def reprocess_document_ingestion(
     *,
     document_id: str,
     actor_id: str,
+    processor_provider: DocumentProcessorSelection | None = None,
+    processor_provider_specified: bool = False,
 ) -> DocumentIngestionOut:
     document, pages = load_document_and_pages(db, document_id=document_id)
     now = datetime.now(timezone.utc)
+    if processor_provider_specified:
+        resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(processor_provider)
+        document.processor_provider = resolved_processor_provider
+        document.processor_model = resolved_processor_model
     document.status = "UPLOADED"
     document.processing_errors = []
     document.review_status = "UNREVIEWED"
@@ -311,6 +354,86 @@ def reprocess_document_ingestion(
     document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
     db.flush()
     return serialize_documents(db, [document], preloaded_pages=pages)[0]
+
+
+def _apply_document_processor_outcome(
+    *,
+    pages: list[DocumentIngestionPage],
+    outcome: DocumentProcessorOutcome,
+) -> None:
+    page_map = {page.page_number: page for page in pages}
+    for result in outcome.pages:
+        page = page_map.get(result.page_number)
+        if page is None:
+            continue
+        heuristic_document_kind = page.document_kind
+        heuristic_document_subtype = page.document_subtype
+        overrode_heuristics = (
+            result.document_kind != "UNKNOWN"
+            and (
+                result.document_kind != heuristic_document_kind
+                or _clean_optional_text(result.document_subtype) != _clean_optional_text(heuristic_document_subtype)
+            )
+        )
+        if result.document_kind != "UNKNOWN" or page.document_kind == "UNKNOWN":
+            page.document_kind = result.document_kind
+            page.document_subtype = result.document_subtype
+            page.classification_confidence = result.confidence
+        page.header_fields = result.header_fields or list(page.header_fields or [])
+        page.table_blocks = result.table_blocks or list(page.table_blocks or [])
+        classification_payload = dict(page.classification_payload or {})
+        classification_payload["processor_provider"] = outcome.provider
+        classification_payload["processor_model"] = outcome.model
+        classification_payload["processor_applied"] = True
+        classification_payload["heuristic_document_kind"] = heuristic_document_kind
+        classification_payload["heuristic_document_subtype"] = heuristic_document_subtype
+        classification_payload["processor_overrode_heuristics"] = overrode_heuristics
+        classification_payload["processor_partial"] = result.partial
+        classification_payload["processor_warnings"] = list(result.warnings or [])
+        page.classification_payload = classification_payload
+        if result.warnings:
+            page.processing_warnings = _dedupe_preserving_order(
+                [*list(page.processing_warnings or []), *result.warnings]
+            )
+
+
+def _apply_document_processor_warnings(
+    *,
+    pages: list[DocumentIngestionPage],
+    provider: str | None,
+    model: str | None,
+    warnings: list[str],
+) -> None:
+    if not warnings:
+        return
+    deduped_warnings = _dedupe_preserving_order([warning for warning in warnings if warning])
+    for page in pages:
+        page.processing_warnings = _dedupe_preserving_order(
+            [*list(page.processing_warnings or []), *deduped_warnings]
+        )
+        classification_payload = dict(page.classification_payload or {})
+        if provider is not None:
+            classification_payload["processor_provider"] = provider
+        if model:
+            classification_payload["processor_model"] = model
+        classification_payload["processor_applied"] = bool(classification_payload.get("processor_applied"))
+        classification_payload["processor_partial"] = True
+        existing_warnings = list(classification_payload.get("processor_warnings") or [])
+        classification_payload["processor_warnings"] = _dedupe_preserving_order(
+            [*existing_warnings, *deduped_warnings]
+        )
+        page.classification_payload = classification_payload
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    deduped_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped_values.append(value)
+    return deduped_values
 
 
 def run_document_processing_job(

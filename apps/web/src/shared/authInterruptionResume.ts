@@ -10,6 +10,15 @@ export type AuthInterruptionResumeSnapshot = {
 }
 
 const AUTH_INTERRUPTION_RESUME_STORAGE_KEY = 'ectrm.auth-interruption-resume'
+const AUTH_INTERRUPTION_RESUME_STORAGE_EVENT = 'ectrm:auth-interruption-resume'
+
+function emitAuthInterruptionResumeStorageChange(): void {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return
+  }
+
+  window.dispatchEvent(new Event(AUTH_INTERRUPTION_RESUME_STORAGE_EVENT))
+}
 
 function normalizeInspectorTab(value: unknown): InspectorTab | null {
   switch (value) {
@@ -80,6 +89,7 @@ export function saveAuthInterruptionResumeSnapshot(
       AUTH_INTERRUPTION_RESUME_STORAGE_KEY,
       JSON.stringify(snapshot),
     )
+    emitAuthInterruptionResumeStorageChange()
   }
 
   return snapshot
@@ -91,4 +101,40 @@ export function clearAuthInterruptionResumeSnapshot(): void {
   }
 
   window.localStorage.removeItem(AUTH_INTERRUPTION_RESUME_STORAGE_KEY)
+  emitAuthInterruptionResumeStorageChange()
+}
+
+export function subscribeAuthInterruptionResumeSnapshot(
+  onStoreChange: () => void,
+): () => void {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.addEventListener !== 'function' ||
+    typeof window.removeEventListener !== 'function'
+  ) {
+    return () => {}
+  }
+
+  const handleStorageChange = (event: StorageEvent) => {
+    if (event.key === null || event.key === AUTH_INTERRUPTION_RESUME_STORAGE_KEY) {
+      onStoreChange()
+    }
+  }
+  const handleLocalStorageChange = () => {
+    onStoreChange()
+  }
+
+  window.addEventListener('storage', handleStorageChange)
+  window.addEventListener(
+    AUTH_INTERRUPTION_RESUME_STORAGE_EVENT,
+    handleLocalStorageChange,
+  )
+
+  return () => {
+    window.removeEventListener('storage', handleStorageChange)
+    window.removeEventListener(
+      AUTH_INTERRUPTION_RESUME_STORAGE_EVENT,
+      handleLocalStorageChange,
+    )
+  }
 }

@@ -117,6 +117,15 @@ export type OperationalResourcePrimaryAction = {
   detail: string
 }
 
+export type OperationalResourceSurfaceAction = {
+  key: string
+  label: string
+  detail: string
+  permission_message: string | null
+  comment_required: boolean
+  comment_hint: string | null
+}
+
 export type OperationalResourceSummaryStat = {
   key: string
   label: string
@@ -132,6 +141,7 @@ export type OperationalResourceSurface = {
   title: string
   description: string
   board_section: string
+  actions?: OperationalResourceSurfaceAction[]
   primary_action: OperationalResourcePrimaryAction | null
   empty_state: OperationalResourceEmptyState | null
   summary_stats: OperationalResourceSummaryStat[]

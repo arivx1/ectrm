@@ -22,6 +22,8 @@ class DocumentIngestion(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     page_count: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
+    processor_provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    processor_model: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     classifier_version: Mapped[str] = mapped_column(String(64), nullable=False)
     extractor_version: Mapped[str] = mapped_column(String(64), nullable=False)
     analysis_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)

@@ -34,6 +34,16 @@ class OperationalResourceSummaryStat:
 
 
 @dataclass(frozen=True, slots=True)
+class OperationalResourceSurfaceAction:
+    key: str
+    label: str
+    detail: str
+    permission_message: str | None = None
+    comment_required: bool = False
+    comment_hint: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class OperationalResourceEmptyState:
     title: str
     detail: str
@@ -44,6 +54,7 @@ class OperationalResourceSurface:
     title: str
     description: str
     board_section: str
+    actions: tuple[OperationalResourceSurfaceAction, ...] = ()
     primary_action: OperationalResourcePrimaryAction | None = None
     empty_state: OperationalResourceEmptyState | None = None
     summary_stats: tuple[OperationalResourceSummaryStat, ...] = ()

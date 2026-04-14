@@ -15,7 +15,7 @@ import {
 } from '../../entities/assistant/api'
 import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
 import { appConfig } from '../../shared/config'
-import { matchesTextFilter } from '../../shared/filtering'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type {
   AssistantActionRequest,
   AssistantAgent,
@@ -36,6 +36,7 @@ import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar
 
 type AssistantWorkspaceProps = {
   authSession: StoredAuthSession | null
+  globalFilter: string
   health: string
   trades: Trade[]
   events: EventRow[]
@@ -79,7 +80,7 @@ function buildAssistantContext({
   positions,
   selectedTrade,
   selectedTradeEvents,
-}: Omit<AssistantWorkspaceProps, 'authSession' | 'onOpenSettings' | 'onRefreshData'>): string {
+}: Omit<AssistantWorkspaceProps, 'authSession' | 'globalFilter' | 'onOpenSettings' | 'onRefreshData'>): string {
   const lines = [
     `API health: ${health}.`,
     `Loaded trades: ${trades.length}.`,
@@ -281,6 +282,7 @@ function toChatMessagesFromConversation(conversation: AssistantConversation): Ch
 
 export function AssistantWorkspace({
   authSession,
+  globalFilter,
   health,
   trades,
   events,
@@ -324,6 +326,7 @@ export function AssistantWorkspace({
   const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [runDetailError, setRunDetailError] = useState('')
   const [screenFilter, setScreenFilter] = useState('')
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
 
   const contextSummary = buildAssistantContext({
     health,
@@ -333,22 +336,26 @@ export function AssistantWorkspace({
     selectedTrade,
     selectedTradeEvents,
   })
-  const hasScreenFilter = screenFilter.trim().length > 0
+  const hasScreenFilter = effectiveScreenFilter.trim().length > 0
   const visibleMessages = useMemo(
-    () => messages.filter((message) => matchesAssistantMessageFilter(message, screenFilter)),
-    [messages, screenFilter],
+    () => messages.filter((message) => matchesAssistantMessageFilter(message, effectiveScreenFilter)),
+    [effectiveScreenFilter, messages],
   )
   const visibleRecentConversations = useMemo(
-    () => recentConversations.filter((conversation) => matchesAssistantConversationFilter(conversation, screenFilter)),
-    [recentConversations, screenFilter],
+    () =>
+      recentConversations.filter((conversation) => matchesAssistantConversationFilter(conversation, effectiveScreenFilter)),
+    [effectiveScreenFilter, recentConversations],
   )
   const visiblePendingActionRequests = useMemo(
-    () => pendingActionRequests.filter((actionRequest) => matchesAssistantActionRequestFilter(actionRequest, screenFilter)),
-    [pendingActionRequests, screenFilter],
+    () =>
+      pendingActionRequests.filter((actionRequest) =>
+        matchesAssistantActionRequestFilter(actionRequest, effectiveScreenFilter),
+      ),
+    [effectiveScreenFilter, pendingActionRequests],
   )
   const visibleRecentRuns = useMemo(
-    () => recentRuns.filter((run) => matchesAssistantRunFilter(run, screenFilter)),
-    [recentRuns, screenFilter],
+    () => recentRuns.filter((run) => matchesAssistantRunFilter(run, effectiveScreenFilter)),
+    [effectiveScreenFilter, recentRuns],
   )
 
   function clearConversationSelection() {
@@ -970,9 +977,9 @@ export function AssistantWorkspace({
         ? 'No saved thread is selected. Sending now will create a brand-new chat.'
         : 'Choose a saved chat from the sidebar or send a first prompt to start a new one.'
   const assistantFilterNote = selectedConversationHiddenByFilter
-    ? 'The active chat stays open even when it falls outside the current local filter.'
+    ? 'The active chat stays open even when it falls outside the current assistant filters.'
     : selectedRunHiddenByFilter
-      ? 'The selected run trace stays open even when it falls outside the current local filter.'
+      ? 'The selected run trace stays open even when it falls outside the current assistant filters.'
       : undefined
 
   return (
@@ -980,11 +987,12 @@ export function AssistantWorkspace({
       <WorkspaceLocalFilterBar
         value={screenFilter}
         onChange={setScreenFilter}
-        placeholder="Message text, chat title, approval summary, run ID, provider, or agent"
+        placeholder="Message text, chat title, approval summary, run ID, provider, or model"
         description="Keep assistant filtering local to this screen so you can search messages, saved chats, pending approvals, and run traces without changing anything else in the app."
         totalCount={assistantArtifactTotalCount}
         matchedCount={assistantArtifactMatchedCount}
         resultLabel="assistant artifacts"
+        globalValue={globalFilter}
         note={assistantFilterNote}
       />
 
@@ -1096,6 +1104,7 @@ export function AssistantWorkspace({
                     <small>
                       {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
                       {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
+                      {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
                     </small>
                   </button>
                 ))}

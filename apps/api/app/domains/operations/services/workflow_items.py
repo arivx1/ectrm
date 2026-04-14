@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -13,6 +12,10 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_credit_approver_role
 from apps.api.app.core.request_context import get_request_identity
+from apps.api.app.domains.trading.services.event_writes import (
+    AppendDomainEventCommand,
+    append_domain_event,
+)
 from apps.api.app.domains.operations.services.actualizations import (
     actualization_workflow_note,
 )
@@ -40,6 +43,9 @@ from apps.api.app.domains.operations.services.resource_views import (
 )
 from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceSurface,
+)
+from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurfaceAction,
 )
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
@@ -82,6 +88,7 @@ from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.operations import TradeCreditApprovalDecisionOut
 from apps.api.app.schemas.operations import TradeCreditApprovalFreshnessOut
 from apps.api.app.schemas.operations import TradeCreditExceptionOut
+from apps.api.app.schemas.operations import OperationalRowActionStateOut
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.shared.enums import ActualizationStatus
 from apps.api.app.shared.enums import AllocationStatus
@@ -412,36 +419,23 @@ def _append_trade_projection_event(
     causation_id: str | None = None,
     recorded_at: datetime | None = None,
 ) -> Event:
-    from apps.api.app.domains.trading.services.trade_event_application import (
-        TradeEventApplicationContext,
-        apply_trade_event,
-    )
-
     identity = get_request_identity()
     effective_recorded_at = _coerce_utc(recorded_at) or datetime.now(timezone.utc)
-    event = Event(
-        event_id=str(uuid.uuid4()),
-        aggregate_type="trade",
-        aggregate_id=aggregate_id,
-        event_type=event_type,
-        occurred_at=_coerce_utc(occurred_at) or effective_recorded_at,
-        recorded_at=effective_recorded_at,
-        actor_id=actor_id,
-        correlation_id=identity.correlation_id,
-        causation_id=causation_id,
-        schema_version=schema_version,
-        payload=payload,
-    )
-    db.add(event)
-    db.flush()
-    apply_trade_event(
-        TradeEventApplicationContext(
-            db=db,
-            event=event,
+    return append_domain_event(
+        db,
+        AppendDomainEventCommand(
+            aggregate_type="trade",
+            aggregate_id=aggregate_id,
+            event_type=event_type,
+            occurred_at=_coerce_utc(occurred_at) or effective_recorded_at,
             recorded_at=effective_recorded_at,
-        )
+            actor_id=actor_id,
+            correlation_id=identity.correlation_id,
+            causation_id=causation_id,
+            schema_version=schema_version,
+            payload=payload,
+        ),
     )
-    return event
 
 
 def _default_option_settlement_notes(trade: Trade) -> str:
@@ -1003,6 +997,33 @@ def _to_out(
     due_at = _coerce_utc(item.due_at)
     is_closed = is_workflow_item_closed(item.workflow_type, item.status)
     is_overdue = bool(due_at is not None and due_at < reference_time and not is_closed)
+    approval_blocked_reason = None
+    if credit_approval_freshness is not None and credit_approval_freshness.approval_blocked:
+        approval_blocked_reason = " ".join(credit_approval_freshness.blocking_reasons).strip() or (
+            "Clear credit freshness blockers before approving the workflow item."
+        )
+    action_states: list[OperationalRowActionStateOut] = [
+        OperationalRowActionStateOut(key="assignSelf"),
+        OperationalRowActionStateOut(key="save"),
+    ]
+    if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value:
+        action_states.extend(
+            [
+                OperationalRowActionStateOut(
+                    key="approve",
+                    available=approval_blocked_reason is None,
+                    blocked_reason=approval_blocked_reason,
+                ),
+                OperationalRowActionStateOut(key="reject"),
+            ]
+        )
+    if item.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value and not is_closed:
+        action_states.append(
+            OperationalRowActionStateOut(
+                key="bookUnderlying",
+                label="Mark Booked" if linked_trade is not None else None,
+            )
+        )
 
     return TradeWorkflowItemOut(
         item_id=item.id,
@@ -1033,6 +1054,7 @@ def _to_out(
         trade_date=trade.trade_date,
         delivery_start=trade.delivery_start,
         delivery_end=trade.delivery_end,
+        action_states=action_states,
         credit_approval_freshness=credit_approval_freshness,
         active_credit_exception=active_credit_exception,
         credit_decision_history=credit_decision_history or [],
@@ -1175,6 +1197,48 @@ WORKFLOW_ITEM_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
             "record-managed ledgers set lifecycle state."
         ),
         board_section="Critical Path",
+        actions=(
+            OperationalResourceSurfaceAction(
+                key="create",
+                label="Create Work Item",
+                detail="Open the next manual or exceptional handoff when operations needs an explicit owner and due date.",
+                permission_message="Sign in to edit workflow ownership, due dates, and statuses.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="assignSelf",
+                label="Assign Me",
+                detail="Claim ownership of the workflow item directly from the queue.",
+                permission_message="Sign in to edit workflow ownership, due dates, and statuses.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="save",
+                label="Save",
+                detail="Persist workflow owner, due date, status, and note changes on the active handoff.",
+                permission_message="Sign in to edit workflow ownership, due dates, and statuses.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="approve",
+                label="Approve With Comment",
+                detail="Approve the credit workflow decision and leave an auditable explanation on the item.",
+                permission_message="Only authorized credit approvers can approve credit workflow items.",
+                comment_required=True,
+                comment_hint="Add a decision comment before approving a credit approval workflow item.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="reject",
+                label="Reject With Comment",
+                detail="Reject the credit workflow decision and record the rationale on the item.",
+                permission_message="Only authorized credit approvers can reject credit workflow items.",
+                comment_required=True,
+                comment_hint="Add a decision comment before rejecting a credit approval workflow item.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="bookUnderlying",
+                label="Book Underlying",
+                detail="Complete the option-settlement handoff by booking or confirming the linked underlying trade.",
+                permission_message="Sign in to edit workflow ownership, due dates, and statuses.",
+            ),
+        ),
         primary_action=OperationalResourcePrimaryAction(
             key="create_handoff",
             label="Create handoff",

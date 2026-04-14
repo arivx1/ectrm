@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from apps.api.app.schemas.operations import OperationalRowActionStateOut
 
 
 class TradeInvoiceOut(BaseModel):
@@ -44,6 +45,7 @@ class TradeInvoiceOut(BaseModel):
     settlement_status: str
     total_paid_amount: float
     outstanding_amount: float
+    action_states: list[OperationalRowActionStateOut] = Field(default_factory=list)
 
 
 class TradeInvoiceCreate(BaseModel):
@@ -105,6 +107,7 @@ class TradePaymentOut(BaseModel):
     delivery_end: Optional[date]
     invoice_status: str
     settlement_status: str
+    action_states: list[OperationalRowActionStateOut] = Field(default_factory=list)
 
 
 class TradePaymentCreate(BaseModel):

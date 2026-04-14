@@ -14,10 +14,23 @@ DocumentAnalysisStatus = Literal["PENDING", "ANALYZED", "FAILED"]
 DocumentReviewStatus = Literal["UNREVIEWED", "IN_REVIEW", "VERIFIED"]
 DocumentPageReviewStatus = Literal["UNREVIEWED", "REVIEWED"]
 DocumentPageTextSource = Literal["none", "pdf_text", "ocr"]
+DocumentProcessorProvider = Literal["openai", "anthropic", "google"]
+DocumentProcessorSelection = Literal["builtin", "openai", "anthropic", "google"]
 DocumentFieldValueType = Literal["text", "date", "number", "currency", "quantity", "identifier"]
 DocumentKind = Literal[
     "UNKNOWN",
+    "TRADE_COMMUNICATION",
     "TRADE_CONFIRMATION",
+    "TRADE_CONTRACT",
+    "BROKER_CONFIRMATION",
+    "BROKER_STATEMENT",
+    "PIPELINE_STATEMENT",
+    "TRUCK_TICKET",
+    "QUALITY_STATEMENT",
+    "SAMPLING_ANALYSIS",
+    "QUALITY_SPECIFICATION",
+    "HAZARDOUS_CARGO_DOCUMENTATION",
+    "DELIVERY_CONFIRMATION",
     "INVOICE",
     "BILL_OF_LADING",
     "CERTIFICATE_OF_ANALYSIS",
@@ -25,6 +38,29 @@ DocumentKind = Literal[
     "WEIGH_TICKET",
     "OTHER",
 ]
+DocumentFamily = Literal[
+    "TRADE_EXECUTION",
+    "TRADE_RECONCILIATION",
+    "LOGISTICS",
+    "NETWORK_FLOW",
+    "QUALITY",
+    "COMPLIANCE",
+    "SETTLEMENT",
+    "GENERAL",
+]
+DocumentTargetRole = Literal["PRIMARY", "SECONDARY", "REFERENCE"]
+DocumentRoutingStrategy = Literal[
+    "TRADE_FIRST",
+    "DELIVERY_FIRST",
+    "SETTLEMENT_FIRST",
+    "ATTACHMENT_FIRST",
+    "MANUAL_REVIEW",
+]
+DocumentRoutingStatus = Literal["READY", "PARTIAL", "INSUFFICIENT", "MANUAL_REVIEW"]
+DocumentLinkageStatus = Literal["READY", "CANDIDATE", "CREATE", "MANUAL_REVIEW"]
+DocumentLinkageAction = Literal["ATTACH", "REVIEW", "CREATE", "MANUAL_REVIEW"]
+DocumentActionPlanStatus = Literal["READY", "REVIEW", "BLOCKED"]
+DocumentActionType = Literal["ATTACH_EXISTING_RECORD", "CREATE_RECORD_FROM_DOCUMENT", "MANUAL_REVIEW"]
 
 FIELD_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
@@ -63,11 +99,23 @@ class DocumentTableTemplateSchemaOut(BaseModel):
     columns: list[DocumentTableColumnSchemaOut] = Field(default_factory=list)
 
 
+class DocumentRecordTargetOut(BaseModel):
+    record_type: str
+    label: str
+    role: DocumentTargetRole = "PRIMARY"
+    match_hint: str
+    create_if_missing: bool = False
+
+
 class DocumentKindSchemaOut(BaseModel):
     document_kind: DocumentKind | str
     label: str
+    document_family: DocumentFamily | str = "GENERAL"
     description: str
     review_guidance: str
+    linkage_summary: str
+    record_targets: list[DocumentRecordTargetOut] = Field(default_factory=list)
+    matching_keys: list[str] = Field(default_factory=list)
     header_fields: list[DocumentFieldSchemaOut] = Field(default_factory=list)
     table_templates: list[DocumentTableTemplateSchemaOut] = Field(default_factory=list)
 
@@ -75,6 +123,125 @@ class DocumentKindSchemaOut(BaseModel):
 class DocumentSchemaRegistryOut(BaseModel):
     version: str
     document_kinds: list[DocumentKindSchemaOut] = Field(default_factory=list)
+
+
+class DocumentRoutingCandidateOut(BaseModel):
+    record_type: str
+    label: str
+    role: DocumentTargetRole = "PRIMARY"
+    score: float = Field(default=0, ge=0, le=1)
+    matched_keys: list[str] = Field(default_factory=list)
+    missing_keys: list[str] = Field(default_factory=list)
+    rationale: str
+    create_if_missing: bool = False
+
+
+class DocumentRoutingAssessmentOut(BaseModel):
+    routing_strategy: DocumentRoutingStrategy = "MANUAL_REVIEW"
+    status: DocumentRoutingStatus = "MANUAL_REVIEW"
+    confidence: float = Field(default=0, ge=0, le=1)
+    primary_record_type: Optional[str] = None
+    primary_label: Optional[str] = None
+    matched_keys: list[str] = Field(default_factory=list)
+    missing_keys: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    candidates: list[DocumentRoutingCandidateOut] = Field(default_factory=list)
+
+
+class DocumentLinkageCandidateOut(BaseModel):
+    record_type: str
+    record_id: Optional[str] = None
+    record_label: str
+    role: DocumentTargetRole = "PRIMARY"
+    existing_record: bool = True
+    score: float = Field(default=0, ge=0, le=1)
+    matched_keys: list[str] = Field(default_factory=list)
+    missing_keys: list[str] = Field(default_factory=list)
+    summary: str
+    reason: str
+    create_if_missing: bool = False
+
+
+class DocumentLinkageAssessmentOut(BaseModel):
+    status: DocumentLinkageStatus = "MANUAL_REVIEW"
+    recommended_action: DocumentLinkageAction = "MANUAL_REVIEW"
+    confidence: float = Field(default=0, ge=0, le=1)
+    primary_record_type: Optional[str] = None
+    primary_record_id: Optional[str] = None
+    primary_record_label: Optional[str] = None
+    reasons: list[str] = Field(default_factory=list)
+    candidates: list[DocumentLinkageCandidateOut] = Field(default_factory=list)
+
+
+class DocumentActionRecordRefOut(BaseModel):
+    record_type: str
+    record_id: Optional[str] = None
+    record_label: str
+    existing_record: bool = True
+
+
+class DocumentActionPlanOut(BaseModel):
+    status: DocumentActionPlanStatus = "REVIEW"
+    action_type: DocumentActionType = "MANUAL_REVIEW"
+    operation_type: Optional[str] = None
+    title: str
+    description: str
+    confidence: float = Field(default=0, ge=0, le=1)
+    target: Optional[DocumentActionRecordRefOut] = None
+    owner: Optional[DocumentActionRecordRefOut] = None
+    reasons: list[str] = Field(default_factory=list)
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class DocumentRecordLinkOut(BaseModel):
+    record_type: str
+    record_id: str
+    record_label: str
+    role: DocumentTargetRole = "PRIMARY"
+    source: str
+    summary: str
+    linked_at: datetime
+    linked_by: str
+
+
+class DocumentProcessorProviderStatusOut(BaseModel):
+    provider: DocumentProcessorProvider
+    label: str
+    enabled: bool
+    configured: bool
+    is_default: bool
+    default_model: str
+    base_url: str
+    setup_env_var: str
+
+
+class DocumentProcessorRuntimeSettingsOut(BaseModel):
+    enabled: bool
+    default_provider: DocumentProcessorProvider
+    effective_default_provider: Optional[DocumentProcessorProvider]
+    configured_provider_count: int
+    providers: list[DocumentProcessorProviderStatusOut]
+
+
+class DocumentProcessorTraceOut(BaseModel):
+    provider: Optional[DocumentProcessorProvider] = None
+    model: Optional[str] = None
+    applied: bool = False
+    overrode_heuristics: bool = False
+    partial: bool = False
+    warning_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DocumentProcessorPageTraceOut(DocumentProcessorTraceOut):
+    heuristic_document_kind: Optional[str] = None
+    heuristic_document_subtype: Optional[str] = None
+
+
+class DocumentProcessorDocumentTraceOut(DocumentProcessorTraceOut):
+    applied_page_count: int = 0
+    overridden_page_count: int = 0
+    partial_page_count: int = 0
 
 
 class DocumentExtractedFieldOut(BaseModel):
@@ -116,6 +283,8 @@ class DocumentIngestionPageOut(BaseModel):
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None
     processed_at: Optional[datetime] = None
+    processor_trace: Optional[DocumentProcessorPageTraceOut] = None
+    routing_assessment: Optional[DocumentRoutingAssessmentOut] = None
 
 
 class DocumentIngestionOut(BaseModel):
@@ -128,6 +297,8 @@ class DocumentIngestionOut(BaseModel):
     size_bytes: int
     page_count: int
     status: DocumentIngestionStatus
+    processor_provider: Optional[DocumentProcessorSelection] = None
+    processor_model: Optional[str] = None
     classifier_version: str
     extractor_version: str
     analysis_summary: dict[str, object] = Field(default_factory=dict)
@@ -141,6 +312,11 @@ class DocumentIngestionOut(BaseModel):
     updated_at: datetime
     updated_by: str
     version: int
+    processor_trace: Optional[DocumentProcessorDocumentTraceOut] = None
+    routing_assessment: Optional[DocumentRoutingAssessmentOut] = None
+    linkage_assessment: Optional[DocumentLinkageAssessmentOut] = None
+    action_plan: Optional[DocumentActionPlanOut] = None
+    record_links: list[DocumentRecordLinkOut] = Field(default_factory=list)
     pages: list[DocumentIngestionPageOut] = Field(default_factory=list)
 
 
@@ -265,3 +441,7 @@ class DocumentIngestionUpdate(BaseModel):
     @classmethod
     def normalize_review_notes(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="review_notes")
+
+
+class DocumentIngestionProcessRequest(BaseModel):
+    processor_provider: Optional[DocumentProcessorSelection] = None

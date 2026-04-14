@@ -35,13 +35,16 @@ operations with session-based access control.
 
 ## Access Model
 
-- Most read endpoints are available without authentication.
+- Public service metadata remains available without authentication.
+- Workspace read endpoints such as `/events`, `/trades`, `/positions`,
+  `/reference/*`, `/reports/*`, `/settlement/*`, and
+  `/operations/workspace-summary` now require a valid session.
 - `POST`, `PUT`, `PATCH`, and `DELETE` calls require a valid session, except
   for `/auth/session`, `/auth/google-session`, and `/auth/bootstrap-admin`.
 - `/admin/*` and `/users/*` require an `ADMIN` or `OPS_ADMIN` session.
 
-This makes it easy to inspect the platform while still protecting writes and
-governance actions.
+This keeps public runtime metadata open while protecting the operator
+workspaces, writes, and governance actions behind an authenticated session.
 
 ## Local Setup
 
@@ -221,6 +224,8 @@ The most important settings are:
   assistant can take during one response
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`: enable GPT, Claude,
   and Gemini respectively
+- `OPENAI_AGENT_BUILDER_MODEL`: optional override for the OpenAI model used
+  when the admin agent builder generates a managed-agent draft
 - `EIA_API_KEY`: unlocks external EIA sync
 - `FRED_API_KEY`: unlocks external FRED sync
 - `CAISO_BASE_URL`: points at the CAISO OASIS current hub-price page used for public power sync
@@ -247,10 +252,18 @@ a visible failure to the backend request log quickly.
 
 ## Assistant Governance
 
-Managed assistant agents can now carry an `allowed_tools` list in addition to
-their capability tags. This means `READ` no longer implies unrestricted access
-to every published live tool: admins can pin each agent to the exact
-read-only tool subset it is allowed to use.
+Managed assistant agents can now carry both an `allowed_tools` list and a
+separate `allowed_action_types` list in addition to their capability tags.
+This means:
+
+- `READ` no longer implies unrestricted access to every published live tool
+- `ACTION` no longer implies unrestricted access to every approval-gated
+  mutation type
+
+Admins can pin each agent to the exact read-only tool subset and action subset
+it is allowed to use. The admin data routes also expose a curated assistant
+agent seed action for opinionated defaults such as `trade-ops-copilot`,
+`settlement-copilot`, and `trade-governor`.
 
 Each successful or failed assistant response also records an `assistant_run`
 row for auditability. Those records capture the resolved runtime, prompt

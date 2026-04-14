@@ -1,54 +1,74 @@
 import { useState } from 'react'
 
+import { combineTextFilters } from '../../shared/filtering'
 import type { EventRow } from '../../shared/models'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   ALL_EVENT_TYPES,
   DEFAULT_VISIBLE_EVENT_COUNT,
+  buildEventTriageRecommendation,
   buildEventTypeOptions,
   filterEventRows,
   formatEventScopeLabel,
   isTradeLinkedEvent,
+  type EventTriageWorkspace,
 } from './eventHelpers'
+
+type EventTradeLinkAction = {
+  tradeId: string
+  eventType: string | null
+}
 
 type EventsWorkspaceProps = {
   authSession: StoredAuthSession | null
   eventFilter: string
   eventsLoadedCount: number
+  globalFilter: string
   selectedTradeId: string | null
   setEventFilter: (value: string) => void
   filteredEvents: EventRow[]
   formatDate: (value: string | null | undefined) => string
-  onOpenTrade: (tradeId: string) => void
+  onOpenOperations: (action: EventTradeLinkAction) => void
+  onOpenSettlement: (action: EventTradeLinkAction) => void
+  onOpenTrade: (action: EventTradeLinkAction) => void
 }
 
 export function EventsWorkspace({
   authSession,
   eventFilter,
   eventsLoadedCount,
+  globalFilter,
   selectedTradeId,
   setEventFilter,
   filteredEvents,
   formatDate,
+  onOpenOperations,
+  onOpenSettlement,
   onOpenTrade,
 }: EventsWorkspaceProps) {
+  const [workspaceMode, setWorkspaceMode] = useState<'triage' | 'browse'>('triage')
   const [eventTypeFilter, setEventTypeFilter] = useState(ALL_EVENT_TYPES)
   const [searchQuery, setSearchQuery] = useState('')
   const [showAllEvents, setShowAllEvents] = useState(false)
+  const effectiveSearchQuery = combineTextFilters(globalFilter, searchQuery)
+  const hasGlobalFilter = globalFilter.trim().length > 0
 
+  const triageModeActive = workspaceMode === 'triage'
   const normalizedScopeFilter = eventFilter === 'SELECTED' ? 'SELECTED' : 'ALL'
-  const eventTypeOptions = buildEventTypeOptions(filteredEvents)
+  const sourceEvents = triageModeActive ? filteredEvents.filter(isTradeLinkedEvent) : filteredEvents
+  const eventTypeOptions = buildEventTypeOptions(sourceEvents)
   const normalizedEventTypeFilter = eventTypeOptions.some((option) => option.value === eventTypeFilter)
     ? eventTypeFilter
     : ALL_EVENT_TYPES
-  const matchingEvents = filterEventRows(filteredEvents, {
+  const matchingEvents = filterEventRows(sourceEvents, {
     eventTypeFilter: normalizedEventTypeFilter,
-    searchQuery,
+    searchQuery: effectiveSearchQuery,
   })
   const latestEvent = matchingEvents[0] ?? null
   const latestTradeEvent = matchingEvents.find(isTradeLinkedEvent) ?? null
   const tradeLinkedEventCount = matchingEvents.filter(isTradeLinkedEvent).length
+  const triageRecommendation = latestTradeEvent ? buildEventTriageRecommendation(latestTradeEvent) : null
   const currentScopeLabel = formatEventScopeLabel(normalizedScopeFilter, selectedTradeId)
   const actorCount = new Set(matchingEvents.map((event) => event.actor_id ?? 'system')).size
   const visibleEvents = showAllEvents ? matchingEvents : matchingEvents.slice(0, DEFAULT_VISIBLE_EVENT_COUNT)
@@ -56,7 +76,7 @@ export function EventsWorkspace({
   const hasActiveRefinement =
     normalizedScopeFilter !== 'ALL' ||
     normalizedEventTypeFilter !== ALL_EVENT_TYPES ||
-    searchQuery.trim().length > 0
+    effectiveSearchQuery.trim().length > 0
   const eventTypeSummary =
     normalizedEventTypeFilter === ALL_EVENT_TYPES ? 'All event types' : normalizedEventTypeFilter
   const searchSummary = searchQuery.trim() || '—'
@@ -80,6 +100,11 @@ export function EventsWorkspace({
     setShowAllEvents(false)
   }
 
+  function handleWorkspaceModeChange(nextMode: 'triage' | 'browse') {
+    setWorkspaceMode(nextMode)
+    setShowAllEvents(false)
+  }
+
   function handleEventTypeChange(nextValue: string) {
     setEventTypeFilter(nextValue)
     setShowAllEvents(false)
@@ -97,6 +122,52 @@ export function EventsWorkspace({
     setShowAllEvents(false)
   }
 
+  function buildEventTradeLinkAction(
+    event: Pick<EventRow, 'aggregate_id' | 'event_type'>,
+  ): EventTradeLinkAction {
+    return {
+      tradeId: event.aggregate_id,
+      eventType: event.event_type,
+    }
+  }
+
+  function openTradeById(tradeId: string) {
+    onOpenTrade({
+      tradeId,
+      eventType: null,
+    })
+  }
+
+  function openTriageWorkspace(
+    workspace: EventTriageWorkspace,
+    event: Pick<EventRow, 'aggregate_id' | 'event_type'>,
+  ) {
+    const action = buildEventTradeLinkAction(event)
+
+    switch (workspace) {
+      case 'operations':
+        onOpenOperations(action)
+        return
+      case 'settlement':
+        onOpenSettlement(action)
+        return
+      case 'trades':
+        onOpenTrade(action)
+        return
+    }
+  }
+
+  function triageActionLabel(workspace: EventTriageWorkspace) {
+    switch (workspace) {
+      case 'operations':
+        return 'Open Work Queue'
+      case 'settlement':
+        return 'Open Settlement'
+      case 'trades':
+        return 'Open Trade'
+    }
+  }
+
   return (
     <TileLayout
       workspaceId="events"
@@ -105,12 +176,33 @@ export function EventsWorkspace({
       tiles={[
         {
           id: 'events-summary',
-          eyebrow: 'Snapshot',
-          title: 'Events Loaded',
-          description: 'A count of the recent event records currently loaded into this session for review.',
+          eyebrow: triageModeActive ? 'Triage' : 'Snapshot',
+          title: triageModeActive ? 'Issue Triage Snapshot' : 'Events Loaded',
+          description: triageModeActive
+            ? 'Start here when the question is what changed and which workspace should own the next action.'
+            : 'A count of the recent event records currently loaded into this session for review.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half', 'side'],
-          content: (
+          content: triageModeActive ? (
+            <div className="detail-list">
+              <div className="detail-row">
+                <span>Issues In View</span>
+                <strong>{matchingEvents.length}</strong>
+              </div>
+              <div className="detail-row">
+                <span>Latest Event</span>
+                <strong>{latestTradeEvent?.event_type ?? '—'}</strong>
+              </div>
+              <div className="detail-row">
+                <span>Latest Trade</span>
+                <strong>{latestTradeEvent?.aggregate_id ?? '—'}</strong>
+              </div>
+              <div className="detail-row">
+                <span>Actors In View</span>
+                <strong>{actorCount}</strong>
+              </div>
+            </div>
+          ) : (
             <div className="trading-metric-tile">
               <strong>{eventsLoadedCount}</strong>
               <p>Recent event records available for review.</p>
@@ -120,12 +212,41 @@ export function EventsWorkspace({
         {
           id: 'events-controls',
           eyebrow: 'Controls',
-          title: 'Stream Filters',
-          description: 'Narrow the event stream before expanding the full timeline so the page stays useful under heavier activity.',
+          title: triageModeActive ? 'Issue Triage Controls' : 'Stream Filters',
+          description: triageModeActive
+            ? 'Keep the feed focused on trade-linked issues first, then route into the workspace that should own the next move.'
+            : 'Narrow the event stream before expanding the full timeline so the page stays useful under heavier activity.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half', 'side'],
           content: (
             <div className="stack">
+              <div className="tab-row" role="tablist" aria-label="Event workspace mode">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={triageModeActive}
+                  className={`tab-pill ${triageModeActive ? 'is-active' : ''}`}
+                  onClick={() => handleWorkspaceModeChange('triage')}
+                >
+                  Issue Triage
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!triageModeActive}
+                  className={`tab-pill ${!triageModeActive ? 'is-active' : ''}`}
+                  onClick={() => handleWorkspaceModeChange('browse')}
+                >
+                  Browse All
+                </button>
+              </div>
+
+              <p className="form-note">
+                {triageModeActive
+                  ? 'Triage mode starts with trade-linked activity and shows the next workspace likely to own the follow-up.'
+                  : 'Browse All shows every loaded event, including non-trade records that may matter during broader investigations.'}
+              </p>
+
               <div className="events-filter-grid">
                 <label className="field events-search-field">
                   <span>Search</span>
@@ -169,8 +290,8 @@ export function EventsWorkspace({
 
               <div className="detail-list">
                 <div className="detail-row">
-                  <span>Scope Result Count</span>
-                  <strong>{filteredEvents.length}</strong>
+                  <span>{triageModeActive ? 'Triage Source Count' : 'Scope Result Count'}</span>
+                  <strong>{sourceEvents.length}</strong>
                 </div>
                 <div className="detail-row">
                   <span>Matching Events</span>
@@ -192,6 +313,12 @@ export function EventsWorkspace({
                   <span>Search</span>
                   <strong>{searchSummary}</strong>
                 </div>
+                {hasGlobalFilter ? (
+                  <div className="detail-row">
+                    <span>Global Filter</span>
+                    <strong>{globalFilter.trim()}</strong>
+                  </div>
+                ) : null}
                 <div className="detail-row">
                   <span>Latest Event</span>
                   <strong>{latestEvent ? formatDate(latestEvent.recorded_at) : '—'}</strong>
@@ -218,16 +345,20 @@ export function EventsWorkspace({
                 </div>
               ) : null}
 
+              {hasGlobalFilter ? (
+                <p className="form-note">Global nav filter “{globalFilter.trim()}” is also narrowing the event stream.</p>
+              ) : null}
+
               {selectedTradeId ? (
                 <div className="stack-actions">
-                  <button type="button" className="button button-secondary" onClick={() => onOpenTrade(selectedTradeId)}>
+                  <button type="button" className="button button-secondary" onClick={() => openTradeById(selectedTradeId)}>
                     Open Selected Trade
                   </button>
                   {latestTradeEvent && latestTradeEvent.aggregate_id !== selectedTradeId ? (
                     <button
                       type="button"
                       className="button button-ghost"
-                      onClick={() => onOpenTrade(latestTradeEvent.aggregate_id)}
+                      onClick={() => onOpenTrade(buildEventTradeLinkAction(latestTradeEvent))}
                     >
                       Open Latest Trade Event
                     </button>
@@ -238,10 +369,92 @@ export function EventsWorkspace({
           ),
         },
         {
+          id: 'events-next-step',
+          eyebrow: 'Next Step',
+          title:
+            triageRecommendation && latestTradeEvent
+              ? `${latestTradeEvent.aggregate_id} · ${latestTradeEvent.event_type}`
+              : 'What To Do Next',
+          description: 'Use the latest trade-linked event to decide which workspace should own the next action.',
+          span: 'half',
+          availableSpans: ['full', 'wide', 'half', 'side'],
+          content: latestTradeEvent && triageRecommendation ? (
+            <div className="stack">
+              <div className="feedback-banner feedback-banner-success">
+                <strong>{triageRecommendation.title}</strong>
+                <p className="form-note">{triageRecommendation.detail}</p>
+              </div>
+
+              <div className="timeline-recommendation-copy">
+                <p>{triageRecommendation.summary}</p>
+                <div className="timeline-recommendation-meta">
+                  <span className={`status-pill status-pill-${triageRecommendation.severityTone}`}>
+                    {triageRecommendation.severityLabel}
+                  </span>
+                  {triageRecommendation.highlights.map((highlight) => (
+                    <span key={highlight} className="entity-chip entity-chip-soft">
+                      {highlight}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="detail-list">
+                <div className="detail-row">
+                  <span>Recommendation</span>
+                  <strong>{triageRecommendation.badge}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Trade</span>
+                  <strong>{latestTradeEvent.aggregate_id}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Actor</span>
+                  <strong>{latestTradeEvent.actor_id ?? 'system'}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Recorded</span>
+                  <strong>{formatDate(latestTradeEvent.recorded_at)}</strong>
+                </div>
+              </div>
+
+              <div className="stack-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => openTriageWorkspace(triageRecommendation.workspace, latestTradeEvent)}
+                >
+                  {triageActionLabel(triageRecommendation.workspace)}
+                </button>
+                {triageRecommendation.workspace !== 'trades' ? (
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => onOpenTrade(buildEventTradeLinkAction(latestTradeEvent))}
+                  >
+                    Open Trade
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No issue handoff yet</strong>
+              <p>
+                {triageModeActive
+                  ? 'Trade-linked activity will surface a recommended next workspace here once it is in scope.'
+                  : 'Switch to Issue Triage to get a recommended next step from the latest trade-linked event.'}
+              </p>
+            </div>
+          ),
+        },
+        {
           id: 'events-breakdown',
-          eyebrow: 'Mix',
-          title: 'Event Breakdown',
-          description: 'A quick read on which event types and aggregate families dominate the current filter.',
+          eyebrow: triageModeActive ? 'Pattern' : 'Mix',
+          title: triageModeActive ? 'Issue Breakdown' : 'Event Breakdown',
+          description: triageModeActive
+            ? 'See which trade-linked event types are dominating the current issue view.'
+            : 'A quick read on which event types and aggregate families dominate the current filter.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half', 'side'],
           content:
@@ -267,17 +480,23 @@ export function EventsWorkspace({
             ) : (
               <div className="empty-state">
                 <strong>No events in scope</strong>
-                <p>Adjust the filter or create activity in the system to populate the event mix.</p>
+                <p>
+                  {triageModeActive
+                    ? 'Switch to Browse All or create trade-linked activity to bring issue patterns back into view.'
+                    : 'Clear the refinements or create trade activity to bring the event mix back into view.'}
+                </p>
               </div>
             ),
         },
         {
           id: 'events-stream',
           eyebrow: 'Timeline',
-          title: latestEvent ? latestEvent.event_type : 'Recent Events',
+          title: latestEvent ? latestEvent.event_type : triageModeActive ? 'Issue Timeline' : 'Recent Events',
           description:
             matchingEvents.length === 0
-              ? 'Refine the stream with scope, event type, or search terms to inspect a smaller slice.'
+              ? triageModeActive
+                ? 'Start with the latest trade-linked issues here, then switch to Browse All when you need platform-wide context.'
+                : 'Refine the stream with scope, event type, or search terms to inspect a smaller slice.'
               : hiddenEventCount > 0
                 ? `Showing ${visibleEvents.length} of ${matchingEvents.length} matching events. ${latestEvent?.aggregate_id ?? 'The latest record'} is the most recent event currently visible in the stream.`
                 : `${latestEvent?.aggregate_id ?? 'The latest record'} was the most recent event currently visible in the stream.`,
@@ -297,34 +516,71 @@ export function EventsWorkspace({
 
                 <div className="timeline timeline-large">
                   {visibleEvents.map((event) => (
-                    <article key={event.event_id} className="timeline-item timeline-item-card">
-                      <div className="timeline-dot" />
-                      <div className="timeline-body">
-                        <div className="timeline-head">
-                          <strong>{event.event_type}</strong>
-                          <span>{formatDate(event.recorded_at)}</span>
-                        </div>
-                        <div className="timeline-summary-row">
-                          <p>
-                            {event.aggregate_id} • {event.aggregate_type}
-                          </p>
-                          {isTradeLinkedEvent(event) ? (
-                            <button
-                              type="button"
-                              className="button button-ghost timeline-action-button"
-                              onClick={() => onOpenTrade(event.aggregate_id)}
-                            >
-                              Open Trade
-                            </button>
-                          ) : null}
-                        </div>
-                        <div className="timeline-meta">
-                          <span>Actor {event.actor_id ?? 'system'}</span>
-                          <span>Schema v{event.schema_version}</span>
-                          <span>{event.correlation_id ?? 'No correlation id'}</span>
-                        </div>
-                      </div>
-                    </article>
+                    (() => {
+                      const tradeLinked = isTradeLinkedEvent(event)
+                      const recommendation = tradeLinked ? buildEventTriageRecommendation(event) : null
+                      const recommendedWorkspace = recommendation?.workspace ?? 'trades'
+
+                      return (
+                        <article key={event.event_id} className="timeline-item timeline-item-card">
+                          <div className="timeline-dot" />
+                          <div className="timeline-body">
+                            <div className="timeline-head">
+                              <strong>{event.event_type}</strong>
+                              <span>{formatDate(event.recorded_at)}</span>
+                            </div>
+                            <div className="timeline-summary-row">
+                              <p>
+                                {event.aggregate_id} • {event.aggregate_type}
+                              </p>
+                              {recommendation ? (
+                                <span className="entity-chip entity-chip-soft">{recommendation.badge}</span>
+                              ) : null}
+                            </div>
+                            {recommendation ? (
+                              <div className="timeline-recommendation-copy">
+                                <p>{recommendation.summary}</p>
+                                <div className="timeline-recommendation-meta">
+                                  <span className={`status-pill status-pill-${recommendation.severityTone}`}>
+                                    {recommendation.severityLabel}
+                                  </span>
+                                  {recommendation.highlights.map((highlight) => (
+                                    <span key={highlight} className="entity-chip entity-chip-soft">
+                                      {highlight}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                            <div className="timeline-meta">
+                              <span>Actor {event.actor_id ?? 'system'}</span>
+                              <span>Schema v{event.schema_version}</span>
+                              <span>{event.correlation_id ?? 'No correlation id'}</span>
+                            </div>
+                            {tradeLinked ? (
+                              <div className="workflow-item-button-row">
+                                {recommendedWorkspace !== 'trades' ? (
+                                  <button
+                                    type="button"
+                                    className="button button-secondary"
+                                    onClick={() => openTriageWorkspace(recommendedWorkspace, event)}
+                                  >
+                                    {triageActionLabel(recommendedWorkspace)}
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className={`button ${recommendedWorkspace === 'trades' ? 'button-secondary' : 'button-ghost'} timeline-action-button`}
+                                  onClick={() => onOpenTrade(buildEventTradeLinkAction(event))}
+                                >
+                                  Open Trade
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </article>
+                      )
+                    })()
                   ))}
                 </div>
 
@@ -346,11 +602,13 @@ export function EventsWorkspace({
               <div className="empty-state">
                 <strong>{filteredEvents.length > 0 ? 'No events match these filters' : 'No recent events'}</strong>
                 <p>
-                  {filteredEvents.length > 0
+                  {matchingEvents.length === 0 && triageModeActive && filteredEvents.length > 0
+                    ? 'Switch to Browse All to inspect non-trade events, or clear the filters to bring trade-linked issues back into scope.'
+                    : filteredEvents.length > 0
                     ? 'Broaden the scope or clear the search to bring records back into view.'
                     : normalizedScopeFilter === 'SELECTED' && !selectedTradeId
                       ? 'Select a trade to inspect its event history here.'
-                      : 'The stream will populate here as trades are created, amended, or cancelled.'}
+                      : 'Book, amend, or cancel a trade to build the activity trail here. This is the first screen to open when someone asks what changed.'}
                 </p>
                 {filteredEvents.length > 0 && hasActiveRefinement ? (
                   <div className="stack-actions">

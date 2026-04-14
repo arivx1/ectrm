@@ -1,8 +1,23 @@
 import { useState } from 'react'
+import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { CreateTradePaymentInput, UpdateTradePaymentInput } from '../../entities/settlement/api'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type { TradeInvoiceRecord, TradePaymentRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import { paymentStatusOptions } from '../../shared/trading'
+import {
+  OperationalFormActions,
+  OperationalFormActionsCopy,
+} from '../operations/operationalFormPrimitives'
+import {
+  OperationalDescriptorForm,
+  OperationalDescriptorFormFeedback,
+  resolveOperationalFormDefinition,
+} from '../operations/operationalFormRegistry'
+import {
+  OperationalDescriptorActionRow,
+  resolveOperationalResourcePermissionMessage,
+  resolveOperationalFormActionSet,
+} from '../operations/operationalFormActionRegistry'
 
 type SettlementPaymentBoardProps = {
   authSession: StoredAuthSession | null
@@ -11,6 +26,7 @@ type SettlementPaymentBoardProps = {
   paymentWorkItems: TradeWorkflowItemRecord[]
   saveError: string
   savingKey: string | null
+  operationalResourceDescriptor?: OperationalResourceDescriptor | null
   formatCommodityClass: (value: string) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
@@ -138,6 +154,7 @@ export function SettlementPaymentBoard({
   paymentWorkItems,
   saveError,
   savingKey,
+  operationalResourceDescriptor = null,
   formatCommodityClass,
   formatDate,
   formatDateOnly,
@@ -164,6 +181,9 @@ export function SettlementPaymentBoard({
       ]),
     ),
   )
+  const permissionMessage =
+    resolveOperationalResourcePermissionMessage(operationalResourceDescriptor) ??
+    'Sign in to schedule, receive, and reconcile settlement payments.'
 
   function updatePaymentDraft(paymentId: number, patch: Partial<PaymentDraft>, invoice: TradeInvoiceRecord, payment: TradePaymentRecord) {
     setDrafts((current) => ({
@@ -218,7 +238,7 @@ export function SettlementPaymentBoard({
   return (
     <div className="workflow-editor-stack">
       {!authSession ? (
-        <p className="workflow-editor-note">Sign in to schedule, receive, and reconcile settlement payments.</p>
+        <p className="workflow-editor-note">{permissionMessage}</p>
       ) : null}
       {saveError ? <p className="field-error workflow-item-save-error">{saveError}</p> : null}
       <div className="position-list">
@@ -231,6 +251,24 @@ export function SettlementPaymentBoard({
           const outstandingAmount = invoice.outstanding_amount
           const createDraft = createDrafts[invoice.invoice_id] ?? buildCreateDraft(invoice, invoicePayments)
           const createPending = savingKey === `invoice:${invoice.invoice_id}:new`
+          const statusOptions = paymentRecordStatusOptions.map((option) => ({
+            value: option,
+            label: option.replaceAll('_', ' '),
+          }))
+          const paymentCreateForm = resolveOperationalFormDefinition('paymentCreate', {
+            createPending,
+            draft: createDraft,
+            formatMoney,
+            invoice,
+            statusOptions,
+            updateDraft: (patch) => updateCreateDraft(invoice.invoice_id, patch, invoice),
+          })
+          const paymentCreateActionSet = resolveOperationalFormActionSet('paymentCreateActions', {
+            createPending,
+            hasAuthenticatedSession: Boolean(authSession),
+            onCreate: () => handleCreate(invoice),
+            onOpenTrade: () => onOpenTrade(invoice.trade_id),
+          }, operationalResourceDescriptor)
 
           return (
             <article key={invoice.invoice_id} className="position-card shipment-card workflow-item-card settlement-payment-card">
@@ -287,6 +325,21 @@ export function SettlementPaymentBoard({
                     const draft = drafts[payment.payment_id] ?? buildPaymentDraft(invoice, payment)
                     const pending = savingKey === `payment:${payment.payment_id}`
                     const savePayload = buildUpdatePayload(payment, draft)
+                    const paymentEditForm = resolveOperationalFormDefinition('paymentEdit', {
+                      draft,
+                      payment,
+                      pending,
+                      statusOptions,
+                      updateDraft: (patch) => updatePaymentDraft(payment.payment_id, patch, invoice, payment),
+                    })
+                    const paymentEditActionSet = resolveOperationalFormActionSet('paymentEditActions', {
+                      actionStates: payment.action_states ?? [],
+                      hasAuthenticatedSession: Boolean(authSession),
+                      onMarkPaid: () => handleMarkPaid(invoice, payment),
+                      onSave: () => handleSave(invoice, payment),
+                      pending,
+                      savePayloadEmpty: Object.keys(savePayload).length === 0,
+                    }, operationalResourceDescriptor)
 
                     return (
                       <article key={payment.payment_id} className="settlement-payment-entry">
@@ -301,219 +354,22 @@ export function SettlementPaymentBoard({
                             {payment.status.replaceAll('_', ' ')}
                           </span>
                         </div>
-                        <div className="workflow-item-grid settlement-payment-grid">
-                          <label className="field">
-                            <span>Reference</span>
-                            <input
-                              className="control control-compact"
-                              value={draft.paymentReference}
-                              onChange={(event) =>
-                                updatePaymentDraft(payment.payment_id, { paymentReference: event.target.value }, invoice, payment)
-                              }
-                              disabled={pending}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Currency</span>
-                            <input
-                              className="control control-compact"
-                              value={draft.paymentCurrencyCode}
-                              onChange={(event) =>
-                                updatePaymentDraft(payment.payment_id, { paymentCurrencyCode: event.target.value }, invoice, payment)
-                              }
-                              disabled={pending}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Amount</span>
-                            <input
-                              className="control control-compact"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={draft.paymentAmount}
-                              onChange={(event) =>
-                                updatePaymentDraft(payment.payment_id, { paymentAmount: event.target.value }, invoice, payment)
-                              }
-                              disabled={pending}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Status</span>
-                            <select
-                              className="control control-compact"
-                              value={draft.status}
-                              onChange={(event) =>
-                                updatePaymentDraft(payment.payment_id, { status: event.target.value }, invoice, payment)
-                              }
-                              disabled={pending}
-                            >
-                              {paymentRecordStatusOptions.map((option) => (
-                                <option key={option} value={option}>
-                                  {option.replaceAll('_', ' ')}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="field">
-                            <span>Due</span>
-                            <input
-                              className="control control-compact"
-                              type="date"
-                              value={draft.dueAt}
-                              onChange={(event) =>
-                                updatePaymentDraft(payment.payment_id, { dueAt: event.target.value }, invoice, payment)
-                              }
-                              disabled={pending}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Received</span>
-                            <input
-                              className="control control-compact"
-                              type="date"
-                              value={draft.receivedAt}
-                              onChange={(event) =>
-                                updatePaymentDraft(payment.payment_id, { receivedAt: event.target.value }, invoice, payment)
-                              }
-                              disabled={pending}
-                            />
-                          </label>
-                          <label className="field field-wide">
-                            <span>Notes</span>
-                            <textarea
-                              className="control control-compact"
-                              rows={2}
-                              value={draft.notes}
-                              onChange={(event) =>
-                                updatePaymentDraft(payment.payment_id, { notes: event.target.value }, invoice, payment)
-                              }
-                              disabled={pending}
-                            />
-                          </label>
-                        </div>
-                        <div className="workflow-item-button-row">
-                          <button
-                            type="button"
-                            className="button button-ghost"
-                            onClick={() => handleSave(invoice, payment)}
-                            disabled={!authSession || pending || Object.keys(savePayload).length === 0}
-                          >
-                            {pending ? 'Saving...' : 'Save'}
-                          </button>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => handleMarkPaid(invoice, payment)}
-                            disabled={!authSession || pending || payment.status === 'PAID'}
-                          >
-                            Mark Paid
-                          </button>
-                        </div>
+                        <OperationalDescriptorForm className="settlement-payment-grid" form={paymentEditForm} />
+                        <OperationalDescriptorFormFeedback form={paymentEditForm} />
+                        <OperationalDescriptorActionRow actionSet={paymentEditActionSet} />
                       </article>
                     )
                   })}
                 </div>
               ) : null}
-              <div className="workflow-item-grid settlement-payment-grid">
-                <label className="field">
-                  <span>New Reference</span>
-                  <input
-                    className="control control-compact"
-                    value={createDraft.paymentReference}
-                    onChange={(event) => updateCreateDraft(invoice.invoice_id, { paymentReference: event.target.value }, invoice)}
-                    disabled={createPending}
-                  />
-                </label>
-                <label className="field">
-                  <span>Currency</span>
-                  <input
-                    className="control control-compact"
-                    value={createDraft.paymentCurrencyCode}
-                    onChange={(event) => updateCreateDraft(invoice.invoice_id, { paymentCurrencyCode: event.target.value }, invoice)}
-                    disabled={createPending}
-                  />
-                </label>
-                <label className="field">
-                  <span>Amount</span>
-                  <input
-                    className="control control-compact"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={createDraft.paymentAmount}
-                    onChange={(event) => updateCreateDraft(invoice.invoice_id, { paymentAmount: event.target.value }, invoice)}
-                    disabled={createPending}
-                  />
-                </label>
-                <label className="field">
-                  <span>Status</span>
-                  <select
-                    className="control control-compact"
-                    value={createDraft.status}
-                    onChange={(event) => updateCreateDraft(invoice.invoice_id, { status: event.target.value }, invoice)}
-                    disabled={createPending}
-                  >
-                    {paymentRecordStatusOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option.replaceAll('_', ' ')}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Due</span>
-                  <input
-                    className="control control-compact"
-                    type="date"
-                    value={createDraft.dueAt}
-                    onChange={(event) => updateCreateDraft(invoice.invoice_id, { dueAt: event.target.value }, invoice)}
-                    disabled={createPending}
-                  />
-                </label>
-                <label className="field">
-                  <span>Received</span>
-                  <input
-                    className="control control-compact"
-                    type="date"
-                    value={createDraft.receivedAt}
-                    onChange={(event) => updateCreateDraft(invoice.invoice_id, { receivedAt: event.target.value }, invoice)}
-                    disabled={createPending}
-                  />
-                </label>
-                <label className="field field-wide">
-                  <span>Notes</span>
-                  <textarea
-                    className="control control-compact"
-                    rows={2}
-                    value={createDraft.notes}
-                    onChange={(event) => updateCreateDraft(invoice.invoice_id, { notes: event.target.value }, invoice)}
-                    disabled={createPending}
-                  />
-                </label>
-              </div>
-              <div className="workflow-item-actions">
-                <div className="shipment-card-copy">
-                  <p>
-                    Invoice {invoice.invoice_number} for {formatMoney(invoice.invoice_amount, invoice.invoice_currency_code)}.
-                    {` `}
-                    Open trade payment status is {invoice.payment_status.replaceAll('_', ' ')}.
-                  </p>
-                </div>
-                <div className="workflow-item-button-row">
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    onClick={() => handleCreate(invoice)}
-                    disabled={!authSession || createPending}
-                  >
-                    {createPending ? 'Creating...' : 'Add Payment'}
-                  </button>
-                  <button type="button" className="button button-ghost" onClick={() => onOpenTrade(invoice.trade_id)}>
-                    Open Trade
-                  </button>
-                </div>
-              </div>
+              <OperationalDescriptorForm className="settlement-payment-grid" form={paymentCreateForm} />
+              <OperationalDescriptorFormFeedback form={paymentCreateForm} />
+              <OperationalFormActions>
+                <OperationalFormActionsCopy>
+                  <p>{paymentCreateForm.helpText}</p>
+                </OperationalFormActionsCopy>
+                <OperationalDescriptorActionRow actionSet={paymentCreateActionSet} />
+              </OperationalFormActions>
             </article>
           )
         })}

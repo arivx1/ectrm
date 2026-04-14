@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import type { WorkspaceDashboardSummary } from '../../entities/app/api'
-import { matchesTextFilter } from '../../shared/filtering'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord, ViewKey } from '../../shared/models'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
@@ -49,6 +49,7 @@ type PriceIndexRecord = {
 
 type DashboardWorkspaceProps = {
   authSession: StoredAuthSession | null
+  globalFilter: string
   onOpenView: (view: ViewKey) => void
   appLoading: boolean
   activeTrades: TradeRecord[]
@@ -549,6 +550,7 @@ function PnlTrendChart({
 export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const {
     authSession,
+    globalFilter,
     onOpenView,
     appLoading,
     activeTrades,
@@ -569,23 +571,24 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const [dateFromFilter, setDateFromFilter] = useState('')
   const [dateToFilter, setDateToFilter] = useState('')
   const [screenFilter, setScreenFilter] = useState('')
-  const hasScreenFilter = screenFilter.trim().length > 0
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
+  const hasScreenFilter = effectiveScreenFilter.trim().length > 0
 
   const directlyMatchedTrades = useMemo(
-    () => activeTrades.filter((trade) => matchesDashboardTradeFilter(trade, screenFilter)),
-    [activeTrades, screenFilter],
+    () => activeTrades.filter((trade) => matchesDashboardTradeFilter(trade, effectiveScreenFilter)),
+    [activeTrades, effectiveScreenFilter],
   )
   const directlyMatchedEvents = useMemo(
-    () => events.filter((event) => matchesDashboardEventFilter(event, screenFilter)),
-    [events, screenFilter],
+    () => events.filter((event) => matchesDashboardEventFilter(event, effectiveScreenFilter)),
+    [effectiveScreenFilter, events],
   )
   const directlyMatchedPositions = useMemo(
-    () => positionsWithClass.filter((position) => matchesDashboardPositionFilter(position, screenFilter)),
-    [positionsWithClass, screenFilter],
+    () => positionsWithClass.filter((position) => matchesDashboardPositionFilter(position, effectiveScreenFilter)),
+    [effectiveScreenFilter, positionsWithClass],
   )
   const directlyMatchedPriceIndices = useMemo(
-    () => priceIndices.filter((priceIndex) => matchesDashboardPriceIndexFilter(priceIndex, screenFilter)),
-    [priceIndices, screenFilter],
+    () => priceIndices.filter((priceIndex) => matchesDashboardPriceIndexFilter(priceIndex, effectiveScreenFilter)),
+    [effectiveScreenFilter, priceIndices],
   )
   const directlyMatchedPositionCommodities = useMemo(
     () => new Set(directlyMatchedPositions.map((position) => position.commodity)),
@@ -1072,6 +1075,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       actionLabel: 'Open Trade Capture',
     },
     {
+      title: 'Investigate a trade issue',
+      detail: 'Open the activity feed when you need to trace what changed on a trade before you jump into capture or operations.',
+      view: 'events',
+      actionLabel: 'Open Activity Feed',
+    },
+    {
       title: 'Check exposure',
       detail: 'Open the exposure workspace when the question is concentration, pricing coverage, or the biggest books.',
       view: 'risk',
@@ -1115,6 +1124,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             visiblePriceIndices.length
           }
           resultLabel="dashboard records"
+          globalValue={globalFilter}
           note="The local search narrows the live snapshot, exposure, market-price, and timeline cards. The P&L history module keeps using its own book, class, and date controls."
         />
       }
@@ -1327,8 +1337,9 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                   <span>P&amp;L Proxy</span>
                   <strong>{formatMoney(currentPnlProxy)}</strong>
                   <p>
-                    Based on {currentPricedTradeCount} priced trade{currentPricedTradeCount === 1 ? '' : 's'} from the
-                    reporting service using market marks, stored price differentials, and settlement history.
+                    {hasScreenFilter
+                      ? `Based on ${currentPricedTradeCount} priced trade${currentPricedTradeCount === 1 ? '' : 's'} in the current local dashboard view.`
+                      : `Based on ${currentPricedTradeCount} priced trade${currentPricedTradeCount === 1 ? '' : 's'} from the reporting service using market marks, stored price differentials, and settlement history.`}
                   </p>
                 </article>
                 <article className="dashboard-report-card">

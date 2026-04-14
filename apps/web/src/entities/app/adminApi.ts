@@ -13,6 +13,14 @@ export type TradingSourceSeedResult = {
   updated_count: number
 }
 
+export type AssistantAgentSeedResult = {
+  requested_by: string
+  total_templates: number
+  created_count: number
+  updated_count: number
+  agent_ids: string[]
+}
+
 const externalDataSyncRouteByProvider = {
   EIA: 'eia',
   EIA_FUNDAMENTALS: 'eia-fundamentals',
@@ -83,6 +91,18 @@ export async function seedTradingSources(
     {
       requested_by: actorId,
       replace_existing: options?.replaceExisting ?? true,
+    },
+    { headers: adminMutationHeaders() },
+  )
+}
+
+export async function seedAssistantAgents(apiBase: string): Promise<AssistantAgentSeedResult> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantAgentSeedResult>(
+    `${apiBase}/admin/data/assistant-agents/seed`,
+    {
+      requested_by: actorId,
     },
     { headers: adminMutationHeaders() },
   )

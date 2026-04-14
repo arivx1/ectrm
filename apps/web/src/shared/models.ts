@@ -346,6 +346,13 @@ export type TradeCreditExceptionRecord = {
   revalidation_reason: string | null
 }
 
+export type OperationalRowActionStateRecord = {
+  key: string
+  available: boolean
+  blocked_reason: string | null
+  label: string | null
+}
+
 export type TradeWorkflowItemRecord = {
   item_id: number
   trade_id: string
@@ -383,6 +390,7 @@ export type TradeWorkflowItemRecord = {
   trade_date: string | null
   delivery_start: string | null
   delivery_end: string | null
+  action_states: OperationalRowActionStateRecord[]
   credit_approval_freshness?: TradeCreditApprovalFreshnessRecord | null
   active_credit_exception?: TradeCreditExceptionRecord | null
   credit_decision_history: TradeCreditApprovalDecisionRecord[]
@@ -440,6 +448,7 @@ export type TradeConfirmationRecord = {
   comparison_status: string
   blocking_mismatch_count: number
   mismatches: TradeConfirmationMismatchRecord[]
+  action_states: OperationalRowActionStateRecord[]
 }
 
 export type TradeConfirmationMismatchRecord = {
@@ -489,6 +498,7 @@ export type TradeInvoiceRecord = {
   settlement_status: string
   total_paid_amount: number
   outstanding_amount: number
+  action_states: OperationalRowActionStateRecord[]
 }
 
 export type TradePaymentRecord = {
@@ -527,6 +537,7 @@ export type TradePaymentRecord = {
   delivery_end: string | null
   invoice_status: string
   settlement_status: string
+  action_states: OperationalRowActionStateRecord[]
 }
 
 export type DocumentExtractedFieldRecord = {
@@ -545,6 +556,106 @@ export type DocumentTableBlockRecord = {
   rows: Array<Record<string, string | null>>
   header_row_detected: boolean
   source: string
+}
+
+export type DocumentRoutingCandidateRecord = {
+  record_type: string
+  label: string
+  role: string
+  score: number
+  matched_keys: string[]
+  missing_keys: string[]
+  rationale: string
+  create_if_missing: boolean
+}
+
+export type DocumentRoutingAssessmentRecord = {
+  routing_strategy: string
+  status: string
+  confidence: number
+  primary_record_type: string | null
+  primary_label: string | null
+  matched_keys: string[]
+  missing_keys: string[]
+  reasons: string[]
+  candidates: DocumentRoutingCandidateRecord[]
+}
+
+export type DocumentLinkageCandidateRecord = {
+  record_type: string
+  record_id: string | null
+  record_label: string
+  role: string
+  existing_record: boolean
+  score: number
+  matched_keys: string[]
+  missing_keys: string[]
+  summary: string
+  reason: string
+  create_if_missing: boolean
+}
+
+export type DocumentLinkageAssessmentRecord = {
+  status: string
+  recommended_action: string
+  confidence: number
+  primary_record_type: string | null
+  primary_record_id: string | null
+  primary_record_label: string | null
+  reasons: string[]
+  candidates: DocumentLinkageCandidateRecord[]
+}
+
+export type DocumentActionRecordRefRecord = {
+  record_type: string
+  record_id: string | null
+  record_label: string
+  existing_record: boolean
+}
+
+export type DocumentActionPlanRecord = {
+  status: string
+  action_type: string
+  operation_type: string | null
+  title: string
+  description: string
+  confidence: number
+  target: DocumentActionRecordRefRecord | null
+  owner: DocumentActionRecordRefRecord | null
+  reasons: string[]
+  payload: Record<string, unknown>
+}
+
+export type DocumentRecordLinkRecord = {
+  record_type: string
+  record_id: string
+  record_label: string
+  role: string
+  source: string
+  summary: string
+  linked_at: string
+  linked_by: string
+}
+
+export type DocumentProcessorTraceRecord = {
+  provider: 'openai' | 'anthropic' | 'google' | null
+  model: string | null
+  applied: boolean
+  overrode_heuristics: boolean
+  partial: boolean
+  warning_count: number
+  warnings: string[]
+}
+
+export type DocumentProcessorPageTraceRecord = DocumentProcessorTraceRecord & {
+  heuristic_document_kind: string | null
+  heuristic_document_subtype: string | null
+}
+
+export type DocumentProcessorDocumentTraceRecord = DocumentProcessorTraceRecord & {
+  applied_page_count: number
+  overridden_page_count: number
+  partial_page_count: number
 }
 
 export type DocumentIngestionPageRecord = {
@@ -568,6 +679,8 @@ export type DocumentIngestionPageRecord = {
   reviewed_at: string | null
   reviewed_by: string | null
   processed_at: string | null
+  processor_trace: DocumentProcessorPageTraceRecord | null
+  routing_assessment: DocumentRoutingAssessmentRecord | null
 }
 
 export type DocumentIngestionRecord = {
@@ -580,6 +693,8 @@ export type DocumentIngestionRecord = {
   size_bytes: number
   page_count: number
   status: string
+  processor_provider: 'builtin' | 'openai' | 'anthropic' | 'google' | null
+  processor_model: string | null
   classifier_version: string
   extractor_version: string
   analysis_summary: Record<string, unknown>
@@ -593,6 +708,11 @@ export type DocumentIngestionRecord = {
   updated_at: string
   updated_by: string
   version: number
+  processor_trace: DocumentProcessorDocumentTraceRecord | null
+  routing_assessment: DocumentRoutingAssessmentRecord | null
+  linkage_assessment: DocumentLinkageAssessmentRecord | null
+  action_plan: DocumentActionPlanRecord | null
+  record_links: DocumentRecordLinkRecord[]
   pages: DocumentIngestionPageRecord[]
 }
 
@@ -621,11 +741,23 @@ export type DocumentTableTemplateSchemaRecord = {
   columns: DocumentTableColumnSchemaRecord[]
 }
 
+export type DocumentRecordTargetRecord = {
+  record_type: string
+  label: string
+  role: string
+  match_hint: string
+  create_if_missing: boolean
+}
+
 export type DocumentKindSchemaRecord = {
   document_kind: string
   label: string
+  document_family: string
   description: string
   review_guidance: string
+  linkage_summary: string
+  record_targets: DocumentRecordTargetRecord[]
+  matching_keys: string[]
   header_fields: DocumentFieldSchemaRecord[]
   table_templates: DocumentTableTemplateSchemaRecord[]
 }
@@ -633,6 +765,25 @@ export type DocumentKindSchemaRecord = {
 export type DocumentSchemaRegistryRecord = {
   version: string
   document_kinds: DocumentKindSchemaRecord[]
+}
+
+export type DocumentProcessorProviderStatusRecord = {
+  provider: 'openai' | 'anthropic' | 'google'
+  label: string
+  enabled: boolean
+  configured: boolean
+  is_default: boolean
+  default_model: string
+  base_url: string
+  setup_env_var: string
+}
+
+export type DocumentProcessorRuntimeSettingsRecord = {
+  enabled: boolean
+  default_provider: 'openai' | 'anthropic' | 'google'
+  effective_default_provider: 'openai' | 'anthropic' | 'google' | null
+  configured_provider_count: number
+  providers: DocumentProcessorProviderStatusRecord[]
 }
 
 export type ReferenceRecord = {
@@ -1493,7 +1644,16 @@ export type AssistantMessageRole = 'user' | 'assistant'
 export type AssistantAgentStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'RETIRED'
 export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
 export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
-export type AssistantActionType = 'cancel_trade'
+export const ASSISTANT_ACTION_TYPES = [
+  'cancel_trade',
+  'issue_trade_confirmation',
+  'record_trade_confirmation_response',
+  'update_trade_workflow_item',
+  'issue_trade_invoice',
+  'create_trade_payment',
+  'reprocess_document_ingestion',
+] as const
+export type AssistantActionType = (typeof ASSISTANT_ACTION_TYPES)[number]
 export type AssistantActionRequestStatus = 'PENDING' | 'REJECTED' | 'EXECUTED' | 'FAILED'
 
 export type AssistantProviderStatus = {
@@ -1537,6 +1697,7 @@ export type AssistantAgent = {
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
   allowed_tools: string[]
+  allowed_action_types: AssistantActionType[]
 }
 
 export type AssistantAdminAgent = AssistantAgent & {

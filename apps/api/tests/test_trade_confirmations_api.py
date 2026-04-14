@@ -343,6 +343,13 @@ class TradeConfirmationsApiTests(unittest.TestCase):
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["workflow_owner"], None)
         self.assertEqual(listed[0]["book"], "CRUDE_PHYS")
+        confirmation_actions = {row["key"]: row for row in listed[0]["action_states"]}
+        self.assertEqual(confirmation_actions["issue"]["label"], None)
+        self.assertFalse(confirmation_actions["received"]["available"])
+        self.assertEqual(
+            confirmation_actions["confirmed"]["blocked_reason"],
+            "Issue the confirmation before recording a counterparty response.",
+        )
 
         with self.SessionLocal() as session:
             trade = session.query(Trade).filter(Trade.trade_id == "T-CONF-1").one()

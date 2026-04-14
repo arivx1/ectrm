@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  filterPrimaryNavigationSections,
   isPrimaryNavigationSectionKey,
   MAX_PRIMARY_NAV_SECTIONS,
   MOBILE_NAV_MEDIA_QUERY,
@@ -87,6 +88,7 @@ describe('mobile navigation helpers', () => {
 
     expect(PRIMARY_NAV_SECTIONS.find((section) => section.key === 'trading')?.startPaths.map((path) => path.title)).toEqual([
       'Capture a trade',
+      'Investigate a trade issue',
       'Check exposure',
       'Inspect net positions',
     ])
@@ -99,6 +101,28 @@ describe('mobile navigation helpers', () => {
     expect(primaryNavigationSectionForView('shipments').key).toBe('execution')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('settings').key).toBe('administration')
+  })
+
+  it('filters navigation sections by matching workspace labels and section copy', () => {
+    expect(filterPrimaryNavigationSections('shipments')).toEqual([
+      expect.objectContaining({
+        key: 'execution',
+        views: [expect.objectContaining({ key: 'shipments' })],
+      }),
+    ])
+
+    expect(filterPrimaryNavigationSections('walkthrough')).toEqual([
+      expect.objectContaining({
+        key: 'overview',
+        views: expect.arrayContaining([
+          expect.objectContaining({ key: 'dashboard' }),
+          expect.objectContaining({ key: 'guide' }),
+          expect.objectContaining({ key: 'demo' }),
+        ]),
+      }),
+    ])
+
+    expect(filterPrimaryNavigationSections('definitely not a workspace')).toEqual([])
   })
 
   it('recognizes supported primary navigation section keys', () => {

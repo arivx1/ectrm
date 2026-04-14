@@ -32,6 +32,7 @@ from apps.api.app.schemas.operations import DependencyHealthOut
 from apps.api.app.schemas.operations import OperationalResourceDescriptorOut
 from apps.api.app.schemas.operations import OperationalResourceEmptyStateOut
 from apps.api.app.schemas.operations import OperationalResourcePrimaryActionOut
+from apps.api.app.schemas.operations import OperationalResourceSurfaceActionOut
 from apps.api.app.schemas.operations import OperationalResourceSummaryStatOut
 from apps.api.app.schemas.operations import OperationalResourceSurfaceOut
 from apps.api.app.schemas.operations import SystemOverviewOut
@@ -262,6 +263,17 @@ def get_operational_resource_descriptors() -> list[OperationalResourceDescriptor
                 title=descriptor.surface.title,
                 description=descriptor.surface.description,
                 board_section=descriptor.surface.board_section,
+                actions=[
+                    OperationalResourceSurfaceActionOut(
+                        key=action.key,
+                        label=action.label,
+                        detail=action.detail,
+                        permission_message=action.permission_message,
+                        comment_required=action.comment_required,
+                        comment_hint=action.comment_hint,
+                    )
+                    for action in descriptor.surface.actions
+                ],
                 primary_action=(
                     OperationalResourcePrimaryActionOut(
                         key=descriptor.surface.primary_action.key,

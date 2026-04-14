@@ -29,6 +29,9 @@ from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceSurface,
 )
 from apps.api.app.domains.operations.services.resource_views import (
+    OperationalResourceSurfaceAction,
+)
+from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
 )
 from apps.api.app.domains.operations.services.workflow_items import SYSTEM_WORKFLOW_ACTOR
@@ -37,6 +40,7 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.schemas.operations import OperationalRowActionStateOut
 from apps.api.app.schemas.settlement import TradePaymentOut
 from apps.api.app.shared.enums import InvoiceStatus
 from apps.api.app.shared.enums import PaymentStatus
@@ -525,6 +529,11 @@ def _to_out(
     received_at = _coerce_utc(payment.received_at)
     effective_status = _effective_payment_status(payment, now=reference_time)
     is_overdue = effective_status == PaymentStatus.OVERDUE.value
+    mark_paid_blocked_reason = (
+        "This payment record is already marked as paid."
+        if effective_status == PaymentStatus.PAID.value
+        else None
+    )
 
     return TradePaymentOut(
         payment_id=payment.id,
@@ -562,6 +571,14 @@ def _to_out(
         delivery_end=trade.delivery_end,
         invoice_status=invoice.status,
         settlement_status=projection.settlement_status,
+        action_states=[
+            OperationalRowActionStateOut(key="save"),
+            OperationalRowActionStateOut(
+                key="markPaid",
+                available=mark_paid_blocked_reason is None,
+                blocked_reason=mark_paid_blocked_reason,
+            ),
+        ],
     )
 
 
@@ -642,6 +659,26 @@ TRADE_PAYMENT_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
             "Cash collection and settlement now run from dedicated payment records instead of a status-only queue row."
         ),
         board_section="Queue",
+        actions=(
+            OperationalResourceSurfaceAction(
+                key="create",
+                label="Add Payment",
+                detail="Create the next payment record in the invoice cash-collection chain.",
+                permission_message="Sign in to schedule, receive, and reconcile settlement payments.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="save",
+                label="Save",
+                detail="Persist due date, amount, receipt timing, and note changes on the payment record.",
+                permission_message="Sign in to schedule, receive, and reconcile settlement payments.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="markPaid",
+                label="Mark Paid",
+                detail="Mark the payment as received and stamp the collection timing directly on the ledger.",
+                permission_message="Sign in to schedule, receive, and reconcile settlement payments.",
+            ),
+        ),
         primary_action=OperationalResourcePrimaryAction(
             key="record_payment",
             label="Record payment",

@@ -9,6 +9,10 @@ import { createServer as createViteServer, type ViteDevServer } from 'vite'
 
 import { buildFallbackTradeMetadata } from '../../../src/shared/tradeMetadata'
 import {
+  adminRoadmapDocument,
+  assistantActionRequests,
+  assistantAdminAgents,
+  assistantRuntimeSettings,
   books,
   buildWorkspaceSummary,
   commodities,
@@ -24,8 +28,13 @@ import {
   smokeAccessToken,
   smokeSession,
   trades,
+  userAccounts,
   units,
 } from './smokeFixtures'
+
+type SmokeTradeRow = (typeof trades)[number]
+type SmokeEventRow = (typeof selectedTradeEvents)[number]
+type SmokeAssistantActionRequestRow = (typeof assistantActionRequests)[number]
 
 type MockApiServer = {
   baseUrl: string
@@ -49,6 +58,112 @@ export type SmokeHarness = {
 }
 
 const webRoot = fileURLToPath(new URL('../../..', import.meta.url))
+
+function normalizeOptionalText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalizeOptionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function buildTradeCreatedEventRow(args: {
+  eventId: string
+  tradeId: string
+  occurredAt: string
+  actorId: string | null
+  schemaVersion: number
+  payload: Record<string, unknown>
+}): SmokeEventRow {
+  const { eventId, tradeId, occurredAt, actorId, schemaVersion, payload } = args
+
+  return {
+    event_id: eventId,
+    aggregate_type: 'trade',
+    aggregate_id: tradeId,
+    event_type: 'TradeCreated',
+    occurred_at: occurredAt,
+    recorded_at: occurredAt,
+    actor_id: actorId,
+    correlation_id: null,
+    causation_id: null,
+    schema_version: schemaVersion,
+    payload,
+  }
+}
+
+function buildCreatedTradeRow(args: {
+  tradeId: string
+  occurredAt: string
+  eventId: string
+  payload: Record<string, unknown>
+}): SmokeTradeRow {
+  const { tradeId, occurredAt, eventId, payload } = args
+  const tradeNature = normalizeOptionalText(payload.trade_nature) ?? 'PHYSICAL'
+  const requiresPhysicalWorkflow = tradeNature === 'PHYSICAL'
+  const tradeStructure = normalizeOptionalText(payload.trade_structure) ?? 'SINGLE'
+
+  return {
+    trade_id: tradeId,
+    originating_option_trade_id: null,
+    external_trade_id: normalizeOptionalText(payload.external_trade_id),
+    source_system: normalizeOptionalText(payload.source_system),
+    created_at: occurredAt,
+    updated_at: occurredAt,
+    execution_timestamp: normalizeOptionalText(payload.execution_timestamp) ?? occurredAt,
+    trade_date: normalizeOptionalText(payload.trade_date) ?? occurredAt.slice(0, 10),
+    effective_start_date: normalizeOptionalText(payload.effective_start_date),
+    effective_end_date: normalizeOptionalText(payload.effective_end_date),
+    quality_spec: normalizeOptionalText(payload.quality_spec),
+    unit_of_measure: normalizeOptionalText(payload.unit_of_measure),
+    trade_currency_code: normalizeOptionalText(payload.trade_currency_code),
+    location_code: normalizeOptionalText(payload.location_code),
+    delivery_start: normalizeOptionalText(payload.delivery_start),
+    delivery_end: normalizeOptionalText(payload.delivery_end),
+    price_unit_code: normalizeOptionalText(payload.price_unit_code),
+    instrument_type: normalizeOptionalText(payload.instrument_type) ?? 'LINEAR',
+    option_type: normalizeOptionalText(payload.option_type),
+    option_style: normalizeOptionalText(payload.option_style),
+    option_strike_price: normalizeOptionalNumber(payload.option_strike_price),
+    option_expiration_date: normalizeOptionalText(payload.option_expiration_date),
+    trade_nature: tradeNature,
+    trade_structure: tradeStructure,
+    trade_side:
+      tradeStructure === 'SWAP'
+        ? null
+        : normalizeOptionalText(payload.trade_side) ?? 'BUY',
+    book: normalizeOptionalText(payload.book) ?? 'GULF_GAS',
+    portfolio: normalizeOptionalText(payload.portfolio),
+    counterparty: normalizeOptionalText(payload.counterparty),
+    commodity_class: normalizeOptionalText(payload.commodity_class) ?? 'NATURAL_GAS',
+    commodity: normalizeOptionalText(payload.commodity) ?? 'HENRY_HUB_GAS',
+    pricing_type: normalizeOptionalText(payload.pricing_type) ?? 'FIXED',
+    pricing_status: normalizeOptionalText(payload.pricing_status) ?? 'PENDING',
+    confirmation_status: normalizeOptionalText(payload.confirmation_status) ?? 'PENDING',
+    nomination_status:
+      normalizeOptionalText(payload.nomination_status) ??
+      (requiresPhysicalWorkflow ? 'PENDING' : 'NOT_REQUIRED'),
+    allocation_status:
+      normalizeOptionalText(payload.allocation_status) ??
+      (requiresPhysicalWorkflow ? 'PENDING' : 'NOT_REQUIRED'),
+    actualization_status: requiresPhysicalWorkflow ? 'PENDING' : 'NOT_REQUIRED',
+    price_index_code: normalizeOptionalText(payload.price_index_code),
+    price: normalizeOptionalNumber(payload.price),
+    volume: normalizeOptionalNumber(payload.volume),
+    invoice_status:
+      normalizeOptionalText(payload.invoice_status) ??
+      (requiresPhysicalWorkflow ? 'PENDING' : 'NOT_REQUIRED'),
+    payment_status: normalizeOptionalText(payload.payment_status) ?? 'PENDING',
+    settlement_status: normalizeOptionalText(payload.settlement_status) ?? 'PENDING',
+    trader_user: normalizeOptionalText(payload.trader_user),
+    status: 'ACTIVE',
+    last_event_id: eventId,
+    active_credit_exception: null,
+    credit_approval_status: 'APPROVED',
+    credit_hold_active: false,
+    credit_hold_reason: null,
+  }
+}
 
 function writeJson(response: ServerResponse, payload: unknown, status = 200): void {
   response.writeHead(status, {
@@ -94,6 +209,15 @@ async function startMockApiServer(
 ): Promise<MockApiServer> {
   const mutationRequests: RecordedRequest[] = []
   const unexpectedRequests: RecordedRequest[] = []
+  const tradeRows: SmokeTradeRow[] = trades.map((trade) => ({ ...trade }))
+  const tradeEventsByAggregateId = new Map<string, SmokeEventRow[]>(
+    [['T-AMEND-100', selectedTradeEvents.map((event) => ({ ...event }))]],
+  )
+  const assistantActionRequestRows: SmokeAssistantActionRequestRow[] = assistantActionRequests.map((request) => ({
+    ...request,
+    payload: { ...request.payload },
+    result: request.result ? { ...request.result } : null,
+  }))
   let sessionExpired = false
   const runtimeSettings = {
     ...publicRuntimeSettings,
@@ -186,8 +310,236 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/assistant/settings' && method === 'GET') {
+      writeJson(response, assistantRuntimeSettings)
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/agents' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(
+        response,
+        assistantAdminAgents.map((agent) => ({
+          ...agent,
+          allowed_workspaces: [...agent.allowed_workspaces],
+          capabilities: [...agent.capabilities],
+          allowed_tools: [...agent.allowed_tools],
+          allowed_action_types: [...agent.allowed_action_types],
+        })),
+      )
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/action-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const status = url.searchParams.get('status')?.trim().toUpperCase() ?? ''
+      const limit = Number(url.searchParams.get('limit') ?? '')
+      const offset = Number(url.searchParams.get('offset') ?? '')
+
+      let filteredRequests = assistantActionRequestRows
+      if (status) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.status === status)
+      }
+
+      const normalizedOffset = Number.isFinite(offset) && offset > 0 ? Math.trunc(offset) : 0
+      const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : null
+      const pagedRequests =
+        normalizedLimit === null
+          ? filteredRequests.slice(normalizedOffset)
+          : filteredRequests.slice(normalizedOffset, normalizedOffset + normalizedLimit)
+
+      writeJson(response, pagedRequests)
+      return
+    }
+
+    if (url.pathname === '/users' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, userAccounts)
+      return
+    }
+
+    if (url.pathname === '/admin/roadmap' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, adminRoadmapDocument)
+      return
+    }
+
+    if (url.pathname === '/admin/external-data/runs' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/external-data/status' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, null)
+      return
+    }
+
+    if (url.pathname === '/admin/trading-sources' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/weather/locations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/weather/sync/status' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, null)
+      return
+    }
+
+    const approveActionRequestMatch = url.pathname.match(/^\/assistant\/action-requests\/(\d+)\/approve$/)
+    if (approveActionRequestMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const actionRequestId = Number(approveActionRequestMatch[1])
+      const actionRequestIndex = assistantActionRequestRows.findIndex(
+        (requestRow) => requestRow.action_request_id === actionRequestId,
+      )
+
+      if (actionRequestIndex < 0) {
+        writeJson(response, { detail: 'Assistant action request not found.' }, 404)
+        return
+      }
+
+      const currentRequest = assistantActionRequestRows[actionRequestIndex]
+      if (currentRequest.status !== 'PENDING') {
+        writeJson(response, { detail: 'Only pending assistant action requests can be approved.' }, 409)
+        return
+      }
+
+      const tradeId =
+        typeof currentRequest.payload.trade_id === 'string' && currentRequest.payload.trade_id.trim()
+          ? currentRequest.payload.trade_id.trim()
+          : 'T-AMEND-100'
+      const updatedRequest = {
+        ...currentRequest,
+        status: 'EXECUTED',
+        result: {
+          trade_id: tradeId,
+          decision: 'approved',
+        },
+        decided_at: '2026-04-11T09:05:00Z',
+        decided_by: smokeSession.user.user_id,
+      } satisfies SmokeAssistantActionRequestRow
+
+      assistantActionRequestRows[actionRequestIndex] = updatedRequest
+      writeJson(response, updatedRequest)
+      return
+    }
+
+    const rejectActionRequestMatch = url.pathname.match(/^\/assistant\/action-requests\/(\d+)\/reject$/)
+    if (rejectActionRequestMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const actionRequestId = Number(rejectActionRequestMatch[1])
+      const actionRequestIndex = assistantActionRequestRows.findIndex(
+        (requestRow) => requestRow.action_request_id === actionRequestId,
+      )
+
+      if (actionRequestIndex < 0) {
+        writeJson(response, { detail: 'Assistant action request not found.' }, 404)
+        return
+      }
+
+      const currentRequest = assistantActionRequestRows[actionRequestIndex]
+      if (currentRequest.status !== 'PENDING') {
+        writeJson(response, { detail: 'Only pending assistant action requests can be rejected.' }, 409)
+        return
+      }
+
+      const updatedRequest = {
+        ...currentRequest,
+        status: 'REJECTED',
+        result: null,
+        decided_at: '2026-04-11T09:05:00Z',
+        decided_by: smokeSession.user.user_id,
+      } satisfies SmokeAssistantActionRequestRow
+
+      assistantActionRequestRows[actionRequestIndex] = updatedRequest
+      writeJson(response, updatedRequest)
+      return
+    }
+
+    if (url.pathname === '/operations/system-overview' && method === 'GET') {
+      writeJson(response, {
+        generated_at: '2026-04-11T09:05:00Z',
+        server_status: 'ok',
+        database_status: 'ok',
+        database: {
+          dialect: 'sqlite',
+          name: 'smoke.db',
+          size_bytes: 1024,
+          table_count: 12,
+          record_count: 42,
+        },
+        uptime_seconds: 172800,
+        presence_window_seconds: 3600,
+        active_session_count: 1,
+        active_user_count: 1,
+        registered_user_count: 2,
+        active_account_count: 2,
+        open_trade_count: tradeRows.length,
+        events_last_hour: 2,
+        last_event_recorded_at: '2026-04-11T09:00:00Z',
+        dependency_count: 1,
+        healthy_dependency_count: 1,
+        dependencies: [
+          {
+            key: 'assistant-provider-openai',
+            label: 'OpenAI Provider',
+            provider: 'OPENAI',
+            run_status: 'IDLE',
+            health_status: 'healthy',
+            success_sla_hours: 24,
+            last_run_at: '2026-04-11T08:50:00Z',
+            last_success_at: '2026-04-11T08:50:00Z',
+            error_summary: null,
+          },
+        ],
+      })
+      return
+    }
+
     if (url.pathname === '/operations/workspace-summary' && method === 'GET') {
-      writeJson(response, buildWorkspaceSummary())
+      writeJson(response, buildWorkspaceSummary(tradeRows))
       return
     }
 
@@ -234,7 +586,7 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/trades' && method === 'GET') {
-      writeJson(response, trades)
+      writeJson(response, tradeRows)
       return
     }
 
@@ -352,10 +704,76 @@ async function startMockApiServer(
         return
       }
 
+      const aggregateId = url.searchParams.get('aggregate_id')?.trim() ?? ''
+      if (aggregateId) {
+        writeJson(response, tradeEventsByAggregateId.get(aggregateId) ?? [])
+        return
+      }
+
       writeJson(
         response,
-        url.searchParams.get('aggregate_id') === 'T-AMEND-100' ? selectedTradeEvents : [],
+        Array.from(tradeEventsByAggregateId.values()).flat(),
       )
+      return
+    }
+
+    if (url.pathname === '/events' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      const eventRequest = payload as {
+        aggregate_type?: unknown
+        aggregate_id?: unknown
+        event_type?: unknown
+        occurred_at?: unknown
+        actor_id?: unknown
+        payload?: unknown
+        schema_version?: unknown
+      }
+
+      assert.equal(eventRequest.aggregate_type, 'trade')
+      assert.equal(eventRequest.event_type, 'TradeCreated')
+      assert.equal(typeof eventRequest.aggregate_id, 'string')
+      assert.equal(typeof eventRequest.occurred_at, 'string')
+      assert.ok(
+        eventRequest.payload &&
+          typeof eventRequest.payload === 'object' &&
+          !Array.isArray(eventRequest.payload),
+      )
+
+      const tradeId = eventRequest.aggregate_id.trim()
+      const occurredAt = eventRequest.occurred_at
+      const actorId = normalizeOptionalText(eventRequest.actor_id)
+      const eventPayload = eventRequest.payload as Record<string, unknown>
+      const schemaVersion =
+        typeof eventRequest.schema_version === 'number' &&
+        Number.isFinite(eventRequest.schema_version)
+          ? eventRequest.schema_version
+          : 1
+      const eventId = `evt-trade-created-${tradeId.toLowerCase()}`
+      const createdEvent = buildTradeCreatedEventRow({
+        eventId,
+        tradeId,
+        occurredAt,
+        actorId,
+        schemaVersion,
+        payload: eventPayload,
+      })
+      const createdTrade = buildCreatedTradeRow({
+        tradeId,
+        occurredAt,
+        eventId,
+        payload: eventPayload,
+      })
+
+      tradeEventsByAggregateId.set(tradeId, [createdEvent])
+      tradeRows.unshift(createdTrade)
+
+      writeJson(response, createdEvent, 201)
       return
     }
 

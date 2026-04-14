@@ -9,6 +9,7 @@ from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.event import Base, Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
@@ -42,6 +43,7 @@ from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprov
 from apps.api.app.models.trade_credit_exception import TradeCreditException
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
+from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.trading_source import TradingSource
 from apps.api.app.models.user_account import UserAccount
@@ -63,6 +65,7 @@ __all__ = [
     "DeliveryPowerDetail",
     "DocumentIngestion",
     "DocumentIngestionPage",
+    "DocumentRecordLink",
     "Event",
     "ExternalDataRun",
     "ExternalSeriesDefinition",
@@ -94,6 +97,7 @@ __all__ = [
     "TradeCreditException",
     "TradeInvoice",
     "TradePayment",
+    "TradePriceTerm",
     "TradeWorkflowItem",
     "TradingSource",
     "UserAccount",

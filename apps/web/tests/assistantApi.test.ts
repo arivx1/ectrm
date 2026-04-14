@@ -9,6 +9,19 @@ const { fetchJsonMock, postJsonMock, putJsonMock, requestOkMock } = vi.hoisted((
   requestOkMock: vi.fn(),
 }))
 
+vi.mock('../src/shared/mutation.ts', () => ({
+  buildMutationHeaders: (headers?: HeadersInit) => {
+    const merged = new Headers(headers)
+    merged.set('Authorization', 'Bearer mutation-token')
+    return merged
+  },
+  getMutationContext: () => ({
+    actorId: 'assistant_user',
+    accessToken: 'mutation-token',
+    role: 'OPS_ADMIN',
+  }),
+}))
+
 vi.mock('../src/shared/api.ts', () => ({
   createApiError: (message: string, init?: { status?: number; correlationId?: string | null }) =>
     Object.assign(new Error(message), init),
@@ -20,6 +33,7 @@ vi.mock('../src/shared/api.ts', () => ({
 }))
 
 import {
+  buildAssistantAgentDraft,
   getAssistantConversation,
   listAssistantActionRequests,
   listAssistantConversations,
@@ -145,4 +159,64 @@ test('streamAssistantResponse derives auth headers from the typed helper options
       data: { chunk: 'Hello back' },
     },
   ])
+})
+
+test('buildAssistantAgentDraft posts the normalized current draft to the admin builder route', async () => {
+  const expected = {
+    agent_id: 'ops-briefing',
+    name: 'Ops Briefing',
+    description: 'Summarizes queue pressure.',
+    status: 'DRAFT',
+    scope: 'TEAM',
+    provider: 'openai',
+    model: 'gpt-5-mini',
+    allowed_workspaces: ['assistant', 'operations'],
+    capabilities: ['READ', 'EXPLAIN'],
+    allowed_tools: ['list_workflow_items'],
+    allowed_action_types: [],
+    system_prompt: 'Summarize the queue.',
+    builder_provider: 'openai',
+    builder_model: 'gpt-5',
+    warnings: [],
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await buildAssistantAgentDraft('http://api.test', {
+    brief: '  Build an operations briefing agent.  ',
+    current_draft: {
+      agent_id: '  ops-briefing  ',
+      name: '  Ops Briefing  ',
+      description: '  Summarizes queue pressure. ',
+      status: 'DRAFT',
+      scope: 'TEAM',
+      provider: null,
+      model: '  ',
+      allowed_workspaces: ['assistant', 'operations'],
+      capabilities: ['READ', 'EXPLAIN'],
+      allowed_tools: ['list_workflow_items'],
+      allowed_action_types: [],
+      system_prompt: '  Summarize the queue.  ',
+    },
+  })
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agents/build')
+  assert.deepEqual(body, {
+    brief: 'Build an operations briefing agent.',
+    current_draft: {
+      agent_id: 'ops-briefing',
+      name: 'Ops Briefing',
+      description: 'Summarizes queue pressure.',
+      status: 'DRAFT',
+      scope: 'TEAM',
+      allowed_workspaces: ['assistant', 'operations'],
+      capabilities: ['READ', 'EXPLAIN'],
+      allowed_tools: ['list_workflow_items'],
+      allowed_action_types: [],
+      system_prompt: 'Summarize the queue.',
+    },
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })

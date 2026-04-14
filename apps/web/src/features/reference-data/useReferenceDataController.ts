@@ -66,6 +66,7 @@ type UseReferenceDataControllerArgs = {
   locationStandards: LocationStandards
   counterpartyStandards: CounterpartyStandards
   commodityClassOrder: readonly string[]
+  externalReferenceSearch?: string
 }
 
 export function useReferenceDataController({
@@ -91,6 +92,7 @@ export function useReferenceDataController({
   locationStandards,
   counterpartyStandards,
   commodityClassOrder,
+  externalReferenceSearch,
 }: UseReferenceDataControllerArgs) {
   const [referenceActionError, setReferenceActionError] = useState('')
   const [referenceActionSuccess, setReferenceActionSuccess] = useState('')
@@ -113,6 +115,7 @@ export function useReferenceDataController({
     locationStandards,
     counterpartyStandards,
     commodityClassOrder,
+    externalReferenceSearch,
   })
 
   const derived = useReferenceDataDerivedState({

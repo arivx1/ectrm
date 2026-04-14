@@ -19,9 +19,11 @@ import {
   formatNumber,
   statusTone,
 } from '../../shared/format'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type { ViewKey } from '../../shared/models'
 import { resolveTradeFormMetadata } from '../../shared/tradeMetadata'
 import type { DocumentationDocumentKey } from '../../workspaces/docs/DocumentationWorkspace'
+import { resolveTradeInspectorTabForEvent } from '../../workspaces/events/eventHelpers'
 
 const DocumentationWorkspace = lazy(() =>
   import('../../workspaces/docs/DocumentationWorkspace').then((module) => ({
@@ -78,6 +80,19 @@ const SettlementWorkspace = lazy(() =>
     default: module.SettlementWorkspace,
   })),
 )
+
+function buildActivityFeedHandoff(
+  tradeId: string,
+  tradeInspectorTab: AppRouteHandoff['tradeInspectorTab'] = null,
+  eventType: AppRouteHandoff['eventType'] = null,
+): AppRouteHandoff {
+  return {
+    source: 'events',
+    tradeId,
+    tradeInspectorTab,
+    eventType,
+  }
+}
 const ReportsWorkspace = lazy(() =>
   import('../../workspaces/reports/ReportsWorkspace').then((module) => ({
     default: module.ReportsWorkspace,
@@ -190,6 +205,7 @@ export type WorkspaceViewRenderContext = {
   handleDocumentationDocumentChange: ReturnType<typeof useAppRouteState>['handleDocumentationDocumentChange']
   navigateToTrade: ReturnType<typeof useAppRouteState>['navigateToTrade']
   navigateToView: ReturnType<typeof useAppRouteState>['navigateToView']
+  routeHandoff: ReturnType<typeof useAppRouteState>['routeHandoff']
   referenceState: ReturnType<typeof useReferenceDataController>
   hrefForView: ReturnType<typeof useAppRouteState>['hrefForView']
   handleRoadmapPublished: ReturnType<typeof useAppShellState>['handleRoadmapPublished']
@@ -197,7 +213,7 @@ export type WorkspaceViewRenderContext = {
   selectedTradeId: ReturnType<typeof useAppRouteState>['selectedTradeId']
   setInspectorTab: ReturnType<typeof useAppShellState>['setInspectorTab']
   setSelectedTradeId: ReturnType<typeof useAppRouteState>['setSelectedTradeId']
-  shell: Pick<ReturnType<typeof useAppShellState>, 'eventFilter' | 'inspectorTab' | 'setEventFilter'>
+  shell: Pick<ReturnType<typeof useAppShellState>, 'eventFilter' | 'globalFilter' | 'inspectorTab' | 'setEventFilter'>
   summary: ReturnType<typeof useAppWorkspaceSummary>
   tradeActions: ReturnType<typeof useAppTradeActions>
   workspaceData: ReturnType<typeof useAppWorkspaceData>
@@ -663,9 +679,9 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     key: 'guide',
     label: 'How It Works',
     kicker: 'Learn',
-    heroTitle: 'How the platform works',
+    heroTitle: 'Start here for onboarding and workflow help',
     heroBody:
-      'Keep onboarding, runbooks, and the operating model inside the product instead of off in separate docs.',
+      'Use the in-product handbook to choose the right workflow, explain the operating model, and jump into the next job without leaving the app.',
     dataGroups: [],
     blockingGroups: [],
   },
@@ -683,9 +699,9 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     key: 'trades',
     label: 'Trade Capture',
     kicker: 'Capture',
-    heroTitle: 'Trade capture and blotter',
+    heroTitle: 'Book, inspect, and amend trades',
     heroBody:
-      'Book tickets, inspect the active trade, and run lifecycle actions without losing the blotter context.',
+      'Use the blotter and ticket panel to enter a deal, verify economics, and move straight into lifecycle actions without losing context.',
     dataGroups: ['trades', 'reference', 'operations'],
     blockingGroups: ['trades', 'reference'],
     mutationRefreshPlans: {
@@ -700,9 +716,9 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     key: 'events',
     label: 'Activity Feed',
     kicker: 'Activity',
-    heroTitle: 'Recent activity and lifecycle history',
+    heroTitle: 'Trace recent trade and platform activity',
     heroBody:
-      'Read recent trade and platform activity as a chronological feed, then narrow to the trade that needs attention.',
+      'Use the activity feed to see what changed, who changed it, and which trade or workflow needs follow-up next.',
     dataGroups: ['events'],
     blockingGroups: ['events'],
   },
@@ -710,9 +726,9 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     key: 'risk',
     label: 'Exposure',
     kicker: 'Watch',
-    heroTitle: 'Exposure concentration and pricing quality',
+    heroTitle: 'Check exposure, pricing gaps, and expiry risk',
     heroBody:
-      'Focus the desk on concentration, unpriced exposure, and the books carrying the most open risk.',
+      'Use this workspace when the question is concentration, unpriced risk, or option expiry decisions on the live book.',
     dataGroups: ['trades', 'positions', 'reference', 'risk'],
     blockingGroups: ['trades', 'positions', 'risk'],
     buildWindowNotices: buildRiskWindowNotices,
@@ -770,9 +786,9 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     key: 'operations',
     label: 'Work Queue',
     kicker: 'Queue',
-    heroTitle: 'Operational queue and blocker coverage',
+    heroTitle: 'Clear post-trade blockers and handoffs',
     heroBody:
-      'Run the operational control loop from workflow queues, delivery blockers, and live platform health on one surface.',
+      'Run confirmations, delivery blockers, approvals, and exception queues from one operational control surface.',
     dataGroups: ['trades', 'deliveries', 'operations', 'admin'],
     blockingGroups: ['trades', 'deliveries', 'operations'],
     mutationRefreshPlans: {
@@ -791,9 +807,9 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     key: 'settlement',
     label: 'Settlement',
     kicker: 'Cash',
-    heroTitle: 'Invoice, payment, and settlement control',
+    heroTitle: 'Issue invoices, track cash, and clear disputes',
     heroBody:
-      'Keep invoice, payment, and settlement aging visible so post-trade cash workflow is no longer buried in raw trade rows.',
+      'Use settlement to move trades from invoice-ready through payment follow-up and dispute resolution without losing trade context.',
     dataGroups: ['trades', 'operations', 'settlement'],
     blockingGroups: ['trades', 'operations', 'settlement'],
     mutationRefreshPlans: {
@@ -897,6 +913,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DashboardWorkspace
         authSession={context.workspaceData.authSession}
+        globalFilter={context.shell.globalFilter}
         onOpenView={context.navigateToView}
         appLoading={context.workspaceData.appLoading}
         activeTrades={context.summary.activeTrades}
@@ -924,6 +941,7 @@ export const WORKSPACE_RENDERERS: Record<
       return (
         <TradingWorkspace
         authSession={context.workspaceData.authSession}
+        globalFilter={context.shell.globalFilter}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         tradeMetadataSource={context.workspaceData.tradeMetadataSource}
         tradeMetadataError={context.workspaceData.tradeMetadataError}
@@ -1077,11 +1095,27 @@ export const WORKSPACE_RENDERERS: Record<
         authSession={context.workspaceData.authSession}
         eventFilter={context.shell.eventFilter}
         eventsLoadedCount={context.workspaceData.events.length}
+        globalFilter={context.shell.globalFilter}
         selectedTradeId={context.selectedTradeId}
         setEventFilter={context.shell.setEventFilter}
         filteredEvents={context.summary.filteredEvents}
         formatDate={formatDate}
-        onOpenTrade={context.navigateToTrade}
+        onOpenOperations={(action) =>
+          context.navigateToView('operations', buildActivityFeedHandoff(action.tradeId, null, action.eventType))
+        }
+        onOpenSettlement={(action) =>
+          context.navigateToView('settlement', buildActivityFeedHandoff(action.tradeId, null, action.eventType))
+        }
+        onOpenTrade={(action) =>
+          context.navigateToTrade(
+            action.tradeId,
+            buildActivityFeedHandoff(
+              action.tradeId,
+              resolveTradeInspectorTabForEvent(action.eventType),
+              action.eventType,
+            ),
+          )
+        }
       />
     ),
   },
@@ -1090,6 +1124,8 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <RiskWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
+        globalFilter={context.shell.globalFilter}
         trades={context.workspaceData.trades}
         activeTrades={context.summary.activeTrades}
         positionsByClass={context.summary.positionsByClass}
@@ -1113,6 +1149,8 @@ export const WORKSPACE_RENDERERS: Record<
       <PositionsWorkspace
         activeTrades={context.summary.activeTrades}
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
+        globalFilter={context.shell.globalFilter}
         onOpenRisk={() => context.navigateToView('risk')}
         onOpenTrade={context.navigateToTrade}
         positionsByClass={context.summary.positionsByClass}
@@ -1128,6 +1166,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DeliveryWorkspace
         authSession={context.workspaceData.authSession}
+        globalFilter={context.shell.globalFilter}
         deliveries={context.workspaceData.deliveries}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
@@ -1154,6 +1193,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <SchedulingWorkspace
         authSession={context.workspaceData.authSession}
+        globalFilter={context.shell.globalFilter}
         deliveries={context.workspaceData.deliveries}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
@@ -1177,6 +1217,8 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <OperationsWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
+        globalFilter={context.shell.globalFilter}
         activeTrades={context.summary.activeTrades}
         confirmations={context.workspaceData.tradeConfirmations}
         deliveries={context.workspaceData.deliveries}
@@ -1213,6 +1255,8 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <SettlementWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
+        globalFilter={context.shell.globalFilter}
         activeTrades={context.summary.activeTrades}
         invoices={context.workspaceData.tradeInvoices}
         payments={context.workspaceData.tradePayments}
@@ -1242,6 +1286,7 @@ export const WORKSPACE_RENDERERS: Record<
       <ReportsWorkspace
         activeTrades={context.summary.activeTrades}
         authSession={context.workspaceData.authSession}
+        globalFilter={context.shell.globalFilter}
         counterpartyCreditReport={context.workspaceData.counterpartyCreditReport}
         portfolios={context.workspaceData.portfolios}
         formatNumber={formatNumber}
@@ -1259,6 +1304,7 @@ export const WORKSPACE_RENDERERS: Record<
         controller={context.referenceState}
         formatCommodityClass={formatCommodityClass}
         formatDate={formatDate}
+        globalFilter={context.shell.globalFilter}
       />
     ),
   },
@@ -1266,6 +1312,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <AdminWorkspace
         authSession={context.workspaceData.authSession}
+        globalFilter={context.shell.globalFilter}
         onOpenSettings={() => context.navigateToView('settings')}
         onRoadmapPublished={context.handleRoadmapPublished}
         selectedTrade={context.summary.selectedTrade}
@@ -1342,6 +1389,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <AssistantWorkspace
         authSession={context.workspaceData.authSession}
+        globalFilter={context.shell.globalFilter}
         health={context.workspaceData.health}
         trades={context.workspaceData.trades}
         events={context.workspaceData.events}

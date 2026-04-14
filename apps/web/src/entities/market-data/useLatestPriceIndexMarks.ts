@@ -41,7 +41,6 @@ export function useLatestPriceIndexMarks(
       ).sort((left, right) => left.localeCompare(right)),
     [priceIndexCodes],
   )
-  const codesKey = normalizedCodes.join('|')
   const [latestMarksByCode, setLatestMarksByCode] = useState<Record<string, PriceIndexObservationRecord>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -79,7 +78,7 @@ export function useLatestPriceIndexMarks(
     return () => {
       cancelled = true
     }
-  }, [codesKey])
+  }, [normalizedCodes])
 
   return {
     latestMarksByCode,

@@ -50,16 +50,28 @@ const QUICK_ACTIONS: Array<{
     view: 'dashboard',
   },
   {
-    eyebrow: 'Lifecycle',
+    eyebrow: 'Investigate',
+    label: 'Open Activity Feed',
+    detail: 'Trace what changed before you chase the trade.',
+    view: 'events',
+  },
+  {
+    eyebrow: 'Capture',
     label: 'Open Trades',
-    detail: 'Inspect, amend, or cancel a deal.',
+    detail: 'Book, inspect, amend, or cancel a deal.',
     view: 'trades',
   },
   {
-    eyebrow: 'Master Data',
-    label: 'Open Reference Data',
-    detail: 'Maintain books, commodities, and pricing records.',
-    view: 'reference',
+    eyebrow: 'Watch',
+    label: 'Open Exposure',
+    detail: 'Check concentration, pricing gaps, and option risk.',
+    view: 'risk',
+  },
+  {
+    eyebrow: 'Queue',
+    label: 'Open Work Queue',
+    detail: 'Clear confirmations, blockers, and downstream handoffs.',
+    view: 'operations',
   },
   {
     eyebrow: 'Access',
@@ -67,11 +79,49 @@ const QUICK_ACTIONS: Array<{
     detail: 'Sign in or bootstrap the first admin.',
     view: 'settings',
   },
+] as const
+
+const GUIDE_START_ACTIONS: Array<{
+  eyebrow: string
+  title: string
+  detail: string
+  actionLabel: string
+  view: Exclude<ViewKey, 'guide'>
+}> = [
   {
-    eyebrow: 'Governance',
-    label: 'Open Admin',
-    detail: 'Inspect protected controls and explainability surfaces.',
-    view: 'admin',
+    eyebrow: 'Capture',
+    title: 'Book a trade',
+    detail: 'Open the trade ticket when you need to book a new position, amend economics, or inspect the active blotter.',
+    actionLabel: 'Open Trade Capture',
+    view: 'trades',
+  },
+  {
+    eyebrow: 'Investigate',
+    title: 'Investigate a trade issue',
+    detail: 'Open the activity feed first when you need to see what changed, who changed it, and which trade needs follow-up.',
+    actionLabel: 'Open Activity Feed',
+    view: 'events',
+  },
+  {
+    eyebrow: 'Watch',
+    title: 'Check exposure',
+    detail: 'Open exposure when the question is concentration, stale pricing, or option expiry risk.',
+    actionLabel: 'Open Exposure',
+    view: 'risk',
+  },
+  {
+    eyebrow: 'Queue',
+    title: 'Run the work queue',
+    detail: 'Open operations when the job is confirmations, blockers, approvals, or post-trade handoffs.',
+    actionLabel: 'Open Work Queue',
+    view: 'operations',
+  },
+  {
+    eyebrow: 'Practice',
+    title: 'Practice the workflow safely',
+    detail: 'Run the walkthrough when you want a local-only scenario that explains the lifecycle without touching live data.',
+    actionLabel: 'Open Walkthrough',
+    view: 'demo',
   },
 ] as const
 
@@ -91,8 +141,8 @@ const DOCUMENT_DEFINITIONS: Record<
     label: 'Operator Guide',
     eyebrow: 'Guide',
     title: 'Operator Guide',
-    heroDetail: 'Read the checked-in operator guide without leaving the console. This view stays aligned with the repo documentation.',
-    sidebarDetail: 'Use this like an in-product handbook for onboarding, workflow questions, and quick context.',
+    heroDetail: 'Use this as the in-product start point for onboarding, workflow questions, and choosing the right workspace for the job in front of you.',
+    sidebarDetail: 'Start with the job cards, then use the handbook and section index for deeper workflow context.',
   },
   roadmap: {
     label: 'Implementation Roadmap',
@@ -293,6 +343,40 @@ export function DocumentationWorkspace({
             </div>
           )}
         </article>
+
+        {activeDocumentKey === 'guide' ? (
+          <article className="surface docs-section">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Start Here</span>
+                <h3>Pick the job in front of you</h3>
+              </div>
+              <p>Use these routes when you want the shortest path from onboarding into the real workspace that owns the job.</p>
+            </div>
+
+            <div className="dashboard-report-grid">
+              {GUIDE_START_ACTIONS.map((action) => (
+                <article key={action.title} className="dashboard-report-card section-start-card">
+                  <div className="section-start-card-copy">
+                    <span>{action.eyebrow}</span>
+                    <strong>{action.title}</strong>
+                    <p>{action.detail}</p>
+                  </div>
+
+                  <div className="section-start-card-actions">
+                    <a
+                      href={getViewHref(action.view)}
+                      className="button button-secondary button-link"
+                      onClick={(event) => handleWorkspaceLinkClick(event, action.view)}
+                    >
+                      {action.actionLabel}
+                    </a>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </article>
+        ) : null}
 
         {activeDocumentKey === 'guide' ? (
           guide.sections.map((section) => (

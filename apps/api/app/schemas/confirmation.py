@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from apps.api.app.schemas.operations import OperationalRowActionStateOut
 
 
 class TradeConfirmationMismatchOut(BaseModel):
@@ -64,6 +65,7 @@ class TradeConfirmationOut(BaseModel):
     comparison_status: str
     blocking_mismatch_count: int
     mismatches: list[TradeConfirmationMismatchOut]
+    action_states: list[OperationalRowActionStateOut] = Field(default_factory=list)
 
 
 class TradeConfirmationCreate(BaseModel):

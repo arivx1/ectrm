@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     DOCUMENT_MAX_UPLOAD_BYTES: int = Field(default=25 * 1024 * 1024, ge=1, le=250 * 1024 * 1024)
     DOCUMENT_PAGE_RENDER_DPI: int = Field(default=144, ge=72, le=300)
     DOCUMENT_OCR_ENABLED: bool = True
+    DOCUMENT_AI_ENABLED: bool = True
+    DOCUMENT_AI_DEFAULT_PROVIDER: str = "openai"
+    DOCUMENT_AI_TIMEOUT_SECONDS: int = Field(default=120, ge=5, le=600)
+    DOCUMENT_AI_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=256, le=8192)
+    DOCUMENT_AI_OPENAI_INLINE_FILE_MAX_BYTES: int = Field(default=8 * 1024 * 1024, ge=0, le=50 * 1024 * 1024)
+    DOCUMENT_AI_OPENAI_MODEL: str = ""
+    DOCUMENT_AI_ANTHROPIC_MODEL: str = ""
+    DOCUMENT_AI_GOOGLE_MODEL: str = ""
     ASSISTANT_ENABLED: bool = True
     ASSISTANT_DEFAULT_PROVIDER: str = "openai"
     ASSISTANT_SYSTEM_PROMPT: str = (
@@ -69,6 +77,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_AGENT_BUILDER_MODEL: str = ""
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5"

@@ -146,4 +146,26 @@ describe('OperationalBoardController', () => {
     expect(markup).toContain('Operational Work Queue')
     expect(markup).not.toContain('No open work queue')
   })
+
+  it('passes custom summary and detail regions through for split workboards', () => {
+    const workboard = resolveOperationalWorkboardDefinition('invoiceLedger', RESOURCE_DESCRIPTORS)
+    const markup = renderToStaticMarkup(
+      createElement(
+        OperationalBoardController,
+        {
+          workboard,
+          className: 'shipment-workbench',
+          detailClassName: 'shipment-editor-panel',
+          summary: createElement('div', { className: 'shipment-card-actions shipment-sync-actions' }, 'Sync From Trades'),
+          detail: createElement('div', { className: 'scheduler-detail-stack' }, 'Editor panel'),
+        },
+        createElement('div', { className: 'position-list' }, 'Queue rows'),
+      ),
+    )
+
+    expect(markup).toContain('Sync From Trades')
+    expect(markup).toContain('Queue rows')
+    expect(markup).toContain('Editor panel')
+    expect(markup).toContain('shipment-editor-panel')
+  })
 })

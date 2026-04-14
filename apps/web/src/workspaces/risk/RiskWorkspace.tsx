@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
-import { matchesTextFilter } from '../../shared/filtering'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import { buildUnitLabelByCommodityClass, normalizeUnitLabel, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
@@ -29,6 +30,8 @@ type PositionRow = {
 
 type RiskWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff?: AppRouteHandoff | null
+  globalFilter: string
   trades: Trade[]
   activeTrades: Trade[]
   positionsByClass: Array<{ commodityClass: string; netVolume: number }>
@@ -286,6 +289,7 @@ function matchesRiskOptionExposureFilter(exposure: OptionExposureRow, query: str
 
 export function RiskWorkspace({
   authSession,
+  globalFilter,
   trades,
   activeTrades,
   positionsByClass,
@@ -302,13 +306,14 @@ export function RiskWorkspace({
   optionLifecycleSubmittingTradeId,
 }: RiskWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const directlyMatchedTrades = useMemo(
-    () => trades.filter((trade) => matchesRiskTradeFilter(trade, screenFilter)),
-    [screenFilter, trades],
+    () => trades.filter((trade) => matchesRiskTradeFilter(trade, effectiveScreenFilter)),
+    [effectiveScreenFilter, trades],
   )
   const directlyMatchedOptionExposures = useMemo(
-    () => optionExposures.filter((exposure) => matchesRiskOptionExposureFilter(exposure, screenFilter)),
-    [optionExposures, screenFilter],
+    () => optionExposures.filter((exposure) => matchesRiskOptionExposureFilter(exposure, effectiveScreenFilter)),
+    [effectiveScreenFilter, optionExposures],
   )
   const visibleTradeIds = useMemo(
     () =>
@@ -332,9 +337,9 @@ export function RiskWorkspace({
         const relatedTrades = visibleActiveTrades.filter(
           (trade) => trade.commodity === position.commodity && trade.commodity_class === position.commodity_class,
         )
-        return matchesRiskPositionFilter(position, relatedTrades, screenFilter)
+        return matchesRiskPositionFilter(position, relatedTrades, effectiveScreenFilter)
       }),
-    [positionsWithClass, screenFilter, visibleActiveTrades],
+    [effectiveScreenFilter, positionsWithClass, visibleActiveTrades],
   )
   const visiblePositionsByClass = useMemo(() => {
     const visiblePositionClasses = new Set(visiblePositionRows.map((position) => position.commodity_class))
@@ -661,6 +666,7 @@ export function RiskWorkspace({
           totalCount={trades.length + positionsWithClass.length + optionExposures.length}
           matchedCount={visibleTrades.length + visiblePositionRows.length + visibleOptionExposures.length}
           resultLabel="risk records"
+          globalValue={globalFilter}
         />
       }
       sections={[
@@ -683,7 +689,7 @@ export function RiskWorkspace({
             ) : (
               <div className="empty-state">
                 <strong>No risk surface yet</strong>
-                <p>Create active trades to populate the risk workspace.</p>
+                <p>Book a trade or run the walkthrough to populate exposure, pricing attention, and option expiry decisions here.</p>
               </div>
             ),
         },
@@ -736,7 +742,7 @@ export function RiskWorkspace({
           ) : (
             <div className="empty-state">
               <strong>No grouped exposure</strong>
-              <p>Linear and option class rollups will appear once exposure is projected.</p>
+              <p>Linear and option rollups appear once open trades project into positions or option-equivalent exposure.</p>
             </div>
           ),
         },

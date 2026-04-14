@@ -53,6 +53,7 @@ class AssistantEvalAgentFixture:
     capabilities: tuple[str, ...]
     allowed_workspaces: tuple[str, ...] = ("assistant",)
     allowed_tools: tuple[str, ...] = ()
+    allowed_action_types: tuple[str, ...] = ()
     status: str = "ACTIVE"
     scope: str = "TEAM"
     provider: str | None = "openai"
@@ -390,6 +391,7 @@ class AssistantApiEvalHarness(unittest.TestCase):
                     allowed_workspaces=list(fixture.allowed_workspaces),
                     capabilities=list(fixture.capabilities),
                     allowed_tools=list(fixture.allowed_tools),
+                    allowed_action_types=list(fixture.allowed_action_types),
                     system_prompt=fixture.system_prompt or f"System prompt for {fixture.name}.",
                     created_at=now,
                     created_by="assistant-eval-suite",

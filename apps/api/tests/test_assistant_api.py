@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 import json
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 if not hasattr(enum, "StrEnum"):
@@ -26,8 +26,14 @@ from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
+from apps.api.app.models.document_ingestion import DocumentIngestion
+from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_confirmation import TradeConfirmation
+from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 
@@ -102,6 +108,7 @@ class AssistantApiTests(unittest.TestCase):
             "ASSISTANT_BUSINESS_CONTEXT": settings.ASSISTANT_BUSINESS_CONTEXT,
             "OPENAI_API_KEY": settings.OPENAI_API_KEY,
             "OPENAI_MODEL": settings.OPENAI_MODEL,
+            "OPENAI_AGENT_BUILDER_MODEL": settings.OPENAI_AGENT_BUILDER_MODEL,
             "OPENAI_BASE_URL": settings.OPENAI_BASE_URL,
             "ANTHROPIC_API_KEY": settings.ANTHROPIC_API_KEY,
             "ANTHROPIC_MODEL": settings.ANTHROPIC_MODEL,
@@ -113,6 +120,12 @@ class AssistantApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             session.query(UserSession).delete()
+            session.query(DocumentIngestionPage).delete()
+            session.query(DocumentIngestion).delete()
+            session.query(TradePayment).delete()
+            session.query(TradeInvoice).delete()
+            session.query(TradeConfirmation).delete()
+            session.query(TradeWorkflowItem).delete()
             session.query(AssistantActionRequest).delete()
             session.query(AssistantRun).delete()
             session.query(AssistantConversation).delete()
@@ -129,6 +142,7 @@ class AssistantApiTests(unittest.TestCase):
         settings.ASSISTANT_BUSINESS_CONTEXT = "Acme tracks trade lifecycle changes through explicit events."
         settings.OPENAI_API_KEY = "openai-test-key"
         settings.OPENAI_MODEL = "gpt-5-mini"
+        settings.OPENAI_AGENT_BUILDER_MODEL = "gpt-5"
         settings.OPENAI_BASE_URL = "https://api.openai.com/v1"
         settings.ANTHROPIC_API_KEY = ""
         settings.ANTHROPIC_MODEL = "claude-sonnet-4-5"
@@ -292,8 +306,19 @@ class AssistantApiTests(unittest.TestCase):
                 "list_positions",
                 "search_reference_data",
                 "get_market_context",
+                "list_workflow_items",
+                "list_trade_confirmations",
+                "get_trade_workbench",
+                "list_trade_invoices",
+                "list_trade_payments",
+                "get_trade_settlement_summary",
+                "list_deliveries",
+                "list_documents",
+                "get_document_ingestion",
+                "get_workspace_summary",
             ],
         )
+        self.assertEqual(create_response.json()["allowed_action_types"], [])
 
         public_listing = self.client.get("/assistant/agents")
         self.assertEqual(public_listing.status_code, 200)
@@ -329,8 +354,19 @@ class AssistantApiTests(unittest.TestCase):
                 "list_positions",
                 "search_reference_data",
                 "get_market_context",
+                "list_workflow_items",
+                "list_trade_confirmations",
+                "get_trade_workbench",
+                "list_trade_invoices",
+                "list_trade_payments",
+                "get_trade_settlement_summary",
+                "list_deliveries",
+                "list_documents",
+                "get_document_ingestion",
+                "get_workspace_summary",
             ],
         )
+        self.assertEqual(updated_payload["allowed_action_types"], [])
 
         admin_listing = self.client.get(
             "/admin/assistant/agents",
@@ -343,6 +379,78 @@ class AssistantApiTests(unittest.TestCase):
         public_listing = self.client.get("/assistant/agents")
         self.assertEqual(public_listing.status_code, 200)
         self.assertEqual([row["agent_id"] for row in public_listing.json()], ["trade-explainer"])
+
+    def test_admin_agent_builder_generates_openai_pinned_draft(self) -> None:
+        token = self._create_session_token()
+        captured_request: dict[str, object] = {}
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            captured_request["url"] = url
+            captured_request["headers"] = headers
+            captured_request["payload"] = payload
+            captured_request["provider_label"] = provider_label
+            return {
+                "output_text": json.dumps(
+                    {
+                        "agent_id": "ops-openai-briefing",
+                        "name": "Ops OpenAI Briefing",
+                        "description": "Summarizes queue pressure and downstream blockers for operations leads.",
+                        "scope": "TEAM",
+                        "allowed_workspaces": ["assistant", "operations", "settlement"],
+                        "capabilities": ["READ", "EXPLAIN", "ACTION"],
+                        "allowed_tools": ["list_workflow_items", "get_trade_settlement_summary"],
+                        "allowed_action_types": ["update_trade_workflow_item"],
+                        "system_prompt": "Summarize operational blockers, explain the evidence, and draft concise follow-up notes.",
+                    }
+                ),
+                "usage": {"input_tokens": 90, "output_tokens": 40},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/admin/assistant/agents/build",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "brief": "Build an operations handoff agent that works from live queue data and drafts follow-up notes.",
+                    "current_draft": {
+                        "status": "DRAFT",
+                        "provider": "google",
+                        "model": "gemini-2.5-flash",
+                        "allowed_workspaces": ["assistant"],
+                        "capabilities": ["EXPLAIN", "ACTION"],
+                        "allowed_action_types": ["cancel_trade"],
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["provider"], "openai")
+        self.assertEqual(payload["model"], "gpt-5-mini")
+        self.assertEqual(payload["builder_provider"], "openai")
+        self.assertEqual(payload["builder_model"], "gpt-5")
+        self.assertEqual(payload["status"], "DRAFT")
+        self.assertEqual(payload["allowed_tools"], ["list_workflow_items", "get_trade_settlement_summary"])
+        self.assertEqual(payload["allowed_action_types"], ["update_trade_workflow_item"])
+        self.assertIn("pinned to OpenAI", payload["warnings"][0])
+
+        request_payload = captured_request["payload"]
+        assert isinstance(request_payload, dict)
+        self.assertEqual(captured_request["provider_label"], "OpenAI Agent Builder")
+        self.assertEqual(captured_request["url"], "https://api.openai.com/v1/responses")
+        self.assertEqual(request_payload["model"], "gpt-5")
+        self.assertEqual(request_payload["text"]["format"]["type"], "json_schema")
+        self.assertEqual(
+            request_payload["text"]["format"]["name"],
+            "assistant_agent_builder_draft",
+        )
+        self.assertIn("Build an operations handoff agent", request_payload["input"])
+        self.assertIn('"provider":"openai"', request_payload["input"])
+        self.assertIn('"action_type_options"', request_payload["input"])
+        self.assertIn('"allowed_action_types":["cancel_trade"]', request_payload["input"])
 
     def test_assistant_prompt_uses_managed_agent_definition(self) -> None:
         token = self._create_session_token()
@@ -451,6 +559,105 @@ class AssistantApiTests(unittest.TestCase):
         with self.SessionLocal() as session:
             self.assertEqual(session.query(AssistantActionRequest).count(), 1)
 
+    def test_admin_agent_create_rejects_action_allowlist_without_action_capability(self) -> None:
+        token = self._create_session_token()
+
+        response = self.client.post(
+            "/admin/assistant/agents",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "agent_id": "trade-reader-limited",
+                "name": "Trade Reader Limited",
+                "description": "Read-only trade explainer.",
+                "status": "DRAFT",
+                "scope": "TEAM",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "allowed_workspaces": ["assistant"],
+                "capabilities": ["READ", "EXPLAIN"],
+                "allowed_action_types": ["cancel_trade"],
+                "system_prompt": "Explain the current trade state.",
+                "created_by": "assistant_user",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("allowed_action_types", response.json()["detail"])
+
+    def test_assistant_prompt_respects_agent_allowed_action_types(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1014A")
+        self._create_agent(
+            agent_id="trade-captain",
+            name="Trade Captain",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["cancel_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "trade-captain",
+                    "workspace": "assistant",
+                    "context": "Selected trade:\n- trade_id: T-1014A\n- commodity: WTI",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Issue invoice for this trade amount 2500."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action_requests"], [])
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(AssistantActionRequest).count(), 0)
+
+    def test_assistant_prompt_extracts_workflow_owner_and_due_date_from_message(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1014B")
+        self._seed_workflow_item_record(
+            trade_id="T-1014B",
+            item_id=141,
+            workflow_type="CONFIRMATION",
+            status="PENDING",
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context="Selected workflow item:\n- item_id: 141",
+            message="Assign workflow item 141 to cash.ops due 2026-04-21T15:00:00+00:00.",
+        )
+
+        self.assertEqual(action_request["action_type"], "update_trade_workflow_item")
+        self.assertEqual(action_request["payload"]["changes"]["owner"], "cash.ops")
+        self.assertEqual(action_request["payload"]["changes"]["due_at"], "2026-04-21T15:00:00+00:00")
+
+    def test_assistant_prompt_extracts_invoice_amount_and_due_date_from_message(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1014C")
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context="Selected trade:\n- trade_id: T-1014C\n- commodity: WTI",
+            message="Issue invoice for this trade invoice amount 2500 due 2026-04-24T12:00:00+00:00.",
+        )
+
+        self.assertEqual(action_request["action_type"], "issue_trade_invoice")
+        self.assertEqual(action_request["payload"]["invoice_amount"], 2500.0)
+        self.assertEqual(action_request["payload"]["due_at"], "2026-04-24T12:00:00+00:00")
+
     def test_assistant_action_request_approval_executes_trade_cancellation(self) -> None:
         token = self._create_session_token()
         action_request_id = self._create_cancel_trade_action_request(
@@ -475,6 +682,253 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(trade.status, "CANCELLED")
             cancelled_events = session.query(Event).filter(Event.event_type == "TradeCancelled").count()
             self.assertEqual(cancelled_events, 1)
+
+    def test_assistant_action_request_approval_executes_confirmation_issue(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1014")
+        self._seed_confirmation_record(
+            trade_id="T-1014",
+            confirmation_id=14,
+            status="PENDING",
+            issue_count=0,
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected confirmation:\n"
+                "- confirmation_id: 14\n"
+                "- issue_method: EMAIL\n"
+                "- issue_recipient: confirmations@acme.example\n"
+            ),
+            message="Issue this confirmation.",
+        )
+
+        self.assertEqual(action_request["action_type"], "issue_trade_confirmation")
+        self.assertEqual(action_request["payload"]["confirmation_id"], 14)
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["confirmation_id"], 14)
+        self.assertEqual(payload["result"]["status"], "SENT")
+
+        with self.SessionLocal() as session:
+            confirmation = session.get(TradeConfirmation, 14)
+            assert confirmation is not None
+            self.assertEqual(confirmation.status, "SENT")
+            self.assertEqual(confirmation.issue_count, 1)
+            self.assertEqual(confirmation.last_issue_method, "EMAIL")
+            self.assertEqual(confirmation.last_issue_recipient, "confirmations@acme.example")
+
+    def test_assistant_action_request_approval_records_confirmation_response(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1015")
+        self._seed_confirmation_record(
+            trade_id="T-1015",
+            confirmation_id=15,
+            status="SENT",
+            issue_count=1,
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected confirmation:\n"
+                "- confirmation_id: 15\n"
+                "- action: COUNTERPARTY_DISPUTED\n"
+                "- dispute_reason: Volume mismatch\n"
+                "- response_method: EMAIL\n"
+            ),
+            message="Record this confirmation as disputed.",
+        )
+
+        self.assertEqual(action_request["action_type"], "record_trade_confirmation_response")
+        self.assertEqual(action_request["payload"]["action"], "COUNTERPARTY_DISPUTED")
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["confirmation_id"], 15)
+        self.assertEqual(payload["result"]["status"], "DISPUTED")
+        self.assertEqual(payload["result"]["receipt_status"], "COUNTERPARTY_DISPUTED")
+
+        with self.SessionLocal() as session:
+            confirmation = session.get(TradeConfirmation, 15)
+            assert confirmation is not None
+            self.assertEqual(confirmation.status, "DISPUTED")
+            self.assertEqual(confirmation.receipt_status, "COUNTERPARTY_DISPUTED")
+            self.assertEqual(confirmation.dispute_reason, "Volume mismatch")
+
+    def test_assistant_action_request_approval_updates_workflow_item(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1016")
+        self._seed_workflow_item_record(
+            trade_id="T-1016",
+            item_id=16,
+            workflow_type="CONFIRMATION",
+            status="PENDING",
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected workflow item:\n"
+                "- item_id: 16\n"
+                "- status: CONFIRMED\n"
+                "- notes: Counterparty verbally matched terms.\n"
+            ),
+            message="Update workflow item 16 to confirmed.",
+        )
+
+        self.assertEqual(action_request["action_type"], "update_trade_workflow_item")
+        self.assertEqual(action_request["payload"]["item_id"], 16)
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["item_id"], 16)
+        self.assertEqual(payload["result"]["status"], "CONFIRMED")
+
+        with self.SessionLocal() as session:
+            workflow_item = session.get(TradeWorkflowItem, 16)
+            assert workflow_item is not None
+            self.assertEqual(workflow_item.status, "CONFIRMED")
+            self.assertEqual(workflow_item.notes, "Counterparty verbally matched terms.")
+
+    def test_assistant_action_request_approval_executes_invoice_issue(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1017")
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected trade:\n"
+                "- trade_id: T-1017\n"
+                "- invoice_number: INV-T-1017\n"
+                "- invoice_amount: 2500\n"
+            ),
+            message="Issue invoice for this trade.",
+        )
+
+        self.assertEqual(action_request["action_type"], "issue_trade_invoice")
+        self.assertEqual(action_request["payload"]["trade_id"], "T-1017")
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["trade_id"], "T-1017")
+        self.assertEqual(payload["result"]["status"], "ISSUED")
+
+        with self.SessionLocal() as session:
+            invoice = session.query(TradeInvoice).filter(TradeInvoice.trade_id == "T-1017").one()
+            self.assertEqual(invoice.invoice_number, "INV-T-1017")
+            self.assertEqual(float(invoice.invoice_amount), 2500.0)
+
+    def test_assistant_action_request_approval_executes_payment_creation(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1018")
+        self._seed_invoice_record(
+            trade_id="T-1018",
+            invoice_id=18,
+            invoice_number="INV-T-1018",
+            invoice_amount=1800.0,
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected invoice:\n"
+                "- invoice_id: 18\n"
+                "- payment_reference: PAY-T-1018-1\n"
+                "- payment_amount: 1800\n"
+                "- status: PAID\n"
+            ),
+            message="Record payment for this invoice.",
+        )
+
+        self.assertEqual(action_request["action_type"], "create_trade_payment")
+        self.assertEqual(action_request["payload"]["invoice_id"], 18)
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["invoice_id"], 18)
+        self.assertEqual(payload["result"]["status"], "PAID")
+
+        with self.SessionLocal() as session:
+            payment = session.query(TradePayment).filter(TradePayment.invoice_id == 18).one()
+            self.assertEqual(payment.payment_reference, "PAY-T-1018-1")
+            self.assertEqual(payment.status, "PAID")
+            self.assertEqual(float(payment.payment_amount), 1800.0)
+
+    def test_assistant_action_request_approval_reprocesses_document(self) -> None:
+        token = self._create_session_token()
+        self._seed_document_record(document_id="DOC-1019")
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected document:\n"
+                "- document_id: DOC-1019\n"
+                "- processor_provider: openai\n"
+            ),
+            message="Reprocess this document.",
+        )
+
+        self.assertEqual(action_request["action_type"], "reprocess_document_ingestion")
+        self.assertEqual(action_request["payload"]["document_id"], "DOC-1019")
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["document_id"], "DOC-1019")
+        self.assertEqual(payload["result"]["status"], "UPLOADED")
+
+        with self.SessionLocal() as session:
+            document = session.get(DocumentIngestion, "DOC-1019")
+            page = (
+                session.query(DocumentIngestionPage)
+                .filter(DocumentIngestionPage.document_id == "DOC-1019")
+                .one()
+            )
+            assert document is not None
+            self.assertEqual(document.status, "UPLOADED")
+            self.assertEqual(document.review_status, "UNREVIEWED")
+            self.assertEqual(document.processor_provider, "openai")
+            self.assertEqual(page.classification_status, "PENDING")
+            self.assertEqual(page.extraction_status, "PENDING")
+            self.assertEqual(page.review_status, "UNREVIEWED")
 
     def test_assistant_action_request_rejection_keeps_trade_active(self) -> None:
         token = self._create_session_token()
@@ -1184,6 +1638,7 @@ class AssistantApiTests(unittest.TestCase):
         allowed_workspaces: list[str],
         capabilities: list[str],
         allowed_tools: list[str] | None = None,
+        allowed_action_types: list[str] | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> None:
@@ -1204,6 +1659,7 @@ class AssistantApiTests(unittest.TestCase):
                     allowed_workspaces=allowed_workspaces,
                     capabilities=capabilities,
                     allowed_tools=list(allowed_tools or []),
+                    allowed_action_types=list(allowed_action_types or []),
                     system_prompt=f"System prompt for {name}.",
                     created_at=now,
                     created_by="test-suite",
@@ -1261,8 +1717,179 @@ class AssistantApiTests(unittest.TestCase):
             )
             session.commit()
 
-    def _create_cancel_trade_action_request(self, *, token: str, trade_id: str) -> int:
-        self._create_trade_with_event(trade_id=trade_id)
+    def _seed_confirmation_record(
+        self,
+        *,
+        trade_id: str,
+        confirmation_id: int,
+        status: str,
+        issue_count: int,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        sent_at = now - timedelta(hours=1) if issue_count else None
+        with self.SessionLocal() as session:
+            session.add(
+                TradeConfirmation(
+                    id=confirmation_id,
+                    trade_id=trade_id,
+                    source_document_id=None,
+                    confirmation_number=f"CNF-{trade_id}",
+                    status=status,
+                    sent_at=sent_at,
+                    confirmed_at=None,
+                    issue_count=issue_count,
+                    last_issued_at=sent_at,
+                    last_issued_by="ops.confirmations" if issue_count else None,
+                    last_issue_method="EMAIL" if issue_count else None,
+                    last_issue_recipient="confirmations@acme.example" if issue_count else None,
+                    last_issue_note="Previously issued" if issue_count else None,
+                    receipt_status="ISSUED_AWAITING_RESPONSE" if issue_count else "NOT_ISSUED",
+                    received_at=None,
+                    received_by=None,
+                    response_method=None,
+                    response_reference=None,
+                    response_note=None,
+                    dispute_reason=None,
+                    notes="Assistant API test fixture",
+                    comparison_waiver_note=None,
+                    comparison_waived_at=None,
+                    comparison_waived_by=None,
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_workflow_item_record(
+        self,
+        *,
+        trade_id: str,
+        item_id: int,
+        workflow_type: str,
+        status: str,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                TradeWorkflowItem(
+                    id=item_id,
+                    trade_id=trade_id,
+                    workflow_type=workflow_type,
+                    status=status,
+                    owner="ops.queue",
+                    due_at=now + timedelta(days=1),
+                    notes="Initial workflow state",
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_invoice_record(
+        self,
+        *,
+        trade_id: str,
+        invoice_id: int,
+        invoice_number: str,
+        invoice_amount: float,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                TradeInvoice(
+                    id=invoice_id,
+                    trade_id=trade_id,
+                    delivery_id=None,
+                    leg_no=None,
+                    invoice_number=invoice_number,
+                    invoice_currency_code="USD",
+                    billed_quantity=1000,
+                    quantity_unit_code="BBL",
+                    invoice_amount=invoice_amount,
+                    status="ISSUED",
+                    issued_at=now,
+                    due_at=now + timedelta(days=5),
+                    dispute_reason=None,
+                    notes="Assistant API invoice fixture",
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_document_record(self, *, document_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                DocumentIngestion(
+                    document_id=document_id,
+                    original_filename=f"{document_id}.pdf",
+                    display_name=f"{document_id}.pdf",
+                    content_type="application/pdf",
+                    storage_key=f"documents/{document_id}.pdf",
+                    sha256="0" * 64,
+                    size_bytes=2048,
+                    page_count=1,
+                    status="ANALYZED",
+                    processor_provider="anthropic",
+                    processor_model="claude-test",
+                    classifier_version="test-classifier",
+                    extractor_version="test-extractor",
+                    analysis_summary={"status": "ready"},
+                    processing_errors=["Old error"],
+                    review_status="REVIEWED",
+                    review_notes="Needs rerun",
+                    reviewed_at=now,
+                    reviewed_by="ops.docs",
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=2,
+                )
+            )
+            session.add(
+                DocumentIngestionPage(
+                    document_id=document_id,
+                    page_number=1,
+                    classification_status="ANALYZED",
+                    extraction_status="ANALYZED",
+                    document_kind="CONFIRMATION",
+                    document_subtype="TRADE",
+                    classification_confidence=0.99,
+                    classification_payload={"kind": "CONFIRMATION"},
+                    header_fields=[],
+                    table_blocks=[],
+                    raw_text="Trade confirmation text",
+                    processing_warnings=[],
+                    processing_errors=[],
+                    review_status="REVIEWED",
+                    review_notes="Reviewed page",
+                    reviewed_at=now,
+                    reviewed_by="ops.docs",
+                    processed_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+
+    def _create_action_request_via_prompt(
+        self,
+        *,
+        token: str,
+        context: str,
+        message: str,
+    ) -> dict[str, object]:
         self._create_agent(
             agent_id="trade-captain",
             name="Trade Captain",
@@ -1284,17 +1911,27 @@ class AssistantApiTests(unittest.TestCase):
                 json={
                     "agent_id": "trade-captain",
                     "workspace": "assistant",
-                    "context": f"Selected trade:\n- trade_id: {trade_id}\n- commodity: WTI",
+                    "context": context,
                     "use_live_tools": False,
                     "messages": [
-                        {"role": "user", "content": "Cancel the selected trade."},
+                        {"role": "user", "content": message},
                     ],
                 },
             )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        return payload["action_requests"][0]["action_request_id"]
+        self.assertEqual(len(payload["action_requests"]), 1)
+        return payload["action_requests"][0]
+
+    def _create_cancel_trade_action_request(self, *, token: str, trade_id: str) -> int:
+        self._create_trade_with_event(trade_id=trade_id)
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=f"Selected trade:\n- trade_id: {trade_id}\n- commodity: WTI",
+            message="Cancel the selected trade.",
+        )
+        return action_request["action_request_id"]
 
 
 if __name__ == "__main__":

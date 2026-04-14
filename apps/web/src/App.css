@@ -2654,6 +2654,30 @@
   gap: 1rem;
 }
 
+.workspace-handoff-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  background:
+    linear-gradient(135deg, rgba(238, 247, 244, 0.94), rgba(247, 251, 249, 0.92)),
+    rgba(255, 255, 255, 0.94);
+}
+
+.workspace-handoff-banner-copy {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.workspace-handoff-banner-copy p {
+  margin: 0;
+}
+
+.workspace-focus-banner {
+  margin-bottom: 1rem;
+}
+
 .workspace-window-banner {
   display: flex;
   align-items: center;
@@ -3610,6 +3634,24 @@
   justify-content: space-between;
   gap: 1rem;
   align-items: flex-start;
+}
+
+.timeline-recommendation-copy {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.72rem;
+}
+
+.timeline-recommendation-copy p {
+  margin: 0;
+  color: #30465b;
+}
+
+.timeline-recommendation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .timeline-action-button {
@@ -5106,6 +5148,15 @@
   gap: 1rem;
 }
 
+.assistant-builder-shell,
+.assistant-builder-preview,
+.assistant-builder-template-grid,
+.assistant-builder-preview-grid,
+.assistant-builder-warning-list {
+  display: grid;
+  gap: 1rem;
+}
+
 .assistant-admin-summary-grid {
   margin-top: 1.2rem;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5125,6 +5176,11 @@
   gap: 1rem;
 }
 
+.assistant-builder-template-grid,
+.assistant-builder-preview-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .assistant-admin-section-head {
   display: flex;
   align-items: flex-start;
@@ -5142,7 +5198,8 @@
   font-size: 0.9rem;
 }
 
-.assistant-admin-agent-card {
+.assistant-admin-agent-card,
+.assistant-builder-template-card {
   width: 100%;
   padding: 1rem;
   border: 1px solid rgba(18, 42, 56, 0.08);
@@ -5157,16 +5214,34 @@
 }
 
 .assistant-admin-agent-card:hover,
-.assistant-admin-agent-card.is-selected {
+.assistant-admin-agent-card.is-selected,
+.assistant-builder-template-card:hover,
+.assistant-builder-template-card.is-selected {
   transform: translateY(-1px);
   border-color: rgba(18, 124, 108, 0.18);
   background: rgba(235, 244, 241, 0.92);
 }
 
 .assistant-admin-agent-card p,
-.assistant-admin-agent-card small {
+.assistant-admin-agent-card small,
+.assistant-builder-template-card p,
+.assistant-builder-template-card small {
   margin: 0.35rem 0 0;
   color: #66717c;
+}
+
+.assistant-builder-preview {
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background: linear-gradient(180deg, rgba(248, 246, 239, 0.94), rgba(240, 246, 243, 0.92));
+}
+
+.assistant-builder-inline-action {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
 }
 
 .assistant-admin-form-grid {
@@ -5398,6 +5473,8 @@
   .roadmap-milestone-grid,
   .assistant-admin-grid,
   .assistant-admin-summary-grid,
+  .assistant-builder-template-grid,
+  .assistant-builder-preview-grid,
   .user-management-grid,
   .user-management-summary-grid {
     grid-template-columns: 1fr;
@@ -5573,6 +5650,8 @@
   .schema-explorer-grid,
   .admin-provenance-grid,
   .assistant-admin-summary-grid,
+  .assistant-builder-template-grid,
+  .assistant-builder-preview-grid,
   .user-management-summary-grid {
     grid-template-columns: 1fr;
   }
@@ -6278,6 +6357,11 @@
   line-height: 1.5;
 }
 
+.workspace-local-filter-notes {
+  display: grid;
+  gap: 0.4rem;
+}
+
 .workspace-local-filter-controls {
   display: flex;
   flex-wrap: wrap;
@@ -6297,6 +6381,23 @@
   align-items: center;
   justify-content: end;
   gap: 0.65rem;
+}
+
+.nav-global-filter .workspace-local-filter-controls {
+  align-items: stretch;
+}
+
+.nav-global-filter .workspace-local-filter-field {
+  flex-basis: 100%;
+  max-width: none;
+}
+
+.nav-global-filter .workspace-local-filter-actions {
+  justify-content: flex-start;
+}
+
+.nav-global-filter-empty {
+  text-align: left;
 }
 
 .start-here-dialog {
@@ -6759,6 +6860,11 @@
   gap: 0.85rem;
 }
 
+.shipment-workbench.operational-board-shell-split {
+  grid-template-columns: minmax(0, 1.55fr) minmax(18rem, 1fr);
+  align-items: start;
+}
+
 .shipment-editor-panel {
   display: grid;
   gap: 1rem;
@@ -6838,6 +6944,36 @@
 .workflow-editor-stack {
   display: grid;
   gap: 0.85rem;
+}
+
+.operational-action-panel,
+.operational-action-panel-copy {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.operational-action-panel {
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.2rem;
+  background: rgba(248, 250, 249, 0.9);
+}
+
+.operational-action-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.operational-action-panel-copy strong {
+  color: #13293d;
+}
+
+.operational-action-panel-copy p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.55;
 }
 
 .operations-workflow-list {

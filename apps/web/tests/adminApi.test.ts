@@ -21,6 +21,7 @@ import {
   previewCounterpartyCreditImport,
   runExternalDataSync,
   runNwsWeatherSync,
+  seedAssistantAgents,
   seedTradingSources,
 } from '../src/entities/app/adminApi.ts'
 
@@ -115,6 +116,26 @@ test('seedTradingSources keeps replaceExisting inside the typed admin helper', a
   assert.deepEqual(body, {
     requested_by: 'ops.admin',
     replace_existing: true,
+  })
+})
+
+test('seedAssistantAgents routes through the typed admin seed helper', async () => {
+  const expected = {
+    requested_by: 'ops.admin',
+    total_templates: 3,
+    created_count: 2,
+    updated_count: 1,
+    agent_ids: ['trade-ops-copilot', 'settlement-copilot', 'trade-governor'],
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await seedAssistantAgents('http://api.test')
+
+  assert.equal(payload, expected)
+  const [url, body] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/data/assistant-agents/seed')
+  assert.deepEqual(body, {
+    requested_by: 'ops.admin',
   })
 })
 

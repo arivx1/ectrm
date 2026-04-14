@@ -20,6 +20,10 @@ from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.chat import AssistantService
 from apps.api.app.domains.assistant.services.tools import AssistantToolService
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_event import DeliveryEvent
+from apps.api.app.models.delivery_obligation import DeliveryObligation
+from apps.api.app.models.document_ingestion import DocumentIngestion
+from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
@@ -27,6 +31,11 @@ from apps.api.app.models.external_series_observation import ExternalSeriesObserv
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
+from apps.api.app.models.trade_confirmation import TradeConfirmation
+from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.assistant import AssistantPromptRequest
 
 
@@ -53,6 +62,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             "ASSISTANT_MAX_TOOL_ROUNDS": settings.ASSISTANT_MAX_TOOL_ROUNDS,
             "OPENAI_API_KEY": settings.OPENAI_API_KEY,
             "OPENAI_MODEL": settings.OPENAI_MODEL,
+            "OPENAI_AGENT_BUILDER_MODEL": settings.OPENAI_AGENT_BUILDER_MODEL,
             "OPENAI_BASE_URL": settings.OPENAI_BASE_URL,
         }
 
@@ -62,6 +72,15 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.query(PriceIndexObservation).delete()
             session.query(ReferencePriceIndex).delete()
             session.query(ExternalDataRun).delete()
+            session.query(DocumentIngestionPage).delete()
+            session.query(DocumentIngestion).delete()
+            session.query(DeliveryEvent).delete()
+            session.query(TradeActualization).delete()
+            session.query(DeliveryObligation).delete()
+            session.query(TradePayment).delete()
+            session.query(TradeInvoice).delete()
+            session.query(TradeConfirmation).delete()
+            session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
             session.add(
@@ -87,6 +106,13 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                     created_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
                     updated_at=datetime(2026, 3, 17, 12, 5, tzinfo=timezone.utc),
                     execution_timestamp=datetime(2026, 3, 17, 11, 45, tzinfo=timezone.utc),
+                    trade_date=datetime(2026, 3, 17, 0, 0, tzinfo=timezone.utc).date(),
+                    trade_currency_code="USD",
+                    location_code="HENRY",
+                    delivery_start=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc).date(),
+                    delivery_end=datetime(2026, 4, 30, 0, 0, tzinfo=timezone.utc).date(),
+                    unit_of_measure="MMBTU",
+                    price_unit_code="USD_MMBTU",
                     trade_nature="PHYSICAL",
                     trade_structure="SINGLE",
                     trade_side="BUY",
@@ -100,10 +126,321 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                     price_index_code=None,
                     price=3.25,
                     volume=1000,
-                    settlement_status="PENDING",
+                    confirmation_status="PENDING",
+                    nomination_status="SCHEDULED",
+                    allocation_status="PENDING",
+                    actualization_status="PARTIALLY_ACTUALIZED",
+                    invoice_status="ISSUED",
+                    payment_status="DUE",
+                    settlement_status="PARTIALLY_SETTLED",
                     trader_user="trader_1",
                     status="ACTIVE",
                     last_event_id="evt-1001",
+                )
+            )
+            session.add_all(
+                [
+                    TradeWorkflowItem(
+                        id=1,
+                        trade_id="T-1001",
+                        workflow_type="CONFIRMATION",
+                        status="PENDING",
+                        owner="ops.confirmations",
+                        due_at=datetime(2099, 3, 20, 12, 0, tzinfo=timezone.utc),
+                        notes="Awaiting confirmation outreach.",
+                        created_at=datetime(2026, 3, 17, 12, 10, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 12, 10, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    TradeWorkflowItem(
+                        id=2,
+                        trade_id="T-1001",
+                        workflow_type="PAYMENT",
+                        status="DUE",
+                        owner="cash.ops",
+                        due_at=datetime(2099, 3, 22, 17, 0, tzinfo=timezone.utc),
+                        notes="Cash settlement due after invoice approval.",
+                        created_at=datetime(2026, 3, 17, 12, 20, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 12, 20, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    TradeWorkflowItem(
+                        id=3,
+                        trade_id="T-1001",
+                        workflow_type="INVOICE",
+                        status="APPROVED",
+                        owner="settlement.ops",
+                        due_at=datetime(2099, 3, 18, 12, 0, tzinfo=timezone.utc),
+                        notes="Invoice approved and closed.",
+                        created_at=datetime(2026, 3, 17, 12, 25, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 12, 25, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                ]
+            )
+            session.add_all(
+                [
+                    TradeConfirmation(
+                        id=1,
+                        trade_id="T-1001",
+                        source_document_id=None,
+                        confirmation_number="CNF-1001-A",
+                        status="SENT",
+                        sent_at=datetime(2026, 3, 17, 13, 0, tzinfo=timezone.utc),
+                        confirmed_at=None,
+                        issue_count=1,
+                        last_issued_at=datetime(2026, 3, 17, 13, 0, tzinfo=timezone.utc),
+                        last_issued_by="ops.confirmations",
+                        last_issue_method="EMAIL",
+                        last_issue_recipient="acme@example.com",
+                        last_issue_note="Initial issue",
+                        receipt_status="ISSUED_AWAITING_RESPONSE",
+                        received_at=None,
+                        received_by=None,
+                        response_method=None,
+                        response_reference=None,
+                        response_note=None,
+                        dispute_reason=None,
+                        notes="Original draft",
+                        comparison_waiver_note=None,
+                        comparison_waived_at=None,
+                        comparison_waived_by=None,
+                        created_at=datetime(2026, 3, 17, 12, 30, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 17, 13, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    TradeConfirmation(
+                        id=2,
+                        trade_id="T-1001",
+                        source_document_id=None,
+                        confirmation_number="CNF-1001-B",
+                        status="DISPUTED",
+                        sent_at=datetime(2026, 3, 18, 9, 0, tzinfo=timezone.utc),
+                        confirmed_at=None,
+                        issue_count=2,
+                        last_issued_at=datetime(2026, 3, 18, 9, 0, tzinfo=timezone.utc),
+                        last_issued_by="ops.confirmations",
+                        last_issue_method="EMAIL",
+                        last_issue_recipient="acme@example.com",
+                        last_issue_note="Superseded and reissued",
+                        receipt_status="COUNTERPARTY_DISPUTED",
+                        received_at=datetime(2026, 3, 18, 10, 0, tzinfo=timezone.utc),
+                        received_by="ops.confirmations",
+                        response_method="EMAIL",
+                        response_reference="reply-1001",
+                        response_note="Counterparty challenged price terms.",
+                        dispute_reason="Price mismatch",
+                        notes="Current disputed draft",
+                        comparison_waiver_note=None,
+                        comparison_waived_at=None,
+                        comparison_waived_by=None,
+                        created_at=datetime(2026, 3, 18, 8, 45, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 18, 10, 0, tzinfo=timezone.utc),
+                        updated_by="system",
+                        version=2,
+                    ),
+                ]
+            )
+            session.add(
+                TradeInvoice(
+                    id=1,
+                    trade_id="T-1001",
+                    delivery_id="DEL-1001",
+                    leg_no=None,
+                    invoice_number="INV-T-1001",
+                    invoice_currency_code="USD",
+                    billed_quantity=1000,
+                    quantity_unit_code="MMBTU",
+                    invoice_amount=3250,
+                    status="ISSUED",
+                    issued_at=datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc),
+                    due_at=datetime(2099, 3, 25, 12, 0, tzinfo=timezone.utc),
+                    dispute_reason=None,
+                    notes="Primary settlement invoice.",
+                    created_at=datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc),
+                    created_by="system",
+                    updated_at=datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc),
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                TradePayment(
+                    id=1,
+                    trade_id="T-1001",
+                    invoice_id=1,
+                    payment_reference="PAY-T-1001-1",
+                    payment_currency_code="USD",
+                    payment_amount=1000,
+                    status="PAID",
+                    due_at=datetime(2099, 3, 27, 12, 0, tzinfo=timezone.utc),
+                    received_at=datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc),
+                    notes="First cash collection remains open.",
+                    created_at=datetime(2026, 3, 19, 9, 0, tzinfo=timezone.utc),
+                    created_by="system",
+                    updated_at=datetime(2026, 3, 19, 9, 0, tzinfo=timezone.utc),
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                DeliveryObligation(
+                    delivery_id="DEL-1001",
+                    trade_id="T-1001",
+                    trade_leg_id=None,
+                    leg_no=None,
+                    external_trade_id="EXT-1001",
+                    direction="BUY",
+                    mode_family="NETWORK_FLOW",
+                    transport_mode="PIPELINE",
+                    transport_mode_source="TRADE_DERIVED",
+                    delivery_profile="FLOW_WINDOW",
+                    book="GAS-US",
+                    book_source="TRADE_DERIVED",
+                    portfolio="NORTH",
+                    portfolio_source="TRADE_DERIVED",
+                    counterparty="ACME",
+                    counterparty_source="TRADE_DERIVED",
+                    commodity_class="GAS",
+                    commodity="HH",
+                    volume=1000,
+                    unit_of_measure="MMBTU",
+                    trade_currency_code="USD",
+                    price_unit_code="USD_MMBTU",
+                    location_code="HENRY",
+                    location_source="TRADE_DERIVED",
+                    delivery_start=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc).date(),
+                    delivery_end=datetime(2026, 4, 30, 0, 0, tzinfo=timezone.utc).date(),
+                    delivery_window_source="TRADE_DERIVED",
+                    execution_status="PLANNED",
+                    execution_status_source="TRADE_DERIVED",
+                    operations_owner="ops.scheduler",
+                    operations_owner_source="MANUAL",
+                    external_reference="PIPE-REF-1001",
+                    external_reference_source="MANUAL",
+                    ops_notes="Pipeline path confirmed.",
+                    ops_notes_source="MANUAL",
+                    booked_at=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
+                    source_trade_updated_at=datetime(2026, 3, 17, 12, 5, tzinfo=timezone.utc),
+                    created_at=datetime(2026, 3, 17, 12, 10, tzinfo=timezone.utc),
+                    created_by="system",
+                    updated_at=datetime(2026, 3, 18, 8, 0, tzinfo=timezone.utc),
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                DeliveryEvent(
+                    id=1,
+                    delivery_id="DEL-1001",
+                    trade_id="T-1001",
+                    leg_no=None,
+                    event_type="PLAN_CAPTURED",
+                    execution_status="PLANNED",
+                    occurred_at=datetime(2026, 3, 18, 8, 0, tzinfo=timezone.utc),
+                    location_code="HENRY",
+                    reference_code="PIPE-REF-1001",
+                    source="system",
+                    notes="Initial delivery plan captured.",
+                    created_at=datetime(2026, 3, 18, 8, 0, tzinfo=timezone.utc),
+                    created_by="system",
+                    updated_at=datetime(2026, 3, 18, 8, 0, tzinfo=timezone.utc),
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                TradeActualization(
+                    id=1,
+                    delivery_id="DEL-1001",
+                    trade_id="T-1001",
+                    leg_no=None,
+                    actual_quantity=980,
+                    actualized_at=datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc),
+                    source="scheduler",
+                    notes="Interim actualization.",
+                    created_at=datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc),
+                    created_by="scheduler",
+                    updated_at=datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc),
+                    updated_by="scheduler",
+                    version=1,
+                )
+            )
+            session.add(
+                DocumentIngestion(
+                    document_id="doc-1001",
+                    original_filename="trade-confirmation.pdf",
+                    display_name="Trade Confirmation T-1001",
+                    content_type="application/pdf",
+                    storage_key="documents/doc-1001.pdf",
+                    sha256="0" * 64,
+                    size_bytes=1024,
+                    page_count=1,
+                    status="ANALYZED",
+                    processor_provider="openai",
+                    processor_model="gpt-5-mini",
+                    classifier_version="test-classifier",
+                    extractor_version="test-extractor",
+                    analysis_summary={},
+                    processing_errors=[],
+                    review_status="IN_REVIEW",
+                    review_notes="Need economics signoff.",
+                    reviewed_at=None,
+                    reviewed_by=None,
+                    created_at=datetime(2026, 3, 18, 14, 0, tzinfo=timezone.utc),
+                    created_by="ops.confirmations",
+                    updated_at=datetime(2026, 3, 18, 14, 30, tzinfo=timezone.utc),
+                    updated_by="ops.confirmations",
+                    version=1,
+                )
+            )
+            session.add(
+                DocumentIngestionPage(
+                    page_id=1,
+                    document_id="doc-1001",
+                    page_number=1,
+                    classification_status="ANALYZED",
+                    extraction_status="ANALYZED",
+                    document_kind="TRADE_CONFIRMATION",
+                    document_subtype=None,
+                    classification_confidence=0.98,
+                    classification_payload={"reason": "seeded"},
+                    header_fields=[
+                        {
+                            "field_key": "trade_id",
+                            "label": "Trade ID",
+                            "value": "T-1001",
+                            "confidence": 0.99,
+                            "source": "ocr",
+                        },
+                        {
+                            "field_key": "confirmation_number",
+                            "label": "Confirmation Number",
+                            "value": "CNF-1001-B",
+                            "confidence": 0.95,
+                            "source": "ocr",
+                        },
+                    ],
+                    table_blocks=[],
+                    raw_text="Trade confirmation for T-1001.",
+                    processing_warnings=[],
+                    processing_errors=[],
+                    review_status="UNREVIEWED",
+                    review_notes=None,
+                    reviewed_at=None,
+                    reviewed_by=None,
+                    processed_at=datetime(2026, 3, 18, 14, 15, tzinfo=timezone.utc),
+                    created_at=datetime(2026, 3, 18, 14, 0, tzinfo=timezone.utc),
+                    updated_at=datetime(2026, 3, 18, 14, 15, tzinfo=timezone.utc),
                 )
             )
             session.add(
@@ -490,6 +827,140 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["power"][0]["series_code"], "CAISO_NP15_RT5M")
         self.assertEqual(result.output["macro"][0]["series_code"], "FRED_DGS10")
         self.assertEqual(result.output["positioning"][0]["series_code"], "CFTC_WTI_MM_NET")
+
+    def test_tool_service_lists_open_workflow_items_for_requested_queue(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_workflow_items",
+                {"queue": "settlement", "limit": 10},
+            )
+
+        self.assertEqual(result.output["count"], 1)
+        self.assertEqual(result.output["items"][0]["workflow_type"], "PAYMENT")
+        self.assertEqual(result.output["items"][0]["queue"], "settlement")
+        self.assertFalse(result.output["items"][0]["is_closed"])
+        self.assertEqual(trace.tool_name, "list_workflow_items")
+        self.assertIn("settlement queue", trace.summary)
+
+    def test_tool_service_lists_current_confirmation_by_default(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_trade_confirmations",
+                {"trade_id": "T-1001", "limit": 10},
+            )
+
+        self.assertEqual(result.output["count"], 1)
+        self.assertEqual(result.output["items"][0]["confirmation_number"], "CNF-1001-B")
+        self.assertTrue(result.output["items"][0]["is_current"])
+        self.assertTrue(result.output["items"][0]["needs_attention"])
+        self.assertEqual(result.output["items"][0]["workflow_owner"], "ops.confirmations")
+        self.assertIn("need follow-up", trace.summary)
+
+    def test_tool_service_can_include_confirmation_history(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_trade_confirmations",
+                {"trade_id": "T-1001", "current_only": False, "limit": 10},
+            )
+
+        confirmation_numbers = [row["confirmation_number"] for row in result.output["items"]]
+        self.assertEqual(result.output["count"], 2)
+        self.assertEqual(confirmation_numbers, ["CNF-1001-B", "CNF-1001-A"])
+        self.assertTrue(result.output["items"][0]["is_current"])
+        self.assertFalse(result.output["items"][1]["is_current"])
+        self.assertEqual(trace.tool_name, "list_trade_confirmations")
+
+    def test_tool_service_lists_trade_invoices_with_outstanding_balance(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_trade_invoices",
+                {"trade_id": "T-1001", "limit": 10},
+            )
+
+        self.assertEqual(result.output["count"], 1)
+        self.assertEqual(result.output["items"][0]["invoice_number"], "INV-T-1001")
+        self.assertEqual(result.output["items"][0]["outstanding_amount"], 2250.0)
+        self.assertEqual(trace.tool_name, "list_trade_invoices")
+
+    def test_tool_service_builds_trade_settlement_summary(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "get_trade_settlement_summary",
+                {"trade_id": "T-1001"},
+            )
+
+        self.assertTrue(result.output["found"])
+        self.assertEqual(result.output["invoice_count"], 1)
+        self.assertEqual(result.output["payment_count"], 1)
+        self.assertEqual(result.output["total_invoiced_amount"], 3250.0)
+        self.assertEqual(result.output["outstanding_amount"], 2250.0)
+        self.assertIn("Settlement summary for T-1001", trace.summary)
+
+    def test_tool_service_builds_trade_workbench(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "get_trade_workbench",
+                {"trade_id": "T-1001", "row_limit": 5, "event_limit": 5},
+            )
+
+        self.assertTrue(result.output["found"])
+        self.assertEqual(result.output["trade"]["trade_id"], "T-1001")
+        self.assertEqual(result.output["workflow"]["open_count"], 2)
+        self.assertEqual(result.output["settlement"]["invoice_count"], 1)
+        self.assertEqual(result.output["deliveries"]["count"], 1)
+        self.assertEqual(result.output["recent_events"]["total_count"], 1)
+        self.assertIn("Built trade workbench for T-1001", trace.summary)
+
+    def test_tool_service_lists_deliveries(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_deliveries",
+                {"trade_id": "T-1001", "limit": 10},
+            )
+
+        self.assertEqual(result.output["count"], 1)
+        self.assertEqual(result.output["items"][0]["delivery_id"], "DEL-1001")
+        self.assertEqual(result.output["items"][0]["event_count"], 1)
+        self.assertEqual(result.output["items"][0]["actualized_quantity"], 980.0)
+        self.assertIn("trade T-1001", trace.summary)
+
+    def test_tool_service_lists_documents_and_loads_document_detail(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            list_result, list_trace = service.execute_tool(
+                "list_documents",
+                {"document_kind": "TRADE_CONFIRMATION", "limit": 10},
+            )
+            detail_result, detail_trace = service.execute_tool(
+                "get_document_ingestion",
+                {"document_id": "doc-1001"},
+            )
+
+        self.assertEqual(list_result.output["count"], 1)
+        self.assertEqual(list_result.output["items"][0]["dominant_document_kind"], "TRADE_CONFIRMATION")
+        self.assertTrue(detail_result.output["found"])
+        self.assertEqual(detail_result.output["document"]["document_id"], "doc-1001")
+        self.assertEqual(detail_result.output["document"]["pages"][0]["document_kind"], "TRADE_CONFIRMATION")
+        self.assertEqual(list_trace.tool_name, "list_documents")
+        self.assertEqual(detail_trace.tool_name, "get_document_ingestion")
+
+    def test_tool_service_loads_workspace_summary(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("get_workspace_summary", {})
+
+        self.assertEqual(result.output["trades"]["total_count"], 1)
+        self.assertEqual(result.output["invoices"]["total_count"], 1)
+        self.assertEqual(result.output["payments"]["total_count"], 1)
+        self.assertEqual(result.output["deliveries"]["total_count"], 1)
+        self.assertIn("Workspace summary loaded", trace.summary)
 
     async def test_openai_response_executes_tool_call_and_returns_trace(self) -> None:
         captured_payloads: list[dict[str, object]] = []

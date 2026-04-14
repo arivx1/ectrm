@@ -9,6 +9,8 @@ import {
   type MutableRefObject,
 } from 'react'
 import {
+  executeDocumentActionPlan,
+  getDocumentProcessorSettings,
   listDocumentIngestions,
   listDocumentSchemaRegistry,
   reprocessDocumentIngestion,
@@ -23,6 +25,7 @@ import type {
   DocumentIngestionPageRecord,
   DocumentIngestionRecord,
   DocumentKindSchemaRecord,
+  DocumentProcessorRuntimeSettingsRecord,
   DocumentSchemaRegistryRecord,
   DocumentTableBlockRecord,
 } from '../../shared/models'
@@ -45,6 +48,8 @@ type PageDraftUpdater = (page: DocumentIngestionPageRecord) => DocumentIngestion
 
 export type DocumentIngestionController = {
   documents: DocumentIngestionRecord[]
+  processorSettings: DocumentProcessorRuntimeSettingsRecord | null
+  reprocessProviderByDocument: Record<string, 'builtin' | 'openai' | 'anthropic' | 'google' | ''>
   schemaRegistry: DocumentSchemaRegistryRecord | null
   schemaByKind: Record<string, DocumentKindSchemaRecord>
   loading: boolean
@@ -52,6 +57,7 @@ export type DocumentIngestionController = {
   uploading: boolean
   uploadError: string
   displayName: string
+  selectedProcessorProvider: 'builtin' | 'openai' | 'anthropic' | 'google' | ''
   selectedFile: File | null
   isDragActive: boolean
   expandedDocumentIds: Record<string, boolean>
@@ -62,6 +68,8 @@ export type DocumentIngestionController = {
   pagePreviewErrors: Record<number, string>
   fileInputRef: MutableRefObject<HTMLInputElement | null>
   setDisplayName: (value: string) => void
+  setSelectedProcessorProvider: (value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
+  setDocumentReprocessProvider: (documentId: string, value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
   toggleDocumentExpanded: (documentId: string) => void
   updateSelectedFile: (file: File | null) => void
   openFilePicker: () => void
@@ -75,7 +83,8 @@ export type DocumentIngestionController = {
   updatePageDraft: (documentId: string, pageId: number, updater: PageDraftUpdater) => void
   handleSaveDocument: (document: DocumentIngestionRecord) => Promise<void>
   handleSavePage: (document: DocumentIngestionRecord, page: DocumentIngestionPageRecord) => Promise<void>
-  handleReprocessDocument: (documentId: string) => Promise<void>
+  handleReprocessDocument: (document: DocumentIngestionRecord) => Promise<void>
+  handleExecuteActionPlan: (document: DocumentIngestionRecord) => Promise<void>
   setSchemaFieldValue: (documentId: string, pageId: number, fieldKey: string, label: string, nextValue: string) => void
   addCustomField: (documentId: string, pageId: number) => void
   updateCustomField: (documentId: string, pageId: number, fieldKey: string, patch: Partial<DocumentExtractedFieldRecord>) => void
@@ -100,6 +109,10 @@ export function useDocumentIngestionController({
   authSession,
 }: UseDocumentIngestionControllerArgs): DocumentIngestionController {
   const [documents, setDocuments] = useState<DocumentIngestionRecord[]>([])
+  const [processorSettings, setProcessorSettings] = useState<DocumentProcessorRuntimeSettingsRecord | null>(null)
+  const [reprocessProviderByDocument, setReprocessProviderByDocument] = useState<
+    Record<string, 'builtin' | 'openai' | 'anthropic' | 'google' | ''>
+  >({})
   const [schemaRegistry, setSchemaRegistry] = useState<DocumentSchemaRegistryRecord | null>(null)
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(false)
@@ -107,6 +120,7 @@ export function useDocumentIngestionController({
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [selectedProcessorProvider, setSelectedProcessorProvider] = useState<'builtin' | 'openai' | 'anthropic' | 'google' | ''>('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragActive, setIsDragActive] = useState(false)
   const [savingTarget, setSavingTarget] = useState<string | null>(null)
@@ -138,6 +152,8 @@ export function useDocumentIngestionController({
   useEffect(() => {
     if (!authSession) {
       setDocuments([])
+      setProcessorSettings(null)
+      setReprocessProviderByDocument({})
       setSchemaRegistry(null)
       setExpandedDocumentIds({})
       setLoadError('')
@@ -147,6 +163,7 @@ export function useDocumentIngestionController({
       setSavingTarget(null)
       setSaveErrors({})
       setDisplayName('')
+      setSelectedProcessorProvider('')
       setSelectedFile(null)
       setIsDragActive(false)
       if (fileInputRef.current) {
@@ -161,13 +178,27 @@ export function useDocumentIngestionController({
       setLoading(true)
       setLoadError('')
       try {
-        const [nextRegistry, nextDocuments] = await Promise.all([
+        const [nextProcessorSettings, nextRegistry, nextDocuments] = await Promise.all([
+          getDocumentProcessorSettings(appConfig.apiBase, session),
           listDocumentSchemaRegistry(appConfig.apiBase, session),
           listDocumentIngestions(appConfig.apiBase, session),
         ])
         if (!cancelled) {
+          setProcessorSettings(nextProcessorSettings)
           setSchemaRegistry(nextRegistry)
           setDocuments(nextDocuments)
+          setSelectedProcessorProvider((current) => {
+            const configuredProviders = new Set(
+              nextProcessorSettings.providers.filter((provider) => provider.configured).map((provider) => provider.provider),
+            )
+            if (
+              current === 'builtin' ||
+              (current !== '' && configuredProviders.has(current as 'openai' | 'anthropic' | 'google'))
+            ) {
+              return current
+            }
+            return nextProcessorSettings.effective_default_provider ?? ''
+          })
         }
       } catch (error) {
         if (cancelled) {
@@ -224,6 +255,14 @@ export function useDocumentIngestionController({
   }, [authSession, hasProcessingDocuments])
 
   function replaceDocument(nextDocument: DocumentIngestionRecord) {
+    setReprocessProviderByDocument((current) => {
+      if (!(nextDocument.document_id in current)) {
+        return current
+      }
+      const nextState = { ...current }
+      delete nextState[nextDocument.document_id]
+      return nextState
+    })
     setDocuments((current) => {
       const index = current.findIndex((document) => document.document_id === nextDocument.document_id)
       if (index === -1) {
@@ -289,6 +328,23 @@ export function useDocumentIngestionController({
       ...current,
       [documentId]: !current[documentId],
     }))
+  }
+
+  function setDocumentReprocessProvider(
+    documentId: string,
+    value: 'builtin' | 'openai' | 'anthropic' | 'google' | '',
+  ) {
+    setReprocessProviderByDocument((current) => {
+      if (!value) {
+        if (!(documentId in current)) {
+          return current
+        }
+        const nextState = { ...current }
+        delete nextState[documentId]
+        return nextState
+      }
+      return { ...current, [documentId]: value }
+    })
   }
 
   function handleDropzoneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -360,7 +416,13 @@ export function useDocumentIngestionController({
     setUploading(true)
     setUploadError('')
     try {
-      const uploaded = await uploadPdfDocument(appConfig.apiBase, session, selectedFile, displayName)
+      const uploaded = await uploadPdfDocument(
+        appConfig.apiBase,
+        session,
+        selectedFile,
+        displayName,
+        selectedProcessorProvider || null,
+      )
       replaceDocument(uploaded)
       setExpandedDocumentIds((current) => ({ ...current, [uploaded.document_id]: true }))
       setSelectedFile(null)
@@ -425,20 +487,50 @@ export function useDocumentIngestionController({
     }
   }
 
-  async function handleReprocessDocument(documentId: string) {
+  async function handleReprocessDocument(document: DocumentIngestionRecord) {
     if (!authSession) {
       return
     }
+    const documentId = document.document_id
     const target = `reprocess:${documentId}`
     clearSaveError(target)
     setSavingTarget(target)
     try {
       clearPagePreviewsForDocument(documentId)
-      const updated = await reprocessDocumentIngestion(appConfig.apiBase, authSession, documentId)
+      const reprocessProvider =
+        reprocessProviderByDocument[documentId] || document.processor_provider || processorSettings?.effective_default_provider || null
+      const updated = await reprocessDocumentIngestion(
+        appConfig.apiBase,
+        authSession,
+        documentId,
+        reprocessProvider,
+      )
       replaceDocument(updated)
       setExpandedDocumentIds((current) => ({ ...current, [documentId]: true }))
     } catch (error) {
       setSaveError(target, error instanceof Error ? error.message : 'Unable to reprocess the document.')
+    } finally {
+      setSavingTarget(null)
+    }
+  }
+
+  async function handleExecuteActionPlan(document: DocumentIngestionRecord) {
+    if (!authSession) {
+      return
+    }
+    const target = `execute:${document.document_id}`
+    clearSaveError(target)
+    setSavingTarget(target)
+    try {
+      const updated = await executeDocumentActionPlan(
+        appConfig.apiBase,
+        authSession,
+        document.document_id,
+      )
+      replaceDocument(updated)
+      setExpandedDocumentIds((current) => ({ ...current, [document.document_id]: true }))
+    } catch (error) {
+      setSaveError(target, error instanceof Error ? error.message : 'Unable to execute the document action plan.')
     } finally {
       setSavingTarget(null)
     }
@@ -717,6 +809,8 @@ export function useDocumentIngestionController({
 
   return {
     documents,
+    processorSettings,
+    reprocessProviderByDocument,
     schemaRegistry,
     schemaByKind,
     loading,
@@ -724,6 +818,7 @@ export function useDocumentIngestionController({
     uploading,
     uploadError,
     displayName,
+    selectedProcessorProvider,
     selectedFile,
     isDragActive,
     expandedDocumentIds,
@@ -734,6 +829,8 @@ export function useDocumentIngestionController({
     pagePreviewErrors,
     fileInputRef,
     setDisplayName,
+    setSelectedProcessorProvider,
+    setDocumentReprocessProvider,
     toggleDocumentExpanded,
     updateSelectedFile,
     openFilePicker,
@@ -748,6 +845,7 @@ export function useDocumentIngestionController({
     handleSaveDocument,
     handleSavePage,
     handleReprocessDocument,
+    handleExecuteActionPlan,
     setSchemaFieldValue,
     addCustomField,
     updateCustomField,

@@ -55,6 +55,184 @@ export const publicRuntimeSettings = {
   },
 } as const
 
+export const assistantRuntimeSettings = {
+  enabled: true,
+  default_provider: 'openai',
+  effective_default_provider: 'openai',
+  configured_provider_count: 1,
+  providers: [
+    {
+      provider: 'openai',
+      label: 'OpenAI',
+      enabled: true,
+      configured: true,
+      is_default: true,
+      default_model: 'gpt-5.4',
+      base_url: 'https://api.openai.com/v1',
+      setup_env_var: 'OPENAI_API_KEY',
+    },
+  ],
+  available_tools: [
+    {
+      name: 'get_trade_by_id',
+      description: 'Load one live trade projection by exact trade_id.',
+    },
+  ],
+} as const
+
+export const assistantAdminAgents = [
+  {
+    agent_id: 'ops-governor',
+    name: 'Ops Governor',
+    description: 'Proposes high-impact trade actions that require admin review.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: 'openai',
+    model: 'gpt-5.4',
+    allowed_workspaces: ['assistant', 'admin', 'trades'],
+    capabilities: ['READ', 'ACTION'],
+    allowed_tools: ['get_trade_by_id'],
+    allowed_action_types: ['cancel_trade'],
+    system_prompt: 'Escalate cross-user trade actions into an approval inbox before execution.',
+    created_at: '2026-04-11T08:00:00Z',
+    created_by: 'ops_admin',
+    updated_at: '2026-04-11T08:30:00Z',
+    updated_by: 'ops_admin',
+    version: 3,
+  },
+] as const
+
+export const assistantActionRequests = [
+  {
+    action_request_id: 7001,
+    run_id: 701,
+    user_id: 'trader.alpha',
+    status: 'PENDING',
+    workspace: 'trades',
+    agent_id: 'ops-governor',
+    agent_name: 'Ops Governor',
+    action_type: 'cancel_trade',
+    summary: 'Cancel trade T-AMEND-100',
+    description:
+      'Cancel trade T-AMEND-100 because the counterparty requested a same-day unwind before confirmation.',
+    payload: {
+      trade_id: 'T-AMEND-100',
+      reason: 'Counterparty unwind requested before confirmation.',
+    },
+    result: null,
+    error_detail: null,
+    created_at: '2026-04-11T08:45:00Z',
+    decided_at: null,
+    decided_by: null,
+  },
+] as const
+
+export const userAccounts = [
+  {
+    user_id: 'ops_admin',
+    email: 'ops@example.com',
+    display_name: 'Ops Admin',
+    role: 'OPS_ADMIN',
+    is_active: true,
+    password_set: true,
+    last_login_at: '2026-04-11T07:55:00Z',
+    created_at: '2026-01-03T10:00:00Z',
+    created_by: 'system',
+    updated_at: '2026-04-11T07:55:00Z',
+    updated_by: 'ops_admin',
+    version: 4,
+  },
+  {
+    user_id: 'trader.alpha',
+    email: 'trader.alpha@example.com',
+    display_name: 'Trader Alpha',
+    role: 'TRADER',
+    is_active: true,
+    password_set: true,
+    last_login_at: '2026-04-11T08:20:00Z',
+    created_at: '2026-01-10T09:30:00Z',
+    created_by: 'ops_admin',
+    updated_at: '2026-04-11T08:20:00Z',
+    updated_by: 'ops_admin',
+    version: 2,
+  },
+] as const
+
+export const adminRoadmapDocument = {
+  document: {
+    source_path: 'docs/engineering/trading-source-roadmap.md',
+    horizons: [
+      {
+        key: 'now',
+        label: 'Now',
+        detail: 'Protect the highest-risk operational seams first.',
+      },
+      {
+        key: 'next',
+        label: 'Next',
+        detail: 'Expand typed contracts and smoke coverage across adjacent flows.',
+      },
+      {
+        key: 'later',
+        label: 'Later',
+        detail: 'Productize deeper governance and automation controls.',
+      },
+    ],
+    phases: [
+      {
+        id: 'wave-0',
+        title: 'Wave 0',
+        priority: 'P0',
+        summary: 'Protect the first operator and governance trust seams.',
+        items: [
+          {
+            id: 'governance-smoke',
+            title: 'Governance smoke coverage',
+            summary: 'Protect assistant approvals with deterministic browser coverage.',
+            status: 'in_progress',
+            horizon: 'now',
+            owner: 'Platform',
+            target: 'Wave 0',
+            source_ids: ['FR0-12'],
+            links: [
+              { label: 'Admin', view: 'admin' },
+              { label: 'Assistant', view: 'assistant' },
+            ],
+          },
+        ],
+      },
+    ],
+    milestones: [
+      {
+        id: 'wave-0-trust',
+        title: 'Wave 0 Trust Protected',
+        summary: 'Primary workflows and one governance seam are covered by smoke automation.',
+        owner: 'Platform',
+        target: 'Wave 0',
+        item_ids: ['governance-smoke'],
+        exit_criteria: [
+          'Seeded browser smoke covers one admin or assistant governance interaction.',
+        ],
+        links: [{ label: 'Admin', view: 'admin' }],
+      },
+    ],
+  },
+  updated_at: '2026-04-11T09:00:00Z',
+  updated_by: 'ops_admin',
+  version: 3,
+  is_default: false,
+  recent_revisions: [
+    {
+      revision_id: 12,
+      version: 3,
+      created_at: '2026-04-11T09:00:00Z',
+      created_by: 'ops_admin',
+      change_summary: ['Added governance smoke coverage milestone.'],
+      restored_from_revision_id: null,
+    },
+  ],
+} as const
+
 export const books = [
   {
     code: 'GULF_GAS',
@@ -181,7 +359,7 @@ export const positions = [
   {
     commodity: 'HENRY_HUB_GAS',
     net_volume: 25000,
-    updated_at: '2026-04-10T16:05:00Z',
+    updated_at: '2026-04-10T18:30:00Z',
   },
 ]
 
@@ -219,7 +397,7 @@ export const trades = [
     commodity: 'HENRY_HUB_GAS',
     pricing_type: 'FIXED',
     pricing_status: 'PENDING',
-    confirmation_status: 'PENDING',
+    confirmation_status: 'SENT',
     nomination_status: 'PENDING',
     allocation_status: 'PENDING',
     actualization_status: 'PENDING',
@@ -231,7 +409,7 @@ export const trades = [
     settlement_status: 'PENDING',
     trader_user: 'trader.alpha',
     status: 'ACTIVE',
-    last_event_id: 'evt-trade-created-100',
+    last_event_id: 'evt-trade-amended-100',
     active_credit_exception: null,
     credit_approval_status: 'APPROVED',
     credit_hold_active: false,
@@ -240,6 +418,40 @@ export const trades = [
 ]
 
 export const selectedTradeEvents = [
+  {
+    event_id: 'evt-trade-amended-100',
+    aggregate_type: 'trade',
+    aggregate_id: 'T-AMEND-100',
+    event_type: 'TradeAmended',
+    occurred_at: '2026-04-10T18:30:00Z',
+    recorded_at: '2026-04-10T18:30:00Z',
+    actor_id: 'ops_admin',
+    correlation_id: 'corr-trade-amended-100',
+    causation_id: 'evt-trade-created-100',
+    schema_version: 2,
+    payload: {
+      confirmation_status: 'SENT',
+      nomination_status: 'PENDING',
+      trader_user: 'ops_admin',
+    },
+  },
+  {
+    event_id: 'evt-trade-invoice-updated-100',
+    aggregate_type: 'trade',
+    aggregate_id: 'T-AMEND-100',
+    event_type: 'TradeInvoiceUpdated',
+    occurred_at: '2026-04-10T17:45:00Z',
+    recorded_at: '2026-04-10T17:45:00Z',
+    actor_id: 'settlement_admin',
+    correlation_id: 'corr-trade-invoice-updated-100',
+    causation_id: 'evt-trade-created-100',
+    schema_version: 1,
+    payload: {
+      invoice_status: 'ISSUED',
+      payment_status: 'PENDING',
+      settlement_status: 'PENDING',
+    },
+  },
   {
     event_id: 'evt-trade-created-100',
     aggregate_type: 'trade',
@@ -265,18 +477,26 @@ export const selectedTradeEvents = [
   },
 ]
 
-export function buildWorkspaceSummary() {
+function buildTradeWorkspaceSummary(tradeRows = trades) {
+  const activeTrades = tradeRows.filter((trade) => trade.status === 'ACTIVE')
+
+  return {
+    total_count: tradeRows.length,
+    active_count: activeTrades.length,
+    priced_active_count: activeTrades.filter((trade) => trade.price !== null).length,
+    pending_pricing_count: activeTrades.filter((trade) => trade.pricing_status === 'PENDING').length,
+    pending_settlement_count: activeTrades.filter((trade) => trade.settlement_status !== 'SETTLED').length,
+    tracked_book_count: new Set(activeTrades.map((trade) => trade.book)).size,
+    total_active_volume: activeTrades.reduce((sum, trade) => sum + (trade.volume ?? 0), 0),
+  }
+}
+
+export function buildWorkspaceSummary(tradeRows = trades) {
+  const tradeSummary = buildTradeWorkspaceSummary(tradeRows)
+
   return {
     generated_at: '2026-04-11T00:00:00Z',
-    trades: {
-      total_count: trades.length,
-      active_count: trades.length,
-      priced_active_count: 1,
-      pending_pricing_count: 1,
-      pending_settlement_count: 1,
-      tracked_book_count: 1,
-      total_active_volume: 25000,
-    },
+    trades: tradeSummary,
     positions: { total_count: 1 },
     option_exposures: { total_count: 0 },
     deliveries: { total_count: 0 },
@@ -309,13 +529,13 @@ export function buildWorkspaceSummary() {
         },
       },
       attention: {
-        total_count: 1,
+        total_count: tradeSummary.pending_pricing_count,
         confirmation_backlog_count: 0,
         nomination_backlog_count: 0,
         allocation_backlog_count: 0,
         invoice_backlog_count: 0,
         overdue_payment_count: 0,
-        stale_pricing_count: 1,
+        stale_pricing_count: tradeSummary.pending_pricing_count,
         incomplete_ops_data_count: 0,
       },
     },

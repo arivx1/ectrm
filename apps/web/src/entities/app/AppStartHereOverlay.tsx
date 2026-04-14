@@ -50,6 +50,18 @@ const START_HERE_ACTIONS: StartHereAction[] = [
     signedOutReturnIntentView: 'risk',
   },
   {
+    title: 'Investigate a trade issue',
+    detail: 'Open the activity feed when you need to trace what changed on a trade before you jump into capture or ops.',
+    signedOutDetail: 'Sign in first to inspect the recent trade activity trail and see what changed.',
+    signedInView: 'events',
+    signedOutView: 'settings',
+    signedInActionLabel: 'Open Activity Feed',
+    signedOutActionLabel: 'Sign In for Activity Feed',
+    signedInChip: 'Investigate',
+    signedOutChip: 'Requires sign-in',
+    signedOutReturnIntentView: 'events',
+  },
+  {
     title: 'Run the work queue',
     detail: 'Open operations when teams are clearing confirmations, blockers, approvals, and handoffs.',
     signedOutDetail: 'Sign in first to work the live operational queue and post-trade blockers.',
@@ -126,8 +138,8 @@ export function AppStartHereOverlay({
             </h3>
             <p>
               {hasAuthSession
-                ? 'Use these four common paths to get oriented fast after sign-in, then jump straight into the right workspace.'
-                : 'You can open the guide right away. Trade capture, exposure, and queue work will route you to the sign-in screen first.'}
+                ? 'Use these common paths to get oriented fast after sign-in, then jump straight into the right workspace.'
+                : 'You can open the guide right away. Trade capture, activity, exposure, and queue work will route you to the sign-in screen first.'}
             </p>
           </div>
 

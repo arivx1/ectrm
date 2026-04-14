@@ -10,17 +10,31 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.schemas.document import DocumentActionPlanOut
 from apps.api.app.schemas.document import DocumentExtractedFieldOut
 from apps.api.app.schemas.document import DocumentIngestionOut
+from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
 from apps.api.app.schemas.document import DocumentIngestionPageOut
+from apps.api.app.schemas.document import DocumentRecordLinkOut
+from apps.api.app.schemas.document import DocumentProcessorDocumentTraceOut
+from apps.api.app.schemas.document import DocumentProcessorPageTraceOut
+from apps.api.app.schemas.document import DocumentProcessorProvider
+from apps.api.app.schemas.document import DocumentRoutingAssessmentOut
 from apps.api.app.schemas.document import DocumentTableBlockOut
 
 from .document_ingestion_common import build_raw_text_excerpt
 from .document_ingestion_common import clean_optional_text
+from .document_action_planning import build_document_action_plan
+from .document_linkage import build_document_linkage_assessment
+from .document_routing import build_document_page_routing_assessment
+from .document_record_links import load_document_record_links_by_document_id
+from .document_record_links import to_document_record_link_out
 from .document_ingestion_review import build_document_summary
 from .document_ingestion_review import page_text_source
 from .document_ingestion_storage import document_page_preview_absolute_path
 from .document_ingestion_storage import document_page_preview_exists
+
+VALID_DOCUMENT_PROCESSOR_PROVIDERS = {"openai", "anthropic", "google"}
 
 
 def load_document_and_pages(
@@ -81,9 +95,57 @@ def serialize_documents(
     pages_by_document: dict[str, list[DocumentIngestionPage]] = defaultdict(list)
     for page in pages:
         pages_by_document[page.document_id].append(page)
+    record_links_by_document = load_document_record_links_by_document_id(db, document_ids=document_ids)
 
     serialized: list[DocumentIngestionOut] = []
     for document in documents:
+        document_pages = pages_by_document.get(document.document_id, [])
+        document_record_links = record_links_by_document.get(document.document_id, [])
+        document_summary = build_document_summary(document_pages, review_status=document.review_status)
+        document_routing_payload = document_summary.get("routing_assessment")
+        document_routing_assessment = (
+            DocumentRoutingAssessmentOut.model_validate(document_routing_payload)
+            if isinstance(document_routing_payload, dict)
+            else None
+        )
+        document_linkage_assessment = build_document_linkage_assessment(
+            db,
+            pages=document_pages,
+            review_status=document.review_status,
+            document_id=document.document_id,
+        )
+        document_action_plan = build_document_action_plan(
+            document_id=document.document_id,
+            pages=document_pages,
+            review_status=document.review_status,
+            linkage_assessment=document_linkage_assessment,
+        )
+        serialized_page_processor_traces = [
+            _build_document_page_processor_trace(
+                page,
+                fallback_provider=document.processor_provider,
+                fallback_model=document.processor_model,
+            )
+            for page in document_pages
+        ]
+        document_processor_trace = _build_document_processor_trace(
+            page_traces=serialized_page_processor_traces,
+            fallback_provider=document.processor_provider,
+            fallback_model=document.processor_model,
+        )
+        document_summary.update(
+            {
+                "linkage_status": document_linkage_assessment.status,
+                "linkage_recommended_action": document_linkage_assessment.recommended_action,
+                "linkage_primary_record_type": document_linkage_assessment.primary_record_type,
+                "linkage_primary_record_id": document_linkage_assessment.primary_record_id,
+                "linkage_candidate_count": len(document_linkage_assessment.candidates),
+                "action_plan_status": document_action_plan.status,
+                "action_plan_type": document_action_plan.action_type,
+                "action_plan_operation_type": document_action_plan.operation_type,
+                "record_link_count": len(document_record_links),
+            }
+        )
         serialized_pages = [
             DocumentIngestionPageOut(
                 page_id=page.page_id or 0,
@@ -115,8 +177,15 @@ def serialize_documents(
                 reviewed_at=page.reviewed_at,
                 reviewed_by=page.reviewed_by,
                 processed_at=page.processed_at,
+                processor_trace=serialized_page_processor_traces[page_index],
+                routing_assessment=build_document_page_routing_assessment(
+                    document_kind=page.document_kind,
+                    header_fields=list(page.header_fields or []),
+                    table_blocks=list(page.table_blocks or []),
+                    review_status=page.review_status,
+                ),
             )
-            for page in pages_by_document.get(document.document_id, [])
+            for page_index, page in enumerate(document_pages)
         ]
         serialized.append(
             DocumentIngestionOut(
@@ -129,9 +198,11 @@ def serialize_documents(
                 size_bytes=document.size_bytes,
                 page_count=document.page_count,
                 status=document.status,
+                processor_provider=document.processor_provider,
+                processor_model=document.processor_model,
                 classifier_version=document.classifier_version,
                 extractor_version=document.extractor_version,
-                analysis_summary=document.analysis_summary or {},
+                analysis_summary=document_summary,
                 processing_errors=list(document.processing_errors or []),
                 review_status=document.review_status,
                 review_notes=document.review_notes,
@@ -142,6 +213,14 @@ def serialize_documents(
                 updated_at=document.updated_at,
                 updated_by=document.updated_by,
                 version=document.version,
+                processor_trace=document_processor_trace,
+                routing_assessment=document_routing_assessment,
+                linkage_assessment=DocumentLinkageAssessmentOut.model_validate(document_linkage_assessment),
+                action_plan=DocumentActionPlanOut.model_validate(document_action_plan),
+                record_links=[
+                    DocumentRecordLinkOut.model_validate(to_document_record_link_out(link))
+                    for link in document_record_links
+                ],
                 pages=serialized_pages,
             )
         )
@@ -171,3 +250,111 @@ def mark_document_processing_failed(
             page.extraction_status = "FAILED"
         page.processing_errors = list(page.processing_errors or []) + [normalized_error]
         page.updated_at = now
+
+
+def _normalize_document_processor_provider(
+    value: object | None,
+) -> DocumentProcessorProvider | None:
+    normalized = clean_optional_text(value, lowercase=True)
+    if normalized in VALID_DOCUMENT_PROCESSOR_PROVIDERS:
+        return normalized  # type: ignore[return-value]
+    return None
+
+
+def _normalized_processor_warning_list(value: object | None) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        warning = clean_optional_text(item)
+        if warning is None or warning in seen:
+            continue
+        seen.add(warning)
+        normalized.append(warning)
+    return normalized
+
+
+def _build_document_page_processor_trace(
+    page: DocumentIngestionPage,
+    *,
+    fallback_provider: str | None,
+    fallback_model: str | None,
+) -> DocumentProcessorPageTraceOut | None:
+    classification_payload = dict(page.classification_payload or {})
+    provider = _normalize_document_processor_provider(
+        classification_payload.get("processor_provider") or fallback_provider
+    )
+    model = clean_optional_text(classification_payload.get("processor_model")) or clean_optional_text(fallback_model)
+    applied = bool(classification_payload.get("processor_applied"))
+    overrode_heuristics = bool(classification_payload.get("processor_overrode_heuristics"))
+    partial = bool(classification_payload.get("processor_partial"))
+    warnings = _normalized_processor_warning_list(classification_payload.get("processor_warnings"))
+    heuristic_document_kind = clean_optional_text(classification_payload.get("heuristic_document_kind"))
+    heuristic_document_subtype = clean_optional_text(classification_payload.get("heuristic_document_subtype"))
+
+    if not any(
+        [
+            provider,
+            model,
+            applied,
+            overrode_heuristics,
+            partial,
+            warnings,
+            heuristic_document_kind,
+            heuristic_document_subtype,
+        ]
+    ):
+        return None
+
+    return DocumentProcessorPageTraceOut(
+        provider=provider,
+        model=model,
+        applied=applied,
+        overrode_heuristics=overrode_heuristics,
+        partial=partial,
+        warning_count=len(warnings),
+        warnings=warnings,
+        heuristic_document_kind=heuristic_document_kind,
+        heuristic_document_subtype=heuristic_document_subtype,
+    )
+
+
+def _build_document_processor_trace(
+    *,
+    page_traces: list[DocumentProcessorPageTraceOut | None],
+    fallback_provider: str | None,
+    fallback_model: str | None,
+) -> DocumentProcessorDocumentTraceOut | None:
+    provider = _normalize_document_processor_provider(fallback_provider)
+    model = clean_optional_text(fallback_model)
+    applied_page_count = sum(1 for trace in page_traces if trace is not None and trace.applied)
+    overridden_page_count = sum(1 for trace in page_traces if trace is not None and trace.overrode_heuristics)
+    partial_page_count = sum(1 for trace in page_traces if trace is not None and trace.partial)
+
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for trace in page_traces:
+        if trace is None:
+            continue
+        for warning in trace.warnings:
+            if warning in seen:
+                continue
+            seen.add(warning)
+            warnings.append(warning)
+
+    if not any([provider, model, applied_page_count, overridden_page_count, partial_page_count, warnings]):
+        return None
+
+    return DocumentProcessorDocumentTraceOut(
+        provider=provider,
+        model=model,
+        applied=applied_page_count > 0,
+        overrode_heuristics=overridden_page_count > 0,
+        partial=partial_page_count > 0 or bool(warnings),
+        warning_count=len(warnings),
+        warnings=warnings,
+        applied_page_count=applied_page_count,
+        overridden_page_count=overridden_page_count,
+        partial_page_count=partial_page_count,
+    )

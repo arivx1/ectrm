@@ -27,6 +27,21 @@ class OperationalResourceRegistryTests(unittest.TestCase):
         self.assertEqual(OPERATIONAL_RESOURCE_DESCRIPTORS["work_items"].sort_fields, ("attention_rank",))
         self.assertIn("upsert_actualization", OPERATIONAL_RESOURCE_DESCRIPTORS["shipments"].actions)
         self.assertIn("append_event", OPERATIONAL_RESOURCE_DESCRIPTORS["deliveries"].actions)
+        confirmation_actions = {
+            action.key: action for action in OPERATIONAL_RESOURCE_DESCRIPTORS["confirmations"].surface.actions
+        }
+        self.assertTrue(confirmation_actions["disputed"].comment_required)
+        self.assertEqual(
+            confirmation_actions["disputed"].comment_hint,
+            "Add a dispute reason or response note before marking the confirmation as disputed.",
+        )
+        workflow_actions = {
+            action.key: action for action in OPERATIONAL_RESOURCE_DESCRIPTORS["work_items"].surface.actions
+        }
+        self.assertEqual(
+            workflow_actions["approve"].permission_message,
+            "Only authorized credit approvers can approve credit workflow items.",
+        )
 
 
 if __name__ == "__main__":

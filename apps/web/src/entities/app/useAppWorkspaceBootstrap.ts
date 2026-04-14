@@ -335,6 +335,9 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setAppLoading(false)
   }
 
+  const handleAuthenticationInterruptionRef = useRef(handleAuthenticationInterruption)
+  handleAuthenticationInterruptionRef.current = handleAuthenticationInterruption
+
   async function loadData(options?: LoadDataOptions) {
     const currentSession = options?.sessionOverride ?? authSession
     const force = options?.force ?? true
@@ -876,6 +879,9 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     }
   }
 
+  const refreshAuthSessionRef = useRef(refreshAuthSession)
+  refreshAuthSessionRef.current = refreshAuthSession
+
   async function handleSessionChange(nextSession: StoredAuthSession | null) {
     if (nextSession) {
       saveStoredAuthSession(nextSession)
@@ -902,7 +908,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   useEffect(() => {
     async function init() {
       try {
-        const session = await refreshAuthSession()
+        const session = await refreshAuthSessionRef.current()
         await loadDataRef.current({
           sessionOverride: session,
           groups: ['core'],
@@ -940,7 +946,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         await sendSessionHeartbeat(appConfig.apiBase)
       } catch (error) {
         if (!cancelled && isAuthenticationError(error)) {
-          handleAuthenticationInterruption('session_expired')
+          handleAuthenticationInterruptionRef.current('session_expired')
         }
       }
     }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 
-import { matchesTextFilter } from '../../shared/filtering'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type { Trade } from '../../shared/models'
 import {
   buildUnitLabelByCommodity,
@@ -44,6 +45,8 @@ function matchesPositionScreenFilter(
 type PositionsWorkspaceProps = {
   activeTrades: Trade[]
   authSession: StoredAuthSession | null
+  routeHandoff?: AppRouteHandoff | null
+  globalFilter: string
   onOpenRisk: () => void
   onOpenTrade: (tradeId: string) => void
   positionsByClass: Array<{ commodityClass: string; netVolume: number }>
@@ -56,6 +59,7 @@ type PositionsWorkspaceProps = {
 export function PositionsWorkspace({
   activeTrades,
   authSession,
+  globalFilter,
   onOpenRisk,
   onOpenTrade,
   positionsByClass,
@@ -65,6 +69,7 @@ export function PositionsWorkspace({
   formatDate,
 }: PositionsWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const positionRowsWithTradeContext = useMemo(
     () =>
       positionsWithClass.map((position) => ({
@@ -75,12 +80,13 @@ export function PositionsWorkspace({
   )
   const filteredPositionRows = useMemo(
     () =>
-      positionRowsWithTradeContext.filter((position) => matchesPositionScreenFilter(position, screenFilter)),
-    [positionRowsWithTradeContext, screenFilter],
+      positionRowsWithTradeContext.filter((position) => matchesPositionScreenFilter(position, effectiveScreenFilter)),
+    [effectiveScreenFilter, positionRowsWithTradeContext],
   )
-  const visiblePositionsWithClass = screenFilter.trim().length > 0 ? filteredPositionRows : positionRowsWithTradeContext
+  const visiblePositionsWithClass =
+    effectiveScreenFilter.trim().length > 0 ? filteredPositionRows : positionRowsWithTradeContext
   const visiblePositionsByClass = useMemo(() => {
-    if (screenFilter.trim().length === 0) {
+    if (effectiveScreenFilter.trim().length === 0) {
       return positionsByClass
     }
 
@@ -94,7 +100,7 @@ export function PositionsWorkspace({
       commodityClass: row.commodityClass,
       netVolume: totals.get(row.commodityClass) ?? 0,
     }))
-  }, [positionsByClass, screenFilter, visiblePositionsWithClass])
+  }, [effectiveScreenFilter, positionsByClass, visiblePositionsWithClass])
   const commodityUnitLabels = buildUnitLabelByCommodity(activeTrades)
   const commodityClassUnitLabels = buildUnitLabelByCommodityClass(activeTrades)
   const grossExposure = visiblePositionsWithClass.reduce((total, position) => total + Math.abs(position.net_volume), 0)
@@ -203,6 +209,7 @@ export function PositionsWorkspace({
           totalCount={positionRowsWithTradeContext.length}
           matchedCount={visiblePositionsWithClass.length}
           resultLabel="commodity rows"
+          globalValue={globalFilter}
         />
       }
       sections={[

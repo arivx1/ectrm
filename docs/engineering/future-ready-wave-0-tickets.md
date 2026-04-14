@@ -447,6 +447,13 @@ mobile viewport and the signed-out entry state.
 - the signed-out entry experience is asserted in browser coverage
 - the test is stable enough for normal CI use
 
+### Implementation note
+
+- the Playwright smoke suite now asserts a phone-width shell layout plus mobile
+  nav drawer overlay behavior
+- a signed-out browser path now verifies the start-here overlay routes trade
+  capture intent into the auth gate with the expected return-intent message
+
 ## FR0-11: Signed-In Trade Capture Smoke Flow
 
 ### Size
@@ -480,6 +487,13 @@ The primary operator write journey is covered by browser automation.
 - the repo has one signed-in trade capture browser smoke flow
 - the flow fails on a broken primary capture journey
 - the test data and login assumptions are documented
+
+### Implementation note
+
+- the Playwright smoke suite now signs in with the seeded local `OPS_ADMIN`
+  session and submits one deterministic fixed-price natural gas ticket
+- the create flow asserts the `TradeCreated` mutation lands, the app routes to
+  the created trade, and the capture form resets to the next suggested trade ID
 
 ## FR0-12: Admin Or Assistant Governance Smoke Flow
 
@@ -517,6 +531,18 @@ does not optimize only for the happy-path trading shell.
 - one governance-oriented flow is covered by browser smoke automation
 - the selected flow verifies a meaningful admin or assistant trust seam
 - docs explain how follow-on governance smoke tests should be prioritized
+
+### Implementation note
+
+- Wave 0 uses the admin assistant approval inbox as the first governance smoke
+  target because it protects the clearest human trust boundary in the current
+  product: a cross-user assistant action that an admin can explicitly reject or
+  execute
+- the Playwright smoke suite now seeds one pending assistant action request,
+  opens the real Admin workspace, and rejects that request through the inbox
+- follow-on governance smoke priorities should expand outward from that trust
+  seam: assistant approval execution, agent-management mutations, then broader
+  user-management or roadmap-control regressions
 
 ## Suggested Milestones
 

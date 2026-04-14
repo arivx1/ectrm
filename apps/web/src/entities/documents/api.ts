@@ -2,6 +2,7 @@ import { fetchJson, patchJson, postFormData, postJson, requestOk } from '../../s
 import type { StoredAuthSession } from '../../shared/mutation'
 import type {
   DocumentIngestionRecord,
+  DocumentProcessorRuntimeSettingsRecord,
   DocumentSchemaRegistryRecord,
 } from '../../shared/models'
 
@@ -51,6 +52,16 @@ export async function listDocumentSchemaRegistry(
   })
 }
 
+export async function getDocumentProcessorSettings(
+  apiBase: string,
+  session: StoredAuthSession,
+): Promise<DocumentProcessorRuntimeSettingsRecord> {
+  return fetchJson<DocumentProcessorRuntimeSettingsRecord>(`${apiBase}/documents/settings`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
+}
+
 export async function listDocumentIngestions(
   apiBase: string,
   session: StoredAuthSession,
@@ -66,11 +77,15 @@ export async function uploadPdfDocument(
   session: StoredAuthSession,
   file: File,
   displayName?: string,
+  processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
 ): Promise<DocumentIngestionRecord> {
   const formData = new FormData()
   formData.append('file', file)
   if (displayName?.trim()) {
     formData.append('display_name', displayName.trim())
+  }
+  if (processorProvider?.trim()) {
+    formData.append('processor_provider', processorProvider.trim())
   }
 
   return postFormData<DocumentIngestionRecord>(`${apiBase}/documents/uploads`, formData, {
@@ -113,9 +128,24 @@ export async function reprocessDocumentIngestion(
   apiBase: string,
   session: StoredAuthSession,
   documentId: string,
+  processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
 ): Promise<DocumentIngestionRecord> {
   return postJson<DocumentIngestionRecord>(
     `${apiBase}/documents/${documentId}/reprocess`,
+    processorProvider ? { processor_provider: processorProvider } : {},
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function executeDocumentActionPlan(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+): Promise<DocumentIngestionRecord> {
+  return postJson<DocumentIngestionRecord>(
+    `${apiBase}/documents/${documentId}/execute-action-plan`,
     {},
     {
       headers: documentHeaders(session),
