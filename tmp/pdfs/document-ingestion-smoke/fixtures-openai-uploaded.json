@@ -1,0 +1,16 @@
+{
+  "api_base": "http://127.0.0.1:8000",
+  "fixtures": [
+    {
+      "expected_transport": "uploaded-file-id",
+      "mode": "openai-uploaded",
+      "page_count": 2,
+      "path": "/Users/anthonyrivich/Documents/GitHub/ectrm/tmp/pdfs/document-ingestion-smoke/openai-uploaded-smoke.pdf",
+      "requested_processor_provider": "openai",
+      "size_bytes": 9437207
+    }
+  ],
+  "fixtures_only": true,
+  "inline_threshold_bytes": 8388608,
+  "results": []
+}
