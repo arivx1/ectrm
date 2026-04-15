@@ -22,12 +22,17 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.config import settings
 from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.services.registry import snapshot_payload_from_record
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
+from apps.api.app.models.assistant_agent_eval_run import AssistantAgentEvalRun
+from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.event import Event
+from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
@@ -59,6 +64,7 @@ class AssistantEvalAgentFixture:
     provider: str | None = "openai"
     model: str | None = "gpt-5-mini"
     system_prompt: str | None = None
+    publish: bool = True
 
 
 @dataclass(frozen=True)
@@ -155,7 +161,11 @@ class AssistantApiEvalHarness(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(UserSession).delete()
             session.query(AssistantActionRequest).delete()
+            session.query(MutationProvenanceRecord).delete()
             session.query(AssistantRun).delete()
+            session.query(AssistantAgentEvalRun).delete()
+            session.query(AssistantAgentEval).delete()
+            session.query(AssistantAgentRevision).delete()
             session.query(AssistantAgent).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
@@ -379,27 +389,46 @@ class AssistantApiEvalHarness(unittest.TestCase):
     def _create_agent(self, fixture: AssistantEvalAgentFixture) -> None:
         now = datetime.now(timezone.utc)
         with self.SessionLocal() as session:
-            session.add(
-                AssistantAgent(
-                    agent_id=fixture.agent_id,
-                    name=fixture.name,
-                    description=f"{fixture.name} evaluation agent.",
-                    status=fixture.status,
-                    scope=fixture.scope,
-                    provider=fixture.provider,
-                    model=fixture.model,
-                    allowed_workspaces=list(fixture.allowed_workspaces),
-                    capabilities=list(fixture.capabilities),
-                    allowed_tools=list(fixture.allowed_tools),
-                    allowed_action_types=list(fixture.allowed_action_types),
-                    system_prompt=fixture.system_prompt or f"System prompt for {fixture.name}.",
-                    created_at=now,
-                    created_by="assistant-eval-suite",
-                    updated_at=now,
-                    updated_by="assistant-eval-suite",
-                    version=1,
-                )
+            record = AssistantAgent(
+                agent_id=fixture.agent_id,
+                name=fixture.name,
+                description=f"{fixture.name} evaluation agent.",
+                status=fixture.status,
+                scope=fixture.scope,
+                provider=fixture.provider,
+                model=fixture.model,
+                allowed_workspaces=list(fixture.allowed_workspaces),
+                capabilities=list(fixture.capabilities),
+                allowed_tools=list(fixture.allowed_tools),
+                allowed_action_types=list(fixture.allowed_action_types),
+                system_prompt=fixture.system_prompt or f"System prompt for {fixture.name}.",
+                created_at=now,
+                created_by="assistant-eval-suite",
+                updated_at=now,
+                updated_by="assistant-eval-suite",
+                version=1,
             )
+            session.add(record)
+            session.flush()
+            revision = AssistantAgentRevision(
+                agent_id=fixture.agent_id,
+                version=record.version,
+                payload=snapshot_payload_from_record(record),
+                change_summary=["Created draft."],
+                created_at=now,
+                created_by="assistant-eval-suite",
+                published_at=now if fixture.publish else None,
+                published_by="assistant-eval-suite" if fixture.publish else None,
+                restored_from_revision_id=None,
+            )
+            session.add(revision)
+            session.flush()
+            record.latest_revision_id = revision.revision_id
+            if fixture.publish:
+                record.published_revision_id = revision.revision_id
+                record.published_snapshot = revision.payload
+                record.published_at = now
+                record.published_by = "assistant-eval-suite"
             session.commit()
 
     def _create_trade_with_event(self, fixture: AssistantEvalTradeFixture) -> None:
