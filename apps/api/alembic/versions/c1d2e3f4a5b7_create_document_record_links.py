@@ -1,6 +1,6 @@
 """create document record links
 
-Revision ID: c1d2e3f4a5b6
+Revision ID: c1d2e3f4a5b7
 Revises: b9c0d1e2f3a4
 Create Date: 2026-04-14 11:00:00.000000
 """
@@ -13,7 +13,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "c1d2e3f4a5b6"
+revision: str = "c1d2e3f4a5b7"
 down_revision: Union[str, Sequence[str], None] = "b9c0d1e2f3a4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
