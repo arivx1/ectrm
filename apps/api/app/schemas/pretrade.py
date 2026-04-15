@@ -1,0 +1,183 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from apps.api.app.schemas._validation import normalize_required_text
+
+PreTradeTradeSide = Literal["BUY", "SELL"]
+PreTradeReviewStatus = Literal["OPEN", "IN_REVIEW", "APPROVED", "REJECTED"]
+
+
+def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalize_required_text(normalized, field_name=field_name)
+
+
+class PreTradeScenarioDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    book: str = Field(..., min_length=1, max_length=64)
+    portfolio: str | None = Field(default=None, max_length=64)
+    counterparty: str | None = Field(default=None, max_length=64)
+    commodity_class: str = Field(..., min_length=1, max_length=64)
+    commodity: str = Field(..., min_length=1, max_length=64)
+    trade_side: PreTradeTradeSide = "BUY"
+    pricing_type: str = Field(..., min_length=1, max_length=64)
+    price_index_code: str | None = Field(default=None, max_length=64)
+    target_price: float | None = None
+    target_volume: float | None = None
+    trade_currency_code: str | None = Field(default=None, max_length=16)
+    unit_of_measure: str | None = Field(default=None, max_length=32)
+    price_unit_code: str | None = Field(default=None, max_length=32)
+    location_code: str | None = Field(default=None, max_length=64)
+    delivery_start: date | None = None
+    delivery_end: date | None = None
+
+    @field_validator(
+        "book",
+        "commodity_class",
+        "commodity",
+        "pricing_type",
+    )
+    @classmethod
+    def normalize_required_fields(cls, value: str, info) -> str:
+        return normalize_required_text(value, field_name=info.field_name)
+
+    @field_validator(
+        "portfolio",
+        "counterparty",
+        "price_index_code",
+        "trade_currency_code",
+        "unit_of_measure",
+        "price_unit_code",
+        "location_code",
+    )
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+    @field_validator("target_volume")
+    @classmethod
+    def validate_target_volume(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("target_volume must be greater than zero")
+        return value
+
+    @model_validator(mode="after")
+    def validate_delivery_window(self) -> "PreTradeScenarioDraft":
+        if self.delivery_start and self.delivery_end and self.delivery_end < self.delivery_start:
+            raise ValueError("delivery_end must be on or after delivery_start")
+        return self
+
+
+class PreTradeScenarioCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=120)
+    thesis: str | None = Field(default=None, max_length=2000)
+    draft: PreTradeScenarioDraft
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="name")
+
+    @field_validator("thesis")
+    @classmethod
+    def normalize_thesis(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="thesis")
+
+
+class PreTradeScenarioUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    thesis: str | None = Field(default=None, max_length=2000)
+    draft: PreTradeScenarioDraft | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="name")
+
+    @field_validator("thesis")
+    @classmethod
+    def normalize_thesis(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="thesis")
+
+
+class PreTradeScenarioOut(BaseModel):
+    scenario_id: int
+    name: str
+    thesis: str | None
+    draft: PreTradeScenarioDraft
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool
+
+
+class PreTradeReviewItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=120)
+    thesis: str | None = Field(default=None, max_length=2000)
+    draft: PreTradeScenarioDraft
+    source_scenario_id: int | None = Field(default=None, ge=1)
+    owner: str | None = Field(default=None, max_length=120)
+    due_at: datetime | None = None
+    review_notes: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="name")
+
+    @field_validator("thesis", "owner", "review_notes")
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeReviewItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    thesis: str | None = Field(default=None, max_length=2000)
+    draft: PreTradeScenarioDraft | None = None
+    review_status: PreTradeReviewStatus | None = None
+    owner: str | None = Field(default=None, max_length=120)
+    due_at: datetime | None = None
+    review_notes: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("name", "thesis", "owner", "review_notes")
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeReviewItemOut(BaseModel):
+    review_id: int
+    name: str
+    thesis: str | None
+    draft: PreTradeScenarioDraft
+    source_scenario_id: int | None
+    review_status: PreTradeReviewStatus
+    owner: str | None
+    due_at: datetime | None
+    review_notes: str | None
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool

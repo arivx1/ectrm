@@ -32,5 +32,8 @@ jobs:
       - name: Verify committed API contract artifacts
         run: make api-contract-check
 
+      - name: Run assistant eval gate
+        run: make api-assistant-evals
+
       - name: Run backend verification
         run: make api-test

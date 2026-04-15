@@ -84,6 +84,7 @@ From the repo root, the canonical backend verification wrapper is:
 
 ```bash
 make api-contract-check
+make api-assistant-evals
 make api-test
 ```
 
@@ -100,12 +101,17 @@ The first GitHub Actions backend lane uses the same commands:
 ```bash
 make api-install
 make api-contract-check
+make api-assistant-evals
 make api-test
 ```
 
 It currently runs on Python `3.12` and does not provision PostgreSQL, because
 the checked-in backend test suite uses self-contained test database fixtures
 for the default CI path.
+
+`make api-assistant-evals` is the explicit assistant-governance eval gate. Use
+it whenever changes affect prompt behavior, provider fallback, tool access, or
+approval-gated action flows.
 
 ## Server-Owned Metadata
 

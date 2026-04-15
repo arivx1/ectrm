@@ -4,7 +4,7 @@ import { shouldHandleClientSideNavigation } from '../../app/navigation'
 import { loadRoadmapDocument, type RoadmapDocumentData } from '../../entities/roadmap/api'
 import type { ViewKey } from '../../shared/models'
 import { appConfig } from '../../shared/config'
-import operatorGuideMarkdown from '../../../../../docs/operator-guide.md?raw'
+import userManualMarkdown from '../../../../../docs/user-manual.md?raw'
 import { RoadmapDocument, RoadmapSidebar } from './RoadmapDocument'
 
 export type DocumentationDocumentKey = 'guide' | 'roadmap'
@@ -18,20 +18,20 @@ type DocumentationWorkspaceProps = {
   roadmapRefreshVersion: number
 }
 
-type DocumentBlock =
+export type DocumentBlock =
   | { type: 'paragraph'; text: string }
   | { type: 'unordered_list'; items: string[] }
   | { type: 'ordered_list'; items: string[] }
   | { type: 'subheading'; text: string }
   | { type: 'table'; headers: string[]; rows: string[][] }
 
-type DocumentSection = {
+export type DocumentSection = {
   id: string
   title: string
   blocks: DocumentBlock[]
 }
 
-type ParsedDocument = {
+export type ParsedDocument = {
   title: string
   preamble: DocumentBlock[]
   sections: DocumentSection[]
@@ -125,6 +125,90 @@ const GUIDE_START_ACTIONS: Array<{
   },
 ] as const
 
+const TASK_PLAYBOOKS: Array<{
+  eyebrow: string
+  title: string
+  detail: string
+  trigger: string
+  view: Exclude<ViewKey, 'guide'>
+  actionLabel: string
+  steps: string[]
+}> = [
+  {
+    eyebrow: 'Capture',
+    title: 'Book a trade',
+    detail: 'Use this when the job is entering a new deal cleanly enough that downstream queues do not have to reconstruct intent.',
+    trigger: 'Best for new bookings, first-pass economics capture, and immediate verification after submit.',
+    view: 'trades',
+    actionLabel: 'Open Trade Capture',
+    steps: [
+      'Pick the correct book, commodity, and structure before entering economics.',
+      'Complete counterparty, pricing, quantity, and delivery details carefully enough that operations can trust the record.',
+      'Submit and confirm the saved state in the overview before leaving the ticket.',
+    ],
+  },
+  {
+    eyebrow: 'Amend',
+    title: 'Amend or cancel a trade',
+    detail: 'Use this when a live trade needs correction and the safe path is to change the existing record instead of rebooking.',
+    trigger: 'Best for urgent trade amendments, cancellations, and verifying what changed after save.',
+    view: 'trades',
+    actionLabel: 'Open Trade Capture',
+    steps: [
+      'Select the exact live trade before editing any economics.',
+      'Use the amend or cancel action path instead of creating a replacement trade.',
+      'Confirm the resulting event history so the desk has an explicit audit trail.',
+    ],
+  },
+  {
+    eyebrow: 'Investigate',
+    title: 'Investigate a mismatch',
+    detail: 'Use this when the current trade, position, exposure, confirmation, or cash state does not match what someone expects.',
+    trigger: 'Best for blotter mismatches, exposure surprises, and tracing where a divergence first appears.',
+    view: 'events',
+    actionLabel: 'Open Activity Feed',
+    steps: [
+      'Find the relevant trade, time window, or workflow item in Activity Feed first.',
+      'Cross-check the current state in Trade Capture, Exposure, or Net Positions depending on the symptom.',
+      'Continue into Operations or Settlement if the mismatch is already a downstream blocker.',
+    ],
+  },
+  {
+    eyebrow: 'Cash',
+    title: 'Clear a settlement blocker',
+    detail: 'Use this when an invoice is missing, a payment is late, cash is unreconciled, or queue ownership is unclear.',
+    trigger: 'Best for invoice issuance, payment follow-up, aging review, and deciding whether the blocker belongs in settlement or operations.',
+    view: 'settlement',
+    actionLabel: 'Open Settlement',
+    steps: [
+      'Inspect the exact invoice or payment record before escalating the issue.',
+      'Confirm whether the problem is issuance, payment status, aging, or reconciliation.',
+      'Hand the issue into Operations only when the blocker needs explicit ownership or approval.',
+    ],
+  },
+  {
+    eyebrow: 'Access',
+    title: 'Fix access issues',
+    detail: 'Use this when sign-in fails, the console behaves like read-only software, or a user cannot reach the workspace they own.',
+    trigger: 'Best for session recovery, bootstrap questions, and deciding when to escalate into privileged controls.',
+    view: 'settings',
+    actionLabel: 'Open Settings',
+    steps: [
+      'Confirm the session is active in Settings before assuming the workflow is misconfigured.',
+      'Retry the blocked action after sign-in so you separate access failures from workflow bugs.',
+      'Move into Admin only when the issue is role policy, bootstrap state, or runtime control.',
+    ],
+  },
+] as const
+
+const MANUAL_SEARCH_SUGGESTIONS = [
+  'trade amendment',
+  'invoice missing',
+  'confirmation stalled',
+  'sign-in',
+  'pricing mismatch',
+] as const
+
 const DOCUMENT_ORDER: DocumentationDocumentKey[] = ['guide', 'roadmap']
 
 const DOCUMENT_DEFINITIONS: Record<
@@ -138,11 +222,11 @@ const DOCUMENT_DEFINITIONS: Record<
   }
 > = {
   guide: {
-    label: 'Operator Guide',
-    eyebrow: 'Guide',
-    title: 'Operator Guide',
-    heroDetail: 'Use this as the in-product start point for onboarding, workflow questions, and choosing the right workspace for the job in front of you.',
-    sidebarDetail: 'Start with the job cards, then use the handbook and section index for deeper workflow context.',
+    label: 'User Manual',
+    eyebrow: 'Manual',
+    title: 'User Manual',
+    heroDetail: 'Use this as the dedicated in-product manual for onboarding, workflow questions, and choosing the right workspace for the job in front of you.',
+    sidebarDetail: 'Start with the job cards, then search or browse the manual for deeper workflow context.',
   },
   roadmap: {
     label: 'Implementation Roadmap',
@@ -160,8 +244,9 @@ export function DocumentationWorkspace({
   onOpenView,
   roadmapRefreshVersion,
 }: DocumentationWorkspaceProps) {
-  const guide = useMemo(() => parseMarkdownDocument(operatorGuideMarkdown), [])
+  const guide = useMemo(() => parseMarkdownDocument(userManualMarkdown), [])
   const [activeSectionId, setActiveSectionId] = useState<string>(guide.sections[0]?.id ?? '')
+  const [manualQuery, setManualQuery] = useState('')
   const [roadmap, setRoadmap] = useState<RoadmapDocumentData | null>(null)
   const [roadmapLoading, setRoadmapLoading] = useState(false)
   const [roadmapError, setRoadmapError] = useState('')
@@ -170,6 +255,15 @@ export function DocumentationWorkspace({
   const activeDocumentDefinition = DOCUMENT_DEFINITIONS[activeDocumentKey]
   const activeDocumentTitle = activeDocumentKey === 'guide' ? guide.title : activeDocumentDefinition.title
   const shouldLoadRoadmap = activeDocumentKey === 'roadmap' || roadmap !== null
+  const filteredGuideSections = useMemo(
+    () => filterGuideSections(guide.sections, manualQuery),
+    [guide.sections, manualQuery],
+  )
+  const visibleGuideSections = activeDocumentKey === 'guide' ? filteredGuideSections : guide.sections
+  const hasManualQuery = manualQuery.trim().length > 0
+  const manualStatusLabel = hasManualQuery
+    ? `${visibleGuideSections.length.toLocaleString()} of ${guide.sections.length.toLocaleString()} sections match`
+    : `All ${guide.sections.length.toLocaleString()} manual sections in view`
 
   function handleWorkspaceLinkClick(
     event: ReactMouseEvent<HTMLAnchorElement>,
@@ -224,6 +318,23 @@ export function DocumentationWorkspace({
 
   useEffect(() => {
     if (activeDocumentKey !== 'guide') {
+      return
+    }
+
+    if (visibleGuideSections.length === 0) {
+      if (activeSectionId !== '') {
+        setActiveSectionId('')
+      }
+      return
+    }
+
+    if (!visibleGuideSections.some((section) => section.id === activeSectionId)) {
+      setActiveSectionId(visibleGuideSections[0].id)
+    }
+  }, [activeDocumentKey, activeSectionId, visibleGuideSections])
+
+  useEffect(() => {
+    if (activeDocumentKey !== 'guide') {
       const frameId = window.requestAnimationFrame(() => {
         setActiveSectionId('')
       })
@@ -237,14 +348,14 @@ export function DocumentationWorkspace({
 
     function sectionIdFromHash(): string | null {
       const hash = window.location.hash.replace(/^#/, '').trim()
-      return guide.sections.some((section) => section.id === hash) ? hash : null
+      return visibleGuideSections.some((section) => section.id === hash) ? hash : null
     }
 
     function updateActiveSection() {
       const topOffset = 180
-      let nextSectionId = guide.sections[0]?.id ?? ''
+      let nextSectionId = visibleGuideSections[0]?.id ?? ''
 
-      for (const section of guide.sections) {
+      for (const section of visibleGuideSections) {
         const element = document.getElementById(section.id)
         if (!element) {
           continue
@@ -305,7 +416,7 @@ export function DocumentationWorkspace({
       window.removeEventListener('resize', scheduleUpdate)
       window.removeEventListener('scroll', scheduleUpdate)
     }
-  }, [activeDocumentKey, guide.sections])
+  }, [activeDocumentKey, visibleGuideSections])
 
   return (
     <div className="workspace-grid docs-workspace">
@@ -345,6 +456,53 @@ export function DocumentationWorkspace({
         </article>
 
         {activeDocumentKey === 'guide' ? (
+          <section className="surface workspace-local-filter docs-search-surface">
+            <div className="workspace-local-filter-copy">
+              <div>
+                <span className="eyebrow">Search</span>
+                <h3>Search the manual</h3>
+              </div>
+              <p>Find the right section by task, symptom, workspace, or support question without scanning the full table of contents first.</p>
+            </div>
+
+            <div className="workspace-local-filter-controls">
+              <label className="field workspace-local-filter-field">
+                <span>Search manual topics</span>
+                <input
+                  className="control"
+                  type="search"
+                  value={manualQuery}
+                  onChange={(event) => setManualQuery(event.target.value)}
+                  placeholder="Trade amendment, invoice missing, sign-in, settlement blocker, exposure mismatch"
+                />
+              </label>
+
+              <div className="workspace-local-filter-actions">
+                <span className="entity-chip entity-chip-soft">{manualStatusLabel}</span>
+                {hasManualQuery ? (
+                  <button type="button" className="button button-ghost" onClick={() => setManualQuery('')}>
+                    Clear Search
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="docs-search-suggestions" aria-label="Suggested manual searches">
+              {MANUAL_SEARCH_SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className={`button button-ghost docs-search-suggestion ${manualQuery.trim() === suggestion ? 'is-active' : ''}`}
+                  onClick={() => setManualQuery(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {activeDocumentKey === 'guide' ? (
           <article className="surface docs-section">
             <div className="section-head">
               <div>
@@ -379,21 +537,37 @@ export function DocumentationWorkspace({
         ) : null}
 
         {activeDocumentKey === 'guide' ? (
-          guide.sections.map((section) => (
-            <article key={section.id} id={section.id} className="surface docs-section">
-              <div className="section-head">
-                <div>
-                  <span className="eyebrow">Section</span>
-                  <h3>{section.title}</h3>
+          visibleGuideSections.length > 0 ? (
+            visibleGuideSections.map((section) => (
+              <article key={section.id} id={section.id} className="surface docs-section">
+                <div className="section-head">
+                  <div>
+                    <span className="eyebrow">Section</span>
+                    <h3>{section.title}</h3>
+                  </div>
+                  <p>{summarizeSection(section)}</p>
                 </div>
-                <p>{summarizeSection(section)}</p>
-              </div>
 
-              <div className="docs-prose">
-                {section.blocks.map((block, index) => renderBlock(block, `${section.id}-${index}`))}
-              </div>
+                <div className="docs-prose">
+                  {section.blocks.map((block, index) => renderBlock(block, `${section.id}-${index}`))}
+                </div>
+
+                {renderGuideSectionEnhancement({
+                  getViewHref,
+                  onHandleWorkspaceLinkClick: handleWorkspaceLinkClick,
+                  sectionId: section.id,
+                })}
+              </article>
+            ))
+          ) : (
+            <article className="surface docs-section empty-state">
+              <strong>No manual sections matched that search.</strong>
+              <p>
+                Try a workspace name, symptom, or job such as <code>trade amendment</code>,{' '}
+                <code>invoice missing</code>, <code>confirmation stalled</code>, or <code>sign-in</code>.
+              </p>
             </article>
-          ))
+          )
         ) : (
           renderRoadmapContent({
             getViewHref,
@@ -417,7 +591,7 @@ export function DocumentationWorkspace({
             </div>
 
             <nav className="docs-toc" aria-label={`${guide.title} sections`}>
-              {guide.sections.map((section, index) => (
+              {visibleGuideSections.map((section, index) => (
                 <a
                   key={section.id}
                   className={`docs-toc-link ${activeSectionId === section.id ? 'is-active' : ''}`}
@@ -467,6 +641,55 @@ export function DocumentationWorkspace({
   )
 }
 
+function renderGuideSectionEnhancement({
+  getViewHref,
+  onHandleWorkspaceLinkClick,
+  sectionId,
+}: {
+  getViewHref: (view: Exclude<ViewKey, 'guide'>) => string
+  onHandleWorkspaceLinkClick: (
+    event: ReactMouseEvent<HTMLAnchorElement>,
+    view: Exclude<ViewKey, 'guide'>,
+  ) => void
+  sectionId: string
+}) {
+  if (sectionId !== 'task-playbooks') {
+    return null
+  }
+
+  return (
+    <div className="docs-playbook-grid">
+      {TASK_PLAYBOOKS.map((playbook) => (
+        <article key={playbook.title} className="docs-playbook-card">
+          <div className="section-start-card-copy">
+            <span>{playbook.eyebrow}</span>
+            <strong>{playbook.title}</strong>
+            <p>{playbook.detail}</p>
+          </div>
+
+          <p className="docs-playbook-trigger">{playbook.trigger}</p>
+
+          <ol className="docs-list docs-list-ordered">
+            {playbook.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+
+          <div className="docs-playbook-actions">
+            <a
+              href={getViewHref(playbook.view)}
+              className="button button-secondary button-link"
+              onClick={(event) => onHandleWorkspaceLinkClick(event, playbook.view)}
+            >
+              {playbook.actionLabel}
+            </a>
+          </div>
+        </article>
+      ))}
+    </div>
+  )
+}
+
 function renderRoadmapContent({
   getViewHref,
   roadmap,
@@ -503,7 +726,7 @@ function renderRoadmapContent({
   )
 }
 
-function parseMarkdownDocument(markdown: string): ParsedDocument {
+export function parseMarkdownDocument(markdown: string): ParsedDocument {
   const lines = markdown.split(/\r?\n/)
   const preamble: DocumentBlock[] = []
   const sections: DocumentSection[] = []
@@ -657,6 +880,24 @@ function parseMarkdownDocument(markdown: string): ParsedDocument {
   }
 }
 
+export function filterGuideSections(sections: DocumentSection[], query: string): DocumentSection[] {
+  const queryTerms = tokenizeManualSearchValue(query)
+  if (queryTerms.length === 0) {
+    return sections
+  }
+
+  return sections.filter((section) => {
+    const searchWords = tokenizeManualSearchValue(
+      [
+        section.title,
+        ...section.blocks.map((block) => documentBlockSearchText(block)),
+      ].join(' '),
+    )
+
+    return queryTerms.every((term) => searchWords.some((word) => word.includes(term)))
+  })
+}
+
 function createSectionId(title: string, usedIds: Set<string>): string {
   const baseId = title
     .toLowerCase()
@@ -694,6 +935,19 @@ function summarizeSection(section: DocumentSection): string {
   const firstSentenceMatch = firstParagraph.text.match(/^.*?[.!?](?:\s|$)/)
   const summary = (firstSentenceMatch?.[0] ?? firstParagraph.text).trim()
   return summary.length > 140 ? `${summary.slice(0, 137).trimEnd()}...` : summary
+}
+
+function documentBlockSearchText(block: DocumentBlock): string {
+  switch (block.type) {
+    case 'paragraph':
+    case 'subheading':
+      return block.text
+    case 'unordered_list':
+    case 'ordered_list':
+      return block.items.join(' ')
+    case 'table':
+      return [...block.headers, ...block.rows.flat()].join(' ')
+  }
 }
 
 function renderBlock(block: DocumentBlock, key: string): ReactNode {
@@ -830,4 +1084,28 @@ function parseTableCells(line: string): string[] {
     .replace(/\|$/, '')
     .split('|')
     .map((cell) => cell.trim())
+}
+
+function tokenizeManualSearchValue(query: string): string[] {
+  return normalizeManualSearchText(query)
+    .split(' ')
+    .map((term) => normalizeManualSearchToken(term.trim()))
+    .filter((term) => term.length >= 3)
+}
+
+function normalizeManualSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function normalizeManualSearchToken(term: string): string {
+  for (const suffix of ['ments', 'ment', 'ings', 'ing', 'ied', 'ies', 'ed', 'es', 's']) {
+    if (term.length > suffix.length + 3 && term.endsWith(suffix)) {
+      return term.slice(0, -suffix.length)
+    }
+  }
+
+  return term
 }

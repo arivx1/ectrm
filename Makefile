@@ -1,4 +1,4 @@
-.PHONY: db-up db-down api-install api-dev api-test api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
+.PHONY: db-up db-down api-install api-dev api-test api-assistant-evals api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
 
 VENV_PYTHON := ./.venv/bin/python
 WEB_DIR := apps/web
@@ -18,6 +18,10 @@ api-dev:
 api-test:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
 	PYTHONPATH=. $(VENV_PYTHON) -m unittest discover -s apps/api/tests -p 'test_*.py'
+
+api-assistant-evals:
+	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
+	PYTHONPATH=. $(VENV_PYTHON) -m unittest apps.api.tests.test_assistant_evals
 
 api-contract-refresh:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
@@ -50,7 +54,7 @@ web-smoke-test:
 
 verify-wave0: api-contract-check api-test web-build web-lint web-test
 
-verify: verify-wave0
+verify: api-assistant-evals verify-wave0
 
 rebuild-trades:
 	. .venv/bin/activate && PYTHONPATH=. python apps/api/scripts/rebuild_trades_projection.py

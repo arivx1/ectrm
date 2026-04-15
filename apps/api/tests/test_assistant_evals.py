@@ -11,6 +11,40 @@ from apps.api.tests.assistant_eval_harness import (
 
 MANAGED_AGENT_EVAL_CASES = (
     AssistantEvalCase(
+        name="default-provider-falls-back-to-first-configured-runtime",
+        request_payload={
+            "workspace": "assistant",
+            "context": "Selected trade:\n- trade_id: T-2000\n- commodity: WTI",
+            "use_live_tools": False,
+            "messages": [
+                {"role": "user", "content": "Summarize the selected trade from the provided context only."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-fallback-1",
+                "output_text": "Using the configured runtime, I can summarize the selected trade from the provided context only.",
+                "usage": {"input_tokens": 14, "output_tokens": 16},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            provider="openai",
+            model="gpt-5-mini",
+            agent_id=None,
+            agent_name=None,
+            message_contains=("configured runtime", "provided context only"),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("workspace", "application-context"),
+            prompt_section_absent_keys=("managed-agent", "approval-gated-action"),
+            provider_request_count=1,
+            provider_tool_names=(),
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
         name="managed-read-agent-uses-allowed-live-tools",
         agent=AssistantEvalAgentFixture(
             agent_id="trade-reader",
@@ -73,6 +107,48 @@ MANAGED_AGENT_EVAL_CASES = (
             provider_request_count=2,
             provider_tool_names=("get_trade_by_id",),
             provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="managed-read-agent-without-enabled-tools-falls-back-to-context-only",
+        agent=AssistantEvalAgentFixture(
+            agent_id="trade-reader-no-tools",
+            name="Trade Reader No Tools",
+            capabilities=("READ", "EXPLAIN"),
+            allowed_tools=("tool_not_published_here",),
+            system_prompt="Use live reads when available, but stay explicit when the runtime cannot offer them.",
+        ),
+        trades=(AssistantEvalTradeFixture(trade_id="T-2001B"),),
+        request_payload={
+            "agent_id": "trade-reader-no-tools",
+            "workspace": "assistant",
+            "context": "Selected trade:\n- trade_id: T-2001B\n- commodity: WTI",
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Explain the selected trade and be explicit if live reads are unavailable."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-read-no-tools-1",
+                "output_text": "I could not verify this with live reads on this worker, so I am using only the provided context.",
+                "usage": {"input_tokens": 18, "output_tokens": 18},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="trade-reader-no-tools",
+            agent_name="Trade Reader No Tools",
+            message_contains=("could not verify", "provided context"),
+            warning_count=1,
+            warning_contains=("has no enabled live tools on this API worker",),
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=1,
+            provider_tool_names=(),
+            provider_tools_key_present=False,
         ),
     ),
     AssistantEvalCase(

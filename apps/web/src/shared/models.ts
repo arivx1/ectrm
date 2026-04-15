@@ -1341,6 +1341,58 @@ export type SettlementReportPresetRecord = {
   can_edit: boolean
 }
 
+export type PreTradeScenarioDraft = {
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trade_side: 'BUY' | 'SELL'
+  pricing_type: string
+  price_index_code: string | null
+  target_price: number | null
+  target_volume: number | null
+  trade_currency_code: string | null
+  unit_of_measure: string | null
+  price_unit_code: string | null
+  location_code: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+}
+
+export type PreTradeScenarioRecord = {
+  scenario_id: number
+  name: string
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeReviewStatus = 'OPEN' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED'
+
+export type PreTradeReviewItemRecord = {
+  review_id: number
+  name: string
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  source_scenario_id: number | null
+  review_status: PreTradeReviewStatus
+  owner: string | null
+  due_at: string | null
+  review_notes: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
 export type PriceIndexObservationRecord = {
   id: number
   price_index_code: string

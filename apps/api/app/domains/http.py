@@ -19,6 +19,7 @@ from apps.api.app.routes.external_data import router as external_data_router
 from apps.api.app.routes.layout_definitions import router as layout_definitions_router
 from apps.api.app.routes.option_exposures import router as option_exposures_router
 from apps.api.app.routes.positions import router as positions_router
+from apps.api.app.routes.pretrade import router as pretrade_router
 from apps.api.app.routes.reference_data import router as reference_data_router
 from apps.api.app.routes.roadmap import admin_router as roadmap_admin_router
 from apps.api.app.routes.roadmap import router as roadmap_router
@@ -50,6 +51,7 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="assistant", name="assistant", router=assistant_router),
     HttpRouteRegistration(domain="assistant", name="assistant-admin", router=assistant_admin_router),
     HttpRouteRegistration(domain="trading", name="trades", router=trades_router),
+    HttpRouteRegistration(domain="pretrade", name="pretrade", router=pretrade_router),
     HttpRouteRegistration(domain="risk", name="option-exposures", router=option_exposures_router),
     HttpRouteRegistration(domain="risk", name="positions", router=positions_router),
     HttpRouteRegistration(domain="documents", name="documents", router=documents_router),

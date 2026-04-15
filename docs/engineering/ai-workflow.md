@@ -144,18 +144,42 @@ The harness seeds realistic users, trades, and managed agents, runs
 `/assistant/respond` through the real route stack, captures mocked provider
 requests, and verifies:
 
+- default-provider fallback when the preferred default is unavailable
 - resolved agent, provider, and model metadata
 - expected warnings
 - expected live-tool traces and filtered tool catalogs
+- context-only fallback when live tools are unavailable on the current worker
 - approval-gated action-request staging
 - persisted run traces and prompt sections
 
 Run it with:
 
 ```bash
-PYTHONPATH=/Users/anthonyrivich/Documents/GitHub/ectrm ./.venv/bin/python -m unittest \
-  apps.api.tests.test_assistant_evals
+make api-assistant-evals
 ```
+
+`make verify` and the GitHub `Backend` workflow now run this eval lane before
+the broader backend suite, so assistant regressions fail under an explicit
+named gate instead of only appearing inside general test discovery.
+
+### Eval Entry Rule
+
+Add or update an assistant eval whenever a change affects any of these:
+
+- provider or model selection behavior, including fallback semantics
+- tool allowlists, tool-round limits, or live-read availability handling
+- approval-gated action requests or action-governance prompt behavior
+- prompt section composition, managed-agent instructions, or explainability
+  warnings
+- automation or assistant behavior that could over-claim certainty without a
+  live read
+
+At minimum:
+
+- run `make api-assistant-evals` locally for assistant or automation changes
+- add a new fixture case or update an existing one when behavior changes
+- note the eval case added, updated, or intentionally not needed in the change
+  notes or PR description
 
 ## Configuration
 

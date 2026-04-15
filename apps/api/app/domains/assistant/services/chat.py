@@ -850,6 +850,14 @@ def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
             {"name": tool.name, "description": tool.description}
             for tool in available_tools
         ],
+        available_action_types=[
+            {
+                "name": action_type.name,
+                "label": action_type.label,
+                "description": action_type.description,
+            }
+            for action_type in ASSISTANT_ACTION_DEFINITIONS
+        ],
     )
 
 

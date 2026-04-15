@@ -118,6 +118,7 @@ Run these commands from the repo root:
 
 ```bash
 make api-contract-check
+make api-assistant-evals
 make api-test
 make web-build
 make web-lint
@@ -141,6 +142,12 @@ make api-contract-refresh
 ```
 
 before the verification targets.
+
+If assistant or automation behavior changes, run the explicit eval lane too:
+
+```bash
+make api-assistant-evals
+```
 
 For the seeded browser smoke harness, install Chromium once and run:
 
