@@ -1248,15 +1248,19 @@ def _list_trade_invoices(db: Session, arguments: dict[str, Any]) -> AssistantToo
         summary = f"Returned {len(items)} trade invoice row(s) for trade {trade_id}."
     if overdue_count:
         summary += f" {overdue_count} invoice(s) are overdue."
-    if not items and trade_id is None and not status and not overdue_only:
+    if trade_id is None and not status and not overdue_only:
         candidate_count = load_invoice_issue_candidate_count(db)
         if candidate_count:
             payload["unissued_invoice_candidate_count"] = candidate_count
             payload["suggested_next_tool"] = "list_invoice_issue_candidates"
-            summary += (
-                f" {candidate_count} active trade(s) need first invoice records; "
+            candidate_summary = (
+                f"{candidate_count} active trade(s) need first invoice records; "
                 "use list_invoice_issue_candidates to inspect those candidates."
             )
+            if items:
+                summary += f" Separately, {candidate_summary}"
+            else:
+                summary += f" {candidate_summary}"
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
 
 
