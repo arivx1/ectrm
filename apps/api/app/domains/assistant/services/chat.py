@@ -393,6 +393,8 @@ class AssistantService:
             response_text = _extract_openai_text(response_payload)
             if response_text:
                 last_response_text = response_text
+            if _openai_response_reached_output_limit(response_payload):
+                _append_warning_once(warnings, _output_limit_warning(provider.label))
 
             pending_calls = _extract_openai_tool_calls(response_payload) if tool_definitions else []
             if pending_calls:
@@ -511,6 +513,8 @@ class AssistantService:
             response_text = _extract_anthropic_text(content_blocks)
             if response_text:
                 last_response_text = response_text
+            if _anthropic_response_reached_output_limit(response_payload):
+                _append_warning_once(warnings, _output_limit_warning(provider.label))
 
             pending_calls = _extract_anthropic_tool_calls(content_blocks) if tool_definitions else []
             if pending_calls:
@@ -667,6 +671,8 @@ class AssistantService:
             response_text = _extract_google_text(parts)
             if response_text:
                 last_response_text = response_text
+            if _google_candidate_reached_output_limit(candidate):
+                _append_warning_once(warnings, _output_limit_warning(provider.label))
 
             pending_calls = _extract_google_tool_calls(parts) if tool_definitions else []
             if pending_calls:
@@ -958,6 +964,18 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
         seen.add(value)
         deduped_values.append(value)
     return deduped_values
+
+
+def _append_warning_once(warnings: list[str], warning: str) -> None:
+    if warning not in warnings:
+        warnings.append(warning)
+
+
+def _output_limit_warning(provider_label: str) -> str:
+    return (
+        f"{provider_label} reached ASSISTANT_MAX_OUTPUT_TOKENS "
+        f"({settings.ASSISTANT_MAX_OUTPUT_TOKENS:,}) before finishing, so the answer may be cut off."
+    )
 
 
 def normalize_default_provider(value: str) -> AssistantProvider:
@@ -1314,6 +1332,24 @@ def _extract_openai_text(response_payload: dict[str, Any]) -> str:
     return "\n".join(text for text in texts if text).strip()
 
 
+def _openai_response_reached_output_limit(response_payload: dict[str, Any]) -> bool:
+    incomplete_details = response_payload.get("incomplete_details")
+    if isinstance(incomplete_details, dict) and incomplete_details.get("reason") == "max_output_tokens":
+        return True
+
+    for item in response_payload.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        item_incomplete_details = item.get("incomplete_details")
+        if (
+            item.get("status") == "incomplete"
+            and isinstance(item_incomplete_details, dict)
+            and item_incomplete_details.get("reason") == "max_output_tokens"
+        ):
+            return True
+    return False
+
+
 def _extract_openai_tool_calls(response_payload: dict[str, Any]) -> list[PendingToolCall]:
     pending_calls: list[PendingToolCall] = []
     for item in response_payload.get("output", []):
@@ -1343,6 +1379,10 @@ def _extract_anthropic_text(content_blocks: Any) -> str:
     ).strip()
 
 
+def _anthropic_response_reached_output_limit(response_payload: dict[str, Any]) -> bool:
+    return response_payload.get("stop_reason") == "max_tokens"
+
+
 def _extract_anthropic_tool_calls(content_blocks: Any) -> list[PendingToolCall]:
     pending_calls: list[PendingToolCall] = []
     for block in content_blocks:
@@ -1370,6 +1410,10 @@ def _extract_google_text(parts: Any) -> str:
         for part in parts
         if isinstance(part, dict) and part.get("text")
     ).strip()
+
+
+def _google_candidate_reached_output_limit(candidate: dict[str, Any]) -> bool:
+    return candidate.get("finishReason") == "MAX_TOKENS"
 
 
 def _extract_google_tool_calls(parts: Any) -> list[PendingToolCall]:

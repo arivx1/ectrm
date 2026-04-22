@@ -116,6 +116,7 @@ class AssistantApiTests(unittest.TestCase):
             "ASSISTANT_COMPANY_NAME": settings.ASSISTANT_COMPANY_NAME,
             "ASSISTANT_COMPANY_CONTEXT": settings.ASSISTANT_COMPANY_CONTEXT,
             "ASSISTANT_BUSINESS_CONTEXT": settings.ASSISTANT_BUSINESS_CONTEXT,
+            "ASSISTANT_MAX_OUTPUT_TOKENS": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
             "ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION": settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION,
             "OPENAI_API_KEY": settings.OPENAI_API_KEY,
             "OPENAI_MODEL": settings.OPENAI_MODEL,
@@ -155,6 +156,7 @@ class AssistantApiTests(unittest.TestCase):
         settings.ASSISTANT_COMPANY_NAME = "Acme Energy"
         settings.ASSISTANT_COMPANY_CONTEXT = "Acme Energy runs an operator-facing commodity trading platform."
         settings.ASSISTANT_BUSINESS_CONTEXT = "Acme tracks trade lifecycle changes through explicit events."
+        settings.ASSISTANT_MAX_OUTPUT_TOKENS = 3200
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 100_000
         settings.OPENAI_API_KEY = "openai-test-key"
         settings.OPENAI_MODEL = "gpt-5-mini"
@@ -603,6 +605,43 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("Acme Energy", prompt_context.system_prompt)
         self.assertIn("Authenticated User", prompt_context.system_prompt)
         self.assertIn("Application Context", prompt_context.system_prompt)
+
+    def test_assistant_prompt_warns_when_openai_hits_output_limit(self) -> None:
+        token = self._create_session_token()
+        settings.ASSISTANT_MAX_OUTPUT_TOKENS = 128
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return {
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "output_text": "Partial answer cut mid-list",
+                "usage": {"input_tokens": 15, "output_tokens": 128},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "Give me a detailed plan."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["message"]["content"], "Partial answer cut mid-list")
+        self.assertIn(
+            "GPT reached ASSISTANT_MAX_OUTPUT_TOKENS (128) before finishing, so the answer may be cut off.",
+            payload["warnings"],
+        )
 
     def test_assistant_prompt_context_preview_includes_business_user_and_data_sections(self) -> None:
         token = self._create_session_token()
