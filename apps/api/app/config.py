@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         "implicit row edits."
     )
     ASSISTANT_TIMEOUT_SECONDS: int = Field(default=60, ge=5, le=300)
-    ASSISTANT_MAX_OUTPUT_TOKENS: int = Field(default=1200, ge=128, le=8192)
+    ASSISTANT_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=128, le=8192)
     ASSISTANT_MAX_TOOL_ROUNDS: int = Field(default=4, ge=0, le=12)
     ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION: int = Field(default=100_000, ge=0, le=100_000_000)
     CODEX_TASKS_ENABLED: bool = False
