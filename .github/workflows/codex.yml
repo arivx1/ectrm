@@ -1,0 +1,246 @@
+name: Codex Task
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Codex prompt rendered by ECTRM
+        required: true
+        type: string
+      task_id:
+        description: ECTRM Codex task request id
+        required: false
+        type: string
+      callback_url:
+        description: ECTRM Codex callback URL
+        required: false
+        type: string
+      run_mode:
+        description: Codex run mode
+        required: false
+        default: SINGLE_TASK
+        type: choice
+        options:
+          - SINGLE_TASK
+          - LONG_RUNNING
+      max_iterations:
+        description: Maximum long-running iterations
+        required: false
+        default: "1"
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  codex-task:
+    name: Execute Codex Task
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Prepare task branch
+        id: branch
+        env:
+          TASK_ID: ${{ inputs.task_id }}
+        run: |
+          set -euo pipefail
+          suffix="${TASK_ID:-manual}"
+          branch_name="codex/task-${suffix}-${GITHUB_RUN_ID}"
+          git switch -c "$branch_name"
+          echo "branch_name=$branch_name" >> "$GITHUB_OUTPUT"
+
+      - name: Notify ECTRM that Codex started
+        env:
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          CALLBACK_TOKEN: ${{ secrets.ECTRM_CODEX_CALLBACK_TOKEN }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          url = os.environ.get("CALLBACK_URL", "").strip()
+          token = os.environ.get("CALLBACK_TOKEN", "").strip()
+          if not url or not token:
+              print("Skipping ECTRM running callback because URL or token is missing.")
+              raise SystemExit(0)
+
+          payload = {
+              "status": "RUNNING",
+              "workflow_run_id": os.environ["WORKFLOW_RUN_ID"],
+              "workflow_run_url": os.environ["WORKFLOW_RUN_URL"],
+              "branch_name": os.environ["BRANCH_NAME"],
+          }
+          request = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "X-Codex-Callback-Token": token,
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              print(f"ECTRM running callback returned {response.status}.")
+          PY
+
+      - name: Run Codex
+        id: codex
+        env:
+          CODEX_PROMPT: ${{ inputs.prompt }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_OUTPUT: ${{ runner.temp }}/codex-output.md
+        run: |
+          set +e
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY GitHub secret is required to run Codex." | tee "$CODEX_OUTPUT"
+            echo "exit_code=2" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          codex exec --full-auto "$CODEX_PROMPT" > "$CODEX_OUTPUT" 2>&1
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish Codex pull request
+        id: publish
+        if: steps.codex.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TASK_ID: ${{ inputs.task_id }}
+          RUN_MODE: ${{ inputs.run_mode }}
+          MAX_ITERATIONS: ${{ inputs.max_iterations }}
+          BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+          CODEX_OUTPUT: ${{ runner.temp }}/codex-output.md
+          BASE_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "pull_request_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "Codex task ${TASK_ID:-manual}"
+          git push --set-upstream origin "$BRANCH_NAME"
+
+          body_file="$RUNNER_TEMP/codex-pr-body.md"
+          {
+            echo "## Codex task"
+            echo
+            echo "- ECTRM task id: ${TASK_ID:-manual}"
+            echo "- Run mode: ${RUN_MODE:-SINGLE_TASK}"
+            echo "- Max iterations: ${MAX_ITERATIONS:-1}"
+            echo "- Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "## Codex output"
+            echo
+            sed -n '1,180p' "$CODEX_OUTPUT"
+          } > "$body_file"
+
+          pr_url="$(gh pr create --draft --base "$BASE_BRANCH" --head "$BRANCH_NAME" --title "Codex task ${TASK_ID:-manual}" --body-file "$body_file")"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "pull_request_url=$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Codex output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-task-${{ inputs.task_id || github.run_id }}-output
+          path: ${{ runner.temp }}/codex-output.md
+          if-no-files-found: ignore
+
+      - name: Notify ECTRM that Codex finished
+        if: always()
+        env:
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          CALLBACK_TOKEN: ${{ secrets.ECTRM_CODEX_CALLBACK_TOKEN }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          BRANCH_NAME: ${{ steps.branch.outputs.branch_name }}
+          PULL_REQUEST_URL: ${{ steps.publish.outputs.pull_request_url }}
+          CODEX_EXIT_CODE: ${{ steps.codex.outputs.exit_code }}
+          RUN_MODE: ${{ inputs.run_mode }}
+          CODEX_OUTPUT: ${{ runner.temp }}/codex-output.md
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          url = os.environ.get("CALLBACK_URL", "").strip()
+          token = os.environ.get("CALLBACK_TOKEN", "").strip()
+          if not url or not token:
+              print("Skipping ECTRM terminal callback because URL or token is missing.")
+              raise SystemExit(0)
+
+          output_path = os.environ.get("CODEX_OUTPUT", "")
+          output_text = ""
+          if output_path and os.path.exists(output_path):
+              with open(output_path, "r", encoding="utf-8", errors="replace") as handle:
+                  output_text = handle.read()
+
+          exit_code = os.environ.get("CODEX_EXIT_CODE") or "1"
+          succeeded = exit_code == "0"
+          pull_request_url = os.environ.get("PULL_REQUEST_URL", "").strip() or None
+          run_mode = os.environ.get("RUN_MODE") or "SINGLE_TASK"
+          status = "COMPLETED" if succeeded else "FAILED"
+          if succeeded and run_mode == "LONG_RUNNING":
+              stop_reason = "Codex completed the long-running loop; see output for the final next-task decision."
+          elif succeeded:
+              stop_reason = "Codex completed the requested task."
+          else:
+              stop_reason = f"Codex exited with status {exit_code}."
+
+          summary = output_text.strip()[:8000] if output_text.strip() else stop_reason
+          payload = {
+              "status": status,
+              "workflow_run_id": os.environ["WORKFLOW_RUN_ID"],
+              "workflow_run_url": os.environ["WORKFLOW_RUN_URL"],
+              "branch_name": os.environ.get("BRANCH_NAME") or None,
+              "pull_request_url": pull_request_url,
+              "artifact_url": os.environ["WORKFLOW_RUN_URL"],
+              "iteration_count": 0,
+              "result_summary": summary,
+              "stop_reason": stop_reason,
+              "error_detail": None if succeeded else summary[:2000],
+          }
+          request = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "X-Codex-Callback-Token": token,
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              print(f"ECTRM terminal callback returned {response.status}.")
+          PY
+
+      - name: Fail workflow when Codex fails
+        if: steps.codex.outputs.exit_code != '0'
+        run: exit 1
