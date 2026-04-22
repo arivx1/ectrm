@@ -13,10 +13,13 @@ import type {
   AssistantActionRequestStatus,
   AssistantAdminAgent,
   AssistantAgent,
+  AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
   AssistantConversation,
   AssistantConversationSummary,
   AssistantOutcomeMetrics,
+  AssistantPolicySimulation,
+  AssistantPolicySimulationPhase,
   AssistantPromptContext,
   AssistantPromptContextRequest,
   AssistantPromptRequest,
@@ -28,6 +31,7 @@ import type {
   AssistantRunAuditTrace,
   AssistantRunSummary,
   AssistantRuntimeSettings,
+  ViewKey,
 } from '../../shared/models'
 
 export type CreateAssistantAgentInput = {
@@ -44,6 +48,7 @@ export type CreateAssistantAgentInput = {
   human_owner_role?: AssistantAdminAgent['human_owner_role']
   authority_ceiling?: AssistantAdminAgent['authority_ceiling']
   activation_notes?: AssistantAdminAgent['activation_notes']
+  profile_request_id?: AssistantAdminAgent['profile_request_id']
   allowed_workspaces: AssistantAdminAgent['allowed_workspaces']
   capabilities: AssistantAdminAgent['capabilities']
   allowed_tools: AssistantAdminAgent['allowed_tools']
@@ -53,6 +58,27 @@ export type CreateAssistantAgentInput = {
 }
 
 export type UpdateAssistantAgentInput = Omit<CreateAssistantAgentInput, 'agent_id'>
+
+export type CreateAssistantAgentProfileRequestInput = {
+  requested_agent_id?: string | null
+  business_problem: string
+  proposed_mission: string
+  human_owner_role: string
+  requested_workspaces: AssistantAdminAgent['allowed_workspaces']
+  work_objects: string[]
+  requested_inputs_tools: string[]
+  expected_outputs: string[]
+  requested_authority_ceiling: NonNullable<AssistantAdminAgent['authority_ceiling']>
+  stop_conditions: string[]
+  success_metrics: string[]
+  proposed_eval_cases: string[]
+}
+
+export type DecideAssistantAgentProfileRequestInput = {
+  reviewed_by?: string
+  approval_notes?: string
+  rejection_reason?: string
+}
 
 export type BuildAssistantAgentDraftInput = {
   brief: string
@@ -88,6 +114,14 @@ export type AssistantStreamEvent = {
 export type SubmitAssistantRunFeedbackInput = {
   rating: AssistantRunFeedbackRating
   comment?: string
+}
+
+export type SimulateAssistantAgentPolicyInput = {
+  workspace: ViewKey
+  prompt?: string
+  context?: string
+  actorRole?: string
+  phase?: AssistantPolicySimulationPhase
 }
 
 function assistantMutationHeaders(): Headers {
@@ -494,6 +528,73 @@ export async function listAdminAssistantRoleArchetypes(
   )
 }
 
+export async function listAdminAssistantProfileRequests(
+  apiBase: string,
+): Promise<AssistantAgentProfileRequest[]> {
+  return fetchJson<AssistantAgentProfileRequest[]>(
+    `${apiBase}/admin/assistant/profile-requests`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function createAssistantAgentProfileRequest(
+  apiBase: string,
+  payload: CreateAssistantAgentProfileRequestInput,
+): Promise<AssistantAgentProfileRequest> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantAgentProfileRequest>(
+    `${apiBase}/admin/assistant/profile-requests`,
+    {
+      ...payload,
+      requested_by: actorId,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function approveAssistantAgentProfileRequest(
+  apiBase: string,
+  requestId: number,
+  payload: DecideAssistantAgentProfileRequestInput,
+): Promise<AssistantAgentProfileRequest> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantAgentProfileRequest>(
+    `${apiBase}/admin/assistant/profile-requests/${requestId}/approve`,
+    {
+      reviewed_by: payload.reviewed_by || actorId,
+      approval_notes: payload.approval_notes,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function rejectAssistantAgentProfileRequest(
+  apiBase: string,
+  requestId: number,
+  payload: DecideAssistantAgentProfileRequestInput,
+): Promise<AssistantAgentProfileRequest> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantAgentProfileRequest>(
+    `${apiBase}/admin/assistant/profile-requests/${requestId}/reject`,
+    {
+      reviewed_by: payload.reviewed_by || actorId,
+      rejection_reason: payload.rejection_reason,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
 export async function listAdminAssistantAgents(apiBase: string): Promise<AssistantAdminAgent[]> {
   return fetchJson<AssistantAdminAgent[]>(`${apiBase}/admin/assistant/agents`, {
     headers: assistantMutationHeaders(),
@@ -530,6 +631,30 @@ export async function updateAssistantAgent(
     {
       ...payload,
       updated_by: actorId,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function simulateAssistantAgentPolicy(
+  apiBase: string,
+  agentId: string,
+  payload: SimulateAssistantAgentPolicyInput,
+): Promise<AssistantPolicySimulation> {
+  const normalizedPrompt = payload.prompt?.trim()
+  const normalizedContext = payload.context?.trim()
+  const normalizedActorRole = payload.actorRole?.trim()
+
+  return postJson<AssistantPolicySimulation>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/policy-simulation`,
+    {
+      workspace: payload.workspace,
+      phase: payload.phase ?? 'stage',
+      ...(normalizedPrompt ? { prompt: normalizedPrompt } : {}),
+      ...(normalizedContext ? { context: normalizedContext } : {}),
+      ...(normalizedActorRole ? { actor_role: normalizedActorRole } : {}),
     },
     {
       headers: assistantMutationHeaders(),

@@ -6,8 +6,10 @@ import {
   listAdminAssistantAgents,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
+  simulateAssistantAgentPolicy,
   updateAssistantAgent,
   type CreateAssistantAgentInput,
+  type SimulateAssistantAgentPolicyInput,
   type UpdateAssistantAgentInput,
 } from '../../entities/assistant/api'
 import {
@@ -33,6 +35,9 @@ import type {
   AssistantAgentRoleArchetype,
   AssistantAgentScope,
   AssistantAgentStatus,
+  AssistantPolicyDecision,
+  AssistantPolicySimulation,
+  AssistantPolicySimulationPhase,
   AssistantProvider,
   AssistantProviderStatus,
   ViewKey,
@@ -112,6 +117,7 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
     human_owner_role: agent.human_owner_role ?? '',
     authority_ceiling: agent.authority_ceiling ?? '',
     activation_notes: agent.activation_notes ?? '',
+    profile_request_id: agent.profile_request_id ?? null,
     allowed_workspaces: [...agent.allowed_workspaces],
     capabilities: [...agent.capabilities],
     allowed_tools: [...agent.allowed_tools],
@@ -143,6 +149,7 @@ function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
     human_owner_role: form.human_owner_role.trim() ? form.human_owner_role.trim() : null,
     authority_ceiling: form.authority_ceiling || null,
     activation_notes: form.activation_notes.trim() ? form.activation_notes.trim() : null,
+    profile_request_id: form.profile_request_id,
     allowed_workspaces: form.allowed_workspaces,
     capabilities: form.capabilities,
     allowed_tools: form.allowed_tools,
@@ -313,6 +320,23 @@ function actionSummary(values: readonly AssistantActionType[]): string {
     : 'No governed actions'
 }
 
+function policyResourceLabel(resourceId: string): string {
+  return ACTION_TYPE_LABELS[resourceId as AssistantActionType] ?? resourceId
+}
+
+function policyDecisionSummary(
+  decisions: readonly AssistantPolicyDecision[],
+  emptyLabel: string,
+): string {
+  return decisions.length > 0
+    ? decisions.map((decision) => policyResourceLabel(decision.resource_id)).join(' · ')
+    : emptyLabel
+}
+
+function firstPolicyDecisionReason(decisions: readonly AssistantPolicyDecision[]): string {
+  return decisions[0]?.reason ?? 'No policy decisions in this bucket.'
+}
+
 function PromptProfilePreview({
   form,
   role,
@@ -397,6 +421,16 @@ export function AgentManagementPanel({
   const [seedingRecommendedAgents, setSeedingRecommendedAgents] = useState(false)
   const [creatingAgent, setCreatingAgent] = useState(false)
   const [savingAgent, setSavingAgent] = useState(false)
+  const [simulationWorkspace, setSimulationWorkspace] = useState<ViewKey>('assistant')
+  const [simulationPhase, setSimulationPhase] = useState<AssistantPolicySimulationPhase>('stage')
+  const [simulationActorRole, setSimulationActorRole] = useState(
+    authSession?.user.role.trim().toUpperCase() || 'OPS_ADMIN',
+  )
+  const [simulationPrompt, setSimulationPrompt] = useState('')
+  const [simulationContext, setSimulationContext] = useState('')
+  const [policySimulation, setPolicySimulation] = useState<AssistantPolicySimulation | null>(null)
+  const [policySimulationLoading, setPolicySimulationLoading] = useState(false)
+  const [policySimulationError, setPolicySimulationError] = useState('')
 
   const selectedAgent = useMemo(
     () => agentRecords.find((agent) => agent.agent_id === selectedAgentId) ?? null,
@@ -543,19 +577,44 @@ export function AgentManagementPanel({
       setOpenAiProviderStatus(null)
       setBuildingAgentDraft(false)
       setSeedingRecommendedAgents(false)
+      setPolicySimulation(null)
+      setPolicySimulationError('')
+      setPolicySimulationLoading(false)
+      setSimulationPrompt('')
+      setSimulationContext('')
+      setSimulationWorkspace('assistant')
+      setSimulationPhase('stage')
+      setSimulationActorRole(authSession?.user.role.trim().toUpperCase() || 'OPS_ADMIN')
       return
     }
 
     void refreshAgents()
-  }, [adminEnabled, refreshAgents])
+  }, [adminEnabled, authSession?.user.role, refreshAgents])
 
   useEffect(() => {
     if (!selectedAgent) {
       setEditForm(createEmptyAgentBuilderDraft())
+      setPolicySimulation(null)
+      setPolicySimulationError('')
+      setPolicySimulationLoading(false)
       return
     }
     setEditForm(toAgentForm(selectedAgent))
+    setPolicySimulation(null)
+    setPolicySimulationError('')
+    setPolicySimulationLoading(false)
+    setSimulationWorkspace(
+      selectedAgent.allowed_workspaces.includes('assistant')
+        ? 'assistant'
+        : selectedAgent.allowed_workspaces[0] ?? 'assistant',
+    )
   }, [selectedAgent])
+
+  useEffect(() => {
+    setSimulationActorRole((current) =>
+      current.trim() ? current : authSession?.user.role.trim().toUpperCase() || 'OPS_ADMIN',
+    )
+  }, [authSession?.user.role])
 
   function handleApplyRoleArchetype(roleKey: string) {
     const role = roleArchetypes.find((entry) => entry.role_key === roleKey)
@@ -767,6 +826,7 @@ export function AgentManagementPanel({
           human_owner_role: payload.human_owner_role,
           authority_ceiling: payload.authority_ceiling,
           activation_notes: payload.activation_notes,
+          profile_request_id: payload.profile_request_id,
           allowed_workspaces: payload.allowed_workspaces,
           capabilities: payload.capabilities,
           allowed_tools: payload.allowed_tools,
@@ -787,6 +847,38 @@ export function AgentManagementPanel({
       })
     } finally {
       setSavingAgent(false)
+    }
+  }
+
+  async function handleRunPolicySimulation() {
+    if (!selectedAgent) {
+      return
+    }
+
+    setPolicySimulationLoading(true)
+    setPolicySimulationError('')
+    setPolicySimulation(null)
+
+    try {
+      const payload: SimulateAssistantAgentPolicyInput = {
+        workspace: simulationWorkspace,
+        phase: simulationPhase,
+        actorRole: simulationActorRole,
+        context: simulationContext,
+        prompt: simulationPrompt,
+      }
+      const result = await simulateAssistantAgentPolicy(
+        appConfig.apiBase,
+        selectedAgent.agent_id,
+        payload,
+      )
+      setPolicySimulation(result)
+    } catch (error) {
+      setPolicySimulationError(
+        error instanceof Error ? error.message : 'Could not run the policy simulation.',
+      )
+    } finally {
+      setPolicySimulationLoading(false)
     }
   }
 
@@ -1624,6 +1716,154 @@ export function AgentManagementPanel({
                     <small>
                       {selectedAgent.effective_policy.policy_notes.join(' ')}
                     </small>
+                  ) : null}
+                </div>
+
+                <div className="assistant-builder-preview assistant-policy-simulator">
+                  <div className="assistant-admin-section-head">
+                    <div>
+                      <span className="eyebrow">Policy Simulator</span>
+                      <h4>Dry Run Agent Access</h4>
+                    </div>
+                    <span>Read-only check against saved policy and deterministic action staging</span>
+                  </div>
+
+                  <div className="assistant-admin-form-grid">
+                    <label className="field">
+                      <span>Workspace</span>
+                      <select
+                        className="control"
+                        value={simulationWorkspace}
+                        onChange={(event) => setSimulationWorkspace(event.target.value as ViewKey)}
+                      >
+                        {WORKSPACE_OPTIONS.map((workspace) => (
+                          <option key={workspace} value={workspace}>
+                            {workspaceLabel(workspace)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Phase</span>
+                      <select
+                        className="control"
+                        value={simulationPhase}
+                        onChange={(event) =>
+                          setSimulationPhase(event.target.value as AssistantPolicySimulationPhase)
+                        }
+                      >
+                        <option value="stage">Stage approval request</option>
+                        <option value="execute">Execute with reviewer role</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Actor role</span>
+                      <input
+                        className="control"
+                        value={simulationActorRole}
+                        onChange={(event) => setSimulationActorRole(event.target.value)}
+                        placeholder="OPS_ADMIN"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>Simulation context</span>
+                    <textarea
+                      className="control"
+                      value={simulationContext}
+                      onChange={(event) => setSimulationContext(event.target.value)}
+                      placeholder="Selected trade:&#10;- trade_id: T-1022&#10;- commodity: WTI"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Prompt to stage</span>
+                    <textarea
+                      className="control assistant-admin-prompt"
+                      value={simulationPrompt}
+                      onChange={(event) => setSimulationPrompt(event.target.value)}
+                      placeholder="Cancel the selected trade."
+                    />
+                    <small className="form-note">
+                      Leave the prompt blank to inspect tool and action gates only.
+                    </small>
+                  </label>
+
+                  <div className="toolbar settings-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleRunPolicySimulation()}
+                      disabled={policySimulationLoading}
+                    >
+                      {policySimulationLoading ? 'Running Simulation...' : 'Run Policy Simulation'}
+                    </button>
+                  </div>
+
+                  {policySimulationError ? (
+                    <div className="feedback-banner feedback-banner-error">{policySimulationError}</div>
+                  ) : null}
+
+                  {policySimulation ? (
+                    <>
+                      <div className="assistant-builder-preview-grid">
+                        <div className="assistant-sidebar-block">
+                          <strong>Allowed tools</strong>
+                          <p>{policySimulation.allowed_tools.length}</p>
+                          <small>
+                            {policyDecisionSummary(policySimulation.allowed_tools, 'No live tools allowed')}
+                          </small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Blocked tools</strong>
+                          <p>{policySimulation.blocked_tools.length}</p>
+                          <small>{firstPolicyDecisionReason(policySimulation.blocked_tools)}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Allowed actions</strong>
+                          <p>{policySimulation.allowed_actions.length}</p>
+                          <small>
+                            {policyDecisionSummary(policySimulation.allowed_actions, 'No actions allowed')}
+                          </small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Blocked actions</strong>
+                          <p>{policySimulation.blocked_actions.length}</p>
+                          <small>{firstPolicyDecisionReason(policySimulation.blocked_actions)}</small>
+                        </div>
+                      </div>
+
+                      {policySimulation.staging_warnings.length > 0 ? (
+                        <div className="feedback-banner feedback-banner-error">
+                          {policySimulation.staging_warnings.join(' ')}
+                        </div>
+                      ) : null}
+
+                      {policySimulation.staged_action_proposals.length > 0 ? (
+                        <div className="assistant-builder-warning-list">
+                          {policySimulation.staged_action_proposals.map((proposal) => (
+                            <div
+                              key={`${proposal.action_type}-${proposal.summary}`}
+                              className="assistant-sidebar-block"
+                            >
+                              <strong>{policyResourceLabel(proposal.action_type)}</strong>
+                              <p>{proposal.summary}</p>
+                              <small>
+                                {proposal.decision.allowed
+                                  ? 'This staged proposal is allowed by the selected simulation policy.'
+                                  : proposal.decision.reason}
+                              </small>
+                            </div>
+                          ))}
+                        </div>
+                      ) : simulationPrompt.trim() ? (
+                        <small className="form-note">
+                          No action proposal matched the prompt and context for this dry run.
+                        </small>
+                      ) : null}
+
+                      <small className="form-note">{policySimulation.simulation_notes.join(' ')}</small>
+                    </>
                   ) : null}
                 </div>
 

@@ -33,15 +33,20 @@ vi.mock('../src/shared/api.ts', () => ({
 }))
 
 import {
+  approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
+  createAssistantAgentProfileRequest,
   getAdminAssistantOutcomeMetrics,
   getAdminAssistantRunAuditTrace,
   getAssistantConversation,
   listAdminAssistantActionRequests,
+  listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   listAssistantActionRequests,
   listAssistantConversations,
   previewAssistantPromptContext,
+  rejectAssistantAgentProfileRequest,
+  simulateAssistantAgentPolicy,
   streamAssistantResponse,
 } from '../src/entities/assistant/api.ts'
 
@@ -222,6 +227,123 @@ test('listAdminAssistantRoleArchetypes loads the server-owned role catalog with 
   assert.equal(payload, expected)
   const [url, init] = fetchJsonMock.mock.calls[0]
   assert.equal(url, 'http://api.test/admin/assistant/role-archetypes')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('listAdminAssistantProfileRequests loads the admin request queue with mutation auth', async () => {
+  const expected = [{ request_id: 10, status: 'REQUESTED' }]
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await listAdminAssistantProfileRequests('http://api.test')
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/profile-requests')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('createAssistantAgentProfileRequest posts requested_by from mutation context', async () => {
+  const expected = { request_id: 11, status: 'REQUESTED' }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await createAssistantAgentProfileRequest('http://api.test', {
+    requested_agent_id: 'weather-dispatch-analyst',
+    business_problem: 'Weather exceptions need triage.',
+    proposed_mission: 'Explain weather exposure and stage narrow follow-up.',
+    human_owner_role: 'Operations Lead',
+    requested_workspaces: ['assistant', 'operations'],
+    work_objects: ['workflow item'],
+    requested_inputs_tools: ['list_workflow_items'],
+    expected_outputs: ['Exception summary'],
+    requested_authority_ceiling: 'STAGE',
+    stop_conditions: ['Evidence is stale.'],
+    success_metrics: ['Reduce triage time.'],
+    proposed_eval_cases: ['Blocks stale evidence.'],
+  })
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/profile-requests')
+  assert.deepEqual(body, {
+    requested_agent_id: 'weather-dispatch-analyst',
+    business_problem: 'Weather exceptions need triage.',
+    proposed_mission: 'Explain weather exposure and stage narrow follow-up.',
+    human_owner_role: 'Operations Lead',
+    requested_workspaces: ['assistant', 'operations'],
+    work_objects: ['workflow item'],
+    requested_inputs_tools: ['list_workflow_items'],
+    expected_outputs: ['Exception summary'],
+    requested_authority_ceiling: 'STAGE',
+    stop_conditions: ['Evidence is stale.'],
+    success_metrics: ['Reduce triage time.'],
+    proposed_eval_cases: ['Blocks stale evidence.'],
+    requested_by: 'assistant_user',
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('approve and reject profile request helpers post reviewer decisions', async () => {
+  postJsonMock
+    .mockResolvedValueOnce({ request_id: 12, status: 'APPROVED' })
+    .mockResolvedValueOnce({ request_id: 13, status: 'REJECTED' })
+
+  await approveAssistantAgentProfileRequest('http://api.test', 12, {
+    approval_notes: 'Owner and eval reviewed.',
+  })
+  await rejectAssistantAgentProfileRequest('http://api.test', 13, {
+    reviewed_by: 'risk-owner',
+    rejection_reason: 'Scope is too broad.',
+  })
+
+  assert.equal(
+    postJsonMock.mock.calls[0][0],
+    'http://api.test/admin/assistant/profile-requests/12/approve',
+  )
+  assert.deepEqual(postJsonMock.mock.calls[0][1], {
+    reviewed_by: 'assistant_user',
+    approval_notes: 'Owner and eval reviewed.',
+  })
+  assert.equal(
+    postJsonMock.mock.calls[1][0],
+    'http://api.test/admin/assistant/profile-requests/13/reject',
+  )
+  assert.deepEqual(postJsonMock.mock.calls[1][1], {
+    reviewed_by: 'risk-owner',
+    rejection_reason: 'Scope is too broad.',
+  })
+})
+
+test('simulateAssistantAgentPolicy posts trimmed dry-run inputs with admin auth', async () => {
+  const expected = {
+    agent_id: 'sim-governor',
+    allowed_tools: [],
+    blocked_tools: [],
+    allowed_actions: [],
+    blocked_actions: [],
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await simulateAssistantAgentPolicy('http://api.test', 'sim-governor', {
+    workspace: 'assistant',
+    phase: 'execute',
+    actorRole: ' TRADER ',
+    context: ' Selected trade:\n- trade_id: T-1022 ',
+    prompt: ' Cancel the selected trade. ',
+  })
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agents/sim-governor/policy-simulation')
+  assert.deepEqual(body, {
+    workspace: 'assistant',
+    phase: 'execute',
+    actor_role: 'TRADER',
+    context: 'Selected trade:\n- trade_id: T-1022',
+    prompt: 'Cancel the selected trade.',
+  })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })

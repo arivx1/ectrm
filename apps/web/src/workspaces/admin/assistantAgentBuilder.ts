@@ -24,6 +24,7 @@ export type AgentBuilderDraft = {
   human_owner_role: string
   authority_ceiling: AssistantAgentAuthorityLevel | ''
   activation_notes: string
+  profile_request_id: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
   allowed_tools: string[]
@@ -65,6 +66,7 @@ type AgentBuilderTemplateDefinition = Omit<
   | 'human_owner_role'
   | 'authority_ceiling'
   | 'activation_notes'
+  | 'profile_request_id'
   | 'allowed_tools'
   | 'allowed_action_types'
   | 'daily_token_allocation'
@@ -597,6 +599,7 @@ export function createEmptyAgentBuilderDraft(): AgentBuilderDraft {
     human_owner_role: '',
     authority_ceiling: '',
     activation_notes: '',
+    profile_request_id: null,
     allowed_workspaces: ['assistant'],
     capabilities: ['READ', 'EXPLAIN'],
     allowed_tools: [],
@@ -651,6 +654,7 @@ export function buildAgentBuilderDraft(
     human_owner_role: profile.human_owner_role,
     authority_ceiling: profile.authority_ceiling,
     activation_notes: profile.activation_notes,
+    profile_request_id: null,
     allowed_workspaces: [...template.allowed_workspaces],
     capabilities: [...template.capabilities],
     allowed_tools: allowedTools,
@@ -685,6 +689,7 @@ export function buildAgentBuilderDraftFromRole(
     human_owner_role: role.human_owner_role,
     authority_ceiling: role.authority_ceiling,
     activation_notes: `Drafted from the ${role.name} role catalog entry.`,
+    profile_request_id: null,
     allowed_workspaces: [...role.allowed_workspaces],
     capabilities: [...role.capability_ceiling],
     allowed_tools: allowedTools,

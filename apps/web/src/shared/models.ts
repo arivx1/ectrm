@@ -1808,6 +1808,7 @@ export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
 export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
 export type AssistantAgentRoleCatalogStatus = 'SEEDED' | 'TEMPLATE' | 'PHASE_1' | 'PHASE_2_PLUS'
 export type AssistantAgentProfileKind = 'CURATED' | 'ROLE_DERIVED' | 'CUSTOM'
+export type AssistantAgentProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
 export type AssistantAgentAuthorityLevel =
   | 'OBSERVE'
   | 'EXPLAIN'
@@ -1870,6 +1871,32 @@ export type AssistantAgentEffectivePolicy = {
   policy_notes: string[]
 }
 
+export type AssistantPolicySimulationPhase = 'stage' | 'execute'
+
+export type AssistantPolicySimulationActionProposal = {
+  action_type: AssistantActionType
+  summary: string
+  description: string
+  payload: Record<string, unknown>
+  decision: AssistantPolicyDecision
+}
+
+export type AssistantPolicySimulation = {
+  agent_id: string
+  agent_name: string
+  workspace: ViewKey
+  actor_role?: string | null
+  phase: AssistantPolicySimulationPhase
+  effective_policy: AssistantAgentEffectivePolicy
+  allowed_tools: AssistantPolicyDecision[]
+  blocked_tools: AssistantPolicyDecision[]
+  allowed_actions: AssistantPolicyDecision[]
+  blocked_actions: AssistantPolicyDecision[]
+  staged_action_proposals: AssistantPolicySimulationActionProposal[]
+  staging_warnings: string[]
+  simulation_notes: string[]
+}
+
 export type AssistantRuntimeSettings = {
   enabled: boolean
   default_provider: AssistantProvider
@@ -1898,6 +1925,7 @@ export type AssistantAgent = {
   human_owner_role?: string | null
   authority_ceiling?: AssistantAgentAuthorityLevel | null
   activation_notes?: string | null
+  profile_request_id?: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
   allowed_tools: string[]
@@ -1950,6 +1978,33 @@ export type AssistantAgentRoleArchetype = {
   required_eval_coverage: string[]
   base_prompt_guidance: string[]
   current_profile_ids: string[]
+}
+
+export type AssistantAgentProfileRequest = {
+  request_id: number
+  status: AssistantAgentProfileRequestStatus
+  requested_agent_id: string | null
+  business_problem: string
+  proposed_mission: string
+  human_owner_role: string
+  requested_workspaces: ViewKey[]
+  work_objects: string[]
+  requested_inputs_tools: string[]
+  expected_outputs: string[]
+  requested_authority_ceiling: AssistantAgentAuthorityLevel
+  stop_conditions: string[]
+  success_metrics: string[]
+  proposed_eval_cases: string[]
+  approval_notes: string | null
+  rejection_reason: string | null
+  linked_agent_id: string | null
+  requested_at: string
+  requested_by: string
+  reviewed_at: string | null
+  reviewed_by: string | null
+  activated_at: string | null
+  activated_by: string | null
+  updated_at: string
 }
 
 export type AssistantPromptRequest = {
