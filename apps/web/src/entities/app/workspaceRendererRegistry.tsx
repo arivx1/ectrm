@@ -950,9 +950,19 @@ export const WORKSPACE_RENDERERS: Record<
         counts={{
           activeTrades: context.workspaceData.workspaceBootstrapSummary?.trades.active_count ?? null,
           openWorkItems: context.workspaceData.workspaceBootstrapSummary?.work_items.total_count ?? null,
+          operationsQueueItems:
+            context.workspaceData.workspaceBootstrapSummary?.work_items.operations_queue_count ?? null,
+          settlementQueueItems:
+            context.workspaceData.workspaceBootstrapSummary?.work_items.settlement_queue_count ?? null,
           pendingInvoices: context.workspaceData.workspaceBootstrapSummary?.settlement.invoice_pending_count ?? null,
           paymentsDue: context.workspaceData.workspaceBootstrapSummary?.settlement.payment_due_count ?? null,
           attentionItems: context.workspaceData.workspaceBootstrapSummary?.dashboard.attention.total_count ?? null,
+          stalePricingItems:
+            context.workspaceData.workspaceBootstrapSummary?.dashboard.attention.stale_pricing_count ?? null,
+          pendingPricingTrades:
+            context.workspaceData.workspaceBootstrapSummary?.trades.pending_pricing_count ?? null,
+          pendingSettlementTrades:
+            context.workspaceData.workspaceBootstrapSummary?.trades.pending_settlement_count ?? null,
         }}
         onOpenView={context.navigateToView}
       />

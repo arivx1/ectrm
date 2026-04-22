@@ -27,6 +27,64 @@
   gap: 0.85rem;
 }
 
+.prompt-home-starters {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.prompt-home-starters .section-head {
+  margin-bottom: 0;
+}
+
+.prompt-home-starter-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.prompt-home-starter {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.prompt-home-starter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.prompt-home-starter-head strong {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.prompt-home-starter h4,
+.prompt-home-starter p {
+  margin: 0;
+}
+
+.prompt-home-starter h4 {
+  font-size: 0.98rem;
+}
+
+.prompt-home-starter p {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.45;
+}
+
+.prompt-home-starter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-self: end;
+}
+
 .prompt-home-textarea {
   min-height: 9rem;
   resize: vertical;
@@ -177,12 +235,18 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+:root[data-color-mode='dark'] .prompt-home-starter {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+
 :root[data-color-mode='dark'] .prompt-home-thread {
   border-color: rgba(126, 154, 184, 0.16);
   background: rgba(255, 255, 255, 0.03);
 }
 
 :root[data-color-mode='dark'] .prompt-home-heading p,
+:root[data-color-mode='dark'] .prompt-home-starter p,
 :root[data-color-mode='dark'] .prompt-home-handoff span,
 :root[data-color-mode='dark'] .prompt-home-thread span,
 :root[data-color-mode='dark'] .prompt-home-thread small,
@@ -190,8 +254,20 @@
   color: #b7c7d9;
 }
 
+@media (max-width: 1180px) {
+  .prompt-home-starter-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .prompt-home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .prompt-home-starter-list {
     grid-template-columns: 1fr;
   }
 }

@@ -1383,6 +1383,13 @@ export type PreTradeRecommendationSourceType = 'USER_INPUT' | 'INTERNAL' | 'EXTE
 export type PreTradeRecommendationFreshness = 'FRESH' | 'STALE' | 'DEGRADED' | 'UNKNOWN'
 export type PreTradeRecommendationSourceQuality = 'OK' | 'STALE' | 'DEGRADED' | 'MISSING'
 export type PreTradeGovernanceRiskStatus = 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
+export type PreTradeGovernanceAuditCategory =
+  | 'PENDING_REVIEW'
+  | 'RISKY_RECOMMENDATION'
+  | 'UNRESOLVED_RISKY_RECOMMENDATION'
+  | 'OVERRIDE'
+  | 'BOOKED_WITH_OVERRIDE'
+  | 'STALE_EVIDENCE'
 
 export type PreTradeReviewActivityRecord = {
   activity_id: string
@@ -1585,6 +1592,42 @@ export type PreTradeGovernanceItemsRecord = {
   override_reviews: PreTradeReviewItemRecord[]
   booked_with_override_reviews: PreTradeReviewItemRecord[]
   stale_evidence_runs: PreTradeGovernanceStaleEvidenceRunRecord[]
+}
+
+export type PreTradeGovernanceAuditRowRecord = {
+  category: PreTradeGovernanceAuditCategory
+  review_id: number | null
+  run_id: number | null
+  run_key: string | null
+  linked_trade_id: string | null
+  name: string
+  book: string | null
+  commodity: string | null
+  review_status: PreTradeReviewStatus | null
+  recommendation_stance: PreTradeRecommendationStance | null
+  recommendation_score: number | null
+  override_reason: string | null
+  override_by: string | null
+  override_at: string | null
+  booked_by: string | null
+  booked_at: string | null
+  source_adapter_key: string | null
+  source_adapter_label: string | null
+  source_quality_status: PreTradeRecommendationSourceQuality | null
+  source_freshness: PreTradeRecommendationFreshness | null
+  source_provider: string | null
+  source_dataset: string | null
+  source_observed_at: string | null
+  summary: string
+}
+
+export type PreTradeGovernanceAuditExportRecord = {
+  generated_at: string
+  exported_by: string
+  format_version: string
+  summary: PreTradeGovernanceSummaryRecord
+  items: PreTradeGovernanceItemsRecord
+  audit_rows: PreTradeGovernanceAuditRowRecord[]
 }
 
 export type PreTradeReviewCaptureContext = {

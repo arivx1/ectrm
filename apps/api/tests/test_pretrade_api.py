@@ -333,6 +333,9 @@ class PreTradeApiTests(unittest.TestCase):
         response = self.client.get("/pretrade/governance/items")
         self.assertEqual(response.status_code, 401)
 
+        response = self.client.get("/pretrade/governance/export")
+        self.assertEqual(response.status_code, 401)
+
         response = self.client.post("/pretrade/scenarios", json=self._scenario_payload())
         self.assertEqual(response.status_code, 401)
 
@@ -571,6 +574,22 @@ class PreTradeApiTests(unittest.TestCase):
             ["latest-mark"],
         )
 
+        governance_export_response = self.client.get(
+            "/pretrade/governance/export",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(governance_export_response.status_code, 200)
+        governance_export = governance_export_response.json()
+        self.assertEqual(governance_export["exported_by"], "trader_one")
+        self.assertEqual(governance_export["format_version"], "pretrade-governance-audit.v1")
+        self.assertEqual(governance_export["summary"]["stale_evidence_run_count"], 1)
+        self.assertTrue(
+            any(
+                row["category"] == "STALE_EVIDENCE" and row["source_adapter_key"] == "latest-mark"
+                for row in governance_export["audit_rows"]
+            )
+        )
+
         missing_scenario_response = self.client.post(
             "/pretrade/recommendations/runs",
             json={"source_scenario_id": scenario["scenario_id"], "input_snapshots": []},
@@ -781,6 +800,21 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(governance_items["override_reviews"][0]["recommendation_override_by"], "trader_two")
         self.assertEqual(len(governance_items["booked_with_override_reviews"]), 1)
         self.assertEqual(governance_items["booked_with_override_reviews"][0]["linked_trade_id"], "TRD-21001")
+
+        governance_export_response = self.client.get(
+            "/pretrade/governance/export",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(governance_export_response.status_code, 200)
+        governance_export = governance_export_response.json()
+        self.assertEqual(governance_export["exported_by"], "trader_two")
+        self.assertEqual(governance_export["items"]["booked_with_override_reviews"][0]["linked_trade_id"], "TRD-21001")
+        self.assertTrue(
+            any(
+                row["category"] == "BOOKED_WITH_OVERRIDE" and row["linked_trade_id"] == "TRD-21001"
+                for row in governance_export["audit_rows"]
+            )
+        )
 
         booked_status_update = self.client.patch(
             f"/pretrade/reviews/{review_id}",

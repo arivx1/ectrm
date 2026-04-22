@@ -17,6 +17,14 @@ PreTradeRecommendationSourceType = Literal["USER_INPUT", "INTERNAL", "EXTERNAL",
 PreTradeRecommendationFreshness = Literal["FRESH", "STALE", "DEGRADED", "UNKNOWN"]
 PreTradeRecommendationSourceQuality = Literal["OK", "STALE", "DEGRADED", "MISSING"]
 PreTradeGovernanceRiskStatus = Literal["CLEAR", "WATCH", "ACTION_REQUIRED"]
+PreTradeGovernanceAuditCategory = Literal[
+    "PENDING_REVIEW",
+    "RISKY_RECOMMENDATION",
+    "UNRESOLVED_RISKY_RECOMMENDATION",
+    "OVERRIDE",
+    "BOOKED_WITH_OVERRIDE",
+    "STALE_EVIDENCE",
+]
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -439,3 +447,39 @@ class PreTradeGovernanceItemsOut(BaseModel):
     override_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
     booked_with_override_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
     stale_evidence_runs: list[PreTradeGovernanceStaleEvidenceRunOut] = Field(default_factory=list)
+
+
+class PreTradeGovernanceAuditRowOut(BaseModel):
+    category: PreTradeGovernanceAuditCategory
+    review_id: int | None = None
+    run_id: int | None = None
+    run_key: str | None = None
+    linked_trade_id: str | None = None
+    name: str
+    book: str | None = None
+    commodity: str | None = None
+    review_status: PreTradeReviewStatus | None = None
+    recommendation_stance: PreTradeRecommendationStance | None = None
+    recommendation_score: int | None = None
+    override_reason: str | None = None
+    override_by: str | None = None
+    override_at: datetime | None = None
+    booked_by: str | None = None
+    booked_at: datetime | None = None
+    source_adapter_key: str | None = None
+    source_adapter_label: str | None = None
+    source_quality_status: PreTradeRecommendationSourceQuality | None = None
+    source_freshness: PreTradeRecommendationFreshness | None = None
+    source_provider: str | None = None
+    source_dataset: str | None = None
+    source_observed_at: datetime | None = None
+    summary: str
+
+
+class PreTradeGovernanceAuditExportOut(BaseModel):
+    generated_at: datetime
+    exported_by: str
+    format_version: str = "pretrade-governance-audit.v1"
+    summary: PreTradeGovernanceSummaryOut
+    items: PreTradeGovernanceItemsOut
+    audit_rows: list[PreTradeGovernanceAuditRowOut] = Field(default_factory=list)

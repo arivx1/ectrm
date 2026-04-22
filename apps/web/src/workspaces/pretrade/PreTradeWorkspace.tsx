@@ -8,6 +8,7 @@ import {
   createPreTradeReviewItem,
   createPreTradeScenario,
   deletePreTradeScenario,
+  loadPreTradeGovernanceAuditExport,
   loadPreTradeGovernanceItems,
   loadPreTradeGovernanceSummary,
   loadPreTradeRecommendationRuns,
@@ -347,6 +348,20 @@ function sourceQualitySummary(snapshots: PreTradeRecommendationSourceSnapshotRec
 
 function formatRecommendationScoreDelta(value: number): string {
   return value > 0 ? `+${value}` : String(value)
+}
+
+function downloadJsonArtifact(filename: string, payload: unknown) {
+  if (typeof document === 'undefined') {
+    return
+  }
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(objectUrl)
 }
 
 export function PreTradeWorkspace({
@@ -1015,6 +1030,15 @@ export function PreTradeWorkspace({
     })
   }
 
+  async function handleExportGovernanceAudit() {
+    await withAuthenticatedAction('export-governance-audit', async (accessToken) => {
+      const artifact = await loadPreTradeGovernanceAuditExport(appConfig.apiBase, accessToken)
+      const timestamp = artifact.generated_at.slice(0, 19).replaceAll(':', '-').replace('T', '-')
+      downloadJsonArtifact(`pretrade-governance-audit-${timestamp}.json`, artifact)
+      setActionMessage(`Exported governance audit with ${artifact.audit_rows.length} audit row${artifact.audit_rows.length === 1 ? '' : 's'}.`)
+    })
+  }
+
   function governanceReviewItemsForBucket(bucket: GovernanceReviewBucketKey): PreTradeReviewItemRecord[] {
     switch (bucket) {
       case 'pending':
@@ -1115,6 +1139,14 @@ export function PreTradeWorkspace({
             <span className="entity-chip entity-chip-soft">
               {governanceSummary ? `Generated ${formatDate(governanceSummary.generated_at)}` : 'Connect to load controls'}
             </span>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => void handleExportGovernanceAudit()}
+              disabled={actionPending !== '' || !authSession}
+            >
+              Export Audit
+            </button>
           </div>
           {collectionLoading ? <p className="form-note">Loading governance summary...</p> : null}
           {collectionError ? <p className="form-note">{collectionError}</p> : null}

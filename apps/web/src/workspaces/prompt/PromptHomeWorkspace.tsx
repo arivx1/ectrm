@@ -41,14 +41,11 @@ import {
   savePromptSignInReturnIntent,
   subscribePromptResumeIntent,
 } from '../../shared/promptResumeIntent'
-
-type PromptHomeCounts = {
-  activeTrades: number | null
-  openWorkItems: number | null
-  pendingInvoices: number | null
-  paymentsDue: number | null
-  attentionItems: number | null
-}
+import {
+  buildPromptHomeContextualStarters,
+  type PromptHomeContextualStarter,
+  type PromptHomeCounts,
+} from './promptHomeStarters'
 
 type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -216,6 +213,10 @@ export function PromptHomeWorkspace({
         displayName: authSession?.user.display_name ?? 'Signed-out user',
       }),
     [authSession?.user.display_name, counts, health],
+  )
+  const contextualStarters = useMemo(
+    () => buildPromptHomeContextualStarters(counts),
+    [counts],
   )
 
   const refreshRecentConversations = useCallback(async () => {
@@ -425,6 +426,27 @@ export function PromptHomeWorkspace({
     onOpenView('settings')
   }
 
+  function handleContextualStarterAsk(starter: PromptHomeContextualStarter) {
+    if (submitting) {
+      return
+    }
+
+    setDraft(starter.prompt)
+    setSubmitError('')
+    setConversationDetailError('')
+
+    if (!authSession) {
+      savePromptResumeIntent({
+        draft: starter.prompt,
+        submitAfterSignIn: true,
+      })
+      onOpenView('settings')
+      return
+    }
+
+    void submitPrompt(starter.prompt)
+  }
+
   function handleNavigationIntent(intent: PromptNavigationIntent, includeHandoff = true) {
     const normalizedIntent = normalizePromptNavigationIntent(intent)
     if (!normalizedIntent) {
@@ -469,6 +491,46 @@ export function PromptHomeWorkspace({
             right place to continue.
           </p>
         </div>
+
+        <section className="prompt-home-starters" aria-label="Contextual starting points">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Live Context</span>
+              <h3>Start from current work</h3>
+            </div>
+          </div>
+
+          <div className="prompt-home-starter-list">
+            {contextualStarters.map((starter) => (
+              <article key={starter.key} className="prompt-home-starter">
+                <div className="prompt-home-starter-head">
+                  <span className="eyebrow">{starter.kicker}</span>
+                  <strong>{starter.metric}</strong>
+                </div>
+                <h4>{starter.title}</h4>
+                <p>{starter.detail}</p>
+                <div className="prompt-home-starter-actions">
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    aria-label={starter.askLabel}
+                    onClick={() => handleContextualStarterAsk(starter)}
+                    disabled={submitting}
+                  >
+                    Ask
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => handleNavigationIntent(starter.intent, false)}
+                  >
+                    {promptNavigationIntentLabel(starter.intent)}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
 
         <form className="prompt-home-composer" onSubmit={handleSubmit}>
           <label className="field">
