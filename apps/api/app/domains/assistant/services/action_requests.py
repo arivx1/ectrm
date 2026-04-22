@@ -763,17 +763,21 @@ def _build_action_request_lifecycle(
 ) -> dict[str, object]:
     status = str(record.status or "").strip().upper()
     review_risk_flags = _derive_review_risk_flags(review_context)
+    preview_status = _action_preview_status(review_context)
+    preview_blocked = preview_status == "BLOCKED"
 
     if status == "PENDING":
         return {
             "stage": "AWAITING_REVIEW",
-            "label": "Awaiting review",
-            "tone": "attention",
+            "label": "Preview blocked" if preview_blocked else "Awaiting review",
+            "tone": "danger" if preview_blocked else "attention",
             "is_terminal": False,
-            "can_approve": True,
+            "can_approve": not preview_blocked,
             "can_reject": True,
             "reviewer_action_label": (
-                "Review evidence, then approve or reject"
+                "Reject or restage with corrected input"
+                if preview_blocked
+                else "Review evidence, then approve or reject"
                 if review_risk_flags
                 else "Approve or reject"
             ),
@@ -833,7 +837,25 @@ def _derive_review_risk_flags(review_context: dict[str, object] | None) -> list[
     if isinstance(stale_state_basis, dict) and stale_state_basis:
         flags.append("STALE_STATE_RECHECK_REQUIRED")
 
+    preview_status = _action_preview_status(review_context)
+    if preview_status == "READY":
+        flags.append("DRY_RUN_PREVIEW_READY")
+    elif preview_status == "BLOCKED":
+        flags.append("DRY_RUN_PREVIEW_BLOCKED")
+
     return flags
+
+
+def _action_preview_status(review_context: dict[str, object] | None) -> str | None:
+    if not review_context:
+        return None
+    action_preview = review_context.get("action_preview")
+    if not isinstance(action_preview, dict):
+        return None
+    status = action_preview.get("status")
+    if status is None:
+        return None
+    return str(status).strip().upper() or None
 
 
 def _decision_label(action: str, decided_by: str | None) -> str:
@@ -1058,6 +1080,9 @@ def _validate_approval_contract(
             "Assistant action approval requires review_context.idempotency_key before execution."
         )
 
+    preview_check = _validate_action_preview_contract(record=record, review_context=review_context)
+    preview_approval_checks = preview_check.pop("approval_checks", [])
+
     duplicate_record = _find_executed_action_request_by_idempotency_key(
         db=db,
         idempotency_key=idempotency_key,
@@ -1077,9 +1102,42 @@ def _validate_approval_contract(
         "checks": [
             "review_context_present",
             "idempotency_key_unique",
+            *preview_approval_checks,
             "stale_state_rechecked",
         ],
+        **preview_check,
         **stale_state_recheck,
+    }
+
+
+def _validate_action_preview_contract(
+    *,
+    record: AssistantActionRequest,
+    review_context: dict[str, object],
+) -> dict[str, object]:
+    if record.action_type != "issue_trade_invoice":
+        return {"approval_checks": []}
+
+    action_preview = review_context.get("action_preview")
+    if not isinstance(action_preview, dict):
+        raise AssistantActionRequestError(
+            "Assistant action approval requires a ready issue_trade_invoice preview before execution."
+        )
+
+    preview_status = _action_preview_status(review_context)
+    if preview_status != "READY":
+        blocking_reasons = action_preview.get("blocking_reasons")
+        reason_text = ""
+        if isinstance(blocking_reasons, list) and blocking_reasons:
+            reason_text = " " + "; ".join(str(reason) for reason in blocking_reasons)
+        raise AssistantActionRequestError(
+            "Assistant action approval blocked because the issue_trade_invoice preview is not ready."
+            + reason_text
+        )
+
+    return {
+        "approval_checks": ["action_preview_ready"],
+        "action_preview_status": preview_status,
     }
 
 

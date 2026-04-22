@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { getAdminAssistantOutcomeMetrics } from '../../entities/assistant/api'
+import { getAdminAssistantOutcomeMetrics, loadAssistantRuntimeSettings } from '../../entities/assistant/api'
+import {
+  assistantActionTypeOptions,
+  buildAssistantActionDefinitionMap,
+} from '../../entities/assistant/actionCatalog'
 import { appConfig } from '../../shared/config'
 import {
-  ASSISTANT_ACTION_TYPES,
+  type AssistantActionDefinition,
   type AssistantActionType,
   type AssistantAgentProfileKind,
   type AssistantOutcomeMetrics,
@@ -230,17 +234,26 @@ export function AssistantOutcomeMetricsPanel({
   const adminEnabled = hasAdministrativeAccess(authSession)
 
   const [metrics, setMetrics] = useState<AssistantOutcomeMetrics | null>(null)
+  const [actionDefinitions, setActionDefinitions] = useState<AssistantActionDefinition[]>([])
   const [filters, setFilters] = useState<OutcomeMetricsFilters>(INITIAL_OUTCOME_FILTERS)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const actionDefinitionsByName = useMemo(
+    () => buildAssistantActionDefinitionMap(actionDefinitions),
+    [actionDefinitions],
+  )
+  const actionTypeOptions = useMemo(
+    () => assistantActionTypeOptions(actionDefinitions),
+    [actionDefinitions],
+  )
 
   const agentRows = useMemo(
     () => buildAssistantAgentOutcomeRows(metrics?.by_agent ?? []),
     [metrics],
   )
   const actionTypeRows = useMemo(
-    () => buildAssistantActionTypeOutcomeRows(metrics?.by_action_type ?? []),
-    [metrics],
+    () => buildAssistantActionTypeOutcomeRows(metrics?.by_action_type ?? [], actionDefinitionsByName),
+    [actionDefinitionsByName, metrics],
   )
   const roleRows = useMemo(
     () => buildAssistantRoleOutcomeRows(metrics?.by_role ?? []),
@@ -343,6 +356,31 @@ export function AssistantOutcomeMetricsPanel({
   useEffect(() => {
     void refreshMetrics()
   }, [authSession, refreshMetrics])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!adminEnabled) {
+      setActionDefinitions([])
+      return
+    }
+
+    loadAssistantRuntimeSettings(appConfig.apiBase)
+      .then((settings) => {
+        if (!cancelled) {
+          setActionDefinitions(settings.available_action_types)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActionDefinitions([])
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [adminEnabled])
 
   function updateFilter<Key extends keyof OutcomeMetricsFilters>(
     key: Key,
@@ -463,9 +501,9 @@ export function AssistantOutcomeMetricsPanel({
                   }
                 >
                   <option value="">All action types</option>
-                  {ASSISTANT_ACTION_TYPES.map((actionType) => (
+                  {actionTypeOptions.map((actionType) => (
                     <option key={actionType} value={actionType}>
-                      {formatAssistantActionTypeLabel(actionType)}
+                      {formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)}
                     </option>
                   ))}
                 </select>

@@ -50,6 +50,8 @@ class AssistantAgentSeedRequest(BaseModel):
 
 class AssistantAgentSeedResult(BaseModel):
     requested_by: str
+    total_profiles: int
+    # Compatibility alias for older Admin clients that treated this seed as template-only.
     total_templates: int
     created_count: int
     updated_count: int

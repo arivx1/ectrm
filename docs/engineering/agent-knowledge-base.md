@@ -600,3 +600,62 @@ proposal form until a human owner approves the domain rule.
   approval and rejection calls send structured decision metadata.
 - Follow-up: review recurring `correction_fields` during autonomy reviews and
   append `algorithm-candidate` entries when a stable rule emerges.
+
+### 2026-04-22 - Health Reviews Promote Brief Candidates Into Work Packages
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: agent health review, deterministic algorithm candidates, policy
+  work packages, service work packages
+- Status: implemented
+- Source:
+  [`autonomy_review.py`](../../apps/api/app/domains/assistant/services/autonomy_review.py)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: autonomy briefs should feed a cross-agent health review. When
+  multiple agents surface the same deterministic candidate, group it into a
+  stable work package with source agents, owner role, priority, rationale, and
+  acceptance checks.
+- Deterministic opportunity: repeated review judgments should graduate into
+  typed policy, service, or eval work packages instead of staying as prompt
+  guidance or one-off review notes.
+- Agent autonomy impact: a health-review work package is not extra autonomy by
+  itself. It is evidence that the deterministic guard should be implemented
+  before expanding authority or reducing reviewer involvement.
+- Tests or evidence: API coverage verifies admin-only health review access,
+  cross-agent candidate grouping, stable package IDs, priority assignment, owner
+  projection, and agent-to-package references. Web API coverage verifies the
+  typed Admin health-review URL and auth headers.
+- Follow-up: persist accepted work packages when the team needs lifecycle state
+  beyond generated candidate snapshots.
+
+### 2026-04-22 - Sensitive Actions Need Deterministic Preview Gates
+
+- Type: algorithm-added
+- Domain: assistant action governance
+- Applies to: staged invoice issuance, action request approval, reviewer
+  surfaces, future sensitive action previews
+- Status: implemented
+- Source:
+  [`settlement_invoices.py`](../../apps/api/app/domains/operations/services/settlement_invoices.py),
+  [`action_requests.py`](../../apps/api/app/domains/assistant/services/action_requests.py),
+  and [Agent Action Request Contract](./agent-action-request-contract.md)
+- Lesson: a sensitive staged action should expose a deterministic dry-run
+  preview before approval. For `issue_trade_invoice`, the preview resolves the
+  same invoice defaults and validation path as execution, lists affected records
+  and expected side effects, and marks the request blocked when the proposed
+  mutation is not safe to execute.
+- Deterministic opportunity: each future high-risk action preview should reuse
+  its domain service normalization and stop conditions instead of summarizing
+  model intent. Preview failures should block approval without creating side
+  effects.
+- Agent autonomy impact: preview gates make staged agent work easier to review,
+  but they do not grant execution authority. Humans still approve invoice
+  issuance, and blocked previews should be rejected or restaged with corrected
+  input.
+- Tests or evidence: focused assistant API tests cover ready preview output,
+  blocked duplicate invoice previews, missing-preview approval failure, and
+  no-side-effect guarantees. Web tests cover ready and blocked preview rendering
+  in the action request list.
+- Follow-up: extend this pattern to the next sensitive action only after its
+  domain owner can define deterministic affected-records, field-change, blocker,
+  and side-effect semantics.

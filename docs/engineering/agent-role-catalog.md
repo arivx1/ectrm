@@ -13,8 +13,8 @@ product:
 - assistant agents with `READ`, `EXPLAIN`, `DRAFT`, and `ACTION` capabilities
 - governed live tools exposed through the assistant runtime
 - approval-gated action requests for sensitive mutations
-- admin agent templates for trade explanation, operations, settlement,
-  document triage, desk briefing, trade operations, and governance
+- role-derived Admin profiles and presets for trade explanation, operations,
+  settlement, document triage, desk briefing, trade operations, and governance
 
 Related docs:
 
@@ -31,8 +31,8 @@ Related docs:
 
 | Status | Meaning |
 | --- | --- |
-| `Seeded` | Already provided as a curated managed-agent seed. |
-| `Template` | Already available as an admin agent-builder template. |
+| `Seeded` | Already synchronized as an active role-derived pilot profile. |
+| `Role preset` | Already available as an Admin builder preset backed by a role archetype. |
 | `Phase 1` | Recommended for the first supervised-agent rollout. |
 | `Phase 2+` | Important to the North Star, but should wait until foundational controls mature. |
 
@@ -47,32 +47,33 @@ Related docs:
 
 ## Current Managed-Agent Anchors
 
-These roles already exist as seeds or templates in the app and should be
-treated as the first version of the catalog rather than throwaway examples.
+These roles already exist as synchronized pilot profiles or Admin role presets
+and should be treated as the first version of the catalog rather than throwaway
+examples.
 
 | Role | Status | Primary objective | Workspaces | Current authority |
 | --- | --- | --- | --- | --- |
 | Trade Ops Copilot | Seeded | Coordinate confirmation, workflow, delivery, and document follow-through for booked trades. | Assistant, Trades, Operations, Deliveries, Scheduling, Reference Data | Read, explain, draft, stage approval-gated ops actions. |
 | Settlement Copilot | Seeded | Interpret settlement posture and stage invoice or payment actions when evidence is clear. | Assistant, Settlement, Operations, Reports | Read, explain, draft, stage invoice and payment actions. |
 | Trade Governor | Seeded | Review high-sensitivity cancellation requests and stage cancel actions only when evidence is clear. | Assistant, Trades, Operations, Admin | Read, explain, stage cancel-trade actions. |
-| Trade Explainer | Template | Explain selected trade state, event history, and exposure in desk language. | Assistant, Trades, Activity Feed, Exposure, Net Positions | Read and explain only. |
-| Ops Coordinator | Template | Summarize downstream blockers across delivery, confirmation, scheduling, and settlement. | Assistant, Deliveries, Scheduling, Operations, Settlement | Read, explain, draft handoff notes. |
-| Settlement Analyst | Template | Explain invoices, payments, aging, exceptions, and cash follow-up. | Assistant, Settlement, Operations, Reports | Read, explain, draft finance follow-ups. |
-| Document Triage | Template | Review ingested documents, linkage evidence, routing confidence, and follow-up checks. | Assistant, Operations, Reference Data | Read, explain, draft review notes. |
-| Desk Briefing | Template | Produce broad desk briefings across exposure, workflow pressure, and market context. | Assistant, Live Desk, Exposure, Net Positions, Reports | Read, explain, draft briefing notes. |
+| Trade Explainer | Role preset | Explain selected trade state, event history, and exposure in desk language. | Assistant, Trades, Activity Feed, Exposure, Net Positions | Read and explain only. |
+| Ops Coordinator | Role preset | Summarize downstream blockers across delivery, confirmation, scheduling, and settlement. | Assistant, Deliveries, Scheduling, Operations, Settlement | Read, explain, draft handoff notes. |
+| Settlement Analyst | Role preset | Explain invoices, payments, aging, exceptions, and cash follow-up. | Assistant, Settlement, Operations, Reports | Read, explain, draft finance follow-ups. |
+| Document Triage | Role preset | Review ingested documents, linkage evidence, routing confidence, and follow-up checks. | Assistant, Operations, Reference Data | Read, explain, draft review notes. |
+| Desk Briefing | Role preset | Produce broad desk briefings across exposure, workflow pressure, and market context. | Assistant, Live Desk, Exposure, Net Positions, Reports | Read, explain, draft briefing notes. |
 
 ## Proposed Expanded Catalog
 
 | Role | Status | Primary objective | Initial work objects | Suggested authority ceiling |
 | --- | --- | --- | --- | --- |
 | Market Research Agent | Phase 1 | Monitor market, weather, logistics, macro, positioning, and source freshness signals. | Market opportunity, desk briefing, pre-trade scenario | Read, explain, draft. |
-| Pre-Trade Structuring Agent | Phase 1 | Convert market context and internal constraints into trade ideas and review-ready structures. | Pre-trade scenario, pre-trade review item, trade intent | Read, explain, draft, stage review items. |
+| Pre-Trade Structuring Agent | Phase 1 | Convert market context and internal constraints into trade ideas and review-ready structures. | Pre-trade scenario, pre-trade review item, trade intent | Read, explain, draft. Stage review items only after eval and outcome review. |
 | Risk Sentinel | Phase 1 | Watch exposure, pricing gaps, credit freshness, option exposures, and stale assumptions. | Risk exception, workflow item, approval request | Read, explain, draft, stage internal workflow items later. |
-| Trade Explainer | Template | Explain current trade state, what changed, and downstream exposure impact. | Trade, event, position, option exposure | Read, explain. |
+| Trade Explainer | Role preset | Explain current trade state, what changed, and downstream exposure impact. | Trade, event, position, option exposure | Read, explain. |
 | Trade Governor | Seeded | Handle sensitive trade cancellation governance with strict scope. | Trade, event, workflow item, approval request | Stage cancel actions only. |
 | Trade Ops Copilot | Seeded | Keep booked trades moving through confirmations, work queues, delivery blockers, and documents. | Workflow item, confirmation, delivery, document review item | Stage approved operations actions. |
 | Logistics Coordinator | Phase 2+ | Manage delivery readiness, scheduling detail, logistics blockers, and actualization evidence. | Delivery obligation, scheduling commitment, delivery event | Stage scheduling and actualization actions after controls mature. |
-| Document Agent | Phase 1 | Classify, match, route, and stage follow-up for trade, logistics, and settlement documents. | Document ingestion, document action plan, record link | Read, explain, draft; stage reprocess first. |
+| Document Agent | Phase 1 | Classify, match, route, and stage follow-up for trade, logistics, and settlement documents. | Document ingestion, document action plan, record link | Read, explain, draft. Stage reprocess only after eval and outcome review. |
 | Settlement Copilot | Seeded | Manage invoice and payment follow-through under approval controls. | Invoice, payment, settlement exception | Stage invoice and payment actions. |
 | Fee and Accrual Agent | Phase 2+ | Identify fees, delivered-but-unbilled exposure, accrual lots, and reconciliation gaps. | Fee item, accrual lot, invoice, delivery actualization | Read, explain, draft until accrual domain matures. |
 | Counterparty Outreach Agent | Phase 2+ | Draft and track bilateral counterparty communications. | Communication draft, confirmation, workflow item | Draft only until external-commitment rules mature. |
@@ -146,8 +147,8 @@ Outputs:
 Initial authority:
 
 - Read, explain, and draft.
-- Phase 1 can add approval-gated staging for pre-trade review items before any
-  direct trade capture action.
+- Approval-gated staging for pre-trade review items is a later promotion step
+  after eval coverage and outcome review.
 
 Success signals:
 
@@ -181,7 +182,9 @@ Outputs:
 
 Initial authority:
 
-- Read, explain, draft, and stage reprocess actions.
+- Read, explain, and draft.
+- Staged reprocess actions require a separate promotion review with eval
+  coverage.
 - Do not auto-create commercial or settlement records without a separate
   approval policy.
 
@@ -312,10 +315,12 @@ created in Admin:
 ## Recommended Catalog Governance
 
 - Keep seeded agents conservative and narrow.
-- Treat broader roles as templates until the authority matrix and action
-  gateway are ready.
+- Treat broader roles as role presets or draft role-derived profiles until the
+  authority matrix, eval coverage, and action gateway are ready.
 - Do not grant `ACTION` to a role unless every allowed action type has an
   explicit approval rule and eval coverage.
+- Promote, narrow, pause, or retire profiles through outcome review rather than
+  editing prompt text alone.
 - Prefer multiple narrow agents over one broad "desk agent" until provenance,
   handoffs, and policy controls mature.
 - Retire or pause roles that create review burden without measurable workflow

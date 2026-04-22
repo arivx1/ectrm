@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import type { OperationalResourceDescriptor, WorkspaceSettlementSummary } from '../../entities/app/api'
-import { describeAppRouteHandoff, type AppRouteHandoff } from '../../shared/appRouteHandoff'
+import { normalizeAppRouteHandoff, type AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   CreateTradeInvoiceInput,
   CreateTradePaymentInput,
@@ -12,6 +12,7 @@ import type {
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type { Trade, TradeInvoiceRecord, TradePaymentRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
@@ -38,6 +39,7 @@ type SettlementWorkspaceProps = {
   invoiceMutationPendingKey: string | null
   paymentMutationError: string
   paymentMutationPendingKey: string | null
+  onClearHandoff: () => void
   onOpenTrade: (tradeId: string) => void
   onIssueInvoice: (tradeId: string, payload: CreateTradeInvoiceInput) => Promise<void>
   onSaveInvoice: (invoiceId: number, payload: UpdateTradeInvoiceInput) => Promise<void>
@@ -168,6 +170,7 @@ export function SettlementWorkspace({
   invoiceMutationPendingKey,
   paymentMutationError,
   paymentMutationPendingKey,
+  onClearHandoff,
   onOpenTrade,
   onIssueInvoice,
   onSaveInvoice,
@@ -302,7 +305,17 @@ export function SettlementWorkspace({
   const settlementExceptionTitle = hasSettlementExceptions ? 'Settlement Exceptions' : 'No active settlement exceptions'
   const invoiceLedgerWorkboard = resolveOperationalWorkboardDefinition('invoiceLedger', operationalResourceDescriptors)
   const paymentLedgerWorkboard = resolveOperationalWorkboardDefinition('paymentLedger', operationalResourceDescriptors)
-  const workspaceFocusBanner = describeAppRouteHandoff(routeHandoff, 'settlement')
+  const normalizedRouteHandoff = normalizeAppRouteHandoff(routeHandoff)
+  const routeHandoffFocusTradeId =
+    normalizedRouteHandoff?.focus.type === 'trade'
+      ? normalizedRouteHandoff.focus.id
+      : normalizedRouteHandoff && normalizedRouteHandoff.tradeId !== normalizedRouteHandoff.focus.id
+        ? normalizedRouteHandoff.tradeId
+        : null
+  function clearWorkspaceHandoff() {
+    setScreenFilter('')
+    onClearHandoff()
+  }
   const settlementSummaryCards: TileSectionGridItem[] = [
     {
       id: 'open-settlement',
@@ -357,14 +370,22 @@ export function SettlementWorkspace({
       authSession={authSession}
       headerContent={
         <>
-          {workspaceFocusBanner ? (
-            <section className="feedback-banner feedback-banner-success workspace-focus-banner">
-              <div className="workspace-handoff-banner-copy">
-                <strong>{workspaceFocusBanner.title}</strong>
-                <p>{workspaceFocusBanner.detail}</p>
-              </div>
-            </section>
-          ) : null}
+          <WorkspaceHandoffFocusBanner
+            handoff={routeHandoff}
+            currentView="settlement"
+            clearLabel="Show Full Settlement"
+            onClear={clearWorkspaceHandoff}
+            actions={
+              routeHandoffFocusTradeId
+                ? [
+                    {
+                      label: 'Open Focused Trade',
+                      onClick: () => onOpenTrade(routeHandoffFocusTradeId),
+                    },
+                  ]
+                : []
+            }
+          />
           <WorkspaceLocalFilterBar
             value={screenFilter}
             onChange={setScreenFilter}

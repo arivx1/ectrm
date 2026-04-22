@@ -620,6 +620,22 @@ architecture into an operating habit.
 - update docs, demo data, and smoke coverage around the new lifecycle
 - run an outcome review before granting any role new action authority
 
+### Implementation notes
+
+- The Admin seed action now synchronizes a 13-profile pilot lineup:
+  3 active seeded profiles, 5 current role-preset drafts, and 5 Phase 1 pilot
+  drafts.
+- Synchronized profiles are role-derived and carry a role key, human owner,
+  authority ceiling, activation note, effective-policy surface, and eval-gate
+  status when reloaded through the policy-aware Admin API.
+- Phase 1 roles start draft-only. Document Agent and Pre-Trade Structuring
+  Agent require eval coverage plus outcome review before gaining any staged
+  action authority.
+- Admin should describe reusable starting points as role presets or role
+  profiles, not as standalone prompt templates.
+- Pilot exit review uses the outcome and autonomy review surfaces to decide
+  promote, narrow, pause, or retire for each profile.
+
 ### Out of scope
 
 - full autonomous execution

@@ -157,7 +157,98 @@ test('prompt home accepts an assistant handoff into the old operations workspace
     await expect(page).toHaveURL(/view=operations/)
     await expect(page).toHaveURL(/handoff=assistant/)
     await expect(page).toHaveURL(/focusTrade=T-AMEND-100/)
+    await expect(page.getByText('Assistant run #8801')).toBeVisible()
+    await expect(page.getByText('Trade: T-AMEND-100')).toBeVisible()
     await expect(page.getByText('Review the confirmation blocker with the operations owner')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Show Full Queue' }).click()
+    await expect(page).toHaveURL(/view=operations/)
+    await expect(page).not.toHaveURL(/handoff=assistant/)
+    await expect(page.getByText('Assistant run #8801')).toBeHidden()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home accepts an assistant handoff into settlement workspace', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+    await dismissStartHereOverlay(page)
+
+    await page.getByLabel('Operator prompt').fill('Where should I handle the invoice settlement item?')
+    await page.getByRole('button', { name: 'Send Prompt' }).click()
+
+    const assistantHandoff = page.locator('.prompt-home-handoff').filter({ hasText: 'Open Settlement' })
+    await expect(assistantHandoff).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant')).not.toContainText('navigation_intent')
+
+    await assistantHandoff.click()
+
+    await expect(page).toHaveURL(/view=settlement/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page).toHaveURL(/focusTrade=T-AMEND-100/)
+    await expect(page.getByText('Assistant run #8801')).toBeVisible()
+    await expect(page.getByText('Trade: T-AMEND-100')).toBeVisible()
+    await expect(page.getByText('Review settlement follow-through for T-AMEND-100')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open Focused Trade' })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Show Full Settlement' }).click()
+    await expect(page).toHaveURL(/view=settlement/)
+    await expect(page).not.toHaveURL(/handoff=assistant/)
+    await expect(page.getByText('Assistant run #8801')).toBeHidden()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home accepts an assistant handoff into trade capture', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+    await dismissStartHereOverlay(page)
+
+    await page.getByLabel('Operator prompt').fill('Open trade capture to amend T-AMEND-100')
+    await page.getByRole('button', { name: 'Send Prompt' }).click()
+
+    const assistantHandoff = page.locator('.prompt-home-handoff').filter({ hasText: 'Open Trade Capture' })
+    await expect(assistantHandoff).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant')).not.toContainText('navigation_intent')
+
+    await assistantHandoff.click()
+
+    await expect(page).toHaveURL(/view=trades/)
+    await expect(page).toHaveURL(/trade=T-AMEND-100/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page).toHaveURL(/tradeTab=amend/)
+    await expect(page.getByText('Assistant run #8801')).toBeVisible()
+    await expect(page.getByText('Trade: T-AMEND-100')).toBeVisible()
+    await expect(page.getByText('Inspector: amend')).toBeVisible()
+    await expect(page.getByText('Open the amend panel for T-AMEND-100')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Show Full Blotter' }).click()
+    await expect(page).toHaveURL(/view=trades/)
+    await expect(page).not.toHaveURL(/handoff=assistant/)
+    await expect(page).not.toHaveURL(/tradeTab=amend/)
+    await expect(page.getByText('Assistant run #8801')).toBeHidden()
 
     assertNoHarnessRequestFailures(harness)
   } finally {
@@ -256,6 +347,50 @@ test('assistant feedback smoke persists response feedback through chat reload an
       harness.unexpectedRequests,
       `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
     ).toHaveLength(0)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('admin smoke shows the role-derived pilot lineup and sync action', async ({ page }) => {
+  const harness = await startSmokeHarness()
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(`${harness.origin}/?view=admin`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+
+    const agentControl = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Managed Agent Control' }) })
+      .first()
+
+    await expect(agentControl).toBeVisible()
+    await expect(agentControl.getByText('Role profiles')).toBeVisible()
+    await expect(agentControl.getByRole('button', { name: /Ops Governor/ })).toBeVisible()
+    await expect(agentControl.getByText('Evals PASS')).toBeVisible()
+    await expect(agentControl.getByText('Pre-Trade Structuring Agent')).toBeVisible()
+    await expect(agentControl.getByText('Phase 1')).toBeVisible()
+
+    await agentControl.getByRole('button', { name: 'Sync Pilot Lineup' }).click()
+    await expect(
+      agentControl.getByText('Pilot lineup synchronized: 0 created, 2 updated across 13 role profiles.'),
+    ).toBeVisible()
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toHaveLength(0)
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: 'POST',
+        path: '/admin/data/assistant-agents/seed',
+        search: '',
+      },
+    ])
   } finally {
     await harness.close()
   }

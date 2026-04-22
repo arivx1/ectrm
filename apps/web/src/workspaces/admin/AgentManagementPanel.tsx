@@ -1164,9 +1164,10 @@ export function AgentManagementPanel({
     try {
       const payload = await seedAssistantAgents(appConfig.apiBase)
       await refreshAgents(payload.agent_ids[0] ?? null)
+      const totalProfiles = payload.total_profiles ?? payload.total_templates
       setAgentFlash({
         tone: 'success',
-        message: `Pilot lineup synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${payload.total_templates} role profiles.`,
+        message: `Pilot lineup synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${totalProfiles} role profiles.`,
       })
     } catch (error) {
       setAgentFlash({

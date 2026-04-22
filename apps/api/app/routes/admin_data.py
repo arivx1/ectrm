@@ -116,7 +116,8 @@ def seed_admin_assistant_agents(
     summary = seed_assistant_agents(db, requested_by=actor_id)
     return AssistantAgentSeedResult(
         requested_by=actor_id,
-        total_templates=summary.total_templates,
+        total_profiles=summary.total_profiles,
+        total_templates=summary.total_profiles,
         created_count=summary.created_count,
         updated_count=summary.updated_count,
         agent_ids=summary.agent_ids,

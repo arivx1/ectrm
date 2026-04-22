@@ -274,28 +274,96 @@ async function startMockApiServer(
   const assistantRunId = 8801
   const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
   const assistantUserPrompt = 'Where should I handle the confirmation blocker?'
-  const assistantResponseContent = [
-    'Operations is the right place to continue because the blocker is tied to the confirmation queue.',
-    '```navigation_intent',
-    JSON.stringify({
-      kind: 'open_workspace',
-      targetView: 'operations',
-      label: 'Open Work Queue',
-      rationale: 'Review the confirmation blocker with the operations owner before changing trade state.',
-      focus: {
-        type: 'trade',
-        id: 'T-AMEND-100',
-        label: 'T-AMEND-100',
-      },
-      inspectorTab: 'events',
-    }),
-    '```',
-  ].join('\n')
   let sessionExpired = false
   const runtimeSettings = {
     ...publicRuntimeSettings,
     single_user_auth_enabled: options.singleUserAuthEnabled ?? publicRuntimeSettings.single_user_auth_enabled,
   }
+
+  function buildAssistantResponseContentForPrompt(prompt: string): string {
+    const normalizedPrompt = prompt.toLowerCase()
+    if (normalizedPrompt.includes('settlement') || normalizedPrompt.includes('invoice')) {
+      return [
+        'Settlement is the right place to continue because the open item is invoice and payment follow-through.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          targetView: 'settlement',
+          label: 'Open Settlement',
+          rationale: 'Review settlement follow-through for T-AMEND-100 before changing invoice or payment state.',
+          focus: {
+            type: 'trade',
+            id: 'T-AMEND-100',
+            label: 'T-AMEND-100',
+          },
+        }),
+        '```',
+      ].join('\n')
+    }
+
+    if (normalizedPrompt.includes('trade capture') || normalizedPrompt.includes('amend')) {
+      return [
+        'Trade Capture is the right place to continue because the next step is an amendment review.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          targetView: 'trades',
+          label: 'Open Trade Capture',
+          rationale: 'Open the amend panel for T-AMEND-100 so economics and workflow changes stay in one place.',
+          focus: {
+            type: 'trade',
+            id: 'T-AMEND-100',
+            label: 'T-AMEND-100',
+          },
+          inspectorTab: 'amend',
+        }),
+        '```',
+      ].join('\n')
+    }
+
+    return [
+      'Operations is the right place to continue because the blocker is tied to the confirmation queue.',
+      '```navigation_intent',
+      JSON.stringify({
+        kind: 'open_workspace',
+        targetView: 'operations',
+        label: 'Open Work Queue',
+        rationale: 'Review the confirmation blocker with the operations owner before changing trade state.',
+        focus: {
+          type: 'trade',
+          id: 'T-AMEND-100',
+          label: 'T-AMEND-100',
+        },
+        inspectorTab: 'events',
+      }),
+      '```',
+    ].join('\n')
+  }
+
+  function latestUserPromptFromPayload(payload: unknown): string {
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+      return ''
+    }
+
+    const messages = (payload as { messages?: unknown }).messages
+    if (!Array.isArray(messages)) {
+      return ''
+    }
+
+    for (const message of [...messages].reverse()) {
+      if (typeof message !== 'object' || message === null || Array.isArray(message)) {
+        continue
+      }
+      const candidate = message as { role?: unknown; content?: unknown }
+      if (candidate.role === 'user' && typeof candidate.content === 'string') {
+        return candidate.content
+      }
+    }
+
+    return ''
+  }
+
+  const assistantResponseContent = buildAssistantResponseContentForPrompt(assistantUserPrompt)
 
   function buildAssistantConversationSummary() {
     return {
@@ -477,8 +545,7 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/auth/session') &&
       !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
       !(method === 'POST' && url.pathname === '/assistant/respond') &&
-      !(method === 'PUT' && url.pathname === '/layout-definitions/trades') &&
-      !(method === 'PUT' && url.pathname === '/layout-definitions/dashboard')
+      !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
     ) {
       mutationRequests.push(record)
     }
@@ -686,12 +753,13 @@ async function startMockApiServer(
       }
       const payload = await readJsonBody(request)
       assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const responseContent = buildAssistantResponseContentForPrompt(latestUserPromptFromPayload(payload))
 
       writeJson(response, {
         ...buildAssistantResponseMetadata(),
         message: {
           role: 'assistant',
-          content: assistantResponseContent,
+          content: responseContent,
         },
       })
       return
@@ -703,6 +771,7 @@ async function startMockApiServer(
       }
       const payload = await readJsonBody(request)
       assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const responseContent = buildAssistantResponseContentForPrompt(latestUserPromptFromPayload(payload))
 
       const metadata = buildAssistantResponseMetadata()
       writeSse(response, [
@@ -720,7 +789,7 @@ async function startMockApiServer(
         {
           event: 'assistant.delta',
           data: {
-            delta: assistantResponseContent,
+            delta: responseContent,
           },
         },
         {
@@ -1107,6 +1176,27 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/admin/data/assistant-agents/seed' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      const requestedBy =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? normalizeOptionalText((payload as Record<string, unknown>).requested_by) ?? smokeSession.user.user_id
+          : smokeSession.user.user_id
+      writeJson(response, {
+        requested_by: requestedBy,
+        total_profiles: 13,
+        total_templates: 13,
+        created_count: 0,
+        updated_count: assistantAdminAgents.length,
+        agent_ids: assistantAdminAgents.map((agent) => agent.agent_id),
+      })
+      return
+    }
+
     if (url.pathname === '/admin/codex/settings' && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -1351,6 +1441,53 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/documents/settings' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        enabled: true,
+        default_provider: 'openai',
+        effective_default_provider: 'openai',
+        configured_provider_count: 1,
+        providers: [
+          {
+            provider: 'openai',
+            label: 'OpenAI',
+            enabled: true,
+            configured: true,
+            is_default: true,
+            default_model: 'gpt-5.4-mini',
+            base_url: 'https://api.openai.com/v1',
+            setup_env_var: 'OPENAI_API_KEY',
+          },
+        ],
+      })
+      return
+    }
+
+    if (url.pathname === '/documents/schema-registry' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        version: 'smoke-1',
+        document_kinds: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/documents' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
     if (url.pathname === '/operations/resources' && method === 'GET') {
       writeJson(response, [
         {
@@ -1418,6 +1555,16 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/confirmations' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/settlement/invoices' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/settlement/payments' && method === 'GET') {
       writeJson(response, [])
       return
     }
@@ -1590,7 +1737,8 @@ async function startMockApiServer(
       return
     }
 
-    if (url.pathname === '/layout-definitions/trades' && method === 'GET') {
+    const layoutDefinitionMatch = url.pathname.match(/^\/layout-definitions\/([^/]+)$/)
+    if (layoutDefinitionMatch && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
@@ -1599,16 +1747,7 @@ async function startMockApiServer(
       return
     }
 
-    if (url.pathname === '/layout-definitions/dashboard' && method === 'GET') {
-      if (!requireAuthorization(request, response, sessionExpired)) {
-        return
-      }
-
-      writeJson(response, null)
-      return
-    }
-
-    if (url.pathname === '/layout-definitions/trades' && method === 'PUT') {
+    if (layoutDefinitionMatch && method === 'PUT') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
@@ -1622,37 +1761,9 @@ async function startMockApiServer(
         spans?: unknown
       }
 
+      const workspaceId = layoutDefinitionMatch[1]
       writeJson(response, {
-        workspace_id: 'trades',
-        order: Array.isArray(layout.order) ? layout.order : [],
-        hidden: Array.isArray(layout.hidden) ? layout.hidden : [],
-        spans:
-          layout.spans && typeof layout.spans === 'object' && !Array.isArray(layout.spans)
-            ? layout.spans
-            : {},
-        updated_at: '2026-04-11T00:00:00Z',
-        updated_by: smokeSession.user.user_id,
-        version: 1,
-      })
-      return
-    }
-
-    if (url.pathname === '/layout-definitions/dashboard' && method === 'PUT') {
-      if (!requireAuthorization(request, response, sessionExpired)) {
-        return
-      }
-
-      const payload = await readJsonBody(request)
-      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
-
-      const layout = payload as {
-        order?: unknown
-        hidden?: unknown
-        spans?: unknown
-      }
-
-      writeJson(response, {
-        workspace_id: 'dashboard',
+        workspace_id: workspaceId,
         order: Array.isArray(layout.order) ? layout.order : [],
         hidden: Array.isArray(layout.hidden) ? layout.hidden : [],
         spans:

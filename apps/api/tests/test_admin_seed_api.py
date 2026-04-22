@@ -78,19 +78,34 @@ class AdminSeedApiTests(unittest.TestCase):
             session.query(ReferenceBook).delete()
             session.commit()
 
-    def test_assistant_agent_seed_upserts_curated_defaults(self) -> None:
+    def test_assistant_agent_seed_upserts_role_derived_pilot_lineup(self) -> None:
         with self.SessionLocal() as session:
             first = seed_admin_assistant_agents(
                 AssistantAgentSeedRequest(requested_by="ops-admin"),
                 db=session,
             )
 
-            self.assertEqual(first.total_templates, 3)
-            self.assertEqual(first.created_count, 3)
+            self.assertEqual(first.total_profiles, 13)
+            self.assertEqual(first.total_templates, 13)
+            self.assertEqual(first.created_count, 13)
             self.assertEqual(first.updated_count, 0)
             self.assertEqual(
                 first.agent_ids,
-                ["trade-ops-copilot", "settlement-copilot", "trade-governor"],
+                [
+                    "trade-ops-copilot",
+                    "settlement-copilot",
+                    "trade-governor",
+                    "trade-explainer",
+                    "ops-coordinator",
+                    "settlement-analyst",
+                    "document-triage",
+                    "desk-briefing",
+                    "market-research-agent",
+                    "pre-trade-structuring-agent",
+                    "document-agent",
+                    "risk-sentinel",
+                    "reporting-reconciliation-agent",
+                ],
             )
 
             governor = session.get(AssistantAgent, "trade-governor")
@@ -99,18 +114,32 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(governor.status, "ACTIVE")
             self.assertEqual(governor.scope, "ORGANIZATION")
             self.assertEqual(governor.role_key, "trade-governor")
-            self.assertEqual(governor.profile_kind, "CURATED")
+            self.assertEqual(governor.profile_kind, "ROLE_DERIVED")
             self.assertEqual(governor.human_owner_role, "Trader, Desk Lead, or Admin")
             self.assertEqual(governor.authority_ceiling, "STAGE")
             self.assertEqual(
                 governor.specialization_summary,
-                "Curated seed profile for the Trade Governor role archetype.",
+                "Role-derived pilot profile for the Trade Governor role archetype.",
             )
-            self.assertEqual(governor.activation_notes, "Seeded by the platform role catalog.")
+            self.assertEqual(
+                governor.activation_notes,
+                "Pilot profile synchronized from the Trade Governor role catalog entry.",
+            )
             self.assertEqual(governor.allowed_action_types, ["cancel_trade"])
             self.assertEqual(governor.allowed_tools[0], "get_trade_by_id")
             self.assertEqual(governor.created_by, "ops-admin")
             self.assertEqual(governor.version, 1)
+
+            document_agent = session.get(AssistantAgent, "document-agent")
+            self.assertIsNotNone(document_agent)
+            assert document_agent is not None
+            self.assertEqual(document_agent.status, "DRAFT")
+            self.assertEqual(document_agent.role_key, "document-agent")
+            self.assertEqual(document_agent.profile_kind, "ROLE_DERIVED")
+            self.assertEqual(document_agent.authority_ceiling, "DRAFT")
+            self.assertNotIn("ACTION", document_agent.capabilities)
+            self.assertEqual(document_agent.allowed_action_types, [])
+            self.assertIn("outcome review", document_agent.activation_notes)
 
             governor.description = "Outdated scope"
             governor.role_key = None
@@ -137,13 +166,16 @@ class AdminSeedApiTests(unittest.TestCase):
             assert refreshed_governor is not None
             self.assertEqual(
                 refreshed_governor.description,
-                "Focuses on high-sensitivity trade governance with a tightly constrained cancel-only action scope.",
+                "Reviews high-sensitivity cancellation requests with a constrained cancel-only action scope.",
             )
             self.assertEqual(refreshed_governor.role_key, "trade-governor")
-            self.assertEqual(refreshed_governor.profile_kind, "CURATED")
+            self.assertEqual(refreshed_governor.profile_kind, "ROLE_DERIVED")
             self.assertEqual(refreshed_governor.human_owner_role, "Trader, Desk Lead, or Admin")
             self.assertEqual(refreshed_governor.authority_ceiling, "STAGE")
-            self.assertEqual(refreshed_governor.activation_notes, "Seeded by the platform role catalog.")
+            self.assertEqual(
+                refreshed_governor.activation_notes,
+                "Pilot profile synchronized from the Trade Governor role catalog entry.",
+            )
             self.assertEqual(refreshed_governor.allowed_action_types, ["cancel_trade"])
             self.assertEqual(refreshed_governor.updated_by, "ops-admin")
             self.assertEqual(refreshed_governor.version, 8)

@@ -43,6 +43,22 @@ const baseCounters = {
 
 test('assistant outcome metric formatting keeps rates and durations compact', () => {
   assert.equal(formatAssistantActionTypeLabel('issue_trade_invoice'), 'issue trade invoice')
+  assert.equal(
+    formatAssistantActionTypeLabel(
+      'issue_trade_invoice',
+      new Map([
+        [
+          'issue_trade_invoice',
+          {
+            name: 'issue_trade_invoice' as const,
+            label: 'Issue invoice',
+            description: 'Catalog label supplied by the assistant runtime settings endpoint.',
+          },
+        ],
+      ]),
+    ),
+    'Issue invoice',
+  )
   assert.equal(formatAssistantOutcomeRate(0.095), '9.5%')
   assert.equal(formatAssistantOutcomeRate(0.8333), '83%')
   assert.equal(formatAssistantOutcomeRate(null), 'n/a')
@@ -111,10 +127,22 @@ test('assistant outcome action rows summarize action-type readiness', () => {
     },
   }
 
-  const [displayRow] = buildAssistantActionTypeOutcomeRows([row])
+  const [displayRow] = buildAssistantActionTypeOutcomeRows(
+    [row],
+    new Map([
+      [
+        'update_trade_workflow_item',
+        {
+          name: 'update_trade_workflow_item' as const,
+          label: 'Update workflow item',
+          description: 'Catalog label supplied by the assistant runtime settings endpoint.',
+        },
+      ],
+    ]),
+  )
 
   assert.equal(displayRow?.key, 'update_trade_workflow_item')
-  assert.equal(displayRow?.title, 'update trade workflow item')
+  assert.equal(displayRow?.title, 'Update workflow item')
   assert.equal(displayRow?.subtitle, '12 decided of 12 staged')
   assert.equal(displayRow?.recommendationTone, 'danger')
   assert.deepEqual(

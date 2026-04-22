@@ -61,6 +61,7 @@ from apps.api.app.schemas.settlement import TradeInvoiceOut
 from apps.api.app.shared.enums import InvoiceStatus
 from apps.api.app.shared.enums import PaymentStatus
 from apps.api.app.shared.enums import TradeNature
+from apps.api.app.shared.enums import TradeStatus
 from apps.api.app.shared.enums import TradeWorkflowType
 
 ZERO = Decimal("0")
@@ -96,9 +97,14 @@ def _audit_invoice_payload(invoice: TradeInvoiceOut) -> dict[str, object]:
     return invoice.model_dump(mode="json")
 
 
-def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
+def _coerce_utc(value: datetime | str | None) -> Optional[datetime]:
     if value is None:
         return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        value = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
@@ -481,6 +487,204 @@ def _derive_trade_invoice_projection(invoices: list[TradeInvoice]) -> TradeInvoi
     if due_at is not None:
         note = f"{note} Next due {due_at.date().isoformat()}."
     return TradeInvoiceProjection(status=status, due_at=due_at, notes=note)
+
+
+def preview_trade_invoice_issue(
+    db: Session,
+    *,
+    trade_id: str,
+    leg_no: int | None = None,
+    invoice_number: object | None = None,
+    invoice_currency_code: object | None = None,
+    billed_quantity: object | None = None,
+    invoice_amount: object | None = None,
+    issued_at: datetime | None = None,
+    due_at: datetime | None = None,
+    now: Optional[datetime] = None,
+) -> dict[str, object]:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
+    if trade is None:
+        return _blocked_invoice_issue_preview(
+            trade_id=trade_id,
+            reasons=(f"Trade '{trade_id}' was not found.",),
+            existing_invoices=[],
+        )
+
+    existing_invoices = _trade_invoices(db, trade_id=trade.trade_id)
+    affected_records = [
+        {
+            "type": "trade",
+            "id": trade.trade_id,
+            "label": f"Trade {trade.trade_id}",
+            "summary": (
+                f"{trade.status} {trade.trade_nature} trade for "
+                f"{trade.counterparty or 'unknown counterparty'} with settlement status {trade.settlement_status}."
+            ),
+        }
+    ]
+    if existing_invoices:
+        affected_records.append(
+            {
+                "type": "trade_invoice_collection",
+                "id": trade.trade_id,
+                "label": f"Invoices for {trade.trade_id}",
+                "summary": f"{len(existing_invoices)} existing invoice(s) will remain unchanged by this preview.",
+            }
+        )
+
+    blocking_reasons: list[str] = []
+    if trade.status != TradeStatus.ACTIVE.value:
+        blocking_reasons.append(
+            f"Trade '{trade.trade_id}' is {trade.status}; invoice issuance requires an ACTIVE trade."
+        )
+
+    credit_hold_state = get_trade_credit_hold_state(db, trade_id=trade.trade_id)
+    if credit_hold_state.hold_active:
+        blocking_reasons.append(
+            format_trade_credit_hold_message(
+                trade.trade_id,
+                credit_hold_state,
+                blocked_action=(
+                    "Settlement actions are blocked until credit approves the trade "
+                    "or the trade is amended back within limit."
+                ),
+            )
+        )
+
+    try:
+        scope = _resolve_invoice_scope(
+            db,
+            trade=trade,
+            leg_no=leg_no,
+            existing_invoices=existing_invoices,
+            invoice_amount_provided=invoice_amount is not None,
+            billed_quantity_provided=billed_quantity is not None,
+        )
+        normalized_billed_quantity = _normalize_billed_quantity(
+            billed_quantity,
+            trade=trade,
+            scope=scope,
+            default_to_remaining_actualized=scope.delivery_id is not None and invoice_amount is None,
+        )
+        normalized_issued_at = _normalize_issued_at(
+            issued_at,
+            due_at=due_at,
+            fallback=reference_time,
+        )
+        normalized_due_at = _normalize_due_at(due_at, trade=trade, issued_at=normalized_issued_at)
+        normalized_invoice_amount = _normalize_invoice_amount(
+            invoice_amount,
+            trade=trade,
+            billed_quantity=normalized_billed_quantity,
+        )
+        normalized_invoice_number = _normalize_invoice_number(
+            invoice_number,
+            trade=trade,
+            existing_invoices=existing_invoices,
+        )
+        normalized_invoice_currency_code = _normalize_currency_code(invoice_currency_code, trade=trade)
+    except (LookupError, ValueError) as exc:
+        blocking_reasons.append(str(exc))
+        return _blocked_invoice_issue_preview(
+            trade_id=trade.trade_id,
+            reasons=tuple(blocking_reasons),
+            existing_invoices=existing_invoices,
+            affected_records=affected_records,
+        )
+
+    if blocking_reasons:
+        return _blocked_invoice_issue_preview(
+            trade_id=trade.trade_id,
+            reasons=tuple(blocking_reasons),
+            existing_invoices=existing_invoices,
+            affected_records=affected_records,
+        )
+
+    assumptions = []
+    if invoice_number is None:
+        assumptions.append("Invoice number will be generated from the trade and invoice sequence.")
+    if invoice_currency_code is None:
+        assumptions.append("Invoice currency will default from the trade currency.")
+    if invoice_amount is None:
+        assumptions.append("Invoice amount will be derived from billed quantity or trade notional.")
+    if issued_at is None:
+        assumptions.append("Issued timestamp will default to the approval execution time.")
+    if due_at is None:
+        assumptions.append("Due timestamp will default from delivery/trade dates or five days after issue.")
+
+    return {
+        "preview_type": "issue_trade_invoice",
+        "status": "READY",
+        "summary": (
+            f"Approval will create invoice {normalized_invoice_number} for trade {trade.trade_id} "
+            f"for {normalized_invoice_currency_code} {float(normalized_invoice_amount):.2f}."
+        ),
+        "affected_records": affected_records,
+        "field_changes": [
+            {"field": "invoice_number", "current_value": None, "proposed_value": normalized_invoice_number},
+            {
+                "field": "invoice_currency_code",
+                "current_value": None,
+                "proposed_value": normalized_invoice_currency_code,
+            },
+            {
+                "field": "invoice_amount",
+                "current_value": None,
+                "proposed_value": float(normalized_invoice_amount),
+            },
+            {
+                "field": "billed_quantity",
+                "current_value": None,
+                "proposed_value": (
+                    float(normalized_billed_quantity) if normalized_billed_quantity is not None else None
+                ),
+            },
+            {"field": "issued_at", "current_value": None, "proposed_value": normalized_issued_at.isoformat()},
+            {"field": "due_at", "current_value": None, "proposed_value": normalized_due_at.isoformat()},
+            {"field": "leg_no", "current_value": None, "proposed_value": scope.leg_no},
+            {"field": "delivery_id", "current_value": None, "proposed_value": scope.delivery_id},
+        ],
+        "expected_side_effects": [
+            "Create one trade invoice record.",
+            "Refresh invoice workflow projections.",
+            "Synchronize accrual relief for physical trades when applicable.",
+            "Append a TradeInvoiceIssued audit event after execution.",
+        ],
+        "warnings": [
+            warning
+            for warning in (
+                f"{len(existing_invoices)} existing invoice(s) are already recorded for this trade."
+                if existing_invoices
+                else None,
+            )
+            if warning is not None
+        ],
+        "blocking_reasons": [],
+        "assumptions": assumptions,
+        "existing_invoice_count": len(existing_invoices),
+    }
+
+
+def _blocked_invoice_issue_preview(
+    *,
+    trade_id: str,
+    reasons: tuple[str, ...],
+    existing_invoices: list[TradeInvoice],
+    affected_records: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "preview_type": "issue_trade_invoice",
+        "status": "BLOCKED",
+        "summary": f"Invoice issue preview for trade {trade_id} is blocked.",
+        "affected_records": list(affected_records or []),
+        "field_changes": [],
+        "expected_side_effects": [],
+        "warnings": [],
+        "blocking_reasons": list(reasons),
+        "assumptions": [],
+        "existing_invoice_count": len(existing_invoices),
+    }
 
 
 def _to_out(

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import type {
+  AssistantActionPreview,
   AssistantActionRequest,
   AssistantActionReviewContext,
   AssistantActionReviewObjectRef,
@@ -92,6 +93,9 @@ function formatReviewOutcome(value: AssistantActionReviewOutcome): string {
 }
 
 function formatReviewValue(value: unknown): string {
+  if (value === undefined) {
+    return 'n/a'
+  }
   if (value === null) {
     return 'null'
   }
@@ -125,6 +129,62 @@ function renderReviewList(title: string, items: string[]) {
           <li key={`${title}-${item}`}>{item}</li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+function formatPreviewStatus(value: string): string {
+  return value
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ')
+}
+
+function previewStatusPillTone(value: string): 'planned' | 'active' | 'blocked' | 'cancelled' {
+  return value.trim().toUpperCase() === 'READY' ? 'active' : 'blocked'
+}
+
+function ActionPreview({ preview }: { preview: AssistantActionPreview }) {
+  return (
+    <div className="assistant-action-review-block">
+      <strong>Dry-run preview</strong>
+      <div className="assistant-message-meta assistant-action-meta">
+        <span className={`status-pill status-pill-${previewStatusPillTone(preview.status)}`}>
+          {formatPreviewStatus(preview.status)}
+        </span>
+        <span>{preview.preview_type}</span>
+        {typeof preview.existing_invoice_count === 'number' ? (
+          <span>{preview.existing_invoice_count} existing invoice(s)</span>
+        ) : null}
+      </div>
+      <p>{preview.summary}</p>
+
+      {preview.field_changes.length > 0 ? (
+        <div className="assistant-action-field-list">
+          {preview.field_changes.map((change) => (
+            <span key={`preview-field-${change.field}`}>
+              {change.field}: {formatReviewValue(change.current_value)} -&gt;{' '}
+              {formatReviewValue(change.proposed_value)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {preview.affected_records.length > 0 ? (
+        <div className="assistant-action-field-list">
+          {preview.affected_records.map((record) => (
+            <span key={`preview-record-${record.type}-${record.id}-${record.summary}`}>
+              {formatReviewObjectRef(record)}: {record.summary}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {renderReviewList('Preview side effects', preview.expected_side_effects)}
+      {renderReviewList('Preview assumptions', preview.assumptions)}
+      {renderReviewList('Preview warnings', preview.warnings)}
+      {renderReviewList('Preview blockers', preview.blocking_reasons)}
     </div>
   )
 }
@@ -177,6 +237,8 @@ function ActionReviewContext({ reviewContext }: { reviewContext: AssistantAction
       {renderReviewList('Expected downstream effects', reviewContext.expected_downstream_effects)}
       {renderReviewList('Assumptions', reviewContext.assumptions)}
       {renderReviewList('Missing evidence', reviewContext.missing_evidence)}
+
+      {reviewContext.action_preview ? <ActionPreview preview={reviewContext.action_preview} /> : null}
 
       {staleStateEntries.length > 0 ? (
         <div className="assistant-action-review-block">

@@ -1,5 +1,6 @@
 import { fetchJson, patchJson, postJson, requestOk } from '../../shared/api'
 import type {
+  PreTradeGovernanceItemsRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeRecommendationSourceAdapterRecord,
   PreTradeRecommendationRunRecord,
@@ -120,6 +121,16 @@ export async function loadPreTradeGovernanceSummary(
   accessToken: string,
 ): Promise<PreTradeGovernanceSummaryRecord> {
   return fetchJson<PreTradeGovernanceSummaryRecord>(`${apiBase}/pretrade/governance/summary`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function loadPreTradeGovernanceItems(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeGovernanceItemsRecord> {
+  return fetchJson<PreTradeGovernanceItemsRecord>(`${apiBase}/pretrade/governance/items`, {
     headers: authorizationHeaders(accessToken),
     cache: 'no-store',
   })

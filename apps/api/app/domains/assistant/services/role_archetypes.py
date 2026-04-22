@@ -321,6 +321,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Humans promote useful generated opportunities into reviewable scenarios.",),
         required_eval_coverage=("Sourced market briefing.", "No trade capture or external-commitment claims."),
         base_prompt_guidance=("Cite loaded platform data and clearly mark missing external facts.",),
+        current_profile_ids=("market-research-agent",),
     ),
     AssistantAgentRoleArchetype(
         role_key="pre-trade-structuring-agent",
@@ -346,6 +347,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Generated structures reduce re-entry and ambiguity in trade capture handoffs.",),
         required_eval_coverage=("Review-ready scenario draft.", "Denied direct trade booking."),
         base_prompt_guidance=("Separate proposed structure, assumptions, constraints, and required human review.",),
+        current_profile_ids=("pre-trade-structuring-agent",),
     ),
     AssistantAgentRoleArchetype(
         role_key="risk-sentinel",
@@ -365,6 +367,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Risk alerts are timely, grounded, and low-noise.",),
         required_eval_coverage=("Risk exception explanation.", "No credit approval or trade mutation."),
         base_prompt_guidance=("Make stale data and confidence limits visible.",),
+        current_profile_ids=("risk-sentinel",),
     ),
     AssistantAgentRoleArchetype(
         role_key="document-agent",
@@ -394,6 +397,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Denied record creation.",
         ),
         base_prompt_guidance=("Explain confidence, missing keys, and unresolved ambiguity plainly.",),
+        current_profile_ids=("document-agent",),
     ),
     AssistantAgentRoleArchetype(
         role_key="reporting-reconciliation-agent",
@@ -420,6 +424,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Reports reduce manual reconciliation and exception-pack preparation time.",),
         required_eval_coverage=("Sourced report draft.", "No official publication or mutation."),
         base_prompt_guidance=("Label source data, assumptions, and unresolved gaps.",),
+        current_profile_ids=("reporting-reconciliation-agent",),
     ),
     AssistantAgentRoleArchetype(
         role_key="logistics-coordinator",

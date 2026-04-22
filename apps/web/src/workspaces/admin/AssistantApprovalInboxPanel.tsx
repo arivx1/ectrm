@@ -4,15 +4,21 @@ import {
   approveAssistantActionRequest,
   getAdminAssistantRunAuditTrace,
   listAdminAssistantActionRequests,
+  loadAssistantRuntimeSettings,
   rejectAssistantActionRequest,
 } from '../../entities/assistant/api'
+import {
+  assistantActionTypeOptions,
+  buildAssistantActionDefinitionMap,
+  formatAssistantActionTypeLabel,
+} from '../../entities/assistant/actionCatalog'
 import {
   AssistantActionRequestList,
   type AssistantActionDecisionPayload,
 } from '../../entities/assistant/AssistantActionRequestList'
 import { appConfig } from '../../shared/config'
 import {
-  ASSISTANT_ACTION_TYPES,
+  type AssistantActionDefinition,
   type AssistantActionRequest,
   type AssistantActionRequestAdminSummary,
   type AssistantActionRequestStatus,
@@ -79,10 +85,6 @@ function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {
   return role === 'OPS_ADMIN' || role === 'ADMIN'
 }
 
-function formatActionTypeLabel(actionType: string): string {
-  return actionType.replace(/_/g, ' ')
-}
-
 function formatDecisionDuration(seconds: number | null | undefined): string {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
     return 'No decisions yet'
@@ -138,6 +140,7 @@ export function AssistantApprovalInboxPanel({
   const [actionRequests, setActionRequests] = useState<AssistantActionRequest[]>([])
   const [actionRequestSummary, setActionRequestSummary] =
     useState<AssistantActionRequestAdminSummary>(EMPTY_ACTION_REQUEST_SUMMARY)
+  const [actionDefinitions, setActionDefinitions] = useState<AssistantActionDefinition[]>([])
   const [pageOffset, setPageOffset] = useState(0)
   const [hasMoreActionRequests, setHasMoreActionRequests] = useState(false)
   const [filters, setFilters] = useState<ActionRequestHistoryFilters>(INITIAL_ACTION_REQUEST_FILTERS)
@@ -175,6 +178,14 @@ export function AssistantApprovalInboxPanel({
     actionRequestSummary.total_count > 0
       ? `${pageStart}-${pageEnd} of ${actionRequestSummary.total_count}`
       : '0 of 0'
+  const actionDefinitionsByName = useMemo(
+    () => buildAssistantActionDefinitionMap(actionDefinitions),
+    [actionDefinitions],
+  )
+  const actionTypeOptions = useMemo(
+    () => assistantActionTypeOptions(actionDefinitions),
+    [actionDefinitions],
+  )
 
   const refreshActionRequests = useCallback(async () => {
     requestSequenceRef.current += 1
@@ -232,6 +243,31 @@ export function AssistantApprovalInboxPanel({
     setFlash(null)
     void refreshActionRequests()
   }, [authSession, refreshActionRequests])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!adminEnabled) {
+      setActionDefinitions([])
+      return
+    }
+
+    loadAssistantRuntimeSettings(appConfig.apiBase)
+      .then((settings) => {
+        if (!cancelled) {
+          setActionDefinitions(settings.available_action_types)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActionDefinitions([])
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [adminEnabled])
 
   const refreshSelectedAuditTrace = useCallback(async () => {
     traceSequenceRef.current += 1
@@ -435,9 +471,9 @@ export function AssistantApprovalInboxPanel({
                   }
                 >
                   <option value="">All action types</option>
-                  {ASSISTANT_ACTION_TYPES.map((actionType) => (
+                  {actionTypeOptions.map((actionType) => (
                     <option key={actionType} value={actionType}>
-                      {formatActionTypeLabel(actionType)}
+                      {formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)}
                     </option>
                   ))}
                 </select>

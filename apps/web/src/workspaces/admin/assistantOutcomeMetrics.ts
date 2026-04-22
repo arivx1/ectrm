@@ -1,4 +1,5 @@
 import type {
+  AssistantActionDefinition,
   AssistantActionTypeOutcomeMetricRow,
   AssistantAgentOutcomeMetricRow,
   AssistantOutcomeMetricRecommendationAction,
@@ -6,6 +7,10 @@ import type {
   AssistantRoleOutcomeMetricRow,
   AssistantWorkspaceFeedbackMetricRow,
 } from '../../shared/models'
+import {
+  formatAssistantActionTypeLabel as formatCatalogActionTypeLabel,
+  type AssistantActionDefinitionMap,
+} from '../../entities/assistant/actionCatalog'
 
 export type AssistantOutcomeMetricTone = 'success' | 'attention' | 'danger' | 'neutral'
 
@@ -32,8 +37,11 @@ export type AssistantWorkspaceFeedbackDisplayRow = {
   metrics: AssistantOutcomeMetricDisplayMetric[]
 }
 
-export function formatAssistantActionTypeLabel(actionType: string): string {
-  return actionType.replace(/_/g, ' ')
+export function formatAssistantActionTypeLabel(
+  actionType: string,
+  definitionsByName?: AssistantActionDefinitionMap,
+): string {
+  return formatCatalogActionTypeLabel(actionType, definitionsByName)
 }
 
 export function formatAssistantOutcomeRate(value: number | null | undefined): string {
@@ -255,10 +263,11 @@ export function buildAssistantWorkspaceFeedbackRows(
 
 export function buildAssistantActionTypeOutcomeRows(
   rows: AssistantActionTypeOutcomeMetricRow[],
+  actionDefinitionsByName?: ReadonlyMap<string, AssistantActionDefinition>,
 ): AssistantOutcomeMetricDisplayRow[] {
   return rows.map((row) => ({
     key: row.action_type,
-    title: formatAssistantActionTypeLabel(row.action_type),
+    title: formatAssistantActionTypeLabel(row.action_type, actionDefinitionsByName),
     subtitle: `${row.decided_action_count} decided of ${row.staged_action_count} staged`,
     recommendationLabel: assistantOutcomeRecommendationLabel(row.recommendation.recommended_action),
     recommendationTone: assistantOutcomeRecommendationTone(row.recommendation.recommended_action),

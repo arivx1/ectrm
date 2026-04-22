@@ -84,6 +84,7 @@ const publicRuntimeSettings = {
     configured_provider_count: 0,
     providers: [],
     available_tools: [],
+    available_action_types: [],
   },
   pagination: {
     standard_default: 100,

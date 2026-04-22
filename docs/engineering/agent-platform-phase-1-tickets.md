@@ -433,6 +433,13 @@ when the requested change was already applied.
 
 ## AP1-09: Dry-Run Or Preview For One Sensitive Action Type
 
+### Status
+
+Implemented for `issue_trade_invoice` on 2026-04-22. Staged invoice actions now
+carry a deterministic `action_preview` in review context, approval surfaces show
+affected records, field changes, expected side effects, assumptions, warnings,
+and blockers, and blocked previews cannot be approved into execution.
+
 ### Size
 
 M

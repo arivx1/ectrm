@@ -7,6 +7,7 @@ import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPr
 import { loadPreTradeRecommendationRun, loadPreTradeReviewItem } from '../../entities/pretrade/api'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
 import { appConfig } from '../../shared/config'
+import { normalizeAppRouteHandoff, type AppRouteHandoff } from '../../shared/appRouteHandoff'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import type {
@@ -27,6 +28,7 @@ import {
 } from '../../shared/optionExposure'
 import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
@@ -375,6 +377,7 @@ function parsePreTradeReviewId(selectedTradeEvents: EventRow[]): number | null {
 
 type TradingWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff: AppRouteHandoff | null
   globalFilter: string
   operationalResourceDescriptors: OperationalResourceDescriptor[]
   tradeMetadataSource: 'server' | 'fallback'
@@ -393,8 +396,9 @@ type TradingWorkspaceProps = {
   selectedTradeId: string | null
   selectedTradeEvents: EventRow[]
   inspectorTab: InspectorTab
-  setSelectedTradeId: (tradeId: string) => void
+  setSelectedTradeId: (tradeId: string | null) => void
   setInspectorTab: (tab: InspectorTab) => void
+  onClearHandoff: () => void
   handleDuplicateTrade: () => void
   handleAmendTrade: (event: React.FormEvent) => void
   handleCancelTrade: (reason: string) => void
@@ -524,6 +528,7 @@ type TradingWorkspaceProps = {
 export function TradingWorkspace(props: TradingWorkspaceProps) {
   const {
     authSession,
+    routeHandoff,
     globalFilter,
     operationalResourceDescriptors,
     tradeMetadataSource,
@@ -544,6 +549,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     inspectorTab,
     setSelectedTradeId,
     setInspectorTab,
+    onClearHandoff,
     handleDuplicateTrade,
     handleAmendTrade,
     handleCancelTrade,
@@ -753,6 +759,13 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
 
   const [screenFilter, setScreenFilter] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
+  const normalizedRouteHandoff = normalizeAppRouteHandoff(routeHandoff)
+  const routeHandoffInspectorTab = normalizedRouteHandoff?.tradeInspectorTab ?? null
+  function clearWorkspaceHandoff() {
+    setScreenFilter('')
+    setSelectedTradeId(null)
+    onClearHandoff()
+  }
   const visibleTrades = useMemo(
     () => trades.filter((trade) => matchesTradeScreenFilter(trade, effectiveScreenFilter)),
     [effectiveScreenFilter, trades],
@@ -980,21 +993,39 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
       workspaceLabel="Trading"
       authSession={authSession}
       headerContent={
-        <WorkspaceLocalFilterBar
-          value={screenFilter}
-          onChange={setScreenFilter}
-          placeholder="Trade ID, counterparty, commodity, book, lifecycle status, or trader"
-          description="Keep the blotter filter local to trade capture so you can narrow this screen without shifting anything in the rest of the console."
-          totalCount={trades.length}
-          matchedCount={visibleTrades.length}
-          resultLabel="trades"
-          globalValue={globalFilter}
-          note={
-            selectedTradeHiddenByFilter
-              ? `Selected trade ${selectedTrade?.trade_id} is still open in the inspector, but it is outside the current trade filters.`
-              : undefined
-          }
-        />
+        <>
+          <WorkspaceHandoffFocusBanner
+            handoff={routeHandoff}
+            currentView="trades"
+            clearLabel="Show Full Blotter"
+            onClear={clearWorkspaceHandoff}
+            actions={
+              routeHandoffInspectorTab && routeHandoffInspectorTab !== inspectorTab
+                ? [
+                    {
+                      label: `Open ${routeHandoffInspectorTab} Tab`,
+                      onClick: () => setInspectorTab(routeHandoffInspectorTab),
+                    },
+                  ]
+                : []
+            }
+          />
+          <WorkspaceLocalFilterBar
+            value={screenFilter}
+            onChange={setScreenFilter}
+            placeholder="Trade ID, counterparty, commodity, book, lifecycle status, or trader"
+            description="Keep the blotter filter local to trade capture so you can narrow this screen without shifting anything in the rest of the console."
+            totalCount={trades.length}
+            matchedCount={visibleTrades.length}
+            resultLabel="trades"
+            globalValue={globalFilter}
+            note={
+              selectedTradeHiddenByFilter
+                ? `Selected trade ${selectedTrade?.trade_id} is still open in the inspector, but it is outside the current trade filters.`
+                : undefined
+            }
+          />
+        </>
       }
       tiles={[
         {

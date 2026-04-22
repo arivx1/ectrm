@@ -221,6 +221,17 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("trade-ops-copilot", role_keys)
         self.assertIn("pre-trade-structuring-agent", role_keys)
         self.assertIn("control-tower-agent", role_keys)
+        phase_1_roles = [row for row in payload if row["catalog_status"] == "PHASE_1"]
+        self.assertEqual(
+            [row["role_key"] for row in phase_1_roles],
+            [
+                "market-research-agent",
+                "pre-trade-structuring-agent",
+                "risk-sentinel",
+                "document-agent",
+                "reporting-reconciliation-agent",
+            ],
+        )
 
         trade_ops = next(row for row in payload if row["role_key"] == "trade-ops-copilot")
         self.assertEqual(trade_ops["catalog_status"], "SEEDED")
@@ -243,6 +254,58 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(trade_ops["eval_gate"]["status"], "PASS")
         self.assertIn("Allowed operational action staging.", trade_ops["eval_gate"]["covered_cases"])
         self.assertEqual(trade_ops["eval_gate"]["missing_cases"], [])
+
+        pre_trade = next(row for row in payload if row["role_key"] == "pre-trade-structuring-agent")
+        self.assertEqual(pre_trade["catalog_status"], "PHASE_1")
+        self.assertEqual(pre_trade["current_profile_ids"], ["pre-trade-structuring-agent"])
+        self.assertEqual(pre_trade["authority_ceiling"], "DRAFT")
+
+    def test_admin_seed_sync_exposes_role_profiles_with_policy_and_eval_status(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+
+        seed_response = self.client.post(
+            "/admin/data/assistant-agents/seed",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"requested_by": "ops-admin"},
+        )
+
+        self.assertEqual(seed_response.status_code, 200)
+        self.assertEqual(seed_response.json()["total_profiles"], 13)
+        self.assertEqual(seed_response.json()["total_templates"], 13)
+
+        listing_response = self.client.get(
+            "/admin/assistant/agents",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(listing_response.status_code, 200)
+        profiles = {row["agent_id"]: row for row in listing_response.json()}
+        self.assertEqual(len(profiles), 13)
+
+        active_profiles = [row for row in profiles.values() if row["status"] == "ACTIVE"]
+        self.assertEqual(
+            sorted(row["agent_id"] for row in active_profiles),
+            ["settlement-copilot", "trade-governor", "trade-ops-copilot"],
+        )
+        for profile in active_profiles:
+            self.assertEqual(profile["profile_kind"], "ROLE_DERIVED")
+            self.assertTrue(profile["role_key"])
+            self.assertTrue(profile["human_owner_role"])
+            self.assertTrue(profile["authority_ceiling"])
+            self.assertIn("policy_notes", profile["effective_policy"])
+            self.assertIn(profile["eval_gate"]["status"], {"PASS", "BLOCKED"})
+
+        pre_trade = profiles["pre-trade-structuring-agent"]
+        self.assertEqual(pre_trade["status"], "DRAFT")
+        self.assertEqual(pre_trade["profile_kind"], "ROLE_DERIVED")
+        self.assertEqual(pre_trade["authority_ceiling"], "DRAFT")
+        self.assertEqual(pre_trade["eval_gate"]["status"], "PASS")
+
+        document_agent = profiles["document-agent"]
+        self.assertEqual(document_agent["status"], "DRAFT")
+        self.assertEqual(document_agent["authority_ceiling"], "DRAFT")
+        self.assertNotIn("ACTION", document_agent["capabilities"])
+        self.assertEqual(document_agent["allowed_action_types"], [])
+        self.assertIn("outcome review", document_agent["activation_notes"])
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_HANDLERS), set(ALL_ASSISTANT_ACTION_TYPES))
@@ -1119,7 +1182,9 @@ class AssistantApiTests(unittest.TestCase):
         with self.SessionLocal() as session:
             record = session.query(AssistantActionRequest).one()
             self.assertIn("review_context", record.payload)
-            self.assertEqual(record.payload["review_context"], review_context)
+            stored_review_context = dict(review_context)
+            stored_review_context.pop("action_preview", None)
+            self.assertEqual(record.payload["review_context"], stored_review_context)
 
     def test_assistant_agent_listing_marks_depleted_token_budget_red(self) -> None:
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 20
@@ -2110,6 +2175,23 @@ class AssistantApiTests(unittest.TestCase):
 
         self.assertEqual(action_request["action_type"], "issue_trade_invoice")
         self.assertEqual(action_request["payload"]["trade_id"], "T-1017")
+        self.assertIn("DRY_RUN_PREVIEW_READY", action_request["lifecycle"]["review_risk_flags"])
+
+        review_context = action_request["review_context"]
+        preview = review_context["action_preview"]
+        self.assertEqual(preview["preview_type"], "issue_trade_invoice")
+        self.assertEqual(preview["status"], "READY")
+        self.assertEqual(preview["existing_invoice_count"], 0)
+        self.assertIn("INV-T-1017", preview["summary"])
+        self.assertIn("USD 2500.00", preview["summary"])
+        preview_fields = {change["field"]: change for change in preview["field_changes"]}
+        self.assertEqual(preview_fields["invoice_number"]["proposed_value"], "INV-T-1017")
+        self.assertEqual(preview_fields["invoice_amount"]["proposed_value"], 2500.0)
+        self.assertIn("Create one trade invoice record.", preview["expected_side_effects"])
+
+        with self.SessionLocal() as session:
+            invoice_count = session.query(TradeInvoice).filter(TradeInvoice.trade_id == "T-1017").count()
+            self.assertEqual(invoice_count, 0)
 
         response = self.client.post(
             f"/assistant/action-requests/{action_request['action_request_id']}/approve",
@@ -2121,11 +2203,112 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "EXECUTED")
         self.assertEqual(payload["result"]["trade_id"], "T-1017")
         self.assertEqual(payload["result"]["status"], "ISSUED")
+        self.assertEqual(payload["result"]["approval_policy"]["action_preview_status"], "READY")
+        self.assertIn("action_preview_ready", payload["result"]["approval_policy"]["checks"])
 
         with self.SessionLocal() as session:
             invoice = session.query(TradeInvoice).filter(TradeInvoice.trade_id == "T-1017").one()
             self.assertEqual(invoice.invoice_number, "INV-T-1017")
             self.assertEqual(float(invoice.invoice_amount), 2500.0)
+
+    def test_assistant_action_request_invoice_preview_blocks_duplicate_invoice_number(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1017P")
+        self._seed_invoice_record(
+            trade_id="T-1017P",
+            invoice_id=172,
+            invoice_number="INV-T-1017P",
+            invoice_amount=500.0,
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected trade:\n"
+                "- trade_id: T-1017P\n"
+                "- invoice_number: INV-T-1017P\n"
+                "- invoice_amount: 2500\n"
+            ),
+            message="Issue invoice for this trade.",
+        )
+
+        self.assertEqual(action_request["action_type"], "issue_trade_invoice")
+        self.assertEqual(action_request["status"], "PENDING")
+        self.assertEqual(action_request["lifecycle"]["label"], "Preview blocked")
+        self.assertEqual(action_request["lifecycle"]["tone"], "danger")
+        self.assertFalse(action_request["lifecycle"]["can_approve"])
+        self.assertTrue(action_request["lifecycle"]["can_reject"])
+        self.assertIn("DRY_RUN_PREVIEW_BLOCKED", action_request["lifecycle"]["review_risk_flags"])
+
+        preview = action_request["review_context"]["action_preview"]
+        self.assertEqual(preview["status"], "BLOCKED")
+        self.assertEqual(preview["existing_invoice_count"], 1)
+        self.assertEqual(preview["expected_side_effects"], [])
+        self.assertTrue(
+            any("already in use" in reason for reason in preview["blocking_reasons"]),
+            preview["blocking_reasons"],
+        )
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertIn("preview is not ready", payload["error_detail"])
+        self.assertIn("already in use", payload["error_detail"])
+
+        with self.SessionLocal() as session:
+            invoice_count = (
+                session.query(TradeInvoice)
+                .filter(
+                    TradeInvoice.trade_id == "T-1017P",
+                    TradeInvoice.invoice_number == "INV-T-1017P",
+                )
+                .count()
+            )
+            self.assertEqual(invoice_count, 1)
+
+    def test_assistant_action_request_approval_requires_invoice_preview(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1017M")
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected trade:\n"
+                "- trade_id: T-1017M\n"
+                "- invoice_number: INV-T-1017M\n"
+                "- invoice_amount: 2500\n"
+            ),
+            message="Issue invoice for this trade.",
+        )
+
+        with self.SessionLocal() as session:
+            record = session.get(AssistantActionRequest, action_request["action_request_id"])
+            assert record is not None
+            record_payload = dict(record.payload)
+            review_context = dict(record_payload["review_context"])
+            review_context.pop("action_preview")
+            record_payload["review_context"] = review_context
+            record.payload = record_payload
+            session.commit()
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "FAILED")
+        self.assertIn("requires a ready issue_trade_invoice preview", payload["error_detail"])
+
+        with self.SessionLocal() as session:
+            invoice_count = session.query(TradeInvoice).filter(TradeInvoice.trade_id == "T-1017M").count()
+            self.assertEqual(invoice_count, 0)
 
     def test_assistant_action_request_approval_blocks_invoice_when_invoice_set_changed(self) -> None:
         token = self._create_session_token()
@@ -3034,6 +3217,133 @@ class AssistantApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(missing_response.status_code, 404)
+
+    def test_admin_agent_health_review_groups_deterministic_work_packages(self) -> None:
+        admin_token = self._create_session_token()
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            for index, agent_id in enumerate(("workflow-alpha", "workflow-beta")):
+                agent_name = f"Workflow {index}"
+                agent = AssistantAgent(
+                    agent_id=agent_id,
+                    name=agent_name,
+                    description="Stages workflow updates for operations review.",
+                    status="ACTIVE",
+                    scope="TEAM",
+                    provider="openai",
+                    model="gpt-5-mini",
+                    role_key="trade-ops-copilot",
+                    profile_kind="ROLE_DERIVED",
+                    specialization_summary="Workflow item update specialist.",
+                    human_owner_role="Operations Lead",
+                    authority_ceiling="STAGE",
+                    activation_notes="Approved for staged workflow update review.",
+                    profile_request_id=None,
+                    allowed_workspaces=["assistant", "operations"],
+                    capabilities=["READ", "EXPLAIN", "ACTION"],
+                    allowed_tools=["list_workflow_items"],
+                    allowed_action_types=["update_trade_workflow_item"],
+                    daily_token_allocation=None,
+                    system_prompt="Stage only reviewable workflow updates.",
+                    created_at=now - timedelta(days=1),
+                    created_by="ops_admin",
+                    updated_at=now - timedelta(days=1),
+                    updated_by="ops_admin",
+                    version=1,
+                )
+                run = AssistantRun(
+                    conversation_id=None,
+                    status="COMPLETED",
+                    user_id=f"ops_{index}",
+                    session_id=f"workflow-session-{index}",
+                    user_role="OPS_ADMIN",
+                    workspace="operations",
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    agent_role_key="trade-ops-copilot",
+                    agent_profile_kind="ROLE_DERIVED",
+                    provider="openai",
+                    model="gpt-5-mini",
+                    use_live_tools=False,
+                    request_messages=[{"role": "user", "content": "Review workflow items."}],
+                    application_context=None,
+                    prompt_sections=[],
+                    rendered_system_prompt="System prompt.",
+                    warnings=[],
+                    tool_calls=[],
+                    input_tokens=100,
+                    output_tokens=40,
+                    latest_user_message="Review workflow items.",
+                    assistant_message="Staged workflow updates.",
+                    error_detail=None,
+                    created_at=now - timedelta(hours=2),
+                    completed_at=now - timedelta(hours=2),
+                )
+                session.add_all([agent, run])
+                session.flush()
+                session.add(
+                    AssistantActionRequest(
+                        run_id=run.id,
+                        status="EXECUTED",
+                        user_id=f"ops_{index}",
+                        session_id=f"workflow-session-{index}",
+                        workspace="operations",
+                        agent_id=agent_id,
+                        agent_name=agent_name,
+                        action_type="update_trade_workflow_item",
+                        summary="Workflow update",
+                        description="Update a workflow item.",
+                        payload={"review_context": {"stale_state_basis": {"version": index}}},
+                        result={"workflow_item": {"id": index + 1}},
+                        error_detail=None,
+                        created_at=now - timedelta(minutes=30 + index),
+                        decided_at=now - timedelta(minutes=20 + index),
+                        decided_by="ops_lead",
+                    )
+                )
+            session.commit()
+
+        response = self.client.get(
+            "/admin/assistant/agent-health-review",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent_count"], 2)
+        self.assertGreaterEqual(payload["work_package_count"], 1)
+        package = next(
+            row
+            for row in payload["work_packages"]
+            if row["source_candidates"]
+            and "update_trade_workflow_item" in row["source_candidates"][0]
+        )
+        self.assertTrue(package["work_package_id"].startswith("policy-"))
+        self.assertEqual(package["package_type"], "POLICY")
+        self.assertEqual(package["priority"], "P2")
+        self.assertEqual(package["status"], "CANDIDATE")
+        self.assertEqual(package["source_agent_ids"], ["workflow-alpha", "workflow-beta"])
+        self.assertIn("typed policy or service logic", package["source_candidates"][0])
+        self.assertIn("Operations Lead", package["recommended_owner_role"])
+        self.assertTrue(any("policy simulation" in check.lower() for check in package["acceptance_checks"]))
+        item_ids = {item["agent_id"]: item["work_package_ids"] for item in payload["review_items"]}
+        self.assertIn(package["work_package_id"], item_ids["workflow-alpha"])
+        self.assertIn(package["work_package_id"], item_ids["workflow-beta"])
+
+    def test_admin_agent_health_review_requires_admin_role(self) -> None:
+        token = self._create_session_token(
+            user_id="desk_user",
+            email="desk@example.com",
+            display_name="Desk User",
+            role="TRADER",
+        )
+
+        response = self.client.get(
+            "/admin/assistant/agent-health-review",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_admin_assistant_run_audit_trace_links_approved_action_mutation(self) -> None:
         admin_token = self._create_session_token()

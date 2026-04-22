@@ -227,6 +227,7 @@ export type WorkspaceViewRenderContext = {
   handleDocumentationDocumentChange: ReturnType<typeof useAppRouteState>['handleDocumentationDocumentChange']
   navigateToTrade: ReturnType<typeof useAppRouteState>['navigateToTrade']
   navigateToView: ReturnType<typeof useAppRouteState>['navigateToView']
+  replaceView: ReturnType<typeof useAppRouteState>['replaceView']
   routeHandoff: ReturnType<typeof useAppRouteState>['routeHandoff']
   referenceState: ReturnType<typeof useReferenceDataController>
   hrefForView: ReturnType<typeof useAppRouteState>['hrefForView']
@@ -1034,6 +1035,7 @@ export const WORKSPACE_RENDERERS: Record<
       return (
         <TradingWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
         globalFilter={context.shell.globalFilter}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         tradeMetadataSource={context.workspaceData.tradeMetadataSource}
@@ -1054,6 +1056,7 @@ export const WORKSPACE_RENDERERS: Record<
         inspectorTab={context.shell.inspectorTab}
         setSelectedTradeId={context.setSelectedTradeId}
         setInspectorTab={context.setInspectorTab}
+        onClearHandoff={() => context.replaceView('trades', null, { tradeId: null })}
         handleDuplicateTrade={context.tradeActions.handleDuplicateTrade}
         handleAmendTrade={context.tradeActions.handleAmendTrade}
         handleCancelTrade={context.tradeActions.handleCancelTrade}
@@ -1333,6 +1336,7 @@ export const WORKSPACE_RENDERERS: Record<
         onIssueConfirmation={context.workspaceData.handleIssueTradeConfirmation}
         onRespondConfirmation={context.workspaceData.handleRespondTradeConfirmation}
         onCreateWorkflowItem={context.workspaceData.handleCreateWorkflowItem}
+        onClearHandoff={() => context.replaceView('operations')}
         onOpenTrade={context.navigateToTrade}
         onOptionLifecycleEvent={context.tradeActions.handleTradeOptionLifecycleEvent}
         optionLifecycleSubmittingEvent={context.tradeActions.optionLifecycleSubmittingEvent}
@@ -1365,6 +1369,7 @@ export const WORKSPACE_RENDERERS: Record<
         invoiceMutationPendingKey={context.workspaceData.invoiceMutationPendingKey}
         paymentMutationError={context.workspaceData.paymentMutationError}
         paymentMutationPendingKey={context.workspaceData.paymentMutationPendingKey}
+        onClearHandoff={() => context.replaceView('settlement')}
         onOpenTrade={context.navigateToTrade}
         onIssueInvoice={context.workspaceData.handleIssueTradeInvoice}
         onSaveInvoice={context.workspaceData.handleUpdateTradeInvoice}

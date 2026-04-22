@@ -424,3 +424,18 @@ class PreTradeRecommendationRunOut(BaseModel):
     updated_by: str
     version: int
     can_edit: bool
+
+
+class PreTradeGovernanceStaleEvidenceRunOut(BaseModel):
+    run: PreTradeRecommendationRunOut
+    impaired_snapshots: list[PreTradeRecommendationSourceSnapshot] = Field(default_factory=list)
+
+
+class PreTradeGovernanceItemsOut(BaseModel):
+    generated_at: datetime
+    pending_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
+    risky_recommendation_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
+    unresolved_risky_recommendation_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
+    override_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
+    booked_with_override_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
+    stale_evidence_runs: list[PreTradeGovernanceStaleEvidenceRunOut] = Field(default_factory=list)

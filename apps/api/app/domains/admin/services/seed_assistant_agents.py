@@ -23,13 +23,18 @@ class AssistantAgentSeedDefinition:
     recommended_tools: tuple[str, ...]
     allowed_action_types: tuple[str, ...]
     system_prompt: str
+    profile_kind: str = "ROLE_DERIVED"
+    specialization_summary: str | None = None
+    human_owner_role: str | None = None
+    authority_ceiling: str | None = None
+    activation_notes: str | None = None
     provider: str | None = None
     model: str | None = None
 
 
 @dataclass(frozen=True)
 class AssistantAgentSeedSummary:
-    total_templates: int
+    total_profiles: int
     created_count: int
     updated_count: int
     agent_ids: list[str]
@@ -58,137 +63,107 @@ def _build_system_prompt(
     )
 
 
-CURATED_ASSISTANT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
-    AssistantAgentSeedDefinition(
-        agent_id="trade-ops-copilot",
-        role_key="trade-ops-copilot",
-        name="Trade Ops Copilot",
-        description=(
-            "Coordinates confirmation, workflow, delivery, and document follow-through for booked trades."
+def _build_role_system_prompt(*, role_key: str, name: str) -> str:
+    role = get_role_archetype(role_key)
+    if role is None:
+        raise RuntimeError(f"Pilot assistant agent references unknown role archetype '{role_key}'")
+    return _build_system_prompt(
+        name=name,
+        mission=role.mission,
+        workflow=(
+            *role.base_prompt_guidance,
+            "Use only the governed workspaces, tools, and authority boundary defined by the role profile.",
         ),
-        status="ACTIVE",
-        scope="TEAM",
-        allowed_workspaces=(
-            "assistant",
-            "trades",
-            "operations",
-            "shipments",
-            "scheduling",
-            "reference",
+        response_style=(
+            "Lead with the operational conclusion, then show the supporting evidence.",
+            "Separate confirmed facts, assumptions, and human review needs.",
         ),
-        capabilities=("READ", "EXPLAIN", "DRAFT", "ACTION"),
-        recommended_tools=(
-            "get_trade_workbench",
-            "list_workflow_items",
-            "list_trade_confirmations",
-            "list_deliveries",
-            "list_documents",
-            "get_document_ingestion",
+        guardrails=(
+            *role.stop_conditions,
+            "Do not expand authority beyond this role-derived profile.",
         ),
-        allowed_action_types=(
-            "issue_trade_confirmation",
-            "record_trade_confirmation_response",
-            "update_trade_workflow_item",
-            "reprocess_document_ingestion",
-        ),
-        system_prompt=_build_system_prompt(
-            name="Trade Ops Copilot",
-            mission=(
-                "Keep booked trades moving by combining operations visibility with tightly scoped, approval-gated actions.",
-                "Help operators understand what is blocked now and stage the smallest appropriate next step.",
-            ),
-            workflow=(
-                "Review trade workbench, workflow items, confirmations, deliveries, and document signals before recommending or staging a change.",
-                "When an action is appropriate, explain why it is needed and keep the requested mutation narrowly scoped to the evidence at hand.",
-                "Use draft-style responses for handoffs, owner notes, or follow-up checklists when direct action is not yet warranted.",
-            ),
-            response_style=(
-                "Lead with the blocker or next action, then show the evidence supporting it.",
-                "Make approvals, unresolved ambiguity, and remaining human checks explicit.",
-            ),
-            guardrails=(
-                "Do not stage broad or speculative changes when the current workflow evidence is incomplete.",
-                "Do not claim an approval is final until the action request is actually executed.",
-            ),
+    )
+
+
+def _seed_definition_from_role(
+    role_key: str,
+    *,
+    agent_id: str | None = None,
+    status: str = "DRAFT",
+    scope: str = "TEAM",
+    capabilities: tuple[str, ...] | None = None,
+    allowed_action_types: tuple[str, ...] | None = None,
+    authority_ceiling: str | None = None,
+    activation_notes: str | None = None,
+) -> AssistantAgentSeedDefinition:
+    role = get_role_archetype(role_key)
+    if role is None:
+        raise RuntimeError(f"Pilot assistant agent references unknown role archetype '{role_key}'")
+
+    resolved_agent_id = agent_id or role.role_key
+    resolved_authority = authority_ceiling or role.authority_ceiling
+    return AssistantAgentSeedDefinition(
+        agent_id=resolved_agent_id,
+        role_key=role.role_key,
+        name=role.name,
+        description=role.description,
+        status=status,
+        scope=scope,
+        allowed_workspaces=role.allowed_workspaces,
+        capabilities=capabilities or role.capability_ceiling,
+        recommended_tools=role.default_tools,
+        allowed_action_types=allowed_action_types if allowed_action_types is not None else role.maximum_action_types,
+        system_prompt=_build_role_system_prompt(role_key=role.role_key, name=role.name),
+        profile_kind="ROLE_DERIVED",
+        specialization_summary=f"Role-derived pilot profile for the {role.name} role archetype.",
+        human_owner_role=role.human_owner_role,
+        authority_ceiling=resolved_authority,
+        activation_notes=activation_notes or f"Pilot profile synchronized from the {role.name} role catalog entry.",
+    )
+
+
+CURRENT_ROLE_DERIVED_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
+    _seed_definition_from_role("trade-ops-copilot", status="ACTIVE"),
+    _seed_definition_from_role("settlement-copilot", status="ACTIVE"),
+    _seed_definition_from_role("trade-governor", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("trade-explainer"),
+    _seed_definition_from_role("ops-coordinator"),
+    _seed_definition_from_role("settlement-analyst"),
+    _seed_definition_from_role("document-triage"),
+    _seed_definition_from_role("desk-briefing", scope="ORGANIZATION"),
+)
+
+PHASE_1_PILOT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
+    _seed_definition_from_role(
+        "market-research-agent",
+        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
+    ),
+    _seed_definition_from_role(
+        "pre-trade-structuring-agent",
+        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
+    ),
+    _seed_definition_from_role(
+        "document-agent",
+        capabilities=("READ", "EXPLAIN", "DRAFT"),
+        allowed_action_types=(),
+        authority_ceiling="DRAFT",
+        activation_notes=(
+            "Phase 1 pilot draft. Reprocessing authority requires eval coverage and outcome review before STAGE."
         ),
     ),
-    AssistantAgentSeedDefinition(
-        agent_id="settlement-copilot",
-        role_key="settlement-copilot",
-        name="Settlement Copilot",
-        description="Pairs settlement analysis with approval-gated invoice and payment staging.",
-        status="ACTIVE",
-        scope="TEAM",
-        allowed_workspaces=("assistant", "settlement", "operations", "reports"),
-        capabilities=("READ", "EXPLAIN", "DRAFT", "ACTION"),
-        recommended_tools=(
-            "list_trade_invoices",
-            "list_trade_payments",
-            "get_trade_settlement_summary",
-            "list_workflow_items",
-            "get_workspace_summary",
-        ),
-        allowed_action_types=("issue_trade_invoice", "create_trade_payment"),
-        system_prompt=_build_system_prompt(
-            name="Settlement Copilot",
-            mission=(
-                "Explain settlement posture clearly and help the team stage the right invoice or payment action when it is justified.",
-                "Keep finance-oriented follow-up grounded in current settlement evidence and workflow context.",
-            ),
-            workflow=(
-                "Verify invoice, payment, settlement, and workflow records before suggesting or staging a cash action.",
-                "Call out missing dates, amounts, or dependencies before moving from explanation into action planning.",
-                "Draft concise collection or review notes when a written handoff is more appropriate than an immediate mutation.",
-            ),
-            response_style=(
-                "Start with the cash status, then move into the evidence and the recommended next step.",
-                "Keep action descriptions tight enough for a reviewer to approve confidently.",
-            ),
-            guardrails=(
-                "Do not stage invoices or payments when amounts, timing, or trade linkage are still ambiguous.",
-                "Do not smooth over missing settlement evidence; surface it directly.",
-            ),
-        ),
+    _seed_definition_from_role(
+        "risk-sentinel",
+        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
     ),
-    AssistantAgentSeedDefinition(
-        agent_id="trade-governor",
-        role_key="trade-governor",
-        name="Trade Governor",
-        description=(
-            "Focuses on high-sensitivity trade governance with a tightly constrained cancel-only action scope."
-        ),
-        status="ACTIVE",
-        scope="ORGANIZATION",
-        allowed_workspaces=("assistant", "trades", "operations", "admin"),
-        capabilities=("READ", "EXPLAIN", "ACTION"),
-        recommended_tools=(
-            "get_trade_by_id",
-            "list_trade_events",
-            "get_trade_workbench",
-            "list_workflow_items",
-        ),
-        allowed_action_types=("cancel_trade",),
-        system_prompt=_build_system_prompt(
-            name="Trade Governor",
-            mission=(
-                "Assess whether a trade cancellation request is supported by the current record and stage it only when the evidence is clear.",
-                "Make reviewer context explicit so approvals are easy to audit and reason about later.",
-            ),
-            workflow=(
-                "Check the live trade state, event history, workbench context, and open workflow items before considering cancellation.",
-                "Explain the operational impact and rationale behind every staged cancel request.",
-                "Decline to stage an action when the request is better handled as an amendment, workflow update, or human investigation.",
-            ),
-            response_style=(
-                "Lead with whether cancellation appears justified, then summarize the strongest supporting and conflicting evidence.",
-                "Keep governance language calm, specific, and reviewable.",
-            ),
-            guardrails=(
-                "Never stage a cancellation when the trade identity, current status, or business reason is uncertain.",
-                "Do not broaden beyond cancel-only governance actions.",
-            ),
-        ),
+    _seed_definition_from_role(
+        "reporting-reconciliation-agent",
+        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
     ),
+)
+
+PILOT_ASSISTANT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
+    *CURRENT_ROLE_DERIVED_AGENT_DEFINITIONS,
+    *PHASE_1_PILOT_AGENT_DEFINITIONS,
 )
 
 
@@ -203,7 +178,7 @@ def seed_assistant_agents(
     updated_count = 0
     agent_ids: list[str] = []
 
-    for definition in CURATED_ASSISTANT_AGENT_DEFINITIONS:
+    for definition in PILOT_ASSISTANT_AGENT_DEFINITIONS:
         agent_ids.append(definition.agent_id)
         allowed_tools = [
             tool_name for tool_name in definition.recommended_tools if tool_name in available_tool_names
@@ -253,7 +228,7 @@ def seed_assistant_agents(
 
     db.commit()
     return AssistantAgentSeedSummary(
-        total_templates=len(CURATED_ASSISTANT_AGENT_DEFINITIONS),
+        total_profiles=len(PILOT_ASSISTANT_AGENT_DEFINITIONS),
         created_count=created_count,
         updated_count=updated_count,
         agent_ids=agent_ids,
@@ -326,9 +301,12 @@ def _profile_metadata_for_definition(definition: AssistantAgentSeedDefinition) -
         raise RuntimeError(f"Seeded assistant agent references unknown role archetype '{definition.role_key}'")
     return {
         "role_key": role.role_key,
-        "profile_kind": "CURATED",
-        "specialization_summary": f"Curated seed profile for the {role.name} role archetype.",
-        "human_owner_role": role.human_owner_role,
-        "authority_ceiling": role.authority_ceiling,
-        "activation_notes": "Seeded by the platform role catalog.",
+        "profile_kind": definition.profile_kind,
+        "specialization_summary": (
+            definition.specialization_summary
+            or f"Role-derived pilot profile for the {role.name} role archetype."
+        ),
+        "human_owner_role": definition.human_owner_role or role.human_owner_role,
+        "authority_ceiling": definition.authority_ceiling or role.authority_ceiling,
+        "activation_notes": definition.activation_notes or f"Pilot profile synchronized from the {role.name} role catalog entry.",
     }

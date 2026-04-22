@@ -28,6 +28,10 @@ export type AppRouteState = {
   handoff: AppRouteHandoff | null
 }
 
+type AppRouteNavigationOptions = {
+  tradeId?: string | null
+}
+
 function readAppRouteState(): AppRouteState {
   if (typeof window === 'undefined') {
     return {
@@ -107,25 +111,35 @@ export function useAppRouteState() {
     window.history[historyMethod](null, '', nextUrl)
   }
 
-  function navigateToView(view: ViewKey, handoff: AppRouteHandoff | null = null) {
-    applyViewNavigation(view, 'push', handoff)
+  function navigateToView(
+    view: ViewKey,
+    handoff: AppRouteHandoff | null = null,
+    options: AppRouteNavigationOptions = {},
+  ) {
+    applyViewNavigation(view, 'push', handoff, options)
   }
 
-  function replaceView(view: ViewKey, handoff: AppRouteHandoff | null = null) {
-    applyViewNavigation(view, 'replace', handoff)
+  function replaceView(
+    view: ViewKey,
+    handoff: AppRouteHandoff | null = null,
+    options: AppRouteNavigationOptions = {},
+  ) {
+    applyViewNavigation(view, 'replace', handoff, options)
   }
 
   function applyViewNavigation(
     view: ViewKey,
     historyMode: 'push' | 'replace',
     handoff: AppRouteHandoff | null = null,
+    options: AppRouteNavigationOptions = {},
   ) {
+    const nextTradeId = options.tradeId !== undefined ? options.tradeId : selectedTradeId
     syncRouteState(
       {
         section: null,
         view,
         docsDocumentKey: activeDocumentationDocumentKey,
-        tradeId: selectedTradeId,
+        tradeId: nextTradeId,
         handoff,
       },
       historyMode,
@@ -134,6 +148,9 @@ export function useAppRouteState() {
     setActiveNavigationSectionKey(null)
     setCurrentView(view)
     setRouteHandoff(handoff)
+    if (options.tradeId !== undefined) {
+      setSelectedTradeId(options.tradeId)
+    }
   }
 
   function hrefForView(view: ViewKey) {

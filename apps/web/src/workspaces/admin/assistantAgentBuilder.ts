@@ -166,7 +166,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for explaining selected trade state, recent events, and exposure.',
     human_owner_role: 'Trader',
     authority_ceiling: 'EXPLAIN',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
   'ops-coordinator': {
     role_key: 'ops-coordinator',
@@ -174,7 +174,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for summarizing operational blockers and next-step handoffs.',
     human_owner_role: 'Operations Lead',
     authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
   'settlement-analyst': {
     role_key: 'settlement-analyst',
@@ -182,7 +182,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for interpreting invoices, payments, aging, and settlement posture.',
     human_owner_role: 'Settlement Lead',
     authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
   'document-triage': {
     role_key: 'document-triage',
@@ -190,7 +190,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for reviewing document ingestion, linkage, and routing confidence.',
     human_owner_role: 'Operations Lead',
     authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
   'desk-briefing': {
     role_key: 'desk-briefing',
@@ -198,7 +198,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for desk-ready briefings across exposure, workflow pressure, and market context.',
     human_owner_role: 'Desk Lead',
     authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
   'trade-ops-copilot': {
     role_key: 'trade-ops-copilot',
@@ -206,7 +206,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for coordinated trade operations follow-through.',
     human_owner_role: 'Operations Lead',
     authority_ceiling: 'STAGE',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
   'settlement-copilot': {
     role_key: 'settlement-copilot',
@@ -214,7 +214,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for settlement analysis and approval-gated cash action staging.',
     human_owner_role: 'Settlement Lead',
     authority_ceiling: 'STAGE',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
   'trade-governor': {
     role_key: 'trade-governor',
@@ -222,7 +222,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     specialization_summary: 'Role-derived profile for cancel-only trade governance review.',
     human_owner_role: 'Trader, Desk Lead, or Admin',
     authority_ceiling: 'STAGE',
-    activation_notes: 'Drafted from the platform role catalog template.',
+    activation_notes: 'Drafted from the platform role catalog preset.',
   },
 }
 

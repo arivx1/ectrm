@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.domains.assistant.services.policies import evaluate_action_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptSection
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
+from apps.api.app.domains.operations.services.settlement_invoices import preview_trade_invoice_issue
 from apps.api.app.domains.operations.services.workflow_items import evaluate_trade_workflow_item_update_policy
 from apps.api.app.domains.operations.services.workflow_items import workflow_allowed_statuses
 from apps.api.app.models.document_ingestion import DocumentIngestion
@@ -129,21 +130,25 @@ def _with_review_context(
     missing_evidence: tuple[str, ...] = (),
     stale_state_basis: dict[str, object] | None = None,
     idempotency_key: str | None = None,
+    action_preview: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    review_context = {
+        "owning_work_object": owning_work_object,
+        "required_reviewer_role": required_reviewer_role,
+        "business_rationale": business_rationale,
+        "proposed_mutation": proposed_mutation,
+        "supporting_records": list(supporting_records),
+        "assumptions": list(assumptions),
+        "missing_evidence": list(missing_evidence),
+        "expected_downstream_effects": list(expected_downstream_effects),
+        "stale_state_basis": dict(stale_state_basis or {}),
+        "idempotency_key": idempotency_key,
+    }
+    if action_preview is not None:
+        review_context["action_preview"] = action_preview
     return {
         **payload,
-        "review_context": {
-            "owning_work_object": owning_work_object,
-            "required_reviewer_role": required_reviewer_role,
-            "business_rationale": business_rationale,
-            "proposed_mutation": proposed_mutation,
-            "supporting_records": list(supporting_records),
-            "assumptions": list(assumptions),
-            "missing_evidence": list(missing_evidence),
-            "expected_downstream_effects": list(expected_downstream_effects),
-            "stale_state_basis": dict(stale_state_basis or {}),
-            "idempotency_key": idempotency_key,
-        },
+        "review_context": review_context,
     }
 
 
@@ -893,6 +898,17 @@ def _plan_issue_trade_invoice(
         **({"due_at": due_at} if due_at else {}),
         **({"notes": _first_present_value(context_fields, "notes")} if _first_present_value(context_fields, "notes") else {}),
     }
+    action_preview = preview_trade_invoice_issue(
+        db,
+        trade_id=trade_id,
+        leg_no=invoice_payload.get("leg_no") if isinstance(invoice_payload.get("leg_no"), int) else None,
+        invoice_number=invoice_payload.get("invoice_number"),
+        invoice_currency_code=invoice_payload.get("invoice_currency_code"),
+        billed_quantity=invoice_payload.get("billed_quantity"),
+        invoice_amount=invoice_payload.get("invoice_amount"),
+        issued_at=issued_at,
+        due_at=due_at,
+    )
 
     return _ActionPlanningCandidate(
         proposal=AssistantActionProposal(
@@ -938,6 +954,7 @@ def _plan_issue_trade_invoice(
                 idempotency_key=(
                     f"assistant-action:issue_trade_invoice:{trade_id}:{invoice_payload.get('invoice_number') or trade.last_event_id}"
                 ),
+                action_preview=action_preview,
             ),
         )
     )

@@ -15,6 +15,8 @@ export type TradingSourceSeedResult = {
 
 export type AssistantAgentSeedResult = {
   requested_by: string
+  total_profiles: number
+  /** @deprecated Use total_profiles; retained for older API responses. */
   total_templates: number
   created_count: number
   updated_count: number

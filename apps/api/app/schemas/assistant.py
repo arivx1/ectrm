@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Any, Literal, Optional, get_args
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_serializer
 
 from apps.api.app.schemas._validation import normalize_optional_text, normalize_required_text
 
@@ -281,6 +281,25 @@ class AssistantActionReviewSupportingRecordOut(AssistantActionReviewObjectRefOut
     summary: str
 
 
+class AssistantActionPreviewFieldChangeOut(BaseModel):
+    field: str
+    current_value: Optional[object] = None
+    proposed_value: Optional[object] = None
+
+
+class AssistantActionPreviewOut(BaseModel):
+    preview_type: str
+    status: str
+    summary: str
+    affected_records: list[AssistantActionReviewSupportingRecordOut] = Field(default_factory=list)
+    field_changes: list[AssistantActionPreviewFieldChangeOut] = Field(default_factory=list)
+    expected_side_effects: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    existing_invoice_count: Optional[int] = None
+
+
 class AssistantActionReviewContextOut(BaseModel):
     owning_work_object: AssistantActionReviewObjectRefOut
     required_reviewer_role: str
@@ -292,6 +311,14 @@ class AssistantActionReviewContextOut(BaseModel):
     expected_downstream_effects: list[str] = Field(default_factory=list)
     stale_state_basis: dict[str, object] = Field(default_factory=dict)
     idempotency_key: Optional[str] = None
+    action_preview: Optional[AssistantActionPreviewOut] = None
+
+    @model_serializer(mode="wrap")
+    def serialize_model(self, handler):
+        payload = handler(self)
+        if payload.get("action_preview") is None:
+            payload.pop("action_preview", None)
+        return payload
 
 
 class AssistantActionRequestLifecycleOut(BaseModel):

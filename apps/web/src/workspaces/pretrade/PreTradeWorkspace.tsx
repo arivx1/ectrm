@@ -8,6 +8,7 @@ import {
   createPreTradeReviewItem,
   createPreTradeScenario,
   deletePreTradeScenario,
+  loadPreTradeGovernanceItems,
   loadPreTradeGovernanceSummary,
   loadPreTradeRecommendationRuns,
   loadPreTradeReviewItems,
@@ -26,6 +27,7 @@ import type {
   MarketContextRecord,
   PortfolioRecord,
   PositionRow,
+  PreTradeGovernanceItemsRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeRecommendationStance,
   PreTradeRecommendationRunRecord,
@@ -46,6 +48,15 @@ import { TileLayout, type WorkspaceTile } from '../../shared/ui/TileLayout'
 import { buildPreTradeRecommendation } from './preTradeRecommendations'
 
 type PositionedRow = PositionRow & { commodity_class?: string }
+type GovernanceBucketKey = 'pending' | 'risky' | 'overrides' | 'stale-evidence' | 'booked-with-override'
+
+const GOVERNANCE_BUCKET_LABELS: Record<GovernanceBucketKey, string> = {
+  pending: 'Pending Reviews',
+  risky: 'Risky Recommendations',
+  overrides: 'Overrides',
+  'stale-evidence': 'Stale Evidence',
+  'booked-with-override': 'Booked With Override',
+}
 
 type PreTradeWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -379,6 +390,8 @@ export function PreTradeWorkspace({
   const [reviews, setReviews] = useState<PreTradeReviewItemRecord[]>([])
   const [recommendationRuns, setRecommendationRuns] = useState<PreTradeRecommendationRunRecord[]>([])
   const [governanceSummary, setGovernanceSummary] = useState<PreTradeGovernanceSummaryRecord | null>(null)
+  const [governanceItems, setGovernanceItems] = useState<PreTradeGovernanceItemsRecord | null>(null)
+  const [selectedGovernanceBucket, setSelectedGovernanceBucket] = useState<GovernanceBucketKey>('pending')
   const [reviewCommentDrafts, setReviewCommentDrafts] = useState<Record<number, string>>({})
   const [reviewOverrideDrafts, setReviewOverrideDrafts] = useState<Record<number, string>>({})
   const [collectionLoading, setCollectionLoading] = useState(false)
@@ -419,16 +432,18 @@ export function PreTradeWorkspace({
     setCollectionLoading(true)
     setCollectionError('')
     try {
-      const [nextScenarios, nextReviews, nextRecommendationRuns, nextGovernanceSummary] = await Promise.all([
+      const [nextScenarios, nextReviews, nextRecommendationRuns, nextGovernanceSummary, nextGovernanceItems] = await Promise.all([
         loadPreTradeScenarios(appConfig.apiBase, accessToken),
         loadPreTradeReviewItems(appConfig.apiBase, accessToken),
         loadPreTradeRecommendationRuns(appConfig.apiBase, accessToken, { limit: 20 }),
         loadPreTradeGovernanceSummary(appConfig.apiBase, accessToken),
+        loadPreTradeGovernanceItems(appConfig.apiBase, accessToken),
       ])
       setScenarios(nextScenarios)
       setReviews(nextReviews)
       setRecommendationRuns(nextRecommendationRuns)
       setGovernanceSummary(nextGovernanceSummary)
+      setGovernanceItems(nextGovernanceItems)
     } catch (error) {
       setCollectionError(error instanceof Error ? error.message : 'Could not load pre-trade scenarios or review queue.')
     } finally {
@@ -442,6 +457,7 @@ export function PreTradeWorkspace({
       setReviews([])
       setRecommendationRuns([])
       setGovernanceSummary(null)
+      setGovernanceItems(null)
       setCollectionError('')
       return
     }
@@ -993,6 +1009,31 @@ export function PreTradeWorkspace({
           ? `${governanceSummary.pending_review_count} review${governanceSummary.pending_review_count === 1 ? '' : 's'} remain open or in review.`
           : 'No open review queue blockers are visible right now.'
     : 'Sign in to load queue-level controls across reviews, recommendation risk, and booking overrides.'
+  const governanceMetricCards: Array<{ bucket: GovernanceBucketKey; label: string; count: number | null }> = [
+    { bucket: 'pending', label: GOVERNANCE_BUCKET_LABELS.pending, count: governanceSummary?.pending_review_count ?? null },
+    { bucket: 'risky', label: GOVERNANCE_BUCKET_LABELS.risky, count: governanceSummary?.risky_recommendation_count ?? null },
+    { bucket: 'overrides', label: GOVERNANCE_BUCKET_LABELS.overrides, count: governanceSummary?.override_count ?? null },
+    { bucket: 'stale-evidence', label: GOVERNANCE_BUCKET_LABELS['stale-evidence'], count: governanceSummary?.stale_evidence_run_count ?? null },
+    {
+      bucket: 'booked-with-override',
+      label: GOVERNANCE_BUCKET_LABELS['booked-with-override'],
+      count: governanceSummary?.booked_with_override_count ?? null,
+    },
+  ]
+  const selectedGovernanceReviewItems =
+    selectedGovernanceBucket === 'pending'
+      ? (governanceItems?.pending_reviews ?? [])
+      : selectedGovernanceBucket === 'risky'
+        ? (governanceItems?.risky_recommendation_reviews ?? [])
+        : selectedGovernanceBucket === 'overrides'
+          ? (governanceItems?.override_reviews ?? [])
+          : selectedGovernanceBucket === 'booked-with-override'
+            ? (governanceItems?.booked_with_override_reviews ?? [])
+            : []
+  const selectedGovernanceStaleEvidenceRuns = selectedGovernanceBucket === 'stale-evidence'
+    ? (governanceItems?.stale_evidence_runs ?? [])
+    : []
+  const selectedGovernanceMetric = governanceMetricCards.find((metric) => metric.bucket === selectedGovernanceBucket)
 
   const tiles: WorkspaceTile[] = [
     {
@@ -1015,26 +1056,17 @@ export function PreTradeWorkspace({
           {collectionLoading ? <p className="form-note">Loading governance summary...</p> : null}
           {collectionError ? <p className="form-note">{collectionError}</p> : null}
           <div className="pretrade-metric-grid">
-            <article className="pretrade-metric-card">
-              <span>Pending Reviews</span>
-              <strong>{governanceSummary?.pending_review_count ?? 'n/a'}</strong>
-            </article>
-            <article className="pretrade-metric-card">
-              <span>Risky Recommendations</span>
-              <strong>{governanceSummary?.risky_recommendation_count ?? 'n/a'}</strong>
-            </article>
-            <article className="pretrade-metric-card">
-              <span>Overrides</span>
-              <strong>{governanceSummary?.override_count ?? 'n/a'}</strong>
-            </article>
-            <article className="pretrade-metric-card">
-              <span>Stale Evidence Runs</span>
-              <strong>{governanceSummary?.stale_evidence_run_count ?? 'n/a'}</strong>
-            </article>
-            <article className="pretrade-metric-card">
-              <span>Booked With Override</span>
-              <strong>{governanceSummary?.booked_with_override_count ?? 'n/a'}</strong>
-            </article>
+            {governanceMetricCards.map((metric) => (
+              <button
+                key={metric.bucket}
+                type="button"
+                className={`pretrade-metric-card pretrade-governance-metric ${selectedGovernanceBucket === metric.bucket ? 'is-selected' : ''}`}
+                onClick={() => setSelectedGovernanceBucket(metric.bucket)}
+              >
+                <span>{metric.label}</span>
+                <strong>{metric.count ?? 'n/a'}</strong>
+              </button>
+            ))}
           </div>
           <div className="surface pretrade-next-actions">
             <span className="eyebrow">Control Readout</span>
@@ -1044,6 +1076,104 @@ export function PreTradeWorkspace({
                 {governanceSummary.open_review_count} open | {governanceSummary.in_review_count} in review | {governanceSummary.approved_review_count} approved | {governanceSummary.rejected_review_count} rejected | {governanceSummary.stale_evidence_source_count} impaired source snapshots | {governanceSummary.recommendation_run_count} recommendation runs
               </p>
             ) : null}
+          </div>
+          <div className="surface pretrade-next-actions">
+            <span className="eyebrow">Drill-Through</span>
+            <p>
+              {selectedGovernanceMetric?.label ?? 'Governance Items'}: {selectedGovernanceMetric?.count ?? 'n/a'} item
+              {selectedGovernanceMetric?.count === 1 ? '' : 's'}
+            </p>
+            {selectedGovernanceBucket === 'stale-evidence' ? (
+              <div className="pretrade-card-list">
+                {selectedGovernanceStaleEvidenceRuns.map((item) => (
+                  <article key={item.run.run_id} className="pretrade-record-card pretrade-record-static">
+                    <div>
+                      <strong>{item.run.name}</strong>
+                      <span>
+                        {item.run.recommendation.stance.replaceAll('_', ' ')} | score {item.run.recommendation.score} | saved {formatDate(item.run.created_at)}
+                      </span>
+                    </div>
+                    <p>{item.run.comparison?.summary ?? item.run.recommendation.explanation.source_quality_rationale}</p>
+                    <div className="pretrade-card-list">
+                      {item.impaired_snapshots.map((snapshot) => (
+                        <div key={`${item.run.run_id}-${snapshot.adapter_key ?? snapshot.source_key}`} className="pretrade-record-card pretrade-record-static">
+                          <div>
+                            <strong>{snapshot.adapter_label ?? snapshot.source_key}</strong>
+                            <span>
+                              {snapshot.quality_status} | {snapshot.freshness}
+                            </span>
+                          </div>
+                          <small>
+                            {snapshot.provenance.provider ?? 'Unknown provider'} | {snapshot.provenance.dataset ?? 'Unknown dataset'}
+                            {snapshot.provenance.observed_at ? ` | observed ${formatDate(snapshot.provenance.observed_at)}` : ''}
+                          </small>
+                          <p>{snapshot.summary ?? 'No source summary was captured.'}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pretrade-inline-actions">
+                      <button type="button" className="button button-secondary" onClick={() => onOpenTradeCapture(item.run.draft)}>
+                        Open Draft
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {!collectionLoading && selectedGovernanceStaleEvidenceRuns.length === 0 ? (
+                  <p className="form-note">No impaired latest recommendation evidence is currently visible for this bucket.</p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="pretrade-card-list">
+                {selectedGovernanceReviewItems.map((review) => (
+                  <article key={review.review_id} className="pretrade-record-card pretrade-record-static">
+                    <div className="pretrade-review-head">
+                      <div>
+                        <strong>{review.name}</strong>
+                        <span>{review.draft.book} | {review.draft.commodity} | {review.created_by}</span>
+                      </div>
+                      <span className={`status-pill status-pill-${reviewStatusTone(review.review_status)}`}>{review.review_status.replaceAll('_', ' ')}</span>
+                    </div>
+                    <p>{review.thesis ?? review.review_notes ?? 'No review notes captured yet.'}</p>
+                    <small>
+                      Owner {review.owner ?? 'unassigned'} | updated {formatDate(review.updated_at)}
+                    </small>
+                    {review.recommendation_summary ? (
+                      <small>
+                        Recommendation {review.recommendation_summary.stance.replaceAll('_', ' ')} | score {review.recommendation_summary.score}
+                      </small>
+                    ) : null}
+                    {review.recommendation_override_reason ? (
+                      <p className="form-note">
+                        Override by {review.recommendation_override_by ?? 'reviewer'}
+                        {review.recommendation_override_at ? ` on ${formatDate(review.recommendation_override_at)}` : ''}: {review.recommendation_override_reason}
+                      </p>
+                    ) : null}
+                    {review.linked_trade_id ? (
+                      <small>
+                        Booked as {review.linked_trade_id}
+                        {review.linked_trade_status ? ` | ${review.linked_trade_status}` : ''}
+                        {review.booked_at ? ` | ${formatDate(review.booked_at)}` : ''}
+                        {review.booked_by ? ` | by ${review.booked_by}` : ''}
+                      </small>
+                    ) : null}
+                    <div className="pretrade-inline-actions">
+                      {review.linked_trade_id ? (
+                        <button type="button" className="button button-secondary" onClick={() => onOpenTrade(review.linked_trade_id!)}>
+                          View Trade
+                        </button>
+                      ) : review.review_status === 'APPROVED' ? (
+                        <button type="button" className="button button-secondary" onClick={() => onOpenTradeCapture(review.draft, buildApprovedReviewCaptureContext(review))}>
+                          Open Ticket
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+                {!collectionLoading && selectedGovernanceReviewItems.length === 0 ? (
+                  <p className="form-note">No review items are currently visible for this bucket.</p>
+                ) : null}
+              </div>
+            )}
           </div>
         </div>
       ),

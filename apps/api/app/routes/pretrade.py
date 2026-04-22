@@ -42,9 +42,12 @@ from apps.api.app.domains.reports.services.pretrade_recommendations import (
 )
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.schemas.pretrade import (
+    PreTradeGovernanceItemsOut,
     PreTradeGovernanceSummaryOut,
+    PreTradeGovernanceStaleEvidenceRunOut,
     PreTradeRecommendationRunCreate,
     PreTradeRecommendationRunOut,
+    PreTradeRecommendationSourceSnapshot,
     PreTradeRecommendationSourceAdapterOut,
     PreTradeReviewActivityAction,
     PreTradeReviewActivityCreate,
@@ -242,6 +245,58 @@ def _governance_recommendation_run_records(
         records_by_id.update({record.id: record for record in attached_records})
 
     return sorted(records_by_id.values(), key=lambda record: (record.created_at, record.id), reverse=True)
+
+
+def _governance_recommendation_run_group_key(record: ReportPreset) -> tuple[str, int]:
+    source_review_id = recommendation_run_source_review_id(record)
+    if source_review_id is not None:
+        return ("review", source_review_id)
+
+    source_scenario_id = recommendation_run_source_scenario_id(record)
+    if source_scenario_id is not None:
+        return ("scenario", source_scenario_id)
+    return ("run", record.id)
+
+
+def _latest_governance_recommendation_run_records(records: list[ReportPreset]) -> list[ReportPreset]:
+    latest_by_group: dict[tuple[str, int], ReportPreset] = {}
+    for record in records:
+        group_key = _governance_recommendation_run_group_key(record)
+        existing_record = latest_by_group.get(group_key)
+        if existing_record is None or (record.created_at, record.id) > (existing_record.created_at, existing_record.id):
+            latest_by_group[group_key] = record
+    return sorted(latest_by_group.values(), key=lambda record: (record.created_at, record.id), reverse=True)
+
+
+def _governance_impaired_snapshots(
+    run: PreTradeRecommendationRunOut,
+) -> list[PreTradeRecommendationSourceSnapshot]:
+    return [
+        snapshot
+        for snapshot in run.input_snapshots
+        if snapshot.source_available and snapshot.quality_status in IMPAIRED_SOURCE_QUALITY_STATUSES
+    ]
+
+
+def _to_review_items(
+    db: Session,
+    records: list[ReportPreset],
+) -> list[PreTradeReviewItemOut]:
+    linked_trade_status_by_id = build_linked_trade_status_lookup(
+        db,
+        [review_linked_trade_id(record) or "" for record in records],
+    )
+    recommendation_summary_by_id = _review_recommendation_summary_lookup(db, records)
+    return [
+        to_review_out(
+            record,
+            linked_trade_status_by_id=linked_trade_status_by_id,
+            recommendation_summary_by_id=recommendation_summary_by_id,
+        )
+        for record in records
+    ]
+
+
 def _same_recommendation_comparison_group(left: ReportPreset, right: ReportPreset) -> bool:
     left_review_id = recommendation_run_source_review_id(left)
     right_review_id = recommendation_run_source_review_id(right)
@@ -446,18 +501,21 @@ def get_pretrade_governance_summary(
             if status_value != "APPROVED" or override_reason is None:
                 unresolved_risky_recommendation_count += 1
 
-    recommendation_run_records = _governance_recommendation_run_records(
+    all_recommendation_run_records = _governance_recommendation_run_records(
         db,
         actor_id=actor_id,
         review_records=review_records,
     )
+    recommendation_run_records = _latest_governance_recommendation_run_records(all_recommendation_run_records)
     stale_evidence_run_count = 0
     stale_evidence_source_count = 0
     for record in recommendation_run_records:
-        run = to_recommendation_run_out(record, actor_id=actor_id)
-        impaired_source_count = sum(
-            1 for snapshot in run.input_snapshots if snapshot.quality_status in IMPAIRED_SOURCE_QUALITY_STATUSES
+        run = to_recommendation_run_out(
+            record,
+            actor_id=actor_id,
+            previous_record=_previous_recommendation_run_record(all_recommendation_run_records, record),
         )
+        impaired_source_count = len(_governance_impaired_snapshots(run))
         if impaired_source_count:
             stale_evidence_run_count += 1
             stale_evidence_source_count += impaired_source_count
@@ -486,6 +544,77 @@ def get_pretrade_governance_summary(
         stale_evidence_run_count=stale_evidence_run_count,
         stale_evidence_source_count=stale_evidence_source_count,
         recommendation_run_count=len(recommendation_run_records),
+    )
+
+
+@router.get("/governance/items", response_model=PreTradeGovernanceItemsOut)
+def get_pretrade_governance_items(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeGovernanceItemsOut:
+    actor_id = require_authenticated_actor(request)
+    review_records = db.execute(
+        _visible_reviews_stmt().order_by(ReportPreset.updated_at.desc(), ReportPreset.created_at.desc())
+    ).scalars().all()
+    recommendation_summary_by_id = _review_recommendation_summary_lookup(db, review_records)
+
+    pending_records: list[ReportPreset] = []
+    risky_records: list[ReportPreset] = []
+    unresolved_risky_records: list[ReportPreset] = []
+    override_records: list[ReportPreset] = []
+    booked_with_override_records: list[ReportPreset] = []
+
+    for record in review_records:
+        status_value = review_status(record)
+        override_reason = review_recommendation_override_reason(record)
+        linked_trade_id = review_linked_trade_id(record)
+        recommendation_run_id = review_recommendation_run_id(record)
+        recommendation_summary = (
+            recommendation_summary_by_id.get(recommendation_run_id)
+            if recommendation_run_id is not None
+            else None
+        )
+
+        if status_value in {"OPEN", "IN_REVIEW"}:
+            pending_records.append(record)
+        if override_reason is not None:
+            override_records.append(record)
+            if linked_trade_id is not None:
+                booked_with_override_records.append(record)
+        if recommendation_summary is not None and recommendation_summary.stance in RECOMMENDATION_OVERRIDE_STANCES:
+            risky_records.append(record)
+            if status_value != "APPROVED" or override_reason is None:
+                unresolved_risky_records.append(record)
+
+    all_recommendation_run_records = _governance_recommendation_run_records(
+        db,
+        actor_id=actor_id,
+        review_records=review_records,
+    )
+    stale_evidence_runs: list[PreTradeGovernanceStaleEvidenceRunOut] = []
+    for record in _latest_governance_recommendation_run_records(all_recommendation_run_records):
+        run = to_recommendation_run_out(
+            record,
+            actor_id=actor_id,
+            previous_record=_previous_recommendation_run_record(all_recommendation_run_records, record),
+        )
+        impaired_snapshots = _governance_impaired_snapshots(run)
+        if impaired_snapshots:
+            stale_evidence_runs.append(
+                PreTradeGovernanceStaleEvidenceRunOut(
+                    run=run,
+                    impaired_snapshots=impaired_snapshots,
+                )
+            )
+
+    return PreTradeGovernanceItemsOut(
+        generated_at=datetime.now(timezone.utc),
+        pending_reviews=_to_review_items(db, pending_records),
+        risky_recommendation_reviews=_to_review_items(db, risky_records),
+        unresolved_risky_recommendation_reviews=_to_review_items(db, unresolved_risky_records),
+        override_reviews=_to_review_items(db, override_records),
+        booked_with_override_reviews=_to_review_items(db, booked_with_override_records),
+        stale_evidence_runs=stale_evidence_runs,
     )
 
 

@@ -1572,6 +1572,21 @@ export type PreTradeRecommendationRunRecord = {
   can_edit: boolean
 }
 
+export type PreTradeGovernanceStaleEvidenceRunRecord = {
+  run: PreTradeRecommendationRunRecord
+  impaired_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+}
+
+export type PreTradeGovernanceItemsRecord = {
+  generated_at: string
+  pending_reviews: PreTradeReviewItemRecord[]
+  risky_recommendation_reviews: PreTradeReviewItemRecord[]
+  unresolved_risky_recommendation_reviews: PreTradeReviewItemRecord[]
+  override_reviews: PreTradeReviewItemRecord[]
+  booked_with_override_reviews: PreTradeReviewItemRecord[]
+  stale_evidence_runs: PreTradeGovernanceStaleEvidenceRunRecord[]
+}
+
 export type PreTradeReviewCaptureContext = {
   reviewId: number
   reviewName: string
@@ -2178,6 +2193,25 @@ export type AssistantActionReviewSupportingRecord = AssistantActionReviewObjectR
   summary: string
 }
 
+export type AssistantActionPreviewFieldChange = {
+  field: string
+  current_value?: unknown
+  proposed_value?: unknown
+}
+
+export type AssistantActionPreview = {
+  preview_type: string
+  status: string
+  summary: string
+  affected_records: AssistantActionReviewSupportingRecord[]
+  field_changes: AssistantActionPreviewFieldChange[]
+  expected_side_effects: string[]
+  warnings: string[]
+  blocking_reasons: string[]
+  assumptions: string[]
+  existing_invoice_count?: number | null
+}
+
 export type AssistantActionReviewContext = {
   owning_work_object: AssistantActionReviewObjectRef
   required_reviewer_role: string
@@ -2189,6 +2223,7 @@ export type AssistantActionReviewContext = {
   expected_downstream_effects: string[]
   stale_state_basis: Record<string, unknown>
   idempotency_key?: string | null
+  action_preview?: AssistantActionPreview | null
 }
 
 export type AssistantActionRequestLifecycle = {

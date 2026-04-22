@@ -137,6 +137,8 @@ function AuthenticatedWorkspaceShell({
     () => describeAppRouteHandoff(routeHandoff, currentView),
     [currentView, routeHandoff],
   )
+  const currentWorkspaceOwnsHandoffBanner =
+    currentView === 'operations' || currentView === 'settlement' || currentView === 'trades'
 
   const summary = useAppWorkspaceSummary({
     authSession: workspaceData.authSession,
@@ -513,7 +515,7 @@ function AuthenticatedWorkspaceShell({
         {!showingNavigationSectionLanding && workspaceWarning ? (
           <div className="error-banner">{workspaceData.groupErrors[workspaceWarning]}</div>
         ) : null}
-        {!showingNavigationSectionLanding && routeHandoffBanner ? (
+        {!showingNavigationSectionLanding && routeHandoffBanner && !currentWorkspaceOwnsHandoffBanner ? (
           <section className="feedback-banner workspace-handoff-banner" aria-live="polite">
             <div className="workspace-handoff-banner-copy">
               <strong>{routeHandoffBanner.title}</strong>
@@ -551,6 +553,7 @@ function AuthenticatedWorkspaceShell({
               hrefForView={route.hrefForView}
               navigateToTrade={navigateToTrade}
               navigateToView={route.navigateToView}
+              replaceView={route.replaceView}
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}
@@ -601,6 +604,7 @@ function AuthenticatedWorkspaceShell({
               hrefForView={route.hrefForView}
               navigateToTrade={navigateToTrade}
               navigateToView={route.navigateToView}
+              replaceView={route.replaceView}
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}

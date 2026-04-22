@@ -26,6 +26,31 @@
   margin-bottom: 1rem;
 }
 
+.workspace-handoff-meta,
+.workspace-handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.workspace-handoff-meta {
+  margin-top: 0.35rem;
+}
+
+.workspace-handoff-meta span {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgba(18, 124, 108, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  font-size: 0.82rem;
+}
+
+.workspace-handoff-actions {
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
 .workspace-window-banner {
   display: flex;
   align-items: center;
@@ -85,4 +110,3 @@
   background: rgba(18, 42, 56, 0.06);
   color: #66717c;
 }
-

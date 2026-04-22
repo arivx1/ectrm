@@ -36,7 +36,7 @@ describe('assistant agent builder helpers', () => {
     expect(suggestAgentBuilderAgentId('Desk   Briefing+++Lead')).toBe('desk-briefing-lead')
   })
 
-  it('builds template drafts with only the currently published tool subset', () => {
+  it('builds role preset drafts with only the currently published tool subset', () => {
     const draft = buildAgentBuilderDraft('ops-coordinator', [
       'list_workflow_items',
       'list_deliveries',
@@ -77,7 +77,7 @@ describe('assistant agent builder helpers', () => {
     expect(draft.role_key).toBe('desk-briefing')
   })
 
-  it('includes governed action types for action-scoped templates', () => {
+  it('includes governed action types for action-scoped role presets', () => {
     const draft = buildAgentBuilderDraft('trade-ops-copilot', ['get_trade_workbench', 'list_documents'])
 
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
