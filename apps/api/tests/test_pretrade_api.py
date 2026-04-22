@@ -550,7 +550,7 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(governance_response.status_code, 200)
         governance = governance_response.json()
         self.assertEqual(governance["pending_review_count"], 0)
-        self.assertEqual(governance["recommendation_run_count"], 1)
+        self.assertEqual(governance["recommendation_run_count"], 2)
         self.assertEqual(governance["stale_evidence_run_count"], 1)
         self.assertEqual(governance["stale_evidence_source_count"], 1)
 

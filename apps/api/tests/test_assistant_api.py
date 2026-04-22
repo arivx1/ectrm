@@ -450,7 +450,6 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("assistant_agent_profile_request.activated", operation_keys)
         self.assertIn("assistant_agent.activated", operation_keys)
 
-    def test_admin_agent_eval_catalog_crud_and_run_history(self) -> None:
     def test_admin_agent_eval_catalog_crud_flow(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
         self._create_agent(
@@ -477,13 +476,6 @@ class AssistantApiTests(unittest.TestCase):
                 "expected_substrings": ["Trade Eval Agent"],
                 "expected_tool_names": [],
                 "expected_action_types": [],
-                "workspace": "trades",
-                "prompt": "Explain selected trade T-1000 and cite the evidence.",
-                "context": "Selected trade:\n- trade_id: T-1000",
-                "use_live_tools": True,
-                "expected_substrings": ["evidence", "next step"],
-                "expected_tool_names": [" Get_Trade_By_ID "],
-                "expected_action_types": ["cancel_trade"],
                 "created_by": "assistant_user",
             },
         )
@@ -528,22 +520,6 @@ class AssistantApiTests(unittest.TestCase):
                 "context": "Selected trade:\n- trade_id: T-1000",
                 "use_live_tools": False,
                 "expected_substrings": ["not present in the response"],
-        created = create_response.json()
-        self.assertEqual(created["agent_id"], "trade-eval-agent")
-        self.assertEqual(created["workspace"], "trades")
-        self.assertEqual(created["expected_tool_names"], ["get_trade_by_id"])
-        self.assertEqual(created["expected_action_types"], ["cancel_trade"])
-
-        update_response = self.client.put(
-            f"/admin/assistant/agent-evals/{created['eval_id']}",
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "name": "Blocks unsupported cancellation",
-                "workspace": "assistant",
-                "prompt": "Refuse to cancel a trade when evidence is ambiguous.",
-                "context": None,
-                "use_live_tools": False,
-                "expected_substrings": ["ambiguous"],
                 "expected_tool_names": [],
                 "expected_action_types": [],
                 "updated_by": "assistant_user",
@@ -576,22 +552,6 @@ class AssistantApiTests(unittest.TestCase):
 
         delete_response = self.client.delete(
             f"/admin/assistant/agent-evals/{created_eval['eval_id']}",
-
-        self.assertEqual(update_response.status_code, 200)
-        updated = update_response.json()
-        self.assertEqual(updated["eval_id"], created["eval_id"])
-        self.assertEqual(updated["name"], "Blocks unsupported cancellation")
-        self.assertFalse(updated["use_live_tools"])
-
-        listing_response = self.client.get(
-            "/admin/assistant/agent-evals?agent_id=trade-eval-agent",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        self.assertEqual(listing_response.status_code, 200)
-        self.assertEqual([row["eval_id"] for row in listing_response.json()], [created["eval_id"]])
-
-        delete_response = self.client.delete(
-            f"/admin/assistant/agent-evals/{created['eval_id']}",
             headers={"Authorization": f"Bearer {token}"},
         )
         self.assertEqual(delete_response.status_code, 204)
