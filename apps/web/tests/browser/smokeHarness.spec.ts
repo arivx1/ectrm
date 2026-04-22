@@ -367,13 +367,14 @@ test('admin smoke shows the role-derived pilot lineup and sync action', async ({
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Managed Agent Control' }) })
       .first()
+    const roleCatalog = agentControl.locator('.assistant-role-catalog-shell')
 
     await expect(agentControl).toBeVisible()
-    await expect(agentControl.getByText('Role profiles')).toBeVisible()
+    await expect(agentControl.getByText('Role profiles', { exact: true })).toBeVisible()
     await expect(agentControl.getByRole('button', { name: /Ops Governor/ })).toBeVisible()
     await expect(agentControl.getByText('Evals PASS')).toBeVisible()
-    await expect(agentControl.getByText('Pre-Trade Structuring Agent')).toBeVisible()
-    await expect(agentControl.getByText('Phase 1')).toBeVisible()
+    await expect(roleCatalog.getByRole('button', { name: /Pre-Trade Structuring Agent/ })).toBeVisible()
+    await expect(roleCatalog.getByText('Phase 1').first()).toBeVisible()
 
     await agentControl.getByRole('button', { name: 'Sync Pilot Lineup' }).click()
     await expect(

@@ -58,7 +58,7 @@ ROLE_DERIVED_PROFILE_BACKFILLS: tuple[dict[str, str], ...] = (
         "specialization_summary": "Role-derived profile for explaining selected trade state, recent events, and exposure.",
         "human_owner_role": "Trader",
         "authority_ceiling": "EXPLAIN",
-        "activation_notes": "Derived from the platform role catalog template.",
+        "activation_notes": "Derived from the platform role catalog preset.",
     },
     {
         "agent_id": "ops-coordinator",
@@ -67,7 +67,7 @@ ROLE_DERIVED_PROFILE_BACKFILLS: tuple[dict[str, str], ...] = (
         "specialization_summary": "Role-derived profile for summarizing operational blockers and next-step handoffs.",
         "human_owner_role": "Operations Lead",
         "authority_ceiling": "DRAFT",
-        "activation_notes": "Derived from the platform role catalog template.",
+        "activation_notes": "Derived from the platform role catalog preset.",
     },
     {
         "agent_id": "settlement-analyst",
@@ -76,7 +76,7 @@ ROLE_DERIVED_PROFILE_BACKFILLS: tuple[dict[str, str], ...] = (
         "specialization_summary": "Role-derived profile for interpreting invoices, payments, aging, and settlement posture.",
         "human_owner_role": "Settlement Lead",
         "authority_ceiling": "DRAFT",
-        "activation_notes": "Derived from the platform role catalog template.",
+        "activation_notes": "Derived from the platform role catalog preset.",
     },
     {
         "agent_id": "document-triage",
@@ -85,7 +85,7 @@ ROLE_DERIVED_PROFILE_BACKFILLS: tuple[dict[str, str], ...] = (
         "specialization_summary": "Role-derived profile for reviewing document ingestion, linkage, and routing confidence.",
         "human_owner_role": "Operations Lead",
         "authority_ceiling": "DRAFT",
-        "activation_notes": "Derived from the platform role catalog template.",
+        "activation_notes": "Derived from the platform role catalog preset.",
     },
     {
         "agent_id": "desk-briefing",
@@ -94,7 +94,7 @@ ROLE_DERIVED_PROFILE_BACKFILLS: tuple[dict[str, str], ...] = (
         "specialization_summary": "Role-derived profile for desk-ready briefings across exposure, workflow pressure, and market context.",
         "human_owner_role": "Desk Lead",
         "authority_ceiling": "DRAFT",
-        "activation_notes": "Derived from the platform role catalog template.",
+        "activation_notes": "Derived from the platform role catalog preset.",
     },
 )
 

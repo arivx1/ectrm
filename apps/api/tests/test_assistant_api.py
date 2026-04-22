@@ -891,7 +891,7 @@ class AssistantApiTests(unittest.TestCase):
                 "specialization_summary": "Role-derived profile for trade explanations.",
                 "human_owner_role": "Trader",
                 "authority_ceiling": "EXPLAIN",
-                "activation_notes": "Created from the role catalog template.",
+                "activation_notes": "Created from the role catalog preset.",
                 "allowed_workspaces": ["assistant", "trades"],
                 "capabilities": ["READ", "EXPLAIN"],
                 "daily_token_allocation": 40_000,
@@ -909,7 +909,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(updated_payload["specialization_summary"], "Role-derived profile for trade explanations.")
         self.assertEqual(updated_payload["human_owner_role"], "Trader")
         self.assertEqual(updated_payload["authority_ceiling"], "EXPLAIN")
-        self.assertEqual(updated_payload["activation_notes"], "Created from the role catalog template.")
+        self.assertEqual(updated_payload["activation_notes"], "Created from the role catalog preset.")
         self.assertEqual(updated_payload["daily_token_allocation"], 40_000)
         self.assertEqual(updated_payload["token_budget"]["allocated_tokens"], 40_000)
         self.assertEqual(
@@ -1035,7 +1035,7 @@ class AssistantApiTests(unittest.TestCase):
             specialization_summary="Role-derived profile for operations analysis.",
             human_owner_role="Operations Lead",
             authority_ceiling="EXPLAIN",
-            activation_notes="Created from the role catalog template.",
+            activation_notes="Created from the role catalog preset.",
         )
         fake_service = _FakeAssistantService()
 
