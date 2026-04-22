@@ -1,0 +1,4502 @@
+[
+  {
+    "code": "A",
+    "name": "Agilent Technologies",
+    "short_name": "Agilent Technologies",
+    "legal_entity_name": "Agilent Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "AAPL",
+    "name": "Apple Inc.",
+    "short_name": "Apple Inc.",
+    "legal_entity_name": "Apple Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "ABBV",
+    "name": "AbbVie",
+    "short_name": "AbbVie",
+    "legal_entity_name": "AbbVie",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "ABNB",
+    "name": "Airbnb",
+    "short_name": "Airbnb",
+    "legal_entity_name": "Airbnb",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "ABT",
+    "name": "Abbott Laboratories",
+    "short_name": "Abbott Laboratories",
+    "legal_entity_name": "Abbott Laboratories",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "ACGL",
+    "name": "Arch Capital Group",
+    "short_name": "Arch Capital Group",
+    "legal_entity_name": "Arch Capital Group",
+    "counterparty_type": "BANK",
+    "country_code": "BM",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "ACN",
+    "name": "Accenture",
+    "short_name": "Accenture",
+    "legal_entity_name": "Accenture",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Information Technology sector (IT Consulting & Other Services)."
+  },
+  {
+    "code": "ADBE",
+    "name": "Adobe Inc.",
+    "short_name": "Adobe Inc.",
+    "legal_entity_name": "Adobe Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "ADI",
+    "name": "Analog Devices",
+    "short_name": "Analog Devices",
+    "legal_entity_name": "Analog Devices",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "ADM",
+    "name": "Archer Daniels Midland",
+    "short_name": "Archer Daniels Midland",
+    "legal_entity_name": "Archer Daniels Midland",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Agricultural Products & Services)."
+  },
+  {
+    "code": "ADP",
+    "name": "Automatic Data Processing",
+    "short_name": "Automatic Data Processing",
+    "legal_entity_name": "Automatic Data Processing",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Human Resource & Employment Services)."
+  },
+  {
+    "code": "ADSK",
+    "name": "Autodesk",
+    "short_name": "Autodesk",
+    "legal_entity_name": "Autodesk",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "AEE",
+    "name": "Ameren",
+    "short_name": "Ameren",
+    "legal_entity_name": "Ameren",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "AEP",
+    "name": "American Electric Power",
+    "short_name": "American Electric Power",
+    "legal_entity_name": "American Electric Power",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "AES",
+    "name": "AES Corporation",
+    "short_name": "AES Corporation",
+    "legal_entity_name": "AES Corporation",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Independent Power Producers & Energy Traders)."
+  },
+  {
+    "code": "AFL",
+    "name": "Aflac",
+    "short_name": "Aflac",
+    "legal_entity_name": "Aflac",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Life & Health Insurance)."
+  },
+  {
+    "code": "AIG",
+    "name": "American International Group",
+    "short_name": "American International Group",
+    "legal_entity_name": "American International Group",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Multi-line Insurance)."
+  },
+  {
+    "code": "AIZ",
+    "name": "Assurant",
+    "short_name": "Assurant",
+    "legal_entity_name": "Assurant",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Multi-line Insurance)."
+  },
+  {
+    "code": "AJG",
+    "name": "Arthur J. Gallagher & Co.",
+    "short_name": "Arthur J. Gallagher & Co.",
+    "legal_entity_name": "Arthur J. Gallagher & Co.",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Insurance Brokers)."
+  },
+  {
+    "code": "AKAM",
+    "name": "Akamai Technologies",
+    "short_name": "Akamai Technologies",
+    "legal_entity_name": "Akamai Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Internet Services & Infrastructure)."
+  },
+  {
+    "code": "ALB",
+    "name": "Albemarle Corporation",
+    "short_name": "Albemarle Corporation",
+    "legal_entity_name": "Albemarle Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Specialty Chemicals)."
+  },
+  {
+    "code": "ALGN",
+    "name": "Align Technology",
+    "short_name": "Align Technology",
+    "legal_entity_name": "Align Technology",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Supplies)."
+  },
+  {
+    "code": "ALL",
+    "name": "Allstate",
+    "short_name": "Allstate",
+    "legal_entity_name": "Allstate",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "ALLE",
+    "name": "Allegion",
+    "short_name": "Allegion",
+    "legal_entity_name": "Allegion",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "AMAT",
+    "name": "Applied Materials",
+    "short_name": "Applied Materials",
+    "legal_entity_name": "Applied Materials",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductor Materials & Equipment)."
+  },
+  {
+    "code": "AMCR",
+    "name": "Amcor",
+    "short_name": "Amcor",
+    "legal_entity_name": "Amcor",
+    "counterparty_type": "END_USER",
+    "country_code": "GB",
+    "description": "Public-company counterparty in the Materials sector (Paper & Plastic Packaging Products & Materials)."
+  },
+  {
+    "code": "AMD",
+    "name": "Advanced Micro Devices",
+    "short_name": "Advanced Micro Devices",
+    "legal_entity_name": "Advanced Micro Devices",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "AME",
+    "name": "Ametek",
+    "short_name": "Ametek",
+    "legal_entity_name": "Ametek",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Electrical Components & Equipment)."
+  },
+  {
+    "code": "AMGN",
+    "name": "Amgen",
+    "short_name": "Amgen",
+    "legal_entity_name": "Amgen",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "AMP",
+    "name": "Ameriprise Financial",
+    "short_name": "Ameriprise Financial",
+    "legal_entity_name": "Ameriprise Financial",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "AMT",
+    "name": "American Tower",
+    "short_name": "American Tower",
+    "legal_entity_name": "American Tower",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Telecom Tower REITs)."
+  },
+  {
+    "code": "AMZN",
+    "name": "Amazon",
+    "short_name": "Amazon",
+    "legal_entity_name": "Amazon",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Broadline Retail)."
+  },
+  {
+    "code": "ANET",
+    "name": "Arista Networks",
+    "short_name": "Arista Networks",
+    "legal_entity_name": "Arista Networks",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Communications Equipment)."
+  },
+  {
+    "code": "AON",
+    "name": "Aon plc",
+    "short_name": "Aon plc",
+    "legal_entity_name": "Aon plc",
+    "counterparty_type": "BROKER",
+    "country_code": "GB",
+    "description": "Public-company counterparty in the Financials sector (Insurance Brokers)."
+  },
+  {
+    "code": "AOS",
+    "name": "A. O. Smith",
+    "short_name": "A. O. Smith",
+    "legal_entity_name": "A. O. Smith",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "APA",
+    "name": "APA Corporation",
+    "short_name": "APA Corporation",
+    "legal_entity_name": "APA Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "APD",
+    "name": "Air Products",
+    "short_name": "Air Products",
+    "legal_entity_name": "Air Products",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Industrial Gases)."
+  },
+  {
+    "code": "APH",
+    "name": "Amphenol",
+    "short_name": "Amphenol",
+    "legal_entity_name": "Amphenol",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Components)."
+  },
+  {
+    "code": "APO",
+    "name": "Apollo Global Management",
+    "short_name": "Apollo Global Management",
+    "legal_entity_name": "Apollo Global Management",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "APP",
+    "name": "AppLovin",
+    "short_name": "AppLovin",
+    "legal_entity_name": "AppLovin",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "APTV",
+    "name": "Aptiv",
+    "short_name": "Aptiv",
+    "legal_entity_name": "Aptiv",
+    "counterparty_type": "END_USER",
+    "country_code": "CH",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Automotive Parts & Equipment)."
+  },
+  {
+    "code": "ARE",
+    "name": "Alexandria Real Estate Equities",
+    "short_name": "Alexandria Real Estate Equities",
+    "legal_entity_name": "Alexandria Real Estate Equities",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Office REITs)."
+  },
+  {
+    "code": "ARES",
+    "name": "Ares Management",
+    "short_name": "Ares Management",
+    "legal_entity_name": "Ares Management",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "ATO",
+    "name": "Atmos Energy",
+    "short_name": "Atmos Energy",
+    "legal_entity_name": "Atmos Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Gas Utilities)."
+  },
+  {
+    "code": "AVB",
+    "name": "AvalonBay Communities",
+    "short_name": "AvalonBay Communities",
+    "legal_entity_name": "AvalonBay Communities",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Multi-Family Residential REITs)."
+  },
+  {
+    "code": "AVGO",
+    "name": "Broadcom",
+    "short_name": "Broadcom",
+    "legal_entity_name": "Broadcom",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "AVY",
+    "name": "Avery Dennison",
+    "short_name": "Avery Dennison",
+    "legal_entity_name": "Avery Dennison",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Paper & Plastic Packaging Products & Materials)."
+  },
+  {
+    "code": "AWK",
+    "name": "American Water Works",
+    "short_name": "American Water Works",
+    "legal_entity_name": "American Water Works",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Water Utilities)."
+  },
+  {
+    "code": "AXON",
+    "name": "Axon Enterprise",
+    "short_name": "Axon Enterprise",
+    "legal_entity_name": "Axon Enterprise",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "AXP",
+    "name": "American Express",
+    "short_name": "American Express",
+    "legal_entity_name": "American Express",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Consumer Finance)."
+  },
+  {
+    "code": "AZO",
+    "name": "AutoZone",
+    "short_name": "AutoZone",
+    "legal_entity_name": "AutoZone",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Automotive Retail)."
+  },
+  {
+    "code": "BA",
+    "name": "Boeing",
+    "short_name": "Boeing",
+    "legal_entity_name": "Boeing",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "BAC",
+    "name": "Bank of America",
+    "short_name": "Bank of America",
+    "legal_entity_name": "Bank of America",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Diversified Banks)."
+  },
+  {
+    "code": "BALL",
+    "name": "Ball Corporation",
+    "short_name": "Ball Corporation",
+    "legal_entity_name": "Ball Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Metal, Glass & Plastic Containers)."
+  },
+  {
+    "code": "BAX",
+    "name": "Baxter International",
+    "short_name": "Baxter International",
+    "legal_entity_name": "Baxter International",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "BBY",
+    "name": "Best Buy",
+    "short_name": "Best Buy",
+    "legal_entity_name": "Best Buy",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Computer & Electronics Retail)."
+  },
+  {
+    "code": "BDX",
+    "name": "Becton Dickinson",
+    "short_name": "Becton Dickinson",
+    "legal_entity_name": "Becton Dickinson",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "BEN",
+    "name": "Franklin Resources",
+    "short_name": "Franklin Resources",
+    "legal_entity_name": "Franklin Resources",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "BF_B",
+    "name": "Brown\u2013Forman",
+    "short_name": "Brown\u2013Forman",
+    "legal_entity_name": "Brown\u2013Forman",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Distillers & Vintners)."
+  },
+  {
+    "code": "BG",
+    "name": "Bunge Global",
+    "short_name": "Bunge Global",
+    "legal_entity_name": "Bunge Global",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Agricultural Products & Services)."
+  },
+  {
+    "code": "BIIB",
+    "name": "Biogen",
+    "short_name": "Biogen",
+    "legal_entity_name": "Biogen",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "BK",
+    "name": "BNY Mellon",
+    "short_name": "BNY Mellon",
+    "legal_entity_name": "BNY Mellon",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "BKNG",
+    "name": "Booking Holdings",
+    "short_name": "Booking Holdings",
+    "legal_entity_name": "Booking Holdings",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "BKR",
+    "name": "Baker Hughes",
+    "short_name": "Baker Hughes",
+    "legal_entity_name": "Baker Hughes",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Equipment & Services)."
+  },
+  {
+    "code": "BLDR",
+    "name": "Builders FirstSource",
+    "short_name": "Builders FirstSource",
+    "legal_entity_name": "Builders FirstSource",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "BLK",
+    "name": "BlackRock",
+    "short_name": "BlackRock",
+    "legal_entity_name": "BlackRock",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "BMY",
+    "name": "Bristol Myers Squibb",
+    "short_name": "Bristol Myers Squibb",
+    "legal_entity_name": "Bristol Myers Squibb",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Pharmaceuticals)."
+  },
+  {
+    "code": "BR",
+    "name": "Broadridge Financial Solutions",
+    "short_name": "Broadridge Financial Solutions",
+    "legal_entity_name": "Broadridge Financial Solutions",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Data Processing & Outsourced Services)."
+  },
+  {
+    "code": "BRK_B",
+    "name": "Berkshire Hathaway",
+    "short_name": "Berkshire Hathaway",
+    "legal_entity_name": "Berkshire Hathaway",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Multi-Sector Holdings)."
+  },
+  {
+    "code": "BRO",
+    "name": "Brown & Brown",
+    "short_name": "Brown & Brown",
+    "legal_entity_name": "Brown & Brown",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Insurance Brokers)."
+  },
+  {
+    "code": "BSX",
+    "name": "Boston Scientific",
+    "short_name": "Boston Scientific",
+    "legal_entity_name": "Boston Scientific",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "BX",
+    "name": "Blackstone Inc.",
+    "short_name": "Blackstone Inc.",
+    "legal_entity_name": "Blackstone Inc.",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "BXP",
+    "name": "BXP, Inc.",
+    "short_name": "BXP, Inc.",
+    "legal_entity_name": "BXP, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Office REITs)."
+  },
+  {
+    "code": "C",
+    "name": "Citigroup",
+    "short_name": "Citigroup",
+    "legal_entity_name": "Citigroup",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Diversified Banks)."
+  },
+  {
+    "code": "CAG",
+    "name": "Conagra Brands",
+    "short_name": "Conagra Brands",
+    "legal_entity_name": "Conagra Brands",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "CAH",
+    "name": "Cardinal Health",
+    "short_name": "Cardinal Health",
+    "legal_entity_name": "Cardinal Health",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Distributors)."
+  },
+  {
+    "code": "CARR",
+    "name": "Carrier Global",
+    "short_name": "Carrier Global",
+    "legal_entity_name": "Carrier Global",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "CAT",
+    "name": "Caterpillar Inc.",
+    "short_name": "Caterpillar Inc.",
+    "legal_entity_name": "Caterpillar Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction Machinery & Heavy Transportation Equipment)."
+  },
+  {
+    "code": "CB",
+    "name": "Chubb Limited",
+    "short_name": "Chubb Limited",
+    "legal_entity_name": "Chubb Limited",
+    "counterparty_type": "BANK",
+    "country_code": "CH",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "CBOE",
+    "name": "Cboe Global Markets",
+    "short_name": "Cboe Global Markets",
+    "legal_entity_name": "Cboe Global Markets",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "CBRE",
+    "name": "CBRE Group",
+    "short_name": "CBRE Group",
+    "legal_entity_name": "CBRE Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Real Estate Services)."
+  },
+  {
+    "code": "CCI",
+    "name": "Crown Castle",
+    "short_name": "Crown Castle",
+    "legal_entity_name": "Crown Castle",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Telecom Tower REITs)."
+  },
+  {
+    "code": "CCL",
+    "name": "Carnival",
+    "short_name": "Carnival",
+    "legal_entity_name": "Carnival",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "CDNS",
+    "name": "Cadence Design Systems",
+    "short_name": "Cadence Design Systems",
+    "legal_entity_name": "Cadence Design Systems",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "CDW",
+    "name": "CDW Corporation",
+    "short_name": "CDW Corporation",
+    "legal_entity_name": "CDW Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Distributors)."
+  },
+  {
+    "code": "CF",
+    "name": "CF Industries",
+    "short_name": "CF Industries",
+    "legal_entity_name": "CF Industries",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Fertilizers & Agricultural Chemicals)."
+  },
+  {
+    "code": "CFG",
+    "name": "Citizens Financial Group",
+    "short_name": "Citizens Financial Group",
+    "legal_entity_name": "Citizens Financial Group",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Regional Banks)."
+  },
+  {
+    "code": "CHD",
+    "name": "Church & Dwight",
+    "short_name": "Church & Dwight",
+    "legal_entity_name": "Church & Dwight",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Household Products)."
+  },
+  {
+    "code": "CHRW",
+    "name": "C.H. Robinson",
+    "short_name": "C.H. Robinson",
+    "legal_entity_name": "C.H. Robinson",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Air Freight & Logistics)."
+  },
+  {
+    "code": "CHTR",
+    "name": "Charter Communications",
+    "short_name": "Charter Communications",
+    "legal_entity_name": "Charter Communications",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Cable & Satellite)."
+  },
+  {
+    "code": "CI",
+    "name": "Cigna",
+    "short_name": "Cigna",
+    "legal_entity_name": "Cigna",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Services)."
+  },
+  {
+    "code": "CIEN",
+    "name": "Ciena",
+    "short_name": "Ciena",
+    "legal_entity_name": "Ciena",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Communications Equipment)."
+  },
+  {
+    "code": "CINF",
+    "name": "Cincinnati Financial",
+    "short_name": "Cincinnati Financial",
+    "legal_entity_name": "Cincinnati Financial",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "CL",
+    "name": "Colgate-Palmolive",
+    "short_name": "Colgate-Palmolive",
+    "legal_entity_name": "Colgate-Palmolive",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Household Products)."
+  },
+  {
+    "code": "CLX",
+    "name": "Clorox",
+    "short_name": "Clorox",
+    "legal_entity_name": "Clorox",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Household Products)."
+  },
+  {
+    "code": "CMCSA",
+    "name": "Comcast",
+    "short_name": "Comcast",
+    "legal_entity_name": "Comcast",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Cable & Satellite)."
+  },
+  {
+    "code": "CME",
+    "name": "CME Group",
+    "short_name": "CME Group",
+    "legal_entity_name": "CME Group",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "CMG",
+    "name": "Chipotle Mexican Grill",
+    "short_name": "Chipotle Mexican Grill",
+    "legal_entity_name": "Chipotle Mexican Grill",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Restaurants)."
+  },
+  {
+    "code": "CMI",
+    "name": "Cummins",
+    "short_name": "Cummins",
+    "legal_entity_name": "Cummins",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction Machinery & Heavy Transportation Equipment)."
+  },
+  {
+    "code": "CMS",
+    "name": "CMS Energy",
+    "short_name": "CMS Energy",
+    "legal_entity_name": "CMS Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "CNC",
+    "name": "Centene Corporation",
+    "short_name": "Centene Corporation",
+    "legal_entity_name": "Centene Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Managed Health Care)."
+  },
+  {
+    "code": "CNP",
+    "name": "CenterPoint Energy",
+    "short_name": "CenterPoint Energy",
+    "legal_entity_name": "CenterPoint Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "COF",
+    "name": "Capital One",
+    "short_name": "Capital One",
+    "legal_entity_name": "Capital One",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Consumer Finance)."
+  },
+  {
+    "code": "COHR",
+    "name": "Coherent Corp.",
+    "short_name": "Coherent Corp.",
+    "legal_entity_name": "Coherent Corp.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Components)."
+  },
+  {
+    "code": "COIN",
+    "name": "Coinbase",
+    "short_name": "Coinbase",
+    "legal_entity_name": "Coinbase",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "COO",
+    "name": "Cooper Companies (The)",
+    "short_name": "Cooper Companies (The)",
+    "legal_entity_name": "Cooper Companies (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Supplies)."
+  },
+  {
+    "code": "COP",
+    "name": "ConocoPhillips",
+    "short_name": "ConocoPhillips",
+    "legal_entity_name": "ConocoPhillips",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "COR",
+    "name": "Cencora",
+    "short_name": "Cencora",
+    "legal_entity_name": "Cencora",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Distributors)."
+  },
+  {
+    "code": "COST",
+    "name": "Costco",
+    "short_name": "Costco",
+    "legal_entity_name": "Costco",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Consumer Staples Merchandise Retail)."
+  },
+  {
+    "code": "CPAY",
+    "name": "Corpay",
+    "short_name": "Corpay",
+    "legal_entity_name": "Corpay",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "CPB",
+    "name": "Campbell's Company (The)",
+    "short_name": "Campbell's Company (The)",
+    "legal_entity_name": "Campbell's Company (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "CPRT",
+    "name": "Copart",
+    "short_name": "Copart",
+    "legal_entity_name": "Copart",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Diversified Support Services)."
+  },
+  {
+    "code": "CPT",
+    "name": "Camden Property Trust",
+    "short_name": "Camden Property Trust",
+    "legal_entity_name": "Camden Property Trust",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Multi-Family Residential REITs)."
+  },
+  {
+    "code": "CRH",
+    "name": "CRH plc",
+    "short_name": "CRH plc",
+    "legal_entity_name": "CRH plc",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Materials sector (Construction Materials)."
+  },
+  {
+    "code": "CRL",
+    "name": "Charles River Laboratories",
+    "short_name": "Charles River Laboratories",
+    "legal_entity_name": "Charles River Laboratories",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "CRM",
+    "name": "Salesforce",
+    "short_name": "Salesforce",
+    "legal_entity_name": "Salesforce",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "CRWD",
+    "name": "CrowdStrike",
+    "short_name": "CrowdStrike",
+    "legal_entity_name": "CrowdStrike",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Systems Software)."
+  },
+  {
+    "code": "CSCO",
+    "name": "Cisco",
+    "short_name": "Cisco",
+    "legal_entity_name": "Cisco",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Communications Equipment)."
+  },
+  {
+    "code": "CSGP",
+    "name": "CoStar Group",
+    "short_name": "CoStar Group",
+    "legal_entity_name": "CoStar Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Real Estate Services)."
+  },
+  {
+    "code": "CSX",
+    "name": "CSX Corporation",
+    "short_name": "CSX Corporation",
+    "legal_entity_name": "CSX Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Rail Transportation)."
+  },
+  {
+    "code": "CTAS",
+    "name": "Cintas",
+    "short_name": "Cintas",
+    "legal_entity_name": "Cintas",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Diversified Support Services)."
+  },
+  {
+    "code": "CTRA",
+    "name": "Coterra",
+    "short_name": "Coterra",
+    "legal_entity_name": "Coterra",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "CTSH",
+    "name": "Cognizant",
+    "short_name": "Cognizant",
+    "legal_entity_name": "Cognizant",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (IT Consulting & Other Services)."
+  },
+  {
+    "code": "CTVA",
+    "name": "Corteva",
+    "short_name": "Corteva",
+    "legal_entity_name": "Corteva",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Fertilizers & Agricultural Chemicals)."
+  },
+  {
+    "code": "CVNA",
+    "name": "Carvana",
+    "short_name": "Carvana",
+    "legal_entity_name": "Carvana",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Automotive Retail)."
+  },
+  {
+    "code": "CVS",
+    "name": "CVS Health",
+    "short_name": "CVS Health",
+    "legal_entity_name": "CVS Health",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Services)."
+  },
+  {
+    "code": "D",
+    "name": "Dominion Energy",
+    "short_name": "Dominion Energy",
+    "legal_entity_name": "Dominion Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "DAL",
+    "name": "Delta Air Lines",
+    "short_name": "Delta Air Lines",
+    "legal_entity_name": "Delta Air Lines",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Passenger Airlines)."
+  },
+  {
+    "code": "DASH",
+    "name": "DoorDash",
+    "short_name": "DoorDash",
+    "legal_entity_name": "DoorDash",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Specialized Consumer Services)."
+  },
+  {
+    "code": "DD",
+    "name": "DuPont",
+    "short_name": "DuPont",
+    "legal_entity_name": "DuPont",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Specialty Chemicals)."
+  },
+  {
+    "code": "DDOG",
+    "name": "Datadog",
+    "short_name": "Datadog",
+    "legal_entity_name": "Datadog",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "DE",
+    "name": "Deere & Company",
+    "short_name": "Deere & Company",
+    "legal_entity_name": "Deere & Company",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Agricultural & Farm Machinery)."
+  },
+  {
+    "code": "DECK",
+    "name": "Deckers Brands",
+    "short_name": "Deckers Brands",
+    "legal_entity_name": "Deckers Brands",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Footwear)."
+  },
+  {
+    "code": "DELL",
+    "name": "Dell Technologies",
+    "short_name": "Dell Technologies",
+    "legal_entity_name": "Dell Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "DG",
+    "name": "Dollar General",
+    "short_name": "Dollar General",
+    "legal_entity_name": "Dollar General",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Consumer Staples Merchandise Retail)."
+  },
+  {
+    "code": "DGX",
+    "name": "Quest Diagnostics",
+    "short_name": "Quest Diagnostics",
+    "legal_entity_name": "Quest Diagnostics",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Services)."
+  },
+  {
+    "code": "DHI",
+    "name": "D. R. Horton",
+    "short_name": "D. R. Horton",
+    "legal_entity_name": "D. R. Horton",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Homebuilding)."
+  },
+  {
+    "code": "DHR",
+    "name": "Danaher Corporation",
+    "short_name": "Danaher Corporation",
+    "legal_entity_name": "Danaher Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "DIS",
+    "name": "Walt Disney Company (The)",
+    "short_name": "Walt Disney Company (The)",
+    "legal_entity_name": "Walt Disney Company (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Movies & Entertainment)."
+  },
+  {
+    "code": "DLR",
+    "name": "Digital Realty",
+    "short_name": "Digital Realty",
+    "legal_entity_name": "Digital Realty",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Data Center REITs)."
+  },
+  {
+    "code": "DLTR",
+    "name": "Dollar Tree",
+    "short_name": "Dollar Tree",
+    "legal_entity_name": "Dollar Tree",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Consumer Staples Merchandise Retail)."
+  },
+  {
+    "code": "DOC",
+    "name": "Healthpeak Properties",
+    "short_name": "Healthpeak Properties",
+    "legal_entity_name": "Healthpeak Properties",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Health Care REITs)."
+  },
+  {
+    "code": "DOV",
+    "name": "Dover Corporation",
+    "short_name": "Dover Corporation",
+    "legal_entity_name": "Dover Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "DOW",
+    "name": "Dow Inc.",
+    "short_name": "Dow Inc.",
+    "legal_entity_name": "Dow Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Commodity Chemicals)."
+  },
+  {
+    "code": "DPZ",
+    "name": "Domino's",
+    "short_name": "Domino's",
+    "legal_entity_name": "Domino's",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Restaurants)."
+  },
+  {
+    "code": "DRI",
+    "name": "Darden Restaurants",
+    "short_name": "Darden Restaurants",
+    "legal_entity_name": "Darden Restaurants",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Restaurants)."
+  },
+  {
+    "code": "DTE",
+    "name": "DTE Energy",
+    "short_name": "DTE Energy",
+    "legal_entity_name": "DTE Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "DUK",
+    "name": "Duke Energy",
+    "short_name": "Duke Energy",
+    "legal_entity_name": "Duke Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "DVA",
+    "name": "DaVita",
+    "short_name": "DaVita",
+    "legal_entity_name": "DaVita",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Services)."
+  },
+  {
+    "code": "DVN",
+    "name": "Devon Energy",
+    "short_name": "Devon Energy",
+    "legal_entity_name": "Devon Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "DXCM",
+    "name": "Dexcom",
+    "short_name": "Dexcom",
+    "legal_entity_name": "Dexcom",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "EA",
+    "name": "Electronic Arts",
+    "short_name": "Electronic Arts",
+    "legal_entity_name": "Electronic Arts",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Interactive Home Entertainment)."
+  },
+  {
+    "code": "EBAY",
+    "name": "eBay Inc.",
+    "short_name": "eBay Inc.",
+    "legal_entity_name": "eBay Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Broadline Retail)."
+  },
+  {
+    "code": "ECL",
+    "name": "Ecolab",
+    "short_name": "Ecolab",
+    "legal_entity_name": "Ecolab",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Specialty Chemicals)."
+  },
+  {
+    "code": "ED",
+    "name": "Consolidated Edison",
+    "short_name": "Consolidated Edison",
+    "legal_entity_name": "Consolidated Edison",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "EFX",
+    "name": "Equifax",
+    "short_name": "Equifax",
+    "legal_entity_name": "Equifax",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Research & Consulting Services)."
+  },
+  {
+    "code": "EG",
+    "name": "Everest Group",
+    "short_name": "Everest Group",
+    "legal_entity_name": "Everest Group",
+    "counterparty_type": "BANK",
+    "country_code": "BM",
+    "description": "Public-company counterparty in the Financials sector (Reinsurance)."
+  },
+  {
+    "code": "EIX",
+    "name": "Edison International",
+    "short_name": "Edison International",
+    "legal_entity_name": "Edison International",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "EL",
+    "name": "Est\u00e9e Lauder Companies (The)",
+    "short_name": "Est\u00e9e Lauder Companies (The)",
+    "legal_entity_name": "Est\u00e9e Lauder Companies (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Personal Care Products)."
+  },
+  {
+    "code": "ELV",
+    "name": "Elevance Health",
+    "short_name": "Elevance Health",
+    "legal_entity_name": "Elevance Health",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Managed Health Care)."
+  },
+  {
+    "code": "EME",
+    "name": "Emcor",
+    "short_name": "Emcor",
+    "legal_entity_name": "Emcor",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction & Engineering)."
+  },
+  {
+    "code": "EMR",
+    "name": "Emerson Electric",
+    "short_name": "Emerson Electric",
+    "legal_entity_name": "Emerson Electric",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Electrical Components & Equipment)."
+  },
+  {
+    "code": "ENGIE",
+    "name": "ENGIE",
+    "short_name": "ENGIE",
+    "legal_entity_name": "ENGIE SA",
+    "counterparty_type": "UTILITY",
+    "country_code": "FR",
+    "description": "Large European gas, power, and LNG utility counterparty."
+  },
+  {
+    "code": "ENI",
+    "name": "Eni",
+    "short_name": "Eni",
+    "legal_entity_name": "Eni S.p.A.",
+    "counterparty_type": "MAJOR",
+    "country_code": "IT",
+    "description": "Integrated international oil, gas, and LNG counterparty."
+  },
+  {
+    "code": "EOG",
+    "name": "EOG Resources",
+    "short_name": "EOG Resources",
+    "legal_entity_name": "EOG Resources",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "EPAM",
+    "name": "EPAM Systems",
+    "short_name": "EPAM Systems",
+    "legal_entity_name": "EPAM Systems",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (IT Consulting & Other Services)."
+  },
+  {
+    "code": "EQIX",
+    "name": "Equinix",
+    "short_name": "Equinix",
+    "legal_entity_name": "Equinix",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Data Center REITs)."
+  },
+  {
+    "code": "EQR",
+    "name": "Equity Residential",
+    "short_name": "Equity Residential",
+    "legal_entity_name": "Equity Residential",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Multi-Family Residential REITs)."
+  },
+  {
+    "code": "EQT",
+    "name": "EQT Corporation",
+    "short_name": "EQT Corporation",
+    "legal_entity_name": "EQT Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "ERIE",
+    "name": "Erie Indemnity",
+    "short_name": "Erie Indemnity",
+    "legal_entity_name": "Erie Indemnity",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Insurance Brokers)."
+  },
+  {
+    "code": "ES",
+    "name": "Eversource Energy",
+    "short_name": "Eversource Energy",
+    "legal_entity_name": "Eversource Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "ESS",
+    "name": "Essex Property Trust",
+    "short_name": "Essex Property Trust",
+    "legal_entity_name": "Essex Property Trust",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Multi-Family Residential REITs)."
+  },
+  {
+    "code": "ETN",
+    "name": "Eaton Corporation",
+    "short_name": "Eaton Corporation",
+    "legal_entity_name": "Eaton Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Industrials sector (Electrical Components & Equipment)."
+  },
+  {
+    "code": "ETR",
+    "name": "Entergy",
+    "short_name": "Entergy",
+    "legal_entity_name": "Entergy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "EVRG",
+    "name": "Evergy",
+    "short_name": "Evergy",
+    "legal_entity_name": "Evergy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "EW",
+    "name": "Edwards Lifesciences",
+    "short_name": "Edwards Lifesciences",
+    "legal_entity_name": "Edwards Lifesciences",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "EXC",
+    "name": "Exelon",
+    "short_name": "Exelon",
+    "legal_entity_name": "Exelon",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "EXE",
+    "name": "Expand Energy",
+    "short_name": "Expand Energy",
+    "legal_entity_name": "Expand Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "EXPD",
+    "name": "Expeditors International",
+    "short_name": "Expeditors International",
+    "legal_entity_name": "Expeditors International",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Air Freight & Logistics)."
+  },
+  {
+    "code": "EXPE",
+    "name": "Expedia Group",
+    "short_name": "Expedia Group",
+    "legal_entity_name": "Expedia Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "EXR",
+    "name": "Extra Space Storage",
+    "short_name": "Extra Space Storage",
+    "legal_entity_name": "Extra Space Storage",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Self-Storage REITs)."
+  },
+  {
+    "code": "F",
+    "name": "Ford Motor Company",
+    "short_name": "Ford Motor Company",
+    "legal_entity_name": "Ford Motor Company",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Automobile Manufacturers)."
+  },
+  {
+    "code": "FANG",
+    "name": "Diamondback Energy",
+    "short_name": "Diamondback Energy",
+    "legal_entity_name": "Diamondback Energy",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "FAST",
+    "name": "Fastenal",
+    "short_name": "Fastenal",
+    "legal_entity_name": "Fastenal",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Trading Companies & Distributors)."
+  },
+  {
+    "code": "FCX",
+    "name": "Freeport-McMoRan",
+    "short_name": "Freeport-McMoRan",
+    "legal_entity_name": "Freeport-McMoRan",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Copper)."
+  },
+  {
+    "code": "FDS",
+    "name": "FactSet",
+    "short_name": "FactSet",
+    "legal_entity_name": "FactSet",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "FDX",
+    "name": "FedEx",
+    "short_name": "FedEx",
+    "legal_entity_name": "FedEx",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Air Freight & Logistics)."
+  },
+  {
+    "code": "FE",
+    "name": "FirstEnergy",
+    "short_name": "FirstEnergy",
+    "legal_entity_name": "FirstEnergy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "FFIV",
+    "name": "F5, Inc.",
+    "short_name": "F5, Inc.",
+    "legal_entity_name": "F5, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Communications Equipment)."
+  },
+  {
+    "code": "FICO",
+    "name": "Fair Isaac",
+    "short_name": "Fair Isaac",
+    "legal_entity_name": "Fair Isaac",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "FIS",
+    "name": "Fidelity National Information Services",
+    "short_name": "Fidelity National Information Services",
+    "legal_entity_name": "Fidelity National Information Services",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "FISV",
+    "name": "Fiserv",
+    "short_name": "Fiserv",
+    "legal_entity_name": "Fiserv",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "FITB",
+    "name": "Fifth Third Bancorp",
+    "short_name": "Fifth Third Bancorp",
+    "legal_entity_name": "Fifth Third Bancorp",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Regional Banks)."
+  },
+  {
+    "code": "FIX",
+    "name": "Comfort Systems USA",
+    "short_name": "Comfort Systems USA",
+    "legal_entity_name": "Comfort Systems USA",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction & Engineering)."
+  },
+  {
+    "code": "FOXA",
+    "name": "Fox Corporation",
+    "short_name": "Fox Corporation",
+    "legal_entity_name": "Fox Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Broadcasting)."
+  },
+  {
+    "code": "FRT",
+    "name": "Federal Realty Investment Trust",
+    "short_name": "Federal Realty Investment Trust",
+    "legal_entity_name": "Federal Realty Investment Trust",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Retail REITs)."
+  },
+  {
+    "code": "FSLR",
+    "name": "First Solar",
+    "short_name": "First Solar",
+    "legal_entity_name": "First Solar",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "FTNT",
+    "name": "Fortinet",
+    "short_name": "Fortinet",
+    "legal_entity_name": "Fortinet",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Systems Software)."
+  },
+  {
+    "code": "FTV",
+    "name": "Fortive",
+    "short_name": "Fortive",
+    "legal_entity_name": "Fortive",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "GD",
+    "name": "General Dynamics",
+    "short_name": "General Dynamics",
+    "legal_entity_name": "General Dynamics",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "GDDY",
+    "name": "GoDaddy",
+    "short_name": "GoDaddy",
+    "legal_entity_name": "GoDaddy",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Internet Services & Infrastructure)."
+  },
+  {
+    "code": "GE",
+    "name": "GE Aerospace",
+    "short_name": "GE Aerospace",
+    "legal_entity_name": "GE Aerospace",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "GEHC",
+    "name": "GE HealthCare",
+    "short_name": "GE HealthCare",
+    "legal_entity_name": "GE HealthCare",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "GEN",
+    "name": "Gen Digital",
+    "short_name": "Gen Digital",
+    "legal_entity_name": "Gen Digital",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Systems Software)."
+  },
+  {
+    "code": "GEV",
+    "name": "GE Vernova",
+    "short_name": "GE Vernova",
+    "legal_entity_name": "GE Vernova",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Heavy Electrical Equipment)."
+  },
+  {
+    "code": "GILD",
+    "name": "Gilead Sciences",
+    "short_name": "Gilead Sciences",
+    "legal_entity_name": "Gilead Sciences",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "GIS",
+    "name": "General Mills",
+    "short_name": "General Mills",
+    "legal_entity_name": "General Mills",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "GL",
+    "name": "Globe Life",
+    "short_name": "Globe Life",
+    "legal_entity_name": "Globe Life",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Life & Health Insurance)."
+  },
+  {
+    "code": "GLW",
+    "name": "Corning Inc.",
+    "short_name": "Corning Inc.",
+    "legal_entity_name": "Corning Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Components)."
+  },
+  {
+    "code": "GM",
+    "name": "General Motors",
+    "short_name": "General Motors",
+    "legal_entity_name": "General Motors",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Automobile Manufacturers)."
+  },
+  {
+    "code": "GNRC",
+    "name": "Generac",
+    "short_name": "Generac",
+    "legal_entity_name": "Generac",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Electrical Components & Equipment)."
+  },
+  {
+    "code": "GOOGL",
+    "name": "Alphabet Inc.",
+    "short_name": "Alphabet Inc.",
+    "legal_entity_name": "Alphabet Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Interactive Media & Services)."
+  },
+  {
+    "code": "GPC",
+    "name": "Genuine Parts Company",
+    "short_name": "Genuine Parts Company",
+    "legal_entity_name": "Genuine Parts Company",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Distributors)."
+  },
+  {
+    "code": "GPN",
+    "name": "Global Payments",
+    "short_name": "Global Payments",
+    "legal_entity_name": "Global Payments",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "GRMN",
+    "name": "Garmin",
+    "short_name": "Garmin",
+    "legal_entity_name": "Garmin",
+    "counterparty_type": "END_USER",
+    "country_code": "CH",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Consumer Electronics)."
+  },
+  {
+    "code": "GS",
+    "name": "Goldman Sachs",
+    "short_name": "Goldman Sachs",
+    "legal_entity_name": "Goldman Sachs",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Investment Banking & Brokerage)."
+  },
+  {
+    "code": "GWW",
+    "name": "W. W. Grainger",
+    "short_name": "W. W. Grainger",
+    "legal_entity_name": "W. W. Grainger",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "HAL",
+    "name": "Halliburton",
+    "short_name": "Halliburton",
+    "legal_entity_name": "Halliburton",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Equipment & Services)."
+  },
+  {
+    "code": "HAS",
+    "name": "Hasbro",
+    "short_name": "Hasbro",
+    "legal_entity_name": "Hasbro",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Leisure Products)."
+  },
+  {
+    "code": "HBAN",
+    "name": "Huntington Bancshares",
+    "short_name": "Huntington Bancshares",
+    "legal_entity_name": "Huntington Bancshares",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Regional Banks)."
+  },
+  {
+    "code": "HCA",
+    "name": "HCA Healthcare",
+    "short_name": "HCA Healthcare",
+    "legal_entity_name": "HCA Healthcare",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Facilities)."
+  },
+  {
+    "code": "HD",
+    "name": "Home Depot (The)",
+    "short_name": "Home Depot (The)",
+    "legal_entity_name": "Home Depot (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Home Improvement Retail)."
+  },
+  {
+    "code": "HIG",
+    "name": "Hartford (The)",
+    "short_name": "Hartford (The)",
+    "legal_entity_name": "Hartford (The)",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "HII",
+    "name": "Huntington Ingalls Industries",
+    "short_name": "Huntington Ingalls Industries",
+    "legal_entity_name": "Huntington Ingalls Industries",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "HLT",
+    "name": "Hilton Worldwide",
+    "short_name": "Hilton Worldwide",
+    "legal_entity_name": "Hilton Worldwide",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "HOLX",
+    "name": "Hologic",
+    "short_name": "Hologic",
+    "legal_entity_name": "Hologic",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "HON",
+    "name": "Honeywell",
+    "short_name": "Honeywell",
+    "legal_entity_name": "Honeywell",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Conglomerates)."
+  },
+  {
+    "code": "HOOD",
+    "name": "Robinhood Markets",
+    "short_name": "Robinhood Markets",
+    "legal_entity_name": "Robinhood Markets",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Investment Banking & Brokerage)."
+  },
+  {
+    "code": "HPE",
+    "name": "Hewlett Packard Enterprise",
+    "short_name": "Hewlett Packard Enterprise",
+    "legal_entity_name": "Hewlett Packard Enterprise",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "HPQ",
+    "name": "HP Inc.",
+    "short_name": "HP Inc.",
+    "legal_entity_name": "HP Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "HRL",
+    "name": "Hormel Foods",
+    "short_name": "Hormel Foods",
+    "legal_entity_name": "Hormel Foods",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "HSIC",
+    "name": "Henry Schein",
+    "short_name": "Henry Schein",
+    "legal_entity_name": "Henry Schein",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Distributors)."
+  },
+  {
+    "code": "HST",
+    "name": "Host Hotels & Resorts",
+    "short_name": "Host Hotels & Resorts",
+    "legal_entity_name": "Host Hotels & Resorts",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Hotel & Resort REITs)."
+  },
+  {
+    "code": "HSY",
+    "name": "Hershey Company (The)",
+    "short_name": "Hershey Company (The)",
+    "legal_entity_name": "Hershey Company (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "HUBB",
+    "name": "Hubbell Incorporated",
+    "short_name": "Hubbell Incorporated",
+    "legal_entity_name": "Hubbell Incorporated",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "HUM",
+    "name": "Humana",
+    "short_name": "Humana",
+    "legal_entity_name": "Humana",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Managed Health Care)."
+  },
+  {
+    "code": "HWM",
+    "name": "Howmet Aerospace",
+    "short_name": "Howmet Aerospace",
+    "legal_entity_name": "Howmet Aerospace",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "IBKR",
+    "name": "Interactive Brokers",
+    "short_name": "Interactive Brokers",
+    "legal_entity_name": "Interactive Brokers",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Investment Banking & Brokerage)."
+  },
+  {
+    "code": "IBM",
+    "name": "IBM",
+    "short_name": "IBM",
+    "legal_entity_name": "IBM",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (IT Consulting & Other Services)."
+  },
+  {
+    "code": "ICE",
+    "name": "Intercontinental Exchange",
+    "short_name": "Intercontinental Exchange",
+    "legal_entity_name": "Intercontinental Exchange",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "IDXX",
+    "name": "Idexx Laboratories",
+    "short_name": "Idexx Laboratories",
+    "legal_entity_name": "Idexx Laboratories",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "IEX",
+    "name": "IDEX Corporation",
+    "short_name": "IDEX Corporation",
+    "legal_entity_name": "IDEX Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "IFF",
+    "name": "International Flavors & Fragrances",
+    "short_name": "International Flavors & Fragrances",
+    "legal_entity_name": "International Flavors & Fragrances",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Specialty Chemicals)."
+  },
+  {
+    "code": "INCY",
+    "name": "Incyte",
+    "short_name": "Incyte",
+    "legal_entity_name": "Incyte",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "INTC",
+    "name": "Intel",
+    "short_name": "Intel",
+    "legal_entity_name": "Intel",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "INTU",
+    "name": "Intuit",
+    "short_name": "Intuit",
+    "legal_entity_name": "Intuit",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "INVH",
+    "name": "Invitation Homes",
+    "short_name": "Invitation Homes",
+    "legal_entity_name": "Invitation Homes",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Single-Family Residential REITs)."
+  },
+  {
+    "code": "IP",
+    "name": "International Paper",
+    "short_name": "International Paper",
+    "legal_entity_name": "International Paper",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Paper & Plastic Packaging Products & Materials)."
+  },
+  {
+    "code": "IQV",
+    "name": "IQVIA",
+    "short_name": "IQVIA",
+    "legal_entity_name": "IQVIA",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "IR",
+    "name": "Ingersoll Rand",
+    "short_name": "Ingersoll Rand",
+    "legal_entity_name": "Ingersoll Rand",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "IRM",
+    "name": "Iron Mountain",
+    "short_name": "Iron Mountain",
+    "legal_entity_name": "Iron Mountain",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Other Specialized REITs)."
+  },
+  {
+    "code": "ISRG",
+    "name": "Intuitive Surgical",
+    "short_name": "Intuitive Surgical",
+    "legal_entity_name": "Intuitive Surgical",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "IT",
+    "name": "Gartner",
+    "short_name": "Gartner",
+    "legal_entity_name": "Gartner",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (IT Consulting & Other Services)."
+  },
+  {
+    "code": "ITW",
+    "name": "Illinois Tool Works",
+    "short_name": "Illinois Tool Works",
+    "legal_entity_name": "Illinois Tool Works",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "IVZ",
+    "name": "Invesco",
+    "short_name": "Invesco",
+    "legal_entity_name": "Invesco",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "J",
+    "name": "Jacobs Solutions",
+    "short_name": "Jacobs Solutions",
+    "legal_entity_name": "Jacobs Solutions",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction & Engineering)."
+  },
+  {
+    "code": "JBHT",
+    "name": "J.B. Hunt",
+    "short_name": "J.B. Hunt",
+    "legal_entity_name": "J.B. Hunt",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Cargo Ground Transportation)."
+  },
+  {
+    "code": "JBL",
+    "name": "Jabil",
+    "short_name": "Jabil",
+    "legal_entity_name": "Jabil",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Manufacturing Services)."
+  },
+  {
+    "code": "JCI",
+    "name": "Johnson Controls",
+    "short_name": "Johnson Controls",
+    "legal_entity_name": "Johnson Controls",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "JKHY",
+    "name": "Jack Henry & Associates",
+    "short_name": "Jack Henry & Associates",
+    "legal_entity_name": "Jack Henry & Associates",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "JNJ",
+    "name": "Johnson & Johnson",
+    "short_name": "Johnson & Johnson",
+    "legal_entity_name": "Johnson & Johnson",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Pharmaceuticals)."
+  },
+  {
+    "code": "JPM",
+    "name": "JPMorgan Chase",
+    "short_name": "JPMorgan Chase",
+    "legal_entity_name": "JPMorgan Chase",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Diversified Banks)."
+  },
+  {
+    "code": "KDP",
+    "name": "Keurig Dr Pepper",
+    "short_name": "Keurig Dr Pepper",
+    "legal_entity_name": "Keurig Dr Pepper",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Soft Drinks & Non-alcoholic Beverages)."
+  },
+  {
+    "code": "KEY",
+    "name": "KeyCorp",
+    "short_name": "KeyCorp",
+    "legal_entity_name": "KeyCorp",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Regional Banks)."
+  },
+  {
+    "code": "KEYS",
+    "name": "Keysight Technologies",
+    "short_name": "Keysight Technologies",
+    "legal_entity_name": "Keysight Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Equipment & Instruments)."
+  },
+  {
+    "code": "KHC",
+    "name": "Kraft Heinz",
+    "short_name": "Kraft Heinz",
+    "legal_entity_name": "Kraft Heinz",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "KIM",
+    "name": "Kimco Realty",
+    "short_name": "Kimco Realty",
+    "legal_entity_name": "Kimco Realty",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Retail REITs)."
+  },
+  {
+    "code": "KKR",
+    "name": "KKR & Co.",
+    "short_name": "KKR & Co.",
+    "legal_entity_name": "KKR & Co.",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "KLAC",
+    "name": "KLA Corporation",
+    "short_name": "KLA Corporation",
+    "legal_entity_name": "KLA Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductor Materials & Equipment)."
+  },
+  {
+    "code": "KMB",
+    "name": "Kimberly-Clark",
+    "short_name": "Kimberly-Clark",
+    "legal_entity_name": "Kimberly-Clark",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Household Products)."
+  },
+  {
+    "code": "KMI",
+    "name": "Kinder Morgan",
+    "short_name": "Kinder Morgan",
+    "legal_entity_name": "Kinder Morgan",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Storage & Transportation)."
+  },
+  {
+    "code": "KO",
+    "name": "Coca-Cola Company (The)",
+    "short_name": "Coca-Cola Company (The)",
+    "legal_entity_name": "Coca-Cola Company (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Soft Drinks & Non-alcoholic Beverages)."
+  },
+  {
+    "code": "KR",
+    "name": "Kroger",
+    "short_name": "Kroger",
+    "legal_entity_name": "Kroger",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Food Retail)."
+  },
+  {
+    "code": "KVUE",
+    "name": "Kenvue",
+    "short_name": "Kenvue",
+    "legal_entity_name": "Kenvue",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Personal Care Products)."
+  },
+  {
+    "code": "L",
+    "name": "Loews Corporation",
+    "short_name": "Loews Corporation",
+    "legal_entity_name": "Loews Corporation",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Multi-line Insurance)."
+  },
+  {
+    "code": "LDOS",
+    "name": "Leidos",
+    "short_name": "Leidos",
+    "legal_entity_name": "Leidos",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Diversified Support Services)."
+  },
+  {
+    "code": "LEN",
+    "name": "Lennar",
+    "short_name": "Lennar",
+    "legal_entity_name": "Lennar",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Homebuilding)."
+  },
+  {
+    "code": "LH",
+    "name": "Labcorp",
+    "short_name": "Labcorp",
+    "legal_entity_name": "Labcorp",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Services)."
+  },
+  {
+    "code": "LHX",
+    "name": "L3Harris",
+    "short_name": "L3Harris",
+    "legal_entity_name": "L3Harris",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "LII",
+    "name": "Lennox International",
+    "short_name": "Lennox International",
+    "legal_entity_name": "Lennox International",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "LIN",
+    "name": "Linde plc",
+    "short_name": "Linde plc",
+    "legal_entity_name": "Linde plc",
+    "counterparty_type": "END_USER",
+    "country_code": "GB",
+    "description": "Public-company counterparty in the Materials sector (Industrial Gases)."
+  },
+  {
+    "code": "LITE",
+    "name": "Lumentum",
+    "short_name": "Lumentum",
+    "legal_entity_name": "Lumentum",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Communications Equipment)."
+  },
+  {
+    "code": "LLY",
+    "name": "Lilly (Eli)",
+    "short_name": "Lilly (Eli)",
+    "legal_entity_name": "Lilly (Eli)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Pharmaceuticals)."
+  },
+  {
+    "code": "LMT",
+    "name": "Lockheed Martin",
+    "short_name": "Lockheed Martin",
+    "legal_entity_name": "Lockheed Martin",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "LNT",
+    "name": "Alliant Energy",
+    "short_name": "Alliant Energy",
+    "legal_entity_name": "Alliant Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "LOW",
+    "name": "Lowe's",
+    "short_name": "Lowe's",
+    "legal_entity_name": "Lowe's",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Home Improvement Retail)."
+  },
+  {
+    "code": "LRCX",
+    "name": "Lam Research",
+    "short_name": "Lam Research",
+    "legal_entity_name": "Lam Research",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductor Materials & Equipment)."
+  },
+  {
+    "code": "LULU",
+    "name": "Lululemon Athletica",
+    "short_name": "Lululemon Athletica",
+    "legal_entity_name": "Lululemon Athletica",
+    "counterparty_type": "END_USER",
+    "country_code": "CA",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Apparel, Accessories & Luxury Goods)."
+  },
+  {
+    "code": "LUV",
+    "name": "Southwest Airlines",
+    "short_name": "Southwest Airlines",
+    "legal_entity_name": "Southwest Airlines",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Passenger Airlines)."
+  },
+  {
+    "code": "LVS",
+    "name": "Las Vegas Sands",
+    "short_name": "Las Vegas Sands",
+    "legal_entity_name": "Las Vegas Sands",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Casinos & Gaming)."
+  },
+  {
+    "code": "LYB",
+    "name": "LyondellBasell",
+    "short_name": "LyondellBasell",
+    "legal_entity_name": "LyondellBasell",
+    "counterparty_type": "END_USER",
+    "country_code": "NL",
+    "description": "Public-company counterparty in the Materials sector (Specialty Chemicals)."
+  },
+  {
+    "code": "LYV",
+    "name": "Live Nation Entertainment",
+    "short_name": "Live Nation Entertainment",
+    "legal_entity_name": "Live Nation Entertainment",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Movies & Entertainment)."
+  },
+  {
+    "code": "MA",
+    "name": "Mastercard",
+    "short_name": "Mastercard",
+    "legal_entity_name": "Mastercard",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "MAA",
+    "name": "Mid-America Apartment Communities",
+    "short_name": "Mid-America Apartment Communities",
+    "legal_entity_name": "Mid-America Apartment Communities",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Multi-Family Residential REITs)."
+  },
+  {
+    "code": "MAR",
+    "name": "Marriott International",
+    "short_name": "Marriott International",
+    "legal_entity_name": "Marriott International",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "MAS",
+    "name": "Masco",
+    "short_name": "Masco",
+    "legal_entity_name": "Masco",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "MCD",
+    "name": "McDonald's",
+    "short_name": "McDonald's",
+    "legal_entity_name": "McDonald's",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Restaurants)."
+  },
+  {
+    "code": "MCHP",
+    "name": "Microchip Technology",
+    "short_name": "Microchip Technology",
+    "legal_entity_name": "Microchip Technology",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "MCK",
+    "name": "McKesson Corporation",
+    "short_name": "McKesson Corporation",
+    "legal_entity_name": "McKesson Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Distributors)."
+  },
+  {
+    "code": "MCO",
+    "name": "Moody's Corporation",
+    "short_name": "Moody's Corporation",
+    "legal_entity_name": "Moody's Corporation",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "MDLZ",
+    "name": "Mondelez International",
+    "short_name": "Mondelez International",
+    "legal_entity_name": "Mondelez International",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "MDT",
+    "name": "Medtronic",
+    "short_name": "Medtronic",
+    "legal_entity_name": "Medtronic",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "MET",
+    "name": "MetLife",
+    "short_name": "MetLife",
+    "legal_entity_name": "MetLife",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Life & Health Insurance)."
+  },
+  {
+    "code": "META",
+    "name": "Meta Platforms",
+    "short_name": "Meta Platforms",
+    "legal_entity_name": "Meta Platforms",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Interactive Media & Services)."
+  },
+  {
+    "code": "MGM",
+    "name": "MGM Resorts",
+    "short_name": "MGM Resorts",
+    "legal_entity_name": "MGM Resorts",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Casinos & Gaming)."
+  },
+  {
+    "code": "MKC",
+    "name": "McCormick & Company",
+    "short_name": "McCormick & Company",
+    "legal_entity_name": "McCormick & Company",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "MLM",
+    "name": "Martin Marietta Materials",
+    "short_name": "Martin Marietta Materials",
+    "legal_entity_name": "Martin Marietta Materials",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Construction Materials)."
+  },
+  {
+    "code": "MMM",
+    "name": "3M",
+    "short_name": "3M",
+    "legal_entity_name": "3M",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Conglomerates)."
+  },
+  {
+    "code": "MNST",
+    "name": "Monster Beverage",
+    "short_name": "Monster Beverage",
+    "legal_entity_name": "Monster Beverage",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Soft Drinks & Non-alcoholic Beverages)."
+  },
+  {
+    "code": "MO",
+    "name": "Altria",
+    "short_name": "Altria",
+    "legal_entity_name": "Altria",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Tobacco)."
+  },
+  {
+    "code": "MOS",
+    "name": "Mosaic Company (The)",
+    "short_name": "Mosaic Company (The)",
+    "legal_entity_name": "Mosaic Company (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Fertilizers & Agricultural Chemicals)."
+  },
+  {
+    "code": "MPC",
+    "name": "Marathon Petroleum",
+    "short_name": "Marathon Petroleum",
+    "legal_entity_name": "Marathon Petroleum",
+    "counterparty_type": "REFINER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Refining & Marketing)."
+  },
+  {
+    "code": "MPWR",
+    "name": "Monolithic Power Systems",
+    "short_name": "Monolithic Power Systems",
+    "legal_entity_name": "Monolithic Power Systems",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "MRK",
+    "name": "Merck & Co.",
+    "short_name": "Merck & Co.",
+    "legal_entity_name": "Merck & Co.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Pharmaceuticals)."
+  },
+  {
+    "code": "MRNA",
+    "name": "Moderna",
+    "short_name": "Moderna",
+    "legal_entity_name": "Moderna",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "MRSH",
+    "name": "Marsh McLennan",
+    "short_name": "Marsh McLennan",
+    "legal_entity_name": "Marsh McLennan",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Insurance Brokers)."
+  },
+  {
+    "code": "MS",
+    "name": "Morgan Stanley",
+    "short_name": "Morgan Stanley",
+    "legal_entity_name": "Morgan Stanley",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Investment Banking & Brokerage)."
+  },
+  {
+    "code": "MSCI",
+    "name": "MSCI Inc.",
+    "short_name": "MSCI Inc.",
+    "legal_entity_name": "MSCI Inc.",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "MSFT",
+    "name": "Microsoft",
+    "short_name": "Microsoft",
+    "legal_entity_name": "Microsoft",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Systems Software)."
+  },
+  {
+    "code": "MSI",
+    "name": "Motorola Solutions",
+    "short_name": "Motorola Solutions",
+    "legal_entity_name": "Motorola Solutions",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Communications Equipment)."
+  },
+  {
+    "code": "MTB",
+    "name": "M&T Bank",
+    "short_name": "M&T Bank",
+    "legal_entity_name": "M&T Bank",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Regional Banks)."
+  },
+  {
+    "code": "MTD",
+    "name": "Mettler Toledo",
+    "short_name": "Mettler Toledo",
+    "legal_entity_name": "Mettler Toledo",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "MU",
+    "name": "Micron Technology",
+    "short_name": "Micron Technology",
+    "legal_entity_name": "Micron Technology",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "NCLH",
+    "name": "Norwegian Cruise Line Holdings",
+    "short_name": "Norwegian Cruise Line Holdings",
+    "legal_entity_name": "Norwegian Cruise Line Holdings",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "NDAQ",
+    "name": "Nasdaq, Inc.",
+    "short_name": "Nasdaq, Inc.",
+    "legal_entity_name": "Nasdaq, Inc.",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "NDSN",
+    "name": "Nordson Corporation",
+    "short_name": "Nordson Corporation",
+    "legal_entity_name": "Nordson Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "NEM",
+    "name": "Newmont",
+    "short_name": "Newmont",
+    "legal_entity_name": "Newmont",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Gold)."
+  },
+  {
+    "code": "NFLX",
+    "name": "Netflix",
+    "short_name": "Netflix",
+    "legal_entity_name": "Netflix",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Movies & Entertainment)."
+  },
+  {
+    "code": "NI",
+    "name": "NiSource",
+    "short_name": "NiSource",
+    "legal_entity_name": "NiSource",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "NKE",
+    "name": "Nike, Inc.",
+    "short_name": "Nike, Inc.",
+    "legal_entity_name": "Nike, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Apparel, Accessories & Luxury Goods)."
+  },
+  {
+    "code": "NOC",
+    "name": "Northrop Grumman",
+    "short_name": "Northrop Grumman",
+    "legal_entity_name": "Northrop Grumman",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "NOW",
+    "name": "ServiceNow",
+    "short_name": "ServiceNow",
+    "legal_entity_name": "ServiceNow",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Systems Software)."
+  },
+  {
+    "code": "NRG",
+    "name": "NRG Energy",
+    "short_name": "NRG Energy",
+    "legal_entity_name": "NRG Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Independent Power Producers & Energy Traders)."
+  },
+  {
+    "code": "NSC",
+    "name": "Norfolk Southern",
+    "short_name": "Norfolk Southern",
+    "legal_entity_name": "Norfolk Southern",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Rail Transportation)."
+  },
+  {
+    "code": "NTAP",
+    "name": "NetApp",
+    "short_name": "NetApp",
+    "legal_entity_name": "NetApp",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "NTRS",
+    "name": "Northern Trust",
+    "short_name": "Northern Trust",
+    "legal_entity_name": "Northern Trust",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "NUE",
+    "name": "Nucor",
+    "short_name": "Nucor",
+    "legal_entity_name": "Nucor",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Steel)."
+  },
+  {
+    "code": "NVDA",
+    "name": "Nvidia",
+    "short_name": "Nvidia",
+    "legal_entity_name": "Nvidia",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "NVR",
+    "name": "NVR, Inc.",
+    "short_name": "NVR, Inc.",
+    "legal_entity_name": "NVR, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Homebuilding)."
+  },
+  {
+    "code": "NWSA",
+    "name": "News Corp",
+    "short_name": "News Corp",
+    "legal_entity_name": "News Corp",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Publishing)."
+  },
+  {
+    "code": "NXPI",
+    "name": "NXP Semiconductors",
+    "short_name": "NXP Semiconductors",
+    "legal_entity_name": "NXP Semiconductors",
+    "counterparty_type": "END_USER",
+    "country_code": "NL",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "O",
+    "name": "Realty Income",
+    "short_name": "Realty Income",
+    "legal_entity_name": "Realty Income",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Retail REITs)."
+  },
+  {
+    "code": "ODFL",
+    "name": "Old Dominion",
+    "short_name": "Old Dominion",
+    "legal_entity_name": "Old Dominion",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Cargo Ground Transportation)."
+  },
+  {
+    "code": "OKE",
+    "name": "Oneok",
+    "short_name": "Oneok",
+    "legal_entity_name": "Oneok",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Storage & Transportation)."
+  },
+  {
+    "code": "OMC",
+    "name": "Omnicom Group",
+    "short_name": "Omnicom Group",
+    "legal_entity_name": "Omnicom Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Advertising)."
+  },
+  {
+    "code": "OMV",
+    "name": "OMV",
+    "short_name": "OMV",
+    "legal_entity_name": "OMV Aktiengesellschaft",
+    "counterparty_type": "MAJOR",
+    "country_code": "AT",
+    "description": "Central European integrated energy and products counterparty."
+  },
+  {
+    "code": "ON",
+    "name": "ON Semiconductor",
+    "short_name": "ON Semiconductor",
+    "legal_entity_name": "ON Semiconductor",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "ORCL",
+    "name": "Oracle Corporation",
+    "short_name": "Oracle Corporation",
+    "legal_entity_name": "Oracle Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "ORLY",
+    "name": "O\u2019Reilly Automotive",
+    "short_name": "O\u2019Reilly Automotive",
+    "legal_entity_name": "O\u2019Reilly Automotive",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Automotive Retail)."
+  },
+  {
+    "code": "OTIS",
+    "name": "Otis Worldwide",
+    "short_name": "Otis Worldwide",
+    "legal_entity_name": "Otis Worldwide",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "OXY",
+    "name": "Occidental Petroleum",
+    "short_name": "Occidental Petroleum",
+    "legal_entity_name": "Occidental Petroleum",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "PANW",
+    "name": "Palo Alto Networks",
+    "short_name": "Palo Alto Networks",
+    "legal_entity_name": "Palo Alto Networks",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Systems Software)."
+  },
+  {
+    "code": "PAYX",
+    "name": "Paychex",
+    "short_name": "Paychex",
+    "legal_entity_name": "Paychex",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Human Resource & Employment Services)."
+  },
+  {
+    "code": "PCAR",
+    "name": "Paccar",
+    "short_name": "Paccar",
+    "legal_entity_name": "Paccar",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction Machinery & Heavy Transportation Equipment)."
+  },
+  {
+    "code": "PCG",
+    "name": "PG&E Corporation",
+    "short_name": "PG&E Corporation",
+    "legal_entity_name": "PG&E Corporation",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "PEG",
+    "name": "Public Service Enterprise Group",
+    "short_name": "Public Service Enterprise Group",
+    "legal_entity_name": "Public Service Enterprise Group",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "PEP",
+    "name": "PepsiCo",
+    "short_name": "PepsiCo",
+    "legal_entity_name": "PepsiCo",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Soft Drinks & Non-alcoholic Beverages)."
+  },
+  {
+    "code": "PFE",
+    "name": "Pfizer",
+    "short_name": "Pfizer",
+    "legal_entity_name": "Pfizer",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Pharmaceuticals)."
+  },
+  {
+    "code": "PFG",
+    "name": "Principal Financial Group",
+    "short_name": "Principal Financial Group",
+    "legal_entity_name": "Principal Financial Group",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Life & Health Insurance)."
+  },
+  {
+    "code": "PG",
+    "name": "Procter & Gamble",
+    "short_name": "Procter & Gamble",
+    "legal_entity_name": "Procter & Gamble",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Personal Care Products)."
+  },
+  {
+    "code": "PGR",
+    "name": "Progressive Corporation",
+    "short_name": "Progressive Corporation",
+    "legal_entity_name": "Progressive Corporation",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "PH",
+    "name": "Parker Hannifin",
+    "short_name": "Parker Hannifin",
+    "legal_entity_name": "Parker Hannifin",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "PHM",
+    "name": "PulteGroup",
+    "short_name": "PulteGroup",
+    "legal_entity_name": "PulteGroup",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Homebuilding)."
+  },
+  {
+    "code": "PKG",
+    "name": "Packaging Corporation of America",
+    "short_name": "Packaging Corporation of America",
+    "legal_entity_name": "Packaging Corporation of America",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Paper & Plastic Packaging Products & Materials)."
+  },
+  {
+    "code": "PLD",
+    "name": "Prologis",
+    "short_name": "Prologis",
+    "legal_entity_name": "Prologis",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Industrial REITs)."
+  },
+  {
+    "code": "PLTR",
+    "name": "Palantir Technologies",
+    "short_name": "Palantir Technologies",
+    "legal_entity_name": "Palantir Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "PM",
+    "name": "Philip Morris International",
+    "short_name": "Philip Morris International",
+    "legal_entity_name": "Philip Morris International",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Tobacco)."
+  },
+  {
+    "code": "PNC",
+    "name": "PNC Financial Services",
+    "short_name": "PNC Financial Services",
+    "legal_entity_name": "PNC Financial Services",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Diversified Banks)."
+  },
+  {
+    "code": "PNR",
+    "name": "Pentair",
+    "short_name": "Pentair",
+    "legal_entity_name": "Pentair",
+    "counterparty_type": "END_USER",
+    "country_code": "GB",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "PNW",
+    "name": "Pinnacle West Capital",
+    "short_name": "Pinnacle West Capital",
+    "legal_entity_name": "Pinnacle West Capital",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "PODD",
+    "name": "Insulet Corporation",
+    "short_name": "Insulet Corporation",
+    "legal_entity_name": "Insulet Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "POOL",
+    "name": "Pool Corporation",
+    "short_name": "Pool Corporation",
+    "legal_entity_name": "Pool Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Distributors)."
+  },
+  {
+    "code": "PPG",
+    "name": "PPG Industries",
+    "short_name": "PPG Industries",
+    "legal_entity_name": "PPG Industries",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Specialty Chemicals)."
+  },
+  {
+    "code": "PPL",
+    "name": "PPL Corporation",
+    "short_name": "PPL Corporation",
+    "legal_entity_name": "PPL Corporation",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "PRU",
+    "name": "Prudential Financial",
+    "short_name": "Prudential Financial",
+    "legal_entity_name": "Prudential Financial",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Life & Health Insurance)."
+  },
+  {
+    "code": "PSA",
+    "name": "Public Storage",
+    "short_name": "Public Storage",
+    "legal_entity_name": "Public Storage",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Self-Storage REITs)."
+  },
+  {
+    "code": "PSKY",
+    "name": "Paramount Skydance Corporation",
+    "short_name": "Paramount Skydance Corporation",
+    "legal_entity_name": "Paramount Skydance Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Movies & Entertainment)."
+  },
+  {
+    "code": "PSX",
+    "name": "Phillips 66",
+    "short_name": "Phillips 66",
+    "legal_entity_name": "Phillips 66",
+    "counterparty_type": "REFINER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Refining & Marketing)."
+  },
+  {
+    "code": "PTC",
+    "name": "PTC Inc.",
+    "short_name": "PTC Inc.",
+    "legal_entity_name": "PTC Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "PWR",
+    "name": "Quanta Services",
+    "short_name": "Quanta Services",
+    "legal_entity_name": "Quanta Services",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction & Engineering)."
+  },
+  {
+    "code": "PYPL",
+    "name": "PayPal",
+    "short_name": "PayPal",
+    "legal_entity_name": "PayPal",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "Q",
+    "name": "Qnity Electronics",
+    "short_name": "Qnity Electronics",
+    "legal_entity_name": "Qnity Electronics",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductor Materials & Equipment)."
+  },
+  {
+    "code": "QCOM",
+    "name": "Qualcomm",
+    "short_name": "Qualcomm",
+    "legal_entity_name": "Qualcomm",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "RCL",
+    "name": "Royal Caribbean Group",
+    "short_name": "Royal Caribbean Group",
+    "legal_entity_name": "Royal Caribbean Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Hotels, Resorts & Cruise Lines)."
+  },
+  {
+    "code": "REG",
+    "name": "Regency Centers",
+    "short_name": "Regency Centers",
+    "legal_entity_name": "Regency Centers",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Retail REITs)."
+  },
+  {
+    "code": "REGN",
+    "name": "Regeneron Pharmaceuticals",
+    "short_name": "Regeneron Pharmaceuticals",
+    "legal_entity_name": "Regeneron Pharmaceuticals",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "REPSOL",
+    "name": "Repsol",
+    "short_name": "Repsol",
+    "legal_entity_name": "Repsol, S.A.",
+    "counterparty_type": "MAJOR",
+    "country_code": "ES",
+    "description": "Integrated European refining and trading counterparty."
+  },
+  {
+    "code": "RF",
+    "name": "Regions Financial Corporation",
+    "short_name": "Regions Financial Corporation",
+    "legal_entity_name": "Regions Financial Corporation",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Regional Banks)."
+  },
+  {
+    "code": "RJF",
+    "name": "Raymond James Financial",
+    "short_name": "Raymond James Financial",
+    "legal_entity_name": "Raymond James Financial",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Investment Banking & Brokerage)."
+  },
+  {
+    "code": "RL",
+    "name": "Ralph Lauren Corporation",
+    "short_name": "Ralph Lauren Corporation",
+    "legal_entity_name": "Ralph Lauren Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Apparel, Accessories & Luxury Goods)."
+  },
+  {
+    "code": "RMD",
+    "name": "ResMed",
+    "short_name": "ResMed",
+    "legal_entity_name": "ResMed",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "ROK",
+    "name": "Rockwell Automation",
+    "short_name": "Rockwell Automation",
+    "legal_entity_name": "Rockwell Automation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Electrical Components & Equipment)."
+  },
+  {
+    "code": "ROL",
+    "name": "Rollins, Inc.",
+    "short_name": "Rollins, Inc.",
+    "legal_entity_name": "Rollins, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Environmental & Facilities Services)."
+  },
+  {
+    "code": "ROP",
+    "name": "Roper Technologies",
+    "short_name": "Roper Technologies",
+    "legal_entity_name": "Roper Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Equipment & Instruments)."
+  },
+  {
+    "code": "ROST",
+    "name": "Ross Stores",
+    "short_name": "Ross Stores",
+    "legal_entity_name": "Ross Stores",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Apparel Retail)."
+  },
+  {
+    "code": "RSG",
+    "name": "Republic Services",
+    "short_name": "Republic Services",
+    "legal_entity_name": "Republic Services",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Environmental & Facilities Services)."
+  },
+  {
+    "code": "RTX",
+    "name": "RTX Corporation",
+    "short_name": "RTX Corporation",
+    "legal_entity_name": "RTX Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "RVTY",
+    "name": "Revvity",
+    "short_name": "Revvity",
+    "legal_entity_name": "Revvity",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "RWE",
+    "name": "RWE",
+    "short_name": "RWE",
+    "legal_entity_name": "RWE AG",
+    "counterparty_type": "UTILITY",
+    "country_code": "DE",
+    "description": "European power and energy transition utility counterparty."
+  },
+  {
+    "code": "SATS",
+    "name": "EchoStar",
+    "short_name": "EchoStar",
+    "legal_entity_name": "EchoStar",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Wireless Telecommunication Services)."
+  },
+  {
+    "code": "SBAC",
+    "name": "SBA Communications",
+    "short_name": "SBA Communications",
+    "legal_entity_name": "SBA Communications",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Telecom Tower REITs)."
+  },
+  {
+    "code": "SBUX",
+    "name": "Starbucks",
+    "short_name": "Starbucks",
+    "legal_entity_name": "Starbucks",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Restaurants)."
+  },
+  {
+    "code": "SCHW",
+    "name": "Charles Schwab Corporation",
+    "short_name": "Charles Schwab Corporation",
+    "legal_entity_name": "Charles Schwab Corporation",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Investment Banking & Brokerage)."
+  },
+  {
+    "code": "SHW",
+    "name": "Sherwin-Williams",
+    "short_name": "Sherwin-Williams",
+    "legal_entity_name": "Sherwin-Williams",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Specialty Chemicals)."
+  },
+  {
+    "code": "SJM",
+    "name": "J.M. Smucker Company (The)",
+    "short_name": "J.M. Smucker Company (The)",
+    "legal_entity_name": "J.M. Smucker Company (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "SLB",
+    "name": "Schlumberger",
+    "short_name": "Schlumberger",
+    "legal_entity_name": "Schlumberger",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Equipment & Services)."
+  },
+  {
+    "code": "SMCI",
+    "name": "Supermicro",
+    "short_name": "Supermicro",
+    "legal_entity_name": "Supermicro",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "SNA",
+    "name": "Snap-on",
+    "short_name": "Snap-on",
+    "legal_entity_name": "Snap-on",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "SNDK",
+    "name": "Sandisk",
+    "short_name": "Sandisk",
+    "legal_entity_name": "Sandisk",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "SNPS",
+    "name": "Synopsys",
+    "short_name": "Synopsys",
+    "legal_entity_name": "Synopsys",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "SO",
+    "name": "Southern Company",
+    "short_name": "Southern Company",
+    "legal_entity_name": "Southern Company",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "SOLV",
+    "name": "Solventum",
+    "short_name": "Solventum",
+    "legal_entity_name": "Solventum",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Technology)."
+  },
+  {
+    "code": "SPG",
+    "name": "Simon Property Group",
+    "short_name": "Simon Property Group",
+    "legal_entity_name": "Simon Property Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Retail REITs)."
+  },
+  {
+    "code": "SPGI",
+    "name": "S&P Global",
+    "short_name": "S&P Global",
+    "legal_entity_name": "S&P Global",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Financial Exchanges & Data)."
+  },
+  {
+    "code": "SRE",
+    "name": "Sempra",
+    "short_name": "Sempra",
+    "legal_entity_name": "Sempra",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "STE",
+    "name": "Steris",
+    "short_name": "Steris",
+    "legal_entity_name": "Steris",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "STLD",
+    "name": "Steel Dynamics",
+    "short_name": "Steel Dynamics",
+    "legal_entity_name": "Steel Dynamics",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Steel)."
+  },
+  {
+    "code": "STT",
+    "name": "State Street Corporation",
+    "short_name": "State Street Corporation",
+    "legal_entity_name": "State Street Corporation",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "STX",
+    "name": "Seagate Technology",
+    "short_name": "Seagate Technology",
+    "legal_entity_name": "Seagate Technology",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "STZ",
+    "name": "Constellation Brands",
+    "short_name": "Constellation Brands",
+    "legal_entity_name": "Constellation Brands",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Distillers & Vintners)."
+  },
+  {
+    "code": "SW",
+    "name": "Smurfit Westrock",
+    "short_name": "Smurfit Westrock",
+    "legal_entity_name": "Smurfit Westrock",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Materials sector (Paper & Plastic Packaging Products & Materials)."
+  },
+  {
+    "code": "SWK",
+    "name": "Stanley Black & Decker",
+    "short_name": "Stanley Black & Decker",
+    "legal_entity_name": "Stanley Black & Decker",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "SWKS",
+    "name": "Skyworks Solutions",
+    "short_name": "Skyworks Solutions",
+    "legal_entity_name": "Skyworks Solutions",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "SYF",
+    "name": "Synchrony Financial",
+    "short_name": "Synchrony Financial",
+    "legal_entity_name": "Synchrony Financial",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Consumer Finance)."
+  },
+  {
+    "code": "SYK",
+    "name": "Stryker Corporation",
+    "short_name": "Stryker Corporation",
+    "legal_entity_name": "Stryker Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "SYY",
+    "name": "Sysco",
+    "short_name": "Sysco",
+    "legal_entity_name": "Sysco",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Food Distributors)."
+  },
+  {
+    "code": "T",
+    "name": "AT&T",
+    "short_name": "AT&T",
+    "legal_entity_name": "AT&T",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Integrated Telecommunication Services)."
+  },
+  {
+    "code": "TAP",
+    "name": "Molson Coors Beverage Company",
+    "short_name": "Molson Coors Beverage Company",
+    "legal_entity_name": "Molson Coors Beverage Company",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Brewers)."
+  },
+  {
+    "code": "TDG",
+    "name": "TransDigm Group",
+    "short_name": "TransDigm Group",
+    "legal_entity_name": "TransDigm Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "TDY",
+    "name": "Teledyne Technologies",
+    "short_name": "Teledyne Technologies",
+    "legal_entity_name": "Teledyne Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Equipment & Instruments)."
+  },
+  {
+    "code": "TECH",
+    "name": "Bio-Techne",
+    "short_name": "Bio-Techne",
+    "legal_entity_name": "Bio-Techne",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "TEL",
+    "name": "TE Connectivity",
+    "short_name": "TE Connectivity",
+    "legal_entity_name": "TE Connectivity",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Manufacturing Services)."
+  },
+  {
+    "code": "TER",
+    "name": "Teradyne",
+    "short_name": "Teradyne",
+    "legal_entity_name": "Teradyne",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductor Materials & Equipment)."
+  },
+  {
+    "code": "TFC",
+    "name": "Truist Financial",
+    "short_name": "Truist Financial",
+    "legal_entity_name": "Truist Financial",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Diversified Banks)."
+  },
+  {
+    "code": "TGT",
+    "name": "Target Corporation",
+    "short_name": "Target Corporation",
+    "legal_entity_name": "Target Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Consumer Staples Merchandise Retail)."
+  },
+  {
+    "code": "TJX",
+    "name": "TJX Companies",
+    "short_name": "TJX Companies",
+    "legal_entity_name": "TJX Companies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Apparel Retail)."
+  },
+  {
+    "code": "TKO",
+    "name": "TKO Group Holdings",
+    "short_name": "TKO Group Holdings",
+    "legal_entity_name": "TKO Group Holdings",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Movies & Entertainment)."
+  },
+  {
+    "code": "TMO",
+    "name": "Thermo Fisher Scientific",
+    "short_name": "Thermo Fisher Scientific",
+    "legal_entity_name": "Thermo Fisher Scientific",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "TMUS",
+    "name": "T-Mobile US",
+    "short_name": "T-Mobile US",
+    "legal_entity_name": "T-Mobile US",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Wireless Telecommunication Services)."
+  },
+  {
+    "code": "TPL",
+    "name": "Texas Pacific Land Corporation",
+    "short_name": "Texas Pacific Land Corporation",
+    "legal_entity_name": "Texas Pacific Land Corporation",
+    "counterparty_type": "PRODUCER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Exploration & Production)."
+  },
+  {
+    "code": "TPR",
+    "name": "Tapestry, Inc.",
+    "short_name": "Tapestry, Inc.",
+    "legal_entity_name": "Tapestry, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Apparel, Accessories & Luxury Goods)."
+  },
+  {
+    "code": "TRGP",
+    "name": "Targa Resources",
+    "short_name": "Targa Resources",
+    "legal_entity_name": "Targa Resources",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Storage & Transportation)."
+  },
+  {
+    "code": "TRMB",
+    "name": "Trimble Inc.",
+    "short_name": "Trimble Inc.",
+    "legal_entity_name": "Trimble Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Equipment & Instruments)."
+  },
+  {
+    "code": "TROW",
+    "name": "T. Rowe Price",
+    "short_name": "T. Rowe Price",
+    "legal_entity_name": "T. Rowe Price",
+    "counterparty_type": "BROKER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Asset Management & Custody Banks)."
+  },
+  {
+    "code": "TRV",
+    "name": "Travelers Companies (The)",
+    "short_name": "Travelers Companies (The)",
+    "legal_entity_name": "Travelers Companies (The)",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "TSCO",
+    "name": "Tractor Supply",
+    "short_name": "Tractor Supply",
+    "legal_entity_name": "Tractor Supply",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Other Specialty Retail)."
+  },
+  {
+    "code": "TSLA",
+    "name": "Tesla, Inc.",
+    "short_name": "Tesla, Inc.",
+    "legal_entity_name": "Tesla, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Automobile Manufacturers)."
+  },
+  {
+    "code": "TSN",
+    "name": "Tyson Foods",
+    "short_name": "Tyson Foods",
+    "legal_entity_name": "Tyson Foods",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Packaged Foods & Meats)."
+  },
+  {
+    "code": "TT",
+    "name": "Trane Technologies",
+    "short_name": "Trane Technologies",
+    "legal_entity_name": "Trane Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "IE",
+    "description": "Public-company counterparty in the Industrials sector (Building Products)."
+  },
+  {
+    "code": "TTD",
+    "name": "Trade Desk (The)",
+    "short_name": "Trade Desk (The)",
+    "legal_entity_name": "Trade Desk (The)",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Advertising)."
+  },
+  {
+    "code": "TTWO",
+    "name": "Take-Two Interactive",
+    "short_name": "Take-Two Interactive",
+    "legal_entity_name": "Take-Two Interactive",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Interactive Home Entertainment)."
+  },
+  {
+    "code": "TXN",
+    "name": "Texas Instruments",
+    "short_name": "Texas Instruments",
+    "legal_entity_name": "Texas Instruments",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Semiconductors)."
+  },
+  {
+    "code": "TXT",
+    "name": "Textron",
+    "short_name": "Textron",
+    "legal_entity_name": "Textron",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Aerospace & Defense)."
+  },
+  {
+    "code": "TYL",
+    "name": "Tyler Technologies",
+    "short_name": "Tyler Technologies",
+    "legal_entity_name": "Tyler Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "UAL",
+    "name": "United Airlines Holdings",
+    "short_name": "United Airlines Holdings",
+    "legal_entity_name": "United Airlines Holdings",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Passenger Airlines)."
+  },
+  {
+    "code": "UBER",
+    "name": "Uber",
+    "short_name": "Uber",
+    "legal_entity_name": "Uber",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Passenger Ground Transportation)."
+  },
+  {
+    "code": "UDR",
+    "name": "UDR, Inc.",
+    "short_name": "UDR, Inc.",
+    "legal_entity_name": "UDR, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Multi-Family Residential REITs)."
+  },
+  {
+    "code": "UHS",
+    "name": "Universal Health Services",
+    "short_name": "Universal Health Services",
+    "legal_entity_name": "Universal Health Services",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Facilities)."
+  },
+  {
+    "code": "ULTA",
+    "name": "Ulta Beauty",
+    "short_name": "Ulta Beauty",
+    "legal_entity_name": "Ulta Beauty",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Other Specialty Retail)."
+  },
+  {
+    "code": "UNH",
+    "name": "UnitedHealth Group",
+    "short_name": "UnitedHealth Group",
+    "legal_entity_name": "UnitedHealth Group",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Managed Health Care)."
+  },
+  {
+    "code": "UNP",
+    "name": "Union Pacific Corporation",
+    "short_name": "Union Pacific Corporation",
+    "legal_entity_name": "Union Pacific Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Rail Transportation)."
+  },
+  {
+    "code": "UPS",
+    "name": "United Parcel Service",
+    "short_name": "United Parcel Service",
+    "legal_entity_name": "United Parcel Service",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Air Freight & Logistics)."
+  },
+  {
+    "code": "URI",
+    "name": "United Rentals",
+    "short_name": "United Rentals",
+    "legal_entity_name": "United Rentals",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Trading Companies & Distributors)."
+  },
+  {
+    "code": "USB",
+    "name": "U.S. Bancorp",
+    "short_name": "U.S. Bancorp",
+    "legal_entity_name": "U.S. Bancorp",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Diversified Banks)."
+  },
+  {
+    "code": "V",
+    "name": "Visa Inc.",
+    "short_name": "Visa Inc.",
+    "legal_entity_name": "Visa Inc.",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "VICI",
+    "name": "Vici Properties",
+    "short_name": "Vici Properties",
+    "legal_entity_name": "Vici Properties",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Hotel & Resort REITs)."
+  },
+  {
+    "code": "VLTO",
+    "name": "Veralto",
+    "short_name": "Veralto",
+    "legal_entity_name": "Veralto",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Environmental & Facilities Services)."
+  },
+  {
+    "code": "VMC",
+    "name": "Vulcan Materials Company",
+    "short_name": "Vulcan Materials Company",
+    "legal_entity_name": "Vulcan Materials Company",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Materials sector (Construction Materials)."
+  },
+  {
+    "code": "VRSK",
+    "name": "Verisk Analytics",
+    "short_name": "Verisk Analytics",
+    "legal_entity_name": "Verisk Analytics",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Research & Consulting Services)."
+  },
+  {
+    "code": "VRSN",
+    "name": "Verisign",
+    "short_name": "Verisign",
+    "legal_entity_name": "Verisign",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Internet Services & Infrastructure)."
+  },
+  {
+    "code": "VRT",
+    "name": "Vertiv",
+    "short_name": "Vertiv",
+    "legal_entity_name": "Vertiv",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Electrical Components & Equipment)."
+  },
+  {
+    "code": "VRTX",
+    "name": "Vertex Pharmaceuticals",
+    "short_name": "Vertex Pharmaceuticals",
+    "legal_entity_name": "Vertex Pharmaceuticals",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Biotechnology)."
+  },
+  {
+    "code": "VST",
+    "name": "Vistra Corp.",
+    "short_name": "Vistra Corp.",
+    "legal_entity_name": "Vistra Corp.",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "VTR",
+    "name": "Ventas",
+    "short_name": "Ventas",
+    "legal_entity_name": "Ventas",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Health Care REITs)."
+  },
+  {
+    "code": "VTRS",
+    "name": "Viatris",
+    "short_name": "Viatris",
+    "legal_entity_name": "Viatris",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Pharmaceuticals)."
+  },
+  {
+    "code": "VZ",
+    "name": "Verizon",
+    "short_name": "Verizon",
+    "legal_entity_name": "Verizon",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Integrated Telecommunication Services)."
+  },
+  {
+    "code": "WAB",
+    "name": "Wabtec",
+    "short_name": "Wabtec",
+    "legal_entity_name": "Wabtec",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Construction Machinery & Heavy Transportation Equipment)."
+  },
+  {
+    "code": "WAT",
+    "name": "Waters Corporation",
+    "short_name": "Waters Corporation",
+    "legal_entity_name": "Waters Corporation",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Life Sciences Tools & Services)."
+  },
+  {
+    "code": "WBD",
+    "name": "Warner Bros. Discovery",
+    "short_name": "Warner Bros. Discovery",
+    "legal_entity_name": "Warner Bros. Discovery",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Communication Services sector (Broadcasting)."
+  },
+  {
+    "code": "WDAY",
+    "name": "Workday, Inc.",
+    "short_name": "Workday, Inc.",
+    "legal_entity_name": "Workday, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Application Software)."
+  },
+  {
+    "code": "WDC",
+    "name": "Western Digital",
+    "short_name": "Western Digital",
+    "legal_entity_name": "Western Digital",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Technology Hardware, Storage & Peripherals)."
+  },
+  {
+    "code": "WEC",
+    "name": "WEC Energy Group",
+    "short_name": "WEC Energy Group",
+    "legal_entity_name": "WEC Energy Group",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Electric Utilities)."
+  },
+  {
+    "code": "WELL",
+    "name": "Welltower",
+    "short_name": "Welltower",
+    "legal_entity_name": "Welltower",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Health Care REITs)."
+  },
+  {
+    "code": "WFC",
+    "name": "Wells Fargo",
+    "short_name": "Wells Fargo",
+    "legal_entity_name": "Wells Fargo",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Diversified Banks)."
+  },
+  {
+    "code": "WM",
+    "name": "Waste Management",
+    "short_name": "Waste Management",
+    "legal_entity_name": "Waste Management",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Environmental & Facilities Services)."
+  },
+  {
+    "code": "WMB",
+    "name": "Williams Companies",
+    "short_name": "Williams Companies",
+    "legal_entity_name": "Williams Companies",
+    "counterparty_type": "MIDSTREAM",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Energy sector (Oil & Gas Storage & Transportation)."
+  },
+  {
+    "code": "WMT",
+    "name": "Walmart",
+    "short_name": "Walmart",
+    "legal_entity_name": "Walmart",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Staples sector (Consumer Staples Merchandise Retail)."
+  },
+  {
+    "code": "WRB",
+    "name": "W. R. Berkley Corporation",
+    "short_name": "W. R. Berkley Corporation",
+    "legal_entity_name": "W. R. Berkley Corporation",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Property & Casualty Insurance)."
+  },
+  {
+    "code": "WSM",
+    "name": "Williams-Sonoma, Inc.",
+    "short_name": "Williams-Sonoma, Inc.",
+    "legal_entity_name": "Williams-Sonoma, Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Homefurnishing Retail)."
+  },
+  {
+    "code": "WST",
+    "name": "West Pharmaceutical Services",
+    "short_name": "West Pharmaceutical Services",
+    "legal_entity_name": "West Pharmaceutical Services",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Supplies)."
+  },
+  {
+    "code": "WTW",
+    "name": "Willis Towers Watson",
+    "short_name": "Willis Towers Watson",
+    "legal_entity_name": "Willis Towers Watson",
+    "counterparty_type": "BROKER",
+    "country_code": "GB",
+    "description": "Public-company counterparty in the Financials sector (Insurance Brokers)."
+  },
+  {
+    "code": "WY",
+    "name": "Weyerhaeuser",
+    "short_name": "Weyerhaeuser",
+    "legal_entity_name": "Weyerhaeuser",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Real Estate sector (Timber REITs)."
+  },
+  {
+    "code": "WYNN",
+    "name": "Wynn Resorts",
+    "short_name": "Wynn Resorts",
+    "legal_entity_name": "Wynn Resorts",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Casinos & Gaming)."
+  },
+  {
+    "code": "XEL",
+    "name": "Xcel Energy",
+    "short_name": "Xcel Energy",
+    "legal_entity_name": "Xcel Energy",
+    "counterparty_type": "UTILITY",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Utilities sector (Multi-Utilities)."
+  },
+  {
+    "code": "XYL",
+    "name": "Xylem Inc.",
+    "short_name": "Xylem Inc.",
+    "legal_entity_name": "Xylem Inc.",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Industrials sector (Industrial Machinery & Supplies & Components)."
+  },
+  {
+    "code": "XYZ",
+    "name": "Block, Inc.",
+    "short_name": "Block, Inc.",
+    "legal_entity_name": "Block, Inc.",
+    "counterparty_type": "BANK",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Financials sector (Transaction & Payment Processing Services)."
+  },
+  {
+    "code": "YUM",
+    "name": "Yum! Brands",
+    "short_name": "Yum! Brands",
+    "legal_entity_name": "Yum! Brands",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Consumer Discretionary sector (Restaurants)."
+  },
+  {
+    "code": "ZBH",
+    "name": "Zimmer Biomet",
+    "short_name": "Zimmer Biomet",
+    "legal_entity_name": "Zimmer Biomet",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Health Care Equipment)."
+  },
+  {
+    "code": "ZBRA",
+    "name": "Zebra Technologies",
+    "short_name": "Zebra Technologies",
+    "legal_entity_name": "Zebra Technologies",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Information Technology sector (Electronic Equipment & Instruments)."
+  },
+  {
+    "code": "ZTS",
+    "name": "Zoetis",
+    "short_name": "Zoetis",
+    "legal_entity_name": "Zoetis",
+    "counterparty_type": "END_USER",
+    "country_code": "US",
+    "description": "Public-company counterparty in the Health Care sector (Pharmaceuticals)."
+  }
+]

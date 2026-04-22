@@ -1,0 +1,539 @@
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from typing import Literal, Optional, get_args
+
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
+
+from apps.api.app.schemas._validation import normalize_optional_text, normalize_required_text
+
+AssistantProvider = Literal["openai", "anthropic", "google"]
+AssistantMessageRole = Literal["user", "assistant"]
+AssistantPromptSectionSource = Literal[
+    "system",
+    "organization",
+    "user",
+    "business",
+    "data",
+    "tool",
+    "world",
+    "workspace",
+    "application",
+    "agent",
+]
+AssistantWorkspace = Literal[
+    "dashboard",
+    "guide",
+    "demo",
+    "trades",
+    "events",
+    "risk",
+    "positions",
+    "shipments",
+    "scheduling",
+    "operations",
+    "settlement",
+    "reports",
+    "reference",
+    "admin",
+    "settings",
+    "assistant",
+]
+AssistantAgentStatus = Literal["DRAFT", "ACTIVE", "PAUSED", "RETIRED"]
+AssistantAgentScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
+AssistantAgentCapability = Literal["READ", "EXPLAIN", "DRAFT", "ACTION"]
+AssistantActionType = Literal[
+    "cancel_trade",
+    "issue_trade_confirmation",
+    "record_trade_confirmation_response",
+    "update_trade_workflow_item",
+    "issue_trade_invoice",
+    "create_trade_payment",
+    "reprocess_document_ingestion",
+]
+AssistantActionRequestStatus = Literal["PENDING", "REJECTED", "EXECUTED", "FAILED"]
+AssistantRunStatus = Literal["COMPLETED", "FAILED"]
+ALL_ASSISTANT_ACTION_TYPES: tuple[str, ...] = get_args(AssistantActionType)
+
+AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
+
+
+class AssistantProviderStatusOut(BaseModel):
+    provider: AssistantProvider
+    label: str
+    enabled: bool
+    configured: bool
+    is_default: bool
+    default_model: str
+    base_url: str
+    setup_env_var: str
+
+
+class AssistantToolDefinitionOut(BaseModel):
+    name: str
+    description: str
+
+
+class AssistantActionDefinitionOut(BaseModel):
+    name: AssistantActionType
+    label: str
+    description: str
+
+
+class AssistantRuntimeSettingsOut(BaseModel):
+    enabled: bool
+    default_provider: AssistantProvider
+    effective_default_provider: Optional[AssistantProvider]
+    configured_provider_count: int
+    providers: list[AssistantProviderStatusOut]
+    available_tools: list[AssistantToolDefinitionOut]
+    available_action_types: list[AssistantActionDefinitionOut]
+
+
+class AssistantMessageIn(BaseModel):
+    role: AssistantMessageRole
+    content: str = Field(..., min_length=1, max_length=20_000)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="content")
+
+
+class AssistantMessageOut(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: str
+
+
+class AssistantPromptContextRequest(BaseModel):
+    agent_id: Optional[str] = Field(default=None, max_length=64)
+    provider: Optional[AssistantProvider] = None
+    workspace: Optional[AssistantWorkspace] = None
+    context: Optional[str] = Field(default=None, max_length=20_000)
+    use_live_tools: bool = True
+
+    @field_validator("agent_id")
+    @classmethod
+    def normalize_agent_id(cls, value: Optional[str]) -> Optional[str]:
+        normalized = normalize_optional_text(value, field_name="agent_id", lowercase=True)
+        if normalized is None:
+            return None
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("context")
+    @classmethod
+    def normalize_context(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="context")
+
+
+class AssistantPromptRequest(AssistantPromptContextRequest):
+    conversation_id: Optional[int] = Field(default=None, ge=1)
+    messages: list[AssistantMessageIn] = Field(..., min_length=1, max_length=40)
+
+
+class AssistantUsageOut(BaseModel):
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+
+
+class AssistantToolCallOut(BaseModel):
+    tool_name: str
+    summary: str
+    arguments: dict[str, object] = Field(default_factory=dict)
+    record_count: Optional[int] = None
+
+
+class AssistantActionRequestOut(BaseModel):
+    action_request_id: int
+    run_id: int
+    user_id: str
+    status: AssistantActionRequestStatus
+    workspace: Optional[AssistantWorkspace] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    action_type: AssistantActionType
+    summary: str
+    description: str
+    payload: dict[str, object] = Field(default_factory=dict)
+    result: Optional[dict[str, object]] = None
+    error_detail: Optional[str] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
+
+
+class AssistantPromptResponse(BaseModel):
+    conversation_id: Optional[int] = None
+    conversation_updated_at: Optional[datetime] = None
+    run_id: Optional[int] = None
+    run_recorded_at: Optional[datetime] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    provider: AssistantProvider
+    model: str
+    message: AssistantMessageOut
+    usage: AssistantUsageOut
+    warnings: list[str] = Field(default_factory=list)
+    tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+    action_requests: list[AssistantActionRequestOut] = Field(default_factory=list)
+
+
+class AssistantPromptSectionOut(BaseModel):
+    key: str
+    title: str
+    source: AssistantPromptSectionSource
+    content: str
+
+
+class AssistantPromptContextOut(BaseModel):
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    provider: AssistantProvider
+    model: str
+    generated_at: datetime
+    warnings: list[str] = Field(default_factory=list)
+    sections: list[AssistantPromptSectionOut]
+    rendered_system_prompt: str
+
+
+def _ensure_distinct_values(values: list[str], *, field_name: str) -> list[str]:
+    if len(values) != len(set(values)):
+        raise ValueError(f"{field_name} must not contain duplicates")
+    return values
+
+
+class AssistantAgentBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    description: str = Field(..., min_length=1, max_length=500)
+    status: AssistantAgentStatus
+    scope: AssistantAgentScope
+    provider: Optional[AssistantProvider] = None
+    model: Optional[str] = Field(default=None, max_length=160)
+    allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
+    capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=16)
+    allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
+    system_prompt: str = Field(..., min_length=1, max_length=20_000)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="name")
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="description")
+
+    @field_validator("model")
+    @classmethod
+    def normalize_model(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="model")
+
+    @field_validator("system_prompt")
+    @classmethod
+    def normalize_system_prompt(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="system_prompt")
+
+    @field_validator("allowed_workspaces")
+    @classmethod
+    def validate_allowed_workspaces(cls, value: list[AssistantWorkspace]) -> list[AssistantWorkspace]:
+        return _ensure_distinct_values(value, field_name="allowed_workspaces")
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
+        return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def normalize_allowed_tools(cls, value: list[str]) -> list[str]:
+        normalized = [normalize_required_text(tool_name, field_name="allowed_tools").lower() for tool_name in value]
+        return _ensure_distinct_values(normalized, field_name="allowed_tools")
+
+    @field_validator("allowed_action_types")
+    @classmethod
+    def normalize_allowed_action_types(cls, value: list[AssistantActionType]) -> list[AssistantActionType]:
+        normalized = [
+            normalize_required_text(action_type, field_name="allowed_action_types", lowercase=True)
+            for action_type in value
+        ]
+        return _ensure_distinct_values(normalized, field_name="allowed_action_types")
+
+    @field_validator("model")
+    @classmethod
+    def validate_model_requires_provider(cls, value: Optional[str], info: ValidationInfo) -> Optional[str]:
+        provider = info.data.get("provider")
+        if value is not None and provider is None:
+            raise ValueError("provider is required when model is set")
+        return value
+
+
+class AssistantAgentCreate(AssistantAgentBase):
+    agent_id: str = Field(..., min_length=2, max_length=64)
+    created_by: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("agent_id")
+    @classmethod
+    def normalize_agent_id(cls, value: str) -> str:
+        normalized = normalize_required_text(value, field_name="agent_id", lowercase=True)
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("created_by")
+    @classmethod
+    def normalize_created_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="created_by")
+
+
+class AssistantAgentUpdate(AssistantAgentBase):
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("updated_by")
+    @classmethod
+    def normalize_updated_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="updated_by")
+
+
+class AssistantAgentOut(BaseModel):
+    agent_id: str
+    name: str
+    description: str
+    status: AssistantAgentStatus
+    scope: AssistantAgentScope
+    provider: Optional[AssistantProvider]
+    model: Optional[str]
+    allowed_workspaces: list[AssistantWorkspace]
+    capabilities: list[AssistantAgentCapability]
+    allowed_tools: list[str]
+    allowed_action_types: list[AssistantActionType]
+
+
+class AssistantAgentAdminOut(AssistantAgentOut):
+    system_prompt: str
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class AssistantAgentBuildDraftIn(BaseModel):
+    agent_id: Optional[str] = Field(default=None, max_length=64)
+    name: Optional[str] = Field(default=None, max_length=160)
+    description: Optional[str] = Field(default=None, max_length=500)
+    status: Optional[AssistantAgentStatus] = None
+    scope: Optional[AssistantAgentScope] = None
+    provider: Optional[AssistantProvider] = None
+    model: Optional[str] = Field(default=None, max_length=160)
+    allowed_workspaces: list[AssistantWorkspace] = Field(default_factory=list, max_length=16)
+    capabilities: list[AssistantAgentCapability] = Field(default_factory=list, max_length=4)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=16)
+    allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
+    system_prompt: Optional[str] = Field(default=None, max_length=20_000)
+
+    @field_validator("agent_id")
+    @classmethod
+    def normalize_optional_agent_id(cls, value: Optional[str]) -> Optional[str]:
+        normalized = normalize_optional_text(value, field_name="agent_id", lowercase=True)
+        if normalized is None:
+            return None
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("name")
+    @classmethod
+    def normalize_optional_name(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="name")
+
+    @field_validator("description")
+    @classmethod
+    def normalize_optional_description(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="description")
+
+    @field_validator("model")
+    @classmethod
+    def normalize_optional_model(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="model")
+
+    @field_validator("system_prompt")
+    @classmethod
+    def normalize_optional_system_prompt(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="system_prompt")
+
+    @field_validator("allowed_workspaces")
+    @classmethod
+    def validate_optional_allowed_workspaces(cls, value: list[AssistantWorkspace]) -> list[AssistantWorkspace]:
+        return _ensure_distinct_values(value, field_name="allowed_workspaces")
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_optional_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
+        return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def normalize_optional_allowed_tools(cls, value: list[str]) -> list[str]:
+        normalized = [normalize_required_text(tool_name, field_name="allowed_tools").lower() for tool_name in value]
+        return _ensure_distinct_values(normalized, field_name="allowed_tools")
+
+    @field_validator("allowed_action_types")
+    @classmethod
+    def normalize_optional_allowed_action_types(cls, value: list[AssistantActionType]) -> list[AssistantActionType]:
+        normalized = [
+            normalize_required_text(action_type, field_name="allowed_action_types", lowercase=True)
+            for action_type in value
+        ]
+        return _ensure_distinct_values(normalized, field_name="allowed_action_types")
+
+
+class AssistantAgentBuildRequest(BaseModel):
+    brief: str = Field(..., min_length=1, max_length=4_000)
+    current_draft: Optional[AssistantAgentBuildDraftIn] = None
+
+    @field_validator("brief")
+    @classmethod
+    def normalize_brief(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="brief")
+
+
+class AssistantAgentBuildSuggestionOut(BaseModel):
+    agent_id: str = Field(..., min_length=2, max_length=64)
+    name: str = Field(..., min_length=1, max_length=160)
+    description: str = Field(..., min_length=1, max_length=500)
+    status: AssistantAgentStatus
+    scope: AssistantAgentScope
+    provider: AssistantProvider
+    model: str = Field(..., min_length=1, max_length=160)
+    allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
+    capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=16)
+    allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
+    system_prompt: str = Field(..., min_length=1, max_length=20_000)
+    builder_provider: AssistantProvider
+    builder_model: str = Field(..., min_length=1, max_length=160)
+    warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("agent_id")
+    @classmethod
+    def normalize_build_agent_id(cls, value: str) -> str:
+        normalized = normalize_required_text(value, field_name="agent_id", lowercase=True)
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("name")
+    @classmethod
+    def normalize_build_name(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="name")
+
+    @field_validator("description")
+    @classmethod
+    def normalize_build_description(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="description")
+
+    @field_validator("model", "builder_model")
+    @classmethod
+    def normalize_build_model(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="model")
+
+    @field_validator("system_prompt")
+    @classmethod
+    def normalize_build_system_prompt(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="system_prompt")
+
+    @field_validator("allowed_workspaces")
+    @classmethod
+    def validate_build_allowed_workspaces(cls, value: list[AssistantWorkspace]) -> list[AssistantWorkspace]:
+        return _ensure_distinct_values(value, field_name="allowed_workspaces")
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_build_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
+        return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def normalize_build_allowed_tools(cls, value: list[str]) -> list[str]:
+        normalized = [normalize_required_text(tool_name, field_name="allowed_tools").lower() for tool_name in value]
+        return _ensure_distinct_values(normalized, field_name="allowed_tools")
+
+    @field_validator("allowed_action_types")
+    @classmethod
+    def normalize_build_allowed_action_types(cls, value: list[AssistantActionType]) -> list[AssistantActionType]:
+        normalized = [
+            normalize_required_text(action_type, field_name="allowed_action_types", lowercase=True)
+            for action_type in value
+        ]
+        return _ensure_distinct_values(normalized, field_name="allowed_action_types")
+
+
+class AssistantRunSummaryOut(BaseModel):
+    conversation_id: Optional[int] = None
+    run_id: int
+    status: AssistantRunStatus
+    created_at: datetime
+    completed_at: datetime
+    user_id: str
+    user_role: str
+    workspace: Optional[AssistantWorkspace]
+    agent_id: Optional[str]
+    agent_name: Optional[str]
+    provider: AssistantProvider
+    model: str
+    use_live_tools: bool
+    warning_count: int
+    tool_call_count: int
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    latest_user_message: Optional[str] = None
+    assistant_message: Optional[str] = None
+    error_detail: Optional[str] = None
+
+
+class AssistantRunOut(AssistantRunSummaryOut):
+    request_messages: list[AssistantMessageIn]
+    application_context: Optional[str] = None
+    prompt_sections: list[AssistantPromptSectionOut]
+    rendered_system_prompt: str
+    warnings: list[str] = Field(default_factory=list)
+    tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+
+
+class AssistantConversationMessageOut(BaseModel):
+    role: AssistantMessageRole
+    content: str
+    recorded_at: datetime
+    run_id: Optional[int] = None
+    provider: Optional[AssistantProvider] = None
+    model: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+
+
+class AssistantConversationSummaryOut(BaseModel):
+    conversation_id: int
+    created_at: datetime
+    updated_at: datetime
+    user_id: str
+    user_role: str
+    workspace: Optional[AssistantWorkspace] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    provider: AssistantProvider
+    model: str
+    use_live_tools: bool
+    title: str
+    run_count: int
+    latest_run_id: Optional[int] = None
+    latest_user_message: Optional[str] = None
+    latest_assistant_message: Optional[str] = None
+
+
+class AssistantConversationOut(AssistantConversationSummaryOut):
+    messages: list[AssistantConversationMessageOut] = Field(default_factory=list)

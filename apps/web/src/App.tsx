@@ -1,542 +1,809 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
-type Trade = {
-  trade_id: string
-  created_at: string
-  updated_at: string
-  book: string
-  commodity: string
-  price: number | null
-  volume: number | null
-  status: string
-  last_event_id: string
+import './App.css'
+import './appearance.css'
+import {
+  filterPrimaryNavigationSections,
+  MOBILE_NAVIGATION_PANEL_ID,
+  type PrimaryNavigationSectionKey,
+  primaryNavigationSectionByKey,
+  primaryNavigationSectionForView,
+} from './app/navigation'
+import { AppStartHereOverlay } from './entities/app/AppStartHereOverlay'
+import { AppWorkspaceContent } from './entities/app/AppWorkspaceContent'
+import {
+  APP_VIEWS,
+  HERO_BODY_BY_VIEW,
+  HERO_TITLE_BY_VIEW,
+  workspaceLabel,
+} from './entities/app/appViews'
+import { useAppRouteState } from './entities/app/useAppRouteState'
+import { useAppShellState } from './entities/app/useAppShellState'
+import { useAppStartHere } from './entities/app/useAppStartHere'
+import { useAuthInterruptionFlow } from './entities/app/useAuthInterruptionFlow'
+import { useStartHereRouting } from './entities/app/useStartHereRouting'
+import { useAppTradeActions } from './entities/app/useAppTradeActions'
+import { useAppAppearance } from './entities/app/useAppAppearance'
+import { useAppTradeCaptureSettings } from './entities/app/useAppTradeCaptureSettings'
+import { useAppWorkspaceData } from './entities/app/useAppWorkspaceData'
+import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
+import {
+  deriveWorkspaceStatus,
+  isAuthenticationRequiredMessage,
+  VIEW_DATA_GROUPS,
+} from './entities/app/workspaceLoading'
+import { logoutCurrentSession } from './entities/auth/api'
+import { AuthGate } from './entities/auth/AuthGate'
+import { useReferenceDataController } from './features/reference-data/useReferenceDataController'
+import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
+import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
+import { appConfig } from './shared/config'
+import {
+  describeAppRouteHandoff,
+  getAppRouteHandoffKey,
+  type AppRouteHandoff,
+} from './shared/appRouteHandoff'
+import { getAuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
+import type { AuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
+import { commodityClassOrder } from './shared/trading'
+
+function WorkspaceLoadState({
+  title,
+  detail,
+}: {
+  title: string
+  detail: string
+}) {
+  return (
+    <section className="surface empty-state">
+      <strong>{title}</strong>
+      <p>{detail}</p>
+    </section>
+  )
 }
 
-type EventRow = {
-  event_id: string
-  aggregate_type: string
-  aggregate_id: string
-  event_type: string
-  occurred_at: string
-  recorded_at: string
-  actor_id: string | null
-  correlation_id: string | null
-  causation_id: string | null
-  schema_version: number
-  payload: Record<string, unknown>
+function WorkspaceErrorState({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <section className="surface empty-state">
+      <strong>{title}</strong>
+      <p>{message}</p>
+      <button type="button" className="button button-secondary" onClick={onRetry}>
+        Retry workspace load
+      </button>
+    </section>
+  )
 }
 
-type PositionRow = {
-  commodity: string
-  net_volume: number
-  updated_at: string
+type AppRouteController = ReturnType<typeof useAppRouteState>
+type AppShellController = ReturnType<typeof useAppShellState>
+type AppAppearanceController = ReturnType<typeof useAppAppearance>
+type AppTradeCaptureSettingsController = ReturnType<typeof useAppTradeCaptureSettings>
+type AppWorkspaceDataController = ReturnType<typeof useAppWorkspaceData>
+type AppStartHereRoutingController = ReturnType<typeof useStartHereRouting>
+
+type AuthenticatedWorkspaceShellProps = {
+  route: AppRouteController
+  shell: AppShellController
+  appearance: AppAppearanceController
+  tradeCapturePreferences: AppTradeCaptureSettingsController
+  workspaceData: AppWorkspaceDataController
+  startHereRouting: AppStartHereRoutingController
+  showStartHereOverlay: boolean
+  dismissStartHere: () => void
+  onSignOut: () => Promise<void>
+  signOutPending: boolean
+  signOutError: string
+  isNavSectionOpen: (sectionKey: PrimaryNavigationSectionKey) => boolean
+  toggleNavSection: (sectionKey: PrimaryNavigationSectionKey) => void
 }
 
-const API_BASE = 'http://localhost:8000'
-const BOOK_OPTIONS = ['CRUDE_PHYS', 'CRUDE_PAPER', 'GAS_PHYS', 'GAS_PAPER']
-
-export default function App() {
-  const [health, setHealth] = useState<string>('checking...')
-  const [trades, setTrades] = useState<Trade[]>([])
-  const [events, setEvents] = useState<EventRow[]>([])
-  const [positions, setPositions] = useState<PositionRow[]>([])
-  const [error, setError] = useState<string>('')
-  const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null)
-
-  const [tradeIdInput, setTradeIdInput] = useState('')
-  const [bookInput, setBookInput] = useState('CRUDE_PHYS')
-  const [commodityInput, setCommodityInput] = useState('crude')
-  const [priceInput, setPriceInput] = useState('80.00')
-  const [volumeInput, setVolumeInput] = useState('1000')
-  const [submitting, setSubmitting] = useState(false)
-
-  const [amendBookInput, setAmendBookInput] = useState('CRUDE_PHYS')
-  const [amendCommodityInput, setAmendCommodityInput] = useState('')
-  const [amendPriceInput, setAmendPriceInput] = useState('')
-  const [amendVolumeInput, setAmendVolumeInput] = useState('')
-  const [amending, setAmending] = useState(false)
-  const [cancelling, setCancelling] = useState(false)
-
-  async function loadData() {
-    const [healthRes, tradesRes, eventsRes, positionsRes] = await Promise.all([
-      fetch(`${API_BASE}/health`),
-      fetch(`${API_BASE}/trades`),
-      fetch(`${API_BASE}/events?limit=50`),
-      fetch(`${API_BASE}/positions`),
-    ])
-
-    if (!healthRes.ok || !tradesRes.ok || !eventsRes.ok || !positionsRes.ok) {
-      throw new Error('API request failed')
-    }
-
-    const healthJson = await healthRes.json()
-    const tradesJson = await tradesRes.json()
-    const eventsJson = await eventsRes.json()
-    const positionsJson = await positionsRes.json()
-
-    setHealth(healthJson.status ?? 'unknown')
-    setTrades(tradesJson)
-    setEvents(eventsJson)
-    setPositions(positionsJson)
-
-    if (tradesJson.length > 0) {
-      setSelectedTradeId((current) => {
-        const stillExists = tradesJson.some((t: Trade) => t.trade_id === current)
-        return stillExists ? current : tradesJson[0].trade_id
-      })
-    }
-  }
-
-  useEffect(() => {
-    async function init() {
-      try {
-        await loadData()
-      } catch {
-        setError('Could not reach API. Make sure backend is running on localhost:8000 and CORS is enabled.')
-      }
-    }
-
-    init()
-  }, [])
-
-  const selectedTrade = useMemo(
-    () => trades.find((t) => t.trade_id === selectedTradeId) ?? null,
-    [trades, selectedTradeId],
+function AuthenticatedWorkspaceShell({
+  route,
+  shell,
+  appearance,
+  tradeCapturePreferences,
+  workspaceData,
+  startHereRouting,
+  showStartHereOverlay,
+  dismissStartHere,
+  onSignOut,
+  signOutPending,
+  signOutError,
+  isNavSectionOpen,
+  toggleNavSection,
+}: AuthenticatedWorkspaceShellProps) {
+  const { currentView, routeHandoff, selectedTradeId } = route
+  const authSession = workspaceData.authSession
+  const activePrimarySection = route.activeNavigationSectionKey
+    ? primaryNavigationSectionByKey(route.activeNavigationSectionKey)
+    : primaryNavigationSectionForView(currentView)
+  const filteredNavSections = useMemo(
+    () => filterPrimaryNavigationSections(shell.globalFilter),
+    [shell.globalFilter],
+  )
+  const hasGlobalFilter = shell.globalFilter.trim().length > 0
+  const filteredNavViewCount = filteredNavSections.reduce((count, section) => count + section.views.length, 0)
+  const routeHandoffBanner = useMemo(
+    () => describeAppRouteHandoff(routeHandoff, currentView),
+    [currentView, routeHandoff],
   )
 
-  useEffect(() => {
-    if (selectedTrade) {
-      setAmendBookInput(selectedTrade.book ?? 'CRUDE_PHYS')
-      setAmendCommodityInput(selectedTrade.commodity ?? '')
-      setAmendPriceInput(selectedTrade.price?.toString() ?? '')
-      setAmendVolumeInput(selectedTrade.volume?.toString() ?? '')
-    }
-  }, [selectedTrade])
+  const summary = useAppWorkspaceSummary({
+    authSession: workspaceData.authSession,
+    bootstrapSummary: workspaceData.workspaceBootstrapSummary,
+    trades: workspaceData.trades,
+    events: workspaceData.events,
+    positions: workspaceData.positions,
+    books: workspaceData.books,
+    commodities: workspaceData.commodities,
+    counterparties: workspaceData.counterparties,
+    currencies: workspaceData.currencies,
+    units: workspaceData.units,
+    locations: workspaceData.locations,
+    portfolios: workspaceData.portfolios,
+    selectedTradeId,
+    setSelectedTradeId: route.setSelectedTradeId,
+    eventFilter: shell.eventFilter,
+    commodityClassOrder,
+  })
 
-  const selectedTradeEvents = useMemo(
-    () =>
-      events.filter(
-        (e) => e.aggregate_type === 'trade' && e.aggregate_id === selectedTradeId,
-      ),
-    [events, selectedTradeId],
+  const captureForm = useTradeCaptureForm(
+    workspaceData.tradeMetadata,
+    summary.activeBooks,
+    summary.commodityClassOptions,
+    summary.activeCommodities,
+    tradeCapturePreferences.tradeCaptureSettings,
+    workspaceData.trades.map((trade) => trade.trade_id),
+    workspaceData.priceIndices,
+    summary.activeCounterparties,
+    summary.activePortfolios,
+    summary.activeUnits,
+    summary.activeCurrencies,
+    summary.activeLocations,
   )
 
-  async function handleCreateTrade(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
+  const amendForm = useTradeAmendForm(
+    summary.selectedTrade,
+    summary.selectedTradeEvents,
+    workspaceData.tradeMetadata,
+    summary.activeBooks,
+    summary.commodityClassOptions,
+    summary.activeCommodities,
+    workspaceData.priceIndices,
+    summary.activeCounterparties,
+    summary.activePortfolios,
+    summary.activeUnits,
+    summary.activeCurrencies,
+    summary.activeLocations,
+  )
 
-    const tradeId = tradeIdInput.trim()
-    const book = bookInput
-    const commodity = commodityInput.trim()
-    const price = Number(priceInput)
-    const volume = Number(volumeInput)
-
-    if (!tradeId || !book || !commodity || Number.isNaN(price) || Number.isNaN(volume)) {
-      setError('Trade ID, book, commodity, price, and volume are required.')
-      return
-    }
-
-    setSubmitting(true)
-
-    try {
-      const response = await fetch(`${API_BASE}/events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-correlation-id': crypto.randomUUID(),
-        },
-        body: JSON.stringify({
-          aggregate_type: 'trade',
-          aggregate_id: tradeId,
-          event_type: 'TradeCreated',
-          occurred_at: new Date().toISOString(),
-          actor_id: 'anthony',
-          payload: { book, commodity, price, volume },
-          schema_version: 1,
-        }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || 'Create trade failed')
-      }
-
-      await loadData()
-      setSelectedTradeId(tradeId)
-      setTradeIdInput('')
-      setBookInput('CRUDE_PHYS')
-      setCommodityInput('crude')
-      setPriceInput('80.00')
-      setVolumeInput('1000')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Create trade failed.')
-    } finally {
-      setSubmitting(false)
-    }
+  function navigateToTrade(tradeId: string, handoff: AppRouteHandoff | null = null) {
+    route.navigateToTrade(tradeId, handoff)
+    shell.setInspectorTab(handoff?.tradeInspectorTab ?? 'overview')
   }
 
-  async function handleAmendTrade(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
+  const tradeActions = useAppTradeActions({
+    captureForm,
+    amendForm,
+    counterpartyCreditProfiles: workspaceData.counterpartyCreditProfiles,
+    refreshMutationData: workspaceData.refreshMutationData,
+    selectedTrade: summary.selectedTrade,
+    selectedTradeEvents: summary.selectedTradeEvents,
+    selectedTradeId,
+    setError: workspaceData.setError,
+    setInspectorTab: shell.setInspectorTab,
+    trades: workspaceData.trades,
+    navigateToTrade,
+    navigateToView: route.navigateToView,
+    findCounterpartyCreditRestriction: summary.findCounterpartyCreditRestriction,
+  })
 
-    if (!selectedTradeId) {
-      setError('Select a trade first.')
-      return
-    }
+  const referenceState = useReferenceDataController({
+    apiBase: appConfig.apiBase,
+    reloadData: workspaceData.loadData,
+    trades: workspaceData.trades,
+    books: workspaceData.books,
+    commodities: workspaceData.commodities,
+    priceIndices: workspaceData.priceIndices,
+    currencies: workspaceData.currencies,
+    units: workspaceData.units,
+    locations: workspaceData.locations,
+    counterparties: workspaceData.counterparties,
+    counterpartyCreditProfiles: workspaceData.counterpartyCreditProfiles,
+    counterpartyExternalCreditSnapshots: workspaceData.counterpartyExternalCreditSnapshots,
+    counterpartyCreditReport: workspaceData.counterpartyCreditReport,
+    portfolios: workspaceData.portfolios,
+    activeBooks: summary.activeBooks,
+    activeCommodities: summary.activeCommodities,
+    activeCurrencies: summary.activeCurrencies,
+    activeUnits: summary.activeUnits,
+    activeLocations: summary.activeLocations,
+    locationStandards: workspaceData.locationStandards,
+    counterpartyStandards: workspaceData.counterpartyStandards,
+    commodityClassOrder,
+    externalReferenceSearch: shell.globalFilter,
+  })
 
-    const book = amendBookInput
-    const commodity = amendCommodityInput.trim()
-    const price = Number(amendPriceInput)
-    const volume = Number(amendVolumeInput)
+  const {
+    blockingWorkspaceError,
+    workspaceLoading,
+    workspaceWarning,
+    systemStateLabel,
+    systemStateTone,
+  } = deriveWorkspaceStatus({
+    appLoading: workspaceData.appLoading,
+    currentView,
+    error: workspaceData.error,
+    groupErrors: workspaceData.groupErrors,
+    groupLoaded: workspaceData.groupLoaded,
+    groupLoading: workspaceData.groupLoading,
+  })
 
-    if (!book || !commodity || Number.isNaN(price) || Number.isNaN(volume)) {
-      setError('Book, commodity, price, and volume are required.')
-      return
-    }
-
-    setAmending(true)
-
-    try {
-      const response = await fetch(`${API_BASE}/events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-correlation-id': crypto.randomUUID(),
-        },
-        body: JSON.stringify({
-          aggregate_type: 'trade',
-          aggregate_id: selectedTradeId,
-          event_type: 'TradeAmended',
-          occurred_at: new Date().toISOString(),
-          actor_id: 'anthony',
-          payload: { book, commodity, price, volume },
-          schema_version: 1,
-        }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || 'Amend trade failed')
-      }
-
-      await loadData()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Amend trade failed.')
-    } finally {
-      setAmending(false)
-    }
-  }
-
-  async function handleCancelTrade() {
-    setError('')
-
-    if (!selectedTradeId) {
-      setError('Select a trade first.')
-      return
-    }
-
-    setCancelling(true)
-
-    try {
-      const response = await fetch(`${API_BASE}/events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-correlation-id': crypto.randomUUID(),
-        },
-        body: JSON.stringify({
-          aggregate_type: 'trade',
-          aggregate_id: selectedTradeId,
-          event_type: 'TradeCancelled',
-          occurred_at: new Date().toISOString(),
-          actor_id: 'anthony',
-          payload: { status: 'CANCELLED' },
-          schema_version: 1,
-        }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || 'Cancel trade failed')
-      }
-
-      await loadData()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Cancel trade failed.')
-    } finally {
-      setCancelling(false)
-    }
-  }
+  const showingNavigationSectionLanding = route.activeNavigationSectionKey !== null
+  const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[currentView]
+  const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[currentView]
+  const hasAuthenticationIssue =
+    isAuthenticationRequiredMessage(workspaceData.error) ||
+    Object.values(workspaceData.groupErrors).some((message) => isAuthenticationRequiredMessage(message))
+  const effectiveSystemStateLabel = !authSession && hasAuthenticationIssue ? 'Needs sign-in' : systemStateLabel
+  const effectiveSystemStateTone = !authSession && hasAuthenticationIssue ? 'active' : systemStateTone
+  const selectedTrade = summary.selectedTrade
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <aside style={{ width: 260, background: '#fff', borderRight: '1px solid #e2e8f0', padding: 24 }}>
-          <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.18em', color: '#64748b', fontWeight: 700 }}>
-            E/CTRM
-          </div>
-          <div style={{ marginTop: 10, fontSize: 28, fontWeight: 700 }}>Control Center</div>
-          <p style={{ marginTop: 10, color: '#475569', lineHeight: 1.5 }}>
-            Event-sourced trading system with live backend connectivity.
-          </p>
-        </aside>
+    <div className="app-shell">
+      <div className="app-aura app-aura-left" />
+      <div className="app-aura app-aura-right" />
 
-        <main style={{ flex: 1, padding: 32 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div className="mobile-topbar">
+        <div>
+          <span className="brand-mark">E/CTRM</span>
+        </div>
+        <div className="mobile-topbar-actions">
+          <button
+            type="button"
+            className="appearance-toggle appearance-toggle-mobile"
+            aria-label={appearance.themeToggleActionLabel}
+            aria-pressed={appearance.resolvedColorMode === 'dark'}
+            title={appearance.themeToggleActionLabel}
+            onClick={appearance.handleToggleColorMode}
+          >
+            <span className="appearance-toggle-copy">
+              <small>Theme</small>
+              <strong>{appearance.themeToggleLabel}</strong>
+            </span>
+            <span
+              className={`appearance-toggle-track appearance-toggle-track-${appearance.resolvedColorMode}`}
+              aria-hidden="true"
+            >
+              <span className="appearance-toggle-thumb" />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="button button-ghost mobile-nav-button"
+            aria-controls={MOBILE_NAVIGATION_PANEL_ID}
+            aria-expanded={shell.mobileNavOpen}
+            aria-label={shell.mobileNavToggleActionLabel}
+            onClick={() => shell.setMobileNavOpen((current) => !current)}
+          >
+            {shell.mobileNavOpen ? 'Close' : 'Menu'}
+          </button>
+        </div>
+      </div>
+
+      <aside
+        id={MOBILE_NAVIGATION_PANEL_ID}
+        className={`side-rail ${shell.mobileNavOpen ? 'is-open' : ''}`}
+        hidden={shell.mobileNavHidden}
+        aria-hidden={shell.mobileNavHidden ? true : undefined}
+      >
+        <div className="brand-lockup">
+          <span className="brand-mark">E/CTRM</span>
+          <h1>Operator Console</h1>
+          <p>A trading operations cockpit for ticket entry, lifecycle management, and live projection views.</p>
+        </div>
+
+        <button
+          type="button"
+          className="appearance-toggle appearance-toggle-desktop"
+          aria-label={appearance.themeToggleActionLabel}
+          aria-pressed={appearance.resolvedColorMode === 'dark'}
+          title={appearance.themeToggleActionLabel}
+          onClick={appearance.handleToggleColorMode}
+        >
+          <span className="appearance-toggle-copy">
+            <small>Theme</small>
+            <strong>{appearance.themeToggleLabel}</strong>
+          </span>
+          <span
+            className={`appearance-toggle-track appearance-toggle-track-${appearance.resolvedColorMode}`}
+            aria-hidden="true"
+          >
+            <span className="appearance-toggle-thumb" />
+          </span>
+        </button>
+
+        <section className="surface workspace-local-filter nav-global-filter">
+          <div className="workspace-local-filter-copy">
             <div>
-              <div style={{ color: '#64748b', fontSize: 14 }}>Live local environment</div>
-              <h1 style={{ margin: '6px 0 0 0', fontSize: 34 }}>Trading Overview</h1>
+              <span className="eyebrow">Search</span>
+              <h3>Global Workspace Filter</h3>
             </div>
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '10px 14px' }}>
-              API health: <strong>{health}</strong>
-            </div>
+            <p>Narrow the left nav and the current workspace with one shared text filter.</p>
           </div>
 
-          {error ? (
-            <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', color: '#9f1239', padding: 16, borderRadius: 16, marginBottom: 24 }}>
-              {error}
-            </div>
-          ) : null}
+          <div className="workspace-local-filter-controls">
+            <label className="field workspace-local-filter-field">
+              <span>Search all workspaces</span>
+              <input
+                className="control"
+                type="search"
+                value={shell.globalFilter}
+                onChange={(event) => shell.setGlobalFilter(event.target.value)}
+                placeholder="Workspace, trade, delivery, counterparty, book, or provider"
+              />
+            </label>
 
-          <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20, marginBottom: 24 }}>
-            <h2 style={{ marginTop: 0 }}>Create Trade</h2>
-            <form onSubmit={handleCreateTrade} style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr)) auto', gap: 12, marginTop: 16, alignItems: 'end' }}>
-              <Field label="Trade ID">
-                <input value={tradeIdInput} onChange={(e) => setTradeIdInput(e.target.value)} placeholder="T-0004" style={inputStyle} />
-              </Field>
-              <Field label="Book">
-                <select value={bookInput} onChange={(e) => setBookInput(e.target.value)} style={inputStyle}>
-                  {BOOK_OPTIONS.map((book) => (
-                    <option key={book} value={book}>{book}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Commodity">
-                <input value={commodityInput} onChange={(e) => setCommodityInput(e.target.value)} style={inputStyle} />
-              </Field>
-              <Field label="Price">
-                <input value={priceInput} onChange={(e) => setPriceInput(e.target.value)} style={inputStyle} />
-              </Field>
-              <Field label="Volume">
-                <input value={volumeInput} onChange={(e) => setVolumeInput(e.target.value)} style={inputStyle} />
-              </Field>
-              <button type="submit" disabled={submitting} style={buttonStyle}>
-                {submitting ? 'Creating...' : 'Create Trade'}
-              </button>
-            </form>
-          </section>
-
-          <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20, marginBottom: 24 }}>
-            <h2 style={{ marginTop: 0 }}>Positions</h2>
-            <p style={{ color: '#64748b', marginTop: 4 }}>Active net volume by commodity</p>
-
-            <div style={{ overflow: 'hidden', borderRadius: 18, border: '1px solid #e2e8f0', marginTop: 16 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f8fafc' }}>
-                  <tr>
-                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Commodity</th>
-                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Net Volume</th>
-                    <th style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {positions.map((p) => (
-                    <tr key={p.commodity} style={{ borderTop: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: 14, fontWeight: 600 }}>{p.commodity}</td>
-                      <td style={{ padding: 14 }}>{p.net_volume}</td>
-                      <td style={{ padding: 14 }}>{p.updated_at}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 }}>
-            <section style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-              <h2 style={{ marginTop: 0 }}>Trades</h2>
-              <div style={{ overflow: 'hidden', borderRadius: 18, border: '1px solid #e2e8f0', marginTop: 16 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead style={{ background: '#f8fafc' }}>
-                    <tr>
-                      {['Trade ID', 'Book', 'Commodity', 'Price', 'Volume', 'Status'].map((h) => (
-                        <th key={h} style={{ textAlign: 'left', padding: 14, fontSize: 14, color: '#475569' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trades.map((trade) => {
-                      const selected = trade.trade_id === selectedTradeId
-                      const cancelled = trade.status === 'CANCELLED'
-                      return (
-                        <tr
-                          key={trade.trade_id}
-                          onClick={() => setSelectedTradeId(trade.trade_id)}
-                          style={{
-                            borderTop: '1px solid #e2e8f0',
-                            cursor: 'pointer',
-                            background: selected ? '#eff6ff' : '#fff',
-                            opacity: cancelled ? 0.65 : 1,
-                          }}
-                        >
-                          <td style={{ padding: 14, fontWeight: 600 }}>{trade.trade_id}</td>
-                          <td style={{ padding: 14 }}>{trade.book}</td>
-                          <td style={{ padding: 14 }}>{trade.commodity}</td>
-                          <td style={{ padding: 14 }}>{trade.price ?? ''}</td>
-                          <td style={{ padding: 14 }}>{trade.volume ?? ''}</td>
-                          <td style={{ padding: 14 }}>
-                            <span
-                              style={{
-                                background: cancelled ? '#fef2f2' : '#ecfdf5',
-                                color: cancelled ? '#b91c1c' : '#047857',
-                                padding: '4px 10px',
-                                borderRadius: 999,
-                                fontSize: 12,
-                                fontWeight: 700,
-                              }}
-                            >
-                              {trade.status}
-                            </span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section style={{ display: 'grid', gap: 24 }}>
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Trade Details</h2>
-                {selectedTrade ? (
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    <DetailRow label="Trade ID" value={selectedTrade.trade_id} />
-                    <DetailRow label="Book" value={selectedTrade.book} />
-                    <DetailRow label="Commodity" value={selectedTrade.commodity} />
-                    <DetailRow label="Price" value={selectedTrade.price ?? ''} />
-                    <DetailRow label="Volume" value={selectedTrade.volume ?? ''} />
-                    <DetailRow label="Status" value={selectedTrade.status} />
-                  </div>
-                ) : (
-                  <div style={{ color: '#64748b' }}>Select a trade.</div>
-                )}
-              </div>
-
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Amend Trade</h2>
-                <form onSubmit={handleAmendTrade} style={{ display: 'grid', gap: 12, marginTop: 16 }}>
-                  <Field label="Book">
-                    <select value={amendBookInput} onChange={(e) => setAmendBookInput(e.target.value)} style={inputStyle}>
-                      {BOOK_OPTIONS.map((book) => (
-                        <option key={book} value={book}>{book}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Commodity">
-                    <input value={amendCommodityInput} onChange={(e) => setAmendCommodityInput(e.target.value)} style={inputStyle} />
-                  </Field>
-                  <Field label="Price">
-                    <input value={amendPriceInput} onChange={(e) => setAmendPriceInput(e.target.value)} style={inputStyle} />
-                  </Field>
-                  <Field label="Volume">
-                    <input value={amendVolumeInput} onChange={(e) => setAmendVolumeInput(e.target.value)} style={inputStyle} />
-                  </Field>
-                  <button type="submit" disabled={amending || !selectedTradeId} style={buttonStyle}>
-                    {amending ? 'Amending...' : 'Amend Trade'}
-                  </button>
-                </form>
-              </div>
-
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Cancel Trade</h2>
-                <button
-                  type="button"
-                  onClick={handleCancelTrade}
-                  disabled={cancelling || !selectedTradeId || selectedTrade?.status === 'CANCELLED'}
-                  style={{
-                    ...buttonStyle,
-                    background: selectedTrade?.status === 'CANCELLED' ? '#94a3b8' : '#991b1b',
-                    width: '100%',
-                  }}
-                >
-                  {selectedTrade?.status === 'CANCELLED'
-                    ? 'Trade Already Cancelled'
-                    : cancelling
-                    ? 'Cancelling...'
-                    : 'Cancel Trade'}
+            <div className="workspace-local-filter-actions">
+              <span className="entity-chip entity-chip-soft">
+                {hasGlobalFilter
+                  ? `${filteredNavViewCount.toLocaleString()} of ${APP_VIEWS.length.toLocaleString()} workspaces match`
+                  : `Search across ${APP_VIEWS.length.toLocaleString()} workspaces and the current screen`}
+              </span>
+              {hasGlobalFilter ? (
+                <button type="button" className="button button-ghost" onClick={() => shell.setGlobalFilter('')}>
+                  Clear Global
                 </button>
-              </div>
+              ) : null}
+            </div>
+          </div>
+        </section>
 
-              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 24, padding: 20 }}>
-                <h2 style={{ marginTop: 0 }}>Event Timeline</h2>
-                <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
-                  {selectedTradeEvents.map((event) => (
-                    <div key={event.event_id} style={{ border: '1px solid #e2e8f0', borderRadius: 18, padding: 14 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <strong>{event.event_type}</strong>
-                        <span style={{ color: '#64748b', fontSize: 12 }}>{event.recorded_at}</span>
-                      </div>
-                      <pre
-                        style={{
-                          marginTop: 10,
-                          background: '#f8fafc',
-                          padding: 12,
-                          borderRadius: 12,
-                          overflowX: 'auto',
-                          fontSize: 12,
-                          color: '#334155',
-                        }}
-                      >
-                        {JSON.stringify(event.payload, null, 2)}
-                      </pre>
+        <nav className="nav-stack" aria-label="Primary">
+          {filteredNavSections.map((section) => {
+            const expanded = hasGlobalFilter || isNavSectionOpen(section.key)
+            const containsCurrentView =
+              route.activeNavigationSectionKey === section.key ||
+              (route.activeNavigationSectionKey === null && section.views.some((view) => view.key === route.currentView))
+
+            return (
+              <section key={section.key} className="nav-section">
+                <div className="nav-section-header">
+                  <button
+                    type="button"
+                    className={`nav-item nav-section-toggle ${containsCurrentView ? 'is-active' : ''}`}
+                    aria-expanded={expanded}
+                    aria-controls={`nav-section-${section.key}`}
+                    onClick={() => {
+                      toggleNavSection(section.key)
+                      route.navigateToSection(section.key)
+                      shell.setMobileNavOpen(false)
+                    }}
+                  >
+                    <div className="nav-section-copy">
+                      <span>{section.kicker}</span>
+                      <strong>{section.label}</strong>
                     </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`nav-item nav-section-toggle-button ${expanded ? 'is-active' : ''}`}
+                    aria-expanded={expanded}
+                    aria-controls={`nav-section-${section.key}`}
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${section.label} section`}
+                    disabled={hasGlobalFilter}
+                    onClick={() => {
+                      if (hasGlobalFilter) {
+                        return
+                      }
+                      toggleNavSection(section.key)
+                    }}
+                  >
+                    <span className="nav-section-indicator" aria-hidden="true">
+                      {expanded ? '-' : '+'}
+                    </span>
+                  </button>
+                </div>
+
+                <div id={`nav-section-${section.key}`} className="nav-section-children" hidden={!expanded}>
+                  {section.views.map((view) => (
+                    <a
+                      key={view.key}
+                      href={route.hrefForView(view.key)}
+                      className={`nav-item nav-item-nested ${
+                        route.activeNavigationSectionKey === null && route.currentView === view.key ? 'is-active' : ''
+                      }`}
+                      aria-current={
+                        route.activeNavigationSectionKey === null && route.currentView === view.key ? 'page' : undefined
+                      }
+                      onClick={(event) => {
+                        if (route.handleViewLinkClick(event, view.key)) {
+                          shell.setMobileNavOpen(false)
+                        }
+                      }}
+                    >
+                      <span>{view.kicker}</span>
+                      <strong>{view.label}</strong>
+                    </a>
                   ))}
                 </div>
-              </div>
-            </section>
+              </section>
+            )
+          })}
+        </nav>
+
+        {hasGlobalFilter && filteredNavSections.length === 0 ? (
+          <section className="surface empty-state nav-global-filter-empty">
+            <strong>No workspaces match the current global filter</strong>
+            <p>The current screen stays open, but the nav will stay empty until the filter changes.</p>
+          </section>
+        ) : null}
+      </aside>
+
+      <main className="main-stage">
+        {showStartHereOverlay ? (
+          <AppStartHereOverlay
+            authSession={authSession}
+            onDismiss={dismissStartHere}
+            onOpenView={startHereRouting.handleStartHereOpenView}
+          />
+        ) : null}
+
+        <header className="hero">
+          <div className="hero-copy">
+            <div className="hero-heading-row">
+              <span className="eyebrow">Workspace</span>
+              <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
+                {effectiveSystemStateLabel}
+              </span>
+            </div>
+            <h2>{heroTitle}</h2>
+            <p>{heroBody}</p>
           </div>
-        </main>
+
+          <div className="hero-badge">
+            <span>Focus</span>
+            <strong>
+              {showingNavigationSectionLanding
+                ? activePrimarySection.label
+                : selectedTrade
+                ? selectedTrade.trade_id
+                : APP_VIEWS.find((view) => view.key === route.currentView)?.label}
+            </strong>
+            <small>
+              {showingNavigationSectionLanding
+                ? `${activePrimarySection.views.length} workspace${activePrimarySection.views.length === 1 ? '' : 's'} grouped in this section`
+                : selectedTrade
+                ? `${selectedTrade.commodity} • ${selectedTrade.book}`
+                : `${workspaceData.events.length} loaded events across the current session`}
+            </small>
+            {authSession ? (
+              <div className="hero-badge-actions">
+                <small className="hero-badge-session">
+                  Signed in as {authSession.user.display_name}
+                </small>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void onSignOut()}
+                  disabled={signOutPending}
+                >
+                  {signOutPending ? 'Signing Out...' : 'Sign Out'}
+                </button>
+                {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
+              </div>
+            ) : null}
+          </div>
+        </header>
+
+        {!showingNavigationSectionLanding && workspaceData.error ? (
+          <div className="error-banner">{workspaceData.error}</div>
+        ) : null}
+        {!showingNavigationSectionLanding && workspaceWarning ? (
+          <div className="error-banner">{workspaceData.groupErrors[workspaceWarning]}</div>
+        ) : null}
+        {!showingNavigationSectionLanding && routeHandoffBanner ? (
+          <section className="feedback-banner workspace-handoff-banner" aria-live="polite">
+            <div className="workspace-handoff-banner-copy">
+              <strong>{routeHandoffBanner.title}</strong>
+              <p>{routeHandoffBanner.detail}</p>
+            </div>
+          </section>
+        ) : null}
+
+        {showingNavigationSectionLanding ? (
+          <Suspense
+            fallback={
+              <WorkspaceLoadState
+                title={`Preparing ${activePrimarySection.label}`}
+                detail="Loading the section overview."
+              />
+            }
+          >
+            <AppWorkspaceContent
+              activeDocumentationDocumentKey={route.activeDocumentationDocumentKey}
+              activeNavigationSectionKey={route.activeNavigationSectionKey}
+              captureForm={captureForm}
+              amendForm={amendForm}
+              appearance={appearance}
+              tradeCapturePreferences={tradeCapturePreferences}
+              currentView={route.currentView}
+              handleDocumentationDocumentChange={route.handleDocumentationDocumentChange}
+              handleRoadmapPublished={shell.handleRoadmapPublished}
+              hrefForView={route.hrefForView}
+              navigateToTrade={navigateToTrade}
+              navigateToView={route.navigateToView}
+              routeHandoff={route.routeHandoff}
+              referenceState={referenceState}
+              roadmapRefreshVersion={shell.roadmapRefreshVersion}
+              selectedTradeId={route.selectedTradeId}
+              setInspectorTab={shell.setInspectorTab}
+              setSelectedTradeId={route.setSelectedTradeId}
+              shell={shell}
+              summary={summary}
+              tradeActions={tradeActions}
+              workspaceData={workspaceData}
+            />
+          </Suspense>
+        ) : blockingWorkspaceError && !workspaceLoading ? (
+          <WorkspaceErrorState
+            title={`${workspaceLabel(route.currentView)} needs attention`}
+            message={workspaceData.groupErrors[blockingWorkspaceError]}
+            onRetry={() => {
+              void workspaceData.loadData({
+                groups: VIEW_DATA_GROUPS[route.currentView],
+                force: true,
+              })
+            }}
+          />
+        ) : workspaceLoading ? (
+          <WorkspaceLoadState
+            title={`Loading ${workspaceLabel(route.currentView)}`}
+            detail="Pulling the workspace-specific datasets needed for this screen."
+          />
+        ) : (
+          <Suspense
+            fallback={
+              <WorkspaceLoadState
+                title={`Preparing ${workspaceLabel(route.currentView)}`}
+                detail="Loading the workspace bundle."
+              />
+            }
+          >
+            <AppWorkspaceContent
+              activeDocumentationDocumentKey={route.activeDocumentationDocumentKey}
+              activeNavigationSectionKey={route.activeNavigationSectionKey}
+              captureForm={captureForm}
+              amendForm={amendForm}
+              appearance={appearance}
+              tradeCapturePreferences={tradeCapturePreferences}
+              currentView={route.currentView}
+              handleDocumentationDocumentChange={route.handleDocumentationDocumentChange}
+              handleRoadmapPublished={shell.handleRoadmapPublished}
+              hrefForView={route.hrefForView}
+              navigateToTrade={navigateToTrade}
+              navigateToView={route.navigateToView}
+              routeHandoff={route.routeHandoff}
+              referenceState={referenceState}
+              roadmapRefreshVersion={shell.roadmapRefreshVersion}
+              selectedTradeId={route.selectedTradeId}
+              setInspectorTab={shell.setInspectorTab}
+              setSelectedTradeId={route.setSelectedTradeId}
+              shell={shell}
+              summary={summary}
+              tradeActions={tradeActions}
+              workspaceData={workspaceData}
+            />
+          </Suspense>
+        )}
+      </main>
+    </div>
+  )
+}
+
+export default function App() {
+  const route = useAppRouteState()
+  const [initialAuthInterruptionResume] = useState<AuthInterruptionResumeSnapshot | null>(() =>
+    getAuthInterruptionResumeSnapshot(),
+  )
+  const [openNavSectionKeys, setOpenNavSectionKeys] = useState<PrimaryNavigationSectionKey[]>(() => [
+    route.activeNavigationSectionKey ?? primaryNavigationSectionForView(route.currentView).key,
+  ])
+  const shell = useAppShellState(
+    route.currentView,
+    route.currentView === 'trades' ? initialAuthInterruptionResume?.inspectorTab ?? null : null,
+  )
+  const appearance = useAppAppearance()
+  const tradeCapturePreferences = useAppTradeCaptureSettings()
+  const workspaceData = useAppWorkspaceData(route.currentView)
+  const startHere = useAppStartHere(workspaceData.authSession)
+  const {
+    activeNavigationSectionKey,
+    currentView,
+    replaceView,
+    routeHandoff,
+    selectedTradeId,
+    setSelectedTradeId,
+  } = route
+  const dismissStartHere = startHere.dismissStartHere
+  const { inspectorTab, setGlobalFilter, setInspectorTab } = shell
+  const activeRouteHandoffFilterRef = useRef<string | null>(null)
+  const appliedRouteHandoffKeyRef = useRef<string | null>(null)
+  const routeHandoffKey = getAppRouteHandoffKey(routeHandoff)
+
+  function toggleNavSection(sectionKey: PrimaryNavigationSectionKey) {
+    setOpenNavSectionKeys((current) =>
+      current.includes(sectionKey)
+        ? current.filter((key) => key !== sectionKey)
+        : [...current, sectionKey],
+    )
+  }
+
+  function isNavSectionOpen(sectionKey: PrimaryNavigationSectionKey) {
+    return openNavSectionKeys.includes(sectionKey)
+  }
+
+  const activePrimarySection = activeNavigationSectionKey
+    ? primaryNavigationSectionByKey(activeNavigationSectionKey)
+    : primaryNavigationSectionForView(currentView)
+
+  useEffect(() => {
+    const nextHandoffFilter =
+      routeHandoff && (currentView === 'operations' || currentView === 'settlement')
+        ? routeHandoff.tradeId
+        : null
+
+    if (routeHandoffKey === null) {
+      const previousHandoffFilter = activeRouteHandoffFilterRef.current
+      if (previousHandoffFilter !== null) {
+        setGlobalFilter((current) => (current === previousHandoffFilter ? '' : current))
+        activeRouteHandoffFilterRef.current = null
+      }
+      appliedRouteHandoffKeyRef.current = null
+      return
+    }
+
+    if (appliedRouteHandoffKeyRef.current === routeHandoffKey) {
+      return
+    }
+
+    const previousHandoffFilter = activeRouteHandoffFilterRef.current
+    if (previousHandoffFilter !== null && previousHandoffFilter !== nextHandoffFilter) {
+      setGlobalFilter((current) => (current === previousHandoffFilter ? '' : current))
+    }
+
+    if (nextHandoffFilter) {
+      setGlobalFilter((current) => (current === nextHandoffFilter ? current : nextHandoffFilter))
+    }
+    activeRouteHandoffFilterRef.current = nextHandoffFilter
+
+    if (currentView === 'trades' && routeHandoff?.tradeId && selectedTradeId !== routeHandoff.tradeId) {
+      setSelectedTradeId(routeHandoff.tradeId)
+    }
+
+    if (
+      currentView === 'trades' &&
+      routeHandoff?.tradeInspectorTab &&
+      inspectorTab !== routeHandoff.tradeInspectorTab
+    ) {
+      setInspectorTab(routeHandoff.tradeInspectorTab)
+    }
+
+    appliedRouteHandoffKeyRef.current = routeHandoffKey
+  }, [
+    currentView,
+    inspectorTab,
+    routeHandoff,
+    routeHandoffKey,
+    selectedTradeId,
+    setInspectorTab,
+    setSelectedTradeId,
+    setGlobalFilter,
+  ])
+
+  const [signOutPending, setSignOutPending] = useState(false)
+  const [signOutError, setSignOutError] = useState('')
+
+  async function handleSignOut() {
+    setSignOutPending(true)
+    setSignOutError('')
+    authInterruption.clearAuthInterruptionResume()
+
+    try {
+      await logoutCurrentSession(appConfig.apiBase)
+    } catch {
+      // Clear the browser session even if the server-side session is already gone.
+    } finally {
+      try {
+        await workspaceData.handleSessionChange(null)
+      } catch (error) {
+        setSignOutError(
+          error instanceof Error
+            ? error.message
+            : 'Signed out locally, but the workspace could not be refreshed.',
+        )
+      } finally {
+        setSignOutPending(false)
+      }
+    }
+  }
+
+  const authSession = workspaceData.authSession
+  const selectedTradeRecordId =
+    workspaceData.trades.find((trade) => trade.trade_id === selectedTradeId)?.trade_id ?? null
+  const showingNavigationSectionLanding = activeNavigationSectionKey !== null
+  const authInterruption = useAuthInterruptionFlow({
+    initialSnapshot: initialAuthInterruptionResume,
+    authSessionId: authSession?.sessionId ?? null,
+    authInterruptionReason: workspaceData.authInterruptionReason,
+    currentView,
+    selectedTradeId,
+    selectedTradeRecordId,
+    inspectorTab,
+    setInspectorTab,
+    activeNavigationSectionLabel: showingNavigationSectionLanding ? activePrimarySection.label : null,
+  })
+  const startHereRouting = useStartHereRouting({
+    authSessionId: authSession?.sessionId ?? null,
+    authInterruptionActive: authInterruption.authInterruptionResume !== null,
+    currentView,
+    dismissStartHere,
+    navigateToView: route.navigateToView,
+    replaceView,
+  })
+
+  const showStartHereOverlay =
+    startHere.showStartHere &&
+    !(authSession && startHereRouting.startHereReturnIntent) &&
+    workspaceData.authInterruptionReason !== 'session_expired' &&
+    authInterruption.authInterruptionResume === null
+  const signedOutNeedsAuthGate = !authSession && currentView !== 'guide'
+
+  if (signedOutNeedsAuthGate) {
+    return (
+      <div className="app-shell auth-gate-shell">
+        <div className="app-aura app-aura-left" />
+        <div className="app-aura app-aura-right" />
+        <AuthGate
+          authInterruptionMessage={authInterruption.authInterruptionMessage}
+          onSessionChange={workspaceData.handleSessionChange}
+          pendingStartHereReturnLabel={startHereRouting.pendingStartHereReturnLabel}
+        />
+        {showStartHereOverlay ? (
+          <AppStartHereOverlay
+            authSession={authSession}
+            onDismiss={dismissStartHere}
+            onOpenView={startHereRouting.handleStartHereOpenView}
+          />
+        ) : null}
       </div>
-    </div>
-  )
-}
+    )
+  }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'grid', gap: 6 }}>
-      <span style={{ fontSize: 14, color: '#475569', fontWeight: 500 }}>{label}</span>
-      {children}
-    </label>
+    <AuthenticatedWorkspaceShell
+      route={route}
+      shell={shell}
+      appearance={appearance}
+      tradeCapturePreferences={tradeCapturePreferences}
+      workspaceData={workspaceData}
+      startHereRouting={startHereRouting}
+      showStartHereOverlay={showStartHereOverlay}
+      dismissStartHere={dismissStartHere}
+      onSignOut={handleSignOut}
+      signOutPending={signOutPending}
+      signOutError={signOutError}
+      isNavSectionOpen={isNavSectionOpen}
+      toggleNavSection={toggleNavSection}
+    />
   )
-}
-
-function DetailRow({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 12, paddingBottom: 10, borderBottom: '1px solid #e2e8f0' }}>
-      <div style={{ color: '#64748b', fontSize: 14 }}>{label}</div>
-      <div style={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{String(value)}</div>
-    </div>
-  )
-}
-
-const inputStyle: React.CSSProperties = {
-  height: 42,
-  borderRadius: 14,
-  border: '1px solid #cbd5e1',
-  padding: '0 12px',
-  fontSize: 14,
-  outline: 'none',
-  background: '#fff',
-}
-
-const buttonStyle: React.CSSProperties = {
-  height: 42,
-  borderRadius: 14,
-  border: 'none',
-  background: '#0f172a',
-  color: '#fff',
-  padding: '0 18px',
-  fontWeight: 600,
-  cursor: 'pointer',
 }

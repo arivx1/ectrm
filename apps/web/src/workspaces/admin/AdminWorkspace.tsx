@@ -1,0 +1,1671 @@
+import { useMemo, useState } from 'react'
+import type {
+  CounterpartyCreditPreviewRecord,
+  ExternalDataSyncStatusRecord,
+  WeatherLocationRecord,
+  WeatherSyncStatusRecord,
+} from '../../shared/models'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
+import { formatDateOnly } from '../../shared/format'
+import { tradeStatusIsActive } from '../../shared/trading'
+import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
+import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
+import { type StoredAuthSession } from '../../shared/mutation'
+import { AgentManagementPanel } from './AgentManagementPanel'
+import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
+import { RoadmapAdminPanel } from './RoadmapAdminPanel'
+import { UserManagementPanel } from './UserManagementPanel'
+import { WeatherOperationsPanel } from './WeatherOperationsPanel'
+import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
+
+type Trade = {
+  trade_id: string
+  updated_at: string
+  commodity_class: string
+  commodity: string
+  price: number | null
+  book: string
+  status: string
+}
+
+type EventRow = {
+  aggregate_id: string
+  event_id: string
+  event_type: string
+  occurred_at: string
+  recorded_at: string
+  schema_version: number
+}
+
+type PositionRow = {
+  commodity: string
+  net_volume: number
+  updated_at: string
+}
+
+type ReferenceRecord = {
+  code: string
+  is_active: boolean
+}
+
+type PriceIndexRecord = ReferenceRecord
+
+type ExternalDataRunRecord = {
+  id: number
+  provider: string
+  job_name: string
+  status: string
+  started_at: string
+  finished_at?: string | null
+  requested_by?: string | null
+  series_count: number
+  observation_count: number
+  error_summary?: string | null
+}
+
+type TradingSourceRecord = {
+  source_id: string
+  source_name: string
+  source_category: string
+  business_owner: string
+  system_owner: string
+  criticality: string
+  status: string
+  update_frequency: string
+  last_reviewed_at: string
+}
+
+type ExternalDataProviderStatusRecord = ExternalDataSyncStatusRecord['providers'][number]
+type CounterpartyCreditPreviewRow = CounterpartyCreditPreviewRecord['rows'][number]
+type ExternalDataSyncProvider = 'EIA' | 'EIA_FUNDAMENTALS' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT' | 'KALSHI'
+
+type SchemaEntityKey =
+  | 'events'
+  | 'trades'
+  | 'positions'
+  | 'reference_books'
+  | 'reference_commodities'
+  | 'reference_price_indices'
+
+type AdminWorkspaceProps = {
+  authSession: StoredAuthSession | null
+  globalFilter: string
+  onOpenSettings: () => void
+  onRoadmapPublished: () => void
+  selectedTrade: Trade | null
+  selectedTradeEvents: EventRow[]
+  events: EventRow[]
+  trades: Trade[]
+  positions: PositionRow[]
+  activeBooks: ReferenceRecord[]
+  activeCommodities: ReferenceRecord[]
+  priceIndices: PriceIndexRecord[]
+  externalDataRuns: ExternalDataRunRecord[]
+  externalDataSyncStatus: ExternalDataSyncStatusRecord | null
+  tradingSources: TradingSourceRecord[]
+  weatherLocations: WeatherLocationRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
+  externalDataSyncing: boolean
+  externalDataSyncingProvider: string | null
+  externalDataError: string
+  externalDataSuccess: string
+  counterpartyCreditImportDraft: string
+  counterpartyCreditPreview: CounterpartyCreditPreviewRecord | null
+  counterpartyCreditPreviewing: boolean
+  counterpartyCreditPreviewError: string
+  counterpartyCreditPreviewSuccess: string
+  counterpartyCreditImporting: boolean
+  counterpartyCreditImportError: string
+  counterpartyCreditImportSuccess: string
+  tradingSourcesSyncing: boolean
+  tradingSourcesError: string
+  tradingSourcesSuccess: string
+  weatherSyncing: boolean
+  weatherSyncError: string
+  weatherSyncSuccess: string
+  weatherLocationMutationError: string
+  weatherLocationMutationPendingCode: string | null
+  weatherLocationMutationSuccess: string
+  onRunExternalDataSync: (provider: ExternalDataSyncProvider) => Promise<void>
+  onCounterpartyCreditImportDraftChange: (value: string) => void
+  onPreviewCounterpartyCreditImport: () => Promise<void>
+  onImportCounterpartyCreditSnapshots: () => Promise<void>
+  onCreateWeatherLocation: (
+    input: {
+      code: string
+      name: string
+      latitude: number
+      longitude: number
+      reference_location_code?: string | null
+      timezone?: string | null
+      description?: string | null
+    },
+  ) => Promise<void>
+  onUpdateWeatherLocation: (
+    locationCode: string,
+    input: {
+      name?: string | null
+      latitude?: number | null
+      longitude?: number | null
+      reference_location_code?: string | null
+      timezone?: string | null
+      description?: string | null
+    },
+  ) => Promise<void>
+  onDeactivateWeatherLocation: (locationCode: string) => Promise<void>
+  onReactivateWeatherLocation: (locationCode: string) => Promise<void>
+  onRunNwsWeatherSync: () => Promise<void>
+  onSeedTradingSources: () => Promise<void>
+  onRefreshData: () => Promise<void>
+  formatDate: (value: string | null | undefined) => string
+  formatMoney: (value: number | null) => string
+  formatNumber: (value: number | null, digits?: number) => string
+  formatCommodityClass: (value: string) => string
+}
+
+const ADMIN_DOMAIN_MAP = [
+  {
+    key: 'trading',
+    label: 'Trading',
+    summary: 'Capture, amend, and cancel commercial positions through typed workflows.',
+    entities: ['trades', 'events'],
+  },
+  {
+    key: 'reference_data',
+    label: 'Reference Data',
+    summary: 'Steward books, commodities, and pricing records that validate writes.',
+    entities: ['reference_books', 'reference_commodities', 'reference_price_indices'],
+  },
+  {
+    key: 'risk',
+    label: 'Risk',
+    summary: 'Aggregate exposure from projections instead of raw write models.',
+    entities: ['positions'],
+  },
+  {
+    key: 'operations',
+    label: 'Operations',
+    summary: 'Own projection rebuilds, monitoring, and operational readiness.',
+    entities: ['events', 'positions'],
+  },
+  {
+    key: 'admin',
+    label: 'Admin',
+    summary: 'Govern access, data stewardship, and explainability surfaces.',
+    entities: ['events', 'reference_books'],
+  },
+  {
+    key: 'assistant',
+    label: 'Assistant',
+    summary: 'Explain and eventually act through the same application services.',
+    entities: ['events', 'trades', 'positions'],
+  },
+] as const
+
+const SCHEMA_ENTITIES: Array<{
+  key: SchemaEntityKey
+  label: string
+  status: 'Current' | 'Planned'
+  purpose: string
+  fields: string[]
+  relationships: string[]
+  consumers: string[]
+}> = [
+  {
+    key: 'events',
+    label: 'events',
+    status: 'Current',
+    purpose: 'Stores the immutable event stream for trade lifecycle changes and other auditable actions.',
+    fields: ['event_id', 'aggregate_id', 'event_type', 'recorded_at', 'schema_version'],
+    relationships: ['feeds trades projection by aggregate_id', 'feeds positions projection through rebuild/update logic'],
+    consumers: ['Events workspace', 'Trade inspector', 'Admin lifecycle trace'],
+  },
+  {
+    key: 'trades',
+    label: 'trades',
+    status: 'Current',
+    purpose: 'Read model optimized for current trade state and fast operator inspection.',
+    fields: ['trade_id', 'book', 'commodity_class', 'commodity', 'price', 'status', 'updated_at'],
+    relationships: ['rebuilt from events', 'joins conceptually to reference_books and reference_commodities by code'],
+    consumers: ['Dashboard', 'Trades workspace', 'Admin provenance'],
+  },
+  {
+    key: 'positions',
+    label: 'positions',
+    status: 'Current',
+    purpose: 'Aggregated exposure projection for downstream risk and position views.',
+    fields: ['commodity', 'net_volume', 'updated_at'],
+    relationships: ['derived from trade-affecting events', 'linked to reference_commodities for class context'],
+    consumers: ['Positions workspace', 'Dashboard exposure cards', 'Admin lifecycle trace'],
+  },
+  {
+    key: 'reference_books',
+    label: 'reference_books',
+    status: 'Current',
+    purpose: 'Authoritative list of valid books available to trade capture and governance.',
+    fields: ['code', 'is_active'],
+    relationships: ['selected by trade capture', 'governed in reference data workspace'],
+    consumers: ['Trade forms', 'Reference data editor', 'Admin provenance'],
+  },
+  {
+    key: 'reference_commodities',
+    label: 'reference_commodities',
+    status: 'Current',
+    purpose: 'Commodity master records used for validation and classification.',
+    fields: ['code', 'commodity_class', 'is_active', 'updated_at', 'version'],
+    relationships: ['selected by trade capture', 'used to classify positions'],
+    consumers: ['Trade forms', 'Positions workspace', 'Admin schema explorer'],
+  },
+  {
+    key: 'reference_price_indices',
+    label: 'reference_price_indices',
+    status: 'Current',
+    purpose: 'Structured pricing references for index-based trade modeling.',
+    fields: ['code', 'commodity_code', 'currency_code', 'unit_code', 'provider', 'market'],
+    relationships: ['depends on commodities and pricing metadata', 'supports future trade price terms'],
+    consumers: ['Reference data workspace', 'Future pricing workflows', 'Admin schema explorer'],
+  },
+]
+
+function projectionFreshnessTooltip(label: string) {
+  switch (label) {
+    case 'Fresh':
+      return 'Trade and position projections are within roughly 15 minutes of the latest loaded event.'
+    case 'Monitoring':
+      return 'Projections are lagging slightly and should be watched, but they are not materially stale yet.'
+    case 'Lagging':
+      return 'Projection updates are meaningfully behind the latest loaded event stream and need investigation.'
+    case 'Awaiting flow':
+      return 'Not enough event or projection data is loaded yet to assess freshness.'
+    default:
+      return 'Projection freshness could not be confidently determined from the currently loaded timestamps.'
+  }
+}
+
+function AdminCardTitle({ label, tooltip }: { label: string; tooltip: string }) {
+  return (
+    <strong>
+      <InlineTooltipLabel tooltip={tooltip} tooltipLabel={`More information about ${label}`} align="start">
+        {label}
+      </InlineTooltipLabel>
+    </strong>
+  )
+}
+
+function cadenceLabel(intervalMinutes: number): string {
+  if (intervalMinutes % 60 === 0) {
+    const hours = intervalMinutes / 60
+    return hours === 1 ? 'Hourly' : `Every ${hours}h`
+  }
+
+  return `Every ${intervalMinutes}m`
+}
+
+function weatherHealthTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
+  switch (status) {
+    case 'healthy':
+      return 'active'
+    case 'running':
+      return 'in-progress'
+    case 'failed':
+      return 'cancelled'
+    default:
+      return 'blocked'
+  }
+}
+
+function weatherHealthLabel(status: string): string {
+  switch (status) {
+    case 'healthy':
+      return 'Healthy'
+    case 'running':
+      return 'Running'
+    case 'failed':
+      return 'Failed'
+    case 'stale':
+      return 'Stale'
+    case 'missing':
+      return 'Missing'
+    case 'degraded':
+      return 'Degraded'
+    default:
+      return 'Unknown'
+  }
+}
+
+function formatAgeHours(value: number | null | undefined): string {
+  if (typeof value !== 'number') {
+    return 'No data'
+  }
+
+  if (value < 1) {
+    return `${Math.max(1, Math.round(value * 60))}m old`
+  }
+
+  if (value < 24) {
+    return `${value.toFixed(value >= 10 ? 0 : 1)}h old`
+  }
+
+  const days = value / 24
+  return `${days.toFixed(days >= 10 ? 0 : 1)}d old`
+}
+
+function marketDataCategoryLabel(value: string): string {
+  switch (value) {
+    case 'price':
+      return 'Prices'
+    case 'power':
+      return 'Power'
+    case 'fundamentals':
+      return 'Fundamentals'
+    case 'macro':
+      return 'Macro'
+    case 'positioning':
+      return 'Positioning'
+    default:
+      return value
+  }
+}
+
+function matchesAdminTradeFilter(trade: Trade, query: string): boolean {
+  return matchesTextFilter(query, [
+    trade.trade_id,
+    trade.book,
+    trade.commodity_class,
+    trade.commodity,
+    trade.price,
+    trade.status,
+    trade.updated_at,
+  ])
+}
+
+function matchesAdminEventFilter(event: EventRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    event.aggregate_id,
+    event.event_id,
+    event.event_type,
+    event.occurred_at,
+    event.recorded_at,
+    event.schema_version,
+  ])
+}
+
+function matchesAdminPositionFilter(position: PositionRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    position.commodity,
+    position.net_volume,
+    position.updated_at,
+  ])
+}
+
+function matchesReferenceFilter(record: ReferenceRecord, query: string): boolean {
+  return matchesTextFilter(query, [record.code, record.is_active])
+}
+
+function matchesExternalDataRunFilter(run: ExternalDataRunRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    run.id,
+    run.provider,
+    run.job_name,
+    run.status,
+    run.started_at,
+    run.finished_at,
+    run.requested_by,
+    run.series_count,
+    run.observation_count,
+    run.error_summary,
+  ])
+}
+
+function matchesExternalDataProviderFilter(provider: ExternalDataProviderStatusRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    provider.provider,
+    provider.label,
+    provider.category,
+    provider.health_status,
+    provider.latest_run_status,
+    provider.latest_observation_at,
+    provider.last_success_at,
+    provider.error_summary,
+    provider.latest_run?.id,
+    provider.latest_run?.status,
+  ])
+}
+
+function matchesTradingSourceFilter(source: TradingSourceRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    source.source_id,
+    source.source_name,
+    source.source_category,
+    source.business_owner,
+    source.system_owner,
+    source.criticality,
+    source.status,
+    source.update_frequency,
+    source.last_reviewed_at,
+  ])
+}
+
+function matchesWeatherLocationFilter(location: WeatherLocationRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    location.code,
+    location.name,
+    location.reference_location_code,
+    location.timezone,
+    location.source_provider,
+    location.cwa,
+    location.grid_id,
+    location.station_id,
+    location.description,
+    location.is_active,
+  ])
+}
+
+function matchesCounterpartyCreditPreviewRowFilter(row: CounterpartyCreditPreviewRow, query: string): boolean {
+  return matchesTextFilter(query, [
+    row.row_number,
+    row.source_entity_id,
+    row.source_entity_name,
+    row.matched_counterparty_code,
+    row.matched_counterparty_name,
+    row.match_status,
+    row.match_basis,
+    row.matched_identifier_value,
+    row.rating_scale,
+    row.rating_value,
+    row.rating_outlook,
+    row.credit_score,
+    row.probability_of_default,
+    row.recommended_limit_currency_code,
+    row.recommended_limit_amount,
+    row.commentary,
+    row.ready_to_import,
+    row.snapshot?.counterparty_code,
+    row.snapshot?.source_entity_name,
+    row.snapshot?.as_of_date,
+    ...row.issues.flatMap((issue) => [issue.severity, issue.code, issue.message]),
+  ])
+}
+
+function matchesAdminDomainFilter(domain: (typeof ADMIN_DOMAIN_MAP)[number], query: string): boolean {
+  return matchesTextFilter(query, [domain.label, domain.summary, ...domain.entities])
+}
+
+function matchesSchemaEntityFilter(entity: (typeof SCHEMA_ENTITIES)[number], query: string): boolean {
+  return matchesTextFilter(query, [
+    entity.label,
+    entity.status,
+    entity.purpose,
+    ...entity.fields,
+    ...entity.relationships,
+    ...entity.consumers,
+  ])
+}
+
+function matchesLifecycleStepFilter(
+  step: { title: string; detail: string; meta: string[] },
+  query: string,
+): boolean {
+  return matchesTextFilter(query, [step.title, step.detail, ...step.meta])
+}
+
+export function AdminWorkspace({
+  authSession,
+  globalFilter,
+  onOpenSettings,
+  onRoadmapPublished,
+  selectedTrade,
+  selectedTradeEvents,
+  events,
+  trades,
+  positions,
+  activeBooks,
+  activeCommodities,
+  priceIndices,
+  externalDataRuns,
+  externalDataSyncStatus,
+  tradingSources,
+  weatherLocations,
+  weatherSyncStatus,
+  externalDataSyncing,
+  externalDataSyncingProvider,
+  externalDataError,
+  externalDataSuccess,
+  counterpartyCreditImportDraft,
+  counterpartyCreditPreview,
+  counterpartyCreditPreviewing,
+  counterpartyCreditPreviewError,
+  counterpartyCreditPreviewSuccess,
+  counterpartyCreditImporting,
+  counterpartyCreditImportError,
+  counterpartyCreditImportSuccess,
+  tradingSourcesSyncing,
+  tradingSourcesError,
+  tradingSourcesSuccess,
+  weatherSyncing,
+  weatherSyncError,
+  weatherSyncSuccess,
+  weatherLocationMutationError,
+  weatherLocationMutationPendingCode,
+  weatherLocationMutationSuccess,
+  onRunExternalDataSync,
+  onCounterpartyCreditImportDraftChange,
+  onPreviewCounterpartyCreditImport,
+  onImportCounterpartyCreditSnapshots,
+  onCreateWeatherLocation,
+  onUpdateWeatherLocation,
+  onDeactivateWeatherLocation,
+  onReactivateWeatherLocation,
+  onRunNwsWeatherSync,
+  onSeedTradingSources,
+  onRefreshData,
+  formatDate,
+  formatMoney,
+  formatNumber,
+  formatCommodityClass,
+}: AdminWorkspaceProps) {
+  const [selectedSchemaEntity, setSelectedSchemaEntity] = useState<SchemaEntityKey>('events')
+  const [screenFilter, setScreenFilter] = useState('')
+  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
+  const hasScreenFilter = effectiveScreenFilter.trim().length > 0
+
+  const visibleEvents = useMemo(
+    () => events.filter((event) => matchesAdminEventFilter(event, effectiveScreenFilter)),
+    [effectiveScreenFilter, events],
+  )
+  const visibleTrades = useMemo(
+    () => trades.filter((trade) => matchesAdminTradeFilter(trade, effectiveScreenFilter)),
+    [effectiveScreenFilter, trades],
+  )
+  const visiblePositions = useMemo(
+    () => positions.filter((position) => matchesAdminPositionFilter(position, effectiveScreenFilter)),
+    [effectiveScreenFilter, positions],
+  )
+  const visibleActiveBooks = useMemo(
+    () => activeBooks.filter((record) => matchesReferenceFilter(record, effectiveScreenFilter)),
+    [activeBooks, effectiveScreenFilter],
+  )
+  const visibleActiveCommodities = useMemo(
+    () => activeCommodities.filter((record) => matchesReferenceFilter(record, effectiveScreenFilter)),
+    [activeCommodities, effectiveScreenFilter],
+  )
+  const visiblePriceIndices = useMemo(
+    () => priceIndices.filter((record) => matchesReferenceFilter(record, effectiveScreenFilter)),
+    [effectiveScreenFilter, priceIndices],
+  )
+  const visibleExternalDataRuns = useMemo(
+    () => externalDataRuns.filter((run) => matchesExternalDataRunFilter(run, effectiveScreenFilter)),
+    [effectiveScreenFilter, externalDataRuns],
+  )
+  const visibleTradingSources = useMemo(
+    () => tradingSources.filter((source) => matchesTradingSourceFilter(source, effectiveScreenFilter)),
+    [effectiveScreenFilter, tradingSources],
+  )
+  const visibleWeatherLocations = useMemo(
+    () => weatherLocations.filter((location) => matchesWeatherLocationFilter(location, effectiveScreenFilter)),
+    [effectiveScreenFilter, weatherLocations],
+  )
+  const visibleCounterpartyCreditPreviewRows = useMemo(
+    () =>
+      counterpartyCreditPreview?.rows.filter((row) =>
+        matchesCounterpartyCreditPreviewRowFilter(row, effectiveScreenFilter),
+      ) ?? [],
+    [counterpartyCreditPreview, effectiveScreenFilter],
+  )
+  const visibleAdminDomains = useMemo(
+    () => ADMIN_DOMAIN_MAP.filter((domain) => matchesAdminDomainFilter(domain, effectiveScreenFilter)),
+    [effectiveScreenFilter],
+  )
+  const visibleSchemaEntities = useMemo(
+    () => SCHEMA_ENTITIES.filter((entity) => matchesSchemaEntityFilter(entity, effectiveScreenFilter)),
+    [effectiveScreenFilter],
+  )
+
+  const latestEventSource = hasScreenFilter ? visibleEvents : events
+  const latestTradeProjectionSource = hasScreenFilter ? visibleTrades : trades
+  const latestPositionProjectionSource = hasScreenFilter ? visiblePositions : positions
+
+  const latestEvent = useMemo(
+    () =>
+      [...latestEventSource].sort(
+        (left, right) => new Date(right.recorded_at).getTime() - new Date(left.recorded_at).getTime(),
+      )[0] ?? null,
+    [latestEventSource],
+  )
+
+  const latestTradeProjectionUpdate = useMemo(
+    () =>
+      [...latestTradeProjectionSource].sort(
+        (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
+      )[0] ?? null,
+    [latestTradeProjectionSource],
+  )
+
+  const latestPositionProjectionUpdate = useMemo(
+    () =>
+      [...latestPositionProjectionSource].sort(
+        (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
+      )[0] ?? null,
+    [latestPositionProjectionSource],
+  )
+
+  const projectionFreshnessLabel = useMemo(() => {
+    if (!latestEvent || !latestTradeProjectionUpdate || !latestPositionProjectionUpdate) {
+      return 'Awaiting flow'
+    }
+
+    const latestSource = new Date(latestEvent.recorded_at).getTime()
+    const latestProjection = Math.min(
+      new Date(latestTradeProjectionUpdate.updated_at).getTime(),
+      new Date(latestPositionProjectionUpdate.updated_at).getTime(),
+    )
+
+    if (Number.isNaN(latestSource) || Number.isNaN(latestProjection)) {
+      return 'Unknown'
+    }
+
+    const lagMinutes = Math.abs(latestSource - latestProjection) / 60000
+    if (lagMinutes <= 15) {
+      return 'Fresh'
+    }
+    if (lagMinutes <= 120) {
+      return 'Monitoring'
+    }
+    return 'Lagging'
+  }, [latestEvent, latestPositionProjectionUpdate, latestTradeProjectionUpdate])
+
+  const selectedTradePositions = useMemo(
+    () => positions.filter((position) => position.commodity === selectedTrade?.commodity),
+    [positions, selectedTrade?.commodity],
+  )
+
+  const lifecycleSteps = useMemo(() => {
+    const latestTradeEvent = selectedTradeEvents[0] ?? null
+    const relatedPosition = selectedTradePositions[0] ?? null
+
+    return [
+      {
+        key: 'ui-action',
+        title: 'Operator action',
+        detail: selectedTrade
+          ? `${tradeStatusIsActive(selectedTrade.status) ? 'Capture, amend, or close' : 'Review'} ${selectedTrade.trade_id} in the workspace`
+          : 'Select or create a trade to inspect the flow',
+        meta: selectedTrade
+          ? [`Book ${selectedTrade.book}`, formatCommodityClass(selectedTrade.commodity_class), selectedTrade.commodity]
+          : ['No trade selected'],
+      },
+      {
+        key: 'event-store',
+        title: 'Event stored',
+        detail: latestTradeEvent
+          ? `${latestTradeEvent.event_type} recorded against trade ${latestTradeEvent.aggregate_id}`
+          : 'No trade event loaded for the current selection',
+        meta: latestTradeEvent
+          ? [`Occurred ${formatDate(latestTradeEvent.occurred_at)}`, `Schema v${latestTradeEvent.schema_version}`]
+          : ['Waiting for event data'],
+      },
+      {
+        key: 'trade-projection',
+        title: 'Trade projection updated',
+        detail: selectedTrade
+          ? `Trade read model now reflects ${selectedTrade.status.toLowerCase()} state`
+          : 'Trade projection is ready once a selection exists',
+        meta: selectedTrade
+          ? [`Updated ${formatDate(selectedTrade.updated_at)}`, `Price ${formatMoney(selectedTrade.price)}`]
+          : ['Projection not targeted'],
+      },
+      {
+        key: 'positions-projection',
+        title: 'Positions projection updated',
+        detail: relatedPosition
+          ? `${relatedPosition.commodity} net exposure recalculated`
+          : 'No matching commodity position found for the selected trade',
+        meta: relatedPosition
+          ? [`Net ${formatNumber(relatedPosition.net_volume, 0)}`, `Updated ${formatDate(relatedPosition.updated_at)}`]
+          : ['Awaiting exposure impact'],
+      },
+      {
+        key: 'read-surfaces',
+        title: 'Operator views refreshed',
+        detail: 'Dashboard, Trades, Positions, and Admin now read from updated projections.',
+        meta: [
+          `${selectedTradeEvents.length} trade event${selectedTradeEvents.length === 1 ? '' : 's'}`,
+          `${events.length} event${events.length === 1 ? '' : 's'} visible in current session`,
+        ],
+      },
+    ]
+  }, [
+    events.length,
+    formatCommodityClass,
+    formatDate,
+    formatMoney,
+    formatNumber,
+    selectedTrade,
+    selectedTradeEvents,
+    selectedTradePositions,
+  ])
+  const visibleLifecycleSteps = useMemo(
+    () => lifecycleSteps.filter((step) => matchesLifecycleStepFilter(step, effectiveScreenFilter)),
+    [effectiveScreenFilter, lifecycleSteps],
+  )
+  const effectiveSelectedSchemaEntity =
+    visibleSchemaEntities.some((entity) => entity.key === selectedSchemaEntity)
+      ? selectedSchemaEntity
+      : visibleSchemaEntities[0]?.key ?? selectedSchemaEntity
+
+  const selectedSchemaDetail = useMemo(
+    () => visibleSchemaEntities.find((entity) => entity.key === effectiveSelectedSchemaEntity) ?? null,
+    [effectiveSelectedSchemaEntity, visibleSchemaEntities],
+  )
+
+  const adminSummaryCards = useMemo(
+    () => [
+      {
+        label: 'Events Recorded',
+        value: `${hasScreenFilter ? visibleEvents.length : events.length}`,
+        note: latestEvent ? `Latest ${formatDate(latestEvent.recorded_at)}` : 'No events loaded yet',
+        tooltip: 'Count of event rows currently loaded into the admin workspace session.',
+      },
+      {
+        label: 'Projection State',
+        value: projectionFreshnessLabel,
+        note: latestTradeProjectionUpdate ? `Trades updated ${formatDate(latestTradeProjectionUpdate.updated_at)}` : 'No trade projection yet',
+        tooltip: 'Compares loaded event timing with trade and position projection timestamps.',
+        valueTooltip: projectionFreshnessTooltip(projectionFreshnessLabel),
+      },
+      {
+        label: 'Reference Records',
+        value: `${visibleActiveBooks.length + visibleActiveCommodities.length + visiblePriceIndices.filter((row) => row.is_active).length}`,
+        note: `${visibleActiveBooks.length} books, ${visibleActiveCommodities.length} commodities, ${visiblePriceIndices.filter((row) => row.is_active).length} price indices`,
+        tooltip: 'Total active master-data records currently supporting trading and pricing workflows.',
+      },
+    ],
+    [
+      events.length,
+      formatDate,
+      hasScreenFilter,
+      latestEvent,
+      latestTradeProjectionUpdate,
+      projectionFreshnessLabel,
+      visibleActiveBooks.length,
+      visibleActiveCommodities.length,
+      visibleEvents.length,
+      visiblePriceIndices,
+    ],
+  )
+
+  const marketDataProviders = useMemo(
+    () =>
+      (externalDataSyncStatus?.providers ?? []).filter((provider) =>
+        matchesExternalDataProviderFilter(provider, effectiveScreenFilter),
+      ),
+    [effectiveScreenFilter, externalDataSyncStatus],
+  )
+  const marketDataProviderCodes = useMemo(
+    () => new Set(marketDataProviders.map((provider) => provider.provider)),
+    [marketDataProviders],
+  )
+  const allMarketDataProviderCodes = useMemo(
+    () => new Set((externalDataSyncStatus?.providers ?? []).map((provider) => provider.provider)),
+    [externalDataSyncStatus],
+  )
+  const marketDataRuns = useMemo(
+    () =>
+      externalDataRuns.filter(
+        (run) =>
+          allMarketDataProviderCodes.has(run.provider) &&
+          (marketDataProviderCodes.has(run.provider) || matchesExternalDataRunFilter(run, effectiveScreenFilter)),
+      ),
+    [allMarketDataProviderCodes, effectiveScreenFilter, externalDataRuns, marketDataProviderCodes],
+  )
+  const latestMarketDataRun = useMemo(() => marketDataRuns[0] ?? null, [marketDataRuns])
+  const latestFreshMarketDataProvider = useMemo(() => {
+    const healthyProviders = marketDataProviders.filter((provider) => provider.latest_observation_at)
+    return (
+      [...healthyProviders].sort((left, right) => {
+        const leftTime = new Date(left.latest_observation_at ?? '').getTime()
+        const rightTime = new Date(right.latest_observation_at ?? '').getTime()
+        return rightTime - leftTime
+      })[0] ?? null
+    )
+  }, [marketDataProviders])
+  const marketDataPowerProviders = useMemo(
+    () => marketDataProviders.filter((provider) => provider.category === 'power'),
+    [marketDataProviders],
+  )
+  const marketDataAttentionCount = marketDataProviders.filter((provider) =>
+    ['failed', 'stale', 'missing', 'degraded'].includes(provider.health_status),
+  ).length
+  const counterpartyCreditImportRuns = useMemo(
+    () => visibleExternalDataRuns.filter((run) => run.job_name === 'import_counterparty_credit_snapshots'),
+    [visibleExternalDataRuns],
+  )
+  const latestCounterpartyCreditImportRun = useMemo(
+    () => counterpartyCreditImportRuns[0] ?? null,
+    [counterpartyCreditImportRuns],
+  )
+  const readyCounterpartyCreditPreviewRows = useMemo(
+    () => visibleCounterpartyCreditPreviewRows.filter((row) => row.ready_to_import),
+    [visibleCounterpartyCreditPreviewRows],
+  )
+  const previewBlockedRowCount = visibleCounterpartyCreditPreviewRows.filter(
+    (row) => row.issues.some((issue) => issue.severity === 'error'),
+  ).length
+  const previewWarningRowCount = visibleCounterpartyCreditPreviewRows.filter(
+    (row) => row.issues.some((issue) => issue.severity !== 'error'),
+  ).length
+  const previewMatchedRowCount = visibleCounterpartyCreditPreviewRows.filter(
+    (row) => Boolean(row.matched_counterparty_code),
+  ).length
+
+  const tradingSourcesByCriticality = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of visibleTradingSources) {
+      counts.set(row.criticality, (counts.get(row.criticality) ?? 0) + 1)
+    }
+    return ['tier_0', 'tier_1', 'tier_2', 'tier_3']
+      .map((key) => ({ key, count: counts.get(key) ?? 0 }))
+      .filter((row) => row.count > 0)
+  }, [visibleTradingSources])
+  const selectedTradeHiddenByFilter =
+    hasScreenFilter && selectedTrade !== null && !matchesAdminTradeFilter(selectedTrade, effectiveScreenFilter)
+
+  return (
+    <div className="stack">
+      <SystemStatusPanel />
+      <WorkspaceLocalFilterBar
+        value={screenFilter}
+        onChange={setScreenFilter}
+        placeholder="Trade, event, provider, weather location, D&B preview row, source register, or schema concept"
+        description="Keep admin filtering local to this screen so you can narrow live operational records and explainability cards without changing the rest of the app."
+        totalCount={
+          events.length +
+          trades.length +
+          positions.length +
+          activeBooks.length +
+          activeCommodities.length +
+          priceIndices.length +
+          externalDataRuns.length +
+          tradingSources.length +
+          weatherLocations.length +
+          (counterpartyCreditPreview?.rows.length ?? 0)
+        }
+        matchedCount={
+          visibleEvents.length +
+          visibleTrades.length +
+          visiblePositions.length +
+          visibleActiveBooks.length +
+          visibleActiveCommodities.length +
+          visiblePriceIndices.length +
+          visibleExternalDataRuns.length +
+          visibleTradingSources.length +
+          visibleWeatherLocations.length +
+          visibleCounterpartyCreditPreviewRows.length
+        }
+        resultLabel="admin records"
+        globalValue={globalFilter}
+        note={
+          selectedTradeHiddenByFilter
+            ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filters. Dedicated admin sub-panels below keep their own controls.`
+            : 'Dedicated admin sub-panels below keep their own controls.'
+        }
+      />
+
+      <section className="surface feature-panel admin-hero-surface">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">How It Works</span>
+            <h3>System Atlas</h3>
+          </div>
+          <p>Read the product as a set of connected domains, events, projections, and governed records rather than isolated pages.</p>
+        </div>
+
+        <div className="admin-summary-grid">
+          {adminSummaryCards.map((card) => (
+            <article key={card.label} className="admin-summary-card">
+              <span>
+                <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
+                  {card.label}
+                </InlineTooltipLabel>
+              </span>
+              {card.valueTooltip ? (
+                <Tooltip content={card.valueTooltip} focusable>
+                  <strong className="tooltip-trigger-hint">{card.value}</strong>
+                </Tooltip>
+              ) : (
+                <strong>{card.value}</strong>
+              )}
+              <p>{card.note}</p>
+            </article>
+          ))}
+        </div>
+
+        <WeatherOperationsPanel
+          authSession={authSession}
+          weatherLocations={visibleWeatherLocations}
+          weatherSyncStatus={weatherSyncStatus}
+          weatherSyncing={weatherSyncing}
+          weatherSyncError={weatherSyncError}
+          weatherSyncSuccess={weatherSyncSuccess}
+          weatherLocationMutationError={weatherLocationMutationError}
+          weatherLocationMutationPendingCode={weatherLocationMutationPendingCode}
+          weatherLocationMutationSuccess={weatherLocationMutationSuccess}
+          onRunNwsWeatherSync={onRunNwsWeatherSync}
+          onCreateWeatherLocation={onCreateWeatherLocation}
+          onUpdateWeatherLocation={onUpdateWeatherLocation}
+          onDeactivateWeatherLocation={onDeactivateWeatherLocation}
+          onReactivateWeatherLocation={onReactivateWeatherLocation}
+          formatDate={formatDate}
+        />
+
+        <div className="admin-sync-panel">
+          <div className="admin-sync-head">
+            <div>
+              <span className="eyebrow">External Data</span>
+              <h3>Market Data Health</h3>
+            </div>
+            <div className="admin-sync-head-actions">
+              {externalDataSyncStatus ? (
+                <span className={`status-pill status-pill-${weatherHealthTone(externalDataSyncStatus.health_status)}`}>
+                  {weatherHealthLabel(externalDataSyncStatus.health_status)}
+                </span>
+              ) : null}
+              <button type="button" className="button button-secondary" onClick={() => void onRefreshData()}>
+                Refresh
+              </button>
+            </div>
+          </div>
+          <p>Watch price, macro, positioning, and power feeds together, then trigger a targeted provider sync when freshness starts to drift.</p>
+
+          <div className="admin-sync-status-grid">
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Coverage"
+                tooltip="How many tracked market-data providers are currently healthy versus stale, failed, or still uninitialized."
+              />
+              <p>
+                {externalDataSyncStatus
+                  ? `${marketDataProviders.filter((provider) => provider.health_status === 'healthy').length} of ${marketDataProviders.length} providers are healthy.`
+                  : 'Market-data sync status has not been loaded yet.'}
+              </p>
+              <span>
+                {externalDataSyncStatus
+                  ? `${marketDataProviders.filter((provider) => provider.health_status === 'failed').length} failed · ${marketDataProviders.filter((provider) => provider.health_status === 'stale').length} stale · ${marketDataProviders.filter((provider) => provider.health_status === 'missing').length} missing`
+                  : 'Awaiting first status snapshot'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Power Footprint"
+                tooltip="How many power providers are currently tracked inside the market-data freshness surface."
+              />
+              <p>
+                {marketDataPowerProviders.length > 0
+                  ? `${marketDataPowerProviders.length} power providers are wired into the live sync registry.`
+                  : 'No power providers are registered yet.'}
+              </p>
+              <span>
+                {marketDataPowerProviders.length > 0
+                  ? marketDataPowerProviders.map((provider) => provider.provider).join(' · ')
+                  : 'Seed a power provider to activate this surface'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Attention Queue"
+                tooltip="Providers needing operator attention because they are stale, failed, or still missing a first successful load."
+              />
+              <p>
+                {externalDataSyncStatus
+                  ? `${marketDataAttentionCount} providers currently need attention.`
+                  : 'Provider attention status is not available yet.'}
+              </p>
+              <span>
+                {externalDataSyncStatus
+                  ? `${marketDataProviders.filter((provider) => provider.health_status === 'running').length} running · ${marketDataProviders.filter((provider) => provider.due_for_sync).length} due for sync`
+                  : 'No scheduler state loaded'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Latest Healthy Data"
+                tooltip="Newest successfully ingested market-data observation currently available across the tracked providers."
+              />
+              <p>
+                {latestFreshMarketDataProvider?.latest_observation_at
+                  ? `${latestFreshMarketDataProvider.label} last landed ${formatDate(latestFreshMarketDataProvider.latest_observation_at)}.`
+                  : 'No provider has published a stored observation yet.'}
+              </p>
+              <span>
+                {latestMarketDataRun
+                  ? `Latest run #${latestMarketDataRun.id} ${latestMarketDataRun.provider} ${latestMarketDataRun.status.toLowerCase()}`
+                  : 'Awaiting first sync'}
+              </span>
+            </article>
+          </div>
+
+          {externalDataError ? <div className="feedback-banner feedback-banner-error">{externalDataError}</div> : null}
+          {externalDataSuccess ? <div className="feedback-banner feedback-banner-success">{externalDataSuccess}</div> : null}
+
+          <div className="admin-run-list">
+            {marketDataProviders.length === 0 ? (
+              <div className="detail-row">
+                <span>{hasScreenFilter ? 'No market-data providers match the current local filter.' : 'No market-data provider status is loaded yet.'}</span>
+              </div>
+            ) : (
+              marketDataProviders.map((provider: ExternalDataProviderStatusRecord) => (
+                <article key={provider.provider} className="admin-run-row admin-weather-row">
+                  <div>
+                    <strong>{provider.label}</strong>
+                    <p>
+                      {provider.provider} · {marketDataCategoryLabel(provider.category)} · {provider.active_series_count} active series
+                    </p>
+                    <div className="admin-weather-row-detail">
+                      <span>{provider.latest_observation_at ? `Latest data ${formatDate(provider.latest_observation_at)}` : 'No stored observation yet'}</span>
+                      <span>{provider.observation_age_hours != null ? formatAgeHours(provider.observation_age_hours) : 'Freshness unknown'}</span>
+                      <span>{provider.due_for_sync ? 'Due for sync' : `Cadence ${cadenceLabel(provider.scheduler_interval_minutes)}`}</span>
+                    </div>
+                    {provider.error_summary ? <p>{provider.error_summary}</p> : null}
+                  </div>
+                  <div className="admin-run-meta">
+                    <span className={`status-pill status-pill-${weatherHealthTone(provider.health_status)}`}>
+                      {weatherHealthLabel(provider.health_status)}
+                    </span>
+                    <span>{provider.last_success_at ? `Last success ${formatDate(provider.last_success_at)}` : 'No successful run yet'}</span>
+                    <span>{provider.latest_run ? `Run #${provider.latest_run.id} ${provider.latest_run.status}` : 'No run history yet'}</span>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void onRunExternalDataSync(provider.provider as ExternalDataSyncProvider)}
+                      disabled={externalDataSyncing}
+                    >
+                      {externalDataSyncingProvider === provider.provider ? 'Running Sync...' : `Run ${provider.provider}`}
+                    </button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+
+          <div className="admin-run-list">
+            {marketDataRuns.length === 0 ? (
+              <div className="detail-row">
+                <span>{hasScreenFilter ? 'No market-data sync runs match the current local filter.' : 'No market-data sync runs are loaded yet.'}</span>
+              </div>
+            ) : (
+              marketDataRuns.slice(0, 8).map((run) => (
+                <article key={run.id} className="admin-run-row">
+                  <div>
+                    <strong>
+                      {run.provider} run #{run.id}
+                    </strong>
+                    <p>
+                      {run.status} · {run.series_count} series · {run.observation_count} observations
+                    </p>
+                  </div>
+                  <div className="admin-run-meta">
+                    <span>{formatDate(run.finished_at ?? run.started_at)}</span>
+                    <span>{run.requested_by ?? 'system'}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="admin-sync-panel">
+          <div className="admin-sync-head">
+            <div>
+              <span className="eyebrow">Credit Operations</span>
+              <h3>D&amp;B Counterparty Credit Preview</h3>
+            </div>
+            <div className="admin-sync-head-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => void onPreviewCounterpartyCreditImport()}
+                disabled={counterpartyCreditPreviewing || counterpartyCreditImporting}
+              >
+                {counterpartyCreditPreviewing ? 'Previewing D&B Rows...' : 'Preview D&B Rows'}
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void onImportCounterpartyCreditSnapshots()}
+                disabled={counterpartyCreditImporting || readyCounterpartyCreditPreviewRows.length === 0}
+              >
+                {counterpartyCreditImporting ? 'Importing Ready Rows...' : 'Import Ready Rows'}
+              </button>
+            </div>
+          </div>
+          <p>
+            Paste a raw D&amp;B JSON array, preview how each row matches counterparties, then import only the rows that are ready.
+            The stored snapshots still land in the auditable external-credit run log after import.
+          </p>
+
+          <div className="admin-sync-status-grid">
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Latest Import"
+                tooltip="Most recent counterparty credit import recorded in the external data run log."
+              />
+              <p>
+                {latestCounterpartyCreditImportRun
+                  ? `${latestCounterpartyCreditImportRun.provider} run #${latestCounterpartyCreditImportRun.id} ${latestCounterpartyCreditImportRun.status.toLowerCase()} with ${latestCounterpartyCreditImportRun.observation_count} snapshots.`
+                  : 'No counterparty credit import has been recorded yet.'}
+              </p>
+              <span>
+                {latestCounterpartyCreditImportRun
+                  ? formatDate(latestCounterpartyCreditImportRun.finished_at ?? latestCounterpartyCreditImportRun.started_at)
+                  : 'Awaiting first import'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Run History"
+                tooltip="Recent counterparty credit import runs, regardless of provider."
+              />
+              <p>
+                {counterpartyCreditImportRuns.length > 0
+                  ? `${counterpartyCreditImportRuns.length} import run${counterpartyCreditImportRuns.length === 1 ? '' : 's'} are currently loaded in the admin workspace.`
+                  : 'Run history will populate after the first batch import.'}
+              </p>
+              <span>
+                {counterpartyCreditImportRuns.length > 0
+                  ? counterpartyCreditImportRuns.slice(0, 3).map((run) => run.provider).join(' · ')
+                  : 'No providers imported yet'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Preview Readiness"
+                tooltip="Current D&B preview status for the pasted JSON batch in this session."
+              />
+              <p>
+                {counterpartyCreditPreview
+                  ? `${readyCounterpartyCreditPreviewRows.length} ready, ${previewBlockedRowCount} blocked, ${previewWarningRowCount} with warnings.`
+                  : 'Preview a D&B batch to see row-level match and validation results.'}
+              </p>
+              <span>
+                {counterpartyCreditPreview
+                  ? `${previewMatchedRowCount} matched of ${visibleCounterpartyCreditPreviewRows.length}`
+                  : 'Awaiting preview'}
+              </span>
+            </article>
+          </div>
+
+          {counterpartyCreditPreviewError ? <div className="feedback-banner feedback-banner-error">{counterpartyCreditPreviewError}</div> : null}
+          {counterpartyCreditPreviewSuccess ? <div className="feedback-banner feedback-banner-success">{counterpartyCreditPreviewSuccess}</div> : null}
+          {counterpartyCreditImportError ? <div className="feedback-banner feedback-banner-error">{counterpartyCreditImportError}</div> : null}
+          {counterpartyCreditImportSuccess ? <div className="feedback-banner feedback-banner-success">{counterpartyCreditImportSuccess}</div> : null}
+
+          <div className="stack-form">
+            <label className="field">
+              <span>D&amp;B Rows JSON Array</span>
+              <textarea
+                className="control control-textarea"
+                value={counterpartyCreditImportDraft}
+                onChange={(event) => onCounterpartyCreditImportDraftChange(event.target.value)}
+                disabled={counterpartyCreditPreviewing || counterpartyCreditImporting}
+                placeholder={`[
+  {
+    "duns": "123456789",
+    "organizationPrimaryName": "Acme Trading LLC",
+    "scoreDate": "2026-04-05",
+    "dnbRating": "4A1",
+    "ratingOutlook": "Stable",
+    "commercialCreditScore": { "rawScore": 74 },
+    "dnbCreditLimitRecommendation": {
+      "maximumRecommendedLimitAmount": 2000000
+    }
+  }
+]`}
+              />
+            </label>
+          </div>
+
+          {counterpartyCreditPreview ? (
+            <div className="stack">
+              <div className="chip-row">
+                <span className="entity-chip entity-chip-soft">
+                  {visibleCounterpartyCreditPreviewRows.length} row{visibleCounterpartyCreditPreviewRows.length === 1 ? '' : 's'}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  {previewMatchedRowCount} matched
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  {readyCounterpartyCreditPreviewRows.length} ready
+                </span>
+                <span className={`entity-chip ${previewWarningRowCount > 0 ? '' : 'entity-chip-soft'}`}>
+                  {previewWarningRowCount} warnings
+                </span>
+                <span className={`entity-chip ${previewBlockedRowCount > 0 ? '' : 'entity-chip-soft'}`}>
+                  {previewBlockedRowCount} blocked
+                </span>
+              </div>
+
+              <div className="admin-run-list">
+                {visibleCounterpartyCreditPreviewRows.length === 0 ? (
+                  <div className="detail-row">
+                    <span>No D&amp;B preview rows match the current local filter.</span>
+                  </div>
+                ) : (
+                  visibleCounterpartyCreditPreviewRows.map((row) => {
+                  const recommendedLimit =
+                    row.recommended_limit_amount != null
+                      ? `${row.recommended_limit_currency_code ?? '—'} ${formatNumber(row.recommended_limit_amount, 2)}`
+                      : '—'
+
+                  return (
+                    <article
+                      key={`${row.row_number}-${row.source_entity_id ?? row.source_entity_name ?? 'row'}`}
+                      className="admin-run-row"
+                    >
+                      <div>
+                        <strong>
+                          Row {row.row_number}
+                          {row.source_entity_name ? ` · ${row.source_entity_name}` : ''}
+                        </strong>
+                        <p>
+                          {row.match_status}
+                          {row.matched_counterparty_code ? ` · ${row.matched_counterparty_code}` : ''}
+                          {row.match_basis ? ` · ${row.match_basis}` : ''}
+                          {row.matched_identifier_value ? ` ${row.matched_identifier_value}` : ''}
+                        </p>
+                        <span>
+                          Rating {row.rating_value ?? '—'}
+                          {row.rating_outlook ? ` · ${row.rating_outlook}` : ''}
+                          {row.credit_score != null ? ` · Score ${formatNumber(row.credit_score, 2)}` : ''}
+                          {row.probability_of_default != null
+                            ? ` · PD ${formatNumber(row.probability_of_default * 100, 2)}%`
+                            : ''}
+                          {` · Limit ${recommendedLimit}`}
+                        </span>
+                        {row.commentary ? <p>{row.commentary}</p> : null}
+                        {row.issues.length > 0 ? (
+                          <div className="chip-row">
+                            {row.issues.map((issue) => (
+                              <span
+                                key={`${row.row_number}-${issue.code}-${issue.message}`}
+                                className={`entity-chip ${issue.severity === 'error' ? '' : 'entity-chip-soft'}`}
+                              >
+                                {issue.severity.toUpperCase()}: {issue.message}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="admin-run-meta">
+                        <span>{row.ready_to_import ? 'Ready to import' : 'Needs attention'}</span>
+                        <span>
+                          {row.snapshot?.as_of_date
+                            ? `As of ${formatDateOnly(row.snapshot.as_of_date)}`
+                            : 'Missing source date'}
+                        </span>
+                      </div>
+                    </article>
+                  )
+                  })
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="admin-run-list">
+            {counterpartyCreditImportRuns.length === 0 ? (
+              <div className="detail-row">
+                <span>{hasScreenFilter ? 'No counterparty credit import runs match the current local filter.' : 'No counterparty credit import runs are loaded yet.'}</span>
+              </div>
+            ) : (
+              counterpartyCreditImportRuns.slice(0, 8).map((run) => (
+                <article key={run.id} className="admin-run-row">
+                  <div>
+                    <strong>
+                      {run.provider} import #{run.id}
+                    </strong>
+                    <p>
+                      {run.status} · {run.series_count} counterparties · {run.observation_count} snapshots
+                    </p>
+                    {run.error_summary ? <span>{run.error_summary}</span> : null}
+                  </div>
+                  <div className="admin-run-meta">
+                    <span>{formatDate(run.finished_at ?? run.started_at)}</span>
+                    <span>{run.requested_by ?? 'system'}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="admin-sync-panel">
+          <div className="admin-sync-head">
+            <div>
+              <span className="eyebrow">Platform Metadata</span>
+              <h3>Trading Source Register</h3>
+            </div>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => void onSeedTradingSources()}
+              disabled={tradingSourcesSyncing}
+            >
+              {tradingSourcesSyncing ? 'Seeding Register...' : 'Seed Source Register'}
+            </button>
+          </div>
+          <p>Load the canonical source register from the repo into the API database and inspect the live metadata used for governance.</p>
+
+          <div className="admin-sync-status-grid">
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Loaded Sources"
+                tooltip="Current number of source-governance records seeded into the live database."
+              />
+              <p>{visibleTradingSources.length === 0 ? 'No trading-source metadata is currently in view.' : `${visibleTradingSources.length} sources are available in the current admin view.`}</p>
+              <span>{visibleTradingSources.length === 0 ? 'Seed the register to activate this surface' : `${visibleTradingSources.filter((row) => row.status === 'active').length} active records`}</span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Criticality Mix"
+                tooltip="Distribution of trading sources by operational criticality tier."
+              />
+              <p>
+                {tradingSourcesByCriticality.length === 0
+                  ? 'Criticality will populate after the first seed.'
+                  : tradingSourcesByCriticality.map((row) => `${row.key}: ${row.count}`).join(' · ')}
+              </p>
+              <span>{visibleTradingSources.length === 0 ? 'Awaiting seed' : 'Derived from live table rows'}</span>
+            </article>
+          </div>
+
+          {tradingSourcesError ? <div className="feedback-banner feedback-banner-error">{tradingSourcesError}</div> : null}
+          {tradingSourcesSuccess ? <div className="feedback-banner feedback-banner-success">{tradingSourcesSuccess}</div> : null}
+
+          <div className="admin-run-list">
+            {visibleTradingSources.length === 0 ? (
+              <div className="detail-row">
+                <span>{hasScreenFilter ? 'No trading sources match the current local filter.' : 'No trading sources loaded.'}</span>
+              </div>
+            ) : (
+              visibleTradingSources.slice(0, 10).map((row) => (
+                <article key={row.source_id} className="admin-run-row">
+                  <div>
+                    <strong>{row.source_name}</strong>
+                    <p>
+                      {row.source_category} · {row.criticality} · {row.business_owner}
+                    </p>
+                  </div>
+                  <div className="admin-run-meta">
+                    <span>{row.status}</span>
+                    <span>{formatDate(row.last_reviewed_at)}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="admin-explainability-grid">
+        <article className="surface feature-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Architecture</span>
+              <h3>Domain Map</h3>
+            </div>
+            <p>Each domain owns a slice of workflow and data, while events and projections bind the product together.</p>
+          </div>
+
+          <div className="domain-map-grid">
+            {visibleAdminDomains.length === 0 ? (
+              <div className="empty-state">
+                <strong>No domain concepts match the filter</strong>
+                <p>Try a broader local search to bring more architecture slices back into view.</p>
+              </div>
+            ) : (
+              visibleAdminDomains.map((domain) => (
+                <article key={domain.key} className="domain-card">
+                  <div className="domain-card-head">
+                    <strong>{domain.label}</strong>
+                    <span>{domain.entities.length} entities</span>
+                  </div>
+                  <p>{domain.summary}</p>
+                  <div className="chip-row">
+                    {domain.entities.map((entity) => (
+                      <span key={entity} className="entity-chip">
+                        {entity}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className="surface feature-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Lifecycle</span>
+              <h3>Trade Trace</h3>
+            </div>
+            <p>{selectedTrade ? `Following ${selectedTrade.trade_id} through the current write and read path.` : 'Select a trade in the main app to inspect its event-to-projection flow.'}</p>
+          </div>
+
+          <div className="timeline timeline-large">
+            {visibleLifecycleSteps.length === 0 ? (
+              <div className="empty-state">
+                <strong>No lifecycle steps match the filter</strong>
+                <p>The selected trade trace stays available, but nothing in the current step copy matches this local search.</p>
+              </div>
+            ) : (
+              visibleLifecycleSteps.map((step) => (
+                <article key={step.key} className="timeline-item timeline-item-card">
+                  <div className="timeline-dot" />
+                  <div className="timeline-body">
+                    <div className="timeline-head">
+                      <strong>{step.title}</strong>
+                    </div>
+                    <p>{step.detail}</p>
+                    <div className="timeline-meta">
+                      {step.meta.map((item) => (
+                        <span key={item}>{item}</span>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </article>
+      </section>
+
+      <section className="admin-explainability-grid">
+        <article className="surface feature-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Schema</span>
+              <h3>Core Entity Explorer</h3>
+            </div>
+            <p>A simplified ERD-style view focused on the records that currently matter most to product behavior.</p>
+          </div>
+
+          <div className="schema-explorer-grid">
+            <div className="schema-entity-list">
+              {visibleSchemaEntities.map((entity) => (
+                <button
+                  key={entity.key}
+                  type="button"
+                  className={`schema-entity-button ${effectiveSelectedSchemaEntity === entity.key ? 'is-active' : ''}`}
+                  onClick={() => setSelectedSchemaEntity(entity.key)}
+                >
+                  <strong>{entity.label}</strong>
+                  <span>{entity.status}</span>
+                </button>
+              ))}
+            </div>
+
+            {selectedSchemaDetail ? (
+              <div className="schema-detail-card">
+                <div className="schema-detail-head">
+                  <div>
+                    <span className="eyebrow">Entity</span>
+                    <h4>{selectedSchemaDetail.label}</h4>
+                  </div>
+                  <Tooltip
+                    content={
+                      selectedSchemaDetail.status === 'Current'
+                        ? 'This entity already exists in the current product model and runtime.'
+                        : 'This entity is planned for a future iteration and is not live yet.'
+                    }
+                    focusable
+                  >
+                    <span className="schema-status tooltip-trigger-hint">{selectedSchemaDetail.status}</span>
+                  </Tooltip>
+                </div>
+
+                <p>{selectedSchemaDetail.purpose}</p>
+
+                <div className="schema-columns">
+                  <div className="schema-column">
+                    <span className="schema-label">Key Fields</span>
+                    <div className="chip-row">
+                      {selectedSchemaDetail.fields.map((field) => (
+                        <span key={field} className="entity-chip">
+                          {field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="schema-column">
+                    <span className="schema-label">Relationships</span>
+                    <div className="stack">
+                      {selectedSchemaDetail.relationships.map((relationship) => (
+                        <div key={relationship} className="detail-row">
+                          <span>{relationship}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="schema-column">
+                    <span className="schema-label">Consumers</span>
+                    <div className="chip-row">
+                      {selectedSchemaDetail.consumers.map((consumer) => (
+                        <span key={consumer} className="entity-chip entity-chip-soft">
+                          {consumer}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No schema entities match the filter</strong>
+                <p>Try a broader local search to bring the entity explorer back into view.</p>
+              </div>
+            )}
+          </div>
+        </article>
+
+        <article className="surface feature-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Provenance</span>
+              <h3>Live System Window</h3>
+            </div>
+            <p>These cards make the explainability surface read from actual runtime state instead of static documentation.</p>
+          </div>
+
+          <div className="admin-provenance-grid">
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Latest Event"
+                tooltip="Most recent event row currently loaded into the admin explainability surface."
+              />
+              <p>{latestEvent ? `${latestEvent.event_type} on ${latestEvent.aggregate_id}` : 'No event has been loaded yet.'}</p>
+              <span>{latestEvent ? formatDate(latestEvent.recorded_at) : 'Awaiting activity'}</span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Trade Projection"
+                tooltip="Most recent trade read-model row loaded into the admin view."
+              />
+              <p>{latestTradeProjectionUpdate ? `Most recent trade row is ${latestTradeProjectionUpdate.trade_id}.` : 'No trade projection loaded yet.'}</p>
+              <span>{latestTradeProjectionUpdate ? formatDate(latestTradeProjectionUpdate.updated_at) : 'Awaiting trade state'}</span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Positions Projection"
+                tooltip="Most recent positions projection row currently loaded for explainability."
+              />
+              <p>{latestPositionProjectionUpdate ? `Latest exposure update is for ${latestPositionProjectionUpdate.commodity}.` : 'No position projection loaded yet.'}</p>
+              <span>{latestPositionProjectionUpdate ? formatDate(latestPositionProjectionUpdate.updated_at) : 'Awaiting exposure state'}</span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
+                label="Schema Version"
+                tooltip="Event schema version observed on the latest loaded write event."
+              />
+              <p>{latestEvent ? `Current loaded writes are emitting schema version ${latestEvent.schema_version}.` : 'Schema version will appear once events are present.'}</p>
+              <span>Derived from event feed</span>
+            </article>
+          </div>
+        </article>
+      </section>
+
+      <RoadmapAdminPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+        onRoadmapPublished={onRoadmapPublished}
+      />
+
+      <AgentManagementPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+      />
+
+      <AssistantApprovalInboxPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+        onRefreshData={onRefreshData}
+      />
+
+      <UserManagementPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+      />
+
+      <section className="surface">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Controls</span>
+            <h3>Governance and Operations</h3>
+          </div>
+          <p>Operational actions still live here, but now below the product-facing explainability layer.</p>
+        </div>
+
+        <div className="admin-grid">
+          <article className="admin-card">
+            <strong>Projection Jobs</strong>
+            <p>Expose rebuild controls for trades and positions here once those flows move into the app.</p>
+          </article>
+          <article className="admin-card">
+            <strong>Reference Governance</strong>
+            <p>Add maker-checker review, deactivation safeguards, and audit history for sensitive master data.</p>
+          </article>
+          <article className="admin-card">
+            <strong>Roles and Access</strong>
+            <p>Split trader, operations, and admin capabilities so only the right users can amend reference data.</p>
+          </article>
+        </div>
+      </section>
+    </div>
+  )
+}

@@ -1,0 +1,36 @@
+name: Backend
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  backend-test:
+    name: Backend Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      # The current checked-in backend suite is self-contained and uses test
+      # database fixtures, so the first CI lane does not provision PostgreSQL.
+      - name: Install backend dependencies
+        run: make api-install
+
+      - name: Verify committed API contract artifacts
+        run: make api-contract-check
+
+      - name: Run backend verification
+        run: make api-test

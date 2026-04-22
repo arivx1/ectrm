@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
 from apps.api.app.models.position import Position
 from apps.api.app.schemas.position import PositionOut
@@ -14,9 +15,13 @@ router = APIRouter(prefix="/positions", tags=["positions"])
 
 
 @router.get("", response_model=List[PositionOut])
-def list_positions(db: Session = Depends(get_db)) -> List[PositionOut]:
+def list_positions(
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> List[PositionOut]:
     rows = db.execute(
-        select(Position).order_by(Position.commodity.asc())
+        select(Position).order_by(Position.commodity.asc()).offset(offset).limit(limit)
     ).scalars().all()
 
     return [

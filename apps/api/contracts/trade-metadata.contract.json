@@ -1,0 +1,163 @@
+{
+  "contract_version": 1,
+  "defaults": {
+    "instrument_type": "LINEAR",
+    "option_style": "AMERICAN",
+    "pricing_status": "PENDING",
+    "pricing_type": "FIXED",
+    "settlement_status": "PENDING",
+    "source_system": "ETRM",
+    "trade_nature": "PHYSICAL",
+    "trade_side": "BUY",
+    "trade_status": "ACTIVE",
+    "trade_structure": "SINGLE",
+    "workflow_statuses_by_trade_nature": {
+      "FINANCIAL": {
+        "actualization_status": "NOT_REQUIRED",
+        "allocation_status": "NOT_REQUIRED",
+        "confirmation_status": "PENDING",
+        "invoice_status": "NOT_REQUIRED",
+        "nomination_status": "NOT_REQUIRED",
+        "payment_status": "PENDING"
+      },
+      "PHYSICAL": {
+        "actualization_status": "PENDING",
+        "allocation_status": "PENDING",
+        "confirmation_status": "PENDING",
+        "invoice_status": "PENDING",
+        "nomination_status": "PENDING",
+        "payment_status": "PENDING"
+      }
+    }
+  },
+  "rules": {
+    "option_allowed_instrument_type": "OPTION",
+    "option_lifecycle_event_to_status": {
+      "OptionAssigned": "ASSIGNED",
+      "OptionExercised": "EXERCISED",
+      "OptionExpired": "EXPIRED"
+    },
+    "option_required_pricing_type": "FIXED",
+    "option_required_trade_nature": "FINANCIAL",
+    "option_required_trade_structure": "SINGLE",
+    "pricing_types_requiring_explicit_price": [
+      "FIXED",
+      "HYBRID"
+    ],
+    "pricing_types_requiring_price_index": [
+      "INDEX",
+      "HYBRID"
+    ],
+    "trade_structures_requiring_top_level_volume": [
+      "SINGLE"
+    ]
+  },
+  "vocabulary": {
+    "actualization_statuses": [
+      "NOT_REQUIRED",
+      "PENDING",
+      "PARTIALLY_ACTUALIZED",
+      "ACTUALIZED"
+    ],
+    "allocation_statuses": [
+      "NOT_REQUIRED",
+      "PENDING",
+      "PARTIALLY_ALLOCATED",
+      "ALLOCATED",
+      "COMPLETED"
+    ],
+    "confirmation_statuses": [
+      "PENDING",
+      "SENT",
+      "CONFIRMED",
+      "DISPUTED"
+    ],
+    "credit_approval_statuses": [
+      "PENDING_REVIEW",
+      "APPROVED",
+      "NOT_REQUIRED",
+      "REJECTED"
+    ],
+    "instrument_types": [
+      "LINEAR",
+      "OPTION"
+    ],
+    "invoice_statuses": [
+      "NOT_REQUIRED",
+      "PENDING",
+      "ISSUED",
+      "APPROVED",
+      "DISPUTED"
+    ],
+    "nomination_statuses": [
+      "NOT_REQUIRED",
+      "PENDING",
+      "SCHEDULED",
+      "NOMINATED",
+      "COMPLETED"
+    ],
+    "option_lifecycle_event_types": [
+      "OptionAssigned",
+      "OptionExercised",
+      "OptionExpired"
+    ],
+    "option_settlement_statuses": [
+      "PENDING",
+      "BOOKED",
+      "NOT_REQUIRED"
+    ],
+    "option_styles": [
+      "AMERICAN",
+      "EUROPEAN"
+    ],
+    "option_types": [
+      "CALL",
+      "PUT"
+    ],
+    "payment_statuses": [
+      "NOT_REQUIRED",
+      "PENDING",
+      "DUE",
+      "PAID",
+      "OVERDUE"
+    ],
+    "pricing_statuses": [
+      "PENDING",
+      "PARTIALLY_PRICED",
+      "PRICED",
+      "DISPUTED"
+    ],
+    "pricing_types": [
+      "FIXED",
+      "INDEX",
+      "FORMULA",
+      "HYBRID"
+    ],
+    "settlement_statuses": [
+      "PENDING",
+      "INVOICED",
+      "PARTIALLY_SETTLED",
+      "SETTLED",
+      "DISPUTED"
+    ],
+    "trade_natures": [
+      "PHYSICAL",
+      "FINANCIAL"
+    ],
+    "trade_sides": [
+      "BUY",
+      "SELL"
+    ],
+    "trade_statuses": [
+      "ACTIVE",
+      "CANCELLED",
+      "EXERCISED",
+      "EXPIRED",
+      "ASSIGNED"
+    ],
+    "trade_structures": [
+      "SINGLE",
+      "SWAP"
+    ]
+  }
+}

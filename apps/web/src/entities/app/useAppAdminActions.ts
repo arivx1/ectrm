@@ -1,0 +1,347 @@
+import { useEffect, useState } from 'react'
+
+import {
+  createWeatherLocation,
+  deactivateWeatherLocation,
+  reactivateWeatherLocation,
+  updateWeatherLocation,
+  type CreateWeatherLocationInput,
+  type UpdateWeatherLocationInput,
+} from '../weather/api'
+import {
+  type CounterpartyCreditPreviewRecord,
+  type CounterpartyCreditSnapshotCandidate,
+} from '../../shared/models'
+import { appConfig } from '../../shared/config'
+import { getMutationContext } from '../../shared/mutation'
+import {
+  importCounterpartyCreditSnapshots,
+  previewCounterpartyCreditImport,
+  runExternalDataSync,
+  runNwsWeatherSync,
+  seedTradingSources,
+} from './adminApi'
+import { type ExternalDataSyncProvider } from './workspaceDataShared'
+
+type RefreshMutationData = (
+  mutation:
+    | 'admin-external-data'
+    | 'admin-counterparty-credit'
+    | 'admin-weather-sync',
+) => Promise<void>
+
+export function useAppAdminActions(args: {
+  refreshMutationData: RefreshMutationData
+  resetKey: string
+}) {
+  const { refreshMutationData, resetKey } = args
+  const [externalDataError, setExternalDataError] = useState<string>('')
+  const [externalDataSuccess, setExternalDataSuccess] = useState<string>('')
+  const [counterpartyCreditImportDraft, setCounterpartyCreditImportDraft] = useState('')
+  const [counterpartyCreditPreview, setCounterpartyCreditPreview] = useState<CounterpartyCreditPreviewRecord | null>(null)
+  const [counterpartyCreditPreviewing, setCounterpartyCreditPreviewing] = useState(false)
+  const [counterpartyCreditPreviewError, setCounterpartyCreditPreviewError] = useState('')
+  const [counterpartyCreditPreviewSuccess, setCounterpartyCreditPreviewSuccess] = useState('')
+  const [counterpartyCreditImporting, setCounterpartyCreditImporting] = useState(false)
+  const [counterpartyCreditImportError, setCounterpartyCreditImportError] = useState('')
+  const [counterpartyCreditImportSuccess, setCounterpartyCreditImportSuccess] = useState('')
+  const [tradingSourcesError, setTradingSourcesError] = useState<string>('')
+  const [tradingSourcesSuccess, setTradingSourcesSuccess] = useState<string>('')
+  const [weatherSyncError, setWeatherSyncError] = useState<string>('')
+  const [weatherSyncSuccess, setWeatherSyncSuccess] = useState<string>('')
+  const [weatherLocationMutationError, setWeatherLocationMutationError] = useState('')
+  const [weatherLocationMutationSuccess, setWeatherLocationMutationSuccess] = useState('')
+  const [weatherLocationMutationPendingCode, setWeatherLocationMutationPendingCode] = useState<string | null>(null)
+  const [externalDataSyncing, setExternalDataSyncing] = useState(false)
+  const [externalDataSyncingProvider, setExternalDataSyncingProvider] = useState<string | null>(null)
+  const [tradingSourcesSyncing, setTradingSourcesSyncing] = useState(false)
+  const [weatherSyncing, setWeatherSyncing] = useState(false)
+
+  useEffect(() => {
+    setExternalDataError('')
+    setExternalDataSuccess('')
+    setCounterpartyCreditImportDraft('')
+    setCounterpartyCreditPreview(null)
+    setCounterpartyCreditPreviewing(false)
+    setCounterpartyCreditPreviewError('')
+    setCounterpartyCreditPreviewSuccess('')
+    setCounterpartyCreditImporting(false)
+    setCounterpartyCreditImportError('')
+    setCounterpartyCreditImportSuccess('')
+    setTradingSourcesError('')
+    setTradingSourcesSuccess('')
+    setWeatherSyncError('')
+    setWeatherSyncSuccess('')
+    setWeatherLocationMutationError('')
+    setWeatherLocationMutationSuccess('')
+    setWeatherLocationMutationPendingCode(null)
+    setExternalDataSyncing(false)
+    setExternalDataSyncingProvider(null)
+    setTradingSourcesSyncing(false)
+    setWeatherSyncing(false)
+  }, [resetKey])
+
+  async function handleRunExternalDataSync(provider: ExternalDataSyncProvider) {
+    setExternalDataSyncing(true)
+    setExternalDataSyncingProvider(provider)
+    setExternalDataError('')
+    setExternalDataSuccess('')
+    try {
+      const payload = await runExternalDataSync(appConfig.apiBase, provider)
+      await refreshMutationData('admin-external-data')
+      setExternalDataSuccess(
+        `${provider} sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.observation_count} observations.`,
+      )
+    } catch (nextError) {
+      setExternalDataError(nextError instanceof Error ? nextError.message : `Failed to run ${provider} sync.`)
+    } finally {
+      setExternalDataSyncing(false)
+      setExternalDataSyncingProvider(null)
+    }
+  }
+
+  async function handlePreviewCounterpartyCreditImport() {
+    const draft = counterpartyCreditImportDraft.trim()
+    if (!draft) {
+      setCounterpartyCreditPreviewError('Paste a JSON array of D&B rows before previewing.')
+      setCounterpartyCreditPreviewSuccess('')
+      return
+    }
+
+    let rows: unknown
+    try {
+      rows = JSON.parse(draft)
+    } catch {
+      setCounterpartyCreditPreviewError('D&B preview payload must be valid JSON.')
+      setCounterpartyCreditPreviewSuccess('')
+      return
+    }
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      setCounterpartyCreditPreviewError('D&B preview payload must be a non-empty JSON array.')
+      setCounterpartyCreditPreviewSuccess('')
+      return
+    }
+
+    setCounterpartyCreditPreviewing(true)
+    setCounterpartyCreditPreviewError('')
+    setCounterpartyCreditPreviewSuccess('')
+    setCounterpartyCreditImportError('')
+    setCounterpartyCreditImportSuccess('')
+    try {
+      const payload = await previewCounterpartyCreditImport(appConfig.apiBase, rows)
+
+      setCounterpartyCreditPreview(payload)
+      setCounterpartyCreditPreviewSuccess(
+        `D&B preview analyzed ${payload.total_rows} row${payload.total_rows === 1 ? '' : 's'}: ${payload.ready_rows} ready, ${payload.blocked_rows} blocked.`,
+      )
+    } catch (nextError) {
+      setCounterpartyCreditPreview(null)
+      setCounterpartyCreditPreviewError(
+        nextError instanceof Error ? nextError.message : 'Failed to preview D&B counterparty credit rows.',
+      )
+    } finally {
+      setCounterpartyCreditPreviewing(false)
+    }
+  }
+
+  function handleCounterpartyCreditImportDraftChange(value: string) {
+    setCounterpartyCreditImportDraft(value)
+    setCounterpartyCreditPreview(null)
+    setCounterpartyCreditPreviewError('')
+    setCounterpartyCreditPreviewSuccess('')
+    setCounterpartyCreditImportError('')
+    setCounterpartyCreditImportSuccess('')
+  }
+
+  async function handleImportCounterpartyCreditSnapshots() {
+    const snapshots =
+      counterpartyCreditPreview?.rows
+        .filter((row) => row.ready_to_import && row.snapshot)
+        .map((row) => row.snapshot)
+        .filter(
+          (snapshot): snapshot is CounterpartyCreditSnapshotCandidate => Boolean(snapshot),
+        ) ?? []
+
+    if (snapshots.length === 0) {
+      setCounterpartyCreditImportError('Preview D&B rows first and make sure at least one row is ready to import.')
+      setCounterpartyCreditImportSuccess('')
+      return
+    }
+
+    setCounterpartyCreditImporting(true)
+    setCounterpartyCreditImportError('')
+    setCounterpartyCreditImportSuccess('')
+    try {
+      const payload = await importCounterpartyCreditSnapshots(appConfig.apiBase, snapshots)
+
+      await refreshMutationData('admin-counterparty-credit')
+      if (payload.status === 'FAILED') {
+        setCounterpartyCreditImportError(
+          payload.error_summary || `DNB counterparty credit import run ${payload.id} failed.`,
+        )
+        return
+      }
+
+      setCounterpartyCreditImportSuccess(
+        `DNB counterparty credit import run ${payload.id} loaded ${payload.observation_count} snapshot${payload.observation_count === 1 ? '' : 's'}.`,
+      )
+    } catch (nextError) {
+      setCounterpartyCreditImportError(
+        nextError instanceof Error ? nextError.message : 'Failed to import counterparty credit snapshots.',
+      )
+    } finally {
+      setCounterpartyCreditImporting(false)
+    }
+  }
+
+  async function handleSeedTradingSources() {
+    setTradingSourcesSyncing(true)
+    setTradingSourcesError('')
+    setTradingSourcesSuccess('')
+    try {
+      const payload = await seedTradingSources(appConfig.apiBase, { replaceExisting: true })
+
+      await refreshMutationData('admin-external-data')
+      setTradingSourcesSuccess(
+        `Trading source register loaded: ${payload.created_count} created, ${payload.updated_count} updated, ${payload.total_rows} total rows.`,
+      )
+    } catch (nextError) {
+      setTradingSourcesError(nextError instanceof Error ? nextError.message : 'Failed to seed trading sources.')
+    } finally {
+      setTradingSourcesSyncing(false)
+    }
+  }
+
+  async function handleRunNwsWeatherSync() {
+    setWeatherSyncing(true)
+    setWeatherSyncError('')
+    setWeatherSyncSuccess('')
+    try {
+      const payload = await runNwsWeatherSync(appConfig.apiBase)
+      await refreshMutationData('admin-weather-sync')
+      setWeatherSyncSuccess(
+        `NWS sync run ${payload.id} finished ${payload.status.toLowerCase()} with ${payload.series_count} series and ${payload.observation_count} observations.`,
+      )
+    } catch (nextError) {
+      setWeatherSyncError(nextError instanceof Error ? nextError.message : 'Failed to run NWS weather sync.')
+    } finally {
+      setWeatherSyncing(false)
+    }
+  }
+
+  async function runWeatherLocationMutation(args: {
+    locationCode: string
+    successMessage: string
+    fallbackMessage: string
+    run: () => Promise<unknown>
+  }) {
+    const { locationCode, successMessage, fallbackMessage, run } = args
+    setWeatherLocationMutationPendingCode(locationCode)
+    setWeatherLocationMutationError('')
+    setWeatherLocationMutationSuccess('')
+
+    try {
+      await run()
+      await refreshMutationData('admin-weather-sync')
+      setWeatherLocationMutationSuccess(successMessage)
+    } catch (nextError) {
+      setWeatherLocationMutationError(nextError instanceof Error ? nextError.message : fallbackMessage)
+    } finally {
+      setWeatherLocationMutationPendingCode((current) => (current === locationCode ? null : current))
+    }
+  }
+
+  async function handleCreateWeatherLocation(
+    input: Omit<CreateWeatherLocationInput, 'created_by'>,
+  ) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode: input.code,
+      successMessage: `Weather location ${input.code} created.`,
+      fallbackMessage: 'Failed to create weather location.',
+      run: () =>
+        createWeatherLocation(appConfig.apiBase, {
+          ...input,
+          created_by: actorId,
+        }),
+    })
+  }
+
+  async function handleUpdateWeatherLocation(
+    locationCode: string,
+    input: Omit<UpdateWeatherLocationInput, 'updated_by'>,
+  ) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode,
+      successMessage: `Weather location ${locationCode} updated.`,
+      fallbackMessage: 'Failed to update weather location.',
+      run: () =>
+        updateWeatherLocation(appConfig.apiBase, locationCode, {
+          ...input,
+          updated_by: actorId,
+        }),
+    })
+  }
+
+  async function handleDeactivateWeatherLocation(locationCode: string) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode,
+      successMessage: `Weather location ${locationCode} deactivated.`,
+      fallbackMessage: 'Failed to deactivate weather location.',
+      run: () =>
+        deactivateWeatherLocation(appConfig.apiBase, locationCode, {
+          updated_by: actorId,
+        }),
+    })
+  }
+
+  async function handleReactivateWeatherLocation(locationCode: string) {
+    const { actorId } = getMutationContext()
+    await runWeatherLocationMutation({
+      locationCode,
+      successMessage: `Weather location ${locationCode} reactivated.`,
+      fallbackMessage: 'Failed to reactivate weather location.',
+      run: () =>
+        reactivateWeatherLocation(appConfig.apiBase, locationCode, {
+          updated_by: actorId,
+        }),
+    })
+  }
+
+  return {
+    counterpartyCreditImportDraft,
+    counterpartyCreditImportError,
+    counterpartyCreditImporting,
+    counterpartyCreditImportSuccess,
+    counterpartyCreditPreview,
+    counterpartyCreditPreviewError,
+    counterpartyCreditPreviewing,
+    counterpartyCreditPreviewSuccess,
+    externalDataError,
+    externalDataSuccess,
+    externalDataSyncing,
+    externalDataSyncingProvider,
+    handleCounterpartyCreditImportDraftChange,
+    handleImportCounterpartyCreditSnapshots,
+    handlePreviewCounterpartyCreditImport,
+    handleRunExternalDataSync,
+    handleRunNwsWeatherSync,
+    handleCreateWeatherLocation,
+    handleDeactivateWeatherLocation,
+    handleReactivateWeatherLocation,
+    handleSeedTradingSources,
+    handleUpdateWeatherLocation,
+    tradingSourcesError,
+    tradingSourcesSuccess,
+    tradingSourcesSyncing,
+    weatherLocationMutationError,
+    weatherLocationMutationPendingCode,
+    weatherLocationMutationSuccess,
+    weatherSyncError,
+    weatherSyncSuccess,
+    weatherSyncing,
+  }
+}
