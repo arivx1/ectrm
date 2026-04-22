@@ -126,9 +126,10 @@ proposal form until a human owner approves the domain rule.
 - Agent autonomy impact: feedback improves promotion and retirement signals,
   but it does not grant mutation authority or change business records directly.
 - Tests or evidence: focused API coverage verifies feedback creation, update,
-  access scoping, and conversation reload serialization.
-- Follow-up: use feedback aggregates in future assistant eval dashboards and
-  agent health reviews.
+  access scoping, conversation reload serialization, and admin aggregation by
+  agent, workspace, recent feedback, and helpful vs. needs-work totals.
+- Follow-up: connect recurring needs-work comments to eval cases and agent
+  health reviews.
 
 ### 2026-04-22 - Deterministic Algorithms Are An Agent Promotion Path
 
