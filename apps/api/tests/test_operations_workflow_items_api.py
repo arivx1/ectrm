@@ -18,8 +18,11 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.config import settings
 from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.services.action_requests import approve_action_request
+from apps.api.app.domains.operations.services.workflow_items import evaluate_trade_workflow_item_update_policy
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -92,6 +95,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
             session.query(TradeConfirmation).delete()
             session.query(TradeCreditApprovalDecision).delete()
             session.query(TradeCreditException).delete()
+            session.query(AssistantActionRequest).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(DeliveryObligation).delete()
             session.query(OptionExposure).delete()
@@ -840,6 +844,337 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                 },
                 {"CONFIRMATION", "INVOICE", "PAYMENT"},
             )
+
+    def test_workflow_item_update_policy_builds_review_context(self) -> None:
+        self._seed_trade(trade_id="T-POLICY-1")
+
+        with self.SessionLocal() as session:
+            item = TradeWorkflowItem(
+                trade_id="T-POLICY-1",
+                workflow_type="NOMINATION",
+                status="PENDING",
+                owner=None,
+                due_at=None,
+                notes=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+            session.add(item)
+            session.commit()
+            item_id = item.id
+
+        with self.SessionLocal() as session:
+            due_at = self.now + timedelta(days=1)
+            decision = evaluate_trade_workflow_item_update_policy(
+                session,
+                item_id=item_id,
+                changes={
+                    "status": "completed",
+                    "owner": " ops_alpha ",
+                    "due_at": due_at,
+                    "notes": " nomination checked ",
+                },
+                now=self.now,
+                validate_actor=False,
+            )
+
+        self.assertEqual(decision.normalized_changes["status"], "COMPLETED")
+        self.assertEqual(decision.normalized_changes["owner"], "ops_alpha")
+        self.assertEqual(decision.normalized_changes["notes"], "nomination checked")
+        self.assertEqual(decision.workflow_queue, "operations")
+        self.assertEqual(decision.required_reviewer_role, "OPERATIONS_LEAD")
+        self.assertIn("credit_hold_not_active", decision.policy_checks)
+        self.assertTrue(decision.idempotency_key.startswith(f"workflow-item-update:{item_id}:v1:"))
+
+        review_context = decision.to_review_context()
+        self.assertEqual(review_context["owning_work_object"]["id"], str(item_id))
+        self.assertEqual(review_context["required_reviewer_role"], "OPERATIONS_LEAD")
+        self.assertEqual(review_context["current_values"]["status"], "PENDING")
+        self.assertEqual(review_context["proposed_values"]["status"], "COMPLETED")
+        self.assertEqual(
+            review_context["proposed_mutation"]["changes"]["due_at"],
+            due_at.isoformat(),
+        )
+
+    def test_assistant_workflow_update_action_uses_record_managed_policy(self) -> None:
+        self._seed_trade(trade_id="T-ACTION-POLICY-1")
+
+        with self.SessionLocal() as session:
+            item = TradeWorkflowItem(
+                trade_id="T-ACTION-POLICY-1",
+                workflow_type="CONFIRMATION",
+                status="PENDING",
+                owner=None,
+                due_at=None,
+                notes=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+            session.add(item)
+            session.flush()
+            item_id = item.id
+            session.add(
+                TradeConfirmation(
+                    trade_id="T-ACTION-POLICY-1",
+                    source_document_id=None,
+                    confirmation_number="CONF-T-ACTION-POLICY-1",
+                    status="SENT",
+                    sent_at=self.now,
+                    confirmed_at=None,
+                    issue_count=1,
+                    last_issued_at=self.now,
+                    last_issued_by="ops_admin",
+                    last_issue_method="EMAIL",
+                    last_issue_recipient="ops@example.com",
+                    last_issue_note=None,
+                    receipt_status="ISSUED",
+                    received_at=None,
+                    received_by=None,
+                    response_method=None,
+                    response_reference=None,
+                    response_note=None,
+                    dispute_reason=None,
+                    notes=None,
+                    comparison_waiver_note=None,
+                    comparison_waived_at=None,
+                    comparison_waived_by=None,
+                    created_at=self.now,
+                    created_by="ops_admin",
+                    updated_at=self.now,
+                    updated_by="ops_admin",
+                    version=1,
+                )
+            )
+            action_request = AssistantActionRequest(
+                run_id=1,
+                status="PENDING",
+                user_id="ops_admin",
+                session_id="session-1",
+                workspace="operations",
+                agent_id=None,
+                agent_name="Operations Agent",
+                action_type="update_trade_workflow_item",
+                summary="Update confirmation workflow item",
+                description="Attempt to close a record-managed confirmation workflow item.",
+                payload={
+                    "item_id": item_id,
+                    "changes": {"status": "CONFIRMED"},
+                    "review_context": {
+                        "owning_work_object": {
+                            "type": "trade_workflow_item",
+                            "id": str(item_id),
+                            "label": f"Trade Workflow Item {item_id}",
+                        },
+                        "required_reviewer_role": "OPERATIONS_LEAD",
+                        "business_rationale": "Exercise assistant approval policy before record-managed workflow rejection.",
+                        "proposed_mutation": {
+                            "operation": "update_trade_workflow_item",
+                            "item_id": item_id,
+                            "changes": {"status": "CONFIRMED"},
+                        },
+                        "supporting_records": [],
+                        "assumptions": [],
+                        "missing_evidence": [],
+                        "expected_downstream_effects": ["Attempt workflow update through approval gateway."],
+                        "stale_state_basis": {},
+                        "idempotency_key": f"test:update-workflow-item:{item_id}:record-managed",
+                    },
+                },
+                result=None,
+                error_detail=None,
+                created_at=self.now,
+                decided_at=None,
+                decided_by=None,
+            )
+            session.add(action_request)
+            session.commit()
+            action_request_id = action_request.id
+
+        with self.SessionLocal() as session:
+            record = session.get(AssistantActionRequest, action_request_id)
+            self.assertIsNotNone(record)
+            failed = approve_action_request(
+                db=session,
+                record=record,
+                actor_id="ops_admin",
+                actor_role="ADMIN",
+            )
+
+            self.assertEqual(failed.status, "FAILED")
+            self.assertIn("record-managed", failed.error_detail or "")
+            workflow_item = session.get(TradeWorkflowItem, item_id)
+            self.assertIsNotNone(workflow_item)
+            self.assertEqual(workflow_item.status, "PENDING")
+
+    def test_workflow_item_update_policy_blocks_terminal_transition_and_far_due_date(self) -> None:
+        self._seed_trade(trade_id="T-POLICY-BLOCK-1")
+
+        with self.SessionLocal() as session:
+            item = TradeWorkflowItem(
+                trade_id="T-POLICY-BLOCK-1",
+                workflow_type="NOMINATION",
+                status="COMPLETED",
+                owner=None,
+                due_at=None,
+                notes=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+            session.add(item)
+            session.commit()
+            item_id = item.id
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(ValueError, "terminal"):
+                evaluate_trade_workflow_item_update_policy(
+                    session,
+                    item_id=item_id,
+                    changes={"status": "PENDING"},
+                    now=self.now,
+                    validate_actor=False,
+                )
+
+            with self.assertRaisesRegex(ValueError, "scheduling window"):
+                evaluate_trade_workflow_item_update_policy(
+                    session,
+                    item_id=item_id,
+                    changes={"due_at": self.now + timedelta(days=731)},
+                    now=self.now,
+                    validate_actor=False,
+                )
+
+    def test_assistant_workflow_update_action_enforces_stale_version_and_allows_idempotent_retry(self) -> None:
+        self._seed_trade(trade_id="T-ACTION-STALE-1")
+
+        with self.SessionLocal() as session:
+            item = TradeWorkflowItem(
+                trade_id="T-ACTION-STALE-1",
+                workflow_type="NOMINATION",
+                status="PENDING",
+                owner=None,
+                due_at=None,
+                notes=None,
+                created_at=self.now,
+                created_by="ops_admin",
+                updated_at=self.now,
+                updated_by="ops_admin",
+                version=1,
+            )
+            session.add(item)
+            session.flush()
+            item_id = item.id
+            stale_request = AssistantActionRequest(
+                run_id=1,
+                status="PENDING",
+                user_id="ops_admin",
+                session_id="session-1",
+                workspace="operations",
+                agent_id=None,
+                agent_name="Operations Agent",
+                action_type="update_trade_workflow_item",
+                summary="Complete nomination workflow item",
+                description="Attempt to complete a stale nomination workflow item.",
+                payload={
+                    "item_id": item_id,
+                    "changes": {"status": "COMPLETED"},
+                    "review_context": {
+                        "stale_state_basis": {"workflow_item_version": 1},
+                        "idempotency_key": f"test:update-workflow-item:{item_id}:stale",
+                    },
+                },
+                result=None,
+                error_detail=None,
+                created_at=self.now,
+                decided_at=None,
+                decided_by=None,
+            )
+            session.add(stale_request)
+            session.flush()
+            stale_request_id = stale_request.id
+            item.owner = "manual.ops"
+            item.version = 2
+            session.commit()
+
+        with self.SessionLocal() as session:
+            record = session.get(AssistantActionRequest, stale_request_id)
+            self.assertIsNotNone(record)
+            failed = approve_action_request(
+                db=session,
+                record=record,
+                actor_id="ops_admin",
+                actor_role="ADMIN",
+            )
+
+            self.assertEqual(failed.status, "FAILED")
+            self.assertTrue(
+                "changed since this action was staged" in (failed.error_detail or "")
+                or "staged review context is stale" in (failed.error_detail or "")
+            )
+            workflow_item = session.get(TradeWorkflowItem, item_id)
+            self.assertIsNotNone(workflow_item)
+            self.assertEqual(workflow_item.status, "PENDING")
+            self.assertEqual(workflow_item.version, 2)
+
+        with self.SessionLocal() as session:
+            workflow_item = session.get(TradeWorkflowItem, item_id)
+            self.assertIsNotNone(workflow_item)
+            workflow_item.status = "COMPLETED"
+            workflow_item.owner = "ops_alpha"
+            workflow_item.version = 3
+            retry_request = AssistantActionRequest(
+                run_id=2,
+                status="PENDING",
+                user_id="ops_admin",
+                session_id="session-2",
+                workspace="operations",
+                agent_id=None,
+                agent_name="Operations Agent",
+                action_type="update_trade_workflow_item",
+                summary="Retry completed nomination workflow item",
+                description="Retry a workflow update that was already applied.",
+                payload={
+                    "item_id": item_id,
+                    "changes": {"status": "COMPLETED", "owner": "ops_alpha"},
+                    "review_context": {
+                        "stale_state_basis": {"workflow_item_version": 1},
+                        "idempotency_key": f"test:update-workflow-item:{item_id}:retry",
+                    },
+                },
+                result=None,
+                error_detail=None,
+                created_at=self.now,
+                decided_at=None,
+                decided_by=None,
+            )
+            session.add(retry_request)
+            session.commit()
+            retry_request_id = retry_request.id
+
+        with self.SessionLocal() as session:
+            record = session.get(AssistantActionRequest, retry_request_id)
+            self.assertIsNotNone(record)
+            executed = approve_action_request(
+                db=session,
+                record=record,
+                actor_id="ops_admin",
+                actor_role="ADMIN",
+            )
+
+            self.assertEqual(executed.status, "EXECUTED")
+            self.assertEqual(executed.result["status"], "COMPLETED")
+            self.assertEqual(executed.result["owner"], "ops_alpha")
+            workflow_item = session.get(TradeWorkflowItem, item_id)
+            self.assertIsNotNone(workflow_item)
+            self.assertEqual(workflow_item.version, 3)
 
     def test_credit_approval_actions_require_comment_and_release_lifecycle_hold(self) -> None:
         admin_token = self._bootstrap_admin()

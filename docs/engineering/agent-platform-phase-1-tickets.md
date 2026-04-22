@@ -730,6 +730,18 @@ M
 The platform can measure whether Phase 1 agents are creating value or review
 burden.
 
+### Implementation note
+
+An initial Admin outcome-metrics API is implemented at
+`GET /admin/assistant/outcome-metrics` and surfaced in the Admin workspace. It
+aggregates run counts, warning/tool counts, feedback, staged/decided action
+outcomes, stale-action outcomes, average decision time, and oldest pending
+action age by agent and by action type. The endpoint applies conservative
+recommendation thresholds that can mark an agent or action type as
+`INSUFFICIENT_DATA`, `KEEP_STAGED`, `ELIGIBLE_FOR_BOUNDED_REVIEW`, or
+`RECOMMEND_PAUSE`. These recommendations are advisory only; they do not grant
+bounded execution or auto-pause agents.
+
 ### Scope
 
 - define first outcome metrics:
@@ -808,6 +820,18 @@ M
 
 Workflow item updates have a deterministic policy layer that can support safer
 agent-staged updates now and measured bounded execution later.
+
+### Implementation note
+
+The workflow-item policy is implemented in the operations workflow-item service.
+It centralizes editable-field normalization, explicit status transition tables,
+due-date scheduling windows, ledger-managed status blockers, credit constraints,
+actualization blockers, reviewer role metadata, old/new preview values,
+stale-state basis, expected-version failure handling, idempotent retry
+recognition, and deterministic idempotency keys for manual and assistant-staged
+workflow updates. Remaining follow-up work before bounded autonomous execution
+should define production outcome metrics, correction thresholds, and
+workflow-type-specific policy promotions.
 
 ### Scope
 

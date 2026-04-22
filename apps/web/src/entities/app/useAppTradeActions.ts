@@ -268,6 +268,7 @@ export function useAppTradeActions(args: {
 
     try {
       const preTradeReviewId = captureForm.preTradeReviewContext?.reviewId ?? null
+      const preTradeRecommendationRunId = captureForm.preTradeReviewContext?.recommendationRunId ?? null
       const preTradeWorkflowNote = captureForm.preTradeReviewContext
         ? buildPreTradeWorkflowNote(captureForm.preTradeReviewContext)
         : null
@@ -279,6 +280,7 @@ export function useAppTradeActions(args: {
           ? {
               ...submission.payload,
               pretrade_review_id: preTradeReviewId,
+              ...(preTradeRecommendationRunId ? { pretrade_recommendation_run_id: preTradeRecommendationRunId } : {}),
             }
           : submission.payload,
       })

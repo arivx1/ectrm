@@ -102,6 +102,29 @@ export const assistantAdminAgents = [
   },
 ] as const
 
+export const assistantRoleArchetypes = [
+  {
+    role_key: 'trade-ops-copilot',
+    name: 'Trade Ops Copilot',
+    description: 'Coordinates trade operations follow-through with staged, reviewable actions.',
+    catalog_status: 'SEEDED',
+    mission: ['Keep booked trades moving.', 'Stage the smallest justified action.'],
+    human_owner_role: 'Operations Lead',
+    allowed_workspaces: ['assistant', 'trades', 'operations'],
+    work_objects: ['trade', 'workflow item'],
+    capability_ceiling: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    default_tools: ['get_trade_by_id'],
+    maximum_action_types: ['cancel_trade', 'update_trade_workflow_item'],
+    authority_ceiling: 'STAGE',
+    approval_rules: ['Operations Lead reviews staged actions before execution.'],
+    stop_conditions: ['Evidence is ambiguous.', 'Requested action exceeds the role boundary.'],
+    success_metrics: ['High approval rate.', 'Low stale action rate.'],
+    required_eval_coverage: ['Allowed action staging.', 'Denied overreach.'],
+    base_prompt_guidance: ['Lead with the blocker.', 'Show evidence before staging.'],
+    current_profile_ids: ['ops-governor'],
+  },
+] as const
+
 export const assistantActionRequests = [
   {
     action_request_id: 7001,
@@ -119,6 +142,17 @@ export const assistantActionRequests = [
       trade_id: 'T-AMEND-100',
       reason: 'Counterparty unwind requested before confirmation.',
     },
+    lifecycle: {
+      stage: 'AWAITING_REVIEW',
+      label: 'Awaiting review',
+      tone: 'attention',
+      is_terminal: false,
+      can_approve: true,
+      can_reject: true,
+      reviewer_action_label: 'Approve or reject',
+      decided_label: null,
+      review_risk_flags: [],
+    },
     result: null,
     error_detail: null,
     created_at: '2026-04-11T08:45:00Z',
@@ -126,6 +160,97 @@ export const assistantActionRequests = [
     decided_by: null,
   },
 ] as const
+
+export const assistantOutcomeMetrics = {
+  generated_at: '2026-04-11T09:10:00Z',
+  created_after: null,
+  created_before: null,
+  thresholds: {
+    min_decided_actions_for_promotion: 10,
+    max_rejection_rate_for_promotion: 0.1,
+    max_failed_execution_rate_for_promotion: 0.02,
+    max_stale_action_rate_for_promotion: 0.05,
+    max_pending_actions_for_promotion: 0,
+    min_decided_actions_for_pause_signal: 5,
+    rejection_rate_pause_threshold: 0.4,
+    failed_execution_rate_pause_threshold: 0.1,
+    stale_action_rate_pause_threshold: 0.25,
+    oldest_pending_hours_pause_threshold: 72,
+  },
+  by_agent: [
+    {
+      agent_id: 'ops-governor',
+      agent_name: 'Ops Governor',
+      agent_role_key: 'trade-ops-copilot',
+      agent_profile_kind: 'ROLE_DERIVED',
+      run_count: 12,
+      completed_run_count: 11,
+      failed_run_count: 1,
+      warning_count: 1,
+      warning_rate: 0.0833,
+      tool_call_count: 15,
+      helpful_feedback_count: 8,
+      needs_work_feedback_count: 1,
+      feedback_helpful_rate: 0.8889,
+      staged_action_count: 12,
+      pending_action_count: 1,
+      executed_action_count: 10,
+      rejected_action_count: 1,
+      failed_action_count: 0,
+      decided_action_count: 11,
+      stale_action_count: 0,
+      approval_rate: 0.9091,
+      rejection_rate: 0.0909,
+      failed_execution_rate: 0,
+      stale_action_rate: 0,
+      avg_decision_seconds: 420,
+      oldest_pending_age_seconds: 1500,
+      recommendation: {
+        recommended_action: 'KEEP_STAGED',
+        promotion_candidate: false,
+        pause_recommended: false,
+        reasons: ['Pending actions remain open before promotion.'],
+      },
+    },
+  ],
+  by_action_type: [
+    {
+      action_type: 'cancel_trade',
+      staged_action_count: 12,
+      pending_action_count: 1,
+      executed_action_count: 10,
+      rejected_action_count: 1,
+      failed_action_count: 0,
+      decided_action_count: 11,
+      stale_action_count: 0,
+      approval_rate: 0.9091,
+      rejection_rate: 0.0909,
+      failed_execution_rate: 0,
+      stale_action_rate: 0,
+      avg_decision_seconds: 420,
+      oldest_pending_age_seconds: 1500,
+      recommendation: {
+        recommended_action: 'KEEP_STAGED',
+        promotion_candidate: false,
+        pause_recommended: false,
+        reasons: ['One pending cancel_trade action is still waiting for review.'],
+      },
+    },
+  ],
+} as const
+
+export const codexTaskSettings = {
+  enabled: true,
+  configured: false,
+  provider: 'github_actions',
+  repository: null,
+  workflow_id: null,
+  default_ref: 'main',
+  prompt_input_name: 'prompt',
+  missing_configuration: ['CODEX_TASK_REPOSITORY', 'CODEX_TASK_WORKFLOW_ID'],
+} as const
+
+export const codexTasks = [] as const
 
 export const userAccounts = [
   {

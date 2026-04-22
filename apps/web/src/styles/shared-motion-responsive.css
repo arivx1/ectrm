@@ -88,11 +88,15 @@
   .assistant-agent-analytics-frequency-grid,
   .assistant-agent-analytics-version-grid,
   .assistant-admin-summary-grid,
+  .assistant-outcome-grid,
+  .assistant-outcome-feedback-grid,
   .projection-integrity-grid,
   .projection-integrity-summary-grid,
   .projection-integrity-toggle-grid,
   .projection-integrity-channel-grid,
   .assistant-builder-template-grid,
+  .assistant-role-catalog-grid,
+  .assistant-profile-fit-grid,
   .assistant-builder-preview-grid,
   .user-management-grid,
   .user-management-summary-grid {
@@ -264,6 +268,7 @@
   .roadmap-admin-meta-grid,
   .roadmap-admin-field-grid,
   .assistant-admin-form-grid,
+  .assistant-outcome-metric-grid,
   .assistant-agent-eval-suite-grid,
   .assistant-agent-publication-summary-grid,
   .assistant-agent-publication-diff-values,
@@ -277,6 +282,8 @@
   .projection-integrity-toggle-grid,
   .projection-integrity-channel-grid,
   .assistant-builder-template-grid,
+  .assistant-role-catalog-grid,
+  .assistant-profile-fit-grid,
   .assistant-builder-preview-grid,
   .user-management-summary-grid {
     grid-template-columns: 1fr;
@@ -360,4 +367,3 @@
     text-align: left;
   }
 }
-

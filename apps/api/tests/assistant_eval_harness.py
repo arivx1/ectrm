@@ -35,6 +35,7 @@ from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
+from apps.api.app.schemas.assistant import ALL_ASSISTANT_ACTION_TYPES
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,7 @@ class AssistantEvalExpectations:
     action_request_types: tuple[str, ...] | None = None
     action_request_statuses: tuple[str, ...] | None = None
     action_request_payloads: tuple[dict[str, object], ...] | None = None
+    action_request_review_contexts: tuple[dict[str, object], ...] | None = None
     prompt_section_keys: tuple[str, ...] = ()
     prompt_section_absent_keys: tuple[str, ...] = ()
     prompt_section_content_contains: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -378,6 +380,12 @@ class AssistantApiEvalHarness(unittest.TestCase):
             actual_action_payloads = [action_request["payload"] for action_request in response_payload["action_requests"]]
             self.assertEqual(actual_action_payloads, list(expectations.action_request_payloads), msg=case.name)
 
+        if expectations.action_request_review_contexts is not None:
+            actual_review_contexts = [
+                action_request["review_context"] for action_request in response_payload["action_requests"]
+            ]
+            self.assertEqual(actual_review_contexts, list(expectations.action_request_review_contexts), msg=case.name)
+
         if run_payload is None:
             self.fail(f"assistant eval case '{case.name}' did not produce a run payload")
 
@@ -557,26 +565,34 @@ class AssistantApiEvalHarness(unittest.TestCase):
 
     def _create_agent(self, fixture: AssistantEvalAgentFixture) -> None:
         now = datetime.now(timezone.utc)
+        normalized_capabilities = {capability.upper() for capability in fixture.capabilities}
+        allowed_action_types = (
+            list(fixture.allowed_action_types)
+            if fixture.allowed_action_types
+            else list(ALL_ASSISTANT_ACTION_TYPES)
+            if "ACTION" in normalized_capabilities
+            else []
+        )
         with self.SessionLocal() as session:
             session.add(
                 AssistantAgent(
-                agent_id=fixture.agent_id,
-                name=fixture.name,
-                description=f"{fixture.name} evaluation agent.",
-                status=fixture.status,
-                scope=fixture.scope,
-                provider=fixture.provider,
-                model=fixture.model,
-                allowed_workspaces=list(fixture.allowed_workspaces),
-                capabilities=list(fixture.capabilities),
-                allowed_tools=list(fixture.allowed_tools),
-                allowed_action_types=list(fixture.allowed_action_types),
-                system_prompt=fixture.system_prompt or f"System prompt for {fixture.name}.",
-                created_at=now,
-                created_by="assistant-eval-suite",
-                updated_at=now,
-                updated_by="assistant-eval-suite",
-                version=1,
+                    agent_id=fixture.agent_id,
+                    name=fixture.name,
+                    description=f"{fixture.name} evaluation agent.",
+                    status=fixture.status,
+                    scope=fixture.scope,
+                    provider=fixture.provider,
+                    model=fixture.model,
+                    allowed_workspaces=list(fixture.allowed_workspaces),
+                    capabilities=list(fixture.capabilities),
+                    allowed_tools=list(fixture.allowed_tools),
+                    allowed_action_types=allowed_action_types,
+                    system_prompt=fixture.system_prompt or f"System prompt for {fixture.name}.",
+                    created_at=now,
+                    created_by="assistant-eval-suite",
+                    updated_at=now,
+                    updated_by="assistant-eval-suite",
+                    version=1,
                 )
             )
             session.commit()

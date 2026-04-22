@@ -21,6 +21,67 @@ export type AssistantAgentSeedResult = {
   agent_ids: string[]
 }
 
+export type CodexTaskStatus = 'QUEUED' | 'DISPATCHED' | 'RUNNING' | 'COMPLETED' | 'STOPPED' | 'FAILED' | 'CANCELLED'
+export type CodexTaskRunMode = 'SINGLE_TASK' | 'LONG_RUNNING'
+
+export type CodexTaskSettings = {
+  enabled: boolean
+  configured: boolean
+  provider: 'github_actions'
+  repository: string | null
+  workflow_id: string | null
+  default_ref: string
+  prompt_input_name: string
+  long_running_default_max_iterations: number
+  long_running_max_iterations: number
+  long_running_default_continuation_prompt: string
+  missing_configuration: string[]
+}
+
+export type CodexTaskRecord = {
+  id: number
+  status: CodexTaskStatus
+  provider: 'github_actions'
+  title: string
+  prompt: string
+  run_mode: CodexTaskRunMode
+  max_iterations: number
+  continuation_prompt: string | null
+  stop_conditions: string[]
+  target_ref: string
+  repository: string | null
+  workflow_id: string | null
+  dispatch_url: string | null
+  callback_url: string | null
+  external_url: string | null
+  workflow_run_id: string | null
+  workflow_run_url: string | null
+  branch_name: string | null
+  pull_request_url: string | null
+  artifact_url: string | null
+  iteration_count: number
+  iteration_summaries: Record<string, unknown>[]
+  result_summary: string | null
+  stop_reason: string | null
+  provider_response: Record<string, unknown> | null
+  error_detail: string | null
+  requested_by: string
+  requester_role: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CreateCodexTaskInput = {
+  title: string
+  prompt: string
+  run_mode?: CodexTaskRunMode
+  max_iterations?: number
+  continuation_prompt?: string
+  target_ref?: string
+}
+
 export type ProjectionAlertChannel = 'ADMIN_WORKSPACE' | 'EMAIL' | 'SLACK' | 'INCIDENT_QUEUE'
 export type ProjectionAutoCleanMode = 'disabled' | 'clean_auto_cleanable'
 export type ProjectionMonitoringHealthStatus = 'disabled' | 'healthy' | 'attention' | 'critical'
@@ -242,6 +303,45 @@ export async function seedAssistantAgents(apiBase: string): Promise<AssistantAge
       requested_by: actorId,
     },
     { headers: adminMutationHeaders() },
+  )
+}
+
+export async function loadCodexTaskSettings(apiBase: string): Promise<CodexTaskSettings> {
+  return fetchJson<CodexTaskSettings>(`${apiBase}/admin/codex/settings`, {
+    headers: adminMutationHeaders(),
+    cache: 'no-store',
+  })
+}
+
+export async function listCodexTasks(apiBase: string, options?: { limit?: number }): Promise<CodexTaskRecord[]> {
+  const params = new URLSearchParams()
+  if (typeof options?.limit === 'number') {
+    params.set('limit', String(options.limit))
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : ''
+  return fetchJson<CodexTaskRecord[]>(`${apiBase}/admin/codex/tasks${suffix}`, {
+    headers: adminMutationHeaders(),
+    cache: 'no-store',
+  })
+}
+
+export async function createCodexTask(
+  apiBase: string,
+  payload: CreateCodexTaskInput,
+): Promise<CodexTaskRecord> {
+  return postJson<CodexTaskRecord>(
+    `${apiBase}/admin/codex/tasks`,
+    {
+      title: payload.title.trim(),
+      prompt: payload.prompt.trim(),
+      ...(payload.run_mode ? { run_mode: payload.run_mode } : {}),
+      ...(typeof payload.max_iterations === 'number' ? { max_iterations: payload.max_iterations } : {}),
+      ...(payload.continuation_prompt?.trim() ? { continuation_prompt: payload.continuation_prompt.trim() } : {}),
+      ...(payload.target_ref?.trim() ? { target_ref: payload.target_ref.trim() } : {}),
+    },
+    {
+      headers: adminMutationHeaders(),
+    },
   )
 }
 

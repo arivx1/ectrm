@@ -36,6 +36,7 @@ const KNOWN_MANUAL_SECTIONS = new Set<ManualSectionId>([
 ])
 
 const VIEW_MANUAL_SECTION: Partial<Record<ViewKey, ManualSectionId>> = {
+  prompt: 'start-here',
   dashboard: 'start-here',
   demo: 'start-here',
   pretrade: 'book-or-amend-a-trade',

@@ -14,8 +14,14 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
       'Use the live desk, product guide, and guided walkthrough as your first stop before diving into a specific workflow.',
     landingBody:
       'This section answers the first question new or returning operators have: where should I start for the job in front of me?',
-    viewKeys: ['dashboard', 'guide', 'demo'],
+    viewKeys: ['prompt', 'dashboard', 'guide', 'demo'],
     startPaths: [
+      {
+        title: 'Ask the operator prompt',
+        detail: 'Start from the job in front of you and let the assistant answer, clarify, or route you to the right workspace.',
+        viewKey: 'prompt',
+        actionLabel: 'Open Prompt Home',
+      },
       {
         title: 'Get oriented',
         detail: 'Read the in-product handbook before you touch live workflows or need to explain the platform to someone new.',

@@ -46,7 +46,10 @@ AssistantAgentCapability = Literal["READ", "EXPLAIN", "DRAFT", "ACTION"]
 AssistantAgentTokenBudgetStatus = Literal["GREEN", "AMBER", "RED"]
 AssistantAgentTokenAllocationSource = Literal["AGENT", "DEFAULT"]
 AssistantAgentRoleCatalogStatus = Literal["SEEDED", "TEMPLATE", "PHASE_1", "PHASE_2_PLUS"]
+AssistantAgentProfileKind = Literal["CURATED", "ROLE_DERIVED", "CUSTOM"]
 AssistantAgentAuthorityLevel = Literal["OBSERVE", "EXPLAIN", "DRAFT", "STAGE", "EXECUTE", "EXTERNAL_COMMIT"]
+AssistantPolicyResourceType = Literal["tool", "action"]
+AssistantPolicyRiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 AssistantActionType = Literal[
     "cancel_trade",
     "issue_trade_confirmation",
@@ -57,7 +60,16 @@ AssistantActionType = Literal[
     "reprocess_document_ingestion",
 ]
 AssistantActionRequestStatus = Literal["PENDING", "REJECTED", "EXECUTED", "FAILED"]
+AssistantActionRequestLifecycleStage = Literal["AWAITING_REVIEW", "EXECUTED", "REJECTED", "FAILED"]
+AssistantActionRequestLifecycleTone = Literal["attention", "success", "neutral", "danger"]
+AssistantOutcomeMetricRecommendationAction = Literal[
+    "INSUFFICIENT_DATA",
+    "KEEP_STAGED",
+    "ELIGIBLE_FOR_BOUNDED_REVIEW",
+    "RECOMMEND_PAUSE",
+]
 AssistantRunStatus = Literal["COMPLETED", "FAILED"]
+AssistantRunFeedbackRating = Literal["HELPFUL", "NEEDS_WORK"]
 ALL_ASSISTANT_ACTION_TYPES: tuple[str, ...] = get_args(AssistantActionType)
 
 AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
@@ -83,6 +95,75 @@ class AssistantActionDefinitionOut(BaseModel):
     name: AssistantActionType
     label: str
     description: str
+
+
+class AssistantPolicyDecisionOut(BaseModel):
+    resource_type: AssistantPolicyResourceType
+    resource_id: str
+    policy_key: str
+    allowed: bool
+    reason: str
+    risk_level: AssistantPolicyRiskLevel
+    approval_required: bool
+    max_scope: AssistantAgentScope
+    roles: list[str] = Field(default_factory=list)
+    workspaces: list[AssistantWorkspace] = Field(default_factory=list)
+
+
+class AssistantAgentEffectivePolicyOut(BaseModel):
+    allowed_tools: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    blocked_tools: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    allowed_actions: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    blocked_actions: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    policy_notes: list[str] = Field(default_factory=list)
+
+
+class AssistantPolicySimulationRequest(BaseModel):
+    workspace: AssistantWorkspace = "assistant"
+    prompt: Optional[str] = Field(default=None, max_length=20_000)
+    context: Optional[str] = Field(default=None, max_length=20_000)
+    actor_role: Optional[str] = Field(default=None, max_length=64)
+    phase: Literal["stage", "execute"] = "stage"
+
+    @field_validator("prompt")
+    @classmethod
+    def normalize_prompt(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="prompt")
+
+    @field_validator("context")
+    @classmethod
+    def normalize_context(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="context")
+
+    @field_validator("actor_role")
+    @classmethod
+    def normalize_actor_role(cls, value: Optional[str]) -> Optional[str]:
+        normalized = normalize_optional_text(value, field_name="actor_role")
+        return normalized.upper() if normalized is not None else None
+
+
+class AssistantPolicySimulationActionProposalOut(BaseModel):
+    action_type: AssistantActionType
+    summary: str
+    description: str
+    payload: dict[str, Any]
+    decision: AssistantPolicyDecisionOut
+
+
+class AssistantPolicySimulationOut(BaseModel):
+    agent_id: str
+    agent_name: str
+    workspace: AssistantWorkspace
+    actor_role: Optional[str]
+    phase: Literal["stage", "execute"]
+    effective_policy: AssistantAgentEffectivePolicyOut
+    allowed_tools: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    blocked_tools: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    allowed_actions: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    blocked_actions: list[AssistantPolicyDecisionOut] = Field(default_factory=list)
+    staged_action_proposals: list[AssistantPolicySimulationActionProposalOut] = Field(default_factory=list)
+    staging_warnings: list[str] = Field(default_factory=list)
+    simulation_notes: list[str] = Field(default_factory=list)
 
 
 class AssistantRuntimeSettingsOut(BaseModel):
@@ -150,6 +231,63 @@ class AssistantToolCallOut(BaseModel):
     record_count: Optional[int] = None
 
 
+class AssistantRunFeedbackCreate(BaseModel):
+    rating: AssistantRunFeedbackRating
+    comment: Optional[str] = Field(default=None, max_length=2_000)
+
+    @field_validator("comment")
+    @classmethod
+    def normalize_comment(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="comment")
+
+
+class AssistantRunFeedbackOut(BaseModel):
+    feedback_id: int
+    run_id: int
+    conversation_id: Optional[int] = None
+    user_id: str
+    user_role: str
+    rating: AssistantRunFeedbackRating
+    comment: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantActionReviewObjectRefOut(BaseModel):
+    type: str
+    id: str
+    label: Optional[str] = None
+
+
+class AssistantActionReviewSupportingRecordOut(AssistantActionReviewObjectRefOut):
+    summary: str
+
+
+class AssistantActionReviewContextOut(BaseModel):
+    owning_work_object: AssistantActionReviewObjectRefOut
+    required_reviewer_role: str
+    business_rationale: str
+    proposed_mutation: dict[str, object] = Field(default_factory=dict)
+    supporting_records: list[AssistantActionReviewSupportingRecordOut] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    expected_downstream_effects: list[str] = Field(default_factory=list)
+    stale_state_basis: dict[str, object] = Field(default_factory=dict)
+    idempotency_key: Optional[str] = None
+
+
+class AssistantActionRequestLifecycleOut(BaseModel):
+    stage: AssistantActionRequestLifecycleStage
+    label: str
+    tone: AssistantActionRequestLifecycleTone
+    is_terminal: bool
+    can_approve: bool
+    can_reject: bool
+    reviewer_action_label: Optional[str] = None
+    decided_label: Optional[str] = None
+    review_risk_flags: list[str] = Field(default_factory=list)
+
+
 class AssistantActionRequestOut(BaseModel):
     action_request_id: int
     run_id: int
@@ -162,6 +300,8 @@ class AssistantActionRequestOut(BaseModel):
     summary: str
     description: str
     payload: dict[str, object] = Field(default_factory=dict)
+    review_context: Optional[AssistantActionReviewContextOut] = None
+    lifecycle: AssistantActionRequestLifecycleOut
     result: Optional[dict[str, object]] = None
     error_detail: Optional[str] = None
     created_at: datetime
@@ -187,6 +327,103 @@ class AssistantActionRequestAdminPageOut(BaseModel):
     summary: AssistantActionRequestAdminSummaryOut
 
 
+class AssistantOutcomeMetricThresholdsOut(BaseModel):
+    min_decided_actions_for_promotion: int
+    max_rejection_rate_for_promotion: float
+    max_failed_execution_rate_for_promotion: float
+    max_stale_action_rate_for_promotion: float
+    max_pending_actions_for_promotion: int
+    min_decided_actions_for_pause_signal: int
+    rejection_rate_pause_threshold: float
+    failed_execution_rate_pause_threshold: float
+    stale_action_rate_pause_threshold: float
+    oldest_pending_hours_pause_threshold: int
+
+
+class AssistantOutcomeMetricRecommendationOut(BaseModel):
+    recommended_action: AssistantOutcomeMetricRecommendationAction
+    promotion_candidate: bool
+    pause_recommended: bool
+    reasons: list[str] = Field(default_factory=list)
+
+
+class AssistantOutcomeMetricCountersOut(BaseModel):
+    staged_action_count: int
+    pending_action_count: int
+    executed_action_count: int
+    rejected_action_count: int
+    failed_action_count: int
+    decided_action_count: int
+    stale_action_count: int
+    approval_rate: Optional[float] = None
+    rejection_rate: Optional[float] = None
+    failed_execution_rate: Optional[float] = None
+    stale_action_rate: Optional[float] = None
+    avg_decision_seconds: Optional[float] = None
+    oldest_pending_age_seconds: Optional[float] = None
+
+
+class AssistantAgentOutcomeMetricRowOut(AssistantOutcomeMetricCountersOut):
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    agent_role_key: Optional[str] = None
+    agent_profile_kind: Optional[AssistantAgentProfileKind] = None
+    run_count: int
+    completed_run_count: int
+    failed_run_count: int
+    warning_count: int
+    warning_rate: Optional[float] = None
+    tool_call_count: int
+    helpful_feedback_count: int
+    needs_work_feedback_count: int
+    feedback_helpful_rate: Optional[float] = None
+    recommendation: AssistantOutcomeMetricRecommendationOut
+
+
+class AssistantWorkspaceFeedbackMetricRowOut(BaseModel):
+    workspace: Optional[AssistantWorkspace] = None
+    run_count: int
+    helpful_feedback_count: int
+    needs_work_feedback_count: int
+    feedback_count: int
+    feedback_helpful_rate: Optional[float] = None
+
+
+class AssistantRunFeedbackInsightOut(BaseModel):
+    feedback_id: int
+    run_id: int
+    conversation_id: Optional[int] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    workspace: Optional[AssistantWorkspace] = None
+    user_id: str
+    user_role: str
+    rating: AssistantRunFeedbackRating
+    comment: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantActionTypeOutcomeMetricRowOut(AssistantOutcomeMetricCountersOut):
+    action_type: AssistantActionType
+    recommendation: AssistantOutcomeMetricRecommendationOut
+
+
+class AssistantOutcomeMetricsOut(BaseModel):
+    generated_at: datetime
+    created_after: Optional[datetime] = None
+    created_before: Optional[datetime] = None
+    thresholds: AssistantOutcomeMetricThresholdsOut
+    total_feedback_count: int = 0
+    helpful_feedback_count: int = 0
+    needs_work_feedback_count: int = 0
+    feedback_helpful_rate: Optional[float] = None
+    by_agent: list[AssistantAgentOutcomeMetricRowOut] = Field(default_factory=list)
+    by_workspace: list[AssistantWorkspaceFeedbackMetricRowOut] = Field(default_factory=list)
+    by_action_type: list[AssistantActionTypeOutcomeMetricRowOut] = Field(default_factory=list)
+    recent_feedback: list[AssistantRunFeedbackInsightOut] = Field(default_factory=list)
+
+
 class AssistantPromptResponse(BaseModel):
     conversation_id: Optional[int] = None
     conversation_updated_at: Optional[datetime] = None
@@ -194,6 +431,8 @@ class AssistantPromptResponse(BaseModel):
     run_recorded_at: Optional[datetime] = None
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
+    agent_role_key: Optional[str] = None
+    agent_profile_kind: Optional[AssistantAgentProfileKind] = None
     provider: AssistantProvider
     model: str
     message: AssistantMessageOut
@@ -213,6 +452,8 @@ class AssistantPromptSectionOut(BaseModel):
 class AssistantPromptContextOut(BaseModel):
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
+    agent_role_key: Optional[str] = None
+    agent_profile_kind: Optional[AssistantAgentProfileKind] = None
     provider: AssistantProvider
     model: str
     generated_at: datetime
@@ -234,6 +475,12 @@ class AssistantAgentBase(BaseModel):
     scope: AssistantAgentScope
     provider: Optional[AssistantProvider] = None
     model: Optional[str] = Field(default=None, max_length=160)
+    role_key: Optional[str] = Field(default=None, max_length=80)
+    profile_kind: AssistantAgentProfileKind = "CUSTOM"
+    specialization_summary: Optional[str] = Field(default=None, max_length=500)
+    human_owner_role: Optional[str] = Field(default=None, max_length=128)
+    authority_ceiling: Optional[AssistantAgentAuthorityLevel] = None
+    activation_notes: Optional[str] = Field(default=None, max_length=2_000)
     allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
     capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
     allowed_tools: list[str] = Field(default_factory=list, max_length=16)
@@ -255,6 +502,31 @@ class AssistantAgentBase(BaseModel):
     @classmethod
     def normalize_model(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="model")
+
+    @field_validator("role_key")
+    @classmethod
+    def normalize_role_key(cls, value: Optional[str]) -> Optional[str]:
+        normalized = normalize_optional_text(value, field_name="role_key", lowercase=True)
+        if normalized is None:
+            return None
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("role_key must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("specialization_summary")
+    @classmethod
+    def normalize_specialization_summary(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="specialization_summary")
+
+    @field_validator("human_owner_role")
+    @classmethod
+    def normalize_human_owner_role(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="human_owner_role")
+
+    @field_validator("activation_notes")
+    @classmethod
+    def normalize_activation_notes(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="activation_notes")
 
     @field_validator("system_prompt")
     @classmethod
@@ -342,12 +614,19 @@ class AssistantAgentOut(BaseModel):
     scope: AssistantAgentScope
     provider: Optional[AssistantProvider]
     model: Optional[str]
+    role_key: Optional[str]
+    profile_kind: AssistantAgentProfileKind
+    specialization_summary: Optional[str]
+    human_owner_role: Optional[str]
+    authority_ceiling: Optional[AssistantAgentAuthorityLevel]
+    activation_notes: Optional[str]
     allowed_workspaces: list[AssistantWorkspace]
     capabilities: list[AssistantAgentCapability]
     allowed_tools: list[str]
     allowed_action_types: list[AssistantActionType]
     daily_token_allocation: Optional[int]
     token_budget: AssistantAgentTokenBudgetOut
+    effective_policy: AssistantAgentEffectivePolicyOut
 
 
 class AssistantAgentAdminOut(AssistantAgentOut):
@@ -542,6 +821,8 @@ class AssistantRunSummaryOut(BaseModel):
     workspace: Optional[AssistantWorkspace]
     agent_id: Optional[str]
     agent_name: Optional[str]
+    agent_role_key: Optional[str] = None
+    agent_profile_kind: Optional[AssistantAgentProfileKind] = None
     provider: AssistantProvider
     model: str
     use_live_tools: bool
@@ -606,6 +887,7 @@ class AssistantConversationMessageOut(BaseModel):
     model: Optional[str] = None
     warnings: list[str] = Field(default_factory=list)
     tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+    feedback: Optional[AssistantRunFeedbackOut] = None
 
 
 class AssistantConversationSummaryOut(BaseModel):

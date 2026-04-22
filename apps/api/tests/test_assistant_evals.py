@@ -274,6 +274,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="trade-captain",
             name="Trade Captain",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("cancel_trade",),
             system_prompt="Stage approval-gated trade actions when the user explicitly requests them.",
         ),
         trades=(AssistantEvalTradeFixture(trade_id="T-2003"),),
@@ -302,6 +303,37 @@ MANAGED_AGENT_EVAL_CASES = (
             action_request_types=("cancel_trade",),
             action_request_statuses=("PENDING",),
             action_request_payloads=({"trade_id": "T-2003"},),
+            action_request_review_contexts=(
+                {
+                    "owning_work_object": {"type": "trade", "id": "T-2003", "label": "Trade T-2003"},
+                    "required_reviewer_role": "TRADER_OR_DESK_LEAD",
+                    "business_rationale": (
+                        "Trade T-2003 was identified from the request context and was active when the action was staged."
+                    ),
+                    "proposed_mutation": {
+                        "operation": "cancel_trade",
+                        "trade_id": "T-2003",
+                        "status": "CANCELLED",
+                    },
+                    "supporting_records": [
+                        {
+                            "type": "trade",
+                            "id": "T-2003",
+                            "label": "Trade T-2003",
+                            "summary": "Current trade status was ACTIVE when staged.",
+                        },
+                    ],
+                    "assumptions": [],
+                    "missing_evidence": [],
+                    "expected_downstream_effects": [
+                        "Create a TradeCancelled event.",
+                        "Mark the trade projection as CANCELLED.",
+                        "Refresh position and option exposure projections.",
+                    ],
+                    "stale_state_basis": {"status": "ACTIVE", "last_event_id": "evt-t-2003"},
+                    "idempotency_key": "assistant-action:cancel_trade:T-2003:evt-t-2003",
+                },
+            ),
             prompt_section_keys=("managed-agent", "workspace", "application-context", "approval-gated-action"),
             prompt_section_content_contains=(
                 (
@@ -321,6 +353,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="trade-captain-exec",
             name="Trade Captain Exec",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("cancel_trade",),
             system_prompt="Stage governed trade actions, and be explicit that execution only happens after approval.",
         ),
         trades=(AssistantEvalTradeFixture(trade_id="T-2004"),),
@@ -378,6 +411,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="trade-captain-cross-user-admin",
             name="Trade Captain Cross User Admin",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("cancel_trade",),
             system_prompt="Stage governed trade actions for administrative approval without implying self-approval.",
         ),
         request_user=AssistantEvalUserFixture(
@@ -447,6 +481,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="trade-captain-cross-user-denied",
             name="Trade Captain Cross User Denied",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("cancel_trade",),
             system_prompt="Stage governed trade actions while preserving approval access boundaries.",
         ),
         request_user=AssistantEvalUserFixture(
@@ -513,6 +548,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="trade-captain-stale",
             name="Trade Captain Stale",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("cancel_trade",),
             system_prompt="Stage governed trade actions, but fail safely if the underlying trade changes before approval.",
         ),
         trades=(AssistantEvalTradeFixture(trade_id="T-2005"),),
@@ -536,7 +572,7 @@ MANAGED_AGENT_EVAL_CASES = (
         before_follow_up_trade_status_updates=(("T-2005", "CANCELLED"),),
         follow_up_expectations=AssistantEvalFollowUpExpectations(
             action_request_status="FAILED",
-            error_detail_contains=("already closed as CANCELLED",),
+            error_detail_contains=("staged review context is stale", "status expected 'ACTIVE' but found 'CANCELLED'"),
             result_is_none=True,
             trade_statuses=(("T-2005", "CANCELLED"),),
         ),
@@ -568,6 +604,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="trade-captain-closed",
             name="Trade Captain Closed",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("cancel_trade",),
             system_prompt="Refuse to imply a governed action was staged when the selected trade is already closed.",
         ),
         trades=(AssistantEvalTradeFixture(trade_id="T-2006", status="CANCELLED"),),
@@ -608,6 +645,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="settlement-governor-invoice",
             name="Settlement Governor Invoice",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("issue_trade_invoice",),
             system_prompt="Stage governed invoice issuance requests and make the approval dependency explicit.",
         ),
         trades=(AssistantEvalTradeFixture(trade_id="T-2010"),),
@@ -660,6 +698,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="settlement-governor-payment",
             name="Settlement Governor Payment",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("create_trade_payment",),
             system_prompt="Stage governed payment requests and wait for approval before implying execution.",
         ),
         trades=(AssistantEvalTradeFixture(trade_id="T-2011"),),
@@ -721,6 +760,7 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="docs-governor-reprocess",
             name="Docs Governor Reprocess",
             capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("reprocess_document_ingestion",),
             system_prompt="Stage governed document reprocess actions and keep the approval boundary explicit.",
         ),
         documents=(

@@ -272,6 +272,57 @@ class PreTradeApiTests(unittest.TestCase):
             },
         }
 
+    def _recommendation_input_snapshots(self) -> list[dict[str, object]]:
+        return [
+            {
+                "source_key": "desk-context",
+                "source_type": "INTERNAL",
+                "freshness": "FRESH",
+                "summary": "Captured matching desk exposure and active trades.",
+                "payload": {
+                    "related_active_trade_count": 1,
+                    "current_net_position": 1000,
+                    "current_counterparty_exposure": 20000,
+                },
+            },
+            {
+                "source_key": "counterparty-credit",
+                "source_type": "INTERNAL",
+                "freshness": "FRESH",
+                "summary": "Internal credit profile is current.",
+                "payload": {
+                    "has_credit_profile": True,
+                    "credit_limit_amount": 500000,
+                    "breach_action": "WARN",
+                    "credit_rating": "A",
+                },
+            },
+            {
+                "source_key": "latest-mark",
+                "source_type": "EXTERNAL",
+                "freshness": "FRESH",
+                "summary": "Latest price-index mark was captured.",
+                "payload": {"latest_mark": 2.83},
+            },
+            {
+                "source_key": "weather-intelligence",
+                "source_type": "EXTERNAL",
+                "freshness": "FRESH",
+                "summary": "No high-risk weather regions are present.",
+                "payload": {"weather_high_risk_count": 0},
+            },
+        ]
+
+    def _escalating_recommendation_input_snapshots(self) -> list[dict[str, object]]:
+        snapshots = self._recommendation_input_snapshots()
+        snapshots[1]["payload"] = {
+            "has_credit_profile": True,
+            "credit_limit_amount": 80000,
+            "breach_action": "WARN",
+            "credit_rating": "A",
+        }
+        return snapshots
+
     def test_scenarios_require_authentication(self) -> None:
         response = self.client.get("/pretrade/scenarios")
         self.assertEqual(response.status_code, 401)
@@ -399,21 +450,104 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(updated_review["activity"][-1]["payload"]["from_status"], "OPEN")
         self.assertEqual(updated_review["activity"][-1]["payload"]["to_status"], "APPROVED")
 
+    def test_recommendation_runs_persist_inputs_scores_and_source_links(self) -> None:
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=self._scenario_payload(),
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario = scenario_response.json()
+
+        run_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "May gas hedge recommendation",
+                "source_scenario_id": scenario["scenario_id"],
+                "input_snapshots": self._recommendation_input_snapshots(),
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(run_response.status_code, 201)
+        run = run_response.json()
+        self.assertEqual(run["source_scenario_id"], scenario["scenario_id"])
+        self.assertIsNone(run["source_review_id"])
+        self.assertEqual(run["draft"]["commodity"], "HENRY_HUB")
+        self.assertEqual(len(run["input_snapshots"]), 4)
+        self.assertEqual(run["recommendation"]["stance"], "PROCEED")
+        self.assertEqual(run["recommendation"]["confidence"], "HIGH")
+        self.assertEqual(run["recommendation"]["score"], 100)
+        self.assertEqual(run["recommendation"]["estimated_notional"], 71000)
+        self.assertEqual(run["recommendation"]["related_active_trade_count"], 1)
+        self.assertTrue(run["run_key"])
+
+        list_response = self.client.get(
+            f"/pretrade/recommendations/runs?source_scenario_id={scenario['scenario_id']}",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(list_response.status_code, 200)
+        listed_runs = list_response.json()
+        self.assertEqual(len(listed_runs), 1)
+        self.assertEqual(listed_runs[0]["run_id"], run["run_id"])
+        self.assertEqual(listed_runs[0]["input_snapshots"][1]["source_key"], "counterparty-credit")
+
+        missing_scenario_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={"source_scenario_id": scenario["scenario_id"], "input_snapshots": []},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(missing_scenario_response.status_code, 404)
+
     def test_trade_creation_links_approved_review_and_prevents_duplicate_booking(self) -> None:
         self._seed_trade_reference_data()
+
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=self._scenario_payload(),
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario_id = scenario_response.json()["scenario_id"]
+
+        recommendation_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "May gas hedge recommendation",
+                "source_scenario_id": scenario_id,
+                "input_snapshots": self._escalating_recommendation_input_snapshots(),
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(recommendation_response.status_code, 201)
+        recommendation_run_id = recommendation_response.json()["run_id"]
+        self.assertEqual(recommendation_response.json()["recommendation"]["stance"], "ESCALATE")
 
         review_response = self.client.post(
             "/pretrade/reviews",
             json={
                 "name": "May gas hedge review",
                 "thesis": "Queue for desk review before capture.",
+                "source_scenario_id": scenario_id,
+                "recommendation_run_id": recommendation_run_id,
                 "review_notes": "Approved flow test.",
                 "draft": self._scenario_payload()["draft"],
             },
             headers=self.trader_one_headers,
         )
         self.assertEqual(review_response.status_code, 201)
-        review_id = review_response.json()["review_id"]
+        review_payload = review_response.json()
+        review_id = review_payload["review_id"]
+        self.assertEqual(review_payload["recommendation_run_id"], recommendation_run_id)
+        self.assertEqual(review_payload["recommendation_summary"]["run_id"], recommendation_run_id)
+        self.assertEqual(review_payload["recommendation_summary"]["stance"], "ESCALATE")
+        self.assertEqual(review_payload["recommendation_summary"]["input_snapshot_count"], 4)
+
+        visible_attached_run = self.client.get(
+            f"/pretrade/recommendations/runs/{recommendation_run_id}",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(visible_attached_run.status_code, 200)
+        self.assertEqual(visible_attached_run.json()["input_snapshots"][0]["source_key"], "desk-context")
 
         blocked_response = self.client.post(
             "/events",
@@ -450,7 +584,7 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(blocked_response.status_code, 409)
         self.assertIn("must be approved", blocked_response.json()["detail"])
 
-        approve_response = self.client.patch(
+        risky_approval_response = self.client.patch(
             f"/pretrade/reviews/{review_id}",
             json={
                 "review_status": "APPROVED",
@@ -458,8 +592,29 @@ class PreTradeApiTests(unittest.TestCase):
             },
             headers=self.trader_two_headers,
         )
+        self.assertEqual(risky_approval_response.status_code, 422)
+        self.assertIn("override reason is required", risky_approval_response.json()["detail"])
+
+        approve_response = self.client.patch(
+            f"/pretrade/reviews/{review_id}",
+            json={
+                "review_status": "APPROVED",
+                "activity_comment": "Approved for booking after desk review.",
+                "recommendation_override_reason": "Credit approved the temporary utilization overage.",
+            },
+            headers=self.trader_two_headers,
+        )
         self.assertEqual(approve_response.status_code, 200)
-        self.assertEqual(approve_response.json()["activity"][-1]["action"], "APPROVED")
+        approved_payload = approve_response.json()
+        self.assertEqual(approved_payload["activity"][-1]["action"], "APPROVED")
+        self.assertEqual(approved_payload["recommendation_override_reason"], "Credit approved the temporary utilization overage.")
+        self.assertEqual(approved_payload["recommendation_override_by"], "trader_two")
+        self.assertIsNotNone(approved_payload["recommendation_override_at"])
+        self.assertEqual(approved_payload["activity"][-1]["payload"]["recommendation_stance"], "ESCALATE")
+        self.assertEqual(
+            approved_payload["activity"][-1]["payload"]["recommendation_override_reason"],
+            "Credit approved the temporary utilization overage.",
+        )
 
         create_response = self.client.post(
             "/events",
@@ -505,9 +660,19 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(linked_payload["linked_trade_status"], "ACTIVE")
         self.assertEqual(linked_payload["booked_by"], "trader_one")
         self.assertIsNotNone(linked_payload["booked_at"])
+        self.assertEqual(linked_payload["recommendation_run_id"], recommendation_run_id)
+        self.assertEqual(linked_payload["recommendation_summary"]["score"], 70)
+        self.assertEqual(linked_payload["recommendation_override_reason"], "Credit approved the temporary utilization overage.")
         self.assertEqual([entry["action"] for entry in linked_payload["activity"]], ["SUBMITTED", "APPROVED", "BOOKED"])
         self.assertEqual(linked_payload["activity"][-1]["actor_id"], "trader_one")
         self.assertEqual(linked_payload["activity"][-1]["payload"]["linked_trade_id"], "TRD-21001")
+        self.assertEqual(linked_payload["activity"][-1]["payload"]["recommendation_run_id"], recommendation_run_id)
+        self.assertEqual(
+            linked_payload["activity"][-1]["payload"]["recommendation_override_reason"],
+            "Credit approved the temporary utilization overage.",
+        )
+        self.assertEqual(linked_payload["activity"][-1]["payload"]["recommendation_override_by"], "trader_two")
+        self.assertIsNotNone(linked_payload["activity"][-1]["payload"]["recommendation_override_at"])
 
         booked_status_update = self.client.patch(
             f"/pretrade/reviews/{review_id}",

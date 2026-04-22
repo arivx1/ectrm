@@ -268,3 +268,4 @@ class TradeWorkflowItemUpdate(BaseModel):
     owner: Optional[str] = None
     due_at: Optional[datetime] = None
     notes: Optional[str] = None
+    expected_version: Optional[int] = None

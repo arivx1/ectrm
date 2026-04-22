@@ -10,6 +10,7 @@
 @import "./styles/shared-forms.css";
 @import "./styles/workspace-windows.css";
 @import "./styles/settings.css";
+@import "./styles/prompt-home.css";
 @import "./styles/assistant-workspace.css";
 @import "./styles/data-sheet.css";
 @import "./styles/docs-content.css";

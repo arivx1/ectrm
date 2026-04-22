@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
 from apps.api.app.domains.assistant.services.tools import build_tool_definitions
 from apps.api.app.models.assistant_agent import AssistantAgent
 
@@ -12,6 +13,7 @@ from apps.api.app.models.assistant_agent import AssistantAgent
 @dataclass(frozen=True)
 class AssistantAgentSeedDefinition:
     agent_id: str
+    role_key: str
     name: str
     description: str
     status: str
@@ -59,6 +61,7 @@ def _build_system_prompt(
 CURATED_ASSISTANT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
     AssistantAgentSeedDefinition(
         agent_id="trade-ops-copilot",
+        role_key="trade-ops-copilot",
         name="Trade Ops Copilot",
         description=(
             "Coordinates confirmation, workflow, delivery, and document follow-through for booked trades."
@@ -111,6 +114,7 @@ CURATED_ASSISTANT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = 
     ),
     AssistantAgentSeedDefinition(
         agent_id="settlement-copilot",
+        role_key="settlement-copilot",
         name="Settlement Copilot",
         description="Pairs settlement analysis with approval-gated invoice and payment staging.",
         status="ACTIVE",
@@ -148,6 +152,7 @@ CURATED_ASSISTANT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = 
     ),
     AssistantAgentSeedDefinition(
         agent_id="trade-governor",
+        role_key="trade-governor",
         name="Trade Governor",
         description=(
             "Focuses on high-sensitivity trade governance with a tightly constrained cancel-only action scope."
@@ -203,6 +208,7 @@ def seed_assistant_agents(
         allowed_tools = [
             tool_name for tool_name in definition.recommended_tools if tool_name in available_tool_names
         ]
+        profile_metadata = _profile_metadata_for_definition(definition)
         record = db.get(AssistantAgent, definition.agent_id)
         if record is None:
             db.add(
@@ -214,6 +220,12 @@ def seed_assistant_agents(
                     scope=definition.scope,
                     provider=definition.provider,
                     model=definition.model,
+                    role_key=profile_metadata["role_key"],
+                    profile_kind=profile_metadata["profile_kind"],
+                    specialization_summary=profile_metadata["specialization_summary"],
+                    human_owner_role=profile_metadata["human_owner_role"],
+                    authority_ceiling=profile_metadata["authority_ceiling"],
+                    activation_notes=profile_metadata["activation_notes"],
                     allowed_workspaces=list(definition.allowed_workspaces),
                     capabilities=list(definition.capabilities),
                     allowed_tools=allowed_tools,
@@ -233,6 +245,7 @@ def seed_assistant_agents(
             record,
             definition=definition,
             allowed_tools=allowed_tools,
+            profile_metadata=profile_metadata,
             requested_by=requested_by,
             updated_at=now,
         ):
@@ -252,6 +265,7 @@ def _apply_definition(
     *,
     definition: AssistantAgentSeedDefinition,
     allowed_tools: list[str],
+    profile_metadata: dict[str, str],
     requested_by: str,
     updated_at: datetime,
 ) -> bool:
@@ -267,6 +281,12 @@ def _apply_definition(
             record.scope != definition.scope,
             record.provider != definition.provider,
             record.model != definition.model,
+            record.role_key != profile_metadata["role_key"],
+            record.profile_kind != profile_metadata["profile_kind"],
+            record.specialization_summary != profile_metadata["specialization_summary"],
+            record.human_owner_role != profile_metadata["human_owner_role"],
+            record.authority_ceiling != profile_metadata["authority_ceiling"],
+            record.activation_notes != profile_metadata["activation_notes"],
             list(record.allowed_workspaces or []) != next_allowed_workspaces,
             list(record.capabilities or []) != next_capabilities,
             list(record.allowed_tools or []) != allowed_tools,
@@ -283,6 +303,12 @@ def _apply_definition(
     record.scope = definition.scope
     record.provider = definition.provider
     record.model = definition.model
+    record.role_key = profile_metadata["role_key"]
+    record.profile_kind = profile_metadata["profile_kind"]
+    record.specialization_summary = profile_metadata["specialization_summary"]
+    record.human_owner_role = profile_metadata["human_owner_role"]
+    record.authority_ceiling = profile_metadata["authority_ceiling"]
+    record.activation_notes = profile_metadata["activation_notes"]
     record.allowed_workspaces = next_allowed_workspaces
     record.capabilities = next_capabilities
     record.allowed_tools = allowed_tools
@@ -292,3 +318,17 @@ def _apply_definition(
     record.updated_by = requested_by
     record.version += 1
     return True
+
+
+def _profile_metadata_for_definition(definition: AssistantAgentSeedDefinition) -> dict[str, str]:
+    role = get_role_archetype(definition.role_key)
+    if role is None:
+        raise RuntimeError(f"Seeded assistant agent references unknown role archetype '{definition.role_key}'")
+    return {
+        "role_key": role.role_key,
+        "profile_kind": "CURATED",
+        "specialization_summary": f"Curated seed profile for the {role.name} role archetype.",
+        "human_owner_role": role.human_owner_role,
+        "authority_ceiling": role.authority_ceiling,
+        "activation_notes": "Seeded by the platform role catalog.",
+    }

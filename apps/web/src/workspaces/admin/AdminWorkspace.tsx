@@ -13,6 +13,8 @@ import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
+import { AssistantOutcomeMetricsPanel } from './AssistantOutcomeMetricsPanel'
+import { CodexTaskPanel } from './CodexTaskPanel'
 import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
@@ -1630,11 +1632,23 @@ export function AdminWorkspace({
         onOpenSettings={onOpenSettings}
       />
 
+      <AssistantOutcomeMetricsPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+      />
+
       <AssistantApprovalInboxPanel
         authSession={authSession}
         formatDate={formatDate}
         onOpenSettings={onOpenSettings}
         onRefreshData={onRefreshData}
+      />
+
+      <CodexTaskPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
       />
 
       <UserManagementPanel

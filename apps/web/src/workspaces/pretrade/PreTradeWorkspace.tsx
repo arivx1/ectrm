@@ -3,10 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { loadMarketContext } from '../../entities/market-data/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
 import {
+  createPreTradeRecommendationRun,
   createPreTradeReviewActivity,
   createPreTradeReviewItem,
   createPreTradeScenario,
   deletePreTradeScenario,
+  loadPreTradeRecommendationRuns,
   loadPreTradeReviewItems,
   loadPreTradeScenarios,
   updatePreTradeReviewItem,
@@ -23,6 +25,9 @@ import type {
   MarketContextRecord,
   PortfolioRecord,
   PositionRow,
+  PreTradeRecommendationStance,
+  PreTradeRecommendationRunRecord,
+  PreTradeRecommendationSourceSnapshotRecord,
   PreTradeReviewCaptureContext,
   PreTradeReviewItemRecord,
   PreTradeReviewStatus,
@@ -187,6 +192,13 @@ function buildApprovedReviewCaptureContext(review: PreTradeReviewItemRecord): Pr
     reviewNotes: review.review_notes,
     reviewOwner: review.owner,
     sourceScenarioId: review.source_scenario_id,
+    recommendationRunId: review.recommendation_run_id,
+    recommendationHeadline: review.recommendation_summary?.headline ?? null,
+    recommendationStance: review.recommendation_summary?.stance ?? null,
+    recommendationScore: review.recommendation_summary?.score ?? null,
+    recommendationOverrideReason: review.recommendation_override_reason,
+    recommendationOverrideBy: review.recommendation_override_by,
+    recommendationOverrideAt: review.recommendation_override_at,
     approvedBy: review.updated_by,
     approvedAt: review.updated_at,
   }
@@ -216,8 +228,30 @@ function recommendationTone(stance: ReturnType<typeof buildPreTradeRecommendatio
   }
 }
 
+function recommendationRequiresOverride(stance: PreTradeRecommendationStance | null | undefined): boolean {
+  return stance === 'ESCALATE' || stance === 'WAIT_FOR_DATA'
+}
+
 function reviewActivityLabel(action: string): string {
   return action.replaceAll('_', ' ').toLowerCase()
+}
+
+function countMarketFreshnessIssues(marketContext: MarketContextRecord | null): number {
+  return (
+    marketContext?.freshness.filter(
+      (entry) =>
+        entry.health_status.toUpperCase() !== 'HEALTHY' ||
+        (typeof entry.observation_age_hours === 'number' && entry.observation_age_hours > 24),
+    ).length ?? 0
+  )
+}
+
+function countHighWeatherRisks(weatherOverview: WeatherIntelligenceOverviewRecord | null): number {
+  return (
+    weatherOverview?.regional_signals.filter((signal) =>
+      [signal.demand_risk, signal.supply_risk, signal.storm_risk].some((risk) => risk.toUpperCase() === 'HIGH'),
+    ).length ?? 0
+  )
 }
 
 export function PreTradeWorkspace({
@@ -273,7 +307,9 @@ export function PreTradeWorkspace({
   const [draft, setDraft] = useState<PreTradeScenarioDraft>(() => createEmptyDraft(draftArgs))
   const [scenarios, setScenarios] = useState<PreTradeScenarioRecord[]>([])
   const [reviews, setReviews] = useState<PreTradeReviewItemRecord[]>([])
+  const [recommendationRuns, setRecommendationRuns] = useState<PreTradeRecommendationRunRecord[]>([])
   const [reviewCommentDrafts, setReviewCommentDrafts] = useState<Record<number, string>>({})
+  const [reviewOverrideDrafts, setReviewOverrideDrafts] = useState<Record<number, string>>({})
   const [collectionLoading, setCollectionLoading] = useState(false)
   const [collectionError, setCollectionError] = useState('')
   const [actionPending, setActionPending] = useState('')
@@ -312,12 +348,14 @@ export function PreTradeWorkspace({
     setCollectionLoading(true)
     setCollectionError('')
     try {
-      const [nextScenarios, nextReviews] = await Promise.all([
+      const [nextScenarios, nextReviews, nextRecommendationRuns] = await Promise.all([
         loadPreTradeScenarios(appConfig.apiBase, accessToken),
         loadPreTradeReviewItems(appConfig.apiBase, accessToken),
+        loadPreTradeRecommendationRuns(appConfig.apiBase, accessToken, { limit: 20 }),
       ])
       setScenarios(nextScenarios)
       setReviews(nextReviews)
+      setRecommendationRuns(nextRecommendationRuns)
     } catch (error) {
       setCollectionError(error instanceof Error ? error.message : 'Could not load pre-trade scenarios or review queue.')
     } finally {
@@ -329,6 +367,7 @@ export function PreTradeWorkspace({
     if (!authSession?.accessToken) {
       setScenarios([])
       setReviews([])
+      setRecommendationRuns([])
       setCollectionError('')
       return
     }
@@ -431,8 +470,108 @@ export function PreTradeWorkspace({
           trade.book === draft.book &&
           trade.commodity_class === draft.commodity_class &&
           trade.commodity === draft.commodity,
-      ),
+    ),
     [activeTrades, draft.book, draft.commodity, draft.commodity_class],
+  )
+  const sameCounterpartyTrades = useMemo(
+    () => activeTrades.filter((trade) => trade.counterparty === draft.counterparty),
+    [activeTrades, draft.counterparty],
+  )
+  const currentCounterpartyExposure = useMemo(
+    () => sameCounterpartyTrades.reduce((sum, trade) => sum + Math.abs((trade.price ?? 0) * (trade.volume ?? 0)), 0),
+    [sameCounterpartyTrades],
+  )
+  const currentNetPosition =
+    positionsWithClass.find((position) => position.commodity === draft.commodity)?.net_volume ?? null
+  const recommendationInputSnapshots = useMemo<PreTradeRecommendationSourceSnapshotRecord[]>(
+    () => [
+      {
+        source_key: 'desk-context',
+        source_type: 'INTERNAL',
+        captured_at: null,
+        freshness: 'FRESH',
+        summary: `${relatedTrades.length} active trade${relatedTrades.length === 1 ? '' : 's'} match the selected book and commodity.`,
+        payload: {
+          related_active_trade_count: relatedTrades.length,
+          current_net_position: currentNetPosition,
+          current_counterparty_exposure: currentCounterpartyExposure,
+        },
+      },
+      {
+        source_key: 'counterparty-credit',
+        source_type: 'INTERNAL',
+        captured_at: selectedCounterpartyProfile?.updated_at ?? null,
+        freshness: selectedCounterpartyProfile ? 'FRESH' : 'UNKNOWN',
+        summary: selectedCounterpartyProfile
+          ? `Internal credit profile captured for ${selectedCounterpartyProfile.counterparty_code}.`
+          : 'No internal credit profile was captured for the selected counterparty.',
+        payload: {
+          has_credit_profile: Boolean(selectedCounterpartyProfile),
+          credit_limit_amount: selectedCounterpartyProfile?.limit_amount ?? null,
+          breach_action: selectedCounterpartyProfile?.breach_action ?? null,
+          credit_rating: selectedCounterpartyProfile?.credit_rating ?? null,
+          external_rating_value: selectedExternalSnapshot?.rating_value ?? null,
+          recommended_limit_amount: selectedExternalSnapshot?.recommended_limit_amount ?? null,
+        },
+      },
+      {
+        source_key: 'latest-mark',
+        source_type: 'EXTERNAL',
+        captured_at: latestMark?.downloaded_at ?? null,
+        freshness: latestMark ? 'FRESH' : 'UNKNOWN',
+        summary: latestMark
+          ? `${latestMark.price_index_code} mark captured for ${latestMark.observation_date}.`
+          : 'No compatible latest mark was captured for the selected price index.',
+        payload: {
+          latest_mark: latestMark?.value ?? null,
+          price_index_code: latestMark?.price_index_code ?? draft.price_index_code,
+          observation_date: latestMark?.observation_date ?? null,
+        },
+      },
+      {
+        source_key: 'market-context',
+        source_type: 'EXTERNAL',
+        captured_at: marketContext?.generated_at ?? null,
+        freshness: !marketContext ? 'UNKNOWN' : countMarketFreshnessIssues(marketContext) > 0 ? 'DEGRADED' : 'FRESH',
+        summary: marketContext
+          ? `Captured ${marketContext.fundamentals.length + marketContext.macro.length} market driver row${marketContext.fundamentals.length + marketContext.macro.length === 1 ? '' : 's'}.`
+          : 'No market context snapshot was captured.',
+        payload: {
+          market_freshness_issue_count: countMarketFreshnessIssues(marketContext),
+          fundamental_count: marketContext?.fundamentals.length ?? 0,
+          macro_count: marketContext?.macro.length ?? 0,
+        },
+      },
+      {
+        source_key: 'weather-intelligence',
+        source_type: 'EXTERNAL',
+        captured_at: weatherOverview?.latest_weather_update_at ?? null,
+        freshness: weatherOverview ? 'FRESH' : 'UNKNOWN',
+        summary: weatherOverview?.headline ?? 'No weather intelligence snapshot was captured.',
+        payload: {
+          weather_high_risk_count: countHighWeatherRisks(weatherOverview),
+          live_weather_location_count: weatherOverview?.live_weather_location_count ?? 0,
+        },
+      },
+    ],
+    [
+      currentCounterpartyExposure,
+      currentNetPosition,
+      draft.price_index_code,
+      latestMark,
+      marketContext,
+      relatedTrades.length,
+      selectedCounterpartyProfile,
+      selectedExternalSnapshot,
+      weatherOverview,
+    ],
+  )
+  const currentRecommendationRuns = useMemo(
+    () =>
+      recommendationRuns
+        .filter((run) => selectedScenarioId === null || run.source_scenario_id === selectedScenarioId)
+        .slice(0, 3),
+    [recommendationRuns, selectedScenarioId],
   )
   const recommendation = useMemo(
     () =>
@@ -550,14 +689,72 @@ export function PreTradeWorkspace({
     const resolvedDraft = sourceScenario?.draft ?? draft
 
     await withAuthenticatedAction('submit-review', async (accessToken) => {
+      const sourceScenarioId = sourceScenario?.scenario_id ?? selectedScenarioId
+      const recommendationRun = await resolveRecommendationRunForReview(accessToken, {
+        name: resolvedName,
+        thesis: resolvedThesis,
+        draft: resolvedDraft,
+        sourceScenarioId,
+        sourceScenario,
+      })
       await createPreTradeReviewItem(appConfig.apiBase, accessToken, {
         name: resolvedName,
         thesis: resolvedThesis,
         draft: resolvedDraft,
-        source_scenario_id: sourceScenario?.scenario_id ?? selectedScenarioId ?? undefined,
+        source_scenario_id: sourceScenarioId ?? undefined,
+        recommendation_run_id: recommendationRun?.run_id ?? undefined,
       })
       await refreshPersistedState(accessToken)
-      setActionMessage(`Submitted "${resolvedName}" to the shared review queue.`)
+      setActionMessage(
+        recommendationRun
+          ? `Submitted "${resolvedName}" with recommendation run ${recommendationRun.run_key.slice(0, 8)}.`
+          : `Submitted "${resolvedName}" to the shared review queue.`,
+      )
+    })
+  }
+
+  async function handleSaveRecommendationRun() {
+    const resolvedName = `${(scenarioName.trim() || buildScenarioTitle(draft)).slice(0, 92)} recommendation`
+    await withAuthenticatedAction('save-recommendation-run', async (accessToken) => {
+      const created = await createPreTradeRecommendationRun(appConfig.apiBase, accessToken, {
+        name: resolvedName,
+        thesis: scenarioThesis.trim() || null,
+        draft,
+        source_scenario_id: selectedScenarioId,
+        input_snapshots: recommendationInputSnapshots,
+      })
+      await refreshPersistedState(accessToken)
+      setActionMessage(`Saved recommendation run ${created.run_key.slice(0, 8)} for "${created.name}".`)
+    })
+  }
+
+  function latestRecommendationRunForScenario(sourceScenarioId: number | null): PreTradeRecommendationRunRecord | null {
+    if (sourceScenarioId === null) {
+      return null
+    }
+    return recommendationRuns.find((run) => run.source_scenario_id === sourceScenarioId) ?? null
+  }
+
+  async function resolveRecommendationRunForReview(
+    accessToken: string,
+    args: {
+      name: string
+      thesis: string | null
+      draft: PreTradeScenarioDraft
+      sourceScenarioId: number | null
+      sourceScenario: PreTradeScenarioRecord | null
+    },
+  ): Promise<PreTradeRecommendationRunRecord | null> {
+    const existingRun = latestRecommendationRunForScenario(args.sourceScenarioId)
+    if (args.sourceScenario !== null) {
+      return existingRun
+    }
+    return createPreTradeRecommendationRun(appConfig.apiBase, accessToken, {
+      name: `${args.name.slice(0, 92)} recommendation`,
+      thesis: args.thesis,
+      draft: args.draft,
+      source_scenario_id: args.sourceScenarioId,
+      input_snapshots: recommendationInputSnapshots,
     })
   }
 
@@ -580,12 +777,45 @@ export function PreTradeWorkspace({
     })
   }
 
+  function reviewOverrideDraft(reviewId: number): string {
+    return reviewOverrideDrafts[reviewId] ?? ''
+  }
+
+  function setReviewOverrideDraft(reviewId: number, value: string) {
+    setReviewOverrideDrafts((current) => ({
+      ...current,
+      [reviewId]: value,
+    }))
+  }
+
+  function clearReviewOverrideDraft(reviewId: number) {
+    setReviewOverrideDrafts((current) => {
+      const next = { ...current }
+      delete next[reviewId]
+      return next
+    })
+  }
+
   async function handleReviewUpdate(
     review: PreTradeReviewItemRecord,
-    payload: { owner?: string | null; review_status?: PreTradeReviewStatus; activity_comment?: string | null },
+    payload: {
+      owner?: string | null
+      review_status?: PreTradeReviewStatus
+      activity_comment?: string | null
+      recommendation_override_reason?: string | null
+    },
   ) {
     if (payload.review_status === 'APPROVED' && !payload.activity_comment?.trim()) {
       setActionError('Approval comment is required before a pre-trade review can be approved.')
+      setActionMessage('')
+      return
+    }
+    if (
+      payload.review_status === 'APPROVED'
+      && recommendationRequiresOverride(review.recommendation_summary?.stance)
+      && !payload.recommendation_override_reason?.trim()
+    ) {
+      setActionError('Add an override reason before approving this recommendation stance.')
       setActionMessage('')
       return
     }
@@ -594,6 +824,7 @@ export function PreTradeWorkspace({
       await updatePreTradeReviewItem(appConfig.apiBase, accessToken, review.review_id, payload)
       await refreshPersistedState(accessToken)
       clearReviewCommentDraft(review.review_id)
+      clearReviewOverrideDraft(review.review_id)
       setActionMessage(`Updated review "${review.name}".`)
     })
   }
@@ -897,6 +1128,14 @@ export function PreTradeWorkspace({
               {recommendation.stance.replaceAll('_', ' ')}
             </span>
             <span className="entity-chip entity-chip-soft">Confidence {recommendation.confidence}</span>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => void handleSaveRecommendationRun()}
+              disabled={actionPending !== '' || !authSession}
+            >
+              Save Run
+            </button>
           </div>
           <div className="pretrade-metric-grid">
             <article className="pretrade-metric-card">
@@ -940,6 +1179,26 @@ export function PreTradeWorkspace({
                 <li key={action}>{action}</li>
               ))}
             </ul>
+          </div>
+          <div className="surface pretrade-next-actions">
+            <span className="eyebrow">Saved Provenance</span>
+            {currentRecommendationRuns.length > 0 ? (
+              <div className="pretrade-card-list">
+                {currentRecommendationRuns.map((run) => (
+                  <article key={run.run_id} className="pretrade-record-card pretrade-record-static">
+                    <div>
+                      <strong>{run.name}</strong>
+                      <span>{run.recommendation.headline}</span>
+                    </div>
+                    <small>
+                      {run.recommendation.stance.replaceAll('_', ' ')} | score {run.recommendation.score} | {run.input_snapshots.length} sources | saved {formatDate(run.created_at)}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="form-note">No recommendation runs have been saved for this scenario yet.</p>
+            )}
           </div>
         </div>
       ),
@@ -1147,7 +1406,16 @@ export function PreTradeWorkspace({
           <div className="pretrade-card-list">
             {reviews.map((review) => {
               const commentDraft = reviewCommentDraft(review.review_id)
-              const approvalBlocked = actionPending !== '' || review.linked_trade_id !== null || commentDraft.trim().length === 0
+              const overrideDraft = reviewOverrideDraft(review.review_id)
+              const existingOverrideReason = review.recommendation_override_reason?.trim() ?? ''
+              const overrideRequired = recommendationRequiresOverride(review.recommendation_summary?.stance)
+              const approvalOverrideReason = overrideDraft.trim() || existingOverrideReason
+              const approvalBlocked = (
+                actionPending !== ''
+                || review.linked_trade_id !== null
+                || commentDraft.trim().length === 0
+                || (overrideRequired && approvalOverrideReason.length === 0)
+              )
 
               return (
                 <article key={review.review_id} className="pretrade-record-card pretrade-record-static">
@@ -1169,6 +1437,38 @@ export function PreTradeWorkspace({
                       {review.booked_at ? ` • ${formatDate(review.booked_at)}` : ''}
                       {review.booked_by ? ` • by ${review.booked_by}` : ''}
                     </small>
+                  ) : null}
+                  {review.recommendation_summary ? (
+                    <div className="pretrade-record-card pretrade-record-static">
+                      <div>
+                        <strong>{review.recommendation_summary.headline}</strong>
+                        <span>{review.recommendation_summary.name}</span>
+                      </div>
+                      <small>
+                        {review.recommendation_summary.stance.replaceAll('_', ' ')} | score {review.recommendation_summary.score} | {review.recommendation_summary.input_snapshot_count} sources
+                      </small>
+                    </div>
+                  ) : (
+                    <p className="form-note">No saved recommendation run is attached to this review yet.</p>
+                  )}
+                  {review.recommendation_override_reason ? (
+                    <p className="form-note">
+                      Override logged by {review.recommendation_override_by ?? 'reviewer'}
+                      {review.recommendation_override_at ? ` on ${formatDate(review.recommendation_override_at)}` : ''}: {review.recommendation_override_reason}
+                    </p>
+                  ) : null}
+                  {overrideRequired && !review.linked_trade_id && review.review_status !== 'APPROVED' ? (
+                    <div className="feedback-banner feedback-banner-error">
+                      <strong>Override required before approval</strong>
+                      <p>This recommendation says {review.recommendation_summary?.stance.replaceAll('_', ' ')}. Capture why the desk is proceeding before approving.</p>
+                      <textarea
+                        className="input pretrade-textarea"
+                        value={overrideDraft}
+                        onChange={(event) => setReviewOverrideDraft(review.review_id, event.target.value)}
+                        placeholder="Explain the override, escalation outcome, or data caveat."
+                        disabled={actionPending !== '' || review.linked_trade_id !== null}
+                      />
+                    </div>
                   ) : null}
                   <textarea
                     className="input pretrade-textarea"
@@ -1193,7 +1493,11 @@ export function PreTradeWorkspace({
                     <button
                       type="button"
                       className="button button-secondary"
-                      onClick={() => void handleReviewUpdate(review, { review_status: 'APPROVED', activity_comment: commentDraft.trim() })}
+                      onClick={() => void handleReviewUpdate(review, {
+                        review_status: 'APPROVED',
+                        activity_comment: commentDraft.trim(),
+                        ...(overrideRequired ? { recommendation_override_reason: approvalOverrideReason } : {}),
+                      })}
                       disabled={approvalBlocked}
                     >
                       Approve

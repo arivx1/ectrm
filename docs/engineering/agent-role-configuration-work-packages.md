@@ -198,6 +198,14 @@ Backend engineer comfortable with migrations and API contract changes.
   produced the response
 - tests cover migration backfill, CRUD, listing, and prompt context behavior
 
+### Implementation note
+
+The profile layer is now represented on `AssistantAgent` with `role_key`,
+`profile_kind`, specialization, owner, authority ceiling, and activation notes.
+Seeded defaults are curated profiles mapped through the role catalog, while
+template-created drafts preserve role-derived metadata. Prompt preview,
+assistant responses, and run records carry role/profile identity for review.
+
 ## WP-03: Role-Aware Policy Validator And Safe Defaults
 
 ### Priority
@@ -253,6 +261,13 @@ Backend/platform engineer with assistant governance context.
 - existing curated seeded agents pass validation without weakening policy
 - evals cover at least one attempted overreach by a custom profile
 
+### Implementation note
+
+WP-03 now routes create and update requests through a shared profile policy
+resolver and validator. Empty custom tool/action allowlists remain empty, empty
+role-derived tool allowlists inherit only role default tools, and `ACTION`
+profiles must declare explicit allowed action types before save.
+
 ## WP-04: Admin Role Catalog And Profile Builder UX
 
 ### Priority
@@ -304,6 +319,15 @@ contract gaps.
 - invalid expansions are blocked before activation
 - prompt preview includes role/profile context
 - tests cover the primary builder path and at least one validation failure
+
+### Implementation note
+
+WP-04 now loads the server-owned role archetype catalog in the Admin managed
+agent panel, supports creating role-derived draft profiles from a selected
+archetype, exposes profile metadata controls, and shows a local policy-fit
+summary before save. The builder preview includes role/profile context, and
+client-side validation blocks role boundary expansions and missing explicit
+actions before the admin save request is sent.
 
 ## WP-05: Custom Specialized Agent Request And Activation Workflow
 
@@ -447,6 +471,14 @@ with initial automatic pause signals for unsafe or noisy agents.
 
 The team should promote, narrow, pause, or retire agents based on evidence,
 not anecdotes.
+
+### Implementation note
+
+The first deterministic metrics slice is available through
+`GET /admin/assistant/outcome-metrics` and the Admin workspace outcome metrics
+panel. It reports by-agent and by-action-type outcomes, including advisory
+promotion and pause recommendations. The endpoint and panel do not auto-pause
+or grant additional authority.
 
 ### Scope
 

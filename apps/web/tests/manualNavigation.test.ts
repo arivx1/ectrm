@@ -9,6 +9,7 @@ import {
 
 describe('manual navigation helpers', () => {
   it('maps representative workspaces to the most relevant manual section', () => {
+    expect(manualSectionIdForView('prompt')).toBe('start-here')
     expect(manualSectionIdForView('dashboard')).toBe('start-here')
     expect(manualSectionIdForView('pretrade')).toBe('book-or-amend-a-trade')
     expect(manualSectionIdForView('trades')).toBe('book-or-amend-a-trade')

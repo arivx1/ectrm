@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -15,9 +15,6 @@ from apps.api.app.domains.operations.services.operational_resource_registry impo
     OPERATIONAL_RESOURCE_DESCRIPTORS,
 )
 from apps.api.app.domains.operations.services import build_workspace_bootstrap_summary
-from apps.api.app.domains.operations.services.settlement_invoices import trade_has_invoice_record
-from apps.api.app.domains.operations.services.settlement_payments import trade_has_payment_records
-from apps.api.app.domains.operations.services.trade_confirmations import trade_has_confirmation_record
 from apps.api.app.domains.operations.services.workflow_items import book_trade_workflow_item_underlying
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
@@ -25,7 +22,6 @@ from apps.api.app.domains.operations.services.workflow_items import update_trade
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.trade import Trade
-from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas.operations import DependencyHealthOut
@@ -147,36 +143,6 @@ def _build_dependency_health(now: datetime, db: Session) -> tuple[list[Dependenc
         )
 
     return dependencies, healthy_dependency_count
-
-
-def _assert_workflow_status_is_not_ledger_managed(
-    db: Session,
-    *,
-    item_id: int,
-    changes: dict[str, object | None],
-) -> None:
-    if "status" not in changes:
-        return
-
-    item = db.execute(select(TradeWorkflowItem).where(TradeWorkflowItem.id == item_id)).scalars().first()
-    if item is None:
-        return
-
-    if item.workflow_type == "INVOICE" and trade_has_invoice_record(db, trade_id=item.trade_id):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invoice workflow status is ledger-managed. Update the invoice record from Settlement instead.",
-        )
-    if item.workflow_type == "CONFIRMATION" and trade_has_confirmation_record(db, trade_id=item.trade_id):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Confirmation workflow status is record-managed. Update the confirmation record instead.",
-        )
-    if item.workflow_type == "PAYMENT" and trade_has_payment_records(db, trade_id=item.trade_id):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Payment workflow status is ledger-managed. Update the payment record from Settlement instead.",
-        )
 
 
 @router.get("/system-overview", response_model=SystemOverviewOut)
@@ -369,11 +335,6 @@ def patch_work_item(
             changes=changes,
         ),
         empty_detail="At least one workflow item field must be provided.",
-        before_action=lambda current_db, changes, _actor: _assert_workflow_status_is_not_ledger_managed(
-            current_db,
-            item_id=item_id,
-            changes=changes,
-        )
     )
 
 

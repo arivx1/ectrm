@@ -21,6 +21,8 @@ class AssistantRun(Base):
     workspace: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     agent_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     agent_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    agent_role_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    agent_profile_kind: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(160), nullable=False)
     use_live_tools: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

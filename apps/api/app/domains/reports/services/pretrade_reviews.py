@@ -14,6 +14,7 @@ from apps.api.app.schemas.pretrade import (
     PreTradeReviewActivityAction,
     PreTradeReviewActivityOut,
     PreTradeReviewItemOut,
+    PreTradeReviewRecommendationSummary,
     PreTradeScenarioDraft,
 )
 
@@ -69,6 +70,28 @@ def review_due_at(record: ReportPreset) -> datetime | None:
 def review_source_scenario_id(record: ReportPreset) -> int | None:
     source_scenario_id = review_record_payload(record).get("source_scenario_id")
     return source_scenario_id if isinstance(source_scenario_id, int) else None
+
+
+def review_recommendation_run_id(record: ReportPreset) -> int | None:
+    recommendation_run_id = review_record_payload(record).get("recommendation_run_id")
+    return recommendation_run_id if isinstance(recommendation_run_id, int) else None
+
+
+def review_recommendation_override_reason(record: ReportPreset) -> str | None:
+    reason = review_record_payload(record).get("recommendation_override_reason")
+    return reason if isinstance(reason, str) and reason.strip() else None
+
+
+def review_recommendation_override_by(record: ReportPreset) -> str | None:
+    actor_id = review_record_payload(record).get("recommendation_override_by")
+    return actor_id if isinstance(actor_id, str) and actor_id.strip() else None
+
+
+def review_recommendation_override_at(record: ReportPreset) -> datetime | None:
+    raw_override_at = review_record_payload(record).get("recommendation_override_at")
+    if not isinstance(raw_override_at, str) or not raw_override_at.strip():
+        return None
+    return datetime.fromisoformat(raw_override_at)
 
 
 def review_linked_trade_id(record: ReportPreset) -> str | None:
@@ -165,14 +188,25 @@ def to_review_out(
     record: ReportPreset,
     *,
     linked_trade_status_by_id: dict[str, str] | None = None,
+    recommendation_summary_by_id: dict[int, PreTradeReviewRecommendationSummary] | None = None,
 ) -> PreTradeReviewItemOut:
     linked_trade_id = review_linked_trade_id(record)
+    recommendation_run_id = review_recommendation_run_id(record)
     return PreTradeReviewItemOut(
         review_id=record.id,
         name=record.name,
         thesis=review_thesis(record),
         draft=review_draft(record),
         source_scenario_id=review_source_scenario_id(record),
+        recommendation_run_id=recommendation_run_id,
+        recommendation_summary=(
+            recommendation_summary_by_id.get(recommendation_run_id)
+            if recommendation_run_id is not None and recommendation_summary_by_id
+            else None
+        ),
+        recommendation_override_reason=review_recommendation_override_reason(record),
+        recommendation_override_by=review_recommendation_override_by(record),
+        recommendation_override_at=review_recommendation_override_at(record),
         review_status=review_status(record),  # type: ignore[arg-type]
         owner=review_owner(record),
         due_at=review_due_at(record),
@@ -241,12 +275,25 @@ def link_approved_pretrade_review_to_trade(
     next_payload["booked_at"] = booked_at.isoformat()
     next_payload["booked_by"] = actor_id
     record.filters_json = next_payload
+    booked_payload: dict[str, object] = {"linked_trade_id": trade_id}
+    recommendation_run_id = review_recommendation_run_id(record)
+    if recommendation_run_id is not None:
+        booked_payload["recommendation_run_id"] = recommendation_run_id
+    recommendation_override_reason = review_recommendation_override_reason(record)
+    if recommendation_override_reason is not None:
+        booked_payload["recommendation_override_reason"] = recommendation_override_reason
+        recommendation_override_by = review_recommendation_override_by(record)
+        recommendation_override_at = review_recommendation_override_at(record)
+        if recommendation_override_by is not None:
+            booked_payload["recommendation_override_by"] = recommendation_override_by
+        if recommendation_override_at is not None:
+            booked_payload["recommendation_override_at"] = recommendation_override_at.isoformat()
     append_review_activity(
         record,
         action="BOOKED",
         actor_id=actor_id,
         occurred_at=booked_at,
-        payload={"linked_trade_id": trade_id},
+        payload=booked_payload,
     )
     record.updated_at = booked_at
     record.updated_by = actor_id

@@ -1,0 +1,128 @@
+.prompt-home {
+  display: grid;
+  gap: 1rem;
+}
+
+.prompt-home-composer-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.prompt-home-heading {
+  max-width: 760px;
+}
+
+.prompt-home-heading h3 {
+  margin: 0.25rem 0 0.5rem;
+  font-size: clamp(1.6rem, 2.4vw, 2.5rem);
+}
+
+.prompt-home-heading p {
+  margin: 0;
+  color: var(--color-copy-muted, #66717c);
+}
+
+.prompt-home-composer {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.prompt-home-textarea {
+  min-height: 9rem;
+  resize: vertical;
+}
+
+.prompt-home-actions {
+  justify-content: flex-start;
+}
+
+.prompt-home-quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.prompt-home-quick-prompts button {
+  cursor: pointer;
+}
+
+.prompt-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.prompt-home-chat,
+.prompt-home-destinations {
+  display: grid;
+  gap: 1rem;
+}
+
+.prompt-home-chat-log {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.prompt-home-empty {
+  min-height: 14rem;
+}
+
+.prompt-home-action-banner {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.prompt-home-action-banner p {
+  margin: 0;
+}
+
+.prompt-home-action-banner .button {
+  justify-self: start;
+}
+
+.prompt-home-destination-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.prompt-home-destination {
+  display: grid;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.85rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-home-destination:hover,
+.prompt-home-destination:focus-visible {
+  border-color: rgb(var(--theme-highlight-rgb) / 0.34);
+  outline: none;
+}
+
+.prompt-home-destination span {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.45;
+}
+
+:root[data-color-mode='dark'] .prompt-home-destination {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:root[data-color-mode='dark'] .prompt-home-heading p,
+:root[data-color-mode='dark'] .prompt-home-destination span {
+  color: #b7c7d9;
+}
+
+@media (max-width: 900px) {
+  .prompt-home-grid {
+    grid-template-columns: 1fr;
+  }
+}

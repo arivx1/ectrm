@@ -18,6 +18,8 @@ import {
   writeAppRouteHandoff,
 } from '../../shared/appRouteHandoff'
 
+export const DEFAULT_APP_VIEW_KEY: ViewKey = 'prompt'
+
 export type AppRouteState = {
   section: PrimaryNavigationSectionKey | null
   view: ViewKey
@@ -30,7 +32,7 @@ function readAppRouteState(): AppRouteState {
   if (typeof window === 'undefined') {
     return {
       section: null,
-      view: 'dashboard',
+      view: DEFAULT_APP_VIEW_KEY,
       docsDocumentKey: DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
       tradeId: null,
       handoff: null,
@@ -41,7 +43,7 @@ function readAppRouteState(): AppRouteState {
   const sectionParam = params.get('section')
   const viewParam = params.get('view')
   const docsParam = params.get('doc')
-  const view: ViewKey = isViewKey(viewParam) ? viewParam : 'dashboard'
+  const view: ViewKey = isViewKey(viewParam) ? viewParam : DEFAULT_APP_VIEW_KEY
 
   return {
     section: isPrimaryNavigationSectionKey(sectionParam) ? sectionParam : null,
@@ -68,7 +70,7 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
   if (route.section !== null) {
     params.set('section', route.section)
   } else {
-    if (route.view !== 'dashboard') {
+    if (route.view !== DEFAULT_APP_VIEW_KEY) {
       params.set('view', route.view)
     }
     if (route.view === 'guide' && route.docsDocumentKey !== DEFAULT_DOCUMENTATION_DOCUMENT_KEY) {

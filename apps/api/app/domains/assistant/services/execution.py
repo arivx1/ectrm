@@ -292,6 +292,10 @@ async def execute_assistant_execution(
     )
     if not isinstance(response, AssistantPromptResponse):
         response = AssistantPromptResponse.model_validate(response)
+    if response.agent_role_key is None:
+        response.agent_role_key = prepared.prompt_context.agent_role_key
+    if response.agent_profile_kind is None:
+        response.agent_profile_kind = prepared.prompt_context.agent_profile_kind
 
     run_record, updated_conversation = _record_assistant_run(
         db=db,
@@ -300,6 +304,8 @@ async def execute_assistant_execution(
         prepared=prepared,
         agent_id=response.agent_id,
         agent_name=response.agent_name,
+        agent_role_key=response.agent_role_key,
+        agent_profile_kind=response.agent_profile_kind,
         provider=response.provider,
         model=response.model,
         warnings=response.warnings,
@@ -342,6 +348,8 @@ def record_failed_assistant_execution(
         prepared=prepared,
         agent_id=prepared.prompt_context.agent_id,
         agent_name=prepared.prompt_context.agent_name,
+        agent_role_key=prepared.prompt_context.agent_role_key,
+        agent_profile_kind=prepared.prompt_context.agent_profile_kind,
         provider=prepared.provider_name,
         model=prepared.model_name,
         warnings=[*prepared.runtime_warnings, *prepared.prompt_context.warnings],
@@ -384,6 +392,8 @@ def _apply_prompt_enrichment(
         generated_at=prompt_context.generated_at,
         agent_id=prompt_context.agent_id,
         agent_name=prompt_context.agent_name,
+        agent_role_key=prompt_context.agent_role_key,
+        agent_profile_kind=prompt_context.agent_profile_kind,
         system_prompt=render_prompt_sections(next_sections),
         sections=next_sections,
         warnings=next_warnings,
@@ -414,6 +424,8 @@ def _record_assistant_run(
     prepared: PreparedAssistantExecution,
     agent_id: str | None,
     agent_name: str | None,
+    agent_role_key: str | None,
+    agent_profile_kind: str | None,
     provider: str,
     model: str,
     warnings: list[str],
@@ -450,6 +462,8 @@ def _record_assistant_run(
         workspace=payload.workspace,
         agent_id=agent_id,
         agent_name=agent_name,
+        agent_role_key=agent_role_key,
+        agent_profile_kind=agent_profile_kind,
         provider=provider,
         model=model,
         use_live_tools=payload.use_live_tools,

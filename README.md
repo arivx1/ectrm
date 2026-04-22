@@ -190,6 +190,7 @@ dependencies.
 - [Future-ready engineering work packages](docs/engineering/future-ready-engineering-work-packages.md)
 - [Future-ready Wave 0 tickets](docs/engineering/future-ready-wave-0-tickets.md)
 - [Agent platform Phase 1 tickets](docs/engineering/agent-platform-phase-1-tickets.md)
+- [Prompt-first operator experience work packages](docs/engineering/prompt-first-operator-experience-work-packages.md)
 - [Agent role catalog](docs/engineering/agent-role-catalog.md)
 - [Human-agent authority matrix](docs/engineering/human-agent-authority-matrix.md)
 - [Canonical work object inventory](docs/engineering/canonical-work-object-inventory.md)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -83,7 +85,10 @@ from apps.api.app.domains.operations.services.trade_credit_hold import (
 from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
+from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.operations import TradeCreditApprovalDecisionOut
 from apps.api.app.schemas.operations import TradeCreditApprovalFreshnessOut
@@ -177,6 +182,142 @@ WORKFLOW_CLOSED_STATUS_VALUES: dict[str, set[str]] = {
 }
 
 
+WORKFLOW_STATUS_TRANSITION_VALUES: dict[str, dict[str, set[str]]] = {
+    TradeWorkflowType.CONFIRMATION.value: {
+        ConfirmationStatus.PENDING.value: {
+            ConfirmationStatus.SENT.value,
+            ConfirmationStatus.CONFIRMED.value,
+            ConfirmationStatus.DISPUTED.value,
+        },
+        ConfirmationStatus.SENT.value: {
+            ConfirmationStatus.PENDING.value,
+            ConfirmationStatus.CONFIRMED.value,
+            ConfirmationStatus.DISPUTED.value,
+        },
+        ConfirmationStatus.DISPUTED.value: {
+            ConfirmationStatus.PENDING.value,
+            ConfirmationStatus.SENT.value,
+            ConfirmationStatus.CONFIRMED.value,
+        },
+        ConfirmationStatus.CONFIRMED.value: set(),
+    },
+    TradeWorkflowType.NOMINATION.value: {
+        NominationStatus.PENDING.value: {
+            NominationStatus.SCHEDULED.value,
+            NominationStatus.NOMINATED.value,
+            NominationStatus.COMPLETED.value,
+            NominationStatus.NOT_REQUIRED.value,
+        },
+        NominationStatus.SCHEDULED.value: {
+            NominationStatus.PENDING.value,
+            NominationStatus.NOMINATED.value,
+            NominationStatus.COMPLETED.value,
+        },
+        NominationStatus.NOMINATED.value: {
+            NominationStatus.PENDING.value,
+            NominationStatus.SCHEDULED.value,
+            NominationStatus.COMPLETED.value,
+        },
+        NominationStatus.COMPLETED.value: set(),
+        NominationStatus.NOT_REQUIRED.value: set(),
+    },
+    TradeWorkflowType.ALLOCATION.value: {
+        AllocationStatus.PENDING.value: {
+            AllocationStatus.PARTIALLY_ALLOCATED.value,
+            AllocationStatus.ALLOCATED.value,
+            AllocationStatus.COMPLETED.value,
+            AllocationStatus.NOT_REQUIRED.value,
+        },
+        AllocationStatus.PARTIALLY_ALLOCATED.value: {
+            AllocationStatus.PENDING.value,
+            AllocationStatus.ALLOCATED.value,
+            AllocationStatus.COMPLETED.value,
+        },
+        AllocationStatus.ALLOCATED.value: {
+            AllocationStatus.PARTIALLY_ALLOCATED.value,
+            AllocationStatus.COMPLETED.value,
+        },
+        AllocationStatus.COMPLETED.value: set(),
+        AllocationStatus.NOT_REQUIRED.value: set(),
+    },
+    TradeWorkflowType.ACTUALIZATION.value: {
+        ActualizationStatus.PENDING.value: {
+            ActualizationStatus.NOT_REQUIRED.value,
+            ActualizationStatus.PARTIALLY_ACTUALIZED.value,
+            ActualizationStatus.ACTUALIZED.value,
+        },
+        ActualizationStatus.NOT_REQUIRED.value: {ActualizationStatus.PENDING.value},
+        ActualizationStatus.PARTIALLY_ACTUALIZED.value: set(),
+        ActualizationStatus.ACTUALIZED.value: set(),
+    },
+    TradeWorkflowType.INVOICE.value: {
+        InvoiceStatus.PENDING.value: {
+            InvoiceStatus.ISSUED.value,
+            InvoiceStatus.APPROVED.value,
+            InvoiceStatus.DISPUTED.value,
+            InvoiceStatus.NOT_REQUIRED.value,
+        },
+        InvoiceStatus.ISSUED.value: {
+            InvoiceStatus.PENDING.value,
+            InvoiceStatus.APPROVED.value,
+            InvoiceStatus.DISPUTED.value,
+        },
+        InvoiceStatus.DISPUTED.value: {
+            InvoiceStatus.PENDING.value,
+            InvoiceStatus.ISSUED.value,
+            InvoiceStatus.APPROVED.value,
+        },
+        InvoiceStatus.APPROVED.value: set(),
+        InvoiceStatus.NOT_REQUIRED.value: set(),
+    },
+    TradeWorkflowType.PAYMENT.value: {
+        PaymentStatus.PENDING.value: {
+            PaymentStatus.DUE.value,
+            PaymentStatus.PAID.value,
+            PaymentStatus.OVERDUE.value,
+            PaymentStatus.NOT_REQUIRED.value,
+        },
+        PaymentStatus.DUE.value: {
+            PaymentStatus.PENDING.value,
+            PaymentStatus.PAID.value,
+            PaymentStatus.OVERDUE.value,
+        },
+        PaymentStatus.OVERDUE.value: {
+            PaymentStatus.PENDING.value,
+            PaymentStatus.DUE.value,
+            PaymentStatus.PAID.value,
+        },
+        PaymentStatus.PAID.value: set(),
+        PaymentStatus.NOT_REQUIRED.value: set(),
+    },
+    TradeWorkflowType.CREDIT_APPROVAL.value: {
+        CreditApprovalStatus.PENDING_REVIEW.value: {
+            CreditApprovalStatus.APPROVED.value,
+            CreditApprovalStatus.REJECTED.value,
+            CreditApprovalStatus.NOT_REQUIRED.value,
+        },
+        CreditApprovalStatus.REJECTED.value: {
+            CreditApprovalStatus.PENDING_REVIEW.value,
+            CreditApprovalStatus.APPROVED.value,
+        },
+        CreditApprovalStatus.APPROVED.value: {
+            CreditApprovalStatus.PENDING_REVIEW.value,
+            CreditApprovalStatus.REJECTED.value,
+            CreditApprovalStatus.NOT_REQUIRED.value,
+        },
+        CreditApprovalStatus.NOT_REQUIRED.value: {CreditApprovalStatus.PENDING_REVIEW.value},
+    },
+    TradeWorkflowType.OPTION_SETTLEMENT.value: {
+        OptionSettlementStatus.PENDING.value: {
+            OptionSettlementStatus.BOOKED.value,
+            OptionSettlementStatus.NOT_REQUIRED.value,
+        },
+        OptionSettlementStatus.BOOKED.value: set(),
+        OptionSettlementStatus.NOT_REQUIRED.value: set(),
+    },
+}
+
+
 def _audit_work_item_payload(item: TradeWorkflowItemOut) -> dict[str, object]:
     return item.model_dump(mode="json")
 
@@ -198,6 +339,12 @@ OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES = {
     TradeStatus.EXERCISED.value,
     TradeStatus.ASSIGNED.value,
 }
+WORKFLOW_ITEM_UPDATE_FIELDS = {"status", "owner", "due_at", "notes"}
+WORKFLOW_UPDATE_SETTLEMENT_REVIEWER = "SETTLEMENT_LEAD"
+WORKFLOW_UPDATE_OPERATIONS_REVIEWER = "OPERATIONS_LEAD"
+WORKFLOW_UPDATE_CREDIT_REVIEWER = "CREDIT_APPROVER_OR_OPS_ADMIN"
+WORKFLOW_DUE_AT_PAST_WINDOW = timedelta(days=366)
+WORKFLOW_DUE_AT_FUTURE_WINDOW = timedelta(days=730)
 
 
 @dataclass(frozen=True)
@@ -215,9 +362,87 @@ class WorkflowItemListContext:
     credit_approval_freshness_by_trade_id: dict[str, TradeCreditApprovalFreshnessOut]
 
 
-def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
+@dataclass(frozen=True)
+class WorkflowItemUpdatePolicyDecision:
+    item_id: int
+    trade_id: str
+    workflow_type: str
+    workflow_queue: str
+    required_reviewer_role: str
+    normalized_changes: dict[str, object | None]
+    current_values: dict[str, object | None]
+    proposed_values: dict[str, object | None]
+    stale_state_basis: dict[str, object | None]
+    policy_checks: tuple[str, ...]
+    missing_evidence: tuple[str, ...]
+    assumptions: tuple[str, ...]
+    expected_downstream_effects: tuple[str, ...]
+    idempotency_key: str
+    expected_version: int | None = None
+    idempotent_retry: bool = False
+
+    def to_review_context(self) -> dict[str, object]:
+        return {
+            "owning_work_object": {
+                "type": "trade_workflow_item",
+                "id": str(self.item_id),
+                "label": f"Trade Workflow Item {self.item_id}",
+            },
+            "required_reviewer_role": self.required_reviewer_role,
+            "business_rationale": (
+                f"Workflow item {self.item_id} on trade {self.trade_id} has a typed update "
+                "payload and passed deterministic pre-approval policy checks."
+            ),
+            "proposed_mutation": {
+                "operation": "update_trade_workflow_item",
+                "item_id": self.item_id,
+                "changes": jsonable_encoder(self.normalized_changes),
+            },
+            "current_values": jsonable_encoder(self.current_values),
+            "proposed_values": jsonable_encoder(self.proposed_values),
+            "supporting_records": [
+                {
+                    "type": "trade_workflow_item",
+                    "id": str(self.item_id),
+                    "label": f"Trade Workflow Item {self.item_id}",
+                    "summary": (
+                        f"{self.workflow_type} item currently has status "
+                        f"{self.current_values.get('status')} in the {self.workflow_queue} queue."
+                    ),
+                },
+                {
+                    "type": "trade",
+                    "id": self.trade_id,
+                    "label": f"Trade {self.trade_id}",
+                    "summary": "Owning trade for the workflow item.",
+                },
+            ],
+            "assumptions": list(self.assumptions),
+            "missing_evidence": list(self.missing_evidence),
+            "expected_downstream_effects": list(self.expected_downstream_effects),
+            "stale_state_basis": jsonable_encoder(self.stale_state_basis),
+            "policy_checks": list(self.policy_checks),
+            "idempotency_key": self.idempotency_key,
+            "expected_version": self.expected_version,
+            "idempotent_retry": self.idempotent_retry,
+        }
+
+
+def _coerce_utc(value: datetime | str | None) -> Optional[datetime]:
     if value is None:
         return None
+    if isinstance(value, str):
+        normalized_value = value.strip()
+        if not normalized_value:
+            return None
+        if normalized_value.endswith("Z"):
+            normalized_value = f"{normalized_value[:-1]}+00:00"
+        try:
+            value = datetime.fromisoformat(normalized_value)
+        except ValueError as exc:
+            raise ValueError("Workflow due_at must be an ISO-8601 datetime.") from exc
+    if not isinstance(value, datetime):
+        raise ValueError("Workflow due_at must be a datetime.")
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
@@ -617,8 +842,20 @@ def normalize_workflow_status(workflow_type: str, value: object | None) -> str:
     return normalized_status
 
 
-def normalize_workflow_due_at(value: datetime | None) -> Optional[datetime]:
-    return _coerce_utc(value)
+def normalize_workflow_due_at(value: object | None) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _coerce_utc(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return _coerce_utc(datetime.fromisoformat(normalized.replace("Z", "+00:00")))
+        except ValueError as exc:
+            raise ValueError("Workflow due_at must be an ISO timestamp.") from exc
+    raise ValueError("Workflow due_at must be an ISO timestamp.")
 
 
 def workflow_status_from_trade(trade: Trade, workflow_type: str) -> str:
@@ -629,6 +866,393 @@ def workflow_status_from_trade(trade: Trade, workflow_type: str) -> str:
 def is_workflow_item_closed(workflow_type: str, status: str) -> bool:
     normalized_type = normalize_workflow_type(workflow_type)
     return status in WORKFLOW_CLOSED_STATUS_VALUES[normalized_type]
+
+
+def workflow_allowed_next_statuses(workflow_type: str, current_status: str) -> tuple[str, ...]:
+    normalized_type = normalize_workflow_type(workflow_type)
+    normalized_current_status = normalize_workflow_status(normalized_type, current_status)
+    return tuple(sorted(WORKFLOW_STATUS_TRANSITION_VALUES[normalized_type][normalized_current_status]))
+
+
+def workflow_update_reviewer_role(workflow_type: str) -> str:
+    normalized_type = normalize_workflow_type(workflow_type)
+    if normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value:
+        return WORKFLOW_UPDATE_CREDIT_REVIEWER
+    if workflow_queue_for_type(normalized_type) == "settlement":
+        return WORKFLOW_UPDATE_SETTLEMENT_REVIEWER
+    return WORKFLOW_UPDATE_OPERATIONS_REVIEWER
+
+
+def _load_workflow_item_update_row(
+    db: Session,
+    *,
+    item_id: int,
+) -> tuple[TradeWorkflowItem, Trade]:
+    row = db.execute(
+        select(TradeWorkflowItem, Trade)
+        .join(Trade, Trade.trade_id == TradeWorkflowItem.trade_id)
+        .where(
+            TradeWorkflowItem.id == item_id,
+            or_(
+                Trade.status == TradeStatus.ACTIVE.value,
+                and_(
+                    TradeWorkflowItem.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value,
+                    Trade.status.in_(tuple(OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES)),
+                ),
+            ),
+        )
+    ).first()
+    if row is None:
+        raise LookupError(f"Workflow item '{item_id}' was not found.")
+    return row
+
+
+def _normalize_workflow_item_update_changes(
+    workflow_type: str,
+    changes: dict[str, object | None],
+) -> dict[str, object | None]:
+    if not changes:
+        raise ValueError("At least one workflow item field must be provided.")
+
+    unknown_fields = sorted(set(changes) - WORKFLOW_ITEM_UPDATE_FIELDS)
+    if unknown_fields:
+        raise ValueError(
+            "Workflow item update contains unsupported field(s): "
+            f"{', '.join(unknown_fields)}. Expected one of: {', '.join(sorted(WORKFLOW_ITEM_UPDATE_FIELDS))}."
+        )
+
+    normalized_changes: dict[str, object | None] = {}
+    if "status" in changes:
+        normalized_changes["status"] = normalize_workflow_status(workflow_type, changes.get("status"))
+    if "owner" in changes:
+        normalized_changes["owner"] = _normalize_optional_text(changes.get("owner"))
+    if "due_at" in changes:
+        normalized_changes["due_at"] = normalize_workflow_due_at(changes.get("due_at"))  # type: ignore[arg-type]
+    if "notes" in changes:
+        normalized_changes["notes"] = _normalize_optional_text(changes.get("notes"))
+    return normalized_changes
+
+
+def _coerce_expected_workflow_version(value: object | None) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        expected_version = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Workflow item expected_version must be an integer.") from exc
+    if expected_version < 1:
+        raise ValueError("Workflow item expected_version must be greater than zero.")
+    return expected_version
+
+
+def _workflow_item_field_values(
+    item: TradeWorkflowItem,
+    fields: set[str] | dict[str, object | None],
+) -> dict[str, object | None]:
+    return {field: getattr(item, field) for field in fields}
+
+
+def _workflow_item_value_matches(
+    *,
+    field: str,
+    current_value: object | None,
+    expected_value: object | None,
+) -> bool:
+    if field == "due_at":
+        return _coerce_utc(current_value) == _coerce_utc(expected_value)  # type: ignore[arg-type]
+    return current_value == expected_value
+
+
+def _workflow_item_matches_changes(
+    item: TradeWorkflowItem,
+    normalized_changes: dict[str, object | None],
+) -> bool:
+    return all(
+        _workflow_item_value_matches(
+            field=field,
+            current_value=getattr(item, field),
+            expected_value=expected_value,
+        )
+        for field, expected_value in normalized_changes.items()
+    )
+
+
+def _trade_has_confirmation_record(db: Session, *, trade_id: str) -> bool:
+    return (
+        db.execute(
+            select(TradeConfirmation.id).where(TradeConfirmation.trade_id == trade_id).limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
+def _trade_has_invoice_record(db: Session, *, trade_id: str) -> bool:
+    return (
+        db.execute(select(TradeInvoice.id).where(TradeInvoice.trade_id == trade_id).limit(1)).scalar_one_or_none()
+        is not None
+    )
+
+
+def _trade_has_payment_record(db: Session, *, trade_id: str) -> bool:
+    return (
+        db.execute(select(TradePayment.id).where(TradePayment.trade_id == trade_id).limit(1)).scalar_one_or_none()
+        is not None
+    )
+
+
+def _assert_workflow_status_is_not_record_managed(
+    db: Session,
+    *,
+    item: TradeWorkflowItem,
+) -> None:
+    if item.workflow_type == TradeWorkflowType.INVOICE.value and _trade_has_invoice_record(
+        db,
+        trade_id=item.trade_id,
+    ):
+        raise ValueError(
+            "Invoice workflow status is ledger-managed. Update the invoice record from Settlement instead."
+        )
+    if item.workflow_type == TradeWorkflowType.CONFIRMATION.value and _trade_has_confirmation_record(
+        db,
+        trade_id=item.trade_id,
+    ):
+        raise ValueError(
+            "Confirmation workflow status is record-managed. Update the confirmation record instead."
+        )
+    if item.workflow_type == TradeWorkflowType.PAYMENT.value and _trade_has_payment_record(
+        db,
+        trade_id=item.trade_id,
+    ):
+        raise ValueError(
+            "Payment workflow status is ledger-managed. Update the payment record from Settlement instead."
+        )
+
+
+def _workflow_update_idempotency_key(
+    *,
+    item: TradeWorkflowItem,
+    normalized_changes: dict[str, object | None],
+) -> str:
+    encoded_changes = json.dumps(
+        jsonable_encoder(normalized_changes),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(encoded_changes.encode("utf-8")).hexdigest()[:16]
+    return f"workflow-item-update:{item.id}:v{item.version}:{digest}"
+
+
+def _assert_workflow_transition_allowed(
+    *,
+    workflow_type: str,
+    current_status: str,
+    requested_status: str,
+) -> None:
+    allowed_next_statuses = set(workflow_allowed_next_statuses(workflow_type, current_status))
+    if requested_status in allowed_next_statuses:
+        return
+
+    if not allowed_next_statuses:
+        raise ValueError(
+            f"{workflow_type} workflow status '{current_status}' is terminal. "
+            "Create a new workflow item or update the owning record instead of reopening it."
+        )
+    raise ValueError(
+        f"Workflow status transition from {current_status} to {requested_status} is not allowed "
+        f"for {workflow_type}. Allowed next statuses: {', '.join(sorted(allowed_next_statuses))}."
+    )
+
+
+def _assert_workflow_due_at_policy(
+    *,
+    due_at: datetime | None,
+    reference_time: datetime,
+) -> None:
+    if due_at is None:
+        return
+
+    normalized_due_at = _coerce_utc(due_at)
+    if normalized_due_at is None:
+        return
+    if normalized_due_at < reference_time - WORKFLOW_DUE_AT_PAST_WINDOW:
+        raise ValueError("Workflow item due_at is outside the allowed scheduling window.")
+    if normalized_due_at > reference_time + WORKFLOW_DUE_AT_FUTURE_WINDOW:
+        raise ValueError("Workflow item due_at is outside the allowed scheduling window.")
+
+
+def _evaluate_workflow_item_update_policy(
+    db: Session,
+    *,
+    item: TradeWorkflowItem,
+    trade: Trade,
+    actor_id: str | None,
+    actor_role: str | None,
+    changes: dict[str, object | None],
+    reference_time: datetime,
+    validate_actor: bool,
+    expected_version: int | None,
+) -> WorkflowItemUpdatePolicyDecision:
+    normalized_type = normalize_workflow_type(item.workflow_type)
+    normalized_changes = _normalize_workflow_item_update_changes(normalized_type, changes)
+    current_values = _workflow_item_field_values(item, normalized_changes)
+    proposed_values = {**current_values, **normalized_changes}
+    policy_checks: list[str] = [
+        "workflow_item_loaded",
+        "allowed_fields_only",
+        "field_values_normalized",
+    ]
+    missing_evidence: list[str] = []
+    assumptions: list[str] = []
+    expected_downstream_effects = [
+        "Update workflow item fields with audit history.",
+        "Refresh the operations or settlement queue view.",
+    ]
+    requested_status = (
+        str(normalized_changes["status"])
+        if "status" in normalized_changes and normalized_changes["status"] is not None
+        else None
+    )
+    status_is_changing = requested_status is not None and requested_status != item.status
+    idempotent_retry = False
+
+    if expected_version is not None:
+        if item.version == expected_version:
+            policy_checks.append("stale_state_version_current")
+        elif _workflow_item_matches_changes(item, normalized_changes):
+            idempotent_retry = True
+            policy_checks.append("idempotent_retry_already_applied")
+        else:
+            raise ValueError(
+                "Workflow item has changed since this action was staged. "
+                f"Expected version {expected_version}, found version {item.version}. Refresh and stage a new update."
+            )
+
+    if "due_at" in normalized_changes:
+        _assert_workflow_due_at_policy(
+            due_at=normalized_changes["due_at"],  # type: ignore[arg-type]
+            reference_time=reference_time,
+        )
+        policy_checks.append("due_at_within_policy_window")
+
+    if status_is_changing and normalized_type == TradeWorkflowType.ACTUALIZATION.value:
+        _validate_actualization_workflow_status_change(
+            db,
+            trade=trade,
+            requested_status=requested_status,
+        )
+        policy_checks.append("actualization_status_manually_editable")
+
+    if status_is_changing:
+        _assert_workflow_transition_allowed(
+            workflow_type=normalized_type,
+            current_status=item.status,
+            requested_status=requested_status,
+        )
+        policy_checks.append("status_transition_allowed")
+        _assert_workflow_status_is_not_record_managed(db, item=item)
+        policy_checks.append("status_not_record_managed")
+
+    if status_is_changing and normalized_type == TradeWorkflowType.CREDIT_APPROVAL.value:
+        next_notes = (
+            str(normalized_changes["notes"] or "").strip()
+            if "notes" in normalized_changes
+            else str(item.notes or "").strip()
+        )
+        if validate_actor:
+            if not _credit_workflow_status_change_allowed(
+                actor_id=actor_id or "",
+                actor_role=actor_role,
+            ):
+                raise PermissionError(
+                    "Only CREDIT_APPROVER, OPS_ADMIN, or ADMIN sessions can change credit approval workflow status."
+                )
+            policy_checks.append("credit_approval_reviewer_authorized")
+        else:
+            policy_checks.append("credit_approval_reviewer_required")
+        if requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES and not next_notes:
+            missing_evidence.append("Recording a credit approval decision requires an audit comment in notes.")
+            raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
+        policy_checks.append("credit_approval_comment_present")
+        if requested_status == CreditApprovalStatus.APPROVED.value:
+            assert_trade_credit_approval_freshness(
+                db,
+                trade=trade,
+                as_of=reference_time,
+            )
+            policy_checks.append("credit_approval_freshness_current")
+
+    if status_is_changing and normalized_type in DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES:
+        credit_hold_state = get_trade_credit_hold_state(db, trade_id=item.trade_id)
+        if credit_hold_state.hold_active:
+            workflow_label = normalized_type.replace("_", " ").lower()
+            raise ValueError(
+                format_trade_credit_hold_message(
+                    trade.trade_id,
+                    credit_hold_state,
+                    blocked_action=(
+                        f"Updating {workflow_label} status is blocked until credit approves the trade "
+                        "or the trade is amended back within limit."
+                    ),
+                )
+            )
+        policy_checks.append("credit_hold_not_active")
+
+    return WorkflowItemUpdatePolicyDecision(
+        item_id=item.id,
+        trade_id=item.trade_id,
+        workflow_type=normalized_type,
+        workflow_queue=workflow_queue_for_type(normalized_type),
+        required_reviewer_role=workflow_update_reviewer_role(normalized_type),
+        normalized_changes=normalized_changes,
+        current_values=current_values,
+        proposed_values=proposed_values,
+        stale_state_basis={
+            "workflow_item_status": item.status,
+            "workflow_item_owner": item.owner,
+            "workflow_item_due_at": item.due_at,
+            "workflow_item_updated_at": item.updated_at,
+            "workflow_item_version": item.version,
+            "trade_status": trade.status,
+            "trade_updated_at": trade.updated_at,
+            "trade_last_event_id": trade.last_event_id,
+        },
+        policy_checks=tuple(policy_checks),
+        missing_evidence=tuple(missing_evidence),
+        assumptions=tuple(assumptions),
+        expected_downstream_effects=tuple(expected_downstream_effects),
+        idempotency_key=_workflow_update_idempotency_key(
+            item=item,
+            normalized_changes=normalized_changes,
+        ),
+        expected_version=expected_version,
+        idempotent_retry=idempotent_retry,
+    )
+
+
+def evaluate_trade_workflow_item_update_policy(
+    db: Session,
+    *,
+    item_id: int,
+    actor_id: str | None = None,
+    actor_role: str | None = None,
+    changes: dict[str, object | None],
+    now: Optional[datetime] = None,
+    validate_actor: bool = True,
+    expected_version: object | None = None,
+) -> WorkflowItemUpdatePolicyDecision:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    item, trade = _load_workflow_item_update_row(db, item_id=item_id)
+    return _evaluate_workflow_item_update_policy(
+        db,
+        item=item,
+        trade=trade,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        changes=changes,
+        reference_time=reference_time,
+        validate_actor=validate_actor,
+        expected_version=_coerce_expected_workflow_version(expected_version),
+    )
 
 
 def _default_due_at_for_trade(trade: Trade, workflow_type: str) -> Optional[datetime]:
@@ -1635,94 +2259,50 @@ def update_trade_workflow_item(
     actor_role: str | None,
     changes: dict[str, object | None],
     now: Optional[datetime] = None,
+    expected_version: object | None = None,
 ) -> TradeWorkflowItemOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
-    row = db.execute(
-        select(TradeWorkflowItem, Trade)
-        .join(Trade, Trade.trade_id == TradeWorkflowItem.trade_id)
-        .where(
-            TradeWorkflowItem.id == item_id,
-            or_(
-                Trade.status == TradeStatus.ACTIVE.value,
-                and_(
-                    TradeWorkflowItem.workflow_type == TradeWorkflowType.OPTION_SETTLEMENT.value,
-                    Trade.status.in_(tuple(OPTION_SETTLEMENT_SOURCE_TRADE_STATUSES)),
-                ),
-            ),
-        )
-    ).first()
-    if row is None:
-        raise LookupError(f"Workflow item '{item_id}' was not found.")
-
-    item, trade = row
+    requested_changes = dict(changes)
+    if expected_version is None and "expected_version" in requested_changes:
+        expected_version = requested_changes.pop("expected_version")
+    else:
+        requested_changes.pop("expected_version", None)
+    item, trade = _load_workflow_item_update_row(db, item_id=item_id)
+    policy_decision = _evaluate_workflow_item_update_policy(
+        db,
+        item=item,
+        trade=trade,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        changes=requested_changes,
+        reference_time=reference_time,
+        validate_actor=True,
+        expected_version=_coerce_expected_workflow_version(expected_version),
+    )
+    changes = dict(policy_decision.normalized_changes)
     changed = False
     previous_status = item.status
-    requested_status: str | None = None
-
-    if item.workflow_type == TradeWorkflowType.CREDIT_APPROVAL.value and "status" in changes:
-        requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
-        next_notes = item.notes
-        if "notes" in changes:
-            next_notes = _normalize_optional_text(changes.get("notes"))
-        if requested_status != item.status:
-            if not _credit_workflow_status_change_allowed(actor_id=actor_id, actor_role=actor_role):
-                raise PermissionError(
-                    "Only CREDIT_APPROVER, OPS_ADMIN, or ADMIN sessions can change credit approval workflow status."
-                )
-            if requested_status in CREDIT_APPROVAL_DECISION_STATUS_VALUES and not next_notes:
-                raise ValueError("Recording a credit approval decision requires an audit comment in notes.")
-            if requested_status == CreditApprovalStatus.APPROVED.value:
-                assert_trade_credit_approval_freshness(
-                    db,
-                    trade=trade,
-                    as_of=reference_time,
-                )
-
-    if item.workflow_type in DOWNSTREAM_CREDIT_GATED_WORKFLOW_TYPES and "status" in changes:
-        requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
-        if requested_status != item.status:
-            credit_hold_state = get_trade_credit_hold_state(db, trade_id=item.trade_id)
-            if credit_hold_state.hold_active:
-                workflow_label = item.workflow_type.replace("_", " ").lower()
-                raise ValueError(
-                    format_trade_credit_hold_message(
-                        trade.trade_id,
-                        credit_hold_state,
-                        blocked_action=(
-                            f"Updating {workflow_label} status is blocked until credit approves the trade "
-                            "or the trade is amended back within limit."
-                        ),
-                    )
-                )
-
-    if item.workflow_type == TradeWorkflowType.ACTUALIZATION.value and "status" in changes:
-        requested_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
-        if requested_status != item.status:
-            _validate_actualization_workflow_status_change(
-                db,
-                trade=trade,
-                requested_status=requested_status,
-            )
+    requested_status = str(changes["status"]) if "status" in changes and changes["status"] is not None else None
 
     if "status" in changes:
-        normalized_status = normalize_workflow_status(item.workflow_type, changes.get("status"))
+        normalized_status = str(changes["status"])
         if item.status != normalized_status:
             item.status = normalized_status
             changed = True
     if "owner" in changes:
-        normalized_owner = _normalize_optional_text(changes.get("owner"))
+        normalized_owner = changes.get("owner")
         if item.owner != normalized_owner:
-            item.owner = normalized_owner
+            item.owner = normalized_owner  # type: ignore[assignment]
             changed = True
     if "due_at" in changes:
-        normalized_due_at = normalize_workflow_due_at(changes.get("due_at"))  # type: ignore[arg-type]
+        normalized_due_at = changes.get("due_at")
         if item.due_at != normalized_due_at:
-            item.due_at = normalized_due_at
+            item.due_at = normalized_due_at  # type: ignore[assignment]
             changed = True
     if "notes" in changes:
-        normalized_notes = _normalize_optional_text(changes.get("notes"))
+        normalized_notes = changes.get("notes")
         if item.notes != normalized_notes:
-            item.notes = normalized_notes
+            item.notes = normalized_notes  # type: ignore[assignment]
             changed = True
 
     if changed:
@@ -1805,6 +2385,7 @@ def update_trade_workflow_item(
         causation_id=f"trade-workflow-item:{item_out.item_id}",
         payload={
             "requested_changes": jsonable_encoder(changes),
+            "policy_decision": policy_decision.to_review_context(),
             "workflow_item": _audit_work_item_payload(item_out),
         },
     )

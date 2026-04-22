@@ -2037,7 +2037,7 @@ test(
 )
 
 test(
-  'single-user auth signs into the dashboard when the API enables one-click access',
+  'single-user auth signs into the prompt home when the API enables one-click access',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer({ singleUserAuthEnabled: true })
@@ -2072,12 +2072,12 @@ test(
       await signedInOverlay.waitFor({ state: 'hidden' })
 
       await page.waitForFunction(() => !document.querySelector('.auth-gate-stage'))
-      await page.getByText('Common Starting Points').waitFor()
+      await page.getByText('Start with the job in front of you').waitFor()
       await page.getByText('Signed in as Ops Admin').waitFor()
 
       assert.ok(
-        page.url() === `${appServer.origin}/` || page.url() === `${appServer.origin}/?view=dashboard`,
-        `Expected the single-user flow to land on the dashboard, received ${page.url()}.`,
+        page.url() === `${appServer.origin}/` || page.url() === `${appServer.origin}/?view=prompt`,
+        `Expected the single-user flow to land on the prompt home, received ${page.url()}.`,
       )
       assert.equal(
         mockApi.unexpectedRequests.length,

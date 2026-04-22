@@ -60,12 +60,12 @@ top-level columns or a structured metadata envelope.
 | `required_reviewer_role` | Yes | Identifies the human role expected to approve or reject. |
 | `business_rationale` | Yes | Explains why the action is appropriate. |
 | `supporting_records` | Yes, where available | Lists records or tool calls supporting the action. |
-| `policy_checks` | Planned | Summarizes deterministic policy checks that passed, failed, or were not available. |
+| `policy_checks` | Yes, where available | Summarizes deterministic policy checks that passed, failed, or were not available. |
 | `assumptions` | Yes, when present | Shows inferred context the reviewer should validate. |
 | `missing_evidence` | Yes, when present | Shows what the agent could not verify. |
 | `expected_downstream_effects` | Yes | Describes projections, workflow state, or records expected to change. |
-| `stale_state_basis` | Planned | Captures version/status fields used to block stale approvals. |
-| `idempotency_key` | Planned | Prevents duplicate side effects on retry or replay. |
+| `stale_state_basis` | Yes | Captures version/status fields used to block stale approvals. |
+| `idempotency_key` | Yes | Prevents duplicate side effects on retry or replay. |
 
 ## Recommended Payload Envelope
 
@@ -109,6 +109,23 @@ reserved `review_context` object inside `payload`.
 The envelope should be treated as reviewer and governance metadata. Execution
 must continue to use typed domain payload fields and deterministic services,
 not arbitrary metadata values.
+
+## Execution Enforcement
+
+The approval gateway now treats `review_context` as a required execution
+contract. Before any side effect runs, approval must:
+
+- require a `review_context` envelope
+- require a non-empty `review_context.idempotency_key`
+- reject duplicate idempotency keys that already executed
+- re-read the current target record and compare it with `stale_state_basis`
+- record the passed approval policy evidence in the action `result`
+
+Stale-state rechecks are performed server-side for all published action types,
+including trade cancellation, confirmations, workflow item updates, invoices,
+payments, and document reprocessing. Workflow item updates may still allow an
+idempotent retry when the requested mutation is already reflected on the target
+record.
 
 ## Current Action Type Map
 
@@ -199,4 +216,3 @@ recommend the next manual or lower-authority step.
 - Assistant evals should assert that staged action requests include reviewer
   metadata for at least one representative action per action-capable pilot
   agent.
-

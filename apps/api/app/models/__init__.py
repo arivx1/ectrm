@@ -2,6 +2,8 @@ from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
+from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
+from apps.api.app.models.codex_task_request import CodexTaskRequest
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetail
 from apps.api.app.models.delivery_obligation import DeliveryObligation
@@ -60,7 +62,9 @@ __all__ = [
     "AssistantAgent",
     "AssistantConversation",
     "AssistantRun",
+    "AssistantRunFeedback",
     "Base",
+    "CodexTaskRequest",
     "DeliveryEvent",
     "DeliveryLogisticsDetail",
     "DeliveryObligation",

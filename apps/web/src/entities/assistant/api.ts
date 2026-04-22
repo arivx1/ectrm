@@ -16,11 +16,14 @@ import type {
   AssistantAgentRoleArchetype,
   AssistantConversation,
   AssistantConversationSummary,
+  AssistantOutcomeMetrics,
   AssistantPromptContext,
   AssistantPromptContextRequest,
   AssistantPromptRequest,
   AssistantPromptResponse,
   AssistantProvider,
+  AssistantRunFeedback,
+  AssistantRunFeedbackRating,
   AssistantRun,
   AssistantRunAuditTrace,
   AssistantRunSummary,
@@ -35,6 +38,12 @@ export type CreateAssistantAgentInput = {
   scope: AssistantAdminAgent['scope']
   provider: AssistantAdminAgent['provider']
   model: AssistantAdminAgent['model']
+  role_key?: AssistantAdminAgent['role_key']
+  profile_kind?: AssistantAdminAgent['profile_kind']
+  specialization_summary?: AssistantAdminAgent['specialization_summary']
+  human_owner_role?: AssistantAdminAgent['human_owner_role']
+  authority_ceiling?: AssistantAdminAgent['authority_ceiling']
+  activation_notes?: AssistantAdminAgent['activation_notes']
   allowed_workspaces: AssistantAdminAgent['allowed_workspaces']
   capabilities: AssistantAdminAgent['capabilities']
   allowed_tools: AssistantAdminAgent['allowed_tools']
@@ -74,6 +83,11 @@ export type BuildAssistantAgentDraftResult = Omit<CreateAssistantAgentInput, 'pr
 export type AssistantStreamEvent = {
   event: string
   data: Record<string, unknown>
+}
+
+export type SubmitAssistantRunFeedbackInput = {
+  rating: AssistantRunFeedbackRating
+  comment?: string
 }
 
 function assistantMutationHeaders(): Headers {
@@ -143,6 +157,28 @@ function actionRequestQuery(init?: {
   return params.size > 0 ? `?${params.toString()}` : ''
 }
 
+function outcomeMetricsQuery(init?: {
+  agentId?: string
+  actionType?: string
+  createdAfter?: string
+  createdBefore?: string
+}): string {
+  const params = new URLSearchParams()
+  if (init?.agentId?.trim()) {
+    params.set('agent_id', init.agentId.trim())
+  }
+  if (init?.actionType?.trim()) {
+    params.set('action_type', init.actionType.trim())
+  }
+  if (init?.createdAfter?.trim()) {
+    params.set('created_after', init.createdAfter.trim())
+  }
+  if (init?.createdBefore?.trim()) {
+    params.set('created_before', init.createdBefore.trim())
+  }
+  return params.size > 0 ? `?${params.toString()}` : ''
+}
+
 export async function loadAssistantRuntimeSettings(apiBase: string): Promise<AssistantRuntimeSettings> {
   return fetchJson<AssistantRuntimeSettings>(`${apiBase}/assistant/settings`)
 }
@@ -200,6 +236,23 @@ export async function getAssistantRun(
   return fetchJson<AssistantRun>(`${apiBase}/assistant/runs/${encodeURIComponent(String(runId))}`, {
     headers: assistantReadHeaders(init?.accessToken),
   })
+}
+
+export async function submitAssistantRunFeedback(
+  apiBase: string,
+  runId: number,
+  payload: SubmitAssistantRunFeedbackInput,
+  init?: { accessToken?: string },
+): Promise<AssistantRunFeedback> {
+  const normalizedComment = payload.comment?.trim()
+  return postJson<AssistantRunFeedback>(
+    `${apiBase}/assistant/runs/${encodeURIComponent(String(runId))}/feedback`,
+    {
+      rating: payload.rating,
+      ...(normalizedComment ? { comment: normalizedComment } : {}),
+    },
+    { headers: assistantReadHeaders(init?.accessToken) },
+  )
 }
 
 export async function getAdminAssistantRunAuditTrace(
@@ -407,6 +460,23 @@ export async function listAdminAssistantActionRequests(
 ): Promise<AssistantActionRequestAdminPage> {
   return fetchJson<AssistantActionRequestAdminPage>(
     `${apiBase}/admin/assistant/action-requests${actionRequestQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function getAdminAssistantOutcomeMetrics(
+  apiBase: string,
+  init?: {
+    agentId?: string
+    actionType?: string
+    createdAfter?: string
+    createdBefore?: string
+  },
+): Promise<AssistantOutcomeMetrics> {
+  return fetchJson<AssistantOutcomeMetrics>(
+    `${apiBase}/admin/assistant/outcome-metrics${outcomeMetricsQuery(init)}`,
     {
       headers: assistantMutationHeaders(),
     },

@@ -40,6 +40,8 @@ def add_assistant_run(
     input_tokens: int | None,
     output_tokens: int | None,
     assistant_message: str | None,
+    agent_role_key: str | None = None,
+    agent_profile_kind: str | None = None,
     error_detail: str | None = None,
 ) -> AssistantRun:
     record = _build_assistant_run(
@@ -51,6 +53,8 @@ def add_assistant_run(
         workspace=workspace,
         agent_id=agent_id,
         agent_name=agent_name,
+        agent_role_key=agent_role_key,
+        agent_profile_kind=agent_profile_kind,
         provider=provider,
         model=model,
         use_live_tools=use_live_tools,
@@ -93,6 +97,8 @@ def create_assistant_run(
     input_tokens: int | None,
     output_tokens: int | None,
     assistant_message: str | None,
+    agent_role_key: str | None = None,
+    agent_profile_kind: str | None = None,
     error_detail: str | None = None,
 ) -> AssistantRun:
     record = _build_assistant_run(
@@ -104,6 +110,8 @@ def create_assistant_run(
         workspace=workspace,
         agent_id=agent_id,
         agent_name=agent_name,
+        agent_role_key=agent_role_key,
+        agent_profile_kind=agent_profile_kind,
         provider=provider,
         model=model,
         use_live_tools=use_live_tools,
@@ -153,6 +161,8 @@ def to_assistant_run_summary_out(record: AssistantRun) -> AssistantRunSummaryOut
         workspace=record.workspace,
         agent_id=record.agent_id,
         agent_name=record.agent_name,
+        agent_role_key=record.agent_role_key,
+        agent_profile_kind=record.agent_profile_kind,
         provider=record.provider,
         model=record.model,
         use_live_tools=record.use_live_tools,
@@ -225,6 +235,8 @@ def _build_assistant_run(
     input_tokens: int | None,
     output_tokens: int | None,
     assistant_message: str | None,
+    agent_role_key: str | None = None,
+    agent_profile_kind: str | None = None,
     error_detail: str | None = None,
 ) -> AssistantRun:
     completed_at = datetime.now(timezone.utc)
@@ -237,6 +249,8 @@ def _build_assistant_run(
         workspace=workspace,
         agent_id=agent_id,
         agent_name=agent_name,
+        agent_role_key=agent_role_key,
+        agent_profile_kind=agent_profile_kind,
         provider=provider,
         model=model,
         use_live_tools=use_live_tools,

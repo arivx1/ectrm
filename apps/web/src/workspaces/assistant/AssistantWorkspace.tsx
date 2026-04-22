@@ -12,6 +12,7 @@ import {
   loadAssistantRuntimeSettings,
   previewAssistantPromptContext,
   streamAssistantResponse,
+  submitAssistantRunFeedback,
 } from '../../entities/assistant/api'
 import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
 import {
@@ -35,6 +36,8 @@ import type {
   AssistantPromptRequest,
   AssistantProvider,
   AssistantRun,
+  AssistantRunFeedback,
+  AssistantRunFeedbackRating,
   AssistantRunSummary,
   AssistantRuntimeSettings,
   EventRow,
@@ -77,6 +80,7 @@ type ChatMessage = {
     record_count: number | null
   }[]
   actionRequests?: AssistantActionRequest[]
+  feedback?: AssistantRunFeedback | null
 }
 
 function createChatMessageId(): string {
@@ -194,6 +198,8 @@ function matchesAssistantMessageFilter(message: ChatMessage, query: string): boo
     message.runRecordedAt,
     ...(message.warnings ?? []),
     ...(message.toolCalls?.flatMap((toolCall) => [toolCall.tool_name, toolCall.summary]) ?? []),
+    message.feedback?.rating,
+    message.feedback?.comment,
     ...(message.actionRequests?.flatMap((actionRequest) => [
       actionRequest.action_request_id,
       actionRequest.status,
@@ -300,7 +306,140 @@ function toChatMessagesFromConversation(conversation: AssistantConversation): Ch
     runRecordedAt: message.recorded_at,
     warnings: message.warnings,
     toolCalls: message.tool_calls,
+    feedback: message.feedback ?? null,
   }))
+}
+
+function formatFeedbackRating(rating: AssistantRunFeedbackRating): string {
+  return rating === 'HELPFUL' ? 'Helpful' : 'Needs work'
+}
+
+type AssistantMessageFeedbackProps = {
+  message: ChatMessage
+  disabled: boolean
+  inFlight: boolean
+  onSubmit: (
+    runId: number,
+    rating: AssistantRunFeedbackRating,
+    comment: string,
+  ) => Promise<AssistantRunFeedback>
+}
+
+function AssistantMessageFeedback({
+  message,
+  disabled,
+  inFlight,
+  onSubmit,
+}: AssistantMessageFeedbackProps) {
+  const runId = message.runId
+  const existingFeedback = message.feedback ?? null
+  const [selectedRating, setSelectedRating] = useState<AssistantRunFeedbackRating>(
+    existingFeedback?.rating ?? 'HELPFUL',
+  )
+  const [comment, setComment] = useState(existingFeedback?.comment ?? '')
+  const [detailsOpen, setDetailsOpen] = useState(Boolean(existingFeedback?.comment))
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+
+  if (message.role !== 'assistant' || !runId) {
+    return null
+  }
+
+  async function submitFeedback(rating: AssistantRunFeedbackRating, nextComment = comment) {
+    if (!runId) {
+      return
+    }
+
+    setSelectedRating(rating)
+    setStatus('')
+    setError('')
+
+    try {
+      const feedback = await onSubmit(runId, rating, nextComment)
+      setStatus(`Saved as ${formatFeedbackRating(feedback.rating).toLowerCase()}.`)
+      setComment(feedback.comment ?? '')
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Could not save feedback.')
+    }
+  }
+
+  const feedbackSummary = existingFeedback
+    ? `Saved ${formatFeedbackRating(existingFeedback.rating).toLowerCase()}`
+    : 'No feedback yet'
+
+  return (
+    <div className="assistant-feedback">
+      <div className="assistant-feedback-head">
+        <strong>Response feedback</strong>
+        <span>{feedbackSummary}</span>
+      </div>
+      <div className="assistant-feedback-actions">
+        <button
+          type="button"
+          className={`assistant-feedback-chip ${selectedRating === 'HELPFUL' ? 'is-selected' : ''}`}
+          onClick={() => void submitFeedback('HELPFUL', comment)}
+          disabled={disabled || inFlight}
+        >
+          Helpful
+        </button>
+        <button
+          type="button"
+          className={`assistant-feedback-chip ${selectedRating === 'NEEDS_WORK' ? 'is-selected' : ''}`}
+          onClick={() => {
+            setDetailsOpen(true)
+            void submitFeedback('NEEDS_WORK', comment)
+          }}
+          disabled={disabled || inFlight}
+        >
+          Needs work
+        </button>
+        <button
+          type="button"
+          className="assistant-run-link"
+          onClick={() => setDetailsOpen((current) => !current)}
+          disabled={disabled || inFlight}
+        >
+          {detailsOpen ? 'Hide note' : 'Add note'}
+        </button>
+      </div>
+
+      {detailsOpen ? (
+        <form
+          className="assistant-feedback-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submitFeedback(selectedRating, comment)
+          }}
+        >
+          <textarea
+            className="control assistant-feedback-textarea"
+            value={comment}
+            onChange={(event) => {
+              setComment(event.target.value)
+              setStatus('')
+              setError('')
+            }}
+            placeholder="What should change in this answer?"
+            disabled={disabled || inFlight}
+          />
+          <div className="assistant-feedback-footer">
+            <button
+              type="submit"
+              className="button button-ghost"
+              disabled={disabled || inFlight}
+            >
+              {inFlight ? 'Saving...' : 'Save note'}
+            </button>
+            <small>{error || status || 'Feedback is saved to this run.'}</small>
+          </div>
+        </form>
+      ) : error || status ? (
+        <small className={error ? 'assistant-feedback-error' : 'assistant-feedback-status'}>
+          {error || status}
+        </small>
+      ) : null}
+    </div>
+  )
 }
 
 export function AssistantWorkspace({
@@ -329,6 +468,7 @@ export function AssistantWorkspace({
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [actionRequestIdsInFlight, setActionRequestIdsInFlight] = useState<number[]>([])
+  const [feedbackRunIdsInFlight, setFeedbackRunIdsInFlight] = useState<number[]>([])
   const [promptPreview, setPromptPreview] = useState<AssistantPromptContext | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
@@ -1009,6 +1149,47 @@ export function AssistantWorkspace({
     }
   }
 
+  async function handleAssistantRunFeedback(
+    runId: number,
+    rating: AssistantRunFeedbackRating,
+    comment: string,
+  ): Promise<AssistantRunFeedback> {
+    if (!authSession) {
+      throw new Error('Sign in before saving feedback.')
+    }
+
+    setSubmitError('')
+    setFeedbackRunIdsInFlight((current) => [...current, runId])
+
+    try {
+      const feedback = await submitAssistantRunFeedback(
+        appConfig.apiBase,
+        runId,
+        {
+          rating,
+          comment,
+        },
+        {
+          accessToken: authSession.accessToken,
+        },
+      )
+
+      setMessages((currentMessages) =>
+        currentMessages.map((message) =>
+          message.role === 'assistant' && message.runId === runId
+            ? {
+                ...message,
+                feedback,
+              }
+            : message,
+        ),
+      )
+      return feedback
+    } finally {
+      setFeedbackRunIdsInFlight((current) => current.filter((currentRunId) => currentRunId !== runId))
+    }
+  }
+
   const selectedProviderDetails =
     runtimeSettings?.providers.find((provider) => provider.provider === selectedProvider) ?? null
   const selectedAgent = agents.find((agent) => agent.agent_id === selectedAgentId) ?? null
@@ -1340,6 +1521,16 @@ export function AssistantWorkspace({
                       </button>
                     </div>
                   ) : null}
+                  <AssistantMessageFeedback
+                    key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
+                    message={message}
+                    disabled={!authSession}
+                    inFlight={
+                      Boolean(message.runId) &&
+                      feedbackRunIdsInFlight.includes(message.runId as number)
+                    }
+                    onSubmit={handleAssistantRunFeedback}
+                  />
                   {message.toolCalls && message.toolCalls.length > 0 ? (
                     <div className="assistant-tool-list">
                       {message.toolCalls.map((toolCall, index) => (

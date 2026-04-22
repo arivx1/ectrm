@@ -12,6 +12,8 @@ from apps.api.app.routes.admin_data import admin_router as admin_data_router
 from apps.api.app.routes.assistant import admin_router as assistant_admin_router
 from apps.api.app.routes.assistant import router as assistant_router
 from apps.api.app.routes.auth import router as auth_router
+from apps.api.app.routes.codex import callback_router as codex_callback_router
+from apps.api.app.routes.codex import router as codex_router
 from apps.api.app.routes.documents import router as documents_router
 from apps.api.app.routes.events import router as events_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
@@ -50,6 +52,8 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="admin", name="external-data-admin", router=external_data_admin_router),
     HttpRouteRegistration(domain="assistant", name="assistant", router=assistant_router),
     HttpRouteRegistration(domain="assistant", name="assistant-admin", router=assistant_admin_router),
+    HttpRouteRegistration(domain="codex", name="codex-admin", router=codex_router),
+    HttpRouteRegistration(domain="codex", name="codex-callback", router=codex_callback_router),
     HttpRouteRegistration(domain="trading", name="trades", router=trades_router),
     HttpRouteRegistration(domain="pretrade", name="pretrade", router=pretrade_router),
     HttpRouteRegistration(domain="risk", name="option-exposures", router=option_exposures_router),

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
+from apps.api.app.domains.assistant.services.policies import evaluate_tool_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptEnvelope
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
 from apps.api.app.domains.assistant.services.tools import (
@@ -194,6 +195,16 @@ class AssistantService:
                 prompt_context.agent_name
                 if prompt_context is not None
                 else agent_definition.name if agent_definition is not None else None
+            ),
+            agent_role_key=(
+                prompt_context.agent_role_key
+                if prompt_context is not None
+                else agent_definition.role_key if agent_definition is not None else None
+            ),
+            agent_profile_kind=(
+                prompt_context.agent_profile_kind
+                if prompt_context is not None
+                else agent_definition.profile_kind if agent_definition is not None else None
             ),
             provider=completion.provider,
             model=completion.model,
@@ -746,14 +757,25 @@ class AssistantService:
                 f"{agent_definition.name} does not include READ capability, so live tools were disabled for this response."
             )
             return [], warnings
-        if agent_definition is None or not agent_definition.allowed_tools:
-            return self._tool_definitions, warnings
+        if agent_definition is None:
+            return [
+                tool_definition
+                for tool_definition in self._tool_definitions
+                if evaluate_tool_policy(
+                    agent=None,
+                    tool_id=tool_definition.name,
+                    workspace=payload.workspace,
+                ).allowed
+            ], warnings
 
-        allowed_tool_names = set(agent_definition.allowed_tools)
         filtered_tool_definitions = [
             tool_definition
             for tool_definition in self._tool_definitions
-            if tool_definition.name in allowed_tool_names
+            if evaluate_tool_policy(
+                agent=agent_definition,
+                tool_id=tool_definition.name,
+                workspace=payload.workspace,
+            ).allowed
         ]
         if filtered_tool_definitions:
             return filtered_tool_definitions, warnings

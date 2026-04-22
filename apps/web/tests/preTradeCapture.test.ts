@@ -89,6 +89,13 @@ describe('applyPreTradeScenarioToCaptureForm', () => {
       reviewNotes: 'Approved for capture once the desk locks the fixed strip.',
       reviewOwner: 'risk.ops',
       sourceScenarioId: 7,
+      recommendationRunId: 99,
+      recommendationHeadline: 'Proceed with standard controls.',
+      recommendationStance: 'PROCEED',
+      recommendationScore: 96,
+      recommendationOverrideReason: null,
+      recommendationOverrideBy: null,
+      recommendationOverrideAt: null,
       approvedBy: 'chief.risk',
       approvedAt: '2026-04-15T15:30:00Z',
     }
@@ -133,6 +140,13 @@ describe('buildPreTradeWorkflowNote', () => {
       reviewNotes: 'Approved for capture once the desk locks the fixed strip.',
       reviewOwner: 'risk.ops',
       sourceScenarioId: 7,
+      recommendationRunId: 99,
+      recommendationHeadline: 'Proceed with standard controls.',
+      recommendationStance: 'PROCEED',
+      recommendationScore: 96,
+      recommendationOverrideReason: 'Credit approved the temporary utilization overage.',
+      recommendationOverrideBy: 'chief.risk',
+      recommendationOverrideAt: '2026-04-15T15:29:00Z',
       approvedBy: 'chief.risk',
       approvedAt: '2026-04-15T15:30:00Z',
     })
@@ -141,6 +155,9 @@ describe('buildPreTradeWorkflowNote', () => {
     expect(note).toContain('Review: #42 June peak hedge')
     expect(note).toContain('Approved: chief.risk • 2026-04-15T15:30:00Z')
     expect(note).toContain('Source scenario: #7')
+    expect(note).toContain('Recommendation run: #99 • PROCEED • score 96')
+    expect(note).toContain('Recommendation: Proceed with standard controls.')
+    expect(note).toContain('Recommendation override: Credit approved the temporary utilization overage. • chief.risk • 2026-04-15T15:29:00Z')
     expect(note).toContain('Review notes: Approved for capture once the desk locks the fixed strip.')
   })
 })

@@ -43,6 +43,13 @@ export function buildPreTradeWorkflowNote(reviewContext: PreTradeReviewCaptureCo
   const reviewOwner = normalizeOptionalText(reviewContext.reviewOwner)
   const reviewThesis = normalizeOptionalText(reviewContext.reviewThesis)
   const reviewNotes = normalizeOptionalText(reviewContext.reviewNotes)
+  const recommendationSummary = [
+    reviewContext.recommendationRunId ? `#${reviewContext.recommendationRunId}` : null,
+    normalizeOptionalText(reviewContext.recommendationStance),
+    typeof reviewContext.recommendationScore === 'number' ? `score ${reviewContext.recommendationScore}` : null,
+  ]
+    .filter(Boolean)
+    .join(' • ')
   const approvalSummary = [normalizeOptionalText(reviewContext.approvedBy), normalizeOptionalText(reviewContext.approvedAt)]
     .filter(Boolean)
     .join(' • ')
@@ -59,6 +66,22 @@ export function buildPreTradeWorkflowNote(reviewContext: PreTradeReviewCaptureCo
   }
   if (typeof reviewContext.sourceScenarioId === 'number') {
     lines.push(`Source scenario: #${reviewContext.sourceScenarioId}`)
+  }
+  if (recommendationSummary) {
+    lines.push(`Recommendation run: ${recommendationSummary}`)
+  }
+  if (reviewContext.recommendationHeadline) {
+    lines.push(`Recommendation: ${reviewContext.recommendationHeadline}`)
+  }
+  if (reviewContext.recommendationOverrideReason) {
+    const overrideSummary = [
+      normalizeOptionalText(reviewContext.recommendationOverrideReason),
+      normalizeOptionalText(reviewContext.recommendationOverrideBy),
+      normalizeOptionalText(reviewContext.recommendationOverrideAt),
+    ]
+      .filter(Boolean)
+      .join(' • ')
+    lines.push(`Recommendation override: ${overrideSummary}`)
   }
   if (reviewThesis) {
     lines.push(`Thesis: ${reviewThesis}`)

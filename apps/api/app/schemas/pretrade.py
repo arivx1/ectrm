@@ -10,6 +10,11 @@ from apps.api.app.schemas._validation import normalize_required_text
 PreTradeTradeSide = Literal["BUY", "SELL"]
 PreTradeReviewStatus = Literal["OPEN", "IN_REVIEW", "APPROVED", "REJECTED"]
 PreTradeReviewActivityAction = Literal["SUBMITTED", "CLAIMED", "COMMENTED", "APPROVED", "REJECTED", "BOOKED"]
+PreTradeRecommendationStance = Literal["PROCEED", "PROCEED_WITH_CARE", "ESCALATE", "WAIT_FOR_DATA"]
+PreTradeRecommendationConfidence = Literal["LOW", "MEDIUM", "HIGH"]
+PreTradeRecommendationCheckStatus = Literal["good", "watch", "block"]
+PreTradeRecommendationSourceType = Literal["USER_INPUT", "INTERNAL", "EXTERNAL", "DERIVED"]
+PreTradeRecommendationFreshness = Literal["FRESH", "STALE", "DEGRADED", "UNKNOWN"]
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -134,6 +139,7 @@ class PreTradeReviewItemCreate(BaseModel):
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft
     source_scenario_id: int | None = Field(default=None, ge=1)
+    recommendation_run_id: int | None = Field(default=None, ge=1)
     owner: str | None = Field(default=None, max_length=120)
     due_at: datetime | None = None
     review_notes: str | None = Field(default=None, max_length=4000)
@@ -155,13 +161,15 @@ class PreTradeReviewItemUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft | None = None
+    recommendation_run_id: int | None = Field(default=None, ge=1)
+    recommendation_override_reason: str | None = Field(default=None, max_length=4000)
     review_status: PreTradeReviewStatus | None = None
     owner: str | None = Field(default=None, max_length=120)
     due_at: datetime | None = None
     review_notes: str | None = Field(default=None, max_length=4000)
     activity_comment: str | None = Field(default=None, max_length=4000)
 
-    @field_validator("name", "thesis", "owner", "review_notes", "activity_comment")
+    @field_validator("name", "thesis", "owner", "review_notes", "activity_comment", "recommendation_override_reason")
     @classmethod
     def normalize_optional_fields(cls, value: str | None, info) -> str | None:
         return _normalize_optional_text(value, field_name=info.field_name)
@@ -187,12 +195,32 @@ class PreTradeReviewActivityOut(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class PreTradeReviewRecommendationSummary(BaseModel):
+    run_id: int
+    run_key: str
+    name: str
+    stance: PreTradeRecommendationStance
+    headline: str
+    confidence: PreTradeRecommendationConfidence
+    score: int = Field(..., ge=0, le=100)
+    source_scenario_id: int | None = None
+    source_review_id: int | None = None
+    input_snapshot_count: int = 0
+    created_at: datetime
+    created_by: str
+
+
 class PreTradeReviewItemOut(BaseModel):
     review_id: int
     name: str
     thesis: str | None
     draft: PreTradeScenarioDraft
     source_scenario_id: int | None
+    recommendation_run_id: int | None = None
+    recommendation_summary: PreTradeReviewRecommendationSummary | None = None
+    recommendation_override_reason: str | None = None
+    recommendation_override_by: str | None = None
+    recommendation_override_at: datetime | None = None
     review_status: PreTradeReviewStatus
     owner: str | None
     due_at: datetime | None
@@ -202,6 +230,96 @@ class PreTradeReviewItemOut(BaseModel):
     booked_at: datetime | None = None
     booked_by: str | None = None
     activity: list[PreTradeReviewActivityOut] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool
+
+
+class PreTradeRecommendationSourceSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_key: str = Field(..., min_length=1, max_length=120)
+    source_type: PreTradeRecommendationSourceType
+    captured_at: datetime | None = None
+    freshness: PreTradeRecommendationFreshness = "UNKNOWN"
+    summary: str | None = Field(default=None, max_length=1000)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("source_key")
+    @classmethod
+    def normalize_source_key(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="source_key")
+
+    @field_validator("summary")
+    @classmethod
+    def normalize_summary(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="summary")
+
+
+class PreTradeRecommendationCheckOut(BaseModel):
+    key: str
+    label: str
+    status: PreTradeRecommendationCheckStatus
+    detail: str
+    score_impact: int = 0
+
+
+class PreTradeRecommendationResultOut(BaseModel):
+    stance: PreTradeRecommendationStance
+    headline: str
+    summary: str
+    confidence: PreTradeRecommendationConfidence
+    score: int = Field(..., ge=0, le=100)
+    estimated_notional: float | None = None
+    projected_credit_utilization_pct: float | None = None
+    current_net_position: float | None = None
+    related_active_trade_count: int = 0
+    latest_mark: float | None = None
+    mark_gap_pct: float | None = None
+    checks: list[PreTradeRecommendationCheckOut]
+    next_actions: list[str]
+
+
+class PreTradeRecommendationRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    thesis: str | None = Field(default=None, max_length=2000)
+    draft: PreTradeScenarioDraft | None = None
+    source_scenario_id: int | None = Field(default=None, ge=1)
+    source_review_id: int | None = Field(default=None, ge=1)
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot] = Field(default_factory=list, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="name")
+
+    @field_validator("thesis")
+    @classmethod
+    def normalize_thesis(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="thesis")
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "PreTradeRecommendationRunCreate":
+        if self.draft is None and self.source_scenario_id is None and self.source_review_id is None:
+            raise ValueError("draft, source_scenario_id, or source_review_id is required")
+        return self
+
+
+class PreTradeRecommendationRunOut(BaseModel):
+    run_id: int
+    run_key: str
+    name: str
+    thesis: str | None
+    draft: PreTradeScenarioDraft
+    source_scenario_id: int | None = None
+    source_review_id: int | None = None
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot]
+    recommendation: PreTradeRecommendationResultOut
     created_at: datetime
     created_by: str
     updated_at: datetime

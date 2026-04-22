@@ -34,6 +34,7 @@ vi.mock('../src/shared/api.ts', () => ({
 
 import {
   buildAssistantAgentDraft,
+  getAdminAssistantOutcomeMetrics,
   getAdminAssistantRunAuditTrace,
   getAssistantConversation,
   listAdminAssistantActionRequests,
@@ -138,6 +139,45 @@ test('listAdminAssistantActionRequests includes history filters and returns the 
   assert.equal(
     url,
     'http://api.test/admin/assistant/action-requests?status=REJECTED&action_type=cancel_trade&agent_id=ops-governor&user_id=trader.alpha&decided_by=ops_admin&search=T-1014&created_after=2026-04-01&created_before=2026-04-30&decided_after=2026-04-02&decided_before=2026-04-29&limit=20&offset=40',
+  )
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth', async () => {
+  const expected = {
+    generated_at: '2026-04-11T09:00:00Z',
+    created_after: '2026-04-01T00:00:00',
+    created_before: '2026-04-30T23:59:59',
+    thresholds: {
+      min_decided_actions_for_promotion: 10,
+      max_rejection_rate_for_promotion: 0.1,
+      max_failed_execution_rate_for_promotion: 0.02,
+      max_stale_action_rate_for_promotion: 0.05,
+      max_pending_actions_for_promotion: 0,
+      min_decided_actions_for_pause_signal: 5,
+      rejection_rate_pause_threshold: 0.4,
+      failed_execution_rate_pause_threshold: 0.1,
+      stale_action_rate_pause_threshold: 0.25,
+      oldest_pending_hours_pause_threshold: 72,
+    },
+    by_agent: [],
+    by_action_type: [],
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await getAdminAssistantOutcomeMetrics('http://api.test', {
+    agentId: ' ops-governor ',
+    actionType: ' cancel_trade ',
+    createdAfter: '2026-04-01T00:00:00',
+    createdBefore: '2026-04-30T23:59:59',
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/outcome-metrics?agent_id=ops-governor&action_type=cancel_trade&created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
   )
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')

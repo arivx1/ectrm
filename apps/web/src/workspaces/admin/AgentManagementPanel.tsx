@@ -4,6 +4,7 @@ import {
   buildAssistantAgentDraft,
   createAssistantAgent,
   listAdminAssistantAgents,
+  listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
   updateAssistantAgent,
   type CreateAssistantAgentInput,
@@ -26,7 +27,10 @@ import { ASSISTANT_ACTION_TYPES } from '../../shared/models'
 import type {
   AssistantActionType,
   AssistantAdminAgent,
+  AssistantAgentAuthorityLevel,
   AssistantAgentCapability,
+  AssistantAgentProfileKind,
+  AssistantAgentRoleArchetype,
   AssistantAgentScope,
   AssistantAgentStatus,
   AssistantProvider,
@@ -37,12 +41,17 @@ import type { StoredAuthSession } from '../../shared/mutation'
 import {
   AGENT_BUILDER_TEMPLATES,
   AGENT_BUILDER_WORKSPACE_OPTIONS,
+  buildAgentBuilderDraftFromRole,
   buildAgentBuilderDraft,
   createEmptyAgentBuilderDraft,
+  describeProfileKind,
+  evaluateAgentRoleProfileFit,
   getAgentBuilderTemplate,
   suggestAgentBuilderAgentId,
   type AgentBuilderDraft,
   type AgentBuilderTemplateKey,
+  type AgentRoleProfileFit,
+  type AgentRoleProfileFitStatus,
 } from './assistantAgentBuilder'
 
 type AgentManagementPanelProps = {
@@ -63,6 +72,15 @@ const SCOPE_OPTIONS: AssistantAgentScope[] = ['PERSONAL', 'TEAM', 'ORGANIZATION'
 const PROVIDER_OPTIONS: Array<AssistantProvider | ''> = ['', 'openai', 'anthropic', 'google']
 const WORKSPACE_OPTIONS: ViewKey[] = AGENT_BUILDER_WORKSPACE_OPTIONS
 const CAPABILITY_OPTIONS: AssistantAgentCapability[] = ['READ', 'EXPLAIN', 'DRAFT', 'ACTION']
+const PROFILE_KIND_OPTIONS: AssistantAgentProfileKind[] = ['CUSTOM', 'ROLE_DERIVED', 'CURATED']
+const AUTHORITY_OPTIONS: AssistantAgentAuthorityLevel[] = [
+  'OBSERVE',
+  'EXPLAIN',
+  'DRAFT',
+  'STAGE',
+  'EXECUTE',
+  'EXTERNAL_COMMIT',
+]
 const ACTION_TYPE_OPTIONS: AssistantActionType[] = [...ASSISTANT_ACTION_TYPES]
 const ACTION_TYPE_LABELS: Record<AssistantActionType, string> = {
   cancel_trade: 'Cancel trade',
@@ -88,6 +106,12 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
     scope: agent.scope,
     provider: agent.provider ?? '',
     model: agent.model ?? '',
+    role_key: agent.role_key ?? '',
+    profile_kind: agent.profile_kind ?? 'CUSTOM',
+    specialization_summary: agent.specialization_summary ?? '',
+    human_owner_role: agent.human_owner_role ?? '',
+    authority_ceiling: agent.authority_ceiling ?? '',
+    activation_notes: agent.activation_notes ?? '',
     allowed_workspaces: [...agent.allowed_workspaces],
     capabilities: [...agent.capabilities],
     allowed_tools: [...agent.allowed_tools],
@@ -113,6 +137,12 @@ function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
     scope: form.scope,
     provider: normalizedProvider,
     model: normalizedModel,
+    role_key: form.role_key.trim() ? form.role_key.trim() : null,
+    profile_kind: form.profile_kind,
+    specialization_summary: form.specialization_summary.trim() ? form.specialization_summary.trim() : null,
+    human_owner_role: form.human_owner_role.trim() ? form.human_owner_role.trim() : null,
+    authority_ceiling: form.authority_ceiling || null,
+    activation_notes: form.activation_notes.trim() ? form.activation_notes.trim() : null,
     allowed_workspaces: form.allowed_workspaces,
     capabilities: form.capabilities,
     allowed_tools: form.allowed_tools,
@@ -204,8 +234,11 @@ function describeLiveToolPlan(form: AgentForm, availableTools: string[]): string
   if (form.allowed_tools.length > 0) {
     return `${form.allowed_tools.length} governed live tool${form.allowed_tools.length === 1 ? '' : 's'} selected.`
   }
+  if (form.role_key && form.profile_kind !== 'CUSTOM') {
+    return 'No subset pinned, so this profile inherits the role tool defaults on save.'
+  }
   if (availableTools.length > 0) {
-    return 'No subset pinned, so the agent can inherit the full published read-only tool catalog.'
+    return 'No live tools selected; custom agents answer from prompt context only.'
   }
   return 'Published tool options will appear once runtime settings finish loading.'
 }
@@ -217,7 +250,124 @@ function describeActionPlan(form: AgentForm): string {
   if (form.allowed_action_types.length > 0) {
     return `${form.allowed_action_types.length} governed action type${form.allowed_action_types.length === 1 ? '' : 's'} selected.`
   }
-  return 'No subset pinned, so this agent can inherit the full published approval-gated action catalog.'
+  return 'Choose at least one explicit governed action before saving an ACTION-capable agent.'
+}
+
+function describeEffectivePolicy(agent: AssistantAdminAgent): string {
+  const policy = agent.effective_policy
+  if (!policy) {
+    return 'Effective policy will appear after the agent reloads from the policy-aware API.'
+  }
+  return [
+    `${policy.allowed_tools.length} allowed tool${policy.allowed_tools.length === 1 ? '' : 's'}`,
+    `${policy.blocked_tools.length} blocked tool${policy.blocked_tools.length === 1 ? '' : 's'}`,
+    `${policy.allowed_actions.length} allowed action${policy.allowed_actions.length === 1 ? '' : 's'}`,
+    `${policy.blocked_actions.length} blocked action${policy.blocked_actions.length === 1 ? '' : 's'}`,
+  ].join(' · ')
+}
+
+function findRoleForForm(
+  form: AgentForm,
+  roleArchetypes: AssistantAgentRoleArchetype[],
+): AssistantAgentRoleArchetype | null {
+  const roleKey = form.role_key.trim()
+  return roleKey ? roleArchetypes.find((role) => role.role_key === roleKey) ?? null : null
+}
+
+function fitStatusLabel(status: AgentRoleProfileFitStatus): string {
+  if (status === 'inherited') {
+    return 'Inherited'
+  }
+  if (status === 'narrowed') {
+    return 'Narrowed'
+  }
+  if (status === 'expanded') {
+    return 'Blocked'
+  }
+  if (status === 'missing') {
+    return 'Needed'
+  }
+  return 'Custom'
+}
+
+function roleCatalogStatusLabel(role: AssistantAgentRoleArchetype): string {
+  if (role.catalog_status === 'SEEDED') {
+    return 'Seeded'
+  }
+  if (role.catalog_status === 'TEMPLATE') {
+    return 'Template'
+  }
+  if (role.catalog_status === 'PHASE_1') {
+    return 'Phase 1'
+  }
+  return 'Future'
+}
+
+function listSummary(values: readonly string[], emptyLabel: string): string {
+  return values.length > 0 ? values.join(' · ') : emptyLabel
+}
+
+function actionSummary(values: readonly AssistantActionType[]): string {
+  return values.length > 0
+    ? values.map((actionType) => ACTION_TYPE_LABELS[actionType]).join(' · ')
+    : 'No governed actions'
+}
+
+function PromptProfilePreview({
+  form,
+  role,
+}: {
+  form: AgentForm
+  role: AssistantAgentRoleArchetype | null
+}) {
+  const previewLines = [
+    `${describeProfileKind(form.profile_kind)}${role ? ` · ${role.name}` : ''}`,
+    form.human_owner_role ? `Owner: ${form.human_owner_role}` : null,
+    form.authority_ceiling ? `Authority: ${form.authority_ceiling}` : null,
+    form.specialization_summary ? `Specialization: ${form.specialization_summary}` : null,
+    form.system_prompt ? form.system_prompt : 'Prompt instructions are still blank.',
+  ].filter(Boolean)
+
+  return (
+    <div className="assistant-prompt-profile-preview">
+      <strong>Prompt Preview</strong>
+      <pre>{previewLines.join('\n\n')}</pre>
+    </div>
+  )
+}
+
+function RoleProfileFitSummary({ fit }: { fit: AgentRoleProfileFit }) {
+  return (
+    <div className="assistant-profile-fit">
+      <div className="assistant-profile-fit-grid">
+        {fit.sections.map((section) => (
+          <div key={`${section.label}-${section.detail}`} className="assistant-profile-fit-row">
+            <span>{section.label}</span>
+            <strong className={`assistant-profile-fit-pill is-${section.status}`}>
+              {fitStatusLabel(section.status)}
+            </strong>
+            <small>{section.detail}</small>
+          </div>
+        ))}
+      </div>
+
+      {fit.errors.length > 0 ? (
+        <div className="assistant-profile-fit-messages is-error">
+          {fit.errors.map((error) => (
+            <small key={error}>{error}</small>
+          ))}
+        </div>
+      ) : null}
+
+      {fit.warnings.length > 0 ? (
+        <div className="assistant-profile-fit-messages is-warning">
+          {fit.warnings.map((warning) => (
+            <small key={warning}>{warning}</small>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export function AgentManagementPanel({
@@ -230,10 +380,12 @@ export function AgentManagementPanel({
 
   const [agentRecords, setAgentRecords] = useState<AssistantAdminAgent[]>([])
   const [availableTools, setAvailableTools] = useState<string[]>([])
+  const [roleArchetypes, setRoleArchetypes] = useState<AssistantAgentRoleArchetype[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
   const [agentsError, setAgentsError] = useState('')
   const [agentFlash, setAgentFlash] = useState<FlashMessage | null>(null)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [selectedCreateRoleKey, setSelectedCreateRoleKey] = useState<string | null>(null)
   const [selectedCreateTemplateKey, setSelectedCreateTemplateKey] =
     useState<AgentBuilderTemplateKey | null>(null)
   const [createForm, setCreateForm] = useState<AgentForm>(() => createEmptyAgentBuilderDraft())
@@ -254,6 +406,29 @@ export function AgentManagementPanel({
     () => (selectedCreateTemplateKey ? getAgentBuilderTemplate(selectedCreateTemplateKey) : null),
     [selectedCreateTemplateKey],
   )
+  const selectedCreateRole = useMemo(
+    () =>
+      selectedCreateRoleKey
+        ? roleArchetypes.find((role) => role.role_key === selectedCreateRoleKey) ?? null
+        : null,
+    [roleArchetypes, selectedCreateRoleKey],
+  )
+  const createFormRole = useMemo(
+    () => findRoleForForm(createForm, roleArchetypes),
+    [createForm, roleArchetypes],
+  )
+  const editFormRole = useMemo(
+    () => findRoleForForm(editForm, roleArchetypes),
+    [editForm, roleArchetypes],
+  )
+  const createProfileFit = useMemo(
+    () => evaluateAgentRoleProfileFit(createForm, roleArchetypes),
+    [createForm, roleArchetypes],
+  )
+  const editProfileFit = useMemo(
+    () => evaluateAgentRoleProfileFit(editForm, roleArchetypes),
+    [editForm, roleArchetypes],
+  )
 
   const statusCounts = useMemo(
     () =>
@@ -273,6 +448,7 @@ export function AgentManagementPanel({
   )
   const depletedAgentCount = agentRecords.filter((agent) => isAgentBudgetDepleted(agent)).length
   const watchAgentCount = agentRecords.filter((agent) => isAgentBudgetNearLimit(agent)).length
+  const roleDerivedAgentCount = agentRecords.filter((agent) => agent.profile_kind !== 'CUSTOM').length
   const createCanUseLiveTools = createForm.capabilities.includes('READ')
   const editCanUseLiveTools = editForm.capabilities.includes('READ')
   const createCanStageActions = createForm.capabilities.includes('ACTION')
@@ -284,6 +460,8 @@ export function AgentManagementPanel({
   const createActionSummary = describeActionPlan(createForm)
   const editActionSummary = describeActionPlan(editForm)
   const openAiBuilderReady = Boolean(openAiProviderStatus?.configured)
+  const createBlockedByProfilePolicy = createProfileFit.errors.length > 0
+  const editBlockedByProfilePolicy = editProfileFit.errors.length > 0
 
   const refreshAgents = useCallback(
     async (preferredAgentId: string | null = null) => {
@@ -297,14 +475,16 @@ export function AgentManagementPanel({
       setAgentsError('')
 
       try {
-        const [nextAgents, runtimeSettings] = await Promise.all([
+        const [nextAgents, runtimeSettings, nextRoles] = await Promise.all([
           listAdminAssistantAgents(appConfig.apiBase),
           loadAssistantRuntimeSettings(appConfig.apiBase),
+          listAdminAssistantRoleArchetypes(appConfig.apiBase),
         ])
         if (requestSequenceRef.current !== requestId) {
           return
         }
         setAgentRecords(nextAgents)
+        setRoleArchetypes(nextRoles)
         setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
         setOpenAiProviderStatus(
           runtimeSettings.providers.find((provider) => provider.provider === 'openai') ?? null,
@@ -318,11 +498,18 @@ export function AgentManagementPanel({
           }
           return nextAgents[0]?.agent_id ?? null
         })
+        setSelectedCreateRoleKey((current) => {
+          if (current && nextRoles.some((role) => role.role_key === current)) {
+            return current
+          }
+          return nextRoles[0]?.role_key ?? null
+        })
       } catch (error) {
         if (requestSequenceRef.current !== requestId) {
           return
         }
         setAgentRecords([])
+        setRoleArchetypes([])
         setAvailableTools([])
         setOpenAiProviderStatus(null)
         setSelectedAgentId(null)
@@ -342,10 +529,12 @@ export function AgentManagementPanel({
 
     if (!adminEnabled) {
       setAgentRecords([])
+      setRoleArchetypes([])
       setAvailableTools([])
       setAgentsError('')
       setAgentsLoading(false)
       setSelectedAgentId(null)
+      setSelectedCreateRoleKey(null)
       setSelectedCreateTemplateKey(null)
       setCreateForm(createEmptyAgentBuilderDraft())
       setEditForm(createEmptyAgentBuilderDraft())
@@ -368,11 +557,30 @@ export function AgentManagementPanel({
     setEditForm(toAgentForm(selectedAgent))
   }, [selectedAgent])
 
+  function handleApplyRoleArchetype(roleKey: string) {
+    const role = roleArchetypes.find((entry) => entry.role_key === roleKey)
+    if (!role) {
+      return
+    }
+    setAgentFlash(null)
+    setBuilderWarnings([])
+    setSelectedCreateTemplateKey(null)
+    setSelectedCreateRoleKey(role.role_key)
+    setCreateForm(buildAgentBuilderDraftFromRole(role, availableTools))
+    setBuilderBrief((current) =>
+      current.trim()
+        ? current
+        : `Build a narrowed ${role.name.toLowerCase()} specialization for a specific team workflow.`,
+    )
+  }
+
   function handleApplyCreateTemplate(templateKey: AgentBuilderTemplateKey) {
     setAgentFlash(null)
     setBuilderWarnings([])
     setSelectedCreateTemplateKey(templateKey)
-    setCreateForm(buildAgentBuilderDraft(templateKey, availableTools))
+    const draft = buildAgentBuilderDraft(templateKey, availableTools)
+    setSelectedCreateRoleKey(draft.role_key || null)
+    setCreateForm(draft)
     setBuilderBrief((current) =>
       current.trim()
         ? current
@@ -383,6 +591,7 @@ export function AgentManagementPanel({
   function handleResetCreateForm() {
     setAgentFlash(null)
     setSelectedCreateTemplateKey(null)
+    setSelectedCreateRoleKey(roleArchetypes[0]?.role_key ?? null)
     setCreateForm(createEmptyAgentBuilderDraft())
     setBuilderBrief('')
     setBuilderWarnings([])
@@ -438,6 +647,12 @@ export function AgentManagementPanel({
         scope: suggestion.scope,
         provider: suggestion.provider ?? '',
         model: suggestion.model ?? '',
+        role_key: createForm.role_key,
+        profile_kind: createForm.profile_kind,
+        specialization_summary: createForm.specialization_summary,
+        human_owner_role: createForm.human_owner_role,
+        authority_ceiling: createForm.authority_ceiling,
+        activation_notes: createForm.activation_notes,
         allowed_workspaces: [...suggestion.allowed_workspaces],
         capabilities: [...suggestion.capabilities],
         allowed_tools: [...suggestion.allowed_tools],
@@ -483,8 +698,18 @@ export function AgentManagementPanel({
 
   async function handleCreateAgent(event: React.FormEvent) {
     event.preventDefault()
-    setCreatingAgent(true)
     setAgentFlash(null)
+
+    const profileFit = evaluateAgentRoleProfileFit(createForm, roleArchetypes)
+    if (profileFit.errors.length > 0) {
+      setAgentFlash({
+        tone: 'error',
+        message: profileFit.errors[0],
+      })
+      return
+    }
+
+    setCreatingAgent(true)
 
     try {
       const payload = normalizeAgentPayload(createForm)
@@ -511,8 +736,18 @@ export function AgentManagementPanel({
       return
     }
 
-    setSavingAgent(true)
     setAgentFlash(null)
+
+    const profileFit = evaluateAgentRoleProfileFit(editForm, roleArchetypes)
+    if (profileFit.errors.length > 0) {
+      setAgentFlash({
+        tone: 'error',
+        message: profileFit.errors[0],
+      })
+      return
+    }
+
+    setSavingAgent(true)
 
     try {
       const payload = normalizeAgentPayload(editForm)
@@ -526,6 +761,12 @@ export function AgentManagementPanel({
           scope: payload.scope,
           provider: payload.provider,
           model: payload.model,
+          role_key: payload.role_key,
+          profile_kind: payload.profile_kind,
+          specialization_summary: payload.specialization_summary,
+          human_owner_role: payload.human_owner_role,
+          authority_ceiling: payload.authority_ceiling,
+          activation_notes: payload.activation_notes,
           allowed_workspaces: payload.allowed_workspaces,
           capabilities: payload.capabilities,
           allowed_tools: payload.allowed_tools,
@@ -616,6 +857,11 @@ export function AgentManagementPanel({
               <strong>{agentRecords.filter((agent) => agent.capabilities.includes('ACTION')).length}</strong>
               <p>Agents currently allowed to stage approval-gated mutations.</p>
             </article>
+            <article className="admin-summary-card">
+              <span>Role profiles</span>
+              <strong>{roleDerivedAgentCount}</strong>
+              <p>Managed agents currently tied to curated or role-derived catalog entries.</p>
+            </article>
           </div>
 
           {agentsLoading ? <div className="feedback-banner feedback-banner-success">Loading assistant agents from Admin...</div> : null}
@@ -676,11 +922,14 @@ export function AgentManagementPanel({
                         <p>{agent.description}</p>
                         <small>
                           {agent.scope}
+                          {` · ${describeProfileKind(agent.profile_kind)}`}
+                          {agent.role_key ? ` · ${agent.role_key}` : ''}
                           {agent.provider ? ` · ${agent.provider}` : ' · inherited provider'}
                           {agent.model ? ` · ${agent.model}` : ''}
                           {agent.allowed_tools.length > 0 ? ` · ${agent.allowed_tools.length} live tools` : ''}
                           {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
                         </small>
+                        <small>{describeEffectivePolicy(agent)}</small>
                       </button>
                     )
                   })
@@ -695,6 +944,91 @@ export function AgentManagementPanel({
                   <h4>Builder Draft</h4>
                 </div>
                 <span>Start from a role template or shape one from scratch</span>
+              </div>
+
+              <div className="assistant-role-catalog-shell">
+                <div className="assistant-admin-section-head">
+                  <div>
+                    <span className="eyebrow">Role Catalog</span>
+                    <h4>Archetypes</h4>
+                  </div>
+                  <span>{roleArchetypes.length} server-owned roles</span>
+                </div>
+
+                {roleArchetypes.length === 0 ? (
+                  <div className="empty-state">
+                    <strong>No role catalog loaded</strong>
+                    <p>Role archetypes will appear here when the Admin role API responds.</p>
+                  </div>
+                ) : (
+                  <div className="assistant-role-catalog-grid">
+                    {roleArchetypes.map((role) => (
+                      <button
+                        key={role.role_key}
+                        type="button"
+                        className={`assistant-role-catalog-card ${
+                          selectedCreateRole?.role_key === role.role_key ? 'is-selected' : ''
+                        }`}
+                        onClick={() => setSelectedCreateRoleKey(role.role_key)}
+                      >
+                        <div className="assistant-provider-head">
+                          <strong>{role.name}</strong>
+                          <span className="status-pill status-pill-planned">
+                            {roleCatalogStatusLabel(role)}
+                          </span>
+                        </div>
+                        <p>{role.description}</p>
+                        <small>{role.human_owner_role}</small>
+                        <small>
+                          {role.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {selectedCreateRole ? (
+                  <div className="assistant-role-detail">
+                    <div className="assistant-admin-section-head">
+                      <div>
+                        <span className="eyebrow">{selectedCreateRole.role_key}</span>
+                        <h4>{selectedCreateRole.name}</h4>
+                      </div>
+                      <span>{selectedCreateRole.authority_ceiling} authority</span>
+                    </div>
+                    <div className="assistant-builder-preview-grid">
+                      <div className="assistant-sidebar-block">
+                        <strong>Mission</strong>
+                        <p>{selectedCreateRole.mission.join(' ')}</p>
+                        <small>{listSummary(selectedCreateRole.work_objects, 'No work objects listed')}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Default tools</strong>
+                        <p>{listSummary(selectedCreateRole.default_tools, 'No default live tools')}</p>
+                        <small>{selectedCreateRole.capability_ceiling.join(' · ')}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Actions</strong>
+                        <p>{actionSummary(selectedCreateRole.maximum_action_types)}</p>
+                        <small>{selectedCreateRole.approval_rules.join(' ')}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Stop conditions + evals</strong>
+                        <p>{selectedCreateRole.stop_conditions.slice(0, 2).join(' ')}</p>
+                        <small>{selectedCreateRole.required_eval_coverage.join(' · ')}</small>
+                      </div>
+                    </div>
+                    <div className="toolbar settings-actions">
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => handleApplyRoleArchetype(selectedCreateRole.role_key)}
+                      >
+                        Start Role-Derived Draft
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="assistant-builder-shell">
@@ -753,7 +1087,9 @@ export function AgentManagementPanel({
                             {createForm.allowed_tools.length > 0
                               ? createForm.allowed_tools.join(' · ')
                               : createCanUseLiveTools && availableTools.length > 0
-                                ? 'Full published read-only catalog'
+                                ? createForm.role_key && createForm.profile_kind !== 'CUSTOM'
+                                  ? 'Role default tool catalog on save'
+                                  : 'No live tools selected'
                                 : 'No live-tool subset selected yet'}
                           </small>
                         </div>
@@ -766,7 +1102,7 @@ export function AgentManagementPanel({
                                   .map((actionType) => ACTION_TYPE_LABELS[actionType])
                                   .join(' · ')
                               : createCanStageActions
-                                ? 'Full approval-gated action catalog on save'
+                                ? 'Explicit action selection required'
                                 : 'No staged actions enabled'}
                           </small>
                         </div>
@@ -975,6 +1311,146 @@ export function AgentManagementPanel({
                   />
                 </label>
 
+                <div className="assistant-builder-preview assistant-profile-panel">
+                  <div className="assistant-admin-section-head">
+                    <div>
+                      <span className="eyebrow">Profile Guardrails</span>
+                      <h4>{describeProfileKind(createForm.profile_kind)}</h4>
+                    </div>
+                    <span>
+                      {createFormRole
+                        ? `${createFormRole.name} · ${roleCatalogStatusLabel(createFormRole)}`
+                        : 'No role boundary selected'}
+                    </span>
+                  </div>
+
+                  <div className="assistant-admin-form-grid">
+                    <label className="field">
+                      <span>Profile Kind</span>
+                      <select
+                        className="control"
+                        value={createForm.profile_kind}
+                        onChange={(event) => {
+                          const nextProfileKind = event.target.value as AssistantAgentProfileKind
+                          setCreateForm((current) => ({
+                            ...current,
+                            profile_kind: nextProfileKind,
+                            role_key: nextProfileKind === 'CUSTOM' ? '' : current.role_key,
+                          }))
+                        }}
+                      >
+                        {PROFILE_KIND_OPTIONS.map((profileKind) => (
+                          <option key={profileKind} value={profileKind}>
+                            {describeProfileKind(profileKind)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Role Archetype</span>
+                      <select
+                        className="control"
+                        value={createForm.role_key}
+                        disabled={createForm.profile_kind === 'CUSTOM'}
+                        onChange={(event) => {
+                          const nextRoleKey = event.target.value
+                          setSelectedCreateRoleKey(nextRoleKey || null)
+                          setCreateForm((current) => ({
+                            ...current,
+                            role_key: nextRoleKey,
+                            profile_kind: nextRoleKey && current.profile_kind === 'CUSTOM' ? 'ROLE_DERIVED' : current.profile_kind,
+                          }))
+                        }}
+                      >
+                        <option value="">Select role archetype</option>
+                        {roleArchetypes.map((role) => (
+                          <option key={role.role_key} value={role.role_key}>
+                            {role.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Human Owner Role</span>
+                      <input
+                        className="control"
+                        value={createForm.human_owner_role}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            human_owner_role: event.target.value,
+                          }))
+                        }
+                        placeholder="Operations Lead"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Authority Ceiling</span>
+                      <select
+                        className="control"
+                        value={createForm.authority_ceiling}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            authority_ceiling: event.target.value as AssistantAgentAuthorityLevel | '',
+                          }))
+                        }
+                      >
+                        <option value="">No authority ceiling</option>
+                        {AUTHORITY_OPTIONS.map((authority) => (
+                          <option key={authority} value={authority}>
+                            {authority}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>Specialization Summary</span>
+                    <textarea
+                      className="control"
+                      value={createForm.specialization_summary}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          specialization_summary: event.target.value,
+                        }))
+                      }
+                      placeholder="Describe what this specialization narrows or adapts from the role archetype."
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Activation Notes</span>
+                    <textarea
+                      className="control"
+                      value={createForm.activation_notes}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          activation_notes: event.target.value,
+                        }))
+                      }
+                      placeholder="Capture owner review, eval readiness, or rollout conditions."
+                    />
+                  </label>
+
+                  <RoleProfileFitSummary fit={createProfileFit} />
+                  <PromptProfilePreview form={createForm} role={createFormRole} />
+
+                  {createFormRole ? (
+                    <div className="toolbar settings-actions">
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => handleApplyRoleArchetype(createFormRole.role_key)}
+                      >
+                        Reapply Role Defaults
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="assistant-admin-option-grid">
                   <div className="assistant-admin-option-group">
                     <strong>Allowed workspaces</strong>
@@ -1020,7 +1496,7 @@ export function AgentManagementPanel({
                     <strong>Allowed live tools</strong>
                     <p>
                       {createCanUseLiveTools
-                        ? 'Choose a subset or leave blank to allow the full published read-only tool catalog.'
+                        ? 'Choose a subset. Blank role profiles inherit role defaults; blank custom agents use no live tools.'
                         : 'Enable READ capability to allow live tools for this agent.'}
                     </p>
                     <div className="chip-row">
@@ -1087,7 +1563,11 @@ export function AgentManagementPanel({
                 </label>
 
                 <div className="toolbar settings-actions">
-                  <button type="submit" className="button button-primary" disabled={creatingAgent}>
+                  <button
+                    type="submit"
+                    className="button button-primary"
+                    disabled={creatingAgent || createBlockedByProfilePolicy}
+                  >
                     {creatingAgent ? 'Creating Agent...' : 'Create Agent'}
                   </button>
                   <button type="button" className="button button-ghost" onClick={handleResetCreateForm}>
@@ -1135,6 +1615,16 @@ export function AgentManagementPanel({
                     </div>
                     <small>{formatBudgetPercent(selectedAgent.token_budget)} of the daily window used.</small>
                   </div>
+                </div>
+
+                <div className="assistant-sidebar-block">
+                  <strong>Effective policy</strong>
+                  <p>{describeEffectivePolicy(selectedAgent)}</p>
+                  {selectedAgent.effective_policy ? (
+                    <small>
+                      {selectedAgent.effective_policy.policy_notes.join(' ')}
+                    </small>
+                  ) : null}
                 </div>
 
                 <div className="assistant-admin-form-grid">
@@ -1246,6 +1736,161 @@ export function AgentManagementPanel({
                   />
                 </label>
 
+                <div className="assistant-builder-preview assistant-profile-panel">
+                  <div className="assistant-admin-section-head">
+                    <div>
+                      <span className="eyebrow">Profile Guardrails</span>
+                      <h4>{describeProfileKind(editForm.profile_kind)}</h4>
+                    </div>
+                    <span>
+                      {editFormRole
+                        ? `${editFormRole.name} · ${roleCatalogStatusLabel(editFormRole)}`
+                        : 'No role boundary selected'}
+                    </span>
+                  </div>
+
+                  <div className="assistant-admin-form-grid">
+                    <label className="field">
+                      <span>Profile Kind</span>
+                      <select
+                        className="control"
+                        value={editForm.profile_kind}
+                        onChange={(event) => {
+                          const nextProfileKind = event.target.value as AssistantAgentProfileKind
+                          setEditForm((current) => ({
+                            ...current,
+                            profile_kind: nextProfileKind,
+                            role_key: nextProfileKind === 'CUSTOM' ? '' : current.role_key,
+                          }))
+                        }}
+                      >
+                        {PROFILE_KIND_OPTIONS.map((profileKind) => (
+                          <option key={profileKind} value={profileKind}>
+                            {describeProfileKind(profileKind)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Role Archetype</span>
+                      <select
+                        className="control"
+                        value={editForm.role_key}
+                        disabled={editForm.profile_kind === 'CUSTOM'}
+                        onChange={(event) =>
+                          setEditForm((current) => ({
+                            ...current,
+                            role_key: event.target.value,
+                            profile_kind:
+                              event.target.value && current.profile_kind === 'CUSTOM'
+                                ? 'ROLE_DERIVED'
+                                : current.profile_kind,
+                          }))
+                        }
+                      >
+                        <option value="">Select role archetype</option>
+                        {roleArchetypes.map((role) => (
+                          <option key={role.role_key} value={role.role_key}>
+                            {role.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Human Owner Role</span>
+                      <input
+                        className="control"
+                        value={editForm.human_owner_role}
+                        onChange={(event) =>
+                          setEditForm((current) => ({
+                            ...current,
+                            human_owner_role: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Authority Ceiling</span>
+                      <select
+                        className="control"
+                        value={editForm.authority_ceiling}
+                        onChange={(event) =>
+                          setEditForm((current) => ({
+                            ...current,
+                            authority_ceiling: event.target.value as AssistantAgentAuthorityLevel | '',
+                          }))
+                        }
+                      >
+                        <option value="">No authority ceiling</option>
+                        {AUTHORITY_OPTIONS.map((authority) => (
+                          <option key={authority} value={authority}>
+                            {authority}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>Specialization Summary</span>
+                    <textarea
+                      className="control"
+                      value={editForm.specialization_summary}
+                      onChange={(event) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          specialization_summary: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Activation Notes</span>
+                    <textarea
+                      className="control"
+                      value={editForm.activation_notes}
+                      onChange={(event) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          activation_notes: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+
+                  <RoleProfileFitSummary fit={editProfileFit} />
+                  <PromptProfilePreview form={editForm} role={editFormRole} />
+
+                  {editFormRole ? (
+                    <div className="toolbar settings-actions">
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => {
+                          const roleDraft = buildAgentBuilderDraftFromRole(editFormRole, availableTools)
+                          setEditForm((current) => ({
+                            ...current,
+                            profile_kind: 'ROLE_DERIVED',
+                            role_key: roleDraft.role_key,
+                            human_owner_role: roleDraft.human_owner_role,
+                            authority_ceiling: roleDraft.authority_ceiling,
+                            activation_notes: current.activation_notes || roleDraft.activation_notes,
+                            specialization_summary:
+                              current.specialization_summary || roleDraft.specialization_summary,
+                            allowed_workspaces: roleDraft.allowed_workspaces,
+                            capabilities: roleDraft.capabilities,
+                            allowed_tools: roleDraft.allowed_tools,
+                            allowed_action_types: roleDraft.allowed_action_types,
+                            system_prompt: current.system_prompt.trim() ? current.system_prompt : roleDraft.system_prompt,
+                          }))
+                        }}
+                      >
+                        Reapply Role Guardrails
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="assistant-admin-option-grid">
                   <div className="assistant-admin-option-group">
                     <strong>Allowed workspaces</strong>
@@ -1291,7 +1936,7 @@ export function AgentManagementPanel({
                     <strong>Allowed live tools</strong>
                     <p>
                       {editCanUseLiveTools
-                        ? 'Choose a subset or leave blank to allow the full published read-only tool catalog.'
+                        ? 'Choose a subset. Blank role profiles inherit role defaults; blank custom agents use no live tools.'
                         : 'Enable READ capability to allow live tools for this agent.'}
                     </p>
                     <div className="chip-row">
@@ -1351,7 +1996,11 @@ export function AgentManagementPanel({
                 </label>
 
                 <div className="toolbar settings-actions">
-                  <button type="submit" className="button button-primary" disabled={savingAgent}>
+                  <button
+                    type="submit"
+                    className="button button-primary"
+                    disabled={savingAgent || editBlockedByProfilePolicy}
+                  >
                     {savingAgent ? 'Saving Agent...' : 'Save Agent'}
                   </button>
                 </div>

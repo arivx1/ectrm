@@ -83,6 +83,53 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-04-22 - Prompt Navigation Is A UI Intent
+
+- Type: lesson
+- Domain: prompt-first operator experience
+- Applies to: assistant landing surfaces, workspace routing, route handoffs,
+  prompt-led old-UX navigation, action governance
+- Status: proposed
+- Source: [Prompt-First Operator Experience Work Packages](./prompt-first-operator-experience-work-packages.md)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: prompt-led navigation should be modeled as a non-mutating UI intent,
+  separate from assistant action requests. The assistant may recommend opening,
+  focusing, or filtering a workspace, but business writes must continue through
+  typed services, permission checks, audit, and approval-gated action requests
+  where required.
+- Deterministic opportunity: repeated accepted routing decisions should become
+  deterministic intent rules with typed inputs, allowed destinations, rejection
+  reasons, and focused browser or assistant-eval coverage.
+- Agent autonomy impact: navigation intent can make the assistant feel more
+  capable without increasing mutation authority. If the request changes
+  records, emits events, or creates external commitments, reduce authority back
+  to staged action or manual workflow.
+- Tests or evidence: initial proof should cover default prompt landing,
+  accepted workspace navigation, focused trade handoff, invalid intent
+  rejection, and unsupported mutation fallback.
+- Follow-up: implement the prompt-first work packages before considering any
+  broader prompt-led execution authority.
+
+### 2026-04-22 - Assistant Feedback Belongs On Runs
+
+- Type: lesson
+- Domain: assistant outcome tracking
+- Applies to: assistant responses, run tracing, eval inputs, prompt review
+- Status: implemented
+- Source: [AI Workflow](./ai-workflow.md)
+- Lesson: user feedback on an assistant answer should be captured as a durable
+  run-level record with user/session provenance, not as loose chat text or a
+  hidden prompt adjustment.
+- Deterministic opportunity: recurring feedback comments that identify stable
+  product behavior, missing evidence rules, or repeatable answer-quality checks
+  should feed the deterministic algorithm loop instead of remaining prompt-only.
+- Agent autonomy impact: feedback improves promotion and retirement signals,
+  but it does not grant mutation authority or change business records directly.
+- Tests or evidence: focused API coverage verifies feedback creation, update,
+  access scoping, and conversation reload serialization.
+- Follow-up: use feedback aggregates in future assistant eval dashboards and
+  agent health reviews.
+
 ### 2026-04-22 - Deterministic Algorithms Are An Agent Promotion Path
 
 - Type: lesson
@@ -223,6 +270,67 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: implement [AP1-19](./agent-platform-phase-1-tickets.md) to turn
   this promotion signal into deterministic workflow item update policy.
 
+### 2026-04-22 - Workflow Item Update Policy Belongs In The Service Layer
+
+- Type: algorithm-added
+- Domain: operations workflow
+- Applies to: `update_trade_workflow_item`, assistant-staged workflow updates,
+  manual workflow item patches, future workflow automation
+- Status: implemented
+- Source:
+  [`workflow_items.py`](../../apps/api/app/domains/operations/services/workflow_items.py),
+  [`action_runtime.py`](../../apps/api/app/domains/assistant/services/action_runtime.py),
+  and [AP1-19](./agent-platform-phase-1-tickets.md)
+- Lesson: workflow item update authority must be evaluated by a shared,
+  side-effect-free policy before any route, assistant action, or future
+  automation mutates the item. Route-only guards are insufficient because
+  assistant approvals can execute through service paths that bypass route
+  helpers.
+- Deterministic opportunity: use observed approval outcomes, reviewer
+  corrections, and policy-failure rates to define promotion thresholds before
+  any workflow update moves from staged approval to bounded execution.
+- Agent autonomy impact: agents may stage workflow updates only after the policy
+  normalizes changes, checks deterministic blockers, and emits reviewer role,
+  old/new preview values, stale-state basis, and idempotency key. This does not
+  grant bounded autonomous execution yet.
+- Tests or evidence: `apps.api.tests.test_operations_workflow_items_api` covers
+  the policy review context, terminal transition blocking, due-date windows,
+  stale-version failure, idempotent retry handling, assistant execution
+  blockers, rollup behavior, and credit constraints;
+  `apps.api.tests.test_assistant_evals` covers the assistant governance path.
+- Follow-up: use the outcome-metrics endpoint to collect enough workflow-update
+  history before proposing any bounded-execution policy expansion.
+
+### 2026-04-22 - Outcome Metrics Can Recommend Autonomy Changes, Not Apply Them
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: admin outcome reporting, action request review burden, bounded
+  execution promotion review, pause recommendations
+- Status: implemented
+- Source:
+  [`outcome_metrics.py`](../../apps/api/app/domains/assistant/services/outcome_metrics.py),
+  [`assistant.py`](../../apps/api/app/routes/assistant.py), and
+  [AP1-17](./agent-platform-phase-1-tickets.md)
+- Lesson: autonomy promotion needs deterministic observed-outcome thresholds,
+  but threshold results should remain advisory until a human owner explicitly
+  changes policy. Metrics can identify candidates and noisy agents; they should
+  not silently alter authority.
+- Deterministic rule: compute action outcome rates from decided action
+  requests, stale-action outcomes from stale failures or idempotent stale
+  retries, and pause signals from rejection, failed-execution, stale-action, and
+  aged-pending thresholds. Promotion requires enough decided outcomes, no
+  pending backlog, and rates below conservative limits.
+- Agent autonomy impact: agents can be flagged as
+  `ELIGIBLE_FOR_BOUNDED_REVIEW` or `RECOMMEND_PAUSE`, but both states require a
+  human admin decision before capabilities, action policy, or status changes.
+- Tests or evidence: `apps.api.tests.test_assistant_api` seeds contrasting
+  high-confidence and noisy agents, then verifies by-agent and by-action-type
+  recommendation behavior from the Admin metrics endpoint. The Admin workspace
+  now renders the advisory endpoint through a read-only outcome metrics panel.
+- Follow-up: add correction capture so reviewer edits, not only
+  approve/reject/failed outcomes, can inform promotion thresholds.
+
 ### 2026-04-22 - Document Execution Needs Matching And Ambiguity Policy
 
 - Type: algorithm-candidate
@@ -357,3 +465,53 @@ proposal form until a human owner approves the domain rule.
   row-level access, no hidden data leakage, and clear uncertainty language.
 - Follow-up: promote commonly accepted report formats into governed report
   definitions.
+
+### 2026-04-22 - Codex Dispatch Is An Admin Engineering Workflow
+
+- Type: lesson
+- Domain: engineering automation
+- Applies to: Codex task dispatch, repository-changing agent work, admin
+  workflow automation
+- Status: accepted
+- Source: [AI Workflow](./ai-workflow.md)
+- Lesson: kicking off Codex from inside ECTRM should be treated as an
+  admin-owned engineering workflow, not as a normal business assistant action.
+  The app may record a task and dispatch a configured repository workflow, but
+  Codex results should still land as reviewable code artifacts such as branches,
+  pull requests, or workflow output.
+- Deterministic opportunity: keep dispatch configuration in typed backend
+  settings and task state in durable `codex_task_requests` records with explicit
+  statuses.
+- Agent autonomy impact: assistants may draft Codex task prompts, but starting
+  repository-mutating work should remain behind admin authentication and
+  server-side credentials.
+- Tests or evidence: focused API coverage should verify disabled/config-missing
+  behavior, successful dispatch recording, and failed dispatch audit state.
+- Follow-up: if assistants later stage Codex tasks, add a typed action request
+  and approval path instead of letting chat text dispatch directly.
+
+### 2026-04-22 - Long-Running Codex Needs Explicit Stop Conditions
+
+- Type: lesson
+- Domain: engineering automation
+- Applies to: Codex task dispatch, long-running repository agents,
+  recommendation loops
+- Status: accepted
+- Source: [AI Workflow](./ai-workflow.md)
+- Lesson: letting Codex continue from one completed task into the next should be
+  modeled as a bounded loop, not as open-ended autonomy. The request must carry
+  a run mode, iteration cap, continuation question, and stop conditions so the
+  repository workflow has a deterministic contract to follow.
+- Deterministic opportunity: store loop controls on `codex_task_requests` and
+  render the continuation contract into the dispatch prompt rather than relying
+  on freeform operator wording. Track execution through a token-authenticated
+  callback that writes workflow run, branch, pull request, artifact, summary,
+  and stop-reason metadata back to the original task record.
+- Agent autonomy impact: long-running Codex may choose the next repository task
+  only when it is concrete, high-confidence, repository-local, and within the
+  original request. It must stop for protected business domains, production data
+  mutation, external commitments, or verification failures requiring human
+  review.
+- Tests or evidence: API coverage should verify loop metadata persistence,
+  prompt contract rendering, configured iteration caps, callback token
+  enforcement, and execution-state updates.

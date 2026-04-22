@@ -106,7 +106,7 @@ test('mobile shell keeps the main stage full-width and the nav drawer behaves li
   }
 })
 
-test('single-user smoke signs into the dashboard when one-click access is enabled', async ({ page }) => {
+test('single-user smoke signs into the prompt home when one-click access is enabled', async ({ page }) => {
   const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
 
   try {
@@ -121,7 +121,7 @@ test('single-user smoke signs into the dashboard when one-click access is enable
     await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
     await dismissStartHereOverlay(page)
 
-    await expect(page.getByText('Common Starting Points')).toBeVisible()
+    await expect(page.getByText('Start with the job in front of you')).toBeVisible()
     await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
 
     assertNoHarnessRequestFailures(harness)

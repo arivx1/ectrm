@@ -453,6 +453,16 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             <p>
               {`Review #${preTradeReviewContext.reviewId} ${preTradeReviewContext.reviewName} is attached to this ticket and will be copied onto the confirmation workflow item when the trade is created.`}
             </p>
+            {preTradeReviewContext.recommendationRunId ? (
+              <p>
+                {`Recommendation #${preTradeReviewContext.recommendationRunId} is attached${preTradeReviewContext.recommendationScore !== null ? ` with score ${preTradeReviewContext.recommendationScore}` : ''}.`}
+              </p>
+            ) : null}
+            {preTradeReviewContext.recommendationOverrideReason ? (
+              <p>
+                {`Recommendation override: ${preTradeReviewContext.recommendationOverrideReason}`}
+              </p>
+            ) : null}
             {preTradeReviewExcerpt ? <p>{preTradeReviewExcerpt}</p> : null}
           </div>
         </div>

@@ -4,11 +4,14 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.assistant.services.policies import evaluate_action_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptSection
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
+from apps.api.app.domains.operations.services.workflow_items import evaluate_trade_workflow_item_update_policy
 from apps.api.app.domains.operations.services.workflow_items import workflow_allowed_statuses
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.trade import Trade
@@ -45,6 +48,57 @@ class AssistantActionRuntimeResult:
     proposals: tuple[AssistantActionProposal, ...]
     warnings: tuple[str, ...] = ()
 
+
+def _object_ref(record_type: str, record_id: object, label: str | None = None) -> dict[str, object]:
+    normalized_id = str(record_id)
+    return {
+        "type": record_type,
+        "id": normalized_id,
+        "label": label or f"{record_type.replace('_', ' ').title()} {normalized_id}",
+    }
+
+
+def _supporting_record(
+    record_type: str,
+    record_id: object,
+    summary: str,
+    label: str | None = None,
+) -> dict[str, object]:
+    return {
+        **_object_ref(record_type, record_id, label),
+        "summary": summary,
+    }
+
+
+def _with_review_context(
+    payload: dict[str, object],
+    *,
+    owning_work_object: dict[str, object],
+    required_reviewer_role: str,
+    business_rationale: str,
+    proposed_mutation: dict[str, object],
+    supporting_records: tuple[dict[str, object], ...],
+    expected_downstream_effects: tuple[str, ...],
+    assumptions: tuple[str, ...] = (),
+    missing_evidence: tuple[str, ...] = (),
+    stale_state_basis: dict[str, object] | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, object]:
+    return {
+        **payload,
+        "review_context": {
+            "owning_work_object": owning_work_object,
+            "required_reviewer_role": required_reviewer_role,
+            "business_rationale": business_rationale,
+            "proposed_mutation": proposed_mutation,
+            "supporting_records": list(supporting_records),
+            "assumptions": list(assumptions),
+            "missing_evidence": list(missing_evidence),
+            "expected_downstream_effects": list(expected_downstream_effects),
+            "stale_state_basis": dict(stale_state_basis or {}),
+            "idempotency_key": idempotency_key,
+        },
+    }
 
 def plan_action_requests(
     *,
@@ -113,11 +167,17 @@ def plan_action_requests(
 
     proposal = planning_candidate.proposal
     assert proposal is not None
-    if not _is_action_allowed(agent_definition, proposal.action_type):
+    policy_decision = evaluate_action_policy(
+        agent=agent_definition,
+        action_type=proposal.action_type,
+        workspace=payload.workspace,
+        phase="stage",
+    )
+    if not policy_decision.allowed:
         return AssistantActionRuntimeResult(
             sections=(),
             proposals=(),
-            warnings=(f"{agent_definition.name} is not allowed to stage {proposal.action_type} actions.",),
+            warnings=(policy_decision.reason,),
         )
     return AssistantActionRuntimeResult(
         sections=(_build_action_prompt_section(proposal),),
@@ -393,7 +453,32 @@ def _plan_cancel_trade(
                 f"Create a TradeCancelled event for {trade_id}. "
                 "If approved, the application will mark the trade as cancelled and recalculate trade projections."
             ),
-            payload={"trade_id": trade_id},
+            payload=_with_review_context(
+                {"trade_id": trade_id},
+                owning_work_object=_object_ref("trade", trade_id),
+                required_reviewer_role="TRADER_OR_DESK_LEAD",
+                business_rationale=(
+                    f"Trade {trade_id} was identified from the request context and was active when the action was staged."
+                ),
+                proposed_mutation={"operation": "cancel_trade", "trade_id": trade_id, "status": "CANCELLED"},
+                supporting_records=(
+                    _supporting_record(
+                        "trade",
+                        trade_id,
+                        f"Current trade status was {trade.status or 'ACTIVE'} when staged.",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Create a TradeCancelled event.",
+                    "Mark the trade projection as CANCELLED.",
+                    "Refresh position and option exposure projections.",
+                ),
+                stale_state_basis={
+                    "status": trade.status,
+                    "last_event_id": trade.last_event_id,
+                },
+                idempotency_key=f"assistant-action:cancel_trade:{trade_id}:{trade.last_event_id}",
+            ),
         )
     )
 
@@ -437,13 +522,47 @@ def _plan_issue_trade_confirmation(
                 f"Issue the current confirmation record {confirmation_id} for trade {confirmation.trade_id}. "
                 "If approved, the application will update issue metadata and confirmation workflow state."
             ),
-            payload={
-                "confirmation_id": confirmation_id,
-                **({"issue_method": issue_method} if issue_method else {}),
-                **({"issue_recipient": issue_recipient} if issue_recipient else {}),
-                **({"issue_note": issue_note} if issue_note else {}),
-                **({"issued_at": issued_at} if issued_at else {}),
-            },
+            payload=_with_review_context(
+                {
+                    "confirmation_id": confirmation_id,
+                    **({"issue_method": issue_method} if issue_method else {}),
+                    **({"issue_recipient": issue_recipient} if issue_recipient else {}),
+                    **({"issue_note": issue_note} if issue_note else {}),
+                    **({"issued_at": issued_at} if issued_at else {}),
+                },
+                owning_work_object=_object_ref("trade_confirmation", confirmation_id),
+                required_reviewer_role="OPERATIONS_LEAD_OR_TRADER",
+                business_rationale=(
+                    f"Confirmation {confirmation_id} for trade {confirmation.trade_id} was selected for issuance."
+                ),
+                proposed_mutation={
+                    "operation": "issue_trade_confirmation",
+                    "confirmation_id": confirmation_id,
+                    **({"issue_method": issue_method} if issue_method else {}),
+                    **({"issue_recipient": issue_recipient} if issue_recipient else {}),
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "trade_confirmation",
+                        confirmation_id,
+                        f"Confirmation is currently {confirmation.status}.",
+                    ),
+                    _supporting_record("trade", confirmation.trade_id, "Owning trade for the confirmation."),
+                ),
+                expected_downstream_effects=(
+                    "Update confirmation issue metadata.",
+                    "Move confirmation workflow state forward.",
+                ),
+                missing_evidence=(() if issue_recipient else ("No issue recipient was provided.",)),
+                stale_state_basis={
+                    "status": confirmation.status,
+                    "issue_count": confirmation.issue_count,
+                    "version": confirmation.version,
+                },
+                idempotency_key=(
+                    f"assistant-action:issue_trade_confirmation:{confirmation_id}:{confirmation.version}:{confirmation.issue_count}"
+                ),
+            ),
         )
     )
 
@@ -491,15 +610,48 @@ def _plan_record_trade_confirmation_response(
                 f"Record a counterparty response on confirmation {confirmation_id} for trade {confirmation.trade_id}. "
                 "If approved, the application will update confirmation receipt status and downstream workflow state."
             ),
-            payload={
-                "confirmation_id": confirmation_id,
-                "action": response_action,
-                **({"received_at": received_at} if received_at else {}),
-                **({"response_method": response_method} if response_method else {}),
-                **({"response_reference": response_reference} if response_reference else {}),
-                **({"response_note": response_note} if response_note else {}),
-                **({"dispute_reason": dispute_reason} if dispute_reason else {}),
-            },
+            payload=_with_review_context(
+                {
+                    "confirmation_id": confirmation_id,
+                    "action": response_action,
+                    **({"received_at": received_at} if received_at else {}),
+                    **({"response_method": response_method} if response_method else {}),
+                    **({"response_reference": response_reference} if response_reference else {}),
+                    **({"response_note": response_note} if response_note else {}),
+                    **({"dispute_reason": dispute_reason} if dispute_reason else {}),
+                },
+                owning_work_object=_object_ref("trade_confirmation", confirmation_id),
+                required_reviewer_role="OPERATIONS_LEAD",
+                business_rationale=(
+                    f"A counterparty response was requested for confirmation {confirmation_id} on trade {confirmation.trade_id}."
+                ),
+                proposed_mutation={
+                    "operation": "record_trade_confirmation_response",
+                    "confirmation_id": confirmation_id,
+                    "action": response_action,
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "trade_confirmation",
+                        confirmation_id,
+                        f"Confirmation receipt status was {confirmation.receipt_status}.",
+                    ),
+                    _supporting_record("trade", confirmation.trade_id, "Owning trade for the confirmation."),
+                ),
+                expected_downstream_effects=(
+                    "Update confirmation receipt status.",
+                    "Refresh downstream confirmation workflow state.",
+                ),
+                missing_evidence=(() if response_method or response_reference or response_note else ("No response evidence was provided.",)),
+                stale_state_basis={
+                    "status": confirmation.status,
+                    "receipt_status": confirmation.receipt_status,
+                    "version": confirmation.version,
+                },
+                idempotency_key=(
+                    f"assistant-action:record_trade_confirmation_response:{confirmation_id}:{confirmation.version}:{response_action}"
+                ),
+            ),
         )
     )
 
@@ -532,6 +684,18 @@ def _plan_update_trade_workflow_item(
             warning=f"Workflow item {item_id} was identified, but no valid workflow changes were found to stage."
         )
 
+    try:
+        policy_decision = evaluate_trade_workflow_item_update_policy(
+            db,
+            item_id=item_id,
+            changes=changes,
+            validate_actor=False,
+        )
+    except (LookupError, PermissionError, ValueError) as exc:
+        return _ActionPlanningCandidate(
+            warning=f"Workflow item {item_id} update was not staged: {exc}"
+        )
+
     return _ActionPlanningCandidate(
         proposal=AssistantActionProposal(
             action_type="update_trade_workflow_item",
@@ -540,7 +704,11 @@ def _plan_update_trade_workflow_item(
                 f"Update workflow item {item_id} ({workflow_item.workflow_type}) for trade {workflow_item.trade_id}. "
                 "If approved, the application will apply the requested workflow field changes with audit history."
             ),
-            payload={"item_id": item_id, "changes": changes},
+            payload={
+                "item_id": item_id,
+                "changes": jsonable_encoder(policy_decision.normalized_changes),
+                "review_context": policy_decision.to_review_context(),
+            },
         )
     )
 
@@ -583,6 +751,18 @@ def _plan_issue_trade_invoice(
         or _extract_labeled_iso_datetime_from_message(message, labels=("due", "due on", "due at"))
     )
 
+    invoice_payload = {
+        "trade_id": trade_id,
+        **({"leg_no": leg_no} if (leg_no := _parse_optional_int_value(_first_present_value(context_fields, "leg_no"))) is not None else {}),
+        **({"invoice_number": _first_present_value(context_fields, "invoice_number")} if _first_present_value(context_fields, "invoice_number") else {}),
+        **({"invoice_currency_code": _first_present_value(context_fields, "invoice_currency_code", "currency_code")} if _first_present_value(context_fields, "invoice_currency_code", "currency_code") else {}),
+        **({"billed_quantity": billed_quantity} if billed_quantity is not None else {}),
+        **({"invoice_amount": invoice_amount} if invoice_amount is not None else {}),
+        **({"issued_at": issued_at} if issued_at else {}),
+        **({"due_at": due_at} if due_at else {}),
+        **({"notes": _first_present_value(context_fields, "notes")} if _first_present_value(context_fields, "notes") else {}),
+    }
+
     return _ActionPlanningCandidate(
         proposal=AssistantActionProposal(
             action_type="issue_trade_invoice",
@@ -591,17 +771,41 @@ def _plan_issue_trade_invoice(
                 f"Issue a settlement invoice for trade {trade_id}. "
                 "If approved, the application will create the invoice and refresh settlement workflow projections."
             ),
-            payload={
-                "trade_id": trade_id,
-                **({"leg_no": leg_no} if (leg_no := _parse_optional_int_value(_first_present_value(context_fields, "leg_no"))) is not None else {}),
-                **({"invoice_number": _first_present_value(context_fields, "invoice_number")} if _first_present_value(context_fields, "invoice_number") else {}),
-                **({"invoice_currency_code": _first_present_value(context_fields, "invoice_currency_code", "currency_code")} if _first_present_value(context_fields, "invoice_currency_code", "currency_code") else {}),
-                **({"billed_quantity": billed_quantity} if billed_quantity is not None else {}),
-                **({"invoice_amount": invoice_amount} if invoice_amount is not None else {}),
-                **({"issued_at": issued_at} if issued_at else {}),
-                **({"due_at": due_at} if due_at else {}),
-                **({"notes": _first_present_value(context_fields, "notes")} if _first_present_value(context_fields, "notes") else {}),
-            },
+            payload=_with_review_context(
+                invoice_payload,
+                owning_work_object=_object_ref("trade", trade_id),
+                required_reviewer_role="SETTLEMENT_LEAD",
+                business_rationale=f"Trade {trade_id} was selected for invoice issuance.",
+                proposed_mutation={"operation": "issue_trade_invoice", **invoice_payload},
+                supporting_records=(
+                    _supporting_record(
+                        "trade",
+                        trade_id,
+                        f"Trade settlement status was {trade.settlement_status}.",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Create a trade invoice.",
+                    "Refresh settlement workflow projections.",
+                    "Expose the invoice in settlement and reporting views.",
+                ),
+                missing_evidence=tuple(
+                    label
+                    for label, present in (
+                        ("No invoice amount was provided.", invoice_amount is not None),
+                        ("No invoice due date was provided.", bool(due_at)),
+                    )
+                    if not present
+                ),
+                stale_state_basis={
+                    "trade_status": trade.status,
+                    "settlement_status": trade.settlement_status,
+                    "last_event_id": trade.last_event_id,
+                },
+                idempotency_key=(
+                    f"assistant-action:issue_trade_invoice:{trade_id}:{invoice_payload.get('invoice_number') or trade.last_event_id}"
+                ),
+            ),
         )
     )
 
@@ -651,16 +855,49 @@ def _plan_create_trade_payment(
                 f"Create a settlement payment against invoice {invoice_id} for trade {invoice.trade_id}. "
                 "If approved, the application will create the payment and refresh payment workflow projections."
             ),
-            payload={
-                "invoice_id": invoice_id,
-                **({"payment_reference": _first_present_value(context_fields, "payment_reference")} if _first_present_value(context_fields, "payment_reference") else {}),
-                **({"payment_currency_code": _first_present_value(context_fields, "payment_currency_code", "currency_code")} if _first_present_value(context_fields, "payment_currency_code", "currency_code") else {}),
-                **({"payment_amount": payment_amount} if payment_amount is not None else {}),
-                **({"status": payment_status} if payment_status else {}),
-                **({"due_at": due_at} if due_at else {}),
-                **({"received_at": received_at} if received_at else {}),
-                **({"notes": _first_present_value(context_fields, "notes")} if _first_present_value(context_fields, "notes") else {}),
-            },
+            payload=_with_review_context(
+                {
+                    "invoice_id": invoice_id,
+                    **({"payment_reference": _first_present_value(context_fields, "payment_reference")} if _first_present_value(context_fields, "payment_reference") else {}),
+                    **({"payment_currency_code": _first_present_value(context_fields, "payment_currency_code", "currency_code")} if _first_present_value(context_fields, "payment_currency_code", "currency_code") else {}),
+                    **({"payment_amount": payment_amount} if payment_amount is not None else {}),
+                    **({"status": payment_status} if payment_status else {}),
+                    **({"due_at": due_at} if due_at else {}),
+                    **({"received_at": received_at} if received_at else {}),
+                    **({"notes": _first_present_value(context_fields, "notes")} if _first_present_value(context_fields, "notes") else {}),
+                },
+                owning_work_object=_object_ref("trade_invoice", invoice_id),
+                required_reviewer_role="SETTLEMENT_LEAD",
+                business_rationale=f"Invoice {invoice_id} was selected for payment recording.",
+                proposed_mutation={
+                    "operation": "create_trade_payment",
+                    "invoice_id": invoice_id,
+                    **({"payment_amount": payment_amount} if payment_amount is not None else {}),
+                    **({"status": payment_status} if payment_status else {}),
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "trade_invoice",
+                        invoice_id,
+                        f"Invoice status was {invoice.status} with invoice amount {invoice.invoice_amount}.",
+                    ),
+                    _supporting_record("trade", invoice.trade_id, "Owning trade for the invoice."),
+                ),
+                expected_downstream_effects=(
+                    "Create a trade payment record.",
+                    "Refresh payment workflow projections.",
+                    "Update settlement and cash follow-through views.",
+                ),
+                missing_evidence=(() if payment_amount is not None else ("No payment amount was provided.",)),
+                stale_state_basis={
+                    "invoice_status": invoice.status,
+                    "invoice_amount": float(invoice.invoice_amount),
+                    "version": invoice.version,
+                },
+                idempotency_key=(
+                    f"assistant-action:create_trade_payment:{invoice_id}:{_first_present_value(context_fields, 'payment_reference') or invoice.version}"
+                ),
+            ),
         )
     )
 
@@ -697,10 +934,38 @@ def _plan_reprocess_document_ingestion(
                 f"Reset and reprocess document ingestion {document_id}. "
                 "If approved, the application will reset analysis state and rerun document processing."
             ),
-            payload={
-                "document_id": document_id,
-                **({"processor_provider": processor_provider} if processor_provider else {}),
-            },
+            payload=_with_review_context(
+                {
+                    "document_id": document_id,
+                    **({"processor_provider": processor_provider} if processor_provider else {}),
+                },
+                owning_work_object=_object_ref("document_ingestion", document_id),
+                required_reviewer_role="OPERATIONS_LEAD_OR_ADMIN",
+                business_rationale=f"Document {document_id} was selected for ingestion reprocessing.",
+                proposed_mutation={
+                    "operation": "reprocess_document_ingestion",
+                    "document_id": document_id,
+                    **({"processor_provider": processor_provider} if processor_provider else {}),
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "document_ingestion",
+                        document_id,
+                        f"Document status was {document.status} and review status was {document.review_status}.",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Reset document analysis state.",
+                    "Rerun document processing.",
+                    "Refresh document review and linkage signals.",
+                ),
+                stale_state_basis={
+                    "status": document.status,
+                    "review_status": document.review_status,
+                    "version": document.version,
+                },
+                idempotency_key=f"assistant-action:reprocess_document_ingestion:{document_id}:{document.version}",
+            ),
         )
     )
 
@@ -901,13 +1166,8 @@ def _resolve_processor_provider(message_lower: str, context_fields: dict[str, st
     return None
 
 
-def _is_action_allowed(agent_definition: ManagedAssistantAgent, action_type: str) -> bool:
-    if not agent_definition.allowed_action_types:
-        return True
-    return action_type in {candidate for candidate in agent_definition.allowed_action_types}
-
-
 def _build_action_prompt_section(proposal: AssistantActionProposal) -> AssistantPromptSection:
+    prompt_payload = _action_payload_for_prompt(proposal.payload)
     return AssistantPromptSection(
         key="approval-gated-action",
         title="Approval-gated action candidate",
@@ -917,7 +1177,11 @@ def _build_action_prompt_section(proposal: AssistantActionProposal) -> Assistant
             f"action_type: {proposal.action_type}\n"
             f"summary: {proposal.summary}\n"
             f"description: {proposal.description}\n"
-            f"payload: {proposal.payload}\n"
+            f"payload: {prompt_payload}\n"
             "Do not claim the action has been executed unless the approval workflow reports EXECUTED."
         ),
     )
+
+
+def _action_payload_for_prompt(payload: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in payload.items() if key != "review_context"}

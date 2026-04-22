@@ -98,12 +98,27 @@ class AdminSeedApiTests(unittest.TestCase):
             assert governor is not None
             self.assertEqual(governor.status, "ACTIVE")
             self.assertEqual(governor.scope, "ORGANIZATION")
+            self.assertEqual(governor.role_key, "trade-governor")
+            self.assertEqual(governor.profile_kind, "CURATED")
+            self.assertEqual(governor.human_owner_role, "Trader, Desk Lead, or Admin")
+            self.assertEqual(governor.authority_ceiling, "STAGE")
+            self.assertEqual(
+                governor.specialization_summary,
+                "Curated seed profile for the Trade Governor role archetype.",
+            )
+            self.assertEqual(governor.activation_notes, "Seeded by the platform role catalog.")
             self.assertEqual(governor.allowed_action_types, ["cancel_trade"])
             self.assertEqual(governor.allowed_tools[0], "get_trade_by_id")
             self.assertEqual(governor.created_by, "ops-admin")
             self.assertEqual(governor.version, 1)
 
             governor.description = "Outdated scope"
+            governor.role_key = None
+            governor.profile_kind = "CUSTOM"
+            governor.human_owner_role = None
+            governor.authority_ceiling = None
+            governor.specialization_summary = None
+            governor.activation_notes = None
             governor.allowed_action_types = []
             governor.updated_by = "manual-edit"
             governor.version = 7
@@ -124,6 +139,11 @@ class AdminSeedApiTests(unittest.TestCase):
                 refreshed_governor.description,
                 "Focuses on high-sensitivity trade governance with a tightly constrained cancel-only action scope.",
             )
+            self.assertEqual(refreshed_governor.role_key, "trade-governor")
+            self.assertEqual(refreshed_governor.profile_kind, "CURATED")
+            self.assertEqual(refreshed_governor.human_owner_role, "Trader, Desk Lead, or Admin")
+            self.assertEqual(refreshed_governor.authority_ceiling, "STAGE")
+            self.assertEqual(refreshed_governor.activation_notes, "Seeded by the platform role catalog.")
             self.assertEqual(refreshed_governor.allowed_action_types, ["cancel_trade"])
             self.assertEqual(refreshed_governor.updated_by, "ops-admin")
             self.assertEqual(refreshed_governor.version, 8)

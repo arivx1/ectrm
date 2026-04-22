@@ -4,12 +4,17 @@ import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
-import { loadPreTradeReviewItem } from '../../entities/pretrade/api'
+import { loadPreTradeRecommendationRun, loadPreTradeReviewItem } from '../../entities/pretrade/api'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
 import { appConfig } from '../../shared/config'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
-import type { PreTradeReviewItemRecord, TradeCreditExceptionRecord, TradeWorkflowItemRecord } from '../../shared/models'
+import type {
+  PreTradeRecommendationRunRecord,
+  PreTradeReviewItemRecord,
+  TradeCreditExceptionRecord,
+  TradeWorkflowItemRecord,
+} from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildOpenOptionValuation,
@@ -667,8 +672,11 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   const [linkedPreTradeReview, setLinkedPreTradeReview] = useState<PreTradeReviewItemRecord | null>(null)
   const [linkedPreTradeReviewLoading, setLinkedPreTradeReviewLoading] = useState(false)
   const [linkedPreTradeReviewError, setLinkedPreTradeReviewError] = useState('')
+  const [linkedPreTradeRecommendationRun, setLinkedPreTradeRecommendationRun] = useState<PreTradeRecommendationRunRecord | null>(null)
+  const [linkedPreTradeRecommendationRunError, setLinkedPreTradeRecommendationRunError] = useState('')
   const linkedPreTradeReviewId = useMemo(() => parsePreTradeReviewId(selectedTradeEvents), [selectedTradeEvents])
   const linkedPreTradeReviewAccessToken = authSession?.accessToken ?? null
+  const linkedPreTradeRecommendationRunId = linkedPreTradeReview?.recommendation_run_id ?? null
 
   useEffect(() => {
     if (!linkedPreTradeReviewAccessToken || linkedPreTradeReviewId === null) {
@@ -709,6 +717,39 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
       cancelled = true
     }
   }, [linkedPreTradeReviewAccessToken, linkedPreTradeReviewId])
+
+  useEffect(() => {
+    if (!linkedPreTradeReviewAccessToken || linkedPreTradeRecommendationRunId === null) {
+      setLinkedPreTradeRecommendationRun(null)
+      setLinkedPreTradeRecommendationRunError('')
+      return
+    }
+
+    const accessToken = linkedPreTradeReviewAccessToken
+    const runId = linkedPreTradeRecommendationRunId
+    let cancelled = false
+    setLinkedPreTradeRecommendationRunError('')
+
+    async function loadRecommendationRun() {
+      try {
+        const run = await loadPreTradeRecommendationRun(appConfig.apiBase, accessToken, runId)
+        if (!cancelled) {
+          setLinkedPreTradeRecommendationRun(run)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLinkedPreTradeRecommendationRun(null)
+          setLinkedPreTradeRecommendationRunError(error instanceof Error ? error.message : 'Could not load the attached recommendation run.')
+        }
+      }
+    }
+
+    void loadRecommendationRun()
+
+    return () => {
+      cancelled = true
+    }
+  }, [linkedPreTradeReviewAccessToken, linkedPreTradeRecommendationRunId])
 
   const [screenFilter, setScreenFilter] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
@@ -1216,6 +1257,21 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         <span>Review Booked By</span>
                         <strong>{linkedPreTradeReview.booked_by ?? '—'}</strong>
                       </div>
+                      {linkedPreTradeReview.recommendation_summary ? (
+                        <div className="detail-row">
+                          <span>Recommendation</span>
+                          <strong>
+                            {linkedPreTradeReview.recommendation_summary.stance.replaceAll('_', ' ')}
+                            {` / ${linkedPreTradeReview.recommendation_summary.score}`}
+                          </strong>
+                        </div>
+                      ) : null}
+                      {linkedPreTradeReview.recommendation_override_reason ? (
+                        <div className="detail-row">
+                          <span>Recommendation Override</span>
+                          <strong>{linkedPreTradeReview.recommendation_override_by ?? 'Logged'}</strong>
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
                   <div className="detail-row">
@@ -1510,6 +1566,40 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <div className="stack">
                       <span className="eyebrow">Pre-Trade Rationale</span>
                       <p>{linkedPreTradeReview.review_notes ?? linkedPreTradeReview.thesis}</p>
+                    </div>
+                  ) : null}
+                  {linkedPreTradeReview?.recommendation_summary ? (
+                    <div className="stack">
+                      <span className="eyebrow">Pre-Trade Recommendation</span>
+                      <p>{linkedPreTradeReview.recommendation_summary.headline}</p>
+                      <p>
+                        {linkedPreTradeReview.recommendation_summary.stance.replaceAll('_', ' ')}
+                        {` | score ${linkedPreTradeReview.recommendation_summary.score}`}
+                        {` | ${linkedPreTradeReview.recommendation_summary.input_snapshot_count} source snapshots`}
+                      </p>
+                      {linkedPreTradeReview.recommendation_override_reason ? (
+                        <p>
+                          Override: {linkedPreTradeReview.recommendation_override_reason}
+                          {linkedPreTradeReview.recommendation_override_by ? ` | ${linkedPreTradeReview.recommendation_override_by}` : ''}
+                          {linkedPreTradeReview.recommendation_override_at ? ` | ${formatDate(linkedPreTradeReview.recommendation_override_at)}` : ''}
+                        </p>
+                      ) : null}
+                      {linkedPreTradeRecommendationRunError ? (
+                        <p className="field-error">{linkedPreTradeRecommendationRunError}</p>
+                      ) : null}
+                      {linkedPreTradeRecommendationRun ? (
+                        <div className="pretrade-card-list">
+                          {linkedPreTradeRecommendationRun.input_snapshots.slice(0, 4).map((snapshot) => (
+                            <article key={snapshot.source_key} className="pretrade-record-card pretrade-record-static">
+                              <div>
+                                <strong>{snapshot.source_key.replaceAll('-', ' ')}</strong>
+                                <span>{snapshot.source_type} | {snapshot.freshness}</span>
+                              </div>
+                              <small>{snapshot.summary ?? 'No source summary captured.'}</small>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {linkedPreTradeReview?.activity.length ? (

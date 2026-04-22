@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -29,6 +30,13 @@ from apps.api.app.domains.assistant.services.conversations import (
     to_assistant_conversation_out,
     to_assistant_conversation_summary_out,
 )
+from apps.api.app.domains.assistant.services.feedback import (
+    to_assistant_run_feedback_out,
+    upsert_assistant_run_feedback,
+)
+from apps.api.app.domains.assistant.services.outcome_metrics import (
+    summarize_assistant_outcome_metrics,
+)
 from apps.api.app.domains.assistant.services.execution import (
     approve_assistant_action_request_for_user,
     execute_assistant_execution,
@@ -44,6 +52,12 @@ from apps.api.app.domains.assistant.services.execution import (
 from apps.api.app.domains.assistant.services.prompt_context import (
     AssistantPromptSection,
     build_prompt_context,
+)
+from apps.api.app.domains.assistant.services.policies import (
+    AssistantAgentProfilePolicyDefaults,
+    AssistantAgentProfilePolicyError,
+    resolve_agent_profile_policy_defaults,
+    validate_agent_profile_definition,
 )
 from apps.api.app.domains.assistant.services.runs import (
     get_assistant_run,
@@ -65,10 +79,8 @@ from apps.api.app.domains.assistant.services.registry import (
     to_admin_agent_out,
     to_public_agent_out,
 )
-from apps.api.app.domains.assistant.services.tools import list_tool_names
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.schemas.assistant import (
-    ALL_ASSISTANT_ACTION_TYPES,
     AssistantActionRequestAdminPageOut,
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
@@ -80,11 +92,14 @@ from apps.api.app.schemas.assistant import (
     AssistantConversationOut,
     AssistantConversationSummaryOut,
     AssistantAgentUpdate,
+    AssistantOutcomeMetricsOut,
     AssistantPromptContextOut,
     AssistantPromptContextRequest,
     AssistantPromptSectionOut,
     AssistantPromptRequest,
     AssistantPromptResponse,
+    AssistantRunFeedbackCreate,
+    AssistantRunFeedbackOut,
     AssistantRunAuditTraceOut,
     AssistantRunOut,
     AssistantRunSummaryOut,
@@ -146,7 +161,7 @@ def get_current_user_assistant_conversation(
         )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    return to_assistant_conversation_out(db, record)
+    return to_assistant_conversation_out(db, record, feedback_user_id=user.user_id)
 
 
 @router.get("/runs", response_model=list[AssistantRunSummaryOut])
@@ -182,6 +197,31 @@ def get_current_user_assistant_run(
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return to_assistant_run_out(record)
+
+
+@router.post("/runs/{run_id}/feedback", response_model=AssistantRunFeedbackOut)
+def submit_current_user_assistant_run_feedback(
+    run_id: int,
+    payload: AssistantRunFeedbackCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantRunFeedbackOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        record = resolve_accessible_assistant_run(
+            db=db,
+            run_id=run_id,
+            user=user,
+        )
+        feedback = upsert_assistant_run_feedback(
+            db,
+            run=record,
+            user=user,
+            payload=payload,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_assistant_run_feedback_out(feedback)
 
 
 @router.get("/action-requests/{action_request_id}", response_model=AssistantActionRequestOut)
@@ -284,6 +324,8 @@ def preview_assistant_prompt_context(
     return AssistantPromptContextOut(
         agent_id=prompt_context.agent_id,
         agent_name=prompt_context.agent_name,
+        agent_role_key=prompt_context.agent_role_key,
+        agent_profile_kind=prompt_context.agent_profile_kind,
         provider=provider.provider,
         model=model,
         generated_at=prompt_context.generated_at,
@@ -429,6 +471,32 @@ def list_admin_assistant_runs(
     ]
 
 
+@admin_router.get("/outcome-metrics", response_model=AssistantOutcomeMetricsOut)
+def get_admin_assistant_outcome_metrics(
+    request: Request,
+    agent_id: str | None = None,
+    action_type: str | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> AssistantOutcomeMetricsOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    snapshot = summarize_assistant_outcome_metrics(
+        db,
+        agent_id=agent_id,
+        action_type=action_type,
+        created_after=created_after,
+        created_before=created_before,
+    )
+    return AssistantOutcomeMetricsOut.model_validate(asdict(snapshot))
+
+
 @admin_router.get("/runs/{run_id}/audit-trace", response_model=AssistantRunAuditTraceOut)
 def get_admin_assistant_run_audit_trace(
     run_id: int,
@@ -513,8 +581,7 @@ def create_assistant_agent(
 
     now = datetime.now(timezone.utc)
     actor_id = resolve_audit_actor_id(payload.created_by)
-    allowed_tools = _resolve_allowed_tools(payload.allowed_tools, payload.capabilities)
-    allowed_action_types = _resolve_allowed_action_types(payload.allowed_action_types, payload.capabilities)
+    policy_defaults = _resolve_agent_profile_defaults(payload)
     record = AssistantAgent(
         agent_id=payload.agent_id,
         name=payload.name,
@@ -523,10 +590,16 @@ def create_assistant_agent(
         scope=payload.scope,
         provider=payload.provider,
         model=payload.model,
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        specialization_summary=payload.specialization_summary,
+        human_owner_role=payload.human_owner_role,
+        authority_ceiling=payload.authority_ceiling,
+        activation_notes=payload.activation_notes,
         allowed_workspaces=list(payload.allowed_workspaces),
         capabilities=list(payload.capabilities),
-        allowed_tools=allowed_tools,
-        allowed_action_types=allowed_action_types,
+        allowed_tools=list(policy_defaults.allowed_tools),
+        allowed_action_types=list(policy_defaults.allowed_action_types),
         daily_token_allocation=payload.daily_token_allocation,
         system_prompt=payload.system_prompt,
         created_at=now,
@@ -561,10 +634,17 @@ def update_assistant_agent(
     record.scope = payload.scope
     record.provider = payload.provider
     record.model = payload.model
+    record.role_key = payload.role_key
+    record.profile_kind = payload.profile_kind
+    record.specialization_summary = payload.specialization_summary
+    record.human_owner_role = payload.human_owner_role
+    record.authority_ceiling = payload.authority_ceiling
+    record.activation_notes = payload.activation_notes
     record.allowed_workspaces = list(payload.allowed_workspaces)
     record.capabilities = list(payload.capabilities)
-    record.allowed_tools = _resolve_allowed_tools(payload.allowed_tools, payload.capabilities)
-    record.allowed_action_types = _resolve_allowed_action_types(payload.allowed_action_types, payload.capabilities)
+    policy_defaults = _resolve_agent_profile_defaults(payload)
+    record.allowed_tools = list(policy_defaults.allowed_tools)
+    record.allowed_action_types = list(policy_defaults.allowed_action_types)
     record.daily_token_allocation = payload.daily_token_allocation
     record.system_prompt = payload.system_prompt
     record.updated_at = datetime.now(timezone.utc)
@@ -594,45 +674,26 @@ def _encode_sse(event: str, payload: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 
-def _resolve_allowed_tools(
-    allowed_tools: list[str],
-    capabilities: list[str],
-) -> list[str]:
-    available_tool_names = list(list_tool_names())
-    available_tool_name_set = set(available_tool_names)
-    invalid_tool_names = [tool_name for tool_name in allowed_tools if tool_name not in available_tool_name_set]
-    if invalid_tool_names:
-        invalid_label = ", ".join(invalid_tool_names)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown assistant tools requested: {invalid_label}",
+def _resolve_agent_profile_defaults(payload: AssistantAgentCreate | AssistantAgentUpdate) -> AssistantAgentProfilePolicyDefaults:
+    defaults = resolve_agent_profile_policy_defaults(
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        capabilities=tuple(payload.capabilities),
+        allowed_tools=tuple(payload.allowed_tools),
+        allowed_action_types=tuple(payload.allowed_action_types),
+    )
+    try:
+        validate_agent_profile_definition(
+            agent_name=payload.name,
+            role_key=payload.role_key,
+            profile_kind=payload.profile_kind,
+            scope=payload.scope,
+            allowed_workspaces=tuple(payload.allowed_workspaces),
+            capabilities=tuple(payload.capabilities),
+            allowed_tools=defaults.allowed_tools,
+            allowed_action_types=defaults.allowed_action_types,
+            authority_ceiling=payload.authority_ceiling,
         )
-
-    if "READ" in {capability.upper() for capability in capabilities} and not allowed_tools:
-        return available_tool_names
-    return list(allowed_tools)
-
-
-def _resolve_allowed_action_types(
-    allowed_action_types: list[str],
-    capabilities: list[str],
-) -> list[str]:
-    normalized_capabilities = {capability.upper() for capability in capabilities}
-    if allowed_action_types and "ACTION" not in normalized_capabilities:
-        raise HTTPException(
-            status_code=400,
-            detail="allowed_action_types can only be set for agents with the ACTION capability.",
-        )
-
-    available_action_type_set = set(ALL_ASSISTANT_ACTION_TYPES)
-    invalid_action_types = [action_type for action_type in allowed_action_types if action_type not in available_action_type_set]
-    if invalid_action_types:
-        invalid_label = ", ".join(invalid_action_types)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown assistant action types requested: {invalid_label}",
-        )
-
-    if "ACTION" in normalized_capabilities and not allowed_action_types:
-        return list(ALL_ASSISTANT_ACTION_TYPES)
-    return list(allowed_action_types)
+    except AssistantAgentProfilePolicyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return defaults

@@ -31,6 +31,11 @@ const DocumentationWorkspace = lazy(() =>
     default: module.DocumentationWorkspace,
   })),
 )
+const PromptHomeWorkspace = lazy(() =>
+  import('../../workspaces/prompt/PromptHomeWorkspace').then((module) => ({
+    default: module.PromptHomeWorkspace,
+  })),
+)
 const DashboardWorkspace = lazy(() =>
   import('../../workspaces/dashboard/DashboardWorkspace').then((module) => ({
     default: module.DashboardWorkspace,
@@ -672,6 +677,16 @@ function buildSettlementWindowNotices({
 }
 
 const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = {
+  prompt: {
+    key: 'prompt',
+    label: 'Prompt Home',
+    kicker: 'Ask',
+    heroTitle: 'Start from the prompt',
+    heroBody:
+      'Describe the job in front of you, then let the assistant answer, clarify, or route you into the right old-school workspace.',
+    dataGroups: [],
+    blockingGroups: [],
+  },
   dashboard: {
     key: 'dashboard',
     label: 'Live Desk',
@@ -915,6 +930,22 @@ export const WORKSPACE_RENDERERS: Record<
   WorkspaceViewRenderContext['currentView'],
   WorkspaceRendererDefinition
 > = {
+  prompt: {
+    render: (context) => (
+      <PromptHomeWorkspace
+        authSession={context.workspaceData.authSession}
+        health={context.workspaceData.health}
+        counts={{
+          activeTrades: context.workspaceData.workspaceBootstrapSummary?.trades.active_count ?? null,
+          openWorkItems: context.workspaceData.workspaceBootstrapSummary?.work_items.total_count ?? null,
+          pendingInvoices: context.workspaceData.workspaceBootstrapSummary?.settlement.invoice_pending_count ?? null,
+          paymentsDue: context.workspaceData.workspaceBootstrapSummary?.settlement.payment_due_count ?? null,
+          attentionItems: context.workspaceData.workspaceBootstrapSummary?.dashboard.attention.total_count ?? null,
+        }}
+        onOpenView={context.navigateToView}
+      />
+    ),
+  },
   guide: {
     render: (context) => (
       <DocumentationWorkspace

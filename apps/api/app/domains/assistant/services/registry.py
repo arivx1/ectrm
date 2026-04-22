@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.domains.assistant.services.policies import build_effective_policy_for_agent
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.schemas.assistant import (
@@ -29,6 +30,12 @@ class ManagedAssistantAgent:
     scope: str
     provider: str | None
     model: str | None
+    role_key: str | None
+    profile_kind: str
+    specialization_summary: str | None
+    human_owner_role: str | None
+    authority_ceiling: str | None
+    activation_notes: str | None
     allowed_workspaces: tuple[AssistantWorkspace, ...]
     capabilities: tuple[str, ...]
     allowed_tools: tuple[str, ...]
@@ -98,12 +105,19 @@ def to_public_agent_out(
         scope=record.scope,
         provider=record.provider,
         model=record.model,
+        role_key=record.role_key,
+        profile_kind=record.profile_kind or "CUSTOM",
+        specialization_summary=record.specialization_summary,
+        human_owner_role=record.human_owner_role,
+        authority_ceiling=record.authority_ceiling,
+        activation_notes=record.activation_notes,
         allowed_workspaces=list(record.allowed_workspaces or []),
         capabilities=list(record.capabilities or []),
         allowed_tools=list(record.allowed_tools or []),
         allowed_action_types=list(record.allowed_action_types or []),
         daily_token_allocation=record.daily_token_allocation,
         token_budget=token_budget or _build_empty_token_budget(record),
+        effective_policy=build_effective_policy_for_agent(to_managed_agent(record)),
     )
 
 
@@ -120,12 +134,19 @@ def to_admin_agent_out(
         scope=record.scope,
         provider=record.provider,
         model=record.model,
+        role_key=record.role_key,
+        profile_kind=record.profile_kind or "CUSTOM",
+        specialization_summary=record.specialization_summary,
+        human_owner_role=record.human_owner_role,
+        authority_ceiling=record.authority_ceiling,
+        activation_notes=record.activation_notes,
         allowed_workspaces=list(record.allowed_workspaces or []),
         capabilities=list(record.capabilities or []),
         allowed_tools=list(record.allowed_tools or []),
         allowed_action_types=list(record.allowed_action_types or []),
         daily_token_allocation=record.daily_token_allocation,
         token_budget=token_budget or _build_empty_token_budget(record),
+        effective_policy=build_effective_policy_for_agent(to_managed_agent(record)),
         system_prompt=record.system_prompt,
         created_at=record.created_at,
         created_by=record.created_by,
@@ -144,6 +165,12 @@ def to_managed_agent(record: AssistantAgent) -> ManagedAssistantAgent:
         scope=record.scope,
         provider=record.provider,
         model=record.model,
+        role_key=record.role_key,
+        profile_kind=record.profile_kind or "CUSTOM",
+        specialization_summary=record.specialization_summary,
+        human_owner_role=record.human_owner_role,
+        authority_ceiling=record.authority_ceiling,
+        activation_notes=record.activation_notes,
         allowed_workspaces=tuple(record.allowed_workspaces or []),
         capabilities=tuple(record.capabilities or []),
         allowed_tools=tuple(record.allowed_tools or []),

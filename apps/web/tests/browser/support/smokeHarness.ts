@@ -12,11 +12,15 @@ import {
   adminRoadmapDocument,
   assistantActionRequests,
   assistantAdminAgents,
+  assistantOutcomeMetrics,
+  assistantRoleArchetypes,
   assistantRuntimeSettings,
   books,
   buildWorkspaceSummary,
   commodities,
   counterparties,
+  codexTasks,
+  codexTaskSettings,
   currencies,
   locations,
   portfolios,
@@ -334,6 +338,32 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/admin/assistant/role-archetypes' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(
+        response,
+        assistantRoleArchetypes.map((role) => ({
+          ...role,
+          mission: [...role.mission],
+          allowed_workspaces: [...role.allowed_workspaces],
+          work_objects: [...role.work_objects],
+          capability_ceiling: [...role.capability_ceiling],
+          default_tools: [...role.default_tools],
+          maximum_action_types: [...role.maximum_action_types],
+          approval_rules: [...role.approval_rules],
+          stop_conditions: [...role.stop_conditions],
+          success_metrics: [...role.success_metrics],
+          required_eval_coverage: [...role.required_eval_coverage],
+          base_prompt_guidance: [...role.base_prompt_guidance],
+          current_profile_ids: [...role.current_profile_ids],
+        })),
+      )
+      return
+    }
+
     const assistantAuditTraceMatch = url.pathname.match(/^\/admin\/assistant\/runs\/(\d+)\/audit-trace$/)
     if (assistantAuditTraceMatch && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
@@ -600,6 +630,15 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/admin/assistant/outcome-metrics' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, assistantOutcomeMetrics)
+      return
+    }
+
     if (url.pathname === '/users' && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -624,6 +663,24 @@ async function startMockApiServer(
       }
 
       writeJson(response, projectionMonitoringAdminRecord)
+      return
+    }
+
+    if (url.pathname === '/admin/codex/settings' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, codexTaskSettings)
+      return
+    }
+
+    if (url.pathname === '/admin/codex/tasks' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [...codexTasks])
       return
     }
 
@@ -711,6 +768,17 @@ async function startMockApiServer(
       const updatedRequest = {
         ...currentRequest,
         status: 'EXECUTED',
+        lifecycle: {
+          ...currentRequest.lifecycle,
+          stage: 'EXECUTED',
+          label: 'Executed',
+          tone: 'success',
+          is_terminal: true,
+          can_approve: false,
+          can_reject: false,
+          reviewer_action_label: null,
+          decided_label: `Executed by ${smokeSession.user.user_id}`,
+        },
         result: {
           event_id: eventId,
           trade_id: tradeId,
@@ -750,6 +818,17 @@ async function startMockApiServer(
       const updatedRequest = {
         ...currentRequest,
         status: 'REJECTED',
+        lifecycle: {
+          ...currentRequest.lifecycle,
+          stage: 'REJECTED',
+          label: 'Rejected',
+          tone: 'neutral',
+          is_terminal: true,
+          can_approve: false,
+          can_reject: false,
+          reviewer_action_label: null,
+          decided_label: `Rejected by ${smokeSession.user.user_id}`,
+        },
         result: null,
         decided_at: '2026-04-11T09:05:00Z',
         decided_by: smokeSession.user.user_id,

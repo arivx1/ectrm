@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError
-from apps.api.app.domains.assistant.services.tools import list_tool_names
+from apps.api.app.domains.assistant.services.policies import (
+    AssistantAgentProfilePolicyError,
+    resolve_agent_profile_policy_defaults,
+    validate_agent_profile_definition,
+)
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.schemas.assistant import (
-    ALL_ASSISTANT_ACTION_TYPES,
     AssistantAgentCreate,
     AssistantAgentUpdate,
 )
@@ -31,6 +34,12 @@ class AssistantAgentMutationInput:
     allowed_tools: tuple[str, ...]
     allowed_action_types: tuple[str, ...]
     system_prompt: str
+    role_key: str | None = None
+    profile_kind: str = "CUSTOM"
+    specialization_summary: str | None = None
+    human_owner_role: str | None = None
+    authority_ceiling: str | None = None
+    activation_notes: str | None = None
     daily_token_allocation: int | None = None
 
 
@@ -102,6 +111,12 @@ def upsert_admin_assistant_agent(
             scope=definition.scope,
             provider=definition.provider,
             model=definition.model,
+            role_key=definition.role_key,
+            profile_kind=definition.profile_kind,
+            specialization_summary=definition.specialization_summary,
+            human_owner_role=definition.human_owner_role,
+            authority_ceiling=definition.authority_ceiling,
+            activation_notes=definition.activation_notes,
             allowed_workspaces=list(definition.allowed_workspaces),
             capabilities=list(definition.capabilities),
             allowed_tools=list(definition.allowed_tools),
@@ -151,6 +166,13 @@ def upsert_admin_assistant_agent(
 
 def _definition_from_create(payload: AssistantAgentCreate) -> AssistantAgentMutationInput:
     capabilities = tuple(payload.capabilities)
+    defaults = resolve_agent_profile_policy_defaults(
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        capabilities=capabilities,
+        allowed_tools=tuple(payload.allowed_tools),
+        allowed_action_types=tuple(payload.allowed_action_types),
+    )
     return AssistantAgentMutationInput(
         agent_id=payload.agent_id,
         name=payload.name,
@@ -159,10 +181,16 @@ def _definition_from_create(payload: AssistantAgentCreate) -> AssistantAgentMuta
         scope=payload.scope,
         provider=payload.provider,
         model=payload.model,
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        specialization_summary=payload.specialization_summary,
+        human_owner_role=payload.human_owner_role,
+        authority_ceiling=payload.authority_ceiling,
+        activation_notes=payload.activation_notes,
         allowed_workspaces=tuple(payload.allowed_workspaces),
         capabilities=capabilities,
-        allowed_tools=_default_tools(tuple(payload.allowed_tools)),
-        allowed_action_types=_default_actions(tuple(payload.allowed_action_types), capabilities=capabilities),
+        allowed_tools=defaults.allowed_tools,
+        allowed_action_types=defaults.allowed_action_types,
         daily_token_allocation=payload.daily_token_allocation,
         system_prompt=payload.system_prompt,
     )
@@ -174,6 +202,13 @@ def _definition_from_update(
     payload: AssistantAgentUpdate,
 ) -> AssistantAgentMutationInput:
     capabilities = tuple(payload.capabilities)
+    defaults = resolve_agent_profile_policy_defaults(
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        capabilities=capabilities,
+        allowed_tools=tuple(payload.allowed_tools),
+        allowed_action_types=tuple(payload.allowed_action_types),
+    )
     return AssistantAgentMutationInput(
         agent_id=agent_id,
         name=payload.name,
@@ -182,38 +217,39 @@ def _definition_from_update(
         scope=payload.scope,
         provider=payload.provider,
         model=payload.model,
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        specialization_summary=payload.specialization_summary,
+        human_owner_role=payload.human_owner_role,
+        authority_ceiling=payload.authority_ceiling,
+        activation_notes=payload.activation_notes,
         allowed_workspaces=tuple(payload.allowed_workspaces),
         capabilities=capabilities,
-        allowed_tools=_default_tools(tuple(payload.allowed_tools)),
-        allowed_action_types=_default_actions(tuple(payload.allowed_action_types), capabilities=capabilities),
+        allowed_tools=defaults.allowed_tools,
+        allowed_action_types=defaults.allowed_action_types,
         daily_token_allocation=payload.daily_token_allocation,
         system_prompt=payload.system_prompt,
     )
 
 
-def _default_tools(allowed_tools: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(allowed_tools) if allowed_tools else tuple(list_tool_names())
-
-
-def _default_actions(
-    allowed_action_types: tuple[str, ...],
-    *,
-    capabilities: tuple[str, ...],
-) -> tuple[str, ...]:
-    if allowed_action_types:
-        return tuple(allowed_action_types)
-    if "ACTION" in {capability.upper() for capability in capabilities}:
-        return tuple(ALL_ASSISTANT_ACTION_TYPES)
-    return ()
-
-
 def _validate_agent_definition(definition: AssistantAgentMutationInput) -> None:
-    capabilities = {capability.upper() for capability in definition.capabilities}
-    if definition.allowed_action_types and "ACTION" not in capabilities:
+    try:
+        validate_agent_profile_definition(
+            agent_name=definition.name,
+            role_key=definition.role_key,
+            profile_kind=definition.profile_kind,
+            scope=definition.scope,
+            allowed_workspaces=definition.allowed_workspaces,
+            capabilities=definition.capabilities,
+            allowed_tools=definition.allowed_tools,
+            allowed_action_types=definition.allowed_action_types,
+            authority_ceiling=definition.authority_ceiling,
+        )
+    except AssistantAgentProfilePolicyError as exc:
         raise AssistantServiceError(
             status_code=422,
-            detail="allowed_action_types can only be set for agents with the ACTION capability",
-        )
+            detail=str(exc),
+        ) from exc
     if definition.daily_token_allocation is not None and definition.daily_token_allocation < 0:
         raise AssistantServiceError(
             status_code=422,
@@ -233,6 +269,12 @@ def _apply_agent_definition(
         "scope": definition.scope,
         "provider": definition.provider,
         "model": definition.model,
+        "role_key": definition.role_key,
+        "profile_kind": definition.profile_kind,
+        "specialization_summary": definition.specialization_summary,
+        "human_owner_role": definition.human_owner_role,
+        "authority_ceiling": definition.authority_ceiling,
+        "activation_notes": definition.activation_notes,
         "allowed_workspaces": list(definition.allowed_workspaces),
         "capabilities": list(definition.capabilities),
         "allowed_tools": list(definition.allowed_tools),
@@ -269,6 +311,8 @@ def _record_agent_provenance(
         ],
         details={
             "agent_id": record.agent_id,
+            "role_key": record.role_key,
+            "profile_kind": record.profile_kind,
             "workspace_count": len(record.allowed_workspaces or []),
             "capability_count": len(record.capabilities or []),
             "tool_count": len(record.allowed_tools or []),

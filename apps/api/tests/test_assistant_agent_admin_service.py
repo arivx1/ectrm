@@ -15,11 +15,10 @@ from apps.api.app.domains.assistant.services.agent_admin import (
     upsert_admin_assistant_agent,
 )
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError
-from apps.api.app.domains.assistant.services.tools import list_tool_names
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
-from apps.api.app.schemas.assistant import ALL_ASSISTANT_ACTION_TYPES, AssistantAgentCreate, AssistantAgentUpdate
+from apps.api.app.schemas.assistant import AssistantAgentCreate, AssistantAgentUpdate
 
 
 class AssistantAgentAdminServiceTests(unittest.TestCase):
@@ -44,7 +43,7 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
             session.query(AssistantAgent).delete()
             session.commit()
 
-    def test_create_admin_assistant_agent_expands_default_tool_and_action_catalogs(self) -> None:
+    def test_create_admin_assistant_agent_inherits_role_tool_defaults_and_requires_explicit_actions(self) -> None:
         with self.SessionLocal() as session:
             record = create_admin_assistant_agent(
                 session,
@@ -56,19 +55,55 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
                     scope="TEAM",
                     provider="openai",
                     model="gpt-5-mini",
+                    role_key="trade-governor",
+                    profile_kind="ROLE_DERIVED",
+                    specialization_summary="Reviews trade governance actions.",
+                    human_owner_role="Trader, Desk Lead, or Admin",
+                    authority_ceiling="STAGE",
+                    activation_notes="Seeded by test fixture.",
                     allowed_workspaces=["assistant", "trades"],
                     capabilities=["READ", "EXPLAIN", "ACTION"],
                     allowed_tools=[],
-                    allowed_action_types=[],
+                    allowed_action_types=["cancel_trade"],
                     system_prompt="Review trade state before recommending actions.",
                     created_by="ops-admin",
                 ),
             )
 
             self.assertEqual(record.created_by, "ops-admin")
-            self.assertEqual(record.allowed_tools, list(list_tool_names()))
-            self.assertEqual(record.allowed_action_types, list(ALL_ASSISTANT_ACTION_TYPES))
+            self.assertEqual(
+                record.allowed_tools,
+                ["get_trade_by_id", "list_trade_events", "get_trade_workbench", "list_workflow_items"],
+            )
+            self.assertEqual(record.allowed_action_types, ["cancel_trade"])
             self.assertEqual(record.version, 1)
+
+    def test_create_admin_assistant_agent_rejects_action_capability_without_explicit_actions(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(
+                AssistantServiceError,
+                "must declare explicit allowed_action_types",
+            ):
+                create_admin_assistant_agent(
+                    session,
+                    AssistantAgentCreate(
+                        agent_id="trade-governor",
+                        name="Trade Governor",
+                        description="Reviews trade governance actions.",
+                        status="DRAFT",
+                        scope="TEAM",
+                        provider="openai",
+                        model="gpt-5-mini",
+                        role_key="trade-governor",
+                        profile_kind="ROLE_DERIVED",
+                        allowed_workspaces=["assistant", "trades"],
+                        capabilities=["READ", "EXPLAIN", "ACTION"],
+                        allowed_tools=[],
+                        allowed_action_types=[],
+                        system_prompt="Review trade state before recommending actions.",
+                        created_by="ops-admin",
+                    ),
+                )
 
     def test_update_admin_assistant_agent_touches_existing_record_even_when_payload_is_unchanged(self) -> None:
         with self.SessionLocal() as session:
@@ -122,6 +157,12 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
             scope="TEAM",
             provider=None,
             model=None,
+            role_key="settlement-copilot",
+            profile_kind="CUSTOM",
+            specialization_summary="Explains settlement posture and next steps.",
+            human_owner_role="Settlement lead",
+            authority_ceiling="STAGE",
+            activation_notes="Seeded by test fixture.",
             allowed_workspaces=("assistant", "settlement"),
             capabilities=("READ", "EXPLAIN", "ACTION"),
             allowed_tools=("list_trade_invoices", "list_trade_payments"),
@@ -185,6 +226,12 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
                         scope="TEAM",
                         provider="openai",
                         model="gpt-5-mini",
+                        role_key="trade-reader",
+                        profile_kind="CUSTOM",
+                        specialization_summary="Reads trade state without staging actions.",
+                        human_owner_role="Trading lead",
+                        authority_ceiling="EXPLAIN",
+                        activation_notes="Seeded by test fixture.",
                         allowed_workspaces=("assistant",),
                         capabilities=("READ", "EXPLAIN"),
                         allowed_tools=(),

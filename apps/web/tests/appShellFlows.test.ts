@@ -5,7 +5,12 @@ import {
   buildAuthInterruptionContinueLabel,
   resolveAuthInterruptionResumeAction,
 } from '../src/entities/app/useAuthInterruptionFlow.ts'
+import { DEFAULT_APP_VIEW_KEY } from '../src/entities/app/useAppRouteState.ts'
 import { resolveStartHereRoutingAction } from '../src/entities/app/useStartHereRouting.ts'
+
+test('the app default route starts at the prompt home', () => {
+  assert.equal(DEFAULT_APP_VIEW_KEY, 'prompt')
+})
 
 test('auth interruption labels prioritize the trade amendment flow', () => {
   assert.equal(

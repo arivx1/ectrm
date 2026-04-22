@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
+from apps.api.app.domains.assistant.services.feedback import (
+    list_feedback_for_runs_by_user,
+    to_assistant_run_feedback_out,
+)
 from apps.api.app.schemas.assistant import (
     AssistantConversationMessageOut,
     AssistantConversationOut,
@@ -208,18 +212,33 @@ def to_assistant_conversation_summary_out(
 def to_assistant_conversation_out(
     db: Session,
     record: AssistantConversation,
+    feedback_user_id: str | None = None,
 ) -> AssistantConversationOut:
     return AssistantConversationOut(
         **to_assistant_conversation_summary_out(record).model_dump(),
-        messages=build_assistant_conversation_messages(db, record.id),
+        messages=build_assistant_conversation_messages(
+            db,
+            record.id,
+            feedback_user_id=feedback_user_id or record.user_id,
+        ),
     )
 
 
 def build_assistant_conversation_messages(
     db: Session,
     conversation_id: int,
+    feedback_user_id: str | None = None,
 ) -> list[AssistantConversationMessageOut]:
     runs = list_runs_for_conversation(db, conversation_id)
+    feedback_by_run = (
+        list_feedback_for_runs_by_user(
+            db,
+            run_ids=(run.id for run in runs),
+            user_id=feedback_user_id,
+        )
+        if feedback_user_id
+        else {}
+    )
     messages: list[AssistantConversationMessageOut] = []
 
     for run in runs:
@@ -248,6 +267,11 @@ def build_assistant_conversation_messages(
                         AssistantToolCallOut.model_validate(tool_call)
                         for tool_call in (run.tool_calls or [])
                     ],
+                    feedback=(
+                        to_assistant_run_feedback_out(feedback_by_run[run.id])
+                        if run.id in feedback_by_run
+                        else None
+                    ),
                 )
             )
 
