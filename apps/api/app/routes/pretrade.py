@@ -10,8 +10,22 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.http import changes_from_payload
 from apps.api.app.core.http import require_authenticated_actor
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reports.services.pretrade_reviews import (
+    PRETRADE_REVIEW_PRESET_KEY,
+    PRETRADE_SHARED_OWNER_KEY,
+    append_review_activity,
+    build_linked_trade_status_lookup,
+    get_pretrade_review_record,
+    review_linked_trade_id,
+    review_owner,
+    review_record_payload,
+    review_status,
+    to_review_out,
+)
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.schemas.pretrade import (
+    PreTradeReviewActivityAction,
+    PreTradeReviewActivityCreate,
     PreTradeReviewItemCreate,
     PreTradeReviewItemOut,
     PreTradeReviewItemUpdate,
@@ -24,8 +38,6 @@ from apps.api.app.schemas.pretrade import (
 router = APIRouter(prefix="/pretrade", tags=["pretrade"])
 
 PRETRADE_SCENARIO_PRESET_KEY = "pretrade"
-PRETRADE_REVIEW_PRESET_KEY = "pretrade_review"
-PRETRADE_SHARED_OWNER_KEY = "__shared__"
 
 
 def _preset_name_key(name: str) -> str:
@@ -48,33 +60,6 @@ def _scenario_thesis(record: ReportPreset) -> str | None:
     return thesis if isinstance(thesis, str) else None
 
 
-def _review_status(record: ReportPreset) -> str:
-    review_status = _record_payload(record).get("review_status")
-    return review_status if isinstance(review_status, str) else "OPEN"
-
-
-def _review_owner(record: ReportPreset) -> str | None:
-    owner = _record_payload(record).get("owner")
-    return owner if isinstance(owner, str) else None
-
-
-def _review_notes(record: ReportPreset) -> str | None:
-    review_notes = _record_payload(record).get("review_notes")
-    return review_notes if isinstance(review_notes, str) else None
-
-
-def _review_due_at(record: ReportPreset) -> datetime | None:
-    raw_due_at = _record_payload(record).get("due_at")
-    if not isinstance(raw_due_at, str) or not raw_due_at.strip():
-        return None
-    return datetime.fromisoformat(raw_due_at)
-
-
-def _source_scenario_id(record: ReportPreset) -> int | None:
-    scenario_id = _record_payload(record).get("source_scenario_id")
-    return scenario_id if isinstance(scenario_id, int) else None
-
-
 def _to_scenario_out(record: ReportPreset, *, actor_id: str) -> PreTradeScenarioOut:
     return PreTradeScenarioOut(
         scenario_id=record.id,
@@ -87,26 +72,6 @@ def _to_scenario_out(record: ReportPreset, *, actor_id: str) -> PreTradeScenario
         updated_by=record.updated_by,
         version=record.version,
         can_edit=record.created_by == actor_id,
-    )
-
-
-def _to_review_out(record: ReportPreset) -> PreTradeReviewItemOut:
-    return PreTradeReviewItemOut(
-        review_id=record.id,
-        name=record.name,
-        thesis=_scenario_thesis(record),
-        draft=_draft_from_record(record),
-        source_scenario_id=_source_scenario_id(record),
-        review_status=_review_status(record),  # type: ignore[arg-type]
-        owner=_review_owner(record),
-        due_at=_review_due_at(record),
-        review_notes=_review_notes(record),
-        created_at=record.created_at,
-        created_by=record.created_by,
-        updated_at=record.updated_at,
-        updated_by=record.updated_by,
-        version=record.version,
-        can_edit=True,
     )
 
 
@@ -282,7 +247,32 @@ def get_pretrade_reviews(
     records = db.execute(
         _visible_reviews_stmt().order_by(ReportPreset.updated_at.desc(), ReportPreset.created_at.desc())
     ).scalars().all()
-    return [_to_review_out(record) for record in records]
+    linked_trade_status_by_id = build_linked_trade_status_lookup(
+        db,
+        [review_linked_trade_id(record) or "" for record in records],
+    )
+    return [
+        to_review_out(record, linked_trade_status_by_id=linked_trade_status_by_id)
+        for record in records
+    ]
+
+
+@router.get("/reviews/{review_id}", response_model=PreTradeReviewItemOut)
+def get_pretrade_review(
+    review_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeReviewItemOut:
+    require_authenticated_actor(request)
+    record = get_pretrade_review_record(db, review_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pre-trade review item was not found.")
+
+    linked_trade_status_by_id = build_linked_trade_status_lookup(
+        db,
+        [review_linked_trade_id(record) or ""],
+    )
+    return to_review_out(record, linked_trade_status_by_id=linked_trade_status_by_id)
 
 
 @router.post("/reviews", response_model=PreTradeReviewItemOut, status_code=status.HTTP_201_CREATED)
@@ -325,10 +315,19 @@ def create_pretrade_review(
         updated_by=actor_id,
         version=1,
     )
+    append_review_activity(
+        record,
+        action="SUBMITTED",
+        actor_id=actor_id,
+        occurred_at=now,
+        comment=payload.review_notes or payload.thesis,
+        payload={"source_scenario_id": payload.source_scenario_id} if payload.source_scenario_id else None,
+    )
     db.add(record)
     db.commit()
     db.refresh(record)
-    return _to_review_out(record)
+    linked_trade_status_by_id = build_linked_trade_status_lookup(db, [])
+    return to_review_out(record, linked_trade_status_by_id=linked_trade_status_by_id)
 
 
 @router.patch("/reviews/{review_id}", response_model=PreTradeReviewItemOut)
@@ -339,16 +338,30 @@ def update_pretrade_review(
     db: Session = Depends(get_db),
 ) -> PreTradeReviewItemOut:
     actor_id = require_authenticated_actor(request)
-    record = db.execute(_visible_reviews_stmt().where(ReportPreset.id == review_id)).scalars().first()
+    record = get_pretrade_review_record(db, review_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pre-trade review item was not found.")
 
     changes = changes_from_payload(payload, empty_detail="Provide at least one review field to update.")
+    current_linked_trade_id = review_linked_trade_id(record)
+    current_review_status = review_status(record)
+    current_owner = review_owner(record)
+
+    if current_linked_trade_id and "review_status" in changes and payload.review_status != current_review_status:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Pre-trade review is already linked to trade '{current_linked_trade_id}' and can no longer change approval status.",
+        )
+    if "review_status" in changes and payload.review_status == "APPROVED" and not payload.activity_comment:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Approval comment is required.",
+        )
 
     if "name" in changes and payload.name is not None:
         record.name = payload.name
 
-    next_payload = _record_payload(record)
+    next_payload = review_record_payload(record)
     if "thesis" in changes:
         next_payload["thesis"] = payload.thesis
     if "draft" in changes:
@@ -363,11 +376,77 @@ def update_pretrade_review(
         next_payload["due_at"] = payload.due_at.isoformat() if payload.due_at else None
     if "review_notes" in changes:
         next_payload["review_notes"] = payload.review_notes
+    if "activity_comment" in changes and "review_notes" not in changes and payload.activity_comment:
+        next_payload["review_notes"] = payload.activity_comment
     record.filters_json = next_payload
 
-    record.updated_at = datetime.now(timezone.utc)
+    activity_action: PreTradeReviewActivityAction | None = None
+    activity_payload: dict[str, object] = {}
+    activity_comment = payload.activity_comment or payload.review_notes
+    if "review_status" in changes and payload.review_status and payload.review_status != current_review_status:
+        activity_action = payload.review_status if payload.review_status in {"APPROVED", "REJECTED"} else "CLAIMED"
+        activity_payload["from_status"] = current_review_status
+        activity_payload["to_status"] = payload.review_status
+    elif "owner" in changes and payload.owner and payload.owner != current_owner:
+        activity_action = "CLAIMED"
+        activity_payload["from_owner"] = current_owner
+        activity_payload["to_owner"] = payload.owner
+    elif "activity_comment" in changes or "review_notes" in changes:
+        activity_action = "COMMENTED"
+
+    now = datetime.now(timezone.utc)
+    if activity_action:
+        append_review_activity(
+            record,
+            action=activity_action,
+            actor_id=actor_id,
+            occurred_at=now,
+            comment=activity_comment,
+            payload=activity_payload,
+        )
+
+    record.updated_at = now
     record.updated_by = actor_id
     record.version += 1
     db.commit()
     db.refresh(record)
-    return _to_review_out(record)
+    linked_trade_status_by_id = build_linked_trade_status_lookup(
+        db,
+        [review_linked_trade_id(record) or ""],
+    )
+    return to_review_out(record, linked_trade_status_by_id=linked_trade_status_by_id)
+
+
+@router.post("/reviews/{review_id}/activity", response_model=PreTradeReviewItemOut, status_code=status.HTTP_201_CREATED)
+def comment_on_pretrade_review(
+    review_id: int,
+    payload: PreTradeReviewActivityCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeReviewItemOut:
+    actor_id = require_authenticated_actor(request)
+    record = get_pretrade_review_record(db, review_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pre-trade review item was not found.")
+
+    now = datetime.now(timezone.utc)
+    next_payload = review_record_payload(record)
+    next_payload["review_notes"] = payload.comment
+    record.filters_json = next_payload
+    append_review_activity(
+        record,
+        action="COMMENTED",
+        actor_id=actor_id,
+        occurred_at=now,
+        comment=payload.comment,
+    )
+    record.updated_at = now
+    record.updated_by = actor_id
+    record.version += 1
+    db.commit()
+    db.refresh(record)
+    linked_trade_status_by_id = build_linked_trade_status_lookup(
+        db,
+        [review_linked_trade_id(record) or ""],
+    )
+    return to_review_out(record, linked_trade_status_by_id=linked_trade_status_by_id)

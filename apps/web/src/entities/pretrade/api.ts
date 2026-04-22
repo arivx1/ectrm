@@ -40,6 +40,11 @@ export type UpdatePreTradeReviewItemPayload = {
   owner?: string | null
   due_at?: string | null
   review_notes?: string | null
+  activity_comment?: string | null
+}
+
+export type CreatePreTradeReviewActivityPayload = {
+  comment: string
 }
 
 export async function loadPreTradeScenarios(
@@ -94,6 +99,17 @@ export async function loadPreTradeReviewItems(
   })
 }
 
+export async function loadPreTradeReviewItem(
+  apiBase: string,
+  accessToken: string,
+  reviewId: number,
+): Promise<PreTradeReviewItemRecord> {
+  return fetchJson<PreTradeReviewItemRecord>(`${apiBase}/pretrade/reviews/${reviewId}`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
 export async function createPreTradeReviewItem(
   apiBase: string,
   accessToken: string,
@@ -111,6 +127,17 @@ export async function updatePreTradeReviewItem(
   payload: UpdatePreTradeReviewItemPayload,
 ): Promise<PreTradeReviewItemRecord> {
   return patchJson<PreTradeReviewItemRecord>(`${apiBase}/pretrade/reviews/${reviewId}`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function createPreTradeReviewActivity(
+  apiBase: string,
+  accessToken: string,
+  reviewId: number,
+  payload: CreatePreTradeReviewActivityPayload,
+): Promise<PreTradeReviewItemRecord> {
+  return postJson<PreTradeReviewItemRecord>(`${apiBase}/pretrade/reviews/${reviewId}/activity`, payload, {
     headers: authorizationHeaders(accessToken),
   })
 }

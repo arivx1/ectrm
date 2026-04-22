@@ -22,6 +22,7 @@ import {
   portfolios,
   positions,
   priceIndices,
+  projectionMonitoringAdminRecord,
   publicRuntimeSettings,
   type RecordedRequest,
   selectedTradeEvents,
@@ -333,18 +334,234 @@ async function startMockApiServer(
       return
     }
 
+    const assistantAuditTraceMatch = url.pathname.match(/^\/admin\/assistant\/runs\/(\d+)\/audit-trace$/)
+    if (assistantAuditTraceMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const runId = Number(assistantAuditTraceMatch[1])
+      const traceActionRequests = assistantActionRequestRows.filter((requestRow) => requestRow.run_id === runId)
+      if (traceActionRequests.length === 0) {
+        writeJson(response, { detail: 'Assistant run not found' }, 404)
+        return
+      }
+
+      const primaryRequest = traceActionRequests[0]
+      const mutationEvents = traceActionRequests.flatMap((requestRow) => {
+        const eventId =
+          requestRow.result && typeof requestRow.result.event_id === 'string' ? requestRow.result.event_id : null
+        return eventId
+          ? [
+              {
+                event_id: eventId,
+                aggregate_type: 'trade',
+                aggregate_id:
+                  typeof requestRow.result?.trade_id === 'string' ? requestRow.result.trade_id : 'T-AMEND-100',
+                event_type: 'TradeCancelled',
+                occurred_at: requestRow.decided_at ?? '2026-04-11T09:05:00Z',
+                recorded_at: requestRow.decided_at ?? '2026-04-11T09:05:00Z',
+                actor_id: requestRow.decided_by,
+                correlation_id: `assistant-action-${requestRow.action_request_id}`,
+                causation_id: `assistant-action-request:${requestRow.action_request_id}`,
+                payload: {
+                  assistant_action_request_id: requestRow.action_request_id,
+                  assistant_run_id: requestRow.run_id,
+                  status: 'CANCELLED',
+                },
+              },
+            ]
+          : []
+      })
+      const actionTraces = traceActionRequests.map((requestRow) => ({
+        action_request: requestRow,
+        mutation_events: mutationEvents.filter(
+          (event) => event.causation_id === `assistant-action-request:${requestRow.action_request_id}`,
+        ),
+      }))
+      const timeline = [
+        {
+          entry_type: 'run_started',
+          occurred_at: primaryRequest.created_at,
+          title: 'Run started',
+          summary: 'Cancel the selected trade.',
+          status: 'COMPLETED',
+          metadata: {
+            run_id: runId,
+            agent_id: primaryRequest.agent_id,
+            workspace: primaryRequest.workspace,
+          },
+        },
+        {
+          entry_type: 'action_requested',
+          occurred_at: primaryRequest.created_at,
+          title: primaryRequest.summary,
+          summary: primaryRequest.description,
+          status: primaryRequest.status,
+          metadata: {
+            action_request_id: primaryRequest.action_request_id,
+            action_type: primaryRequest.action_type,
+            payload: primaryRequest.payload,
+          },
+        },
+        {
+          entry_type: 'tool_call',
+          occurred_at: primaryRequest.created_at,
+          title: 'Tool call: get_trade_by_id',
+          summary: 'Loaded trade T-AMEND-100 for governance review.',
+          status: null,
+          metadata: {
+            tool_name: 'get_trade_by_id',
+            arguments: { trade_id: 'T-AMEND-100' },
+            record_count: 1,
+          },
+        },
+        ...traceActionRequests
+          .filter((requestRow) => requestRow.decided_at !== null)
+          .map((requestRow) => ({
+            entry_type: 'decision',
+            occurred_at: requestRow.decided_at,
+            title: `Decision: ${requestRow.status}`,
+            summary: `${requestRow.decided_by ?? 'ops_admin'} decided action request #${requestRow.action_request_id}.`,
+            status: requestRow.status,
+            metadata: {
+              action_request_id: requestRow.action_request_id,
+              result: requestRow.result ?? {},
+            },
+          })),
+        ...mutationEvents.map((event) => ({
+          entry_type: 'mutation',
+          occurred_at: event.occurred_at,
+          title: `Mutation event: ${event.event_type}`,
+          summary: `${event.aggregate_type} ${event.aggregate_id}`,
+          status: null,
+          metadata: {
+            event_id: event.event_id,
+            payload: event.payload,
+          },
+        })),
+        {
+          entry_type: 'run_completed',
+          occurred_at: primaryRequest.created_at,
+          title: 'Run completed',
+          summary: 'Assistant run completed.',
+          status: 'COMPLETED',
+          metadata: {
+            action_request_count: traceActionRequests.length,
+            tool_call_count: 1,
+          },
+        },
+      ]
+
+      writeJson(response, {
+        run: {
+          conversation_id: 601,
+          run_id: runId,
+          status: 'COMPLETED',
+          created_at: primaryRequest.created_at,
+          completed_at: primaryRequest.created_at,
+          user_id: primaryRequest.user_id,
+          user_role: 'TRADER',
+          workspace: primaryRequest.workspace,
+          agent_id: primaryRequest.agent_id,
+          agent_name: primaryRequest.agent_name,
+          provider: 'openai',
+          model: 'gpt-5.4',
+          use_live_tools: true,
+          warning_count: 0,
+          tool_call_count: 1,
+          input_tokens: 120,
+          output_tokens: 60,
+          latest_user_message: 'Cancel the selected trade.',
+          assistant_message: primaryRequest.description,
+          error_detail: null,
+          request_messages: [{ role: 'user', content: 'Cancel the selected trade.' }],
+          application_context: 'Selected trade T-AMEND-100.',
+          prompt_sections: [],
+          rendered_system_prompt: 'Escalate cross-user trade actions into an approval inbox before execution.',
+          warnings: [],
+          tool_calls: [
+            {
+              tool_name: 'get_trade_by_id',
+              summary: 'Loaded trade T-AMEND-100 for governance review.',
+              arguments: { trade_id: 'T-AMEND-100' },
+              record_count: 1,
+            },
+          ],
+        },
+        action_requests: actionTraces,
+        timeline,
+        mutation_event_count: mutationEvents.length,
+      })
+      return
+    }
+
     if (url.pathname === '/admin/assistant/action-requests' && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
 
       const status = url.searchParams.get('status')?.trim().toUpperCase() ?? ''
+      const actionType = url.searchParams.get('action_type')?.trim() ?? ''
+      const agentId = url.searchParams.get('agent_id')?.trim().toLowerCase() ?? ''
+      const userId = url.searchParams.get('user_id')?.trim() ?? ''
+      const decidedBy = url.searchParams.get('decided_by')?.trim() ?? ''
+      const search = url.searchParams.get('search')?.trim().toLowerCase() ?? ''
+      const createdAfter = Date.parse(url.searchParams.get('created_after') ?? '')
+      const createdBefore = Date.parse(url.searchParams.get('created_before') ?? '')
+      const decidedAfter = Date.parse(url.searchParams.get('decided_after') ?? '')
+      const decidedBefore = Date.parse(url.searchParams.get('decided_before') ?? '')
       const limit = Number(url.searchParams.get('limit') ?? '')
       const offset = Number(url.searchParams.get('offset') ?? '')
 
       let filteredRequests = assistantActionRequestRows
       if (status) {
         filteredRequests = filteredRequests.filter((requestRow) => requestRow.status === status)
+      }
+      if (actionType) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.action_type === actionType)
+      }
+      if (agentId) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.agent_id?.toLowerCase() === agentId)
+      }
+      if (userId) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.user_id === userId)
+      }
+      if (decidedBy) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.decided_by === decidedBy)
+      }
+      if (Number.isFinite(createdAfter)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => Date.parse(requestRow.created_at) >= createdAfter,
+        )
+      }
+      if (Number.isFinite(createdBefore)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => Date.parse(requestRow.created_at) <= createdBefore,
+        )
+      }
+      if (Number.isFinite(decidedAfter)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => requestRow.decided_at !== null && Date.parse(requestRow.decided_at) >= decidedAfter,
+        )
+      }
+      if (Number.isFinite(decidedBefore)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => requestRow.decided_at !== null && Date.parse(requestRow.decided_at) <= decidedBefore,
+        )
+      }
+      if (search) {
+        filteredRequests = filteredRequests.filter((requestRow) =>
+          [
+            requestRow.summary,
+            requestRow.description,
+            requestRow.user_id,
+            requestRow.agent_id,
+            requestRow.agent_name,
+            requestRow.decided_by,
+            requestRow.action_type,
+          ].some((value) => String(value ?? '').toLowerCase().includes(search)),
+        )
       }
 
       const normalizedOffset = Number.isFinite(offset) && offset > 0 ? Math.trunc(offset) : 0
@@ -354,7 +571,32 @@ async function startMockApiServer(
           ? filteredRequests.slice(normalizedOffset)
           : filteredRequests.slice(normalizedOffset, normalizedOffset + normalizedLimit)
 
-      writeJson(response, pagedRequests)
+      const decidedRequests = filteredRequests.filter((requestRow) => requestRow.decided_at !== null)
+      const totalDecisionSeconds = decidedRequests.reduce((total, requestRow) => {
+        const createdAt = Date.parse(requestRow.created_at)
+        const decidedAt = Date.parse(requestRow.decided_at ?? '')
+        return Number.isFinite(createdAt) && Number.isFinite(decidedAt)
+          ? total + Math.max((decidedAt - createdAt) / 1000, 0)
+          : total
+      }, 0)
+      const summary = {
+        total_count: filteredRequests.length,
+        pending_count: filteredRequests.filter((requestRow) => requestRow.status === 'PENDING').length,
+        executed_count: filteredRequests.filter((requestRow) => requestRow.status === 'EXECUTED').length,
+        rejected_count: filteredRequests.filter((requestRow) => requestRow.status === 'REJECTED').length,
+        failed_count: filteredRequests.filter((requestRow) => requestRow.status === 'FAILED').length,
+        avg_decision_seconds:
+          decidedRequests.length > 0 ? totalDecisionSeconds / decidedRequests.length : null,
+      }
+
+      writeJson(response, {
+        items: pagedRequests,
+        total_count: filteredRequests.length,
+        limit: normalizedLimit ?? filteredRequests.length,
+        offset: normalizedOffset,
+        has_more: normalizedOffset + pagedRequests.length < filteredRequests.length,
+        summary,
+      })
       return
     }
 
@@ -373,6 +615,15 @@ async function startMockApiServer(
       }
 
       writeJson(response, adminRoadmapDocument)
+      return
+    }
+
+    if (url.pathname === '/admin/data/projection-monitoring' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, projectionMonitoringAdminRecord)
       return
     }
 
@@ -447,12 +698,23 @@ async function startMockApiServer(
         typeof currentRequest.payload.trade_id === 'string' && currentRequest.payload.trade_id.trim()
           ? currentRequest.payload.trade_id.trim()
           : 'T-AMEND-100'
+      const eventId = `evt-assistant-cancel-${actionRequestId}`
+      const tradeIndex = tradeRows.findIndex((trade) => trade.trade_id === tradeId)
+      if (tradeIndex >= 0) {
+        tradeRows[tradeIndex] = {
+          ...tradeRows[tradeIndex],
+          status: 'CANCELLED',
+          updated_at: '2026-04-11T09:05:00Z',
+          last_event_id: eventId,
+        } as SmokeTradeRow
+      }
       const updatedRequest = {
         ...currentRequest,
         status: 'EXECUTED',
         result: {
+          event_id: eventId,
           trade_id: tradeId,
-          decision: 'approved',
+          trade_status: 'CANCELLED',
         },
         decided_at: '2026-04-11T09:05:00Z',
         decided_by: smokeSession.user.user_id,

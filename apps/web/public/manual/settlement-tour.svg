@@ -1,0 +1,46 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="720" rx="28" fill="#07111B"/>
+  <rect x="36" y="36" width="1208" height="648" rx="24" fill="#0C1824" stroke="#1D3346"/>
+  <rect x="68" y="78" width="1144" height="104" rx="18" fill="#112A3B"/>
+  <rect x="68" y="210" width="1144" height="132" rx="18" fill="#102231"/>
+  <rect x="68" y="370" width="540" height="272" rx="18" fill="#102231"/>
+  <rect x="632" y="370" width="580" height="272" rx="18" fill="#112A3B"/>
+
+  <text x="96" y="124" fill="#7FB7E8" font-family="Arial, sans-serif" font-size="18" font-weight="700">Settlement</text>
+  <text x="96" y="154" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="28" font-weight="700">Issue invoices, track cash, and clear disputes</text>
+  <text x="96" y="178" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">Cash follow-through starts with status cards, then narrows into invoice and payment ledgers for exact record-level work.</text>
+
+  <rect x="96" y="236" width="240" height="80" rx="16" fill="#17384C"/>
+  <rect x="360" y="236" width="240" height="80" rx="16" fill="#17384C"/>
+  <rect x="624" y="236" width="240" height="80" rx="16" fill="#17384C"/>
+  <rect x="888" y="236" width="240" height="80" rx="16" fill="#17384C"/>
+
+  <text x="94" y="402" fill="#7FB7E8" font-family="Arial, sans-serif" font-size="17" font-weight="700">Invoice ledger</text>
+  <rect x="94" y="426" width="488" height="42" rx="10" fill="#163245"/>
+  <rect x="94" y="480" width="488" height="42" rx="10" fill="#153649"/>
+  <rect x="94" y="534" width="488" height="42" rx="10" fill="#163245"/>
+
+  <text x="658" y="402" fill="#7FB7E8" font-family="Arial, sans-serif" font-size="17" font-weight="700">Payment queue and reconciliation</text>
+  <rect x="658" y="428" width="528" height="52" rx="12" fill="#17384C"/>
+  <rect x="658" y="496" width="528" height="52" rx="12" fill="#17384C"/>
+  <rect x="658" y="564" width="168" height="34" rx="17" fill="#26A17B"/>
+  <rect x="844" y="564" width="168" height="34" rx="17" fill="#1B3345"/>
+
+  <circle cx="340" cy="196" r="22" fill="#26A17B"/>
+  <text x="332" y="203" fill="#07111B" font-family="Arial, sans-serif" font-size="18" font-weight="700">1</text>
+  <path d="M362 196H430" stroke="#26A17B" stroke-width="4" stroke-linecap="round"/>
+  <text x="440" y="186" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="18" font-weight="700">Start with the cash status cards</text>
+  <text x="440" y="210" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">Aging, due amounts, and open exceptions tell you whether the issue is invoice-side or payment-side.</text>
+
+  <circle cx="606" cy="500" r="22" fill="#4EA7FF"/>
+  <text x="598" y="507" fill="#07111B" font-family="Arial, sans-serif" font-size="18" font-weight="700">2</text>
+  <path d="M628 500H688" stroke="#4EA7FF" stroke-width="4" stroke-linecap="round"/>
+  <text x="698" y="490" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="18" font-weight="700">Inspect the exact invoice or payment record</text>
+  <text x="698" y="514" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">The ledgers hold the due dates, issue timing, and reconciliation state that explain most settlement questions.</text>
+
+  <circle cx="1018" cy="580" r="22" fill="#F2B84B"/>
+  <text x="1010" y="587" fill="#07111B" font-family="Arial, sans-serif" font-size="18" font-weight="700">3</text>
+  <path d="M1040 580H1108" stroke="#F2B84B" stroke-width="4" stroke-linecap="round"/>
+  <text x="844" y="634" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="18" font-weight="700">Record the cash action or escalate the exception</text>
+  <text x="844" y="658" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">Use the action row to move from diagnosis into issuance, payment capture, or downstream dispute handling.</text>
+</svg>

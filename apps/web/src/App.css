@@ -1,7 +1,29 @@
-/* App shell, workspace, and feature styles are split into ordered imports to keep the cascade stable. */
-@import "./styles/app-shell-auth.css";
-@import "./styles/workspace-admin.css";
-@import "./styles/trading-settings.css";
-@import "./styles/assistant-admin.css";
-@import "./styles/terminal-theme.css";
-@import "./styles/demo-docs-scheduling.css";
+/* Ordered feature imports preserve the existing cascade while making the stylesheet easier to navigate. */
+@import "./styles/app-shell.css";
+@import "./styles/auth-gate.css";
+@import "./styles/start-here.css";
+@import "./styles/workspace-overview.css";
+@import "./styles/workspace-tiles.css";
+@import "./styles/roadmap-admin.css";
+@import "./styles/shared-section-head.css";
+@import "./styles/trade-form.css";
+@import "./styles/shared-forms.css";
+@import "./styles/workspace-windows.css";
+@import "./styles/settings.css";
+@import "./styles/assistant-workspace.css";
+@import "./styles/data-sheet.css";
+@import "./styles/docs-content.css";
+@import "./styles/roadmap-workspace.css";
+@import "./styles/docs-navigation.css";
+@import "./styles/admin-reference-panels.css";
+@import "./styles/assistant-admin-tools.css";
+@import "./styles/terminal-core.css";
+@import "./styles/terminal-start-here.css";
+@import "./styles/terminal-data-sheet.css";
+@import "./styles/terminal-market-admin.css";
+@import "./styles/terminal-trade-inspector.css";
+@import "./styles/demo.css";
+@import "./styles/documents.css";
+@import "./styles/scheduling.css";
+@import "./styles/pretrade.css";
+@import "./styles/shared-motion-responsive.css";

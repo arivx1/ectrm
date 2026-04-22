@@ -19,6 +19,7 @@ export type AgentBuilderDraft = {
   capabilities: AssistantAgentCapability[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
+  daily_token_allocation: string
   system_prompt: string
 }
 
@@ -32,7 +33,10 @@ export type AgentBuilderTemplateKey =
   | 'settlement-copilot'
   | 'trade-governor'
 
-type AgentBuilderTemplateDefinition = Omit<AgentBuilderDraft, 'allowed_tools' | 'allowed_action_types'> & {
+type AgentBuilderTemplateDefinition = Omit<
+  AgentBuilderDraft,
+  'allowed_tools' | 'allowed_action_types' | 'daily_token_allocation'
+> & {
   key: AgentBuilderTemplateKey
   summary: string
   best_for: string
@@ -451,6 +455,7 @@ export function createEmptyAgentBuilderDraft(): AgentBuilderDraft {
     capabilities: ['READ', 'EXPLAIN'],
     allowed_tools: [],
     allowed_action_types: [],
+    daily_token_allocation: '',
     system_prompt: '',
   }
 }
@@ -497,6 +502,7 @@ export function buildAgentBuilderDraft(
     capabilities: [...template.capabilities],
     allowed_tools: allowedTools,
     allowed_action_types: [...template.recommended_action_types],
+    daily_token_allocation: '',
     system_prompt: template.system_prompt,
   }
 }

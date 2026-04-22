@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
 from apps.api.app.models.event import Event
 
 
@@ -89,6 +90,29 @@ def append_domain_event(
                     recorded_at=effective_recorded_at,
                 )
             )
+
+        record_mutation_provenance(
+            db,
+            operation_key=f"event_write.{event.event_type}",
+            source_surface="events",
+            affected_records=[
+                {
+                    "record_type": "event",
+                    "record_id": event.event_id,
+                    "action": "created",
+                    "label": f"{event.aggregate_type}:{event.aggregate_id}",
+                }
+            ],
+            details={
+                "event_id": event.event_id,
+                "aggregate_type": event.aggregate_type,
+                "aggregate_id": event.aggregate_id,
+                "event_type": event.event_type,
+                "schema_version": event.schema_version,
+            },
+            started_at=effective_recorded_at,
+            completed_at=effective_recorded_at,
+        )
 
         if commit:
             db.commit()

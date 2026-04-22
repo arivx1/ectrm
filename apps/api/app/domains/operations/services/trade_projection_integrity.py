@@ -7,6 +7,12 @@ from decimal import Decimal
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.settlement_payments import (
+    derive_trade_payment_projection,
+    synchronize_trade_payment_projection,
+)
+from apps.api.app.domains.operations.services.trade_confirmations import create_trade_confirmation
+from apps.api.app.domains.operations.services.workflow_items import set_trade_workflow_item_projection
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.event import Event
 from apps.api.app.models.option_exposure import OptionExposure
@@ -24,6 +30,15 @@ from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.domains.risk.services.option_exposures import rebuild_option_exposures_projection
+from apps.api.app.shared.enums import (
+    ActualizationStatus,
+    ConfirmationStatus,
+    OptionSettlementStatus,
+    PaymentStatus,
+    SettlementStatus,
+    TradeStatus,
+    TradeWorkflowType,
+)
 
 ZERO = Decimal("0")
 AUTO_CLEANABLE_ISSUE_TYPES = ("missing_last_event_no_trade_events",)
@@ -70,6 +85,25 @@ class TradeProjectionCleanupSummary:
     deleted_row_counts: dict[str, int]
     positions_rebuilt: int
     option_exposures_rebuilt: int
+
+
+@dataclass(frozen=True)
+class TradeProjectionInvariantIssue:
+    trade_id: str
+    issue_type: str
+    expected_value: str | None
+    actual_value: str | None
+    details: dict[str, object]
+
+
+@dataclass(frozen=True)
+class TradeOperationalProjectionRebuildSummary:
+    trade_id: str
+    before_issue_count: int
+    after_issue_count: int
+    resolved_issue_types: tuple[str, ...]
+    confirmation_record_present: bool
+    option_settlement_workflow_present: bool
 
 
 def list_trade_projection_integrity_issues(
@@ -170,6 +204,111 @@ def cleanup_auto_cleanable_trade_projection_issues(
     )
 
 
+def list_trade_projection_invariant_issues(
+    db: Session,
+    *,
+    trade_ids: list[str] | None = None,
+    now: datetime | None = None,
+) -> list[TradeProjectionInvariantIssue]:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    stmt = select(Trade).order_by(*trade_recency_order())
+    if trade_ids:
+        stmt = stmt.where(Trade.trade_id.in_(trade_ids))
+
+    issues: list[TradeProjectionInvariantIssue] = []
+    for trade in db.execute(stmt).scalars().all():
+        issues.extend(_actualization_invariant_issues(db, trade=trade))
+        issues.extend(_delivery_invariant_issues(db, trade=trade))
+        issues.extend(_settlement_invariant_issues(db, trade=trade, now=reference_time))
+        issues.extend(_confirmation_invariant_issues(db, trade=trade))
+        issues.extend(_option_settlement_invariant_issues(db, trade=trade))
+    return issues
+
+
+def rebuild_trade_operational_projection(
+    db: Session,
+    *,
+    trade_id: str,
+    actor_id: str,
+    now: datetime | None = None,
+) -> TradeOperationalProjectionRebuildSummary:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    trade = db.get(Trade, trade_id)
+    if trade is None:
+        raise LookupError(f"Trade '{trade_id}' was not found.")
+
+    before = list_trade_projection_invariant_issues(db, trade_ids=[trade_id], now=reference_time)
+    before_issue_types = {issue.issue_type for issue in before}
+
+    if _expected_actualization_status(trade) == ActualizationStatus.NOT_REQUIRED.value:
+        trade.actualization_status = ActualizationStatus.NOT_REQUIRED.value
+        db.execute(delete(DeliveryObligation).where(DeliveryObligation.trade_id == trade.trade_id))
+        set_trade_workflow_item_projection(
+            db,
+            trade=trade,
+            workflow_type=TradeWorkflowType.ACTUALIZATION.value,
+            status=ActualizationStatus.NOT_REQUIRED.value,
+            actor_id=actor_id,
+            now=reference_time,
+            rollup_settlement_status=False,
+        )
+
+    if _trade_has_invoices(db, trade_id=trade.trade_id):
+        synchronize_trade_payment_projection(db, trade=trade, actor_id=actor_id, now=reference_time)
+
+    confirmation = _latest_confirmation(db, trade_id=trade.trade_id)
+    if confirmation is None and _requires_confirmation_projection(trade):
+        confirmation_out = create_trade_confirmation(
+            db,
+            trade_id=trade.trade_id,
+            actor_id=actor_id,
+            status=ConfirmationStatus.PENDING.value,
+            now=reference_time,
+            enforce_credit_hold_status_change=False,
+        )
+        confirmation = db.get(TradeConfirmation, confirmation_out.confirmation_id)
+    if confirmation is not None:
+        set_trade_workflow_item_projection(
+            db,
+            trade=trade,
+            workflow_type=TradeWorkflowType.CONFIRMATION.value,
+            status=confirmation.status,
+            actor_id=actor_id,
+            now=reference_time,
+            rollup_settlement_status=False,
+        )
+
+    if _is_exercised_option_trade(db, trade=trade):
+        set_trade_workflow_item_projection(
+            db,
+            trade=trade,
+            workflow_type=TradeWorkflowType.OPTION_SETTLEMENT.value,
+            status=OptionSettlementStatus.PENDING.value,
+            actor_id=actor_id,
+            now=reference_time,
+            rollup_settlement_status=False,
+        )
+
+    trade.updated_at = reference_time
+    db.flush()
+
+    after = list_trade_projection_invariant_issues(db, trade_ids=[trade_id], now=reference_time)
+    after_issue_types = {issue.issue_type for issue in after}
+    return TradeOperationalProjectionRebuildSummary(
+        trade_id=trade_id,
+        before_issue_count=len(before),
+        after_issue_count=len(after),
+        resolved_issue_types=tuple(sorted(before_issue_types - after_issue_types)),
+        confirmation_record_present=_latest_confirmation(db, trade_id=trade_id) is not None,
+        option_settlement_workflow_present=_workflow_item(
+            db,
+            trade_id=trade_id,
+            workflow_type=TradeWorkflowType.OPTION_SETTLEMENT.value,
+        )
+        is not None,
+    )
+
+
 def rebuild_positions_projection(db: Session) -> int:
     db.execute(text("DELETE FROM positions"))
     db.flush()
@@ -226,6 +365,265 @@ def rebuild_positions_projection(db: Session) -> int:
     return count
 
 
+def _actualization_invariant_issues(
+    db: Session,
+    *,
+    trade: Trade,
+) -> list[TradeProjectionInvariantIssue]:
+    expected_status = _expected_actualization_status(trade)
+    actual_status = str(trade.actualization_status or "").strip().upper()
+    if actual_status == expected_status:
+        return []
+    return [
+        TradeProjectionInvariantIssue(
+            trade_id=trade.trade_id,
+            issue_type="actualization_status_mismatch",
+            expected_value=expected_status,
+            actual_value=actual_status or None,
+            details={"trade_status": trade.status, "trade_nature": trade.trade_nature},
+        )
+    ]
+
+
+def _delivery_invariant_issues(
+    db: Session,
+    *,
+    trade: Trade,
+) -> list[TradeProjectionInvariantIssue]:
+    delivery_count = int(
+        db.execute(
+            select(func.count())
+            .select_from(DeliveryObligation)
+            .where(DeliveryObligation.trade_id == trade.trade_id)
+        ).scalar_one()
+    )
+    if delivery_count == 0 or _expected_actualization_status(trade) != ActualizationStatus.NOT_REQUIRED.value:
+        return []
+    return [
+        TradeProjectionInvariantIssue(
+            trade_id=trade.trade_id,
+            issue_type="unexpected_delivery_obligation",
+            expected_value="0",
+            actual_value=str(delivery_count),
+            details={"delivery_count": delivery_count},
+        )
+    ]
+
+
+def _settlement_invariant_issues(
+    db: Session,
+    *,
+    trade: Trade,
+    now: datetime,
+) -> list[TradeProjectionInvariantIssue]:
+    invoices = db.execute(
+        select(TradeInvoice)
+        .where(TradeInvoice.trade_id == trade.trade_id)
+        .order_by(TradeInvoice.created_at.asc(), TradeInvoice.id.asc())
+    ).scalars().all()
+    if not invoices:
+        return []
+
+    payments = db.execute(
+        select(TradePayment)
+        .where(TradePayment.trade_id == trade.trade_id)
+        .order_by(TradePayment.created_at.asc(), TradePayment.id.asc())
+    ).scalars().all()
+    payments_by_invoice_id: dict[int, list[TradePayment]] = {}
+    for payment in payments:
+        payments_by_invoice_id.setdefault(payment.invoice_id, []).append(payment)
+    projection = derive_trade_payment_projection(
+        invoices=invoices,
+        payments_by_invoice_id=payments_by_invoice_id,
+        now=now,
+    )
+
+    issues: list[TradeProjectionInvariantIssue] = []
+    if trade.payment_status != projection.payment_status:
+        issues.append(
+            TradeProjectionInvariantIssue(
+                trade_id=trade.trade_id,
+                issue_type="payment_status_mismatch",
+                expected_value=projection.payment_status,
+                actual_value=trade.payment_status,
+                details={"invoice_count": len(invoices), "payment_count": len(payments)},
+            )
+        )
+    if trade.settlement_status != projection.settlement_status:
+        issues.append(
+            TradeProjectionInvariantIssue(
+                trade_id=trade.trade_id,
+                issue_type="settlement_status_mismatch",
+                expected_value=projection.settlement_status,
+                actual_value=trade.settlement_status,
+                details={"invoice_count": len(invoices), "payment_count": len(payments)},
+            )
+        )
+
+    workflow_item = _workflow_item(
+        db,
+        trade_id=trade.trade_id,
+        workflow_type=TradeWorkflowType.PAYMENT.value,
+    )
+    if workflow_item is None or workflow_item.status != projection.payment_status:
+        issues.append(
+            TradeProjectionInvariantIssue(
+                trade_id=trade.trade_id,
+                issue_type="workflow_status_mismatch",
+                expected_value=projection.payment_status,
+                actual_value=workflow_item.status if workflow_item is not None else None,
+                details={"workflow_type": TradeWorkflowType.PAYMENT.value},
+            )
+        )
+    elif workflow_item.status != trade.payment_status:
+        issues.append(
+            TradeProjectionInvariantIssue(
+                trade_id=trade.trade_id,
+                issue_type="workflow_status_mismatch",
+                expected_value=trade.payment_status,
+                actual_value=workflow_item.status,
+                details={"workflow_type": TradeWorkflowType.PAYMENT.value},
+            )
+        )
+    return issues
+
+
+def _confirmation_invariant_issues(
+    db: Session,
+    *,
+    trade: Trade,
+) -> list[TradeProjectionInvariantIssue]:
+    if not _requires_confirmation_projection(trade):
+        return []
+
+    issues: list[TradeProjectionInvariantIssue] = []
+    confirmation = _latest_confirmation(db, trade_id=trade.trade_id)
+    workflow_item = _workflow_item(
+        db,
+        trade_id=trade.trade_id,
+        workflow_type=TradeWorkflowType.CONFIRMATION.value,
+    )
+    if confirmation is None:
+        issues.append(
+            TradeProjectionInvariantIssue(
+                trade_id=trade.trade_id,
+                issue_type="missing_confirmation_record",
+                expected_value="present",
+                actual_value=None,
+                details={},
+            )
+        )
+    if workflow_item is None:
+        issues.append(
+            TradeProjectionInvariantIssue(
+                trade_id=trade.trade_id,
+                issue_type="missing_automated_workflow_item",
+                expected_value=TradeWorkflowType.CONFIRMATION.value,
+                actual_value=None,
+                details={"workflow_type": TradeWorkflowType.CONFIRMATION.value},
+            )
+        )
+    return issues
+
+
+def _option_settlement_invariant_issues(
+    db: Session,
+    *,
+    trade: Trade,
+) -> list[TradeProjectionInvariantIssue]:
+    if not _is_exercised_option_trade(db, trade=trade):
+        return []
+    workflow_item = _workflow_item(
+        db,
+        trade_id=trade.trade_id,
+        workflow_type=TradeWorkflowType.OPTION_SETTLEMENT.value,
+    )
+    if workflow_item is not None:
+        return []
+    return [
+        TradeProjectionInvariantIssue(
+            trade_id=trade.trade_id,
+            issue_type="missing_option_settlement_workflow",
+            expected_value=TradeWorkflowType.OPTION_SETTLEMENT.value,
+            actual_value=None,
+            details={},
+        )
+    ]
+
+
+def _expected_actualization_status(trade: Trade) -> str:
+    if trade.status != TradeStatus.ACTIVE.value or trade.trade_nature != "PHYSICAL":
+        return ActualizationStatus.NOT_REQUIRED.value
+    return trade.actualization_status or ActualizationStatus.PENDING.value
+
+
+def _requires_confirmation_projection(trade: Trade) -> bool:
+    if trade.status != TradeStatus.ACTIVE.value:
+        return False
+    return str(trade.confirmation_status or "").strip().upper() in {
+        ConfirmationStatus.PENDING.value,
+        ConfirmationStatus.SENT.value,
+        ConfirmationStatus.CONFIRMED.value,
+        ConfirmationStatus.DISPUTED.value,
+    }
+
+
+def _is_exercised_option_trade(
+    db: Session,
+    *,
+    trade: Trade,
+) -> bool:
+    if str(getattr(trade, "instrument_type", "LINEAR") or "LINEAR").strip().upper() != "OPTION":
+        return False
+    if trade.status == TradeStatus.EXERCISED.value:
+        return True
+    return (
+        db.execute(
+            select(Event.event_id)
+            .where(
+                Event.aggregate_type == "trade",
+                Event.aggregate_id == trade.trade_id,
+                Event.event_type == "OptionExercised",
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
+def _latest_confirmation(db: Session, *, trade_id: str) -> TradeConfirmation | None:
+    return db.execute(
+        select(TradeConfirmation)
+        .where(TradeConfirmation.trade_id == trade_id)
+        .order_by(TradeConfirmation.id.desc())
+    ).scalars().first()
+
+
+def _workflow_item(
+    db: Session,
+    *,
+    trade_id: str,
+    workflow_type: str,
+) -> TradeWorkflowItem | None:
+    return db.execute(
+        select(TradeWorkflowItem).where(
+            TradeWorkflowItem.trade_id == trade_id,
+            TradeWorkflowItem.workflow_type == workflow_type,
+        )
+    ).scalars().first()
+
+
+def _trade_has_invoices(db: Session, *, trade_id: str) -> bool:
+    return (
+        db.execute(
+            select(TradeInvoice.id)
+            .where(TradeInvoice.trade_id == trade_id)
+            .limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
 def _count_dependent_rows(db: Session, trade_id: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for table_name, model in DEPENDENT_MODELS:
@@ -237,6 +635,14 @@ def _count_dependent_rows(db: Session, trade_id: str) -> dict[str, int]:
             ).scalar_one()
         )
     return counts
+
+
+def _coerce_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _signed_quantity(side: str | None, quantity: object | None) -> Decimal:

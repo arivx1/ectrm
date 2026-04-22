@@ -72,7 +72,7 @@ The current Wave 0 smoke suite covers:
 - mobile shell drawer behavior at phone width
 - signed-out start-here routing into the auth gate
 - signed-in trade capture through one deterministic create-ticket path
-- admin-governed assistant approval rejection through the seeded inbox
+- admin-governed assistant approval rejection and execution through the seeded inbox
 
 The signed-in trade capture smoke uses the seeded local `OPS_ADMIN` session and
 captures one fixed-price natural gas ticket against the deterministic

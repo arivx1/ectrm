@@ -11,6 +11,13 @@ describe('workspace descriptor system', () => {
   })
 
   it('co-locates metadata, refresh plans, and notice behavior for operational workspaces', () => {
+    expect(WORKSPACE_DESCRIPTORS.pretrade.dataGroups).toEqual([
+      'trades',
+      'positions',
+      'reference',
+    ])
+    expect(WORKSPACE_DESCRIPTORS.pretrade.buildWindowNotices).toBeUndefined()
+
     expect(WORKSPACE_DESCRIPTORS.operations.dataGroups).toEqual([
       'trades',
       'deliveries',

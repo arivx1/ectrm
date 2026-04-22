@@ -1,0 +1,329 @@
+.error-banner {
+  margin-bottom: 1.2rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(163, 77, 66, 0.16);
+  background: rgba(255, 243, 240, 0.92);
+  color: #9a4338;
+}
+
+.success-banner {
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(18, 124, 108, 0.16);
+  background: rgba(236, 248, 245, 0.92);
+  color: #0d735f;
+}
+
+.metric-grid,
+.dashboard-grid,
+.workspace-grid,
+.reference-grid,
+.reference-workspace,
+.admin-grid,
+.mini-grid,
+.position-class-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.metric-grid > *,
+.dashboard-grid > *,
+.workspace-grid > *,
+.reference-grid > *,
+.reference-workspace > *,
+.admin-grid > *,
+.mini-grid > *,
+.position-class-grid > *,
+.settings-summary-grid > *,
+.docs-summary-grid > *,
+.admin-explainability-grid > *,
+.admin-summary-grid > *,
+.domain-map-grid > *,
+.schema-explorer-grid > *,
+.admin-provenance-grid > *,
+.roadmap-board > *,
+.roadmap-phase-grid > *,
+.roadmap-milestone-grid > *,
+.user-management-grid > *,
+.user-management-summary-grid > * {
+  min-width: 0;
+}
+
+.metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1rem;
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+  padding: 1.2rem;
+  border-radius: 1.45rem;
+}
+
+.metric-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(18, 124, 108, 0.9), rgba(19, 41, 61, 0.24));
+}
+
+.metric-card span {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #127c6c;
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 0.6rem;
+  font-size: 1.68rem;
+  letter-spacing: -0.04em;
+  color: #13293d;
+}
+
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(22rem, 0.9fr);
+  align-items: start;
+}
+
+.system-overview-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.system-overview-panel-compact {
+  gap: 0.8rem;
+}
+
+.system-subhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 1rem;
+}
+
+.system-subhead h4 {
+  margin: 0.35rem 0 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+  color: #13293d;
+}
+
+.system-subhead p {
+  margin: 0;
+  max-width: 20rem;
+  color: #66717c;
+  line-height: 1.55;
+}
+
+.system-status-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.system-status-grid-compact {
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.dependency-status-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.dependency-status-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.system-status-card {
+  position: relative;
+  overflow: hidden;
+  padding: 1rem;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 250, 0.9));
+}
+
+.system-status-card-compact {
+  padding: 0.85rem 0.9rem;
+  border-radius: 1rem;
+}
+
+.system-status-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 3px;
+}
+
+.system-status-card.tone-active::before {
+  background: linear-gradient(90deg, rgba(18, 124, 108, 0.92), rgba(18, 124, 108, 0.22));
+}
+
+.system-status-card.tone-in-progress::before {
+  background: linear-gradient(90deg, rgba(210, 131, 36, 0.92), rgba(210, 131, 36, 0.22));
+}
+
+.system-status-card.tone-blocked::before,
+.system-status-card.tone-cancelled::before {
+  background: linear-gradient(90deg, rgba(163, 77, 66, 0.92), rgba(163, 77, 66, 0.22));
+}
+
+.system-status-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.system-status-card-head > div > span {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #127c6c;
+}
+
+.system-status-card-head > div > strong {
+  display: block;
+  margin-top: 0.55rem;
+  font-size: 1.55rem;
+  letter-spacing: -0.04em;
+  color: #13293d;
+}
+
+.system-status-card-compact .system-status-card-head > div > strong {
+  margin-top: 0.4rem;
+  font-size: 1.28rem;
+}
+
+.system-status-card p {
+  margin: 0.7rem 0 0;
+  color: #66717c;
+}
+
+.system-status-detail-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.system-status-detail-list-compact {
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+}
+
+.system-status-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.system-status-detail-row span {
+  color: #66717c;
+}
+
+.system-status-detail-row strong {
+  color: #13293d;
+}
+
+.system-panel-note {
+  margin: 0;
+  color: #66717c;
+  font-size: 0.92rem;
+}
+
+.workspace-grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(21rem, 0.85fr);
+  align-items: start;
+}
+
+.tile-layout-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.operations-workspace .tile-layout-toolbar p {
+  max-width: 44rem;
+}
+
+.operations-workspace .workspace-tile-head {
+  margin-bottom: 0.85rem;
+}
+
+.operations-workspace .workspace-tile-copy p {
+  max-width: 30rem;
+  line-height: 1.5;
+}
+
+.tile-layout-toolbar {
+  display: grid;
+  gap: 1rem;
+}
+
+.tile-layout-toolbar h3,
+.workspace-tile-copy h3 {
+  margin: 0.35rem 0 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: #13293d;
+}
+
+.tile-layout-toolbar h3 {
+  font-size: 1.55rem;
+}
+
+.tile-layout-toolbar p,
+.workspace-tile-copy p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.6;
+}
+
+.tile-layout-toolbar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.tile-layout-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.tile-layout-add-button {
+  color: #103045;
+}
+
+.tile-layout-reset-button {
+  margin-left: auto;
+}
+
+.tile-workspace-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+}
+

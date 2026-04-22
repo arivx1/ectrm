@@ -17,6 +17,59 @@ from apps.api.app.schemas.assistant import (
 )
 
 
+def add_assistant_run(
+    *,
+    db: Session,
+    conversation_id: int | None,
+    status: str,
+    user_id: str,
+    session_id: str,
+    user_role: str,
+    workspace: str | None,
+    agent_id: str | None,
+    agent_name: str | None,
+    provider: str,
+    model: str,
+    use_live_tools: bool,
+    request_messages: Sequence[AssistantMessageIn],
+    application_context: str | None,
+    prompt_sections: Iterable[AssistantPromptSectionOut],
+    rendered_system_prompt: str,
+    warnings: Sequence[str],
+    tool_calls: Sequence[AssistantToolCallOut],
+    input_tokens: int | None,
+    output_tokens: int | None,
+    assistant_message: str | None,
+    error_detail: str | None = None,
+) -> AssistantRun:
+    record = _build_assistant_run(
+        conversation_id=conversation_id,
+        status=status,
+        user_id=user_id,
+        session_id=session_id,
+        user_role=user_role,
+        workspace=workspace,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        provider=provider,
+        model=model,
+        use_live_tools=use_live_tools,
+        request_messages=request_messages,
+        application_context=application_context,
+        prompt_sections=prompt_sections,
+        rendered_system_prompt=rendered_system_prompt,
+        warnings=warnings,
+        tool_calls=tool_calls,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        assistant_message=assistant_message,
+        error_detail=error_detail,
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
 def create_assistant_run(
     *,
     db: Session,
@@ -42,8 +95,7 @@ def create_assistant_run(
     assistant_message: str | None,
     error_detail: str | None = None,
 ) -> AssistantRun:
-    completed_at = datetime.now(timezone.utc)
-    record = AssistantRun(
+    record = _build_assistant_run(
         conversation_id=conversation_id,
         status=status,
         user_id=user_id,
@@ -55,29 +107,16 @@ def create_assistant_run(
         provider=provider,
         model=model,
         use_live_tools=use_live_tools,
-        request_messages=[message.model_dump(mode="json") for message in request_messages],
+        request_messages=request_messages,
         application_context=application_context,
-        prompt_sections=[
-            section.model_dump(mode="json")
-            if isinstance(section, AssistantPromptSectionOut)
-            else AssistantPromptSectionOut.model_validate(section).model_dump(mode="json")
-            for section in prompt_sections
-        ],
+        prompt_sections=prompt_sections,
         rendered_system_prompt=rendered_system_prompt,
-        warnings=list(warnings),
-        tool_calls=[
-            tool_call.model_dump(mode="json")
-            if isinstance(tool_call, AssistantToolCallOut)
-            else AssistantToolCallOut.model_validate(tool_call).model_dump(mode="json")
-            for tool_call in tool_calls
-        ],
+        warnings=warnings,
+        tool_calls=tool_calls,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        latest_user_message=_latest_user_message(request_messages),
         assistant_message=assistant_message,
         error_detail=error_detail,
-        created_at=completed_at,
-        completed_at=completed_at,
     )
     db.add(record)
     db.commit()
@@ -162,3 +201,66 @@ def _latest_user_message(messages: Sequence[AssistantMessageIn]) -> str | None:
         if message.role == "user":
             return message.content
     return None
+
+
+def _build_assistant_run(
+    *,
+    conversation_id: int | None,
+    status: str,
+    user_id: str,
+    session_id: str,
+    user_role: str,
+    workspace: str | None,
+    agent_id: str | None,
+    agent_name: str | None,
+    provider: str,
+    model: str,
+    use_live_tools: bool,
+    request_messages: Sequence[AssistantMessageIn],
+    application_context: str | None,
+    prompt_sections: Iterable[AssistantPromptSectionOut],
+    rendered_system_prompt: str,
+    warnings: Sequence[str],
+    tool_calls: Sequence[AssistantToolCallOut],
+    input_tokens: int | None,
+    output_tokens: int | None,
+    assistant_message: str | None,
+    error_detail: str | None = None,
+) -> AssistantRun:
+    completed_at = datetime.now(timezone.utc)
+    return AssistantRun(
+        conversation_id=conversation_id,
+        status=status,
+        user_id=user_id,
+        session_id=session_id,
+        user_role=user_role,
+        workspace=workspace,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        provider=provider,
+        model=model,
+        use_live_tools=use_live_tools,
+        request_messages=[message.model_dump(mode="json") for message in request_messages],
+        application_context=application_context,
+        prompt_sections=[
+            section.model_dump(mode="json")
+            if isinstance(section, AssistantPromptSectionOut)
+            else AssistantPromptSectionOut.model_validate(section).model_dump(mode="json")
+            for section in prompt_sections
+        ],
+        rendered_system_prompt=rendered_system_prompt,
+        warnings=list(warnings),
+        tool_calls=[
+            tool_call.model_dump(mode="json")
+            if isinstance(tool_call, AssistantToolCallOut)
+            else AssistantToolCallOut.model_validate(tool_call).model_dump(mode="json")
+            for tool_call in tool_calls
+        ],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        latest_user_message=_latest_user_message(request_messages),
+        assistant_message=assistant_message,
+        error_detail=error_detail,
+        created_at=completed_at,
+        completed_at=completed_at,
+    )

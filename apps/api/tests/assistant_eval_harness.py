@@ -27,8 +27,12 @@ from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_run import AssistantRun
+from apps.api.app.models.document_ingestion import DocumentIngestion
+from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 
@@ -63,6 +67,32 @@ class AssistantEvalAgentFixture:
 
 
 @dataclass(frozen=True)
+class AssistantEvalUserFixture:
+    user_id: str
+    email: str
+    display_name: str
+    role: str = "OPS_ADMIN"
+
+
+@dataclass(frozen=True)
+class AssistantEvalInvoiceFixture:
+    trade_id: str
+    invoice_id: int
+    invoice_number: str
+    invoice_amount: float
+    status: str = "ISSUED"
+
+
+@dataclass(frozen=True)
+class AssistantEvalDocumentFixture:
+    document_id: str
+    status: str = "ANALYZED"
+    review_status: str = "REVIEWED"
+    processor_provider: str = "anthropic"
+    processor_model: str = "claude-test"
+
+
+@dataclass(frozen=True)
 class AssistantEvalExpectations:
     http_status: int = 200
     provider: str = "openai"
@@ -80,9 +110,21 @@ class AssistantEvalExpectations:
     action_request_payloads: tuple[dict[str, object], ...] | None = None
     prompt_section_keys: tuple[str, ...] = ()
     prompt_section_absent_keys: tuple[str, ...] = ()
+    prompt_section_content_contains: tuple[tuple[str, tuple[str, ...]], ...] = ()
     provider_request_count: int | None = None
     provider_tool_names: tuple[str, ...] | None = None
     provider_tools_key_present: bool | None = None
+
+
+@dataclass(frozen=True)
+class AssistantEvalFollowUpExpectations:
+    http_status: int = 200
+    action_request_status: str | None = None
+    error_detail_contains: tuple[str, ...] = ()
+    response_detail_contains: tuple[str, ...] = ()
+    result_contains: dict[str, object] = field(default_factory=dict)
+    result_is_none: bool | None = None
+    trade_statuses: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -90,8 +132,15 @@ class AssistantEvalCase:
     name: str
     request_payload: dict[str, Any]
     agent: AssistantEvalAgentFixture | None = None
+    request_user: AssistantEvalUserFixture | None = None
     trades: tuple[AssistantEvalTradeFixture, ...] = ()
+    invoices: tuple[AssistantEvalInvoiceFixture, ...] = ()
+    documents: tuple[AssistantEvalDocumentFixture, ...] = ()
     provider_responses: tuple[dict[str, Any], ...] = ()
+    follow_up_action: str | None = None
+    follow_up_user: AssistantEvalUserFixture | None = None
+    before_follow_up_trade_status_updates: tuple[tuple[str, str], ...] = ()
+    follow_up_expectations: AssistantEvalFollowUpExpectations | None = None
     expectations: AssistantEvalExpectations = field(default_factory=AssistantEvalExpectations)
 
 
@@ -101,6 +150,7 @@ class AssistantEvalResult:
     run_payload: dict[str, Any] | None
     run_listing_payload: list[dict[str, Any]]
     captured_provider_requests: list[dict[str, Any]]
+    follow_up_payload: dict[str, Any] | None = None
 
 
 class AssistantApiEvalHarness(unittest.TestCase):
@@ -158,6 +208,10 @@ class AssistantApiEvalHarness(unittest.TestCase):
             session.query(AssistantActionRequest).delete()
             session.query(AssistantRun).delete()
             session.query(AssistantAgent).delete()
+            session.query(TradePayment).delete()
+            session.query(TradeInvoice).delete()
+            session.query(DocumentIngestionPage).delete()
+            session.query(DocumentIngestion).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
             session.query(UserAccount).delete()
@@ -184,12 +238,16 @@ class AssistantApiEvalHarness(unittest.TestCase):
             setattr(settings, key, value)
 
     def run_eval_case(self, case: AssistantEvalCase) -> AssistantEvalResult:
-        token = self._create_session_token()
+        token = self._create_session_token(case.request_user)
 
         if case.agent is not None:
             self._create_agent(case.agent)
         for trade in case.trades:
             self._create_trade_with_event(trade)
+        for invoice in case.invoices:
+            self._create_invoice_record(invoice)
+        for document in case.documents:
+            self._create_document_record(document)
 
         queued_responses = [copy.deepcopy(payload) for payload in case.provider_responses]
         captured_provider_requests: list[dict[str, Any]] = []
@@ -220,6 +278,7 @@ class AssistantApiEvalHarness(unittest.TestCase):
         response_payload = response.json()
         run_payload: dict[str, Any] | None = None
         run_listing_payload: list[dict[str, Any]] = []
+        follow_up_payload: dict[str, Any] | None = None
 
         if response.status_code == 200:
             run_id = response_payload.get("run_id")
@@ -243,17 +302,34 @@ class AssistantApiEvalHarness(unittest.TestCase):
                 msg=f"assistant eval case '{case.name}' did not appear in run listing",
             )
 
+        if case.follow_up_action is not None:
+            for trade_id, status in case.before_follow_up_trade_status_updates:
+                self._set_trade_status(trade_id=trade_id, status=status)
+            follow_up_payload = self._run_follow_up_action(
+                case=case,
+                token=token,
+                response_payload=response_payload,
+            )
+
         self._assert_case_result(
             case=case,
             response_payload=response_payload,
             run_payload=run_payload,
             captured_provider_requests=captured_provider_requests,
         )
+        if case.follow_up_expectations is not None:
+            if follow_up_payload is None:
+                self.fail(f"assistant eval case '{case.name}' did not produce a follow-up payload")
+            self._assert_follow_up_result(
+                case=case,
+                follow_up_payload=follow_up_payload,
+            )
         return AssistantEvalResult(
             response_payload=response_payload,
             run_payload=run_payload,
             run_listing_payload=run_listing_payload,
             captured_provider_requests=captured_provider_requests,
+            follow_up_payload=follow_up_payload,
         )
 
     def _assert_case_result(
@@ -330,6 +406,16 @@ class AssistantApiEvalHarness(unittest.TestCase):
             self.assertIn(key, prompt_section_keys, msg=case.name)
         for key in expectations.prompt_section_absent_keys:
             self.assertNotIn(key, prompt_section_keys, msg=case.name)
+        prompt_section_content_by_key = {
+            section["key"]: section["content"]
+            for section in run_payload["prompt_sections"]
+        }
+        for key, fragments in expectations.prompt_section_content_contains:
+            content = prompt_section_content_by_key.get(key)
+            self.assertIsNotNone(content, msg=case.name)
+            assert content is not None
+            for fragment in fragments:
+                self.assertIn(fragment, content, msg=case.name)
 
         if expectations.provider_request_count is not None:
             self.assertEqual(len(captured_provider_requests), expectations.provider_request_count, msg=case.name)
@@ -344,17 +430,106 @@ class AssistantApiEvalHarness(unittest.TestCase):
                 provider_tool_names = [tool["name"] for tool in captured_provider_requests[0].get("tools", [])]
             self.assertEqual(provider_tool_names, list(expectations.provider_tool_names), msg=case.name)
 
-    def _create_session_token(self) -> str:
+    def _run_follow_up_action(
+        self,
+        *,
+        case: AssistantEvalCase,
+        token: str,
+        response_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        action_requests = response_payload.get("action_requests", [])
+        self.assertTrue(
+            action_requests,
+            msg=f"assistant eval case '{case.name}' did not stage an action request for follow-up",
+        )
+        action_request_id = action_requests[0]["action_request_id"]
+        follow_up_token = self._create_session_token(case.follow_up_user) if case.follow_up_user is not None else token
+
+        if case.follow_up_action == "approve_first_action_request":
+            response = self.client.post(
+                f"/assistant/action-requests/{action_request_id}/approve",
+                headers={"Authorization": f"Bearer {follow_up_token}"},
+            )
+        elif case.follow_up_action == "reject_first_action_request":
+            response = self.client.post(
+                f"/assistant/action-requests/{action_request_id}/reject",
+                headers={"Authorization": f"Bearer {follow_up_token}"},
+            )
+        else:
+            self.fail(f"assistant eval case '{case.name}' configured unsupported follow_up_action '{case.follow_up_action}'")
+
+        expected_status = (
+            case.follow_up_expectations.http_status
+            if case.follow_up_expectations is not None
+            else 200
+        )
+        self.assertEqual(
+            response.status_code,
+            expected_status,
+            msg=f"assistant eval case '{case.name}' follow-up returned {response.status_code}: {response.text}",
+        )
+        return response.json()
+
+    def _assert_follow_up_result(
+        self,
+        *,
+        case: AssistantEvalCase,
+        follow_up_payload: dict[str, Any],
+    ) -> None:
+        expectations = case.follow_up_expectations
+        if expectations is None:
+            return
+
+        if expectations.action_request_status is not None:
+            self.assertEqual(follow_up_payload["status"], expectations.action_request_status, msg=case.name)
+
+        error_detail = follow_up_payload.get("error_detail")
+        for fragment in expectations.error_detail_contains:
+            self.assertIsInstance(error_detail, str, msg=case.name)
+            assert isinstance(error_detail, str)
+            self.assertIn(fragment, error_detail, msg=case.name)
+
+        response_detail = follow_up_payload.get("detail")
+        for fragment in expectations.response_detail_contains:
+            self.assertIsInstance(response_detail, str, msg=case.name)
+            assert isinstance(response_detail, str)
+            self.assertIn(fragment, response_detail, msg=case.name)
+
+        result = follow_up_payload.get("result")
+        if expectations.result_is_none is True:
+            self.assertIsNone(result, msg=case.name)
+        elif expectations.result_is_none is False:
+            self.assertIsNotNone(result, msg=case.name)
+
+        for key, expected_value in expectations.result_contains.items():
+            self.assertIsInstance(result, dict, msg=case.name)
+            assert isinstance(result, dict)
+            self.assertEqual(result.get(key), expected_value, msg=case.name)
+
+        for trade_id, expected_status in expectations.trade_statuses:
+            with self.SessionLocal() as session:
+                trade = session.get(Trade, trade_id)
+                self.assertIsNotNone(trade, msg=case.name)
+                assert trade is not None
+                self.assertEqual(trade.status, expected_status, msg=case.name)
+
+    def _create_session_token(self, fixture: AssistantEvalUserFixture | None = None) -> str:
+        user_fixture = fixture or AssistantEvalUserFixture(
+            user_id="assistant_user",
+            email="assistant@example.com",
+            display_name="Assistant User",
+            role="OPS_ADMIN",
+        )
         now = datetime.now(timezone.utc)
         with self.SessionLocal() as session:
-            user = session.get(UserAccount, "assistant_user")
+            user = session.get(UserAccount, user_fixture.user_id)
             if user is None:
                 session.add(
                     UserAccount(
-                        user_id="assistant_user",
-                        email="assistant@example.com",
-                        display_name="Assistant User",
-                        role="OPS_ADMIN",
+                        user_id=user_fixture.user_id,
+                        email=user_fixture.email,
+                        display_name=user_fixture.display_name,
+                        role=user_fixture.role,
                         password_hash=hash_password("supersecret1"),
                         is_active=True,
                         last_login_at=now,
@@ -366,9 +541,12 @@ class AssistantApiEvalHarness(unittest.TestCase):
                     )
                 )
                 session.commit()
-                user = session.get(UserAccount, "assistant_user")
+                user = session.get(UserAccount, user_fixture.user_id)
                 assert user is not None
             else:
+                user.email = user_fixture.email
+                user.display_name = user_fixture.display_name
+                user.role = user_fixture.role
                 user.last_login_at = now
                 user.updated_at = now
                 user.updated_by = "assistant-eval-suite"
@@ -447,6 +625,102 @@ class AssistantApiEvalHarness(unittest.TestCase):
                     trader_user="assistant_user",
                     status=fixture.status,
                     last_event_id=event_id,
+                )
+            )
+            session.commit()
+
+    def _set_trade_status(self, *, trade_id: str, status: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, trade_id)
+            self.assertIsNotNone(trade, msg=f"assistant eval fixture trade '{trade_id}' was not found for status update")
+            assert trade is not None
+            trade.status = status
+            trade.updated_at = now
+            trade.updated_by = "assistant-eval-suite"
+            session.commit()
+
+    def _create_invoice_record(self, fixture: AssistantEvalInvoiceFixture) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                TradeInvoice(
+                    id=fixture.invoice_id,
+                    trade_id=fixture.trade_id,
+                    delivery_id=None,
+                    leg_no=None,
+                    invoice_number=fixture.invoice_number,
+                    invoice_currency_code="USD",
+                    billed_quantity=1000,
+                    quantity_unit_code="BBL",
+                    invoice_amount=fixture.invoice_amount,
+                    status=fixture.status,
+                    issued_at=now,
+                    due_at=now,
+                    dispute_reason=None,
+                    notes="Assistant eval invoice fixture",
+                    created_at=now,
+                    created_by="assistant-eval-suite",
+                    updated_at=now,
+                    updated_by="assistant-eval-suite",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _create_document_record(self, fixture: AssistantEvalDocumentFixture) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                DocumentIngestion(
+                    document_id=fixture.document_id,
+                    original_filename=f"{fixture.document_id}.pdf",
+                    display_name=f"{fixture.document_id}.pdf",
+                    content_type="application/pdf",
+                    storage_key=f"documents/{fixture.document_id}.pdf",
+                    sha256="0" * 64,
+                    size_bytes=2048,
+                    page_count=1,
+                    status=fixture.status,
+                    processor_provider=fixture.processor_provider,
+                    processor_model=fixture.processor_model,
+                    classifier_version="assistant-eval-classifier",
+                    extractor_version="assistant-eval-extractor",
+                    analysis_summary={"status": "ready"},
+                    processing_errors=["Old error"],
+                    review_status=fixture.review_status,
+                    review_notes="Needs rerun",
+                    reviewed_at=now,
+                    reviewed_by="ops.docs",
+                    created_at=now,
+                    created_by="assistant-eval-suite",
+                    updated_at=now,
+                    updated_by="assistant-eval-suite",
+                    version=2,
+                )
+            )
+            session.add(
+                DocumentIngestionPage(
+                    document_id=fixture.document_id,
+                    page_number=1,
+                    classification_status="ANALYZED",
+                    extraction_status="ANALYZED",
+                    document_kind="CONFIRMATION",
+                    document_subtype="TRADE",
+                    classification_confidence=0.99,
+                    classification_payload={"kind": "CONFIRMATION"},
+                    header_fields=[],
+                    table_blocks=[],
+                    raw_text="Trade confirmation text",
+                    processing_warnings=[],
+                    processing_errors=[],
+                    review_status=fixture.review_status,
+                    review_notes="Reviewed page",
+                    reviewed_at=now,
+                    reviewed_by="ops.docs",
+                    processed_at=now,
+                    created_at=now,
+                    updated_at=now,
                 )
             )
             session.commit()

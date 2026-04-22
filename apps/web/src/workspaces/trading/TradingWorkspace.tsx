@@ -1,13 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { TradeCaptureForm } from '../../features/trades/TradeCaptureForm'
 import { TradeAmendForm } from '../../features/trades/TradeAmendForm'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
+import { loadPreTradeReviewItem } from '../../entities/pretrade/api'
 import type { CounterpartyCreditPolicyPreview } from '../../features/trades/counterpartyCredit'
+import { appConfig } from '../../shared/config'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
-import type { TradeCreditExceptionRecord, TradeWorkflowItemRecord } from '../../shared/models'
+import type { PreTradeReviewItemRecord, TradeCreditExceptionRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildOpenOptionValuation,
@@ -87,6 +89,7 @@ type EventRow = {
   event_id: string
   event_type: string
   recorded_at: string
+  payload: Record<string, unknown>
 }
 
 type ReferenceRecord = {
@@ -357,6 +360,12 @@ function settlementMarkToMarketLabel(
     return `Loss ${formatCurrencyAmount(Math.abs(value), currencyCode)}`
   }
   return formatCurrencyAmount(0, currencyCode)
+}
+
+function parsePreTradeReviewId(selectedTradeEvents: EventRow[]): number | null {
+  const tradeCreatedEvent = selectedTradeEvents.find((event) => event.event_type === 'TradeCreated')
+  const candidate = tradeCreatedEvent?.payload.pretrade_review_id
+  return typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0 ? candidate : null
 }
 
 type TradingWorkspaceProps = {
@@ -655,6 +664,52 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     formatDateOnly,
     statusTone,
   } = props
+  const [linkedPreTradeReview, setLinkedPreTradeReview] = useState<PreTradeReviewItemRecord | null>(null)
+  const [linkedPreTradeReviewLoading, setLinkedPreTradeReviewLoading] = useState(false)
+  const [linkedPreTradeReviewError, setLinkedPreTradeReviewError] = useState('')
+  const linkedPreTradeReviewId = useMemo(() => parsePreTradeReviewId(selectedTradeEvents), [selectedTradeEvents])
+  const linkedPreTradeReviewAccessToken = authSession?.accessToken ?? null
+
+  useEffect(() => {
+    if (!linkedPreTradeReviewAccessToken || linkedPreTradeReviewId === null) {
+      setLinkedPreTradeReview(null)
+      setLinkedPreTradeReviewLoading(false)
+      setLinkedPreTradeReviewError('')
+      return
+    }
+
+    const accessToken = linkedPreTradeReviewAccessToken
+    const reviewId = linkedPreTradeReviewId
+    let cancelled = false
+    setLinkedPreTradeReviewLoading(true)
+    setLinkedPreTradeReviewError('')
+
+    async function loadReview() {
+      try {
+        const review = await loadPreTradeReviewItem(appConfig.apiBase, accessToken, reviewId)
+        if (!cancelled) {
+          setLinkedPreTradeReview(review)
+          setLinkedPreTradeReviewError('')
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLinkedPreTradeReview(null)
+          setLinkedPreTradeReviewError(error instanceof Error ? error.message : 'Could not load the originating pre-trade review.')
+        }
+      } finally {
+        if (!cancelled) {
+          setLinkedPreTradeReviewLoading(false)
+        }
+      }
+    }
+
+    void loadReview()
+
+    return () => {
+      cancelled = true
+    }
+  }, [linkedPreTradeReviewAccessToken, linkedPreTradeReviewId])
+
   const [screenFilter, setScreenFilter] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const visibleTrades = useMemo(
@@ -1042,6 +1097,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                           : ''}
                       </p>
                     ) : null}
+                    {linkedPreTradeReviewLoading && linkedPreTradeReviewId !== null ? (
+                      <p className="form-note">Loading the originating pre-trade review...</p>
+                    ) : null}
+                    {linkedPreTradeReviewError ? (
+                      <p className="field-error">{linkedPreTradeReviewError}</p>
+                    ) : null}
+                    {linkedPreTradeReview ? (
+                      <p className="form-note">
+                        Originated from approved pre-trade review #{linkedPreTradeReview.review_id} {linkedPreTradeReview.name}.
+                        {linkedPreTradeReview.booked_at ? ` Booked ${formatDate(linkedPreTradeReview.booked_at)}.` : ''}
+                      </p>
+                    ) : null}
                   </>
                 ) : null
               }
@@ -1131,6 +1198,26 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                     <span>Source System</span>
                     <strong>{selectedTrade.source_system ?? '—'}</strong>
                   </div>
+                  {linkedPreTradeReview ? (
+                    <>
+                      <div className="detail-row">
+                        <span>Pre-Trade Review</span>
+                        <strong>{`#${linkedPreTradeReview.review_id} ${linkedPreTradeReview.name}`}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Review Approval</span>
+                        <strong>{linkedPreTradeReview.review_status}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Review Booked</span>
+                        <strong>{formatDate(linkedPreTradeReview.booked_at)}</strong>
+                      </div>
+                      <div className="detail-row">
+                        <span>Review Booked By</span>
+                        <strong>{linkedPreTradeReview.booked_by ?? '—'}</strong>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="detail-row">
                     <span>Execution Time</span>
                     <strong>{formatDate(selectedTrade.execution_timestamp)}</strong>
@@ -1413,6 +1500,32 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                                   ? ` • ${creditDecisionExposureSummary(decision)}`
                                   : ''}
                               </p>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {linkedPreTradeReview?.review_notes || linkedPreTradeReview?.thesis ? (
+                    <div className="stack">
+                      <span className="eyebrow">Pre-Trade Rationale</span>
+                      <p>{linkedPreTradeReview.review_notes ?? linkedPreTradeReview.thesis}</p>
+                    </div>
+                  ) : null}
+                  {linkedPreTradeReview?.activity.length ? (
+                    <div className="stack">
+                      <span className="eyebrow">Pre-Trade Review Activity</span>
+                      <div className="timeline">
+                        {linkedPreTradeReview.activity.map((activity) => (
+                          <article key={activity.activity_id} className="timeline-item">
+                            <div className="timeline-dot" />
+                            <div className="timeline-body">
+                              <div className="timeline-head">
+                                <strong>{activity.action.replaceAll('_', ' ').toLowerCase()}</strong>
+                                <span>{formatDate(activity.occurred_at)}</span>
+                              </div>
+                              <p>{activity.comment ?? `${activity.actor_id} updated the pre-trade review.`}</p>
+                              <p>{activity.actor_id}</p>
                             </div>
                           </article>
                         ))}

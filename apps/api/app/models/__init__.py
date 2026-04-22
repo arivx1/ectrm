@@ -9,12 +9,15 @@ from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
+from apps.api.app.models.document_action_decision import DocumentActionDecision
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.event import Base, Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
 from apps.api.app.models.layout_definition import LayoutDefinition
+from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
@@ -65,12 +68,15 @@ __all__ = [
     "DeliveryPowerDetail",
     "DocumentIngestion",
     "DocumentIngestionPage",
+    "DocumentActionApprovalRequest",
+    "DocumentActionDecision",
     "DocumentRecordLink",
     "Event",
     "ExternalDataRun",
     "ExternalSeriesDefinition",
     "ExternalSeriesObservation",
     "LayoutDefinition",
+    "MutationProvenanceRecord",
     "OptionExposure",
     "Position",
     "PriceIndexObservation",

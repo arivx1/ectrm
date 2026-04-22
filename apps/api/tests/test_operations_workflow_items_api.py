@@ -435,7 +435,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                 ReferenceCounterpartyCreditProfile(
                     counterparty_code="SHELL_TRADING",
                     credit_rating="BBB",
-                    review_due_at=review_due_at or (self.now.date() + timedelta(days=14)),
+                    review_due_at=review_due_at or (date.today() + timedelta(days=14)),
                     limit_currency_code=limit_currency_code,
                     limit_amount=limit_amount,
                     breach_action=breach_action,
@@ -478,7 +478,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                     source_entity_name="Shell Trading",
                     match_basis="DUNS",
                     matched_identifier_value="123456789",
-                    as_of_date=as_of_date or self.now.date(),
+                    as_of_date=as_of_date or date.today(),
                     rating_scale="DNB Rating",
                     rating_value="4A1",
                     rating_outlook="Stable",

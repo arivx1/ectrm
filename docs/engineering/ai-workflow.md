@@ -14,6 +14,17 @@ responses from a managed prompt foundation that combines:
 
 This keeps prompts explainable, reviewable, and ready for future governance.
 
+Related governance:
+
+- [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+- [Agent Platform Phase 1 Tickets](./agent-platform-phase-1-tickets.md)
+- [Agent Action Request Contract](./agent-action-request-contract.md)
+- [Agent Role Catalog](./agent-role-catalog.md)
+- [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- [Agent Knowledge Base](./agent-knowledge-base.md)
+- [Human-Agent Authority Matrix](./human-agent-authority-matrix.md)
+- [Agent Role Configuration Work Packages](./agent-role-configuration-work-packages.md)
+
 ## Current Prompt Layers
 
 When `/assistant/respond` is called, the API now assembles a server-owned prompt
@@ -150,6 +161,7 @@ requests, and verifies:
 - expected live-tool traces and filtered tool catalogs
 - context-only fallback when live tools are unavailable on the current worker
 - approval-gated action-request staging
+- approval execution outcomes and cross-user permission boundaries
 - persisted run traces and prompt sections
 
 Run it with:
@@ -169,6 +181,7 @@ Add or update an assistant eval whenever a change affects any of these:
 - provider or model selection behavior, including fallback semantics
 - tool allowlists, tool-round limits, or live-read availability handling
 - approval-gated action requests or action-governance prompt behavior
+- assistant approval access control, especially cross-user review boundaries
 - prompt section composition, managed-agent instructions, or explainability
   warnings
 - automation or assistant behavior that could over-claim certainty without a

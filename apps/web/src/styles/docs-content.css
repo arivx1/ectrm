@@ -1,0 +1,207 @@
+.docs-intro-surface {
+  background:
+    radial-gradient(circle at top right, rgba(37, 107, 141, 0.14), rgba(37, 107, 141, 0)),
+    rgba(255, 255, 255, 0.82);
+}
+
+.docs-section {
+  scroll-margin-top: 1.5rem;
+}
+
+.docs-sidebar,
+.docs-prose,
+.docs-toc,
+.docs-actions,
+.docs-related-help,
+.docs-action-copy,
+.docs-summary-grid,
+.docs-role-grid,
+.docs-tour-grid,
+.docs-role-route-list,
+.docs-tour-copy {
+  display: grid;
+}
+
+.docs-sidebar,
+.docs-prose,
+.docs-actions,
+.docs-related-help,
+.docs-tour-copy {
+  gap: 1rem;
+}
+
+.docs-document-tabs {
+  margin: 0.15rem 0 0;
+}
+
+.docs-toc {
+  gap: 0.8rem;
+}
+
+.docs-prose p,
+.docs-toc-link small {
+  margin: 0;
+  color: #5d6975;
+  line-height: 1.68;
+}
+
+.docs-prose h4 {
+  margin: 0.25rem 0 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 1.14rem;
+  color: #13293d;
+}
+
+.docs-prose code {
+  padding: 0.16rem 0.4rem;
+  border-radius: 0.55rem;
+  background: rgba(18, 124, 108, 0.09);
+  color: #0f685a;
+  font-size: 0.94em;
+}
+
+.docs-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #5d6975;
+  line-height: 1.68;
+}
+
+.docs-list-ordered {
+  padding-left: 1.45rem;
+}
+
+.docs-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background: rgba(250, 248, 242, 0.9);
+}
+
+.docs-table {
+  width: 100%;
+  min-width: 38rem;
+  border-collapse: collapse;
+}
+
+.docs-table th,
+.docs-table td {
+  padding: 0.82rem 0.95rem;
+  border-bottom: 1px solid rgba(18, 42, 56, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-table th {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6b7783;
+  background: rgba(235, 244, 241, 0.92);
+}
+
+.docs-table td {
+  color: #5d6975;
+  line-height: 1.58;
+}
+
+.docs-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.docs-summary-grid {
+  gap: 0.9rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.docs-role-grid,
+.docs-tour-grid {
+  gap: 1rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+}
+
+.docs-role-card,
+.docs-tour-card {
+  display: grid;
+  gap: 0.95rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.15rem;
+  background: rgba(246, 245, 240, 0.72);
+}
+
+.docs-role-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.docs-role-card-head h4 {
+  margin: 0.35rem 0 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 1.2rem;
+  color: #13293d;
+}
+
+.docs-role-card p,
+.docs-tour-card p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.58;
+}
+
+.docs-role-route-list {
+  gap: 0.55rem;
+}
+
+.docs-role-route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.docs-role-route span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #127c6c;
+}
+
+.docs-role-route strong {
+  color: #13293d;
+}
+
+.docs-tour-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.docs-tour-figure {
+  overflow: hidden;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(15, 34, 48, 0.96), rgba(8, 19, 30, 0.98));
+}
+
+.docs-tour-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.docs-tour-steps {
+  margin-top: 0;
+}
+
+.docs-tour-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+

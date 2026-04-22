@@ -263,6 +263,12 @@ test('admin smoke rejects a pending assistant approval from the governance inbox
     await expect(approvalsSection.getByText('Type: cancel_trade')).toBeVisible()
     await expect(approvalsSection.getByText('Run #701')).toBeVisible()
 
+    await approvalActionCard.getByRole('button', { name: 'Open trace' }).click()
+    await expect(approvalsSection.getByText('Audit trace for run #701')).toBeVisible()
+    await expect(approvalsSection.getByText('Run started')).toBeVisible()
+    await expect(approvalsSection.getByText('Tool call: get_trade_by_id')).toBeVisible()
+    await approvalsSection.getByRole('button', { name: 'Close trace' }).click()
+
     await approvalsSection.getByRole('button', { name: 'Reject' }).click()
 
     await expect(approvalsSection.getByText(`${requestSummary} has been rejected.`)).toBeVisible()
@@ -280,6 +286,57 @@ test('admin smoke rejects a pending assistant approval from the governance inbox
       {
         method: 'POST',
         path: '/assistant/action-requests/7001/reject',
+        search: '',
+      },
+    ])
+  } finally {
+    await harness.close()
+  }
+})
+
+test('admin smoke approves and executes a pending assistant approval from the governance inbox', async ({ page }) => {
+  const harness = await startSmokeHarness()
+  const requestSummary = 'Cancel trade T-AMEND-100'
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(`${harness.origin}/?view=admin`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+
+    const approvalsSection = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Pending Approvals' }) })
+      .first()
+    const approvalActionCard = approvalsSection.locator('.assistant-action-card').first()
+    const approvalSummary = approvalActionCard.locator('strong').filter({ hasText: requestSummary })
+
+    await expect(approvalsSection).toBeVisible()
+    await expect(approvalsSection.getByText('1 pending assistant action request require review.')).toBeVisible()
+    await expect(approvalSummary).toBeVisible()
+    await expect(approvalActionCard.getByText('Requester: trader.alpha')).toBeVisible()
+    await expect(approvalActionCard.getByText('Type: cancel_trade')).toBeVisible()
+    await expect(approvalActionCard.getByText('Run #701')).toBeVisible()
+
+    await approvalsSection.getByRole('button', { name: 'Approve' }).click()
+
+    await expect(approvalsSection.getByText(`${requestSummary} has been executed.`)).toBeVisible()
+    await expect(
+      approvalsSection.getByText('No assistant action requests are currently waiting for approval.'),
+    ).toBeVisible()
+    await expect(approvalSummary).toHaveCount(0)
+    await expect(approvalsSection.getByText('Requester: trader.alpha')).toHaveCount(0)
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toHaveLength(0)
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: 'POST',
+        path: '/assistant/action-requests/7001/approve',
         search: '',
       },
     ])

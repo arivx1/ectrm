@@ -1,0 +1,239 @@
+.workspace-tile {
+  min-width: 0;
+  transition:
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.workspace-tile.is-dragging {
+  z-index: 3;
+  opacity: 0.94;
+  box-shadow: 0 28px 70px rgba(17, 30, 41, 0.16);
+}
+
+.workspace-tile-span-full {
+  grid-column: span 12;
+}
+
+.workspace-tile-span-wide {
+  grid-column: span 8;
+}
+
+.workspace-tile-span-side {
+  grid-column: span 4;
+}
+
+.workspace-tile-span-half {
+  grid-column: span 6;
+}
+
+.workspace-tile-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+
+.workspace-tile-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.workspace-tile-copy h3 {
+  font-size: 1.75rem;
+}
+
+.workspace-tile-copy p {
+  max-width: 36rem;
+}
+
+.workspace-tile-controls {
+  display: grid;
+  justify-items: end;
+  gap: 0.7rem;
+  flex-shrink: 0;
+}
+
+.workspace-tile-size-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.28rem;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(245, 247, 250, 0.92);
+}
+
+.workspace-tile-size-button {
+  padding: 0.48rem 0.82rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #5d6974;
+  font: inherit;
+  font-size: 0.83rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.workspace-tile-size-button:hover,
+.workspace-tile-size-button:focus-visible {
+  background: rgba(18, 124, 108, 0.12);
+  color: #103045;
+  outline: none;
+}
+
+.workspace-tile-size-button.is-active {
+  background: linear-gradient(135deg, rgba(18, 124, 108, 0.18), rgba(16, 48, 69, 0.14));
+  color: #103045;
+  box-shadow: inset 0 0 0 1px rgba(18, 124, 108, 0.14);
+}
+
+.workspace-tile-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex-shrink: 0;
+}
+
+.workspace-tile-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.workspace-tile-handle:active {
+  cursor: grabbing;
+}
+
+.workspace-tile-body {
+  min-width: 0;
+}
+
+.tile-section-card {
+  transition:
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.tile-section-card.is-dragging {
+  z-index: 2;
+  opacity: 0.94;
+  box-shadow: 0 24px 60px rgba(17, 30, 41, 0.14);
+}
+
+.tile-section-card-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.tile-section-card-handle {
+  padding: 0.45rem 0.78rem;
+  font-size: 0.82rem;
+  cursor: grab;
+  touch-action: none;
+}
+
+.tile-section-card-handle:active {
+  cursor: grabbing;
+}
+
+.workspace-tile-inspector {
+  display: grid;
+  gap: 1rem;
+}
+
+.workspace-tile-empty-state {
+  min-height: 12rem;
+  place-items: center;
+}
+
+.settings-grid {
+  grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 0.9fr);
+}
+
+.docs-workspace {
+  grid-template-columns: minmax(0, 1.08fr) minmax(20rem, 0.92fr);
+}
+
+.settings-summary-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.trade-capture-rule-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-rule-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  background: rgba(248, 250, 249, 0.82);
+}
+
+.settings-rule-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.settings-rule-title {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 1.12rem;
+  color: #13293d;
+}
+
+.settings-rule-toolbar {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.settings-rule-group {
+  display: grid;
+  gap: 0.8rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.settings-rule-group .section-head {
+  margin-bottom: 0;
+}
+
+.settings-rule-group .section-head h3 {
+  font-size: 1.05rem;
+}
+
+.settings-rule-group .section-head p {
+  max-width: 34rem;
+}
+
+.reference-grid {
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  align-items: start;
+}
+
+.reference-workspace {
+  grid-template-columns: minmax(0, 1.1fr) minmax(22rem, 0.9fr);
+  align-items: start;
+}
+
+.admin-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+

@@ -17,10 +17,17 @@ This project is a good fit for:
   [docs/operator-guide.md](docs/operator-guide.md)
 - Backend guide: [apps/api/README.md](apps/api/README.md)
 - Frontend guide: [apps/web/README.md](apps/web/README.md)
+- Coding-agent guide: [AGENTS.md](AGENTS.md)
 - Engineering blueprint:
   [docs/engineering/platform-blueprint.md](docs/engineering/platform-blueprint.md)
 - AI workflow and prompt-management notes:
   [docs/engineering/ai-workflow.md](docs/engineering/ai-workflow.md)
+- Agent autonomy rubric:
+  [docs/engineering/agent-autonomy-rubric.md](docs/engineering/agent-autonomy-rubric.md)
+- Agent platform Phase 1 roadmap:
+  [docs/engineering/agent-platform-phase-1-roadmap.md](docs/engineering/agent-platform-phase-1-roadmap.md)
+- Agent knowledge base:
+  [docs/engineering/agent-knowledge-base.md](docs/engineering/agent-knowledge-base.md)
 - Local development notes:
   [docs/engineering/local-development.md](docs/engineering/local-development.md)
 
@@ -182,3 +189,7 @@ dependencies.
 - [Trading source roadmap](docs/engineering/trading-source-roadmap.md)
 - [Future-ready engineering work packages](docs/engineering/future-ready-engineering-work-packages.md)
 - [Future-ready Wave 0 tickets](docs/engineering/future-ready-wave-0-tickets.md)
+- [Agent platform Phase 1 tickets](docs/engineering/agent-platform-phase-1-tickets.md)
+- [Agent role catalog](docs/engineering/agent-role-catalog.md)
+- [Human-agent authority matrix](docs/engineering/human-agent-authority-matrix.md)
+- [Canonical work object inventory](docs/engineering/canonical-work-object-inventory.md)

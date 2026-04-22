@@ -1,0 +1,108 @@
+.docs-link,
+.docs-inline-link {
+  color: #0f685a;
+  font-weight: 700;
+}
+
+.docs-link {
+  text-decoration: none;
+  border-bottom: 1px solid rgba(18, 124, 108, 0.18);
+}
+
+.docs-link:hover {
+  color: #127c6c;
+  border-bottom-color: rgba(18, 124, 108, 0.38);
+}
+
+.docs-related-link {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.9rem 0.95rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(248, 250, 249, 0.84);
+  text-decoration: none;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.docs-related-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(18, 124, 108, 0.18);
+  background: rgba(235, 244, 241, 0.92);
+}
+
+.docs-related-link strong {
+  color: #13293d;
+}
+
+.docs-related-link small {
+  color: #66717c;
+  line-height: 1.5;
+}
+
+.docs-toc-link {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background: rgba(246, 245, 240, 0.72);
+  text-decoration: none;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.docs-toc-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(18, 124, 108, 0.18);
+  background: rgba(235, 244, 241, 0.92);
+}
+
+.docs-toc-link.is-active {
+  border-color: rgba(18, 124, 108, 0.24);
+  background: linear-gradient(135deg, rgba(18, 124, 108, 0.12), rgba(255, 255, 255, 0.92));
+  box-shadow: inset 0 0 0 1px rgba(18, 124, 108, 0.05);
+}
+
+.docs-toc-link span,
+.docs-action-copy span {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #127c6c;
+}
+
+.docs-toc-link strong,
+.docs-action-copy strong {
+  color: #13293d;
+}
+
+.docs-toc-link.is-active strong {
+  color: #103045;
+}
+
+.docs-action-copy {
+  gap: 0.18rem;
+  text-align: left;
+}
+
+.docs-action-button {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
+.docs-action-button small {
+  max-width: 12rem;
+  color: #66717c;
+  line-height: 1.45;
+  text-align: right;
+}
+

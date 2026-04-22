@@ -4,6 +4,7 @@ import type {
   CurrencyRecord,
   EventRow,
   LocationRecord,
+  PreTradeReviewCaptureContext,
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
@@ -122,6 +123,7 @@ export function useTradeCaptureForm(
     }),
   )
   const [duplicateSourceTradeId, setDuplicateSourceTradeId] = useState<string | null>(null)
+  const [preTradeReviewContext, setPreTradeReviewContext] = useState<PreTradeReviewCaptureContext | null>(null)
 
   const resolvedBookInput = activeBooks.some((book) => book.code === bookInput)
     ? bookInput
@@ -461,6 +463,7 @@ export function useTradeCaptureForm(
     setTraderUserInput(selectedTrade.trader_user ?? tradeHeaderDefaults.trader_user)
     setCreateLegs(duplicateLegs)
     setDuplicateSourceTradeId(selectedTrade.trade_id)
+    setPreTradeReviewContext(null)
   }
 
   function reset(nextTradeId: string = suggestedTradeId) {
@@ -520,6 +523,7 @@ export function useTradeCaptureForm(
       }),
     )
     setDuplicateSourceTradeId(null)
+    setPreTradeReviewContext(null)
   }
 
   return {
@@ -602,6 +606,8 @@ export function useTradeCaptureForm(
     traderUserInput,
     setTraderUserInput,
     duplicateSourceTradeId,
+    preTradeReviewContext,
+    setPreTradeReviewContext,
     createLegs,
     createCommodityOptions,
     createPriceIndexOptions,

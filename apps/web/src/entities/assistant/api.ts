@@ -9,9 +9,11 @@ import {
 import { buildMutationHeaders, getMutationContext } from '../../shared/mutation'
 import type {
   AssistantActionRequest,
+  AssistantActionRequestAdminPage,
   AssistantActionRequestStatus,
   AssistantAdminAgent,
   AssistantAgent,
+  AssistantAgentRoleArchetype,
   AssistantConversation,
   AssistantConversationSummary,
   AssistantPromptContext,
@@ -20,6 +22,7 @@ import type {
   AssistantPromptResponse,
   AssistantProvider,
   AssistantRun,
+  AssistantRunAuditTrace,
   AssistantRunSummary,
   AssistantRuntimeSettings,
 } from '../../shared/models'
@@ -36,6 +39,7 @@ export type CreateAssistantAgentInput = {
   capabilities: AssistantAdminAgent['capabilities']
   allowed_tools: AssistantAdminAgent['allowed_tools']
   allowed_action_types: AssistantAdminAgent['allowed_action_types']
+  daily_token_allocation?: AssistantAdminAgent['daily_token_allocation']
   system_prompt: string
 }
 
@@ -87,12 +91,48 @@ function assistantReadHeaders(accessToken?: string): Headers | undefined {
 
 function actionRequestQuery(init?: {
   status?: AssistantActionRequestStatus
+  actionType?: string
+  agentId?: string
+  userId?: string
+  decidedBy?: string
+  search?: string
+  createdAfter?: string
+  createdBefore?: string
+  decidedAfter?: string
+  decidedBefore?: string
   limit?: number
   offset?: number
 }): string {
   const params = new URLSearchParams()
   if (init?.status) {
     params.set('status', init.status)
+  }
+  if (init?.actionType?.trim()) {
+    params.set('action_type', init.actionType.trim())
+  }
+  if (init?.agentId?.trim()) {
+    params.set('agent_id', init.agentId.trim())
+  }
+  if (init?.userId?.trim()) {
+    params.set('user_id', init.userId.trim())
+  }
+  if (init?.decidedBy?.trim()) {
+    params.set('decided_by', init.decidedBy.trim())
+  }
+  if (init?.search?.trim()) {
+    params.set('search', init.search.trim())
+  }
+  if (init?.createdAfter?.trim()) {
+    params.set('created_after', init.createdAfter.trim())
+  }
+  if (init?.createdBefore?.trim()) {
+    params.set('created_before', init.createdBefore.trim())
+  }
+  if (init?.decidedAfter?.trim()) {
+    params.set('decided_after', init.decidedAfter.trim())
+  }
+  if (init?.decidedBefore?.trim()) {
+    params.set('decided_before', init.decidedBefore.trim())
   }
   if (typeof init?.limit === 'number') {
     params.set('limit', String(init.limit))
@@ -160,6 +200,18 @@ export async function getAssistantRun(
   return fetchJson<AssistantRun>(`${apiBase}/assistant/runs/${encodeURIComponent(String(runId))}`, {
     headers: assistantReadHeaders(init?.accessToken),
   })
+}
+
+export async function getAdminAssistantRunAuditTrace(
+  apiBase: string,
+  runId: number,
+): Promise<AssistantRunAuditTrace> {
+  return fetchJson<AssistantRunAuditTrace>(
+    `${apiBase}/admin/assistant/runs/${encodeURIComponent(String(runId))}/audit-trace`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
 }
 
 export async function listAssistantActionRequests(
@@ -340,12 +392,32 @@ export async function listAdminAssistantActionRequests(
   apiBase: string,
   init?: {
     status?: AssistantActionRequestStatus
+    actionType?: string
+    agentId?: string
+    userId?: string
+    decidedBy?: string
+    search?: string
+    createdAfter?: string
+    createdBefore?: string
+    decidedAfter?: string
+    decidedBefore?: string
     limit?: number
     offset?: number
   },
-): Promise<AssistantActionRequest[]> {
-  return fetchJson<AssistantActionRequest[]>(
+): Promise<AssistantActionRequestAdminPage> {
+  return fetchJson<AssistantActionRequestAdminPage>(
     `${apiBase}/admin/assistant/action-requests${actionRequestQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function listAdminAssistantRoleArchetypes(
+  apiBase: string,
+): Promise<AssistantAgentRoleArchetype[]> {
+  return fetchJson<AssistantAgentRoleArchetype[]>(
+    `${apiBase}/admin/assistant/role-archetypes`,
     {
       headers: assistantMutationHeaders(),
     },

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -9,6 +9,7 @@ from apps.api.app.schemas._validation import normalize_required_text
 
 PreTradeTradeSide = Literal["BUY", "SELL"]
 PreTradeReviewStatus = Literal["OPEN", "IN_REVIEW", "APPROVED", "REJECTED"]
+PreTradeReviewActivityAction = Literal["SUBMITTED", "CLAIMED", "COMMENTED", "APPROVED", "REJECTED", "BOOKED"]
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -158,11 +159,32 @@ class PreTradeReviewItemUpdate(BaseModel):
     owner: str | None = Field(default=None, max_length=120)
     due_at: datetime | None = None
     review_notes: str | None = Field(default=None, max_length=4000)
+    activity_comment: str | None = Field(default=None, max_length=4000)
 
-    @field_validator("name", "thesis", "owner", "review_notes")
+    @field_validator("name", "thesis", "owner", "review_notes", "activity_comment")
     @classmethod
     def normalize_optional_fields(cls, value: str | None, info) -> str | None:
         return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeReviewActivityCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    comment: str = Field(..., min_length=1, max_length=4000)
+
+    @field_validator("comment")
+    @classmethod
+    def normalize_comment(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="comment")
+
+
+class PreTradeReviewActivityOut(BaseModel):
+    activity_id: str
+    action: PreTradeReviewActivityAction
+    actor_id: str
+    occurred_at: datetime
+    comment: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class PreTradeReviewItemOut(BaseModel):
@@ -175,6 +197,11 @@ class PreTradeReviewItemOut(BaseModel):
     owner: str | None
     due_at: datetime | None
     review_notes: str | None
+    linked_trade_id: str | None = None
+    linked_trade_status: str | None = None
+    booked_at: datetime | None = None
+    booked_by: str | None = None
+    activity: list[PreTradeReviewActivityOut] = Field(default_factory=list)
     created_at: datetime
     created_by: str
     updated_at: datetime

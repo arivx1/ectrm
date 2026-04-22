@@ -1,0 +1,372 @@
+.pretrade-form-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.pretrade-form-grid > .field.field-span-2 {
+  grid-column: span 2;
+}
+
+.pretrade-form-grid .control.control-textarea,
+.pretrade-form-grid .textarea-control {
+  min-height: 6.5rem;
+  resize: vertical;
+}
+
+.pretrade-callout,
+.pretrade-recommendation-list,
+.pretrade-trade-list,
+.pretrade-saved-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.pretrade-callout {
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.pretrade-callout > *,
+.pretrade-context-card,
+.pretrade-stance-card,
+.pretrade-recommendation,
+.pretrade-scenario-card {
+  padding: 1rem 1.05rem;
+  border-radius: 1rem;
+  border: 1px solid var(--terminal-line);
+  background: linear-gradient(180deg, rgba(14, 25, 38, 0.94), rgba(8, 15, 24, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.pretrade-context-card,
+.pretrade-recommendation,
+.pretrade-stance-card,
+.pretrade-recommendation-title,
+.pretrade-scenario-card {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.pretrade-context-card,
+.pretrade-stance-card,
+.pretrade-recommendation,
+.pretrade-scenario-card {
+  color: var(--terminal-text-soft);
+}
+
+.pretrade-scenario-card.is-selected {
+  border-color: rgba(61, 214, 160, 0.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 0 0 1px rgba(61, 214, 160, 0.08);
+}
+
+.pretrade-stance-card.tone-active {
+  border-color: rgba(61, 214, 160, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(61, 214, 160, 0.16), transparent 42%),
+    linear-gradient(180deg, rgba(12, 32, 47, 0.98), rgba(8, 16, 25, 0.98));
+}
+
+.pretrade-stance-card.tone-planned {
+  border-color: rgba(245, 190, 103, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(245, 190, 103, 0.16), transparent 42%),
+    linear-gradient(180deg, rgba(25, 23, 16, 0.98), rgba(10, 17, 26, 0.98));
+}
+
+.pretrade-stance-card.tone-blocked {
+  border-color: rgba(255, 139, 127, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(255, 139, 127, 0.18), transparent 42%),
+    linear-gradient(180deg, rgba(35, 19, 22, 0.98), rgba(10, 17, 26, 0.98));
+}
+
+.pretrade-stance-head,
+.pretrade-recommendation-head,
+.pretrade-scenario-head,
+.pretrade-signal-row,
+.pretrade-context-stat,
+.pretrade-trade-link {
+  display: flex;
+  gap: 0.9rem;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.pretrade-stance-metrics {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  color: var(--terminal-dim);
+  font-size: 0.82rem;
+}
+
+.pretrade-recommendation.tone-blocked {
+  border-color: rgba(193, 86, 74, 0.24);
+}
+
+.pretrade-recommendation.tone-planned {
+  border-color: rgba(201, 146, 36, 0.22);
+}
+
+.pretrade-recommendation.tone-active {
+  border-color: rgba(18, 124, 108, 0.18);
+}
+
+.pretrade-context-card p,
+.pretrade-recommendation p,
+.pretrade-stance-card p,
+.pretrade-callout p,
+.pretrade-scenario-card p {
+  margin: 0;
+  color: var(--terminal-text-soft);
+}
+
+.pretrade-context-card strong,
+.pretrade-stance-card strong,
+.pretrade-recommendation-title strong,
+.pretrade-scenario-card strong {
+  color: var(--terminal-text);
+}
+
+.pretrade-context-stat strong,
+.pretrade-signal-row strong,
+.pretrade-trade-link strong {
+  color: var(--terminal-text);
+}
+
+.pretrade-context-stat span,
+.pretrade-signal-row span,
+.pretrade-inline-value span,
+.pretrade-trade-link span,
+.pretrade-scenario-meta span {
+  color: var(--terminal-dim);
+}
+
+.pretrade-scenario-meta {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.form-error-text {
+  margin: 0;
+  color: var(--terminal-red);
+  font-size: 0.92rem;
+}
+
+.pretrade-signal-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.pretrade-inline-value {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: end;
+  text-align: right;
+}
+
+.pretrade-trade-link {
+  width: 100%;
+  border: 1px solid var(--terminal-line);
+  border-radius: 1rem;
+  padding: 0.95rem 1rem;
+  background: linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(17, 31, 46, 0.74));
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.pretrade-trade-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(61, 214, 160, 0.18);
+  background: linear-gradient(180deg, rgba(12, 23, 35, 0.98), rgba(18, 39, 57, 0.92));
+  box-shadow: 0 12px 28px rgba(3, 10, 18, 0.22);
+}
+
+@media (max-width: 720px) {
+  .pretrade-stance-head,
+  .pretrade-recommendation-head,
+  .pretrade-scenario-head,
+  .pretrade-signal-row,
+  .pretrade-context-stat,
+  .pretrade-trade-link {
+    flex-direction: column;
+  }
+
+  .pretrade-inline-value {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .pretrade-form-grid > .field.field-span-2 {
+    grid-column: span 1;
+  }
+}
+
+.pretrade-textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.pretrade-action-row,
+.pretrade-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.pretrade-metric-grid,
+.pretrade-context-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+}
+
+.pretrade-metric-card,
+.pretrade-next-actions,
+.pretrade-signal-card,
+.pretrade-record-card {
+  padding: 1rem 1.05rem;
+  border-radius: 1rem;
+  border: 1px solid var(--terminal-line);
+  background: linear-gradient(180deg, rgba(14, 25, 38, 0.94), rgba(8, 15, 24, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.pretrade-metric-card {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pretrade-metric-card span {
+  color: var(--terminal-dim);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.pretrade-metric-card strong {
+  color: var(--terminal-text);
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+}
+
+.pretrade-check-list,
+.pretrade-card-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.pretrade-check-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--terminal-line);
+  background: linear-gradient(180deg, rgba(12, 22, 34, 0.98), rgba(8, 15, 24, 0.98));
+}
+
+.pretrade-check-card-good {
+  border-color: rgba(61, 214, 160, 0.18);
+}
+
+.pretrade-check-card-watch {
+  border-color: rgba(245, 190, 103, 0.22);
+}
+
+.pretrade-check-card-block {
+  border-color: rgba(255, 139, 127, 0.22);
+}
+
+.pretrade-check-head,
+.pretrade-review-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.pretrade-check-head strong,
+.pretrade-record-card strong,
+.pretrade-next-actions .eyebrow {
+  color: var(--terminal-text);
+}
+
+.pretrade-check-head span,
+.pretrade-record-card span,
+.pretrade-record-card small,
+.pretrade-next-actions li {
+  color: var(--terminal-dim);
+}
+
+.pretrade-check-card p,
+.pretrade-record-card p,
+.pretrade-next-actions p {
+  margin: 0;
+  color: var(--terminal-text-soft);
+}
+
+.pretrade-bullet-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.pretrade-record-card {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.pretrade-record-card:not(.pretrade-record-static) {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.pretrade-record-card:not(.pretrade-record-static):hover {
+  transform: translateY(-1px);
+  border-color: rgba(61, 214, 160, 0.18);
+  box-shadow: 0 12px 28px rgba(3, 10, 18, 0.22);
+}
+
+.pretrade-record-card.is-selected {
+  border-color: rgba(61, 214, 160, 0.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 0 0 1px rgba(61, 214, 160, 0.08);
+}
+
+.pretrade-recommendation-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .pretrade-action-row,
+  .pretrade-inline-actions,
+  .pretrade-check-head,
+  .pretrade-review-head,
+  .pretrade-recommendation-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

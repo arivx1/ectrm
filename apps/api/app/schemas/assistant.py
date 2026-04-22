@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Literal, Optional, get_args
+from typing import Any, Literal, Optional, get_args
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
@@ -43,6 +43,10 @@ AssistantWorkspace = Literal[
 AssistantAgentStatus = Literal["DRAFT", "ACTIVE", "PAUSED", "RETIRED"]
 AssistantAgentScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
 AssistantAgentCapability = Literal["READ", "EXPLAIN", "DRAFT", "ACTION"]
+AssistantAgentTokenBudgetStatus = Literal["GREEN", "AMBER", "RED"]
+AssistantAgentTokenAllocationSource = Literal["AGENT", "DEFAULT"]
+AssistantAgentRoleCatalogStatus = Literal["SEEDED", "TEMPLATE", "PHASE_1", "PHASE_2_PLUS"]
+AssistantAgentAuthorityLevel = Literal["OBSERVE", "EXPLAIN", "DRAFT", "STAGE", "EXECUTE", "EXTERNAL_COMMIT"]
 AssistantActionType = Literal[
     "cancel_trade",
     "issue_trade_confirmation",
@@ -165,6 +169,24 @@ class AssistantActionRequestOut(BaseModel):
     decided_by: Optional[str] = None
 
 
+class AssistantActionRequestAdminSummaryOut(BaseModel):
+    total_count: int
+    pending_count: int
+    executed_count: int
+    rejected_count: int
+    failed_count: int
+    avg_decision_seconds: Optional[float] = None
+
+
+class AssistantActionRequestAdminPageOut(BaseModel):
+    items: list[AssistantActionRequestOut] = Field(default_factory=list)
+    total_count: int
+    limit: int
+    offset: int
+    has_more: bool
+    summary: AssistantActionRequestAdminSummaryOut
+
+
 class AssistantPromptResponse(BaseModel):
     conversation_id: Optional[int] = None
     conversation_updated_at: Optional[datetime] = None
@@ -216,6 +238,7 @@ class AssistantAgentBase(BaseModel):
     capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
     allowed_tools: list[str] = Field(default_factory=list, max_length=16)
     allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
+    daily_token_allocation: Optional[int] = Field(default=None, ge=0, le=100_000_000)
     system_prompt: str = Field(..., min_length=1, max_length=20_000)
 
     @field_validator("name")
@@ -299,6 +322,18 @@ class AssistantAgentUpdate(AssistantAgentBase):
         return normalize_required_text(value, field_name="updated_by")
 
 
+class AssistantAgentTokenBudgetOut(BaseModel):
+    status: AssistantAgentTokenBudgetStatus
+    allocated_tokens: int
+    used_tokens: int
+    remaining_tokens: int
+    percent_used: float
+    warning_threshold_percent: float
+    allocation_source: AssistantAgentTokenAllocationSource
+    window_started_at: datetime
+    reset_at: datetime
+
+
 class AssistantAgentOut(BaseModel):
     agent_id: str
     name: str
@@ -311,6 +346,8 @@ class AssistantAgentOut(BaseModel):
     capabilities: list[AssistantAgentCapability]
     allowed_tools: list[str]
     allowed_action_types: list[AssistantActionType]
+    daily_token_allocation: Optional[int]
+    token_budget: AssistantAgentTokenBudgetOut
 
 
 class AssistantAgentAdminOut(AssistantAgentOut):
@@ -320,6 +357,27 @@ class AssistantAgentAdminOut(AssistantAgentOut):
     updated_at: datetime
     updated_by: str
     version: int
+
+
+class AssistantAgentRoleArchetypeOut(BaseModel):
+    role_key: str
+    name: str
+    description: str
+    catalog_status: AssistantAgentRoleCatalogStatus
+    mission: list[str]
+    human_owner_role: str
+    allowed_workspaces: list[AssistantWorkspace]
+    work_objects: list[str]
+    capability_ceiling: list[AssistantAgentCapability]
+    default_tools: list[str]
+    maximum_action_types: list[AssistantActionType]
+    authority_ceiling: AssistantAgentAuthorityLevel
+    approval_rules: list[str]
+    stop_conditions: list[str]
+    success_metrics: list[str]
+    required_eval_coverage: list[str]
+    base_prompt_guidance: list[str]
+    current_profile_ids: list[str]
 
 
 class AssistantAgentBuildDraftIn(BaseModel):
@@ -503,6 +561,40 @@ class AssistantRunOut(AssistantRunSummaryOut):
     rendered_system_prompt: str
     warnings: list[str] = Field(default_factory=list)
     tool_calls: list[AssistantToolCallOut] = Field(default_factory=list)
+
+
+class AssistantAuditEventOut(BaseModel):
+    event_id: str
+    aggregate_type: str
+    aggregate_id: str
+    event_type: str
+    occurred_at: datetime
+    recorded_at: datetime
+    actor_id: Optional[str] = None
+    correlation_id: Optional[str] = None
+    causation_id: Optional[str] = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssistantAuditTimelineEntryOut(BaseModel):
+    entry_type: str
+    occurred_at: datetime
+    title: str
+    summary: str
+    status: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssistantActionRequestTraceOut(BaseModel):
+    action_request: AssistantActionRequestOut
+    mutation_events: list[AssistantAuditEventOut] = Field(default_factory=list)
+
+
+class AssistantRunAuditTraceOut(BaseModel):
+    run: AssistantRunOut
+    action_requests: list[AssistantActionRequestTraceOut] = Field(default_factory=list)
+    timeline: list[AssistantAuditTimelineEntryOut] = Field(default_factory=list)
+    mutation_event_count: int
 
 
 class AssistantConversationMessageOut(BaseModel):

@@ -1,0 +1,49 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="720" rx="28" fill="#07111B"/>
+  <rect x="36" y="36" width="1208" height="648" rx="24" fill="#0C1824" stroke="#1D3346"/>
+  <rect x="68" y="78" width="1144" height="104" rx="18" fill="#112A3B"/>
+  <rect x="68" y="210" width="460" height="432" rx="18" fill="#102231"/>
+  <rect x="552" y="210" width="300" height="432" rx="18" fill="#102231"/>
+  <rect x="876" y="210" width="336" height="432" rx="18" fill="#112A3B"/>
+
+  <text x="96" y="124" fill="#7FB7E8" font-family="Arial, sans-serif" font-size="18" font-weight="700">Operations</text>
+  <text x="96" y="154" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="28" font-weight="700">Clear post-trade blockers and handoffs</text>
+  <text x="96" y="178" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">The queue, handoff lanes, and inspector sit together so operators can work owner-by-owner without losing context.</text>
+
+  <text x="94" y="242" fill="#7FB7E8" font-family="Arial, sans-serif" font-size="17" font-weight="700">Queue stack</text>
+  <rect x="94" y="264" width="408" height="66" rx="14" fill="#163245"/>
+  <rect x="94" y="344" width="408" height="66" rx="14" fill="#163245"/>
+  <rect x="94" y="424" width="408" height="66" rx="14" fill="#153649"/>
+  <rect x="94" y="504" width="408" height="66" rx="14" fill="#163245"/>
+
+  <text x="578" y="242" fill="#7FB7E8" font-family="Arial, sans-serif" font-size="17" font-weight="700">Status lanes</text>
+  <rect x="578" y="266" width="248" height="88" rx="14" fill="#17384C"/>
+  <rect x="578" y="372" width="248" height="88" rx="14" fill="#17384C"/>
+  <rect x="578" y="478" width="248" height="88" rx="14" fill="#17384C"/>
+
+  <text x="902" y="242" fill="#7FB7E8" font-family="Arial, sans-serif" font-size="17" font-weight="700">Inspector and action panel</text>
+  <rect x="902" y="268" width="284" height="20" rx="10" fill="#26A17B"/>
+  <rect x="902" y="304" width="284" height="58" rx="14" fill="#17384C"/>
+  <rect x="902" y="380" width="284" height="58" rx="14" fill="#17384C"/>
+  <rect x="902" y="456" width="284" height="58" rx="14" fill="#17384C"/>
+  <rect x="902" y="550" width="132" height="34" rx="17" fill="#26A17B"/>
+  <rect x="1054" y="550" width="132" height="34" rx="17" fill="#1B3345"/>
+
+  <circle cx="520" cy="296" r="22" fill="#26A17B"/>
+  <text x="512" y="303" fill="#07111B" font-family="Arial, sans-serif" font-size="18" font-weight="700">1</text>
+  <path d="M542 296H592" stroke="#26A17B" stroke-width="4" stroke-linecap="round"/>
+  <text x="602" y="286" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="18" font-weight="700">Start with the live queue item</text>
+  <text x="602" y="310" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">The queue row tells you which trade, blocker, or handoff needs owner attention first.</text>
+
+  <circle cx="848" cy="426" r="22" fill="#4EA7FF"/>
+  <text x="840" y="433" fill="#07111B" font-family="Arial, sans-serif" font-size="18" font-weight="700">2</text>
+  <path d="M870 426H920" stroke="#4EA7FF" stroke-width="4" stroke-linecap="round"/>
+  <text x="930" y="416" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="18" font-weight="700">Use the inspector to decide the next action</text>
+  <text x="930" y="440" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">Ownership, notes, and related trade context all sit next to the queue so follow-up is explicit.</text>
+
+  <circle cx="1040" cy="566" r="22" fill="#F2B84B"/>
+  <text x="1032" y="573" fill="#07111B" font-family="Arial, sans-serif" font-size="18" font-weight="700">3</text>
+  <path d="M1062 566H1120" stroke="#F2B84B" stroke-width="4" stroke-linecap="round"/>
+  <text x="888" y="632" fill="#E7F1FA" font-family="Arial, sans-serif" font-size="18" font-weight="700">Promote, update, or hand off the work</text>
+  <text x="888" y="656" fill="#8BA8C2" font-family="Arial, sans-serif" font-size="15">The action panel is where blocked work becomes an owned next step instead of a lingering note.</text>
+</svg>

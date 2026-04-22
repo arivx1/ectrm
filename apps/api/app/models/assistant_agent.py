@@ -23,6 +23,7 @@ class AssistantAgent(Base):
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     allowed_tools: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     allowed_action_types: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    daily_token_allocation: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)

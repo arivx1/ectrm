@@ -1375,6 +1375,17 @@ export type PreTradeScenarioRecord = {
 
 export type PreTradeReviewStatus = 'OPEN' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED'
 
+export type PreTradeReviewActivityAction = 'SUBMITTED' | 'CLAIMED' | 'COMMENTED' | 'APPROVED' | 'REJECTED' | 'BOOKED'
+
+export type PreTradeReviewActivityRecord = {
+  activity_id: string
+  action: PreTradeReviewActivityAction
+  actor_id: string
+  occurred_at: string
+  comment: string | null
+  payload: Record<string, unknown>
+}
+
 export type PreTradeReviewItemRecord = {
   review_id: number
   name: string
@@ -1385,12 +1396,28 @@ export type PreTradeReviewItemRecord = {
   owner: string | null
   due_at: string | null
   review_notes: string | null
+  linked_trade_id: string | null
+  linked_trade_status: string | null
+  booked_at: string | null
+  booked_by: string | null
+  activity: PreTradeReviewActivityRecord[]
   created_at: string
   created_by: string
   updated_at: string
   updated_by: string
   version: number
   can_edit: boolean
+}
+
+export type PreTradeReviewCaptureContext = {
+  reviewId: number
+  reviewName: string
+  reviewThesis: string | null
+  reviewNotes: string | null
+  reviewOwner: string | null
+  sourceScenarioId: number | null
+  approvedBy: string | null
+  approvedAt: string | null
 }
 
 export type PriceIndexObservationRecord = {
@@ -1696,6 +1723,14 @@ export type AssistantMessageRole = 'user' | 'assistant'
 export type AssistantAgentStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'RETIRED'
 export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
 export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
+export type AssistantAgentRoleCatalogStatus = 'SEEDED' | 'TEMPLATE' | 'PHASE_1' | 'PHASE_2_PLUS'
+export type AssistantAgentAuthorityLevel =
+  | 'OBSERVE'
+  | 'EXPLAIN'
+  | 'DRAFT'
+  | 'STAGE'
+  | 'EXECUTE'
+  | 'EXTERNAL_COMMIT'
 export const ASSISTANT_ACTION_TYPES = [
   'cancel_trade',
   'issue_trade_confirmation',
@@ -1750,6 +1785,23 @@ export type AssistantAgent = {
   capabilities: AssistantAgentCapability[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
+  daily_token_allocation?: number | null
+  token_budget?: AssistantAgentTokenBudget
+}
+
+export type AssistantAgentTokenBudgetStatus = 'GREEN' | 'AMBER' | 'RED'
+export type AssistantAgentTokenAllocationSource = 'AGENT' | 'DEFAULT'
+
+export type AssistantAgentTokenBudget = {
+  status: AssistantAgentTokenBudgetStatus
+  allocated_tokens: number
+  used_tokens: number
+  remaining_tokens: number
+  percent_used: number
+  warning_threshold_percent: number
+  allocation_source: AssistantAgentTokenAllocationSource
+  window_started_at: string
+  reset_at: string
 }
 
 export type AssistantAdminAgent = AssistantAgent & {
@@ -1759,6 +1811,27 @@ export type AssistantAdminAgent = AssistantAgent & {
   updated_at: string
   updated_by: string
   version: number
+}
+
+export type AssistantAgentRoleArchetype = {
+  role_key: string
+  name: string
+  description: string
+  catalog_status: AssistantAgentRoleCatalogStatus
+  mission: string[]
+  human_owner_role: string
+  allowed_workspaces: ViewKey[]
+  work_objects: string[]
+  capability_ceiling: AssistantAgentCapability[]
+  default_tools: string[]
+  maximum_action_types: AssistantActionType[]
+  authority_ceiling: AssistantAgentAuthorityLevel
+  approval_rules: string[]
+  stop_conditions: string[]
+  success_metrics: string[]
+  required_eval_coverage: string[]
+  base_prompt_guidance: string[]
+  current_profile_ids: string[]
 }
 
 export type AssistantPromptRequest = {
@@ -1795,6 +1868,24 @@ export type AssistantActionRequest = {
   created_at: string
   decided_at?: string | null
   decided_by?: string | null
+}
+
+export type AssistantActionRequestAdminSummary = {
+  total_count: number
+  pending_count: number
+  executed_count: number
+  rejected_count: number
+  failed_count: number
+  avg_decision_seconds?: number | null
+}
+
+export type AssistantActionRequestAdminPage = {
+  items: AssistantActionRequest[]
+  total_count: number
+  limit: number
+  offset: number
+  has_more: boolean
+  summary: AssistantActionRequestAdminSummary
 }
 
 export type AssistantPromptResponse = {
@@ -1891,6 +1982,40 @@ export type AssistantRun = AssistantRunSummary & {
   tool_calls: AssistantToolCall[]
 }
 
+export type AssistantAuditEvent = {
+  event_id: string
+  aggregate_type: string
+  aggregate_id: string
+  event_type: string
+  occurred_at: string
+  recorded_at: string
+  actor_id?: string | null
+  correlation_id?: string | null
+  causation_id?: string | null
+  payload: Record<string, unknown>
+}
+
+export type AssistantAuditTimelineEntry = {
+  entry_type: string
+  occurred_at: string
+  title: string
+  summary: string
+  status?: string | null
+  metadata: Record<string, unknown>
+}
+
+export type AssistantActionRequestTrace = {
+  action_request: AssistantActionRequest
+  mutation_events: AssistantAuditEvent[]
+}
+
+export type AssistantRunAuditTrace = {
+  run: AssistantRun
+  action_requests: AssistantActionRequestTrace[]
+  timeline: AssistantAuditTimelineEntry[]
+  mutation_event_count: number
+}
+
 export type AssistantConversationMessage = {
   role: AssistantMessageRole
   content: string
@@ -1929,6 +2054,7 @@ export type ViewKey =
   | 'dashboard'
   | 'guide'
   | 'demo'
+  | 'pretrade'
   | 'trades'
   | 'events'
   | 'risk'

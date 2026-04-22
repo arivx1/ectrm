@@ -91,7 +91,7 @@ export function AssistantActionRequestList({
               </div>
             ) : null}
 
-            {!actionRequest.error_detail && actionRequest.decided_at ? (
+            {actionRequest.decided_at ? (
               <div className="assistant-message-meta assistant-action-meta">
                 <span>Decided: {formatDate(actionRequest.decided_at)}</span>
                 <span>Decided by: {actionRequest.decided_by ?? 'n/a'}</span>

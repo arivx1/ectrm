@@ -23,9 +23,9 @@ from apps.api.app.domains.assistant.services.chat import (
     resolve_effective_runtime,
 )
 from apps.api.app.domains.assistant.services.conversations import (
-    create_assistant_conversation,
+    add_assistant_conversation,
+    apply_assistant_conversation_after_run,
     get_assistant_conversation,
-    update_assistant_conversation_after_run,
 )
 from apps.api.app.domains.assistant.services.prompt_context import (
     AssistantPromptEnvelope,
@@ -38,11 +38,12 @@ from apps.api.app.domains.assistant.services.registry import (
     ACTIVE_ASSISTANT_AGENT_STATUS,
     ManagedAssistantAgent,
     get_agent_record,
+    summarize_agent_token_budget,
     to_managed_agent,
 )
 from apps.api.app.domains.assistant.services.runs import (
+    add_assistant_run,
     attach_run_metadata,
-    create_assistant_run,
     get_assistant_run,
 )
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
@@ -54,6 +55,7 @@ from apps.api.app.schemas.assistant import (
     AssistantPromptRequest,
     AssistantPromptResponse,
     AssistantPromptSectionOut,
+    AssistantToolCallOut,
 )
 
 
@@ -66,7 +68,7 @@ class PreparedAssistantExecution:
     runtime_warnings: tuple[str, ...]
     prompt_context: AssistantPromptEnvelope
     action_runtime_result: AssistantActionRuntimeResult
-    conversation: AssistantConversation
+    conversation: AssistantConversation | None
 
 
 def resolve_prompt_user(
@@ -117,6 +119,29 @@ def resolve_agent_definition_for_request(
         )
 
     return agent_definition
+
+
+def ensure_agent_has_token_allocation(
+    *,
+    db: Session,
+    agent_definition: ManagedAssistantAgent | None,
+) -> None:
+    if agent_definition is None:
+        return
+
+    record = get_agent_record(db, agent_definition.agent_id)
+    if record is None:
+        raise AssistantServiceError(status_code=404, detail="Assistant agent not found")
+
+    token_budget = summarize_agent_token_budget(db, record)
+    if token_budget.status == "RED":
+        raise AssistantServiceError(
+            status_code=429,
+            detail=(
+                f"{record.name} is in the red and has no token allocation remaining "
+                f"until {token_budget.reset_at.isoformat()}."
+            ),
+        )
 
 
 def resolve_accessible_assistant_run(
@@ -217,15 +242,13 @@ def prepare_assistant_execution(
     authorization_header: str | None,
 ) -> PreparedAssistantExecution:
     agent_definition = resolve_agent_definition_for_request(db=db, payload=payload)
+    ensure_agent_has_token_allocation(db=db, agent_definition=agent_definition)
     user = resolve_prompt_user(db=db, authorization_header=authorization_header)
     provider_config, model_name, runtime_warnings = resolve_effective_runtime(payload, agent_definition)
-    conversation = _resolve_conversation_for_request(
+    conversation = _resolve_existing_conversation_for_request(
         db=db,
         payload=payload,
         user=user,
-        agent_definition=agent_definition,
-        provider_name=provider_config.provider,
-        model_name=model_name,
     )
     prompt_context = build_prompt_context(
         payload=payload,
@@ -270,23 +293,15 @@ async def execute_assistant_execution(
     if not isinstance(response, AssistantPromptResponse):
         response = AssistantPromptResponse.model_validate(response)
 
-    run_record = create_assistant_run(
+    run_record, updated_conversation = _record_assistant_run(
         db=db,
-        conversation_id=prepared.conversation.id,
         status="COMPLETED",
-        user_id=prepared.user.user_id,
-        session_id=prepared.user.session_id,
-        user_role=prepared.user.role,
-        workspace=payload.workspace,
+        payload=payload,
+        prepared=prepared,
         agent_id=response.agent_id,
         agent_name=response.agent_name,
         provider=response.provider,
         model=response.model,
-        use_live_tools=payload.use_live_tools,
-        request_messages=payload.messages,
-        application_context=payload.context,
-        prompt_sections=[_to_prompt_section_out(section) for section in prepared.prompt_context.sections],
-        rendered_system_prompt=prepared.prompt_context.system_prompt,
         warnings=response.warnings,
         tool_calls=response.tool_calls,
         input_tokens=response.usage.input_tokens,
@@ -307,20 +322,6 @@ async def execute_assistant_execution(
         )
     )
 
-    updated_conversation = update_assistant_conversation_after_run(
-        db=db,
-        record=prepared.conversation,
-        run_record=run_record,
-        workspace=payload.workspace,
-        agent_id=response.agent_id,
-        agent_name=response.agent_name,
-        provider=response.provider,
-        model=response.model,
-        use_live_tools=payload.use_live_tools,
-        latest_user_message=_latest_request_user_message(payload),
-        latest_assistant_message=response.message.content,
-    )
-
     response = attach_run_metadata(response, run_record)
     response.conversation_id = updated_conversation.id
     response.conversation_updated_at = updated_conversation.updated_at
@@ -333,24 +334,16 @@ def record_failed_assistant_execution(
     payload: AssistantPromptRequest,
     prepared: PreparedAssistantExecution,
     detail: str,
-) -> None:
-    run_record = create_assistant_run(
+) -> AssistantConversation:
+    _, updated_conversation = _record_assistant_run(
         db=db,
-        conversation_id=prepared.conversation.id,
         status="FAILED",
-        user_id=prepared.user.user_id,
-        session_id=prepared.user.session_id,
-        user_role=prepared.user.role,
-        workspace=payload.workspace,
+        payload=payload,
+        prepared=prepared,
         agent_id=prepared.prompt_context.agent_id,
         agent_name=prepared.prompt_context.agent_name,
         provider=prepared.provider_name,
         model=prepared.model_name,
-        use_live_tools=payload.use_live_tools,
-        request_messages=payload.messages,
-        application_context=payload.context,
-        prompt_sections=[_to_prompt_section_out(section) for section in prepared.prompt_context.sections],
-        rendered_system_prompt=prepared.prompt_context.system_prompt,
         warnings=[*prepared.runtime_warnings, *prepared.prompt_context.warnings],
         tool_calls=[],
         input_tokens=None,
@@ -358,50 +351,22 @@ def record_failed_assistant_execution(
         assistant_message=None,
         error_detail=detail,
     )
-    update_assistant_conversation_after_run(
-        db=db,
-        record=prepared.conversation,
-        run_record=run_record,
-        workspace=payload.workspace,
-        agent_id=prepared.prompt_context.agent_id,
-        agent_name=prepared.prompt_context.agent_name,
-        provider=prepared.provider_name,
-        model=prepared.model_name,
-        use_live_tools=payload.use_live_tools,
-        latest_user_message=_latest_request_user_message(payload),
-        latest_assistant_message=detail,
-    )
+    return updated_conversation
 
 
-def _resolve_conversation_for_request(
+def _resolve_existing_conversation_for_request(
     *,
     db: Session,
     payload: AssistantPromptRequest,
     user: AssistantPromptUser,
-    agent_definition: ManagedAssistantAgent | None,
-    provider_name: str,
-    model_name: str,
-) -> AssistantConversation:
+) -> AssistantConversation | None:
     if payload.conversation_id is not None:
         return resolve_accessible_assistant_conversation(
             db=db,
             conversation_id=payload.conversation_id,
             user=user,
         )
-
-    return create_assistant_conversation(
-        db=db,
-        user_id=user.user_id,
-        session_id=user.session_id,
-        user_role=user.role,
-        workspace=payload.workspace,
-        agent_id=agent_definition.agent_id if agent_definition is not None else None,
-        agent_name=agent_definition.name if agent_definition is not None else None,
-        provider=provider_name,
-        model=model_name,
-        use_live_tools=payload.use_live_tools,
-        title=_latest_request_user_message(payload) or "New conversation",
-    )
+    return None
 
 
 def _apply_prompt_enrichment(
@@ -439,3 +404,80 @@ def _latest_request_user_message(payload: AssistantPromptRequest) -> str | None:
         if message.role == "user":
             return message.content
     return None
+
+
+def _record_assistant_run(
+    *,
+    db: Session,
+    status: str,
+    payload: AssistantPromptRequest,
+    prepared: PreparedAssistantExecution,
+    agent_id: str | None,
+    agent_name: str | None,
+    provider: str,
+    model: str,
+    warnings: list[str],
+    tool_calls: list[AssistantToolCallOut],
+    input_tokens: int | None,
+    output_tokens: int | None,
+    assistant_message: str | None,
+    error_detail: str | None = None,
+) -> tuple[AssistantRun, AssistantConversation]:
+    latest_user_message = _latest_request_user_message(payload)
+    conversation = prepared.conversation
+    if conversation is None:
+        conversation = add_assistant_conversation(
+            db=db,
+            user_id=prepared.user.user_id,
+            session_id=prepared.user.session_id,
+            user_role=prepared.user.role,
+            workspace=payload.workspace,
+            agent_id=prepared.agent_definition.agent_id if prepared.agent_definition is not None else None,
+            agent_name=prepared.agent_definition.name if prepared.agent_definition is not None else None,
+            provider=prepared.provider_name,
+            model=prepared.model_name,
+            use_live_tools=payload.use_live_tools,
+            title=latest_user_message or "New conversation",
+        )
+
+    run_record = add_assistant_run(
+        db=db,
+        conversation_id=conversation.id,
+        status=status,
+        user_id=prepared.user.user_id,
+        session_id=prepared.user.session_id,
+        user_role=prepared.user.role,
+        workspace=payload.workspace,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        provider=provider,
+        model=model,
+        use_live_tools=payload.use_live_tools,
+        request_messages=payload.messages,
+        application_context=payload.context,
+        prompt_sections=[_to_prompt_section_out(section) for section in prepared.prompt_context.sections],
+        rendered_system_prompt=prepared.prompt_context.system_prompt,
+        warnings=warnings,
+        tool_calls=tool_calls,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        assistant_message=assistant_message,
+        error_detail=error_detail,
+    )
+    updated_conversation = apply_assistant_conversation_after_run(
+        db=db,
+        record=conversation,
+        run_record=run_record,
+        workspace=payload.workspace,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        provider=provider,
+        model=model,
+        use_live_tools=payload.use_live_tools,
+        latest_user_message=latest_user_message,
+        latest_assistant_message=assistant_message or error_detail,
+    )
+    db.commit()
+    db.refresh(run_record)
+    db.refresh(updated_conversation)
+    return run_record, updated_conversation

@@ -14,6 +14,16 @@ import {
   streamAssistantResponse,
 } from '../../entities/assistant/api'
 import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
+import {
+  assistantBudgetSignalClass,
+  assistantBudgetSignalLabel,
+  budgetMeterWidth,
+  describeAssistantTokenBudget,
+  formatBudgetPercent,
+  formatTokenCount,
+  isAgentBudgetDepleted,
+  isAgentBudgetNearLimit,
+} from '../../entities/assistant/budget'
 import { appConfig } from '../../shared/config'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type {
@@ -264,6 +274,19 @@ function summarizeConversationCard(conversation: AssistantConversationSummary): 
     pieces.push(conversation.agent_name)
   }
   return pieces.join(' · ')
+}
+
+function budgetCardToneClass(budgetClass: string): string {
+  if (budgetClass === 'is-red') {
+    return 'is-budget-red'
+  }
+  if (budgetClass === 'is-amber') {
+    return 'is-budget-amber'
+  }
+  if (budgetClass === 'is-green') {
+    return 'is-budget-green'
+  }
+  return 'is-budget-pending'
 }
 
 function toChatMessagesFromConversation(conversation: AssistantConversation): ChatMessage[] {
@@ -782,9 +805,19 @@ export function AssistantWorkspace({
                 : typeof metadata.run_id === 'string'
                   ? Number.parseInt(metadata.run_id, 10)
                   : null
+            const conversationId =
+              typeof metadata.conversation_id === 'number'
+                ? metadata.conversation_id
+                : typeof metadata.conversation_id === 'string'
+                  ? Number.parseInt(metadata.conversation_id, 10)
+                  : null
 
             if (typeof metadata.provider === 'string') {
               setSelectedProvider(metadata.provider as AssistantProvider)
+            }
+            if (conversationId && Number.isFinite(conversationId)) {
+              setSelectedConversationId(conversationId)
+              void refreshConversationHistory(conversationId)
             }
             if (runId && Number.isFinite(runId)) {
               setSelectedRunId(runId)
@@ -944,6 +977,9 @@ export function AssistantWorkspace({
   const selectedProviderDetails =
     runtimeSettings?.providers.find((provider) => provider.provider === selectedProvider) ?? null
   const selectedAgent = agents.find((agent) => agent.agent_id === selectedAgentId) ?? null
+  const selectedAgentBudgetDepleted = isAgentBudgetDepleted(selectedAgent)
+  const depletedAgentCount = agents.filter((agent) => isAgentBudgetDepleted(agent)).length
+  const watchAgentCount = agents.filter((agent) => isAgentBudgetNearLimit(agent)).length
   const selectedConversationSummary =
     recentConversations.find((conversation) => conversation.conversation_id === selectedConversationId) ?? null
   const selectedRunSummary = recentRuns.find((run) => run.run_id === selectedRunId) ?? null
@@ -961,11 +997,21 @@ export function AssistantWorkspace({
       (conversation) => conversation.conversation_id === selectedConversationSummary.conversation_id,
     ) &&
     visibleMessages.length === 0
+  const selectedConversationHasNoMessages =
+    selectedConversationId !== null &&
+    !conversationDetailLoading &&
+    !conversationDetailError &&
+    messages.length === 0
   const selectedRunHiddenByFilter =
     hasScreenFilter &&
     selectedRunSummary !== null &&
     !visibleRecentRuns.some((run) => run.run_id === selectedRunSummary.run_id)
-  const assistantReady = Boolean(runtimeSettings?.enabled && authSession && selectedProviderDetails?.enabled)
+  const assistantReady = Boolean(
+    runtimeSettings?.enabled &&
+      authSession &&
+      selectedProviderDetails?.enabled &&
+      !selectedAgentBudgetDepleted,
+  )
   const previewText = renderPromptPreview(promptPreview)
   const activeConversationTitle =
     selectedConversation?.title ?? selectedConversationSummary?.title ?? 'New chat draft'
@@ -976,6 +1022,15 @@ export function AssistantWorkspace({
       : messages.length > 0
         ? 'No saved thread is selected. Sending now will create a brand-new chat.'
         : 'Choose a saved chat from the sidebar or send a first prompt to start a new one.'
+  const assistantReadinessNote = !authSession
+    ? 'Sign in first. Prompt preview and assistant requests are protected.'
+    : !runtimeSettings?.enabled
+      ? 'No configured provider is currently ready on the API.'
+      : selectedAgentBudgetDepleted && selectedAgent
+        ? `${selectedAgent.name} is in the red. No token allocation remains for this agent today.`
+        : selectedProviderDetails
+          ? `Using ${selectedProviderDetails.label} with ${useLiveTools ? 'live tools enabled' : 'live tools disabled'}.`
+          : 'Select a provider to begin.'
   const assistantFilterNote = selectedConversationHiddenByFilter
     ? 'The active chat stays open even when it falls outside the current assistant filters.'
     : selectedRunHiddenByFilter
@@ -1037,6 +1092,23 @@ export function AssistantWorkspace({
                   </p>
                 </article>
                 <article className="settings-summary-card">
+                  <span>Token budget</span>
+                  <strong>
+                    {depletedAgentCount > 0
+                      ? `${depletedAgentCount} red`
+                      : watchAgentCount > 0
+                        ? `${watchAgentCount} watch`
+                        : 'Green'}
+                  </strong>
+                  <p>
+                    {selectedAgent
+                      ? describeAssistantTokenBudget(selectedAgent.token_budget)
+                      : agents.length > 0
+                        ? 'Select a managed agent to inspect its daily token allocation.'
+                        : 'Managed agent budgets will appear after active agents are published.'}
+                  </p>
+                </article>
+                <article className="settings-summary-card">
                   <span>Available tools</span>
                   <strong>{runtimeSettings.available_tools.length}</strong>
                   <p>
@@ -1089,25 +1161,42 @@ export function AssistantWorkspace({
                   <small>Good for general operator questions and prompt review.</small>
                 </button>
 
-                {agents.map((agent) => (
-                  <button
-                    key={agent.agent_id}
-                    type="button"
-                    className={`assistant-agent-card ${selectedAgentId === agent.agent_id ? 'is-selected' : ''}`}
-                    onClick={() => setSelectedAgentId(agent.agent_id)}
-                  >
-                    <div className="assistant-provider-head">
-                      <strong>{agent.name}</strong>
-                      <span className="status-pill status-pill-active">{agent.scope}</span>
-                    </div>
-                    <p>{agent.description}</p>
-                    <small>
-                      {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
-                      {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
-                      {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
-                    </small>
-                  </button>
-                ))}
+                {agents.map((agent) => {
+                  const budgetClass = assistantBudgetSignalClass(agent.token_budget)
+                  return (
+                    <button
+                      key={agent.agent_id}
+                      type="button"
+                      className={[
+                        'assistant-agent-card',
+                        selectedAgentId === agent.agent_id ? 'is-selected' : '',
+                        budgetCardToneClass(budgetClass),
+                      ].join(' ')}
+                      onClick={() => setSelectedAgentId(agent.agent_id)}
+                    >
+                      <div className="assistant-provider-head">
+                        <strong>{agent.name}</strong>
+                        <span className={`assistant-budget-signal ${budgetClass}`}>
+                          {assistantBudgetSignalLabel(agent.token_budget)}
+                        </span>
+                      </div>
+                      <p>{agent.description}</p>
+                      <div className="assistant-agent-budget-row">
+                        <span>{agent.scope}</span>
+                        <span>{formatBudgetPercent(agent.token_budget)} used</span>
+                      </div>
+                      <div className={`assistant-budget-meter ${budgetClass}`} aria-hidden="true">
+                        <span style={{ width: budgetMeterWidth(agent.token_budget) }} />
+                      </div>
+                      <small>{describeAssistantTokenBudget(agent.token_budget)}</small>
+                      <small>
+                        {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
+                        {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
+                        {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
+                      </small>
+                    </button>
+                  )
+                })}
               </div>
             </>
           ) : (
@@ -1150,11 +1239,19 @@ export function AssistantWorkspace({
           <div className="assistant-chat-log">
             {visibleMessages.length === 0 ? (
               <div className="empty-state assistant-empty-state">
-                <strong>{messages.length > 0 && hasScreenFilter ? 'No chat messages match the filter' : 'No chat selected'}</strong>
+                <strong>
+                  {messages.length > 0 && hasScreenFilter
+                    ? 'No chat messages match the filter'
+                    : selectedConversationHasNoMessages
+                      ? 'This chat has no recorded messages yet'
+                      : 'No chat selected'}
+                </strong>
                 <p>
                   {messages.length > 0 && hasScreenFilter
                     ? 'Broaden the local search to bring the current chat transcript back into view.'
-                    : 'Reopen a stored conversation from the sidebar or send a first request here to begin a separate chat.'}
+                    : selectedConversationHasNoMessages
+                      ? 'This saved conversation exists, but no user or assistant messages were recorded in it.'
+                      : 'Reopen a stored conversation from the sidebar or send a first request here to begin a separate chat.'}
                 </p>
               </div>
             ) : (
@@ -1172,8 +1269,18 @@ export function AssistantWorkspace({
                   <p>{message.content}</p>
                   {message.usage ? (
                     <div className="assistant-message-meta">
-                      <span>Input tokens: {message.usage.input_tokens ?? 'n/a'}</span>
-                      <span>Output tokens: {message.usage.output_tokens ?? 'n/a'}</span>
+                      <span>
+                        Input tokens:{' '}
+                        {message.usage.input_tokens !== null
+                          ? formatTokenCount(message.usage.input_tokens)
+                          : 'n/a'}
+                      </span>
+                      <span>
+                        Output tokens:{' '}
+                        {message.usage.output_tokens !== null
+                          ? formatTokenCount(message.usage.output_tokens)
+                          : 'n/a'}
+                      </span>
                       {message.runId ? <span>Run #{message.runId}</span> : null}
                       {message.runId ? (
                         <button
@@ -1312,6 +1419,23 @@ export function AssistantWorkspace({
                 <small>{selectedAgent ? selectedAgent.description : 'Platform foundation with no named agent override.'}</small>
               </div>
 
+              <div className="assistant-sidebar-block">
+                <strong>Token budget</strong>
+                <small>
+                  {selectedAgent
+                    ? describeAssistantTokenBudget(selectedAgent.token_budget)
+                    : 'Choose a managed agent to see its daily allocation.'}
+                </small>
+                {selectedAgent ? (
+                  <div
+                    className={`assistant-budget-meter ${assistantBudgetSignalClass(selectedAgent.token_budget)}`}
+                    aria-hidden="true"
+                  >
+                    <span style={{ width: budgetMeterWidth(selectedAgent.token_budget) }} />
+                  </div>
+                ) : null}
+              </div>
+
               <label className="assistant-toggle">
                 <input
                   type="checkbox"
@@ -1349,15 +1473,7 @@ export function AssistantWorkspace({
             </div>
 
             <p className={`form-note ${submitError ? 'form-note-error' : ''}`}>
-              {submitError
-                ? submitError
-                : !authSession
-                  ? 'Sign in first. Prompt preview and assistant requests are protected.'
-                  : !runtimeSettings?.enabled
-                    ? 'No configured provider is currently ready on the API.'
-                    : selectedProviderDetails
-                      ? `Using ${selectedProviderDetails.label} with ${useLiveTools ? 'live tools enabled' : 'live tools disabled'}.`
-                      : 'Select a provider to begin.'}
+              {submitError || assistantReadinessNote}
             </p>
           </form>
         </article>
@@ -1559,7 +1675,8 @@ export function AssistantWorkspace({
               <article className="assistant-run-summary-card">
                 <span>Tokens</span>
                 <strong>
-                  {selectedRun.input_tokens ?? 'n/a'} / {selectedRun.output_tokens ?? 'n/a'}
+                  {selectedRun.input_tokens !== null ? formatTokenCount(selectedRun.input_tokens) : 'n/a'} /{' '}
+                  {selectedRun.output_tokens !== null ? formatTokenCount(selectedRun.output_tokens) : 'n/a'}
                 </strong>
                 <small>Input / output</small>
               </article>

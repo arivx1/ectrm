@@ -20,6 +20,13 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.report_preset import ReportPreset
+from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_currency import ReferenceCurrency
+from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_portfolio import ReferencePortfolio
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 
@@ -58,9 +65,8 @@ class PreTradeApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.now = datetime(2026, 4, 15, 14, 0, tzinfo=timezone.utc)
         with self.SessionLocal() as session:
-            session.query(ReportPreset).delete()
-            session.query(UserSession).delete()
-            session.query(UserAccount).delete()
+            for table in reversed(Base.metadata.sorted_tables):
+                session.execute(table.delete())
             session.commit()
 
         self.trader_one_token = self._create_user_session(
@@ -75,6 +81,143 @@ class PreTradeApiTests(unittest.TestCase):
         )
         self.trader_one_headers = {"Authorization": f"Bearer {self.trader_one_token}"}
         self.trader_two_headers = {"Authorization": f"Bearer {self.trader_two_token}"}
+
+    def _seed_trade_reference_data(self) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                ReferenceBook(
+                    code="GAS_PHYS",
+                    name="Gas Physical",
+                    description="Test gas book",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test",
+                    updated_at=self.now,
+                    updated_by="test",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceCommodity(
+                    code="HENRY_HUB",
+                    name="Henry Hub",
+                    description="Gas benchmark",
+                    commodity_class="NATURAL_GAS",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test",
+                    updated_at=self.now,
+                    updated_by="test",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceCounterparty(
+                    code="SHELL_TRADING",
+                    name="Shell Trading",
+                    short_name=None,
+                    legal_entity_name=None,
+                    counterparty_type="SUPPLIER",
+                    country_code=None,
+                    description="Test counterparty",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test",
+                    updated_at=self.now,
+                    updated_by="test",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferencePortfolio(
+                    code="PROMPT",
+                    name="Prompt Gas",
+                    book_code="GAS_PHYS",
+                    owner=None,
+                    strategy="Directional",
+                    trader_persona=None,
+                    risk_archetype=None,
+                    description="Prompt gas portfolio",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test",
+                    updated_at=self.now,
+                    updated_by="test",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceUnit(
+                    code="MMBTU",
+                    name="MMBtu",
+                    commodity_class="NATURAL_GAS",
+                    dimension="VOLUME",
+                    base_unit_code=None,
+                    conversion_factor=None,
+                    precision=3,
+                    description="Gas volume",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test",
+                    updated_at=self.now,
+                    updated_by="test",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceCurrency(
+                    code="USD",
+                    name="US Dollar",
+                    symbol="$",
+                    description="US Dollar",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test",
+                    updated_at=self.now,
+                    updated_by="test",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceLocation(
+                    code="HENRY_HUB",
+                    name="Henry Hub",
+                    location_kind="POINT",
+                    location_type="HUB",
+                    parent_location_code=None,
+                    market="PHYSICAL",
+                    city="Erath",
+                    subdivision_code="LA",
+                    country_code="US",
+                    continent_code="NA",
+                    latitude=None,
+                    longitude=None,
+                    region="Gulf Coast",
+                    timezone="America/Chicago",
+                    description="Henry Hub",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="test",
+                    updated_at=self.now,
+                    updated_by="test",
+                    version=1,
+                )
+            )
+            session.commit()
 
     def _create_user_session(
         self,
@@ -204,11 +347,35 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(created_review["review_status"], "OPEN")
         self.assertEqual(created_review["source_scenario_id"], scenario_id)
         self.assertEqual(created_review["created_by"], "trader_one")
+        self.assertEqual(created_review["activity"][0]["action"], "SUBMITTED")
+        self.assertEqual(created_review["activity"][0]["actor_id"], "trader_one")
+        self.assertEqual(created_review["activity"][0]["comment"], "Validate weather conviction against latest marks.")
+        self.assertEqual(created_review["activity"][0]["payload"]["source_scenario_id"], scenario_id)
 
         shared_reviews = self.client.get("/pretrade/reviews", headers=self.trader_two_headers)
         self.assertEqual(shared_reviews.status_code, 200)
         self.assertEqual(len(shared_reviews.json()), 1)
         self.assertEqual(shared_reviews.json()[0]["review_id"], created_review["review_id"])
+
+        comment_response = self.client.post(
+            f"/pretrade/reviews/{created_review['review_id']}/activity",
+            json={"comment": "Risk and credit context reviewed."},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(comment_response.status_code, 201)
+        commented_review = comment_response.json()
+        self.assertEqual(commented_review["review_notes"], "Risk and credit context reviewed.")
+        self.assertEqual(commented_review["activity"][-1]["action"], "COMMENTED")
+        self.assertEqual(commented_review["activity"][-1]["actor_id"], "trader_two")
+        self.assertEqual(commented_review["activity"][-1]["comment"], "Risk and credit context reviewed.")
+
+        approval_without_comment_response = self.client.patch(
+            f"/pretrade/reviews/{created_review['review_id']}",
+            json={"review_status": "APPROVED"},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(approval_without_comment_response.status_code, 422)
+        self.assertIn("Approval comment is required", approval_without_comment_response.json()["detail"])
 
         update_response = self.client.patch(
             f"/pretrade/reviews/{created_review['review_id']}",
@@ -216,6 +383,7 @@ class PreTradeApiTests(unittest.TestCase):
                 "review_status": "APPROVED",
                 "owner": "trader_two",
                 "review_notes": "Approved for capture with current sizing.",
+                "activity_comment": "Approved for capture with current sizing.",
             },
             headers=self.trader_two_headers,
         )
@@ -225,6 +393,164 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(updated_review["owner"], "trader_two")
         self.assertEqual(updated_review["updated_by"], "trader_two")
         self.assertTrue(updated_review["can_edit"])
+        self.assertEqual([entry["action"] for entry in updated_review["activity"]], ["SUBMITTED", "COMMENTED", "APPROVED"])
+        self.assertEqual(updated_review["activity"][-1]["actor_id"], "trader_two")
+        self.assertEqual(updated_review["activity"][-1]["comment"], "Approved for capture with current sizing.")
+        self.assertEqual(updated_review["activity"][-1]["payload"]["from_status"], "OPEN")
+        self.assertEqual(updated_review["activity"][-1]["payload"]["to_status"], "APPROVED")
+
+    def test_trade_creation_links_approved_review_and_prevents_duplicate_booking(self) -> None:
+        self._seed_trade_reference_data()
+
+        review_response = self.client.post(
+            "/pretrade/reviews",
+            json={
+                "name": "May gas hedge review",
+                "thesis": "Queue for desk review before capture.",
+                "review_notes": "Approved flow test.",
+                "draft": self._scenario_payload()["draft"],
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(review_response.status_code, 201)
+        review_id = review_response.json()["review_id"]
+
+        blocked_response = self.client.post(
+            "/events",
+            json={
+                "aggregate_type": "trade",
+                "aggregate_id": "TRD-21001",
+                "event_type": "TradeCreated",
+                "occurred_at": self.now.isoformat(),
+                "payload": {
+                    "book": "GAS_PHYS",
+                    "commodity_class": "NATURAL_GAS",
+                    "commodity": "HENRY_HUB",
+                    "pricing_type": "FIXED",
+                    "trade_side": "BUY",
+                    "trade_nature": "PHYSICAL",
+                    "trade_structure": "SINGLE",
+                    "portfolio": "PROMPT",
+                    "counterparty": "SHELL_TRADING",
+                    "trade_currency_code": "USD",
+                    "price_unit_code": "MMBTU",
+                    "unit_of_measure": "MMBTU",
+                    "location_code": "HENRY_HUB",
+                    "trade_date": "2026-05-01",
+                    "delivery_start": "2026-05-01",
+                    "delivery_end": "2026-05-31",
+                    "price": 2.84,
+                    "volume": 25000,
+                    "pretrade_review_id": review_id,
+                },
+                "schema_version": 4,
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(blocked_response.status_code, 409)
+        self.assertIn("must be approved", blocked_response.json()["detail"])
+
+        approve_response = self.client.patch(
+            f"/pretrade/reviews/{review_id}",
+            json={
+                "review_status": "APPROVED",
+                "activity_comment": "Approved for booking after desk review.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["activity"][-1]["action"], "APPROVED")
+
+        create_response = self.client.post(
+            "/events",
+            json={
+                "aggregate_type": "trade",
+                "aggregate_id": "TRD-21001",
+                "event_type": "TradeCreated",
+                "occurred_at": self.now.isoformat(),
+                "payload": {
+                    "book": "GAS_PHYS",
+                    "commodity_class": "NATURAL_GAS",
+                    "commodity": "HENRY_HUB",
+                    "pricing_type": "FIXED",
+                    "trade_side": "BUY",
+                    "trade_nature": "PHYSICAL",
+                    "trade_structure": "SINGLE",
+                    "portfolio": "PROMPT",
+                    "counterparty": "SHELL_TRADING",
+                    "trade_currency_code": "USD",
+                    "price_unit_code": "MMBTU",
+                    "unit_of_measure": "MMBTU",
+                    "location_code": "HENRY_HUB",
+                    "trade_date": "2026-05-01",
+                    "delivery_start": "2026-05-01",
+                    "delivery_end": "2026-05-31",
+                    "price": 2.84,
+                    "volume": 25000,
+                    "pretrade_review_id": review_id,
+                },
+                "schema_version": 4,
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(create_response.status_code, 201)
+
+        linked_review = self.client.get(
+            f"/pretrade/reviews/{review_id}",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(linked_review.status_code, 200)
+        linked_payload = linked_review.json()
+        self.assertEqual(linked_payload["linked_trade_id"], "TRD-21001")
+        self.assertEqual(linked_payload["linked_trade_status"], "ACTIVE")
+        self.assertEqual(linked_payload["booked_by"], "trader_one")
+        self.assertIsNotNone(linked_payload["booked_at"])
+        self.assertEqual([entry["action"] for entry in linked_payload["activity"]], ["SUBMITTED", "APPROVED", "BOOKED"])
+        self.assertEqual(linked_payload["activity"][-1]["actor_id"], "trader_one")
+        self.assertEqual(linked_payload["activity"][-1]["payload"]["linked_trade_id"], "TRD-21001")
+
+        booked_status_update = self.client.patch(
+            f"/pretrade/reviews/{review_id}",
+            json={"review_status": "REJECTED"},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(booked_status_update.status_code, 409)
+        self.assertIn("can no longer change approval status", booked_status_update.json()["detail"])
+
+        duplicate_response = self.client.post(
+            "/events",
+            json={
+                "aggregate_type": "trade",
+                "aggregate_id": "TRD-21002",
+                "event_type": "TradeCreated",
+                "occurred_at": self.now.isoformat(),
+                "payload": {
+                    "book": "GAS_PHYS",
+                    "commodity_class": "NATURAL_GAS",
+                    "commodity": "HENRY_HUB",
+                    "pricing_type": "FIXED",
+                    "trade_side": "BUY",
+                    "trade_nature": "PHYSICAL",
+                    "trade_structure": "SINGLE",
+                    "portfolio": "PROMPT",
+                    "counterparty": "SHELL_TRADING",
+                    "trade_currency_code": "USD",
+                    "price_unit_code": "MMBTU",
+                    "unit_of_measure": "MMBTU",
+                    "location_code": "HENRY_HUB",
+                    "trade_date": "2026-05-01",
+                    "delivery_start": "2026-05-01",
+                    "delivery_end": "2026-05-31",
+                    "price": 2.9,
+                    "volume": 15000,
+                    "pretrade_review_id": review_id,
+                },
+                "schema_version": 4,
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(duplicate_response.status_code, 409)
+        self.assertIn("already linked", duplicate_response.json()["detail"])
 
 
 if __name__ == "__main__":

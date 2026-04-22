@@ -13,6 +13,7 @@ import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
+import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
 import { WeatherOperationsPanel } from './WeatherOperationsPanel'
@@ -1642,6 +1643,13 @@ export function AdminWorkspace({
         onOpenSettings={onOpenSettings}
       />
 
+      <ProjectionMonitoringPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+        onRefreshData={onRefreshData}
+      />
+
       <section className="surface">
         <div className="section-head">
           <div>
@@ -1652,10 +1660,6 @@ export function AdminWorkspace({
         </div>
 
         <div className="admin-grid">
-          <article className="admin-card">
-            <strong>Projection Jobs</strong>
-            <p>Expose rebuild controls for trades and positions here once those flows move into the app.</p>
-          </article>
           <article className="admin-card">
             <strong>Reference Governance</strong>
             <p>Add maker-checker review, deactivation safeguards, and audit history for sensitive master data.</p>

@@ -20,6 +20,8 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.config import settings
 from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.services.role_archetypes import validate_role_archetype_registry
+from apps.api.app.domains.assistant.services.execution import prepare_assistant_execution
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
@@ -36,6 +38,7 @@ from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
+from apps.api.app.schemas.assistant import AssistantPromptRequest
 
 
 class _FakeAssistantService:
@@ -106,6 +109,7 @@ class AssistantApiTests(unittest.TestCase):
             "ASSISTANT_COMPANY_NAME": settings.ASSISTANT_COMPANY_NAME,
             "ASSISTANT_COMPANY_CONTEXT": settings.ASSISTANT_COMPANY_CONTEXT,
             "ASSISTANT_BUSINESS_CONTEXT": settings.ASSISTANT_BUSINESS_CONTEXT,
+            "ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION": settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION,
             "OPENAI_API_KEY": settings.OPENAI_API_KEY,
             "OPENAI_MODEL": settings.OPENAI_MODEL,
             "OPENAI_AGENT_BUILDER_MODEL": settings.OPENAI_AGENT_BUILDER_MODEL,
@@ -140,6 +144,7 @@ class AssistantApiTests(unittest.TestCase):
         settings.ASSISTANT_COMPANY_NAME = "Acme Energy"
         settings.ASSISTANT_COMPANY_CONTEXT = "Acme Energy runs an operator-facing commodity trading platform."
         settings.ASSISTANT_BUSINESS_CONTEXT = "Acme tracks trade lifecycle changes through explicit events."
+        settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 100_000
         settings.OPENAI_API_KEY = "openai-test-key"
         settings.OPENAI_MODEL = "gpt-5-mini"
         settings.OPENAI_AGENT_BUILDER_MODEL = "gpt-5"
@@ -179,6 +184,67 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(public_settings_response.status_code, 200)
         self.assertIn("assistant", public_settings_response.json())
         self.assertIn("database", public_settings_response.json())
+
+    def test_admin_role_archetypes_expose_governed_role_contract(self) -> None:
+        validate_role_archetype_registry()
+        token = self._create_session_token(role="OPS_ADMIN")
+
+        response = self.client.get(
+            "/admin/assistant/role-archetypes",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        role_keys = [row["role_key"] for row in payload]
+        self.assertIn("trade-ops-copilot", role_keys)
+        self.assertIn("pre-trade-structuring-agent", role_keys)
+        self.assertIn("control-tower-agent", role_keys)
+
+        trade_ops = next(row for row in payload if row["role_key"] == "trade-ops-copilot")
+        self.assertEqual(trade_ops["catalog_status"], "SEEDED")
+        self.assertEqual(trade_ops["authority_ceiling"], "STAGE")
+        self.assertEqual(trade_ops["human_owner_role"], "Operations Lead")
+        self.assertEqual(trade_ops["current_profile_ids"], ["trade-ops-copilot"])
+        self.assertIn("ACTION", trade_ops["capability_ceiling"])
+        self.assertEqual(
+            trade_ops["maximum_action_types"],
+            [
+                "issue_trade_confirmation",
+                "record_trade_confirmation_response",
+                "update_trade_workflow_item",
+                "reprocess_document_ingestion",
+            ],
+        )
+        self.assertIn("get_trade_workbench", trade_ops["default_tools"])
+        self.assertGreaterEqual(len(trade_ops["stop_conditions"]), 1)
+        self.assertGreaterEqual(len(trade_ops["required_eval_coverage"]), 1)
+
+    def test_admin_role_archetype_detail_normalizes_role_key(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+
+        response = self.client.get(
+            "/admin/assistant/role-archetypes/SETTLEMENT-COPILOT",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["role_key"], "settlement-copilot")
+        self.assertEqual(payload["catalog_status"], "SEEDED")
+        self.assertEqual(payload["current_profile_ids"], ["settlement-copilot"])
+        self.assertEqual(payload["maximum_action_types"], ["issue_trade_invoice", "create_trade_payment"])
+
+    def test_admin_role_archetype_detail_returns_404_for_unknown_role(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+
+        response = self.client.get(
+            "/admin/assistant/role-archetypes/unknown-role",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Assistant agent role archetype not found")
 
     def test_assistant_prompt_requires_authentication(self) -> None:
         response = self.client.post(
@@ -290,6 +356,7 @@ class AssistantApiTests(unittest.TestCase):
                 "model": "gpt-5-mini",
                 "allowed_workspaces": ["assistant", "trades"],
                 "capabilities": ["READ", "EXPLAIN"],
+                "daily_token_allocation": 50_000,
                 "system_prompt": "Explain the current trade and call out missing context.",
                 "created_by": "assistant_user",
             },
@@ -297,6 +364,9 @@ class AssistantApiTests(unittest.TestCase):
 
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(create_response.json()["status"], "DRAFT")
+        self.assertEqual(create_response.json()["daily_token_allocation"], 50_000)
+        self.assertEqual(create_response.json()["token_budget"]["allocated_tokens"], 50_000)
+        self.assertEqual(create_response.json()["token_budget"]["allocation_source"], "AGENT")
         self.assertEqual(
             create_response.json()["allowed_tools"],
             [
@@ -336,6 +406,7 @@ class AssistantApiTests(unittest.TestCase):
                 "model": "gpt-5-mini",
                 "allowed_workspaces": ["assistant", "trades"],
                 "capabilities": ["READ", "EXPLAIN", "DRAFT"],
+                "daily_token_allocation": 40_000,
                 "system_prompt": "Explain the trade and draft next-step suggestions.",
                 "updated_by": "assistant_user",
             },
@@ -345,6 +416,8 @@ class AssistantApiTests(unittest.TestCase):
         updated_payload = update_response.json()
         self.assertEqual(updated_payload["status"], "ACTIVE")
         self.assertEqual(updated_payload["version"], 2)
+        self.assertEqual(updated_payload["daily_token_allocation"], 40_000)
+        self.assertEqual(updated_payload["token_budget"]["allocated_tokens"], 40_000)
         self.assertEqual(
             updated_payload["allowed_tools"],
             [
@@ -379,6 +452,9 @@ class AssistantApiTests(unittest.TestCase):
         public_listing = self.client.get("/assistant/agents")
         self.assertEqual(public_listing.status_code, 200)
         self.assertEqual([row["agent_id"] for row in public_listing.json()], ["trade-explainer"])
+        self.assertEqual(public_listing.json()[0]["token_budget"]["status"], "GREEN")
+        self.assertEqual(public_listing.json()[0]["daily_token_allocation"], 40_000)
+        self.assertEqual(public_listing.json()[0]["token_budget"]["allocated_tokens"], 40_000)
 
     def test_admin_agent_builder_generates_openai_pinned_draft(self) -> None:
         token = self._create_session_token()
@@ -558,6 +634,102 @@ class AssistantApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             self.assertEqual(session.query(AssistantActionRequest).count(), 1)
+
+    def test_assistant_agent_listing_marks_depleted_token_budget_red(self) -> None:
+        settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 20
+        self._create_agent(
+            agent_id="budget-runner",
+            name="Budget Runner",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        self._create_assistant_run(agent_id="budget-runner", input_tokens=12, output_tokens=8)
+
+        response = self.client.get("/assistant/agents")
+
+        self.assertEqual(response.status_code, 200)
+        budget = response.json()[0]["token_budget"]
+        self.assertEqual(budget["status"], "RED")
+        self.assertEqual(budget["allocated_tokens"], 20)
+        self.assertEqual(budget["used_tokens"], 20)
+        self.assertEqual(budget["remaining_tokens"], 0)
+        self.assertEqual(budget["percent_used"], 100.0)
+        self.assertEqual(budget["allocation_source"], "DEFAULT")
+        self.assertEqual(budget["warning_threshold_percent"], 80.0)
+        self.assertIn("window_started_at", budget)
+
+    def test_assistant_agent_listing_marks_near_depleted_token_budget_amber(self) -> None:
+        self._create_agent(
+            agent_id="budget-watch",
+            name="Budget Watch",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN"],
+            provider="openai",
+            model="gpt-5-mini",
+            daily_token_allocation=50,
+        )
+        self._create_assistant_run(agent_id="budget-watch", input_tokens=30, output_tokens=10)
+
+        response = self.client.get("/assistant/agents")
+
+        self.assertEqual(response.status_code, 200)
+        budget = response.json()[0]["token_budget"]
+        self.assertEqual(budget["status"], "AMBER")
+        self.assertEqual(budget["allocated_tokens"], 50)
+        self.assertEqual(budget["used_tokens"], 40)
+        self.assertEqual(budget["remaining_tokens"], 10)
+        self.assertEqual(budget["percent_used"], 80.0)
+        self.assertEqual(budget["allocation_source"], "AGENT")
+
+    def test_assistant_prompt_rejects_agent_with_depleted_token_budget(self) -> None:
+        settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 20
+        token = self._create_session_token()
+        self._create_agent(
+            agent_id="budget-runner",
+            name="Budget Runner",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        self._create_assistant_run(agent_id="budget-runner", input_tokens=12, output_tokens=8)
+        fake_service = _FakeAssistantService()
+
+        preview_response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "agent_id": "budget-runner",
+                "workspace": "assistant",
+            },
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.json()["agent_id"], "budget-runner")
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "budget-runner",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "Can you still answer?"},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("in the red", response.json()["detail"])
+        self.assertEqual(fake_service.calls, [])
 
     def test_admin_agent_create_rejects_action_allowlist_without_action_capability(self) -> None:
         token = self._create_session_token()
@@ -1015,9 +1187,62 @@ class AssistantApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual([row["action_request_id"] for row in payload], [other_action_request_id])
-        self.assertEqual(payload[0]["user_id"], "ops_user")
-        self.assertEqual(payload[0]["status"], "PENDING")
+        self.assertEqual([row["action_request_id"] for row in payload["items"]], [other_action_request_id])
+        self.assertEqual(payload["items"][0]["user_id"], "ops_user")
+        self.assertEqual(payload["items"][0]["status"], "PENDING")
+        self.assertEqual(payload["total_count"], 1)
+        self.assertEqual(payload["summary"]["total_count"], 1)
+        self.assertEqual(payload["summary"]["pending_count"], 1)
+        self.assertEqual(payload["summary"]["rejected_count"], 0)
+
+    def test_admin_action_request_listing_filters_history_and_summarizes_decisions(self) -> None:
+        admin_token = self._create_session_token()
+        target_action_request_id = self._create_cancel_trade_action_request(
+            token=admin_token,
+            trade_id="T-1014",
+        )
+
+        other_token = self._create_session_token(
+            user_id="desk_user",
+            email="desk@example.com",
+            display_name="Desk User",
+            role="TRADER",
+        )
+        self._create_cancel_trade_action_request(
+            token=other_token,
+            trade_id="T-1015",
+        )
+
+        reject_response = self.client.post(
+            f"/assistant/action-requests/{target_action_request_id}/reject",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(reject_response.status_code, 200)
+
+        response = self.client.get(
+            "/admin/assistant/action-requests"
+            "?status=REJECTED"
+            "&action_type=cancel_trade"
+            "&agent_id=trade-captain"
+            "&user_id=assistant_user"
+            "&decided_by=assistant_user"
+            "&search=T-1014"
+            "&limit=1"
+            "&offset=0",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total_count"], 1)
+        self.assertFalse(payload["has_more"])
+        self.assertEqual(payload["items"][0]["action_request_id"], target_action_request_id)
+        self.assertEqual(payload["items"][0]["status"], "REJECTED")
+        self.assertEqual(payload["items"][0]["decided_by"], "assistant_user")
+        self.assertEqual(payload["summary"]["total_count"], 1)
+        self.assertEqual(payload["summary"]["pending_count"], 0)
+        self.assertEqual(payload["summary"]["rejected_count"], 1)
+        self.assertGreaterEqual(payload["summary"]["avg_decision_seconds"], 0)
 
     def test_admin_action_request_listing_requires_admin_role(self) -> None:
         token = self._create_session_token(
@@ -1039,6 +1264,69 @@ class AssistantApiTests(unittest.TestCase):
             payload["error"]["message"],
             "An administrative session is required for this operation.",
         )
+
+    def test_admin_assistant_run_audit_trace_links_approved_action_mutation(self) -> None:
+        admin_token = self._create_session_token()
+        action_request_id = self._create_cancel_trade_action_request(
+            token=admin_token,
+            trade_id="T-1016",
+        )
+
+        approve_response = self.client.post(
+            f"/assistant/action-requests/{action_request_id}/approve",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        event_id = approve_response.json()["result"]["event_id"]
+
+        with self.SessionLocal() as session:
+            action_request = session.get(AssistantActionRequest, action_request_id)
+            assert action_request is not None
+            run_id = action_request.run_id
+
+        response = self.client.get(
+            f"/admin/assistant/runs/{run_id}/audit-trace",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["run"]["run_id"], run_id)
+        self.assertEqual(payload["mutation_event_count"], 1)
+        self.assertEqual(payload["action_requests"][0]["action_request"]["action_request_id"], action_request_id)
+        self.assertEqual(payload["action_requests"][0]["mutation_events"][0]["event_id"], event_id)
+        self.assertEqual(payload["action_requests"][0]["mutation_events"][0]["event_type"], "TradeCancelled")
+        self.assertIn("mutation", [entry["entry_type"] for entry in payload["timeline"]])
+
+    def test_admin_assistant_run_audit_trace_keeps_rejected_action_mutation_free(self) -> None:
+        admin_token = self._create_session_token()
+        action_request_id = self._create_cancel_trade_action_request(
+            token=admin_token,
+            trade_id="T-1017",
+        )
+
+        reject_response = self.client.post(
+            f"/assistant/action-requests/{action_request_id}/reject",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(reject_response.status_code, 200)
+
+        with self.SessionLocal() as session:
+            action_request = session.get(AssistantActionRequest, action_request_id)
+            assert action_request is not None
+            run_id = action_request.run_id
+
+        response = self.client.get(
+            f"/admin/assistant/runs/{run_id}/audit-trace",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["mutation_event_count"], 0)
+        self.assertEqual(payload["action_requests"][0]["mutation_events"], [])
+        self.assertIn("decision", [entry["entry_type"] for entry in payload["timeline"]])
+        self.assertNotIn("mutation", [entry["entry_type"] for entry in payload["timeline"]])
 
     def test_assistant_prompt_executes_live_tools_and_returns_tool_trace(self) -> None:
         token = self._create_session_token()
@@ -1444,6 +1732,90 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(run_listing.status_code, 200)
         self.assertEqual(run_listing.json()[0]["run_id"], payload["run_id"])
 
+    def test_prepare_assistant_execution_does_not_persist_new_conversation(self) -> None:
+        token = self._create_session_token()
+        payload = AssistantPromptRequest.model_validate(
+            {
+                "provider": "openai",
+                "workspace": "assistant",
+                "messages": [
+                    {"role": "user", "content": "What can you help me do?"},
+                ],
+            }
+        )
+
+        with self.SessionLocal() as session:
+            prepared = prepare_assistant_execution(
+                db=session,
+                payload=payload,
+                authorization_header=f"Bearer {token}",
+            )
+            self.assertIsNone(prepared.conversation)
+            self.assertEqual(session.query(AssistantConversation).count(), 0)
+
+    def test_assistant_conversation_listing_excludes_empty_threads(self) -> None:
+        token = self._create_session_token()
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return {
+                "output_text": "Saved answer.",
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "Persist this conversation."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        valid_conversation_id = response.json()["conversation_id"]
+
+        now = datetime.now(timezone.utc) + timedelta(minutes=1)
+        with self.SessionLocal() as session:
+            session.add(
+                AssistantConversation(
+                    user_id="assistant_user",
+                    session_id="legacy-session",
+                    user_role="OPS_ADMIN",
+                    workspace="assistant",
+                    agent_id=None,
+                    agent_name=None,
+                    provider="openai",
+                    model="gpt-5-mini",
+                    use_live_tools=False,
+                    title="Empty legacy conversation",
+                    run_count=0,
+                    latest_run_id=None,
+                    latest_user_message=None,
+                    latest_assistant_message=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+
+        conversations_response = self.client.get(
+            "/assistant/conversations",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(conversations_response.status_code, 200)
+        self.assertEqual(
+            [conversation["conversation_id"] for conversation in conversations_response.json()],
+            [valid_conversation_id],
+        )
+
     def test_assistant_prompt_persists_conversation_and_reloads_it(self) -> None:
         token = self._create_session_token()
 
@@ -1557,6 +1929,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("event: assistant.delta", stream_body)
         self.assertIn("event: assistant.complete", stream_body)
 
+        conversation_data = self._decode_last_sse_event_payload(stream_body, "conversation")
+        self.assertEqual(conversation_data["run_count"], 1)
+        self.assertEqual(conversation_data["latest_user_message"], "Stream this reply.")
+
         completion_data = self._decode_last_sse_event_payload(stream_body, "assistant.complete")
         self.assertEqual(completion_data["message"]["content"], "Streamed answer.")
         self.assertIsInstance(completion_data["conversation_id"], int)
@@ -1641,6 +2017,7 @@ class AssistantApiTests(unittest.TestCase):
         allowed_action_types: list[str] | None = None,
         provider: str | None = None,
         model: str | None = None,
+        daily_token_allocation: int | None = None,
     ) -> None:
         now = datetime.now(timezone.utc)
         with self.SessionLocal() as session:
@@ -1660,12 +2037,52 @@ class AssistantApiTests(unittest.TestCase):
                     capabilities=capabilities,
                     allowed_tools=list(allowed_tools or []),
                     allowed_action_types=list(allowed_action_types or []),
+                    daily_token_allocation=daily_token_allocation,
                     system_prompt=f"System prompt for {name}.",
                     created_at=now,
                     created_by="test-suite",
                     updated_at=now,
                     updated_by="test-suite",
                     version=1,
+                )
+            )
+            session.commit()
+
+    def _create_assistant_run(
+        self,
+        *,
+        agent_id: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                AssistantRun(
+                    conversation_id=None,
+                    status="COMPLETED",
+                    user_id="assistant_user",
+                    session_id="test-session",
+                    user_role="TRADER",
+                    workspace="assistant",
+                    agent_id=agent_id,
+                    agent_name=agent_id,
+                    provider="openai",
+                    model="gpt-5-mini",
+                    use_live_tools=False,
+                    request_messages=[{"role": "user", "content": "Hello"}],
+                    application_context=None,
+                    prompt_sections=[],
+                    rendered_system_prompt="System prompt.",
+                    warnings=[],
+                    tool_calls=[],
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latest_user_message="Hello",
+                    assistant_message="Hi.",
+                    error_detail=None,
+                    created_at=now,
+                    completed_at=now,
                 )
             )
             session.commit()

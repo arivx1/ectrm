@@ -45,8 +45,14 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
       'Move from ticket entry into activity, exposure, and net positions without guessing which screen owns which job.',
     landingBody:
       'Use this section when the job is booking a trade, tracing its recent changes, or understanding where open exposure sits.',
-    viewKeys: ['trades', 'events', 'risk', 'positions'],
+    viewKeys: ['pretrade', 'trades', 'events', 'risk', 'positions'],
     startPaths: [
+      {
+        title: 'Build a pre-trade view',
+        detail: 'Pull desk context, live external signals, and a proposed structure together before the trade reaches capture.',
+        viewKey: 'pretrade',
+        actionLabel: 'Open Pre-Trade',
+      },
       {
         title: 'Capture a trade',
         detail: 'Open the trade blotter and ticket-entry workflow when the desk needs to book or amend a position.',

@@ -13,6 +13,7 @@ import {
 } from './tradeSearchFields'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
+import type { PreTradeReviewCaptureContext } from '../../shared/models'
 import { FieldLabel } from '../../shared/ui/Tooltip'
 import type { TradeCaptureAppliedRule } from '../../shared/tradeCaptureSettings'
 import {
@@ -137,6 +138,7 @@ type TradeCaptureFormProps = {
   removeDraftLeg: (index: number) => void
   updateDraftLeg: (index: number, field: keyof TradeLegDraft, value: string) => void
   duplicateSourceTradeId: string | null
+  preTradeReviewContext: PreTradeReviewCaptureContext | null
   submitting: boolean
   referenceDataLoading: boolean
   hasReferenceOptions: boolean
@@ -272,6 +274,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     removeDraftLeg,
     updateDraftLeg,
     duplicateSourceTradeId,
+    preTradeReviewContext,
     submitting,
     referenceDataLoading,
     hasReferenceOptions,
@@ -325,6 +328,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     tradeDateInput.trim().length > 0 ||
     effectiveStartDateInput.trim().length > 0 ||
     effectiveEndDateInput.trim().length > 0
+  const preTradeReviewExcerpt = preTradeReviewContext?.reviewNotes?.trim() || preTradeReviewContext?.reviewThesis?.trim() || ''
 
   useEffect(() => {
     if (!selectedCommodity && commodityInput.trim().length === 0) {
@@ -438,6 +442,18 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           <div className="feedback-banner feedback-banner-success trade-structure-note">
             <strong>Duplicating {duplicateSourceTradeId}</strong>
             <p>Trade number was regenerated, external IDs are blank, execution time is reset, and settlement starts back at PENDING.</p>
+          </div>
+        </div>
+      )}
+
+      {preTradeReviewContext && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-success trade-structure-note">
+            <strong>Approved pre-trade review attached</strong>
+            <p>
+              {`Review #${preTradeReviewContext.reviewId} ${preTradeReviewContext.reviewName} is attached to this ticket and will be copied onto the confirmation workflow item when the trade is created.`}
+            </p>
+            {preTradeReviewExcerpt ? <p>{preTradeReviewExcerpt}</p> : null}
           </div>
         </div>
       )}

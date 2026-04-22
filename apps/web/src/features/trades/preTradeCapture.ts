@@ -1,15 +1,22 @@
 import type { useTradeCaptureForm } from './useTradeCaptureForm'
-import type { PreTradeScenarioDraft } from '../../shared/models'
+import type { PreTradeReviewCaptureContext, PreTradeScenarioDraft } from '../../shared/models'
 
 function toInputNumber(value: number | null): string {
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  return normalized ? normalized : null
+}
+
 export function applyPreTradeScenarioToCaptureForm(
   captureForm: ReturnType<typeof useTradeCaptureForm>,
   draft: PreTradeScenarioDraft,
+  reviewContext: PreTradeReviewCaptureContext | null = null,
 ) {
   captureForm.reset()
+  captureForm.setPreTradeReviewContext(reviewContext)
   captureForm.setBookInput(draft.book)
   captureForm.setBookSearchInput(draft.book)
   captureForm.setCommodityClassInput(draft.commodity_class)
@@ -29,4 +36,36 @@ export function applyPreTradeScenarioToCaptureForm(
   captureForm.setLocationInput(draft.location_code ?? '')
   captureForm.setDeliveryStartInput(draft.delivery_start ?? '')
   captureForm.setDeliveryEndInput(draft.delivery_end ?? '')
+}
+
+export function buildPreTradeWorkflowNote(reviewContext: PreTradeReviewCaptureContext): string {
+  const reviewName = normalizeOptionalText(reviewContext.reviewName) ?? 'Untitled review'
+  const reviewOwner = normalizeOptionalText(reviewContext.reviewOwner)
+  const reviewThesis = normalizeOptionalText(reviewContext.reviewThesis)
+  const reviewNotes = normalizeOptionalText(reviewContext.reviewNotes)
+  const approvalSummary = [normalizeOptionalText(reviewContext.approvedBy), normalizeOptionalText(reviewContext.approvedAt)]
+    .filter(Boolean)
+    .join(' • ')
+  const lines = [
+    'Pre-trade governance context attached from approved shared review.',
+    `Review: #${reviewContext.reviewId} ${reviewName}`,
+  ]
+
+  if (approvalSummary) {
+    lines.push(`Approved: ${approvalSummary}`)
+  }
+  if (reviewOwner) {
+    lines.push(`Review owner: ${reviewOwner}`)
+  }
+  if (typeof reviewContext.sourceScenarioId === 'number') {
+    lines.push(`Source scenario: #${reviewContext.sourceScenarioId}`)
+  }
+  if (reviewThesis) {
+    lines.push(`Thesis: ${reviewThesis}`)
+  }
+  if (reviewNotes) {
+    lines.push(`Review notes: ${reviewNotes}`)
+  }
+
+  return lines.join('\n')
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import userManualMarkdown from '../../../docs/user-manual.md?raw'
-import { filterGuideSections, parseMarkdownDocument } from '../src/workspaces/docs/DocumentationWorkspace'
+import { filterGuideSections, parseMarkdownDocument } from '../src/workspaces/docs/guideDocument'
 
 describe('manual search helpers', () => {
   const guide = parseMarkdownDocument(userManualMarkdown)

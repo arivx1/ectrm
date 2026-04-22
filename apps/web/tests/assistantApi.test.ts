@@ -34,7 +34,10 @@ vi.mock('../src/shared/api.ts', () => ({
 
 import {
   buildAssistantAgentDraft,
+  getAdminAssistantRunAuditTrace,
   getAssistantConversation,
+  listAdminAssistantActionRequests,
+  listAdminAssistantRoleArchetypes,
   listAssistantActionRequests,
   listAssistantConversations,
   previewAssistantPromptContext,
@@ -95,6 +98,86 @@ test('listAssistantActionRequests centralizes query-string assembly for pending 
   assert.equal(url, 'http://api.test/assistant/action-requests?status=PENDING&limit=12&offset=3')
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer actions-token')
+})
+
+test('listAdminAssistantActionRequests includes history filters and returns the page payload', async () => {
+  const expected = {
+    items: [{ action_request_id: 7 }],
+    total_count: 1,
+    limit: 20,
+    offset: 40,
+    has_more: false,
+    summary: {
+      total_count: 1,
+      pending_count: 0,
+      executed_count: 0,
+      rejected_count: 1,
+      failed_count: 0,
+      avg_decision_seconds: 90,
+    },
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await listAdminAssistantActionRequests('http://api.test', {
+    status: 'REJECTED',
+    actionType: 'cancel_trade',
+    agentId: 'ops-governor',
+    userId: 'trader.alpha',
+    decidedBy: 'ops_admin',
+    search: 'T-1014',
+    createdAfter: '2026-04-01',
+    createdBefore: '2026-04-30',
+    decidedAfter: '2026-04-02',
+    decidedBefore: '2026-04-29',
+    limit: 20,
+    offset: 40,
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/action-requests?status=REJECTED&action_type=cancel_trade&agent_id=ops-governor&user_id=trader.alpha&decided_by=ops_admin&search=T-1014&created_after=2026-04-01&created_before=2026-04-30&decided_after=2026-04-02&decided_before=2026-04-29&limit=20&offset=40',
+  )
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('getAdminAssistantRunAuditTrace owns the admin trace URL and mutation auth', async () => {
+  const expected = {
+    run: { run_id: 701 },
+    action_requests: [],
+    timeline: [],
+    mutation_event_count: 0,
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await getAdminAssistantRunAuditTrace('http://api.test', 701)
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/runs/701/audit-trace')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('listAdminAssistantRoleArchetypes loads the server-owned role catalog with admin auth', async () => {
+  const expected = [
+    {
+      role_key: 'trade-ops-copilot',
+      name: 'Trade Ops Copilot',
+      catalog_status: 'SEEDED',
+    },
+  ]
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await listAdminAssistantRoleArchetypes('http://api.test')
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/role-archetypes')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })
 
 test('previewAssistantPromptContext sends typed payloads with access-token-based auth', async () => {

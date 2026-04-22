@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.auth import is_admin_role, resolve_audit_actor_id
 from apps.api.app.core.query_params import ADMIN_LIST_LIMIT_QUERY, LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.services.audit_traces import build_assistant_run_audit_trace
 from apps.api.app.domains.assistant.services.action_requests import (
     list_action_requests,
+    list_action_request_page,
     to_action_request_out,
     to_action_request_out_list,
 )
@@ -44,14 +46,22 @@ from apps.api.app.domains.assistant.services.prompt_context import (
     build_prompt_context,
 )
 from apps.api.app.domains.assistant.services.runs import (
+    get_assistant_run,
     list_assistant_runs,
     to_assistant_run_out,
     to_assistant_run_summary_out,
+)
+from apps.api.app.domains.assistant.services.role_archetypes import (
+    get_role_archetype,
+    list_role_archetypes,
+    to_role_archetype_out,
 )
 from apps.api.app.domains.assistant.services.registry import (
     get_agent_record,
     list_admin_agent_records,
     list_public_agent_records,
+    summarize_agent_token_budget,
+    summarize_agent_token_budgets,
     to_admin_agent_out,
     to_public_agent_out,
 )
@@ -59,12 +69,14 @@ from apps.api.app.domains.assistant.services.tools import list_tool_names
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.schemas.assistant import (
     ALL_ASSISTANT_ACTION_TYPES,
+    AssistantActionRequestAdminPageOut,
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
     AssistantAgentBuildRequest,
     AssistantAgentBuildSuggestionOut,
     AssistantAgentCreate,
     AssistantAgentOut,
+    AssistantAgentRoleArchetypeOut,
     AssistantConversationOut,
     AssistantConversationSummaryOut,
     AssistantAgentUpdate,
@@ -73,6 +85,7 @@ from apps.api.app.schemas.assistant import (
     AssistantPromptSectionOut,
     AssistantPromptRequest,
     AssistantPromptResponse,
+    AssistantRunAuditTraceOut,
     AssistantRunOut,
     AssistantRunSummaryOut,
     AssistantRuntimeSettingsOut,
@@ -93,7 +106,12 @@ def get_assistant_settings() -> AssistantRuntimeSettingsOut:
 
 @router.get("/agents", response_model=list[AssistantAgentOut])
 def list_assistant_agents(db: Session = Depends(get_db)) -> list[AssistantAgentOut]:
-    return [to_public_agent_out(record) for record in list_public_agent_records(db)]
+    records = list_public_agent_records(db)
+    token_budgets = summarize_agent_token_budgets(db, records)
+    return [
+        to_public_agent_out(record, token_budget=token_budgets.get(record.agent_id))
+        for record in records
+    ]
 
 
 @router.get("/conversations", response_model=list[AssistantConversationSummaryOut])
@@ -322,28 +340,32 @@ async def stream_assistant_response(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     async def event_stream():
-        yield _encode_sse(
-            "conversation",
-            to_assistant_conversation_summary_out(prepared.conversation).model_dump(mode="json"),
-        )
         yield _encode_sse("status", {"phase": "running"})
         try:
-            response, _ = await execute_assistant_execution(
+            response, conversation = await execute_assistant_execution(
                 assistant_service=get_assistant_service(db),
                 payload=payload,
                 db=db,
                 prepared=prepared,
             )
         except AssistantServiceError as exc:
-            record_failed_assistant_execution(
+            failed_conversation = record_failed_assistant_execution(
                 payload=payload,
                 db=db,
                 prepared=prepared,
                 detail=exc.detail,
             )
+            yield _encode_sse(
+                "conversation",
+                to_assistant_conversation_summary_out(failed_conversation).model_dump(mode="json"),
+            )
             yield _encode_sse("error", {"detail": exc.detail})
             return
 
+        yield _encode_sse(
+            "conversation",
+            to_assistant_conversation_summary_out(conversation).model_dump(mode="json"),
+        )
         metadata_payload = response.model_dump(mode="json")
         metadata_payload["message"]["content"] = ""
         yield _encode_sse("assistant.metadata", metadata_payload)
@@ -361,9 +383,27 @@ async def stream_assistant_response(
     )
 
 
+@admin_router.get("/role-archetypes", response_model=list[AssistantAgentRoleArchetypeOut])
+def list_admin_assistant_role_archetypes() -> list[AssistantAgentRoleArchetypeOut]:
+    return [to_role_archetype_out(role) for role in list_role_archetypes()]
+
+
+@admin_router.get("/role-archetypes/{role_key}", response_model=AssistantAgentRoleArchetypeOut)
+def get_admin_assistant_role_archetype(role_key: str) -> AssistantAgentRoleArchetypeOut:
+    role = get_role_archetype(role_key)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Assistant agent role archetype not found")
+    return to_role_archetype_out(role)
+
+
 @admin_router.get("/agents", response_model=list[AssistantAgentAdminOut])
 def list_admin_assistant_agents(db: Session = Depends(get_db)) -> list[AssistantAgentAdminOut]:
-    return [to_admin_agent_out(record) for record in list_admin_agent_records(db)]
+    records = list_admin_agent_records(db)
+    token_budgets = summarize_agent_token_budgets(db, records)
+    return [
+        to_admin_agent_out(record, token_budget=token_budgets.get(record.agent_id))
+        for record in records
+    ]
 
 
 @admin_router.post("/agents/build", response_model=AssistantAgentBuildSuggestionOut)
@@ -389,27 +429,77 @@ def list_admin_assistant_runs(
     ]
 
 
-@admin_router.get("/action-requests", response_model=list[AssistantActionRequestOut])
-def list_admin_assistant_action_requests(
+@admin_router.get("/runs/{run_id}/audit-trace", response_model=AssistantRunAuditTraceOut)
+def get_admin_assistant_run_audit_trace(
+    run_id: int,
     request: Request,
-    status: str | None = None,
-    limit: int = ADMIN_LIST_LIMIT_QUERY,
-    offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
-) -> list[AssistantActionRequestOut]:
+) -> AssistantRunAuditTraceOut:
     try:
         user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     if not is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="Administrative access is required")
-    return to_action_request_out_list(
-        list_action_requests(
-            db,
-            limit=limit,
-            offset=offset,
-            status=status,
-        )
+
+    record = get_assistant_run(db, run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant run not found")
+    return build_assistant_run_audit_trace(db, record)
+
+
+@admin_router.get("/action-requests", response_model=AssistantActionRequestAdminPageOut)
+def list_admin_assistant_action_requests(
+    request: Request,
+    status: str | None = None,
+    action_type: str | None = None,
+    agent_id: str | None = None,
+    user_id: str | None = None,
+    decided_by: str | None = None,
+    search: str | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    decided_after: datetime | None = None,
+    decided_before: datetime | None = None,
+    limit: int = ADMIN_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> AssistantActionRequestAdminPageOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+    page = list_action_request_page(
+        db,
+        limit=limit,
+        offset=offset,
+        status=status,
+        action_type=action_type,
+        agent_id=agent_id,
+        requester_user_id=user_id,
+        decided_by=decided_by,
+        search=search,
+        created_after=created_after,
+        created_before=created_before,
+        decided_after=decided_after,
+        decided_before=decided_before,
+    )
+    return AssistantActionRequestAdminPageOut(
+        items=to_action_request_out_list(page.records),
+        total_count=page.total_count,
+        limit=page.limit,
+        offset=page.offset,
+        has_more=page.has_more,
+        summary={
+            "total_count": page.summary.total_count,
+            "pending_count": page.summary.pending_count,
+            "executed_count": page.summary.executed_count,
+            "rejected_count": page.summary.rejected_count,
+            "failed_count": page.summary.failed_count,
+            "avg_decision_seconds": page.summary.avg_decision_seconds,
+        },
     )
 
 
@@ -437,6 +527,7 @@ def create_assistant_agent(
         capabilities=list(payload.capabilities),
         allowed_tools=allowed_tools,
         allowed_action_types=allowed_action_types,
+        daily_token_allocation=payload.daily_token_allocation,
         system_prompt=payload.system_prompt,
         created_at=now,
         created_by=actor_id,
@@ -451,7 +542,7 @@ def create_assistant_agent(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assistant agent already exists") from exc
     db.refresh(record)
-    return to_admin_agent_out(record)
+    return to_admin_agent_out(record, token_budget=summarize_agent_token_budget(db, record))
 
 
 @admin_router.put("/agents/{agent_id}", response_model=AssistantAgentAdminOut)
@@ -474,13 +565,14 @@ def update_assistant_agent(
     record.capabilities = list(payload.capabilities)
     record.allowed_tools = _resolve_allowed_tools(payload.allowed_tools, payload.capabilities)
     record.allowed_action_types = _resolve_allowed_action_types(payload.allowed_action_types, payload.capabilities)
+    record.daily_token_allocation = payload.daily_token_allocation
     record.system_prompt = payload.system_prompt
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = resolve_audit_actor_id(payload.updated_by)
     record.version += 1
     db.commit()
     db.refresh(record)
-    return to_admin_agent_out(record)
+    return to_admin_agent_out(record, token_budget=summarize_agent_token_budget(db, record))
 
 
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:

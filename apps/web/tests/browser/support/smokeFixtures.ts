@@ -233,6 +233,71 @@ export const adminRoadmapDocument = {
   ],
 } as const
 
+export const projectionMonitoringAdminRecord = {
+  document: {
+    policy_key: 'trade-projection-monitoring',
+    schedule: {
+      enabled: false,
+      cadence_minutes: 60,
+      auto_clean_mode: 'disabled',
+      max_cleanup_trades_per_run: 25,
+    },
+    alerting: {
+      enabled: false,
+      issue_count_threshold: 1,
+      impacted_trade_threshold: 1,
+      minimum_alert_interval_minutes: 60,
+      channels: ['ADMIN_WORKSPACE'],
+      routing_note: 'Seeded browser smoke monitoring policy.',
+    },
+  },
+  updated_at: '2026-04-11T09:00:00Z',
+  updated_by: 'ops_admin',
+  version: 1,
+  is_default: false,
+  recent_revisions: [
+    {
+      revision_id: 31,
+      version: 1,
+      created_at: '2026-04-11T09:00:00Z',
+      created_by: 'ops_admin',
+      change_summary: ['Seeded projection monitoring smoke policy.'],
+      restored_from_revision_id: null,
+    },
+  ],
+  runtime: {
+    last_evaluated_at: null,
+    last_evaluated_by: null,
+    last_issue_count: 0,
+    last_structural_issue_count: 0,
+    last_invariant_issue_count: 0,
+    last_impacted_trade_count: 0,
+    last_auto_cleaned_trade_count: 0,
+    last_auto_cleaned_trade_ids: [],
+    last_cycle_status: 'idle',
+    last_alert_at: null,
+    last_alert_reason: null,
+    last_alert_severity: null,
+  },
+  recent_alerts: [],
+  recent_deliveries: [],
+  live_status: {
+    health_status: 'disabled',
+    evaluation_due: false,
+    next_evaluation_at: null,
+    live_issue_count: 0,
+    live_structural_issue_count: 0,
+    live_invariant_issue_count: 0,
+    live_impacted_trade_count: 0,
+    should_alert: false,
+    alert_messages: [],
+    last_evaluated_at: null,
+    last_evaluated_by: null,
+    last_alert_at: null,
+    last_alert_reason: null,
+  },
+} as const
+
 export const books = [
   {
     code: 'GULF_GAS',

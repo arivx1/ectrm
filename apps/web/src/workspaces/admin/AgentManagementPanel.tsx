@@ -9,6 +9,15 @@ import {
   type CreateAssistantAgentInput,
   type UpdateAssistantAgentInput,
 } from '../../entities/assistant/api'
+import {
+  assistantBudgetSignalClass,
+  assistantBudgetSignalLabel,
+  budgetMeterWidth,
+  describeAssistantTokenBudget,
+  formatBudgetPercent,
+  isAgentBudgetDepleted,
+  isAgentBudgetNearLimit,
+} from '../../entities/assistant/budget'
 import { seedAssistantAgents } from '../../entities/app/adminApi'
 import { workspaceLabel } from '../../entities/app/appViews'
 import { appConfig } from '../../shared/config'
@@ -82,6 +91,10 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
     capabilities: [...agent.capabilities],
     allowed_tools: [...agent.allowed_tools],
     allowed_action_types: [...agent.allowed_action_types],
+    daily_token_allocation:
+      agent.daily_token_allocation === null || agent.daily_token_allocation === undefined
+        ? ''
+        : String(agent.daily_token_allocation),
     system_prompt: agent.system_prompt,
   }
 }
@@ -89,6 +102,7 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
 function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
   const normalizedProvider = form.provider || null
   const normalizedModel = form.model.trim() ? form.model.trim() : null
+  const dailyTokenAllocation = normalizeDailyTokenAllocation(form.daily_token_allocation)
 
   return {
     agent_id: form.agent_id.trim(),
@@ -102,8 +116,31 @@ function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
     capabilities: form.capabilities,
     allowed_tools: form.allowed_tools,
     allowed_action_types: form.allowed_action_types,
+    daily_token_allocation: dailyTokenAllocation,
     system_prompt: form.system_prompt.trim(),
   }
+}
+
+function normalizeDailyTokenAllocation(value: string): number | null {
+  const normalized = value.trim().replace(/,/g, '')
+  if (!normalized) {
+    return null
+  }
+  const parsed = Number.parseInt(normalized, 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function budgetCardToneClass(budgetClass: string): string {
+  if (budgetClass === 'is-red') {
+    return 'is-budget-red'
+  }
+  if (budgetClass === 'is-amber') {
+    return 'is-budget-amber'
+  }
+  if (budgetClass === 'is-green') {
+    return 'is-budget-green'
+  }
+  return 'is-budget-pending'
 }
 
 function toggleSelection<T extends string>(
@@ -215,6 +252,8 @@ export function AgentManagementPanel({
       ),
     [agentRecords],
   )
+  const depletedAgentCount = agentRecords.filter((agent) => isAgentBudgetDepleted(agent)).length
+  const watchAgentCount = agentRecords.filter((agent) => isAgentBudgetNearLimit(agent)).length
   const createCanUseLiveTools = createForm.capabilities.includes('READ')
   const editCanUseLiveTools = editForm.capabilities.includes('READ')
   const createCanStageActions = createForm.capabilities.includes('ACTION')
@@ -384,6 +423,7 @@ export function AgentManagementPanel({
         capabilities: [...suggestion.capabilities],
         allowed_tools: [...suggestion.allowed_tools],
         allowed_action_types: [...suggestion.allowed_action_types],
+        daily_token_allocation: createForm.daily_token_allocation,
         system_prompt: suggestion.system_prompt,
       })
       setBuilderWarnings(suggestion.warnings)
@@ -471,6 +511,7 @@ export function AgentManagementPanel({
           capabilities: payload.capabilities,
           allowed_tools: payload.allowed_tools,
           allowed_action_types: payload.allowed_action_types,
+          daily_token_allocation: payload.daily_token_allocation,
           system_prompt: payload.system_prompt,
         } satisfies UpdateAssistantAgentInput,
       )
@@ -541,6 +582,17 @@ export function AgentManagementPanel({
               <p>Agents with a provider pinned instead of inheriting the current backend default.</p>
             </article>
             <article className="admin-summary-card">
+              <span>Token budget</span>
+              <strong>
+                {depletedAgentCount > 0
+                  ? `${depletedAgentCount} red`
+                  : watchAgentCount > 0
+                    ? `${watchAgentCount} watch`
+                    : 'Green'}
+              </strong>
+              <p>Daily allocation status across managed agents based on recorded run usage.</p>
+            </article>
+            <article className="admin-summary-card">
               <span>Action scoped</span>
               <strong>{agentRecords.filter((agent) => agent.capabilities.includes('ACTION')).length}</strong>
               <p>Agents currently allowed to stage approval-gated mutations.</p>
@@ -572,30 +624,47 @@ export function AgentManagementPanel({
                     <p>Create the first managed agent below to make the assistant workspace configurable in-product.</p>
                   </div>
                 ) : (
-                  agentRecords.map((agent) => (
-                    <button
-                      key={agent.agent_id}
-                      type="button"
-                      className={`assistant-admin-agent-card ${selectedAgent?.agent_id === agent.agent_id ? 'is-selected' : ''}`}
-                      onClick={() => {
-                        setAgentFlash(null)
-                        setSelectedAgentId(agent.agent_id)
-                      }}
-                    >
-                      <div className="assistant-provider-head">
-                        <strong>{agent.name}</strong>
-                        <span className={`status-pill status-pill-${statusTone(agent.status)}`}>{agent.status}</span>
-                      </div>
-                      <p>{agent.description}</p>
-                      <small>
-                        {agent.scope}
-                        {agent.provider ? ` · ${agent.provider}` : ' · inherited provider'}
-                        {agent.model ? ` · ${agent.model}` : ''}
-                        {agent.allowed_tools.length > 0 ? ` · ${agent.allowed_tools.length} live tools` : ''}
-                        {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
-                      </small>
-                    </button>
-                  ))
+                  agentRecords.map((agent) => {
+                    const budgetClass = assistantBudgetSignalClass(agent.token_budget)
+                    return (
+                      <button
+                        key={agent.agent_id}
+                        type="button"
+                        className={[
+                          'assistant-admin-agent-card',
+                          selectedAgent?.agent_id === agent.agent_id ? 'is-selected' : '',
+                          budgetCardToneClass(budgetClass),
+                        ].join(' ')}
+                        onClick={() => {
+                          setAgentFlash(null)
+                          setSelectedAgentId(agent.agent_id)
+                        }}
+                      >
+                        <div className="assistant-provider-head">
+                          <strong>{agent.name}</strong>
+                          <span className={`assistant-budget-signal ${budgetClass}`}>
+                            {assistantBudgetSignalLabel(agent.token_budget)}
+                          </span>
+                        </div>
+                        <div className="assistant-agent-budget-row">
+                          <span className={`status-pill status-pill-${statusTone(agent.status)}`}>{agent.status}</span>
+                          <span>{formatBudgetPercent(agent.token_budget)} used</span>
+                        </div>
+                        <div className={`assistant-budget-meter ${budgetClass}`} aria-hidden="true">
+                          <span style={{ width: budgetMeterWidth(agent.token_budget) }} />
+                        </div>
+                        <small>{describeAssistantTokenBudget(agent.token_budget)}</small>
+                        <p>{agent.description}</p>
+                        <small>
+                          {agent.scope}
+                          {agent.provider ? ` · ${agent.provider}` : ' · inherited provider'}
+                          {agent.model ? ` · ${agent.model}` : ''}
+                          {agent.allowed_tools.length > 0 ? ` · ${agent.allowed_tools.length} live tools` : ''}
+                          {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
+                        </small>
+                      </button>
+                    )
+                  })
                 )}
               </div>
             </div>
@@ -855,6 +924,26 @@ export function AgentManagementPanel({
                       placeholder="Leave blank to use the configured provider default"
                     />
                   </label>
+                  <label className="field">
+                    <span>Daily Token Allocation</span>
+                    <input
+                      className="control"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={createForm.daily_token_allocation}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          daily_token_allocation: event.target.value,
+                        }))
+                      }
+                      placeholder="Inherit backend default"
+                    />
+                    <small className="form-note">
+                      Leave blank to inherit the platform default; set 0 to hold the agent in the red.
+                    </small>
+                  </label>
                 </div>
 
                 <label className="field">
@@ -997,7 +1086,10 @@ export function AgentManagementPanel({
               </div>
               <span>
                 {selectedAgent
-                  ? `Updated ${formatDate(selectedAgent.updated_at)} by ${selectedAgent.updated_by}`
+                  ? [
+                      `Updated ${formatDate(selectedAgent.updated_at)} by ${selectedAgent.updated_by}`,
+                      assistantBudgetSignalLabel(selectedAgent.token_budget),
+                    ].join(' · ')
                   : 'Choose a record from the catalog'}
               </span>
             </div>
@@ -1009,6 +1101,22 @@ export function AgentManagementPanel({
               </div>
             ) : (
               <form className="assistant-admin-form" onSubmit={handleSaveAgent}>
+                <div className="assistant-agent-budget-detail">
+                  <span className={`assistant-budget-signal ${assistantBudgetSignalClass(selectedAgent.token_budget)}`}>
+                    {assistantBudgetSignalLabel(selectedAgent.token_budget)}
+                  </span>
+                  <div className="assistant-agent-budget-detail-copy">
+                    <p>{describeAssistantTokenBudget(selectedAgent.token_budget)}</p>
+                    <div
+                      className={`assistant-budget-meter ${assistantBudgetSignalClass(selectedAgent.token_budget)}`}
+                      aria-hidden="true"
+                    >
+                      <span style={{ width: budgetMeterWidth(selectedAgent.token_budget) }} />
+                    </div>
+                    <small>{formatBudgetPercent(selectedAgent.token_budget)} of the daily window used.</small>
+                  </div>
+                </div>
+
                 <div className="assistant-admin-form-grid">
                   <label className="field">
                     <span>Agent ID</span>
@@ -1082,6 +1190,26 @@ export function AgentManagementPanel({
                       value={editForm.model}
                       onChange={(event) => setEditForm((current) => ({ ...current, model: event.target.value }))}
                     />
+                  </label>
+                  <label className="field">
+                    <span>Daily Token Allocation</span>
+                    <input
+                      className="control"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={editForm.daily_token_allocation}
+                      onChange={(event) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          daily_token_allocation: event.target.value,
+                        }))
+                      }
+                      placeholder="Inherit backend default"
+                    />
+                    <small className="form-note">
+                      Leave blank to inherit the platform default; set 0 to stop this agent immediately.
+                    </small>
                   </label>
                 </div>
 

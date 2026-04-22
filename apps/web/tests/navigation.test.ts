@@ -87,6 +87,7 @@ describe('mobile navigation helpers', () => {
     }
 
     expect(PRIMARY_NAV_SECTIONS.find((section) => section.key === 'trading')?.startPaths.map((path) => path.title)).toEqual([
+      'Build a pre-trade view',
       'Capture a trade',
       'Investigate a trade issue',
       'Check exposure',
@@ -97,6 +98,7 @@ describe('mobile navigation helpers', () => {
   it('maps representative workspaces into their grouped nav sections', () => {
     expect(primaryNavigationSectionForView('dashboard').key).toBe('overview')
     expect(primaryNavigationSectionForView('demo').key).toBe('overview')
+    expect(primaryNavigationSectionForView('pretrade').key).toBe('trading')
     expect(primaryNavigationSectionForView('trades').key).toBe('trading')
     expect(primaryNavigationSectionForView('shipments').key).toBe('execution')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')

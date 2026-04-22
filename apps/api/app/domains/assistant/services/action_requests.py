@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.assistant.services.action_runtime import AssistantActionProposal
@@ -31,6 +32,29 @@ class AssistantActionRequestError(Exception):
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
         self.detail = detail
+
+
+@dataclass(frozen=True)
+class AssistantActionRequestAdminSummary:
+    total_count: int
+    pending_count: int
+    executed_count: int
+    rejected_count: int
+    failed_count: int
+    avg_decision_seconds: float | None
+
+
+@dataclass(frozen=True)
+class AssistantActionRequestPage:
+    records: list[AssistantActionRequest]
+    total_count: int
+    limit: int
+    offset: int
+    summary: AssistantActionRequestAdminSummary
+
+    @property
+    def has_more(self) -> bool:
+        return self.offset + len(self.records) < self.total_count
 
 
 def create_action_requests(
@@ -88,20 +112,76 @@ def list_action_requests(
     user_id: str | None = None,
     status: str | None = None,
 ) -> list[AssistantActionRequest]:
-    stmt = select(AssistantActionRequest)
-    if user_id is not None:
-        stmt = stmt.where(AssistantActionRequest.user_id == user_id)
-    if status is not None:
-        stmt = stmt.where(AssistantActionRequest.status == status)
-    stmt = (
-        stmt.order_by(
+    return list_action_request_page(
+        db,
+        limit=limit,
+        offset=offset,
+        user_id=user_id,
+        status=status,
+    ).records
+
+
+def list_action_request_page(
+    db: Session,
+    *,
+    limit: int,
+    offset: int,
+    user_id: str | None = None,
+    status: str | None = None,
+    action_type: str | None = None,
+    agent_id: str | None = None,
+    requester_user_id: str | None = None,
+    decided_by: str | None = None,
+    search: str | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    decided_after: datetime | None = None,
+    decided_before: datetime | None = None,
+) -> AssistantActionRequestPage:
+    items_stmt = _apply_action_request_filters(
+        select(AssistantActionRequest),
+        user_id=user_id,
+        status=status,
+        action_type=action_type,
+        agent_id=agent_id,
+        requester_user_id=requester_user_id,
+        decided_by=decided_by,
+        search=search,
+        created_after=created_after,
+        created_before=created_before,
+        decided_after=decided_after,
+        decided_before=decided_before,
+    )
+    records = db.execute(
+        items_stmt.order_by(
             AssistantActionRequest.created_at.desc(),
             AssistantActionRequest.id.desc(),
         )
         .limit(limit)
         .offset(offset)
+    ).scalars().all()
+
+    summary = _summarize_action_requests(
+        db=db,
+        user_id=user_id,
+        status=status,
+        action_type=action_type,
+        agent_id=agent_id,
+        requester_user_id=requester_user_id,
+        decided_by=decided_by,
+        search=search,
+        created_after=created_after,
+        created_before=created_before,
+        decided_after=decided_after,
+        decided_before=decided_before,
     )
-    return db.execute(stmt).scalars().all()
+    return AssistantActionRequestPage(
+        records=records,
+        total_count=summary.total_count,
+        limit=limit,
+        offset=offset,
+        summary=summary,
+    )
 
 
 def list_action_requests_for_run(db: Session, run_id: int) -> list[AssistantActionRequest]:
@@ -201,6 +281,155 @@ def to_action_request_out(record: AssistantActionRequest) -> AssistantActionRequ
 
 def to_action_request_out_list(records: Iterable[AssistantActionRequest]) -> list[AssistantActionRequestOut]:
     return [to_action_request_out(record) for record in records]
+
+
+def _apply_action_request_filters(
+    stmt,
+    *,
+    user_id: str | None = None,
+    status: str | None = None,
+    action_type: str | None = None,
+    agent_id: str | None = None,
+    requester_user_id: str | None = None,
+    decided_by: str | None = None,
+    search: str | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    decided_after: datetime | None = None,
+    decided_before: datetime | None = None,
+):
+    normalized_status = _normalize_optional_text(status, uppercase=True)
+    normalized_action_type = _normalize_optional_text(action_type)
+    normalized_agent_id = _normalize_optional_text(agent_id, lowercase=True)
+    normalized_requester_user_id = _normalize_optional_text(requester_user_id)
+    normalized_decided_by = _normalize_optional_text(decided_by)
+    normalized_search = _normalize_optional_text(search, lowercase=True)
+
+    if user_id is not None:
+        stmt = stmt.where(AssistantActionRequest.user_id == user_id)
+    if normalized_status is not None:
+        stmt = stmt.where(AssistantActionRequest.status == normalized_status)
+    if normalized_action_type is not None:
+        stmt = stmt.where(AssistantActionRequest.action_type == normalized_action_type)
+    if normalized_agent_id is not None:
+        stmt = stmt.where(AssistantActionRequest.agent_id == normalized_agent_id)
+    if normalized_requester_user_id is not None:
+        stmt = stmt.where(AssistantActionRequest.user_id == normalized_requester_user_id)
+    if normalized_decided_by is not None:
+        stmt = stmt.where(AssistantActionRequest.decided_by == normalized_decided_by)
+    if created_after is not None:
+        stmt = stmt.where(AssistantActionRequest.created_at >= created_after)
+    if created_before is not None:
+        stmt = stmt.where(AssistantActionRequest.created_at <= created_before)
+    if decided_after is not None:
+        stmt = stmt.where(AssistantActionRequest.decided_at.is_not(None))
+        stmt = stmt.where(AssistantActionRequest.decided_at >= decided_after)
+    if decided_before is not None:
+        stmt = stmt.where(AssistantActionRequest.decided_at.is_not(None))
+        stmt = stmt.where(AssistantActionRequest.decided_at <= decided_before)
+    if normalized_search is not None:
+        search_pattern = f"%{normalized_search}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(AssistantActionRequest.summary).like(search_pattern),
+                func.lower(AssistantActionRequest.description).like(search_pattern),
+                func.lower(AssistantActionRequest.user_id).like(search_pattern),
+                func.lower(func.coalesce(AssistantActionRequest.agent_name, "")).like(search_pattern),
+                func.lower(func.coalesce(AssistantActionRequest.decided_by, "")).like(search_pattern),
+                func.lower(AssistantActionRequest.action_type).like(search_pattern),
+            )
+        )
+    return stmt
+
+
+def _summarize_action_requests(
+    *,
+    db: Session,
+    user_id: str | None,
+    status: str | None,
+    action_type: str | None,
+    agent_id: str | None,
+    requester_user_id: str | None,
+    decided_by: str | None,
+    search: str | None,
+    created_after: datetime | None,
+    created_before: datetime | None,
+    decided_after: datetime | None,
+    decided_before: datetime | None,
+) -> AssistantActionRequestAdminSummary:
+    summary_subquery = _apply_action_request_filters(
+        select(
+            AssistantActionRequest.status.label("status"),
+            AssistantActionRequest.created_at.label("created_at"),
+            AssistantActionRequest.decided_at.label("decided_at"),
+        ),
+        user_id=user_id,
+        status=status,
+        action_type=action_type,
+        agent_id=agent_id,
+        requester_user_id=requester_user_id,
+        decided_by=decided_by,
+        search=search,
+        created_after=created_after,
+        created_before=created_before,
+        decided_after=decided_after,
+        decided_before=decided_before,
+    ).subquery()
+
+    total_count = int(db.execute(select(func.count()).select_from(summary_subquery)).scalar_one())
+    status_counts = {
+        "PENDING": 0,
+        "EXECUTED": 0,
+        "REJECTED": 0,
+        "FAILED": 0,
+    }
+    for row_status, row_count in db.execute(
+        select(summary_subquery.c.status, func.count()).group_by(summary_subquery.c.status)
+    ).all():
+        if row_status in status_counts:
+            status_counts[str(row_status)] = int(row_count)
+
+    latency_rows = db.execute(
+        select(summary_subquery.c.created_at, summary_subquery.c.decided_at).where(
+            summary_subquery.c.decided_at.is_not(None)
+        )
+    ).all()
+    avg_decision_seconds: float | None = None
+    if latency_rows:
+        total_decision_seconds = sum(
+            max((decided_at - created_at).total_seconds(), 0.0)
+            for created_at, decided_at in latency_rows
+            if created_at is not None and decided_at is not None
+        )
+        avg_decision_seconds = total_decision_seconds / len(latency_rows)
+
+    return AssistantActionRequestAdminSummary(
+        total_count=total_count,
+        pending_count=status_counts["PENDING"],
+        executed_count=status_counts["EXECUTED"],
+        rejected_count=status_counts["REJECTED"],
+        failed_count=status_counts["FAILED"],
+        avg_decision_seconds=avg_decision_seconds,
+    )
+
+
+def _normalize_optional_text(
+    value: str | None,
+    *,
+    lowercase: bool = False,
+    uppercase: bool = False,
+) -> str | None:
+    if value is None:
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if lowercase:
+        return normalized.lower()
+    if uppercase:
+        return normalized.upper()
+    return normalized
 
 
 def _execute_action(

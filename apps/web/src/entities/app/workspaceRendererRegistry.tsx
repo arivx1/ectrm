@@ -8,6 +8,7 @@ import type { useAppShellState } from './useAppShellState'
 import type { useAppTradeActions } from './useAppTradeActions'
 import type { useAppWorkspaceData } from './useAppWorkspaceData'
 import type { useAppWorkspaceSummary } from './useAppWorkspaceSummary'
+import { applyPreTradeScenarioToCaptureForm } from '../../features/trades/preTradeCapture'
 import type { useTradeAmendForm } from '../../features/trades/useTradeAmendForm'
 import type { useTradeCaptureForm } from '../../features/trades/useTradeCaptureForm'
 import { useReferenceDataController } from '../../features/reference-data/useReferenceDataController'
@@ -38,6 +39,11 @@ const DashboardWorkspace = lazy(() =>
 const DemoWorkspace = lazy(() =>
   import('../../workspaces/demo/DemoWorkspace').then((module) => ({
     default: module.DemoWorkspace,
+  })),
+)
+const PreTradeWorkspace = lazy(() =>
+  import('../../workspaces/pretrade/PreTradeWorkspace').then((module) => ({
+    default: module.PreTradeWorkspace,
   })),
 )
 const TradingWorkspace = lazy(() =>
@@ -319,6 +325,7 @@ function buildTradeCaptureFormProps(context: WorkspaceViewRenderContext) {
     traderUserInput: captureForm.traderUserInput,
     setTraderUserInput: captureForm.setTraderUserInput,
     duplicateSourceTradeId: captureForm.duplicateSourceTradeId,
+    preTradeReviewContext: captureForm.preTradeReviewContext,
     createLegs: captureForm.createLegs,
     activeCommodities: summary.activeCommodities,
     addDraftLeg: captureForm.addDraftLeg,
@@ -695,6 +702,16 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     dataGroups: [],
     blockingGroups: [],
   },
+  pretrade: {
+    key: 'pretrade',
+    label: 'Pre-Trade',
+    kicker: 'Shape',
+    heroTitle: 'Accumulate context before capture',
+    heroBody:
+      'Assemble internal desk context, external signals, and a proposed structure before the trade turns into a live ticket.',
+    dataGroups: ['trades', 'positions', 'reference'],
+    blockingGroups: ['trades', 'positions', 'reference'],
+  },
   trades: {
     key: 'trades',
     label: 'Trade Capture',
@@ -932,6 +949,40 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DemoWorkspace authSession={context.workspaceData.authSession} onOpenView={context.navigateToView} />
     ),
+  },
+  pretrade: {
+    render: (context) => {
+      const tradeFormMetadata = resolveTradeFormMetadata(context.workspaceData.tradeMetadata)
+
+      return (
+        <PreTradeWorkspace
+          authSession={context.workspaceData.authSession}
+          activeBooks={context.summary.activeBooks}
+          activeCommodities={context.summary.activeCommodities}
+          activeCounterparties={context.summary.activeCounterparties}
+          activeCurrencies={context.summary.activeCurrencies}
+          activeLocations={context.summary.activeLocations}
+          activePortfolios={context.summary.activePortfolios}
+          activeTrades={context.summary.activeTrades}
+          activeUnits={context.summary.activeUnits}
+          counterpartyCreditProfiles={context.workspaceData.counterpartyCreditProfiles}
+          counterpartyExternalCreditSnapshots={context.workspaceData.counterpartyExternalCreditSnapshots}
+          formatCommodityClass={formatCommodityClass}
+          formatDate={formatDate}
+          formatDateOnly={formatDateOnly}
+          formatMoney={formatMoney}
+          formatNumber={formatNumber}
+          onOpenTradeCapture={(draft, reviewContext) => {
+            applyPreTradeScenarioToCaptureForm(context.captureForm, draft, reviewContext)
+            context.navigateToView('trades')
+          }}
+          onOpenTrade={(tradeId) => context.navigateToTrade(tradeId)}
+          positionsWithClass={context.summary.positionsWithClass}
+          priceIndices={context.workspaceData.priceIndices}
+          pricingTypeOptions={tradeFormMetadata.pricingTypeOptions}
+        />
+      )
+    },
   },
   trades: {
     usesWindowNotices: true,
