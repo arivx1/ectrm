@@ -8,6 +8,7 @@ import type { useAppShellState } from './useAppShellState'
 import type { useAppTradeActions } from './useAppTradeActions'
 import type { useAppWorkspaceData } from './useAppWorkspaceData'
 import type { useAppWorkspaceSummary } from './useAppWorkspaceSummary'
+import { applyPreTradeScenarioToCaptureForm } from '../../features/trades/preTradeCapture'
 import type { useTradeAmendForm } from '../../features/trades/useTradeAmendForm'
 import type { useTradeCaptureForm } from '../../features/trades/useTradeCaptureForm'
 import { useReferenceDataController } from '../../features/reference-data/useReferenceDataController'
@@ -30,6 +31,11 @@ const DocumentationWorkspace = lazy(() =>
     default: module.DocumentationWorkspace,
   })),
 )
+const PromptHomeWorkspace = lazy(() =>
+  import('../../workspaces/prompt/PromptHomeWorkspace').then((module) => ({
+    default: module.PromptHomeWorkspace,
+  })),
+)
 const DashboardWorkspace = lazy(() =>
   import('../../workspaces/dashboard/DashboardWorkspace').then((module) => ({
     default: module.DashboardWorkspace,
@@ -38,6 +44,11 @@ const DashboardWorkspace = lazy(() =>
 const DemoWorkspace = lazy(() =>
   import('../../workspaces/demo/DemoWorkspace').then((module) => ({
     default: module.DemoWorkspace,
+  })),
+)
+const PreTradeWorkspace = lazy(() =>
+  import('../../workspaces/pretrade/PreTradeWorkspace').then((module) => ({
+    default: module.PreTradeWorkspace,
   })),
 )
 const TradingWorkspace = lazy(() =>
@@ -89,8 +100,19 @@ function buildActivityFeedHandoff(
   return {
     source: 'events',
     tradeId,
+    focus: {
+      type: 'trade',
+      id: tradeId,
+      label: tradeId,
+    },
     tradeInspectorTab,
     eventType,
+    label: null,
+    rationale: null,
+    filter: null,
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
   }
 }
 const ReportsWorkspace = lazy(() =>
@@ -205,6 +227,7 @@ export type WorkspaceViewRenderContext = {
   handleDocumentationDocumentChange: ReturnType<typeof useAppRouteState>['handleDocumentationDocumentChange']
   navigateToTrade: ReturnType<typeof useAppRouteState>['navigateToTrade']
   navigateToView: ReturnType<typeof useAppRouteState>['navigateToView']
+  replaceView: ReturnType<typeof useAppRouteState>['replaceView']
   routeHandoff: ReturnType<typeof useAppRouteState>['routeHandoff']
   referenceState: ReturnType<typeof useReferenceDataController>
   hrefForView: ReturnType<typeof useAppRouteState>['hrefForView']
@@ -319,6 +342,7 @@ function buildTradeCaptureFormProps(context: WorkspaceViewRenderContext) {
     traderUserInput: captureForm.traderUserInput,
     setTraderUserInput: captureForm.setTraderUserInput,
     duplicateSourceTradeId: captureForm.duplicateSourceTradeId,
+    preTradeReviewContext: captureForm.preTradeReviewContext,
     createLegs: captureForm.createLegs,
     activeCommodities: summary.activeCommodities,
     addDraftLeg: captureForm.addDraftLeg,
@@ -665,6 +689,16 @@ function buildSettlementWindowNotices({
 }
 
 const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = {
+  prompt: {
+    key: 'prompt',
+    label: 'Prompt Home',
+    kicker: 'Ask',
+    heroTitle: 'Start from the prompt',
+    heroBody:
+      'Describe the job in front of you, then let the assistant answer, clarify, or route you into the right old-school workspace.',
+    dataGroups: [],
+    blockingGroups: [],
+  },
   dashboard: {
     key: 'dashboard',
     label: 'Live Desk',
@@ -694,6 +728,16 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
       'Run a safe scenario with realistic lifecycle friction and jump through the exact workspaces used to manage it.',
     dataGroups: [],
     blockingGroups: [],
+  },
+  pretrade: {
+    key: 'pretrade',
+    label: 'Pre-Trade',
+    kicker: 'Shape',
+    heroTitle: 'Accumulate context before capture',
+    heroBody:
+      'Assemble internal desk context, external signals, and a proposed structure before the trade turns into a live ticket.',
+    dataGroups: ['trades', 'positions', 'reference'],
+    blockingGroups: ['trades', 'positions', 'reference'],
   },
   trades: {
     key: 'trades',
@@ -884,11 +928,11 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
   },
   assistant: {
     key: 'assistant',
-    label: 'Assistant',
-    kicker: 'AI',
-    heroTitle: 'Analyst copilot for the desk',
+    label: 'Assistant Console',
+    kicker: 'AI Ops',
+    heroTitle: 'Assistant runtime and trace console',
     heroBody:
-      'Ask for grounded analysis with the desk state already loaded so AI stays anchored to what operations can see.',
+      'Inspect provider readiness, managed agents, prompt previews, saved conversations, run traces, feedback, and governed approval paths.',
     dataGroups: ['trades', 'events', 'positions'],
     blockingGroups: ['trades', 'events', 'positions'],
   },
@@ -898,6 +942,32 @@ export const WORKSPACE_RENDERERS: Record<
   WorkspaceViewRenderContext['currentView'],
   WorkspaceRendererDefinition
 > = {
+  prompt: {
+    render: (context) => (
+      <PromptHomeWorkspace
+        authSession={context.workspaceData.authSession}
+        health={context.workspaceData.health}
+        counts={{
+          activeTrades: context.workspaceData.workspaceBootstrapSummary?.trades.active_count ?? null,
+          openWorkItems: context.workspaceData.workspaceBootstrapSummary?.work_items.total_count ?? null,
+          operationsQueueItems:
+            context.workspaceData.workspaceBootstrapSummary?.work_items.operations_queue_count ?? null,
+          settlementQueueItems:
+            context.workspaceData.workspaceBootstrapSummary?.work_items.settlement_queue_count ?? null,
+          pendingInvoices: context.workspaceData.workspaceBootstrapSummary?.settlement.invoice_pending_count ?? null,
+          paymentsDue: context.workspaceData.workspaceBootstrapSummary?.settlement.payment_due_count ?? null,
+          attentionItems: context.workspaceData.workspaceBootstrapSummary?.dashboard.attention.total_count ?? null,
+          stalePricingItems:
+            context.workspaceData.workspaceBootstrapSummary?.dashboard.attention.stale_pricing_count ?? null,
+          pendingPricingTrades:
+            context.workspaceData.workspaceBootstrapSummary?.trades.pending_pricing_count ?? null,
+          pendingSettlementTrades:
+            context.workspaceData.workspaceBootstrapSummary?.trades.pending_settlement_count ?? null,
+        }}
+        onOpenView={context.navigateToView}
+      />
+    ),
+  },
   guide: {
     render: (context) => (
       <DocumentationWorkspace
@@ -933,6 +1003,40 @@ export const WORKSPACE_RENDERERS: Record<
       <DemoWorkspace authSession={context.workspaceData.authSession} onOpenView={context.navigateToView} />
     ),
   },
+  pretrade: {
+    render: (context) => {
+      const tradeFormMetadata = resolveTradeFormMetadata(context.workspaceData.tradeMetadata)
+
+      return (
+        <PreTradeWorkspace
+          authSession={context.workspaceData.authSession}
+          activeBooks={context.summary.activeBooks}
+          activeCommodities={context.summary.activeCommodities}
+          activeCounterparties={context.summary.activeCounterparties}
+          activeCurrencies={context.summary.activeCurrencies}
+          activeLocations={context.summary.activeLocations}
+          activePortfolios={context.summary.activePortfolios}
+          activeTrades={context.summary.activeTrades}
+          activeUnits={context.summary.activeUnits}
+          counterpartyCreditProfiles={context.workspaceData.counterpartyCreditProfiles}
+          counterpartyExternalCreditSnapshots={context.workspaceData.counterpartyExternalCreditSnapshots}
+          formatCommodityClass={formatCommodityClass}
+          formatDate={formatDate}
+          formatDateOnly={formatDateOnly}
+          formatMoney={formatMoney}
+          formatNumber={formatNumber}
+          onOpenTradeCapture={(draft, reviewContext) => {
+            applyPreTradeScenarioToCaptureForm(context.captureForm, draft, reviewContext)
+            context.navigateToView('trades')
+          }}
+          onOpenTrade={(tradeId) => context.navigateToTrade(tradeId)}
+          positionsWithClass={context.summary.positionsWithClass}
+          priceIndices={context.workspaceData.priceIndices}
+          pricingTypeOptions={tradeFormMetadata.pricingTypeOptions}
+        />
+      )
+    },
+  },
   trades: {
     usesWindowNotices: true,
     render: (context) => {
@@ -941,6 +1045,7 @@ export const WORKSPACE_RENDERERS: Record<
       return (
         <TradingWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
         globalFilter={context.shell.globalFilter}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         tradeMetadataSource={context.workspaceData.tradeMetadataSource}
@@ -961,6 +1066,7 @@ export const WORKSPACE_RENDERERS: Record<
         inspectorTab={context.shell.inspectorTab}
         setSelectedTradeId={context.setSelectedTradeId}
         setInspectorTab={context.setInspectorTab}
+        onClearHandoff={() => context.replaceView('trades', null, { tradeId: null })}
         handleDuplicateTrade={context.tradeActions.handleDuplicateTrade}
         handleAmendTrade={context.tradeActions.handleAmendTrade}
         handleCancelTrade={context.tradeActions.handleCancelTrade}
@@ -1240,6 +1346,7 @@ export const WORKSPACE_RENDERERS: Record<
         onIssueConfirmation={context.workspaceData.handleIssueTradeConfirmation}
         onRespondConfirmation={context.workspaceData.handleRespondTradeConfirmation}
         onCreateWorkflowItem={context.workspaceData.handleCreateWorkflowItem}
+        onClearHandoff={() => context.replaceView('operations')}
         onOpenTrade={context.navigateToTrade}
         onOptionLifecycleEvent={context.tradeActions.handleTradeOptionLifecycleEvent}
         optionLifecycleSubmittingEvent={context.tradeActions.optionLifecycleSubmittingEvent}
@@ -1272,6 +1379,7 @@ export const WORKSPACE_RENDERERS: Record<
         invoiceMutationPendingKey={context.workspaceData.invoiceMutationPendingKey}
         paymentMutationError={context.workspaceData.paymentMutationError}
         paymentMutationPendingKey={context.workspaceData.paymentMutationPendingKey}
+        onClearHandoff={() => context.replaceView('settlement')}
         onOpenTrade={context.navigateToTrade}
         onIssueInvoice={context.workspaceData.handleIssueTradeInvoice}
         onSaveInvoice={context.workspaceData.handleUpdateTradeInvoice}

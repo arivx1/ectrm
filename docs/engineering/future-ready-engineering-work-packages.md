@@ -21,7 +21,10 @@ AI-assisted workflows to change responsibly.
 
 - [ADR 0002: V2 Application Architecture And Canonical Domain Boundaries](../adr/0002-v2-application-architecture.md)
 - [AI Workflow](./ai-workflow.md)
+- [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+- [Agent Platform Phase 1 Tickets](./agent-platform-phase-1-tickets.md)
 - [De-hard-code Initiative](./de-hardcode-initiative.md)
+- [Prompt-First Operator Experience Work Packages](./prompt-first-operator-experience-work-packages.md)
 - [User Extensibility Initiative](./user-extensibility-initiative.md)
 - [Platform Blueprint](./platform-blueprint.md)
 
@@ -64,6 +67,14 @@ AI-assisted workflows to change responsibly.
 Detailed execution breakdown for Wave 0:
 
 - [Future-Ready Wave 0 Tickets](./future-ready-wave-0-tickets.md)
+
+Detailed execution breakdown for the supervised agent-platform Phase 1:
+
+- [Agent Platform Phase 1 Tickets](./agent-platform-phase-1-tickets.md)
+
+Detailed execution breakdown for the prompt-first operator experience:
+
+- [Prompt-First Operator Experience Work Packages](./prompt-first-operator-experience-work-packages.md)
 
 ## Shared Definition Of Done
 

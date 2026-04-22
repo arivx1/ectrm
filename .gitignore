@@ -22,6 +22,8 @@ dist/
 playwright-report/
 test-results/
 tmp/
+apps/api/.data/
+apps/web/vitest-smoke.*.ts
 
 # IDEs
 .idea/

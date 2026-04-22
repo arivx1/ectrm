@@ -22,6 +22,10 @@ from apps.api.app.domains.operations.services.trade_credit_hold import (
 from apps.api.app.domains.operations.services.trade_credit_hold import get_trade_credit_hold_state
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
+from apps.api.app.domains.reports.services.pretrade_reviews import (
+    link_approved_pretrade_review_to_trade,
+    parse_pretrade_review_id,
+)
 from apps.api.app.domains.accruals.services import synchronize_trade_accruals
 from apps.api.app.domains.reports.services.counterparty_credit import (
     CounterpartyCreditTradeInput,
@@ -101,6 +105,11 @@ def _apply_trade_created(
     *,
     payload_data: dict[str, object],
 ) -> Trade:
+    try:
+        pretrade_review_id = parse_pretrade_review_id(payload_data.get("pretrade_review_id"))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
     instrument_type = support.normalize_instrument_type(payload_data.get("instrument_type"))
     trade_nature_value = payload_data.get("trade_nature")
     if instrument_type == TradeInstrumentType.OPTION.value and trade_nature_value in {None, ""}:
@@ -386,6 +395,19 @@ def _apply_trade_created(
         actor_id=workflow_actor_id,
         now=context.recorded_at,
     )
+    if pretrade_review_id is not None:
+        try:
+            link_approved_pretrade_review_to_trade(
+                context.db,
+                review_id=pretrade_review_id,
+                trade_id=trade.trade_id,
+                actor_id=workflow_actor_id,
+                booked_at=context.recorded_at,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return trade
 
 

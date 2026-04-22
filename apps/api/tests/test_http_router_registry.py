@@ -15,6 +15,9 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn(("settlement", "settlement"), registrations)
         self.assertIn(("reports", "reports"), registrations)
         self.assertIn(("accruals", "accruals"), registrations)
+        self.assertIn(("pretrade", "pretrade"), registrations)
+        self.assertIn(("codex", "codex-admin"), registrations)
+        self.assertIn(("codex", "codex-callback"), registrations)
 
     def test_include_http_routers_mounts_expected_paths(self) -> None:
         app = FastAPI()
@@ -32,6 +35,9 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn("/settlement/invoices", paths)
         self.assertIn("/reports/overview", paths)
         self.assertIn("/accruals/reconciliation", paths)
+        self.assertIn("/pretrade/scenarios", paths)
+        self.assertIn("/admin/codex/tasks", paths)
+        self.assertIn("/codex/tasks/{task_id}/callback", paths)
 
 
 if __name__ == "__main__":

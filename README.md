@@ -17,10 +17,17 @@ This project is a good fit for:
   [docs/operator-guide.md](docs/operator-guide.md)
 - Backend guide: [apps/api/README.md](apps/api/README.md)
 - Frontend guide: [apps/web/README.md](apps/web/README.md)
+- Coding-agent guide: [AGENTS.md](AGENTS.md)
 - Engineering blueprint:
   [docs/engineering/platform-blueprint.md](docs/engineering/platform-blueprint.md)
 - AI workflow and prompt-management notes:
   [docs/engineering/ai-workflow.md](docs/engineering/ai-workflow.md)
+- Agent autonomy rubric:
+  [docs/engineering/agent-autonomy-rubric.md](docs/engineering/agent-autonomy-rubric.md)
+- Agent platform Phase 1 roadmap:
+  [docs/engineering/agent-platform-phase-1-roadmap.md](docs/engineering/agent-platform-phase-1-roadmap.md)
+- Agent knowledge base:
+  [docs/engineering/agent-knowledge-base.md](docs/engineering/agent-knowledge-base.md)
 - Local development notes:
   [docs/engineering/local-development.md](docs/engineering/local-development.md)
 
@@ -118,6 +125,7 @@ Run these commands from the repo root:
 
 ```bash
 make api-contract-check
+make api-assistant-evals
 make api-test
 make web-build
 make web-lint
@@ -141,6 +149,12 @@ make api-contract-refresh
 ```
 
 before the verification targets.
+
+If assistant or automation behavior changes, run the explicit eval lane too:
+
+```bash
+make api-assistant-evals
+```
 
 For the seeded browser smoke harness, install Chromium once and run:
 
@@ -167,6 +181,8 @@ dependencies.
 
 ## Additional Docs
 
+- [Business use case roadmap](docs/engineering/business-use-case-roadmap.md)
+- [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)
 - [Trading source candidates](docs/engineering/trading-source-candidates.csv)
@@ -175,3 +191,8 @@ dependencies.
 - [Trading source roadmap](docs/engineering/trading-source-roadmap.md)
 - [Future-ready engineering work packages](docs/engineering/future-ready-engineering-work-packages.md)
 - [Future-ready Wave 0 tickets](docs/engineering/future-ready-wave-0-tickets.md)
+- [Agent platform Phase 1 tickets](docs/engineering/agent-platform-phase-1-tickets.md)
+- [Prompt-first operator experience work packages](docs/engineering/prompt-first-operator-experience-work-packages.md)
+- [Agent role catalog](docs/engineering/agent-role-catalog.md)
+- [Human-agent authority matrix](docs/engineering/human-agent-authority-matrix.md)
+- [Canonical work object inventory](docs/engineering/canonical-work-object-inventory.md)

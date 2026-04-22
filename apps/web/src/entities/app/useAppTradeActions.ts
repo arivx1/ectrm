@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 
+import { createTradeWorkflowItem } from '../operations/api'
 import { submitTradeEvent } from '../trade/api'
+import { buildPreTradeWorkflowNote } from '../../features/trades/preTradeCapture'
 import type { useTradeAmendForm } from '../../features/trades/useTradeAmendForm'
 import type { useTradeCaptureForm } from '../../features/trades/useTradeCaptureForm'
 import {
@@ -265,11 +267,36 @@ export function useAppTradeActions(args: {
     setSubmitting(true)
 
     try {
+      const preTradeReviewId = captureForm.preTradeReviewContext?.reviewId ?? null
+      const preTradeRecommendationRunId = captureForm.preTradeReviewContext?.recommendationRunId ?? null
+      const preTradeWorkflowNote = captureForm.preTradeReviewContext
+        ? buildPreTradeWorkflowNote(captureForm.preTradeReviewContext)
+        : null
+
       await submitTradeEvent(appConfig.apiBase, {
         aggregate_id: submission.tradeId,
         event_type: 'TradeCreated',
-        payload: submission.payload,
+        payload: preTradeReviewId
+          ? {
+              ...submission.payload,
+              pretrade_review_id: preTradeReviewId,
+              ...(preTradeRecommendationRunId ? { pretrade_recommendation_run_id: preTradeRecommendationRunId } : {}),
+            }
+          : submission.payload,
       })
+
+      if (preTradeWorkflowNote) {
+        try {
+          await createTradeWorkflowItem(appConfig.apiBase, {
+            trade_id: submission.tradeId,
+            workflow_type: 'CONFIRMATION',
+            notes: preTradeWorkflowNote,
+          })
+        } catch (noteError) {
+          const detail = noteError instanceof Error ? noteError.message : 'The confirmation workflow note could not be attached.'
+          setError(`Trade ${submission.tradeId} was created, but the approved pre-trade review could not be attached to Confirmation. ${detail}`)
+        }
+      }
 
       await refreshTradeMutationData()
       navigateToTrade(submission.tradeId)

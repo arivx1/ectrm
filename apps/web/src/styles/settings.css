@@ -1,0 +1,92 @@
+.settings-form {
+  margin-top: 1rem;
+}
+
+.settings-actions {
+  flex-wrap: wrap;
+}
+
+.google-sign-in-button {
+  min-height: 44px;
+}
+
+.settings-summary-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem;
+  border-radius: 1.15rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(248, 250, 249, 0.92);
+}
+
+.settings-summary-card span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #127c6c;
+}
+
+.settings-summary-card strong {
+  color: #13293d;
+  font-size: 1.12rem;
+  line-height: 1.2;
+}
+
+.settings-summary-card p {
+  margin: 0;
+  color: #5c6975;
+  line-height: 1.5;
+}
+
+.settings-kv {
+  display: grid;
+}
+
+.settings-kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.settings-kv-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.settings-kv-row div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settings-kv-row span,
+.settings-kv-row small {
+  color: #6c7782;
+}
+
+.settings-kv-row span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-kv-row small {
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.settings-kv-row strong {
+  color: #13293d;
+  text-align: right;
+  word-break: break-word;
+}
+
+.settings-chip-block {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+

@@ -84,6 +84,7 @@ const publicRuntimeSettings = {
     configured_provider_count: 0,
     providers: [],
     available_tools: [],
+    available_action_types: [],
   },
   pagination: {
     standard_default: 100,
@@ -573,6 +574,60 @@ async function startMockApiServer(
         return
       }
       writeNoContent(response)
+      return
+    }
+
+    if (url.pathname === '/assistant/conversations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, [
+        {
+          conversation_id: 902,
+          created_at: '2026-04-11T09:00:00Z',
+          updated_at: '2026-04-11T09:08:00Z',
+          user_id: smokeSession.user.user_id,
+          user_role: smokeSession.user.role,
+          workspace: 'assistant',
+          agent_id: null,
+          agent_name: null,
+          provider: 'openai',
+          model: 'gpt-5.4',
+          use_live_tools: true,
+          title: 'Recent blocker triage',
+          run_count: 1,
+          latest_run_id: 8801,
+          latest_user_message: 'Where should I handle the confirmation blocker?',
+          latest_assistant_message: 'Operations is the right place to continue.',
+        },
+      ])
+      return
+    }
+
+    const assistantConversationMatch = url.pathname.match(/^\/assistant\/conversations\/(\d+)$/)
+    if (assistantConversationMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, {
+        conversation_id: Number(assistantConversationMatch[1]),
+        created_at: '2026-04-11T09:00:00Z',
+        updated_at: '2026-04-11T09:08:00Z',
+        user_id: smokeSession.user.user_id,
+        user_role: smokeSession.user.role,
+        workspace: 'assistant',
+        agent_id: null,
+        agent_name: null,
+        provider: 'openai',
+        model: 'gpt-5.4',
+        use_live_tools: true,
+        title: 'Recent blocker triage',
+        run_count: 1,
+        latest_run_id: 8801,
+        latest_user_message: 'Where should I handle the confirmation blocker?',
+        latest_assistant_message: 'Operations is the right place to continue.',
+        messages: [],
+      })
       return
     }
 
@@ -1687,7 +1742,7 @@ test(
         window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
       }, { apiBaseOverride: `${appServer.origin}/api` })
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -1763,7 +1818,7 @@ test(
         },
       )
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -1832,7 +1887,7 @@ test(
         },
       )
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -1890,7 +1945,7 @@ test(
         window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
       }, { apiBaseOverride: `${appServer.origin}/api` })
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -2037,7 +2092,7 @@ test(
 )
 
 test(
-  'single-user auth signs into the dashboard when the API enables one-click access',
+  'single-user auth signs into the prompt home when the API enables one-click access',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer({ singleUserAuthEnabled: true })
@@ -2054,10 +2109,8 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      const signedOutOverlay = page.locator('.start-here-dialog')
-      await signedOutOverlay.waitFor()
-      await signedOutOverlay.getByRole('button', { name: 'Not Now' }).click()
-      await signedOutOverlay.waitFor({ state: 'hidden' })
+      await page.getByText('Start with the job in front of you').waitFor()
+      await page.getByRole('button', { name: 'Sign In', exact: true }).click()
 
       const authGate = page.locator('.auth-gate-stage')
       await authGate.waitFor()
@@ -2065,19 +2118,13 @@ test(
 
       await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
 
-      const signedInOverlay = page.locator('.start-here-dialog')
-      await signedInOverlay.waitFor()
-      await signedInOverlay.getByText('Signed in as Ops Admin').waitFor()
-      await signedInOverlay.getByRole('button', { name: 'Not Now' }).click()
-      await signedInOverlay.waitFor({ state: 'hidden' })
-
       await page.waitForFunction(() => !document.querySelector('.auth-gate-stage'))
-      await page.getByText('Common Starting Points').waitFor()
+      await page.getByText('Start with the job in front of you').waitFor()
       await page.getByText('Signed in as Ops Admin').waitFor()
 
       assert.ok(
-        page.url() === `${appServer.origin}/` || page.url() === `${appServer.origin}/?view=dashboard`,
-        `Expected the single-user flow to land on the dashboard, received ${page.url()}.`,
+        page.url() === `${appServer.origin}/` || page.url() === `${appServer.origin}/?view=prompt`,
+        `Expected the single-user flow to land on the prompt home, received ${page.url()}.`,
       )
       assert.equal(
         mockApi.unexpectedRequests.length,

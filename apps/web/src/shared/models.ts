@@ -1341,6 +1341,396 @@ export type SettlementReportPresetRecord = {
   can_edit: boolean
 }
 
+export type PreTradeScenarioDraft = {
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trade_side: 'BUY' | 'SELL'
+  pricing_type: string
+  price_index_code: string | null
+  target_price: number | null
+  target_volume: number | null
+  trade_currency_code: string | null
+  unit_of_measure: string | null
+  price_unit_code: string | null
+  location_code: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+}
+
+export type PreTradeScenarioRecord = {
+  scenario_id: number
+  name: string
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeReviewStatus = 'OPEN' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED'
+
+export type PreTradeReviewActivityAction = 'SUBMITTED' | 'CLAIMED' | 'COMMENTED' | 'APPROVED' | 'REJECTED' | 'BOOKED'
+export type PreTradeRecommendationStance = 'PROCEED' | 'PROCEED_WITH_CARE' | 'ESCALATE' | 'WAIT_FOR_DATA'
+export type PreTradeRecommendationConfidence = 'LOW' | 'MEDIUM' | 'HIGH'
+export type PreTradeRecommendationCheckStatus = 'good' | 'watch' | 'block'
+export type PreTradeRecommendationSourceType = 'USER_INPUT' | 'INTERNAL' | 'EXTERNAL' | 'DERIVED'
+export type PreTradeRecommendationFreshness = 'FRESH' | 'STALE' | 'DEGRADED' | 'UNKNOWN'
+export type PreTradeRecommendationSourceQuality = 'OK' | 'STALE' | 'DEGRADED' | 'MISSING'
+export type PreTradeGovernanceRiskStatus = 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
+export type PreTradeOpportunityCategory =
+  | 'MARK_GAP'
+  | 'EXPOSURE_OFFSET'
+  | 'RISK_REDUCTION'
+  | 'RISK_INCREASE'
+  | 'STANDARD_REVIEW'
+  | 'WAIT_FOR_DATA'
+export type PreTradeExposureDirection = 'LONG' | 'SHORT' | 'FLAT' | 'UNKNOWN'
+export type PreTradeExposureEffect = 'OFFSETS' | 'DEEPENS' | 'NEUTRAL' | 'UNKNOWN'
+export type PreTradeNettingCandidateMatchQuality = 'EXACT' | 'PARTIAL' | 'REJECTED'
+export type PreTradeHedgeInstrumentType = 'FUTURES' | 'OPTIONS' | 'SWAP' | 'PHYSICAL_OFFSET' | 'NO_HEDGE' | 'WAIT_FOR_DATA'
+export type PreTradeMissingEvidenceSeverity = 'BLOCKING' | 'WARNING'
+export type PreTradeGovernanceAuditCategory =
+  | 'PENDING_REVIEW'
+  | 'RISKY_RECOMMENDATION'
+  | 'UNRESOLVED_RISKY_RECOMMENDATION'
+  | 'OVERRIDE'
+  | 'BOOKED_WITH_OVERRIDE'
+  | 'STALE_EVIDENCE'
+
+export type PreTradeReviewActivityRecord = {
+  activity_id: string
+  action: PreTradeReviewActivityAction
+  actor_id: string
+  occurred_at: string
+  comment: string | null
+  payload: Record<string, unknown>
+}
+
+export type PreTradeReviewRecommendationSummaryRecord = {
+  run_id: number
+  run_key: string
+  name: string
+  stance: PreTradeRecommendationStance
+  headline: string
+  confidence: PreTradeRecommendationConfidence
+  score: number
+  explanation: PreTradeRecommendationExplanationRecord | null
+  source_scenario_id: number | null
+  source_review_id: number | null
+  input_snapshot_count: number
+  created_at: string
+  created_by: string
+}
+
+export type PreTradeReviewItemRecord = {
+  review_id: number
+  name: string
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  source_scenario_id: number | null
+  recommendation_run_id: number | null
+  recommendation_summary: PreTradeReviewRecommendationSummaryRecord | null
+  recommendation_override_reason: string | null
+  recommendation_override_by: string | null
+  recommendation_override_at: string | null
+  review_status: PreTradeReviewStatus
+  owner: string | null
+  due_at: string | null
+  review_notes: string | null
+  linked_trade_id: string | null
+  linked_trade_status: string | null
+  booked_at: string | null
+  booked_by: string | null
+  activity: PreTradeReviewActivityRecord[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeGovernanceSummaryRecord = {
+  generated_at: string
+  risk_status: PreTradeGovernanceRiskStatus
+  open_review_count: number
+  in_review_count: number
+  approved_review_count: number
+  rejected_review_count: number
+  pending_review_count: number
+  booked_review_count: number
+  risky_recommendation_count: number
+  unresolved_risky_recommendation_count: number
+  override_count: number
+  booked_with_override_count: number
+  stale_evidence_run_count: number
+  stale_evidence_source_count: number
+  recommendation_run_count: number
+}
+
+export type PreTradeRecommendationSourceSnapshotRecord = {
+  source_key: string
+  adapter_key: string | null
+  adapter_label: string | null
+  source_type: PreTradeRecommendationSourceType
+  source_available: boolean
+  captured_at: string | null
+  freshness: PreTradeRecommendationFreshness
+  quality_status: PreTradeRecommendationSourceQuality
+  quality_score: number
+  summary: string | null
+  provenance: PreTradeRecommendationSourceProvenanceRecord
+  payload: Record<string, unknown>
+}
+
+export type PreTradeRecommendationSourceProvenanceRecord = {
+  provider: string | null
+  dataset: string | null
+  record_id: string | null
+  observed_at: string | null
+  ingested_at: string | null
+  captured_by: string | null
+}
+
+export type PreTradeRecommendationSourceAdapterRecord = {
+  adapter_key: string
+  label: string
+  source_type: PreTradeRecommendationSourceType
+  description: string
+  freshness_sla_hours: number | null
+  required_for_recommendation: boolean
+  payload_keys: string[]
+  provenance_dataset: string
+}
+
+export type PreTradeRecommendationCheckRecord = {
+  key: string
+  label: string
+  status: PreTradeRecommendationCheckStatus
+  detail: string
+  score_impact: number
+}
+
+export type PreTradeRecommendationExplanationRecord = {
+  stance_rationale: string
+  source_quality_rationale: string
+  confidence_rationale: string
+  primary_drivers: string[]
+  reviewer_focus: string[]
+}
+
+export type PreTradeRecommendationEvidenceRefRecord = {
+  source_key: string
+  adapter_key: string | null
+  adapter_label: string | null
+  source_type: PreTradeRecommendationSourceType
+  freshness: PreTradeRecommendationFreshness
+  quality_status: PreTradeRecommendationSourceQuality
+  record_id: string | null
+  summary: string | null
+}
+
+export type PreTradeRecommendationOpportunitySummaryRecord = {
+  category: PreTradeOpportunityCategory
+  title: string
+  detail: string
+  driver_keys: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationResidualExposureRecord = {
+  current_net_position: number | null
+  proposed_trade_delta: number | null
+  residual_after_trade: number | null
+  direction_before: PreTradeExposureDirection
+  direction_after: PreTradeExposureDirection
+  exposure_effect: PreTradeExposureEffect
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationNettingCandidateRecord = {
+  candidate_id: string
+  label: string
+  match_quality: PreTradeNettingCandidateMatchQuality
+  matched_quantity: number | null
+  residual_quantity: number | null
+  constraints: string[]
+  rejection_reasons: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationHedgeRecommendationRecord = {
+  instrument_type: PreTradeHedgeInstrumentType
+  rationale: string
+  target_delta: number | null
+  hedge_ratio: number | null
+  policy_stops: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationRejectedAlternativeRecord = {
+  alternative: PreTradeHedgeInstrumentType
+  reason: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationMissingEvidenceRecord = {
+  evidence_key: string
+  label: string
+  severity: PreTradeMissingEvidenceSeverity
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationResultRecord = {
+  stance: PreTradeRecommendationStance
+  headline: string
+  summary: string
+  confidence: PreTradeRecommendationConfidence
+  score: number
+  estimated_notional: number | null
+  projected_credit_utilization_pct: number | null
+  current_net_position: number | null
+  related_active_trade_count: number
+  latest_mark: number | null
+  mark_gap_pct: number | null
+  explanation: PreTradeRecommendationExplanationRecord
+  checks: PreTradeRecommendationCheckRecord[]
+  next_actions: string[]
+  opportunity_summary: PreTradeRecommendationOpportunitySummaryRecord | null
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  netting_candidates: PreTradeRecommendationNettingCandidateRecord[]
+  hedge_recommendation: PreTradeRecommendationHedgeRecommendationRecord | null
+  rejected_alternatives: PreTradeRecommendationRejectedAlternativeRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+}
+
+export type PreTradeRecommendationSourceQualityDeltaRecord = {
+  adapter_key: string
+  adapter_label: string
+  previous_quality_status: PreTradeRecommendationSourceQuality | null
+  current_quality_status: PreTradeRecommendationSourceQuality | null
+  previous_freshness: PreTradeRecommendationFreshness | null
+  current_freshness: PreTradeRecommendationFreshness | null
+}
+
+export type PreTradeRecommendationInputDeltaRecord = {
+  adapter_key: string
+  adapter_label: string
+  change_type: 'ADDED' | 'REMOVED' | 'CHANGED'
+}
+
+export type PreTradeRecommendationRunComparisonRecord = {
+  previous_run_id: number
+  previous_run_key: string
+  previous_created_at: string
+  previous_stance: PreTradeRecommendationStance
+  previous_score: number
+  stance_changed: boolean
+  score_delta: number
+  added_primary_drivers: string[]
+  removed_primary_drivers: string[]
+  source_quality_changes: PreTradeRecommendationSourceQualityDeltaRecord[]
+  input_snapshot_changes: PreTradeRecommendationInputDeltaRecord[]
+  summary: string
+}
+
+export type PreTradeRecommendationRunRecord = {
+  run_id: number
+  run_key: string
+  name: string
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  source_scenario_id: number | null
+  source_review_id: number | null
+  input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+  recommendation: PreTradeRecommendationResultRecord
+  comparison: PreTradeRecommendationRunComparisonRecord | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeGovernanceStaleEvidenceRunRecord = {
+  run: PreTradeRecommendationRunRecord
+  impaired_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+}
+
+export type PreTradeGovernanceItemsRecord = {
+  generated_at: string
+  pending_reviews: PreTradeReviewItemRecord[]
+  risky_recommendation_reviews: PreTradeReviewItemRecord[]
+  unresolved_risky_recommendation_reviews: PreTradeReviewItemRecord[]
+  override_reviews: PreTradeReviewItemRecord[]
+  booked_with_override_reviews: PreTradeReviewItemRecord[]
+  stale_evidence_runs: PreTradeGovernanceStaleEvidenceRunRecord[]
+}
+
+export type PreTradeGovernanceAuditRowRecord = {
+  category: PreTradeGovernanceAuditCategory
+  review_id: number | null
+  run_id: number | null
+  run_key: string | null
+  linked_trade_id: string | null
+  name: string
+  book: string | null
+  commodity: string | null
+  review_status: PreTradeReviewStatus | null
+  recommendation_stance: PreTradeRecommendationStance | null
+  recommendation_score: number | null
+  override_reason: string | null
+  override_by: string | null
+  override_at: string | null
+  booked_by: string | null
+  booked_at: string | null
+  source_adapter_key: string | null
+  source_adapter_label: string | null
+  source_quality_status: PreTradeRecommendationSourceQuality | null
+  source_freshness: PreTradeRecommendationFreshness | null
+  source_provider: string | null
+  source_dataset: string | null
+  source_observed_at: string | null
+  summary: string
+}
+
+export type PreTradeGovernanceAuditExportRecord = {
+  generated_at: string
+  exported_by: string
+  format_version: string
+  summary: PreTradeGovernanceSummaryRecord
+  items: PreTradeGovernanceItemsRecord
+  audit_rows: PreTradeGovernanceAuditRowRecord[]
+}
+
+export type PreTradeReviewCaptureContext = {
+  reviewId: number
+  reviewName: string
+  reviewThesis: string | null
+  reviewNotes: string | null
+  reviewOwner: string | null
+  sourceScenarioId: number | null
+  recommendationRunId: number | null
+  recommendationHeadline: string | null
+  recommendationStance: PreTradeRecommendationStance | null
+  recommendationScore: number | null
+  recommendationRationale: string | null
+  recommendationOverrideReason: string | null
+  recommendationOverrideBy: string | null
+  recommendationOverrideAt: string | null
+  approvedBy: string | null
+  approvedAt: string | null
+}
+
 export type PriceIndexObservationRecord = {
   id: number
   price_index_code: string
@@ -1644,6 +2034,17 @@ export type AssistantMessageRole = 'user' | 'assistant'
 export type AssistantAgentStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'RETIRED'
 export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
 export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
+export type AssistantAgentRoleCatalogStatus = 'SEEDED' | 'TEMPLATE' | 'PHASE_1' | 'PHASE_2_PLUS'
+export type AssistantAgentProfileKind = 'CURATED' | 'ROLE_DERIVED' | 'CUSTOM'
+export type AssistantAgentProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
+export type AssistantAgentEvalGateStatus = 'PASS' | 'BLOCKED' | 'NOT_REQUIRED'
+export type AssistantAgentAuthorityLevel =
+  | 'OBSERVE'
+  | 'EXPLAIN'
+  | 'DRAFT'
+  | 'STAGE'
+  | 'EXECUTE'
+  | 'EXTERNAL_COMMIT'
 export const ASSISTANT_ACTION_TYPES = [
   'cancel_trade',
   'issue_trade_confirmation',
@@ -1655,6 +2056,20 @@ export const ASSISTANT_ACTION_TYPES = [
 ] as const
 export type AssistantActionType = (typeof ASSISTANT_ACTION_TYPES)[number]
 export type AssistantActionRequestStatus = 'PENDING' | 'REJECTED' | 'EXECUTED' | 'FAILED'
+export type AssistantActionRequestLifecycleStage =
+  | 'AWAITING_REVIEW'
+  | 'EXECUTED'
+  | 'REJECTED'
+  | 'FAILED'
+export type AssistantActionRequestLifecycleTone = 'attention' | 'success' | 'neutral' | 'danger'
+export type AssistantActionReviewOutcome = 'APPROVED_AS_IS' | 'APPROVED_WITH_CORRECTIONS' | 'REJECTED'
+export type AssistantControlTowerTrustSignalType =
+  | 'MISSING_EVAL_COVERAGE'
+  | 'POLICY_WARNING'
+  | 'RUN_WARNING'
+  | 'ACTION_BACKLOG'
+  | 'FAILED_ACTIONS'
+export type AssistantControlTowerTrustSignalSeverity = 'info' | 'warning' | 'danger'
 
 export type AssistantProviderStatus = {
   provider: AssistantProvider
@@ -1672,6 +2087,69 @@ export type AssistantToolDefinition = {
   description: string
 }
 
+export type AssistantActionDefinition = {
+  name: AssistantActionType
+  label: string
+  description: string
+}
+
+export type AssistantPolicyDecision = {
+  resource_type: 'tool' | 'action'
+  resource_id: string
+  policy_key: string
+  allowed: boolean
+  reason: string
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  approval_required: boolean
+  max_scope: AssistantAgentScope
+  roles: string[]
+  workspaces: ViewKey[]
+}
+
+export type AssistantAgentEffectivePolicy = {
+  allowed_tools: AssistantPolicyDecision[]
+  blocked_tools: AssistantPolicyDecision[]
+  allowed_actions: AssistantPolicyDecision[]
+  blocked_actions: AssistantPolicyDecision[]
+  policy_notes: string[]
+}
+
+export type AssistantAgentEvalGate = {
+  status: AssistantAgentEvalGateStatus
+  role_key?: string | null
+  required_cases: string[]
+  covered_cases: string[]
+  missing_cases: string[]
+  custom_case_count: number
+  notes: string[]
+}
+
+export type AssistantPolicySimulationPhase = 'stage' | 'execute'
+
+export type AssistantPolicySimulationActionProposal = {
+  action_type: AssistantActionType
+  summary: string
+  description: string
+  payload: Record<string, unknown>
+  decision: AssistantPolicyDecision
+}
+
+export type AssistantPolicySimulation = {
+  agent_id: string
+  agent_name: string
+  workspace: ViewKey
+  actor_role?: string | null
+  phase: AssistantPolicySimulationPhase
+  effective_policy: AssistantAgentEffectivePolicy
+  allowed_tools: AssistantPolicyDecision[]
+  blocked_tools: AssistantPolicyDecision[]
+  allowed_actions: AssistantPolicyDecision[]
+  blocked_actions: AssistantPolicyDecision[]
+  staged_action_proposals: AssistantPolicySimulationActionProposal[]
+  staging_warnings: string[]
+  simulation_notes: string[]
+}
+
 export type AssistantRuntimeSettings = {
   enabled: boolean
   default_provider: AssistantProvider
@@ -1679,6 +2157,7 @@ export type AssistantRuntimeSettings = {
   configured_provider_count: number
   providers: AssistantProviderStatus[]
   available_tools: AssistantToolDefinition[]
+  available_action_types: AssistantActionDefinition[]
 }
 
 export type AssistantMessage = {
@@ -1694,10 +2173,36 @@ export type AssistantAgent = {
   scope: AssistantAgentScope
   provider: AssistantProvider | null
   model: string | null
+  role_key?: string | null
+  profile_kind: AssistantAgentProfileKind
+  specialization_summary?: string | null
+  human_owner_role?: string | null
+  authority_ceiling?: AssistantAgentAuthorityLevel | null
+  activation_notes?: string | null
+  profile_request_id?: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
+  daily_token_allocation?: number | null
+  token_budget?: AssistantAgentTokenBudget
+  effective_policy?: AssistantAgentEffectivePolicy
+  eval_gate?: AssistantAgentEvalGate | null
+}
+
+export type AssistantAgentTokenBudgetStatus = 'GREEN' | 'AMBER' | 'RED'
+export type AssistantAgentTokenAllocationSource = 'AGENT' | 'DEFAULT'
+
+export type AssistantAgentTokenBudget = {
+  status: AssistantAgentTokenBudgetStatus
+  allocated_tokens: number
+  used_tokens: number
+  remaining_tokens: number
+  percent_used: number
+  warning_threshold_percent: number
+  allocation_source: AssistantAgentTokenAllocationSource
+  window_started_at: string
+  reset_at: string
 }
 
 export type AssistantAdminAgent = AssistantAgent & {
@@ -1707,6 +2212,90 @@ export type AssistantAdminAgent = AssistantAgent & {
   updated_at: string
   updated_by: string
   version: number
+}
+
+export type AssistantAgentRoleArchetype = {
+  role_key: string
+  name: string
+  description: string
+  catalog_status: AssistantAgentRoleCatalogStatus
+  mission: string[]
+  human_owner_role: string
+  allowed_workspaces: ViewKey[]
+  work_objects: string[]
+  capability_ceiling: AssistantAgentCapability[]
+  default_tools: string[]
+  maximum_action_types: AssistantActionType[]
+  authority_ceiling: AssistantAgentAuthorityLevel
+  approval_rules: string[]
+  stop_conditions: string[]
+  success_metrics: string[]
+  required_eval_coverage: string[]
+  eval_gate?: AssistantAgentEvalGate | null
+  base_prompt_guidance: string[]
+  current_profile_ids: string[]
+}
+
+export type AssistantAgentProfileRequest = {
+  request_id: number
+  status: AssistantAgentProfileRequestStatus
+  requested_agent_id: string | null
+  business_problem: string
+  proposed_mission: string
+  human_owner_role: string
+  requested_workspaces: ViewKey[]
+  work_objects: string[]
+  requested_inputs_tools: string[]
+  expected_outputs: string[]
+  requested_authority_ceiling: AssistantAgentAuthorityLevel
+  stop_conditions: string[]
+  success_metrics: string[]
+  proposed_eval_cases: string[]
+  approval_notes: string | null
+  rejection_reason: string | null
+  linked_agent_id: string | null
+  requested_at: string
+  requested_by: string
+  reviewed_at: string | null
+  reviewed_by: string | null
+  activated_at: string | null
+  activated_by: string | null
+  updated_at: string
+}
+
+export type AssistantAgentEvalRunStatus = 'PASS' | 'FAIL' | 'ERROR'
+
+export type AssistantAgentEvalRun = {
+  eval_run_id: number
+  eval_id: number
+  agent_id: string
+  run_id?: number | null
+  status: AssistantAgentEvalRunStatus
+  failure_reasons: string[]
+  observed_tool_names: string[]
+  observed_action_types: AssistantActionType[]
+  response_message?: string | null
+  started_at: string
+  completed_at: string
+  run_by: string
+}
+
+export type AssistantAgentEval = {
+  eval_id: number
+  agent_id: string
+  name: string
+  workspace: ViewKey
+  prompt: string
+  context?: string | null
+  use_live_tools: boolean
+  expected_substrings: string[]
+  expected_tool_names: string[]
+  expected_action_types: AssistantActionType[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  latest_run?: AssistantAgentEvalRun | null
 }
 
 export type AssistantPromptRequest = {
@@ -1726,6 +2315,61 @@ export type AssistantToolCall = {
   record_count: number | null
 }
 
+export type AssistantActionReviewObjectRef = {
+  type: string
+  id: string
+  label?: string | null
+}
+
+export type AssistantActionReviewSupportingRecord = AssistantActionReviewObjectRef & {
+  summary: string
+}
+
+export type AssistantActionPreviewFieldChange = {
+  field: string
+  current_value?: unknown
+  proposed_value?: unknown
+}
+
+export type AssistantActionPreview = {
+  preview_type: string
+  status: string
+  summary: string
+  affected_records: AssistantActionReviewSupportingRecord[]
+  field_changes: AssistantActionPreviewFieldChange[]
+  expected_side_effects: string[]
+  warnings: string[]
+  blocking_reasons: string[]
+  assumptions: string[]
+  existing_invoice_count?: number | null
+}
+
+export type AssistantActionReviewContext = {
+  owning_work_object: AssistantActionReviewObjectRef
+  required_reviewer_role: string
+  business_rationale: string
+  proposed_mutation: Record<string, unknown>
+  supporting_records: AssistantActionReviewSupportingRecord[]
+  assumptions: string[]
+  missing_evidence: string[]
+  expected_downstream_effects: string[]
+  stale_state_basis: Record<string, unknown>
+  idempotency_key?: string | null
+  action_preview?: AssistantActionPreview | null
+}
+
+export type AssistantActionRequestLifecycle = {
+  stage: AssistantActionRequestLifecycleStage
+  label: string
+  tone: AssistantActionRequestLifecycleTone
+  is_terminal: boolean
+  can_approve: boolean
+  can_reject: boolean
+  reviewer_action_label?: string | null
+  decided_label?: string | null
+  review_risk_flags: string[]
+}
+
 export type AssistantActionRequest = {
   action_request_id: number
   run_id: number
@@ -1738,11 +2382,381 @@ export type AssistantActionRequest = {
   summary: string
   description: string
   payload: Record<string, unknown>
+  review_context?: AssistantActionReviewContext | null
+  lifecycle: AssistantActionRequestLifecycle
   result?: Record<string, unknown> | null
   error_detail?: string | null
+  review_outcome?: AssistantActionReviewOutcome | null
+  decision_note?: string | null
+  correction_summary?: string | null
+  correction_fields: string[]
   created_at: string
   decided_at?: string | null
   decided_by?: string | null
+}
+
+export type AssistantActionRequestAdminSummary = {
+  total_count: number
+  pending_count: number
+  executed_count: number
+  rejected_count: number
+  failed_count: number
+  correction_count: number
+  avg_decision_seconds?: number | null
+}
+
+export type AssistantActionRequestAdminPage = {
+  items: AssistantActionRequest[]
+  total_count: number
+  limit: number
+  offset: number
+  has_more: boolean
+  summary: AssistantActionRequestAdminSummary
+}
+
+export type AssistantOutcomeMetricRecommendationAction =
+  | 'INSUFFICIENT_DATA'
+  | 'KEEP_STAGED'
+  | 'ELIGIBLE_FOR_BOUNDED_REVIEW'
+  | 'RECOMMEND_PAUSE'
+
+export type AssistantOutcomeMetricThresholds = {
+  min_decided_actions_for_promotion: number
+  max_rejection_rate_for_promotion: number
+  max_failed_execution_rate_for_promotion: number
+  max_stale_action_rate_for_promotion: number
+  max_correction_rate_for_promotion: number
+  max_pending_actions_for_promotion: number
+  min_decided_actions_for_pause_signal: number
+  rejection_rate_pause_threshold: number
+  failed_execution_rate_pause_threshold: number
+  stale_action_rate_pause_threshold: number
+  oldest_pending_hours_pause_threshold: number
+  repeated_failed_actions_pause_threshold: number
+  unsupported_attempt_pause_threshold: number
+  policy_drift_pause_threshold: number
+}
+
+export type AssistantOutcomeMetricRecommendation = {
+  recommended_action: AssistantOutcomeMetricRecommendationAction
+  promotion_candidate: boolean
+  pause_recommended: boolean
+  reasons: string[]
+}
+
+export type AssistantOutcomeMetricCounters = {
+  staged_action_count: number
+  pending_action_count: number
+  executed_action_count: number
+  rejected_action_count: number
+  failed_action_count: number
+  correction_count: number
+  decided_action_count: number
+  stale_action_count: number
+  unsupported_attempt_count: number
+  policy_drift_count: number
+  approval_rate?: number | null
+  rejection_rate?: number | null
+  failed_execution_rate?: number | null
+  correction_rate?: number | null
+  stale_action_rate?: number | null
+  avg_decision_seconds?: number | null
+  oldest_pending_age_seconds?: number | null
+}
+
+export type AssistantAgentOutcomeMetricRow = AssistantOutcomeMetricCounters & {
+  agent_id?: string | null
+  agent_name?: string | null
+  agent_role_key?: string | null
+  agent_profile_kind?: AssistantAgentProfileKind | null
+  run_count: number
+  completed_run_count: number
+  failed_run_count: number
+  warning_count: number
+  warning_rate?: number | null
+  tool_call_count: number
+  tool_error_count: number
+  tool_error_rate?: number | null
+  helpful_feedback_count: number
+  needs_work_feedback_count: number
+  feedback_helpful_rate?: number | null
+  recommendation: AssistantOutcomeMetricRecommendation
+}
+
+export type AssistantRoleOutcomeMetricRow = AssistantOutcomeMetricCounters & {
+  agent_role_key?: string | null
+  run_count: number
+  completed_run_count: number
+  failed_run_count: number
+  warning_count: number
+  warning_rate?: number | null
+  tool_call_count: number
+  tool_error_count: number
+  tool_error_rate?: number | null
+  recommendation: AssistantOutcomeMetricRecommendation
+}
+
+export type AssistantProfileOutcomeMetricRow = AssistantOutcomeMetricCounters & {
+  agent_profile_kind?: AssistantAgentProfileKind | null
+  run_count: number
+  completed_run_count: number
+  failed_run_count: number
+  warning_count: number
+  warning_rate?: number | null
+  tool_call_count: number
+  tool_error_count: number
+  tool_error_rate?: number | null
+  recommendation: AssistantOutcomeMetricRecommendation
+}
+
+export type AssistantWorkspaceFeedbackMetricRow = {
+  workspace?: ViewKey | null
+  run_count: number
+  helpful_feedback_count: number
+  needs_work_feedback_count: number
+  feedback_count: number
+  feedback_helpful_rate?: number | null
+}
+
+export type AssistantRunFeedbackInsight = {
+  feedback_id: number
+  run_id: number
+  conversation_id?: number | null
+  agent_id?: string | null
+  agent_name?: string | null
+  workspace?: ViewKey | null
+  user_id: string
+  user_role: string
+  rating: AssistantRunFeedbackRating
+  comment?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type AssistantActionTypeOutcomeMetricRow = AssistantOutcomeMetricCounters & {
+  action_type: AssistantActionType
+  recommendation: AssistantOutcomeMetricRecommendation
+}
+
+export type AssistantOutcomeMetrics = {
+  generated_at: string
+  created_after?: string | null
+  created_before?: string | null
+  thresholds: AssistantOutcomeMetricThresholds
+  total_feedback_count: number
+  helpful_feedback_count: number
+  needs_work_feedback_count: number
+  feedback_helpful_rate?: number | null
+  by_agent: AssistantAgentOutcomeMetricRow[]
+  by_role: AssistantRoleOutcomeMetricRow[]
+  by_profile: AssistantProfileOutcomeMetricRow[]
+  by_workspace: AssistantWorkspaceFeedbackMetricRow[]
+  by_action_type: AssistantActionTypeOutcomeMetricRow[]
+  recent_feedback: AssistantRunFeedbackInsight[]
+}
+
+export type AssistantControlTowerAgentRosterSummary = {
+  total_count: number
+  active_count: number
+  draft_count: number
+  paused_count: number
+  retired_count: number
+  action_capable_count: number
+  missing_eval_coverage_count: number
+  policy_warning_count: number
+}
+
+export type AssistantControlTowerRunSummary = {
+  total_count: number
+  completed_count: number
+  failed_count: number
+  warning_count: number
+  tool_call_count: number
+  latest_run_at?: string | null
+}
+
+export type AssistantControlTowerOldestPendingAction = {
+  action_request_id: number
+  action_type: string
+  summary: string
+  agent_id?: string | null
+  agent_name?: string | null
+  user_id: string
+  created_at: string
+  age_seconds: number
+}
+
+export type AssistantControlTowerActionSummary = {
+  total_count: number
+  pending_count: number
+  failed_count: number
+  rejected_count: number
+  executed_count: number
+  preview_blocked_count: number
+  oldest_pending_action?: AssistantControlTowerOldestPendingAction | null
+}
+
+export type AssistantControlTowerAgentTrustSignal = {
+  agent_id: string
+  agent_name: string
+  status: AssistantAgentStatus
+  role_key?: string | null
+  profile_kind?: AssistantAgentProfileKind | null
+  signal_type: AssistantControlTowerTrustSignalType
+  severity: AssistantControlTowerTrustSignalSeverity
+  summary: string
+  details: string[]
+  pending_action_count: number
+  failed_action_count: number
+  warning_run_count: number
+  eval_status?: AssistantAgentEvalGateStatus | null
+}
+
+export type AssistantControlTowerSummary = {
+  generated_at: string
+  created_after?: string | null
+  created_before?: string | null
+  roster: AssistantControlTowerAgentRosterSummary
+  runs: AssistantControlTowerRunSummary
+  actions: AssistantControlTowerActionSummary
+  trust_signals: AssistantControlTowerAgentTrustSignal[]
+}
+
+export type AssistantAutonomyReviewRecommendationAction =
+  | 'KEEP_STAGED'
+  | 'NARROW'
+  | 'PAUSE'
+  | 'ELIGIBLE_FOR_BOUNDED_REVIEW'
+
+export type AssistantAutonomyReviewEvalStatus =
+  | 'MISSING_EVAL_PLAN'
+  | 'DECLARED'
+  | 'ACTIONABLE'
+
+export type AssistantAutonomyKnowledgeEntry = {
+  title: string
+  entry_type?: string | null
+  domain?: string | null
+  applies_to?: string | null
+  status?: string | null
+  lesson?: string | null
+  deterministic_opportunity?: string | null
+  agent_autonomy_impact?: string | null
+}
+
+export type AssistantAutonomyEvalSignal = {
+  status: AssistantAutonomyReviewEvalStatus
+  required_cases: string[]
+  proposed_cases: string[]
+  notes: string[]
+}
+
+export type AssistantAutonomyReviewBrief = {
+  generated_at: string
+  agent_id: string
+  agent_name: string
+  current_status: AssistantAgentStatus
+  current_authority?: AssistantAgentAuthorityLevel | null
+  recommended_next_authority: AssistantAutonomyReviewRecommendationAction
+  recommendation_reasons: string[]
+  human_owner_role?: string | null
+  allowed_action_types: AssistantActionType[]
+  outcome_window_created_after?: string | null
+  outcome_window_created_before?: string | null
+  outcome_metrics?: AssistantAgentOutcomeMetricRow | null
+  action_type_metrics: AssistantActionTypeOutcomeMetricRow[]
+  eval_signal: AssistantAutonomyEvalSignal
+  stop_conditions: string[]
+  knowledge_base_entries: AssistantAutonomyKnowledgeEntry[]
+  deterministic_algorithm_candidates: string[]
+  review_checklist: string[]
+}
+
+export type AssistantAgentHealthWorkPackageType =
+  | 'POLICY'
+  | 'SERVICE'
+  | 'EVAL'
+  | 'KNOWLEDGE_BASE'
+
+export type AssistantAgentHealthWorkPackagePriority = 'P1' | 'P2' | 'P3' | 'P4'
+
+export type AssistantAgentHealthWorkPackageStatus = 'CANDIDATE'
+
+export type AssistantAgentWorkPackageStatus =
+  | 'CANDIDATE'
+  | 'ACCEPTED'
+  | 'IN_PROGRESS'
+  | 'IMPLEMENTED'
+  | 'DISMISSED'
+
+export type AssistantAgentHealthReviewItem = {
+  agent_id: string
+  agent_name: string
+  current_status: AssistantAgentStatus
+  current_authority?: AssistantAgentAuthorityLevel | null
+  recommended_next_authority: AssistantAutonomyReviewRecommendationAction
+  recommendation_reasons: string[]
+  eval_status: AssistantAutonomyReviewEvalStatus
+  decided_action_count: number
+  pending_action_count: number
+  failed_action_count: number
+  deterministic_candidate_count: number
+  stop_condition_count: number
+  work_package_ids: string[]
+}
+
+export type AssistantAgentHealthWorkPackage = {
+  work_package_id: string
+  title: string
+  package_type: AssistantAgentHealthWorkPackageType
+  priority: AssistantAgentHealthWorkPackagePriority
+  status: AssistantAgentHealthWorkPackageStatus
+  source_agent_ids: string[]
+  source_agent_names: string[]
+  source_recommendations: AssistantAutonomyReviewRecommendationAction[]
+  source_candidates: string[]
+  recommended_owner_role?: string | null
+  rationale: string
+  acceptance_checks: string[]
+  knowledge_base_titles: string[]
+}
+
+export type AssistantAgentHealthReview = {
+  generated_at: string
+  outcome_window_created_after?: string | null
+  outcome_window_created_before?: string | null
+  agent_count: number
+  pause_count: number
+  narrow_count: number
+  bounded_review_candidate_count: number
+  keep_staged_count: number
+  work_package_count: number
+  review_items: AssistantAgentHealthReviewItem[]
+  work_packages: AssistantAgentHealthWorkPackage[]
+}
+
+export type AssistantAgentWorkPackage = {
+  id: number
+  work_package_id: string
+  title: string
+  package_type: AssistantAgentHealthWorkPackageType
+  priority: AssistantAgentHealthWorkPackagePriority
+  status: AssistantAgentWorkPackageStatus
+  source_agent_ids: string[]
+  source_agent_names: string[]
+  source_recommendations: AssistantAutonomyReviewRecommendationAction[]
+  source_candidates: string[]
+  recommended_owner_role?: string | null
+  rationale: string
+  acceptance_checks: string[]
+  knowledge_base_titles: string[]
+  accepted_at?: string | null
+  accepted_by?: string | null
+  notes?: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
 }
 
 export type AssistantPromptResponse = {
@@ -1752,6 +2766,8 @@ export type AssistantPromptResponse = {
   run_recorded_at?: string | null
   agent_id?: string | null
   agent_name?: string | null
+  agent_role_key?: string | null
+  agent_profile_kind?: AssistantAgentProfileKind | null
   provider: AssistantProvider
   model: string
   message: {
@@ -1797,6 +2813,8 @@ export type AssistantPromptSection = {
 export type AssistantPromptContext = {
   agent_id?: string | null
   agent_name?: string | null
+  agent_role_key?: string | null
+  agent_profile_kind?: AssistantAgentProfileKind | null
   provider: AssistantProvider
   model: string
   generated_at: string
@@ -1806,6 +2824,19 @@ export type AssistantPromptContext = {
 }
 
 export type AssistantRunStatus = 'COMPLETED' | 'FAILED'
+export type AssistantRunFeedbackRating = 'HELPFUL' | 'NEEDS_WORK'
+
+export type AssistantRunFeedback = {
+  feedback_id: number
+  run_id: number
+  conversation_id?: number | null
+  user_id: string
+  user_role: string
+  rating: AssistantRunFeedbackRating
+  comment?: string | null
+  created_at: string
+  updated_at: string
+}
 
 export type AssistantRunSummary = {
   conversation_id?: number | null
@@ -1818,6 +2849,8 @@ export type AssistantRunSummary = {
   workspace?: ViewKey | null
   agent_id?: string | null
   agent_name?: string | null
+  agent_role_key?: string | null
+  agent_profile_kind?: AssistantAgentProfileKind | null
   provider: AssistantProvider
   model: string
   use_live_tools: boolean
@@ -1839,6 +2872,40 @@ export type AssistantRun = AssistantRunSummary & {
   tool_calls: AssistantToolCall[]
 }
 
+export type AssistantAuditEvent = {
+  event_id: string
+  aggregate_type: string
+  aggregate_id: string
+  event_type: string
+  occurred_at: string
+  recorded_at: string
+  actor_id?: string | null
+  correlation_id?: string | null
+  causation_id?: string | null
+  payload: Record<string, unknown>
+}
+
+export type AssistantAuditTimelineEntry = {
+  entry_type: string
+  occurred_at: string
+  title: string
+  summary: string
+  status?: string | null
+  metadata: Record<string, unknown>
+}
+
+export type AssistantActionRequestTrace = {
+  action_request: AssistantActionRequest
+  mutation_events: AssistantAuditEvent[]
+}
+
+export type AssistantRunAuditTrace = {
+  run: AssistantRun
+  action_requests: AssistantActionRequestTrace[]
+  timeline: AssistantAuditTimelineEntry[]
+  mutation_event_count: number
+}
+
 export type AssistantConversationMessage = {
   role: AssistantMessageRole
   content: string
@@ -1848,6 +2915,7 @@ export type AssistantConversationMessage = {
   model?: string | null
   warnings: string[]
   tool_calls: AssistantToolCall[]
+  feedback?: AssistantRunFeedback | null
 }
 
 export type AssistantConversationSummary = {
@@ -1874,9 +2942,11 @@ export type AssistantConversation = AssistantConversationSummary & {
 }
 
 export type ViewKey =
+  | 'prompt'
   | 'dashboard'
   | 'guide'
   | 'demo'
+  | 'pretrade'
   | 'trades'
   | 'events'
   | 'risk'

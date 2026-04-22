@@ -3,6 +3,7 @@ import type { ViewKey } from './models'
 export type PersonalizableWorkspaceId = Extract<
   ViewKey,
   | 'dashboard'
+  | 'pretrade'
   | 'trades'
   | 'events'
   | 'risk'

@@ -12,16 +12,21 @@ import {
   adminRoadmapDocument,
   assistantActionRequests,
   assistantAdminAgents,
+  assistantOutcomeMetrics,
+  assistantRoleArchetypes,
   assistantRuntimeSettings,
   books,
   buildWorkspaceSummary,
   commodities,
   counterparties,
+  codexTasks,
+  codexTaskSettings,
   currencies,
   locations,
   portfolios,
   positions,
   priceIndices,
+  projectionMonitoringAdminRecord,
   publicRuntimeSettings,
   type RecordedRequest,
   selectedTradeEvents,
@@ -35,6 +40,18 @@ import {
 type SmokeTradeRow = (typeof trades)[number]
 type SmokeEventRow = (typeof selectedTradeEvents)[number]
 type SmokeAssistantActionRequestRow = (typeof assistantActionRequests)[number]
+type SmokeAssistantFeedbackRating = 'HELPFUL' | 'NEEDS_WORK'
+type SmokeAssistantFeedbackRow = {
+  feedback_id: number
+  run_id: number
+  conversation_id: number
+  user_id: string
+  user_role: string
+  rating: SmokeAssistantFeedbackRating
+  comment: string | null
+  created_at: string
+  updated_at: string
+}
 
 type MockApiServer = {
   baseUrl: string
@@ -178,6 +195,24 @@ function writeNoContent(response: ServerResponse): void {
   response.end()
 }
 
+function writeSse(
+  response: ServerResponse,
+  events: Array<{ event: string; data: Record<string, unknown> }>,
+): void {
+  response.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-store',
+    Connection: 'keep-alive',
+  })
+
+  for (const event of events) {
+    response.write(`event: ${event.event}\n`)
+    response.write(`data: ${JSON.stringify(event.data)}\n\n`)
+  }
+
+  response.end()
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = []
   for await (const chunk of request) {
@@ -204,6 +239,22 @@ function requireAuthorization(
   return false
 }
 
+function normalizedReviewText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalizedCorrectionFields(value: unknown): string[] {
+  return Array.isArray(value)
+    ? Array.from(
+        new Set(
+          value
+            .map((field) => (typeof field === 'string' ? field.trim() : ''))
+            .filter(Boolean),
+        ),
+      )
+    : []
+}
+
 async function startMockApiServer(
   options: StartSmokeHarnessOptions = {},
 ): Promise<MockApiServer> {
@@ -218,10 +269,265 @@ async function startMockApiServer(
     payload: { ...request.payload },
     result: request.result ? { ...request.result } : null,
   }))
+  const assistantRunFeedbackByRunId = new Map<number, SmokeAssistantFeedbackRow>()
+  const assistantConversationId = 902
+  const assistantRunId = 8801
+  const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
+  const assistantUserPrompt = 'Where should I handle the confirmation blocker?'
   let sessionExpired = false
   const runtimeSettings = {
     ...publicRuntimeSettings,
     single_user_auth_enabled: options.singleUserAuthEnabled ?? publicRuntimeSettings.single_user_auth_enabled,
+  }
+
+  function buildAssistantResponseContentForPrompt(prompt: string): string {
+    const normalizedPrompt = prompt.toLowerCase()
+    if (normalizedPrompt.includes('settlement') || normalizedPrompt.includes('invoice')) {
+      return [
+        'Settlement is the right place to continue because the open item is invoice and payment follow-through.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          targetView: 'settlement',
+          label: 'Open Settlement',
+          rationale: 'Review settlement follow-through for T-AMEND-100 before changing invoice or payment state.',
+          focus: {
+            type: 'trade',
+            id: 'T-AMEND-100',
+            label: 'T-AMEND-100',
+          },
+        }),
+        '```',
+      ].join('\n')
+    }
+
+    if (normalizedPrompt.includes('trade capture') || normalizedPrompt.includes('amend')) {
+      return [
+        'Trade Capture is the right place to continue because the next step is an amendment review.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          targetView: 'trades',
+          label: 'Open Trade Capture',
+          rationale: 'Open the amend panel for T-AMEND-100 so economics and workflow changes stay in one place.',
+          focus: {
+            type: 'trade',
+            id: 'T-AMEND-100',
+            label: 'T-AMEND-100',
+          },
+          inspectorTab: 'amend',
+        }),
+        '```',
+      ].join('\n')
+    }
+
+    return [
+      'Operations is the right place to continue because the blocker is tied to the confirmation queue.',
+      '```navigation_intent',
+      JSON.stringify({
+        kind: 'open_workspace',
+        targetView: 'operations',
+        label: 'Open Work Queue',
+        rationale: 'Review the confirmation blocker with the operations owner before changing trade state.',
+        focus: {
+          type: 'trade',
+          id: 'T-AMEND-100',
+          label: 'T-AMEND-100',
+        },
+        inspectorTab: 'events',
+      }),
+      '```',
+    ].join('\n')
+  }
+
+  function latestUserPromptFromPayload(payload: unknown): string {
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+      return ''
+    }
+
+    const messages = (payload as { messages?: unknown }).messages
+    if (!Array.isArray(messages)) {
+      return ''
+    }
+
+    for (const message of [...messages].reverse()) {
+      if (typeof message !== 'object' || message === null || Array.isArray(message)) {
+        continue
+      }
+      const candidate = message as { role?: unknown; content?: unknown }
+      if (candidate.role === 'user' && typeof candidate.content === 'string') {
+        return candidate.content
+      }
+    }
+
+    return ''
+  }
+
+  const assistantResponseContent = buildAssistantResponseContentForPrompt(assistantUserPrompt)
+
+  function buildAssistantConversationSummary() {
+    return {
+      conversation_id: assistantConversationId,
+      created_at: '2026-04-11T09:00:00Z',
+      updated_at: assistantRunRecordedAt,
+      user_id: smokeSession.user.user_id,
+      user_role: smokeSession.user.role,
+      workspace: 'assistant',
+      agent_id: null,
+      agent_name: null,
+      provider: 'openai',
+      model: 'gpt-5.4',
+      use_live_tools: true,
+      title: 'Recent blocker triage',
+      run_count: 1,
+      latest_run_id: assistantRunId,
+      latest_user_message: assistantUserPrompt,
+      latest_assistant_message: 'Operations is the right place to continue.',
+    }
+  }
+
+  function buildAssistantConversation() {
+    return {
+      ...buildAssistantConversationSummary(),
+      messages: [
+        {
+          role: 'user',
+          content: assistantUserPrompt,
+          recorded_at: '2026-04-11T09:07:00Z',
+          run_id: null,
+          provider: null,
+          model: null,
+          warnings: [],
+          tool_calls: [],
+          feedback: null,
+        },
+        {
+          role: 'assistant',
+          content: assistantResponseContent,
+          recorded_at: assistantRunRecordedAt,
+          run_id: assistantRunId,
+          provider: 'openai',
+          model: 'gpt-5.4',
+          warnings: [],
+          tool_calls: [],
+          feedback: assistantRunFeedbackByRunId.get(assistantRunId) ?? null,
+        },
+      ],
+    }
+  }
+
+  function buildAssistantRunSummary() {
+    return {
+      conversation_id: assistantConversationId,
+      run_id: assistantRunId,
+      status: 'COMPLETED',
+      created_at: assistantRunRecordedAt,
+      completed_at: assistantRunRecordedAt,
+      user_id: smokeSession.user.user_id,
+      user_role: smokeSession.user.role,
+      workspace: 'assistant',
+      agent_id: null,
+      agent_name: null,
+      agent_role_key: null,
+      agent_profile_kind: null,
+      provider: 'openai',
+      model: 'gpt-5.4',
+      use_live_tools: true,
+      warning_count: 0,
+      tool_call_count: 0,
+      input_tokens: 120,
+      output_tokens: 60,
+      latest_user_message: assistantUserPrompt,
+      assistant_message: assistantResponseContent,
+      error_detail: null,
+    }
+  }
+
+  function buildAssistantRun() {
+    return {
+      ...buildAssistantRunSummary(),
+      request_messages: [{ role: 'user', content: assistantUserPrompt }],
+      application_context: 'Selected trade T-AMEND-100.',
+      prompt_sections: [
+        {
+          key: 'workspace',
+          title: 'Workspace',
+          source: 'workspace',
+          content: 'Assistant workspace smoke context.',
+        },
+      ],
+      rendered_system_prompt: 'Answer with grounded operational context and stage reviewable actions only.',
+      warnings: [],
+      tool_calls: [],
+    }
+  }
+
+  function buildAssistantResponseMetadata() {
+    return {
+      conversation_id: assistantConversationId,
+      conversation_updated_at: assistantRunRecordedAt,
+      run_id: assistantRunId,
+      run_recorded_at: assistantRunRecordedAt,
+      agent_id: null,
+      agent_name: null,
+      agent_role_key: null,
+      agent_profile_kind: null,
+      provider: 'openai',
+      model: 'gpt-5.4',
+      usage: {
+        input_tokens: 120,
+        output_tokens: 60,
+      },
+      warnings: [],
+      tool_calls: [],
+      action_requests: [],
+    }
+  }
+
+  function buildAssistantOutcomeMetrics() {
+    const feedbackRows = Array.from(assistantRunFeedbackByRunId.values())
+    if (feedbackRows.length === 0) {
+      return assistantOutcomeMetrics
+    }
+
+    const helpfulFeedbackDelta = feedbackRows.filter((row) => row.rating === 'HELPFUL').length
+    const needsWorkFeedbackDelta = feedbackRows.filter((row) => row.rating === 'NEEDS_WORK').length
+    const totalFeedbackCount = assistantOutcomeMetrics.total_feedback_count + feedbackRows.length
+    const helpfulFeedbackCount = assistantOutcomeMetrics.helpful_feedback_count + helpfulFeedbackDelta
+    const needsWorkFeedbackCount = assistantOutcomeMetrics.needs_work_feedback_count + needsWorkFeedbackDelta
+
+    return {
+      ...assistantOutcomeMetrics,
+      total_feedback_count: totalFeedbackCount,
+      helpful_feedback_count: helpfulFeedbackCount,
+      needs_work_feedback_count: needsWorkFeedbackCount,
+      feedback_helpful_rate: helpfulFeedbackCount / totalFeedbackCount,
+      by_workspace: assistantOutcomeMetrics.by_workspace.map((row) => {
+        if (row.workspace !== 'assistant') {
+          return row
+        }
+
+        const workspaceFeedbackCount = row.feedback_count + feedbackRows.length
+        const workspaceHelpfulFeedbackCount = row.helpful_feedback_count + helpfulFeedbackDelta
+        return {
+          ...row,
+          run_count: row.run_count + feedbackRows.length,
+          helpful_feedback_count: workspaceHelpfulFeedbackCount,
+          needs_work_feedback_count: row.needs_work_feedback_count + needsWorkFeedbackDelta,
+          feedback_count: workspaceFeedbackCount,
+          feedback_helpful_rate: workspaceHelpfulFeedbackCount / workspaceFeedbackCount,
+        }
+      }),
+      recent_feedback: [
+        ...feedbackRows.map((row) => ({
+          ...row,
+          agent_id: null,
+          agent_name: null,
+          workspace: 'assistant',
+        })),
+        ...assistantOutcomeMetrics.recent_feedback,
+      ],
+    }
   }
 
   const server = createHttpServer(async (request, response) => {
@@ -238,8 +544,8 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/auth/heartbeat') &&
       !(method === 'POST' && url.pathname === '/auth/session') &&
       !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
-      !(method === 'PUT' && url.pathname === '/layout-definitions/trades') &&
-      !(method === 'PUT' && url.pathname === '/layout-definitions/dashboard')
+      !(method === 'POST' && url.pathname === '/assistant/respond') &&
+      !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
     ) {
       mutationRequests.push(record)
     }
@@ -315,6 +621,194 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/assistant/agents' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/assistant/conversations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [buildAssistantConversationSummary()])
+      return
+    }
+
+    const assistantConversationMatch = url.pathname.match(/^\/assistant\/conversations\/(\d+)$/)
+    if (assistantConversationMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const conversationId = Number(assistantConversationMatch[1])
+      if (conversationId !== assistantConversationId) {
+        writeJson(response, { detail: 'Assistant conversation not found.' }, 404)
+        return
+      }
+
+      writeJson(response, buildAssistantConversation())
+      return
+    }
+
+    if (url.pathname === '/assistant/runs' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [buildAssistantRunSummary()])
+      return
+    }
+
+    const assistantRunMatch = url.pathname.match(/^\/assistant\/runs\/(\d+)$/)
+    if (assistantRunMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const runId = Number(assistantRunMatch[1])
+      if (runId !== assistantRunId) {
+        writeJson(response, { detail: 'Assistant run not found.' }, 404)
+        return
+      }
+
+      writeJson(response, buildAssistantRun())
+      return
+    }
+
+    const assistantRunFeedbackMatch = url.pathname.match(/^\/assistant\/runs\/(\d+)\/feedback$/)
+    if (assistantRunFeedbackMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const runId = Number(assistantRunFeedbackMatch[1])
+      if (runId !== assistantRunId) {
+        writeJson(response, { detail: 'Assistant run not found.' }, 404)
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      const feedbackPayload = payload as {
+        rating?: unknown
+        comment?: unknown
+      }
+      if (feedbackPayload.rating !== 'HELPFUL' && feedbackPayload.rating !== 'NEEDS_WORK') {
+        writeJson(response, { detail: 'Unsupported feedback rating.' }, 422)
+        return
+      }
+
+      const previousFeedback = assistantRunFeedbackByRunId.get(runId)
+      const feedback: SmokeAssistantFeedbackRow = {
+        feedback_id: previousFeedback?.feedback_id ?? 990,
+        run_id: runId,
+        conversation_id: assistantConversationId,
+        user_id: smokeSession.user.user_id,
+        user_role: smokeSession.user.role,
+        rating: feedbackPayload.rating,
+        comment: normalizeOptionalText(feedbackPayload.comment),
+        created_at: previousFeedback?.created_at ?? '2026-04-11T09:12:00Z',
+        updated_at: '2026-04-11T09:12:00Z',
+      }
+
+      assistantRunFeedbackByRunId.set(runId, feedback)
+      writeJson(response, feedback)
+      return
+    }
+
+    if (url.pathname === '/assistant/context' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      writeJson(response, {
+        agent_id: null,
+        agent_name: null,
+        agent_role_key: null,
+        agent_profile_kind: null,
+        provider: 'openai',
+        model: 'gpt-5.4',
+        generated_at: assistantRunRecordedAt,
+        warnings: [],
+        sections: [
+          {
+            key: 'workspace',
+            title: 'Workspace',
+            source: 'workspace',
+            content: 'Assistant workspace smoke context.',
+          },
+        ],
+        rendered_system_prompt: 'Answer with grounded operational context and stage reviewable actions only.',
+      })
+      return
+    }
+
+    if (url.pathname === '/assistant/respond' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const responseContent = buildAssistantResponseContentForPrompt(latestUserPromptFromPayload(payload))
+
+      writeJson(response, {
+        ...buildAssistantResponseMetadata(),
+        message: {
+          role: 'assistant',
+          content: responseContent,
+        },
+      })
+      return
+    }
+
+    if (url.pathname === '/assistant/respond/stream' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const responseContent = buildAssistantResponseContentForPrompt(latestUserPromptFromPayload(payload))
+
+      const metadata = buildAssistantResponseMetadata()
+      writeSse(response, [
+        {
+          event: 'conversation',
+          data: {
+            conversation_id: assistantConversationId,
+            updated_at: assistantRunRecordedAt,
+          },
+        },
+        {
+          event: 'assistant.metadata',
+          data: metadata,
+        },
+        {
+          event: 'assistant.delta',
+          data: {
+            delta: responseContent,
+          },
+        },
+        {
+          event: 'assistant.complete',
+          data: metadata,
+        },
+      ])
+      return
+    }
+
+    if (url.pathname === '/assistant/action-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
     if (url.pathname === '/admin/assistant/agents' && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -333,18 +827,278 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/admin/assistant/role-archetypes' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(
+        response,
+        assistantRoleArchetypes.map((role) => ({
+          ...role,
+          mission: [...role.mission],
+          allowed_workspaces: [...role.allowed_workspaces],
+          work_objects: [...role.work_objects],
+          capability_ceiling: [...role.capability_ceiling],
+          default_tools: [...role.default_tools],
+          maximum_action_types: [...role.maximum_action_types],
+          approval_rules: [...role.approval_rules],
+          stop_conditions: [...role.stop_conditions],
+          success_metrics: [...role.success_metrics],
+          required_eval_coverage: [...role.required_eval_coverage],
+          base_prompt_guidance: [...role.base_prompt_guidance],
+          current_profile_ids: [...role.current_profile_ids],
+        })),
+      )
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/profile-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/agent-evals' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    const assistantAuditTraceMatch = url.pathname.match(/^\/admin\/assistant\/runs\/(\d+)\/audit-trace$/)
+    if (assistantAuditTraceMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const runId = Number(assistantAuditTraceMatch[1])
+      const traceActionRequests = assistantActionRequestRows.filter((requestRow) => requestRow.run_id === runId)
+      if (traceActionRequests.length === 0) {
+        writeJson(response, { detail: 'Assistant run not found' }, 404)
+        return
+      }
+
+      const primaryRequest = traceActionRequests[0]
+      const mutationEvents = traceActionRequests.flatMap((requestRow) => {
+        const eventId =
+          requestRow.result && typeof requestRow.result.event_id === 'string' ? requestRow.result.event_id : null
+        return eventId
+          ? [
+              {
+                event_id: eventId,
+                aggregate_type: 'trade',
+                aggregate_id:
+                  typeof requestRow.result?.trade_id === 'string' ? requestRow.result.trade_id : 'T-AMEND-100',
+                event_type: 'TradeCancelled',
+                occurred_at: requestRow.decided_at ?? '2026-04-11T09:05:00Z',
+                recorded_at: requestRow.decided_at ?? '2026-04-11T09:05:00Z',
+                actor_id: requestRow.decided_by,
+                correlation_id: `assistant-action-${requestRow.action_request_id}`,
+                causation_id: `assistant-action-request:${requestRow.action_request_id}`,
+                payload: {
+                  assistant_action_request_id: requestRow.action_request_id,
+                  assistant_run_id: requestRow.run_id,
+                  status: 'CANCELLED',
+                },
+              },
+            ]
+          : []
+      })
+      const actionTraces = traceActionRequests.map((requestRow) => ({
+        action_request: requestRow,
+        mutation_events: mutationEvents.filter(
+          (event) => event.causation_id === `assistant-action-request:${requestRow.action_request_id}`,
+        ),
+      }))
+      const timeline = [
+        {
+          entry_type: 'run_started',
+          occurred_at: primaryRequest.created_at,
+          title: 'Run started',
+          summary: 'Cancel the selected trade.',
+          status: 'COMPLETED',
+          metadata: {
+            run_id: runId,
+            agent_id: primaryRequest.agent_id,
+            workspace: primaryRequest.workspace,
+          },
+        },
+        {
+          entry_type: 'action_requested',
+          occurred_at: primaryRequest.created_at,
+          title: primaryRequest.summary,
+          summary: primaryRequest.description,
+          status: primaryRequest.status,
+          metadata: {
+            action_request_id: primaryRequest.action_request_id,
+            action_type: primaryRequest.action_type,
+            payload: primaryRequest.payload,
+          },
+        },
+        {
+          entry_type: 'tool_call',
+          occurred_at: primaryRequest.created_at,
+          title: 'Tool call: get_trade_by_id',
+          summary: 'Loaded trade T-AMEND-100 for governance review.',
+          status: null,
+          metadata: {
+            tool_name: 'get_trade_by_id',
+            arguments: { trade_id: 'T-AMEND-100' },
+            record_count: 1,
+          },
+        },
+        ...traceActionRequests
+          .filter((requestRow) => requestRow.decided_at !== null)
+          .map((requestRow) => ({
+            entry_type: 'decision',
+            occurred_at: requestRow.decided_at,
+            title: `Decision: ${requestRow.status}`,
+            summary: `${requestRow.decided_by ?? 'ops_admin'} decided action request #${requestRow.action_request_id}.`,
+            status: requestRow.status,
+            metadata: {
+              action_request_id: requestRow.action_request_id,
+              result: requestRow.result ?? {},
+            },
+          })),
+        ...mutationEvents.map((event) => ({
+          entry_type: 'mutation',
+          occurred_at: event.occurred_at,
+          title: `Mutation event: ${event.event_type}`,
+          summary: `${event.aggregate_type} ${event.aggregate_id}`,
+          status: null,
+          metadata: {
+            event_id: event.event_id,
+            payload: event.payload,
+          },
+        })),
+        {
+          entry_type: 'run_completed',
+          occurred_at: primaryRequest.created_at,
+          title: 'Run completed',
+          summary: 'Assistant run completed.',
+          status: 'COMPLETED',
+          metadata: {
+            action_request_count: traceActionRequests.length,
+            tool_call_count: 1,
+          },
+        },
+      ]
+
+      writeJson(response, {
+        run: {
+          conversation_id: 601,
+          run_id: runId,
+          status: 'COMPLETED',
+          created_at: primaryRequest.created_at,
+          completed_at: primaryRequest.created_at,
+          user_id: primaryRequest.user_id,
+          user_role: 'TRADER',
+          workspace: primaryRequest.workspace,
+          agent_id: primaryRequest.agent_id,
+          agent_name: primaryRequest.agent_name,
+          provider: 'openai',
+          model: 'gpt-5.4',
+          use_live_tools: true,
+          warning_count: 0,
+          tool_call_count: 1,
+          input_tokens: 120,
+          output_tokens: 60,
+          latest_user_message: 'Cancel the selected trade.',
+          assistant_message: primaryRequest.description,
+          error_detail: null,
+          request_messages: [{ role: 'user', content: 'Cancel the selected trade.' }],
+          application_context: 'Selected trade T-AMEND-100.',
+          prompt_sections: [],
+          rendered_system_prompt: 'Escalate cross-user trade actions into an approval inbox before execution.',
+          warnings: [],
+          tool_calls: [
+            {
+              tool_name: 'get_trade_by_id',
+              summary: 'Loaded trade T-AMEND-100 for governance review.',
+              arguments: { trade_id: 'T-AMEND-100' },
+              record_count: 1,
+            },
+          ],
+        },
+        action_requests: actionTraces,
+        timeline,
+        mutation_event_count: mutationEvents.length,
+      })
+      return
+    }
+
     if (url.pathname === '/admin/assistant/action-requests' && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
 
       const status = url.searchParams.get('status')?.trim().toUpperCase() ?? ''
+      const actionType = url.searchParams.get('action_type')?.trim() ?? ''
+      const agentId = url.searchParams.get('agent_id')?.trim().toLowerCase() ?? ''
+      const userId = url.searchParams.get('user_id')?.trim() ?? ''
+      const decidedBy = url.searchParams.get('decided_by')?.trim() ?? ''
+      const search = url.searchParams.get('search')?.trim().toLowerCase() ?? ''
+      const createdAfter = Date.parse(url.searchParams.get('created_after') ?? '')
+      const createdBefore = Date.parse(url.searchParams.get('created_before') ?? '')
+      const decidedAfter = Date.parse(url.searchParams.get('decided_after') ?? '')
+      const decidedBefore = Date.parse(url.searchParams.get('decided_before') ?? '')
       const limit = Number(url.searchParams.get('limit') ?? '')
       const offset = Number(url.searchParams.get('offset') ?? '')
 
       let filteredRequests = assistantActionRequestRows
       if (status) {
         filteredRequests = filteredRequests.filter((requestRow) => requestRow.status === status)
+      }
+      if (actionType) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.action_type === actionType)
+      }
+      if (agentId) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.agent_id?.toLowerCase() === agentId)
+      }
+      if (userId) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.user_id === userId)
+      }
+      if (decidedBy) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.decided_by === decidedBy)
+      }
+      if (Number.isFinite(createdAfter)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => Date.parse(requestRow.created_at) >= createdAfter,
+        )
+      }
+      if (Number.isFinite(createdBefore)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => Date.parse(requestRow.created_at) <= createdBefore,
+        )
+      }
+      if (Number.isFinite(decidedAfter)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => requestRow.decided_at !== null && Date.parse(requestRow.decided_at) >= decidedAfter,
+        )
+      }
+      if (Number.isFinite(decidedBefore)) {
+        filteredRequests = filteredRequests.filter(
+          (requestRow) => requestRow.decided_at !== null && Date.parse(requestRow.decided_at) <= decidedBefore,
+        )
+      }
+      if (search) {
+        filteredRequests = filteredRequests.filter((requestRow) =>
+          [
+            requestRow.summary,
+            requestRow.description,
+            requestRow.user_id,
+            requestRow.agent_id,
+            requestRow.agent_name,
+            requestRow.decided_by,
+            requestRow.action_type,
+          ].some((value) => String(value ?? '').toLowerCase().includes(search)),
+        )
       }
 
       const normalizedOffset = Number.isFinite(offset) && offset > 0 ? Math.trunc(offset) : 0
@@ -354,7 +1108,44 @@ async function startMockApiServer(
           ? filteredRequests.slice(normalizedOffset)
           : filteredRequests.slice(normalizedOffset, normalizedOffset + normalizedLimit)
 
-      writeJson(response, pagedRequests)
+      const decidedRequests = filteredRequests.filter((requestRow) => requestRow.decided_at !== null)
+      const totalDecisionSeconds = decidedRequests.reduce((total, requestRow) => {
+        const createdAt = Date.parse(requestRow.created_at)
+        const decidedAt = Date.parse(requestRow.decided_at ?? '')
+        return Number.isFinite(createdAt) && Number.isFinite(decidedAt)
+          ? total + Math.max((decidedAt - createdAt) / 1000, 0)
+          : total
+      }, 0)
+      const summary = {
+        total_count: filteredRequests.length,
+        pending_count: filteredRequests.filter((requestRow) => requestRow.status === 'PENDING').length,
+        executed_count: filteredRequests.filter((requestRow) => requestRow.status === 'EXECUTED').length,
+        rejected_count: filteredRequests.filter((requestRow) => requestRow.status === 'REJECTED').length,
+        failed_count: filteredRequests.filter((requestRow) => requestRow.status === 'FAILED').length,
+        correction_count: filteredRequests.filter(
+          (requestRow) => requestRow.review_outcome === 'APPROVED_WITH_CORRECTIONS',
+        ).length,
+        avg_decision_seconds:
+          decidedRequests.length > 0 ? totalDecisionSeconds / decidedRequests.length : null,
+      }
+
+      writeJson(response, {
+        items: pagedRequests,
+        total_count: filteredRequests.length,
+        limit: normalizedLimit ?? filteredRequests.length,
+        offset: normalizedOffset,
+        has_more: normalizedOffset + pagedRequests.length < filteredRequests.length,
+        summary,
+      })
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/outcome-metrics' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, buildAssistantOutcomeMetrics())
       return
     }
 
@@ -373,6 +1164,54 @@ async function startMockApiServer(
       }
 
       writeJson(response, adminRoadmapDocument)
+      return
+    }
+
+    if (url.pathname === '/admin/data/projection-monitoring' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, projectionMonitoringAdminRecord)
+      return
+    }
+
+    if (url.pathname === '/admin/data/assistant-agents/seed' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      const requestedBy =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? normalizeOptionalText((payload as Record<string, unknown>).requested_by) ?? smokeSession.user.user_id
+          : smokeSession.user.user_id
+      writeJson(response, {
+        requested_by: requestedBy,
+        total_profiles: 13,
+        total_templates: 13,
+        created_count: 0,
+        updated_count: assistantAdminAgents.length,
+        agent_ids: assistantAdminAgents.map((agent) => agent.agent_id),
+      })
+      return
+    }
+
+    if (url.pathname === '/admin/codex/settings' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, codexTaskSettings)
+      return
+    }
+
+    if (url.pathname === '/admin/codex/tasks' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [...codexTasks])
       return
     }
 
@@ -443,19 +1282,58 @@ async function startMockApiServer(
         return
       }
 
+      const decisionPayload = await readJsonBody(request)
+      const decisionRecord =
+        decisionPayload && typeof decisionPayload === 'object' && !Array.isArray(decisionPayload)
+          ? (decisionPayload as Record<string, unknown>)
+          : {}
+      const reviewOutcome =
+        decisionRecord.review_outcome === 'APPROVED_WITH_CORRECTIONS'
+          ? 'APPROVED_WITH_CORRECTIONS'
+          : 'APPROVED_AS_IS'
+      const correctionFields = normalizedCorrectionFields(decisionRecord.correction_fields)
       const tradeId =
         typeof currentRequest.payload.trade_id === 'string' && currentRequest.payload.trade_id.trim()
           ? currentRequest.payload.trade_id.trim()
           : 'T-AMEND-100'
+      const eventId = `evt-assistant-cancel-${actionRequestId}`
+      const tradeIndex = tradeRows.findIndex((trade) => trade.trade_id === tradeId)
+      if (tradeIndex >= 0) {
+        tradeRows[tradeIndex] = {
+          ...tradeRows[tradeIndex],
+          status: 'CANCELLED',
+          updated_at: '2026-04-11T09:05:00Z',
+          last_event_id: eventId,
+        } as SmokeTradeRow
+      }
       const updatedRequest = {
         ...currentRequest,
         status: 'EXECUTED',
+        lifecycle: {
+          ...currentRequest.lifecycle,
+          stage: 'EXECUTED',
+          label: 'Executed',
+          tone: 'success',
+          is_terminal: true,
+          can_approve: false,
+          can_reject: false,
+          reviewer_action_label: null,
+          decided_label: `Executed by ${smokeSession.user.user_id}`,
+        },
         result: {
+          event_id: eventId,
           trade_id: tradeId,
-          decision: 'approved',
+          trade_status: 'CANCELLED',
         },
         decided_at: '2026-04-11T09:05:00Z',
         decided_by: smokeSession.user.user_id,
+        review_outcome: reviewOutcome,
+        decision_note: normalizedReviewText(decisionRecord.decision_note),
+        correction_summary:
+          reviewOutcome === 'APPROVED_WITH_CORRECTIONS'
+            ? normalizedReviewText(decisionRecord.correction_summary)
+            : null,
+        correction_fields: reviewOutcome === 'APPROVED_WITH_CORRECTIONS' ? correctionFields : [],
       } satisfies SmokeAssistantActionRequestRow
 
       assistantActionRequestRows[actionRequestIndex] = updatedRequest
@@ -485,12 +1363,32 @@ async function startMockApiServer(
         return
       }
 
+      const decisionPayload = await readJsonBody(request)
+      const decisionRecord =
+        decisionPayload && typeof decisionPayload === 'object' && !Array.isArray(decisionPayload)
+          ? (decisionPayload as Record<string, unknown>)
+          : {}
       const updatedRequest = {
         ...currentRequest,
         status: 'REJECTED',
+        lifecycle: {
+          ...currentRequest.lifecycle,
+          stage: 'REJECTED',
+          label: 'Rejected',
+          tone: 'neutral',
+          is_terminal: true,
+          can_approve: false,
+          can_reject: false,
+          reviewer_action_label: null,
+          decided_label: `Rejected by ${smokeSession.user.user_id}`,
+        },
         result: null,
         decided_at: '2026-04-11T09:05:00Z',
         decided_by: smokeSession.user.user_id,
+        review_outcome: 'REJECTED',
+        decision_note: normalizedReviewText(decisionRecord.decision_note),
+        correction_summary: null,
+        correction_fields: [],
       } satisfies SmokeAssistantActionRequestRow
 
       assistantActionRequestRows[actionRequestIndex] = updatedRequest
@@ -540,6 +1438,53 @@ async function startMockApiServer(
 
     if (url.pathname === '/operations/workspace-summary' && method === 'GET') {
       writeJson(response, buildWorkspaceSummary(tradeRows))
+      return
+    }
+
+    if (url.pathname === '/documents/settings' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        enabled: true,
+        default_provider: 'openai',
+        effective_default_provider: 'openai',
+        configured_provider_count: 1,
+        providers: [
+          {
+            provider: 'openai',
+            label: 'OpenAI',
+            enabled: true,
+            configured: true,
+            is_default: true,
+            default_model: 'gpt-5.4-mini',
+            base_url: 'https://api.openai.com/v1',
+            setup_env_var: 'OPENAI_API_KEY',
+          },
+        ],
+      })
+      return
+    }
+
+    if (url.pathname === '/documents/schema-registry' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        version: 'smoke-1',
+        document_kinds: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/documents' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
       return
     }
 
@@ -610,6 +1555,21 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/confirmations' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/settlement/invoices' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/settlement/payments' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/deliveries' && method === 'GET') {
       writeJson(response, [])
       return
     }
@@ -777,7 +1737,8 @@ async function startMockApiServer(
       return
     }
 
-    if (url.pathname === '/layout-definitions/trades' && method === 'GET') {
+    const layoutDefinitionMatch = url.pathname.match(/^\/layout-definitions\/([^/]+)$/)
+    if (layoutDefinitionMatch && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
@@ -786,16 +1747,7 @@ async function startMockApiServer(
       return
     }
 
-    if (url.pathname === '/layout-definitions/dashboard' && method === 'GET') {
-      if (!requireAuthorization(request, response, sessionExpired)) {
-        return
-      }
-
-      writeJson(response, null)
-      return
-    }
-
-    if (url.pathname === '/layout-definitions/trades' && method === 'PUT') {
+    if (layoutDefinitionMatch && method === 'PUT') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
       }
@@ -809,37 +1761,9 @@ async function startMockApiServer(
         spans?: unknown
       }
 
+      const workspaceId = layoutDefinitionMatch[1]
       writeJson(response, {
-        workspace_id: 'trades',
-        order: Array.isArray(layout.order) ? layout.order : [],
-        hidden: Array.isArray(layout.hidden) ? layout.hidden : [],
-        spans:
-          layout.spans && typeof layout.spans === 'object' && !Array.isArray(layout.spans)
-            ? layout.spans
-            : {},
-        updated_at: '2026-04-11T00:00:00Z',
-        updated_by: smokeSession.user.user_id,
-        version: 1,
-      })
-      return
-    }
-
-    if (url.pathname === '/layout-definitions/dashboard' && method === 'PUT') {
-      if (!requireAuthorization(request, response, sessionExpired)) {
-        return
-      }
-
-      const payload = await readJsonBody(request)
-      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
-
-      const layout = payload as {
-        order?: unknown
-        hidden?: unknown
-        spans?: unknown
-      }
-
-      writeJson(response, {
-        workspace_id: 'dashboard',
+        workspace_id: workspaceId,
         order: Array.isArray(layout.order) ? layout.order : [],
         hidden: Array.isArray(layout.hidden) ? layout.hidden : [],
         spans:

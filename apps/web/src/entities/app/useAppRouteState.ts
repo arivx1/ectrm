@@ -18,6 +18,8 @@ import {
   writeAppRouteHandoff,
 } from '../../shared/appRouteHandoff'
 
+export const DEFAULT_APP_VIEW_KEY: ViewKey = 'prompt'
+
 export type AppRouteState = {
   section: PrimaryNavigationSectionKey | null
   view: ViewKey
@@ -26,11 +28,15 @@ export type AppRouteState = {
   handoff: AppRouteHandoff | null
 }
 
+type AppRouteNavigationOptions = {
+  tradeId?: string | null
+}
+
 function readAppRouteState(): AppRouteState {
   if (typeof window === 'undefined') {
     return {
       section: null,
-      view: 'dashboard',
+      view: DEFAULT_APP_VIEW_KEY,
       docsDocumentKey: DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
       tradeId: null,
       handoff: null,
@@ -41,7 +47,7 @@ function readAppRouteState(): AppRouteState {
   const sectionParam = params.get('section')
   const viewParam = params.get('view')
   const docsParam = params.get('doc')
-  const view: ViewKey = isViewKey(viewParam) ? viewParam : 'dashboard'
+  const view: ViewKey = isViewKey(viewParam) ? viewParam : DEFAULT_APP_VIEW_KEY
 
   return {
     section: isPrimaryNavigationSectionKey(sectionParam) ? sectionParam : null,
@@ -68,7 +74,7 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
   if (route.section !== null) {
     params.set('section', route.section)
   } else {
-    if (route.view !== 'dashboard') {
+    if (route.view !== DEFAULT_APP_VIEW_KEY) {
       params.set('view', route.view)
     }
     if (route.view === 'guide' && route.docsDocumentKey !== DEFAULT_DOCUMENTATION_DOCUMENT_KEY) {
@@ -105,25 +111,35 @@ export function useAppRouteState() {
     window.history[historyMethod](null, '', nextUrl)
   }
 
-  function navigateToView(view: ViewKey, handoff: AppRouteHandoff | null = null) {
-    applyViewNavigation(view, 'push', handoff)
+  function navigateToView(
+    view: ViewKey,
+    handoff: AppRouteHandoff | null = null,
+    options: AppRouteNavigationOptions = {},
+  ) {
+    applyViewNavigation(view, 'push', handoff, options)
   }
 
-  function replaceView(view: ViewKey, handoff: AppRouteHandoff | null = null) {
-    applyViewNavigation(view, 'replace', handoff)
+  function replaceView(
+    view: ViewKey,
+    handoff: AppRouteHandoff | null = null,
+    options: AppRouteNavigationOptions = {},
+  ) {
+    applyViewNavigation(view, 'replace', handoff, options)
   }
 
   function applyViewNavigation(
     view: ViewKey,
     historyMode: 'push' | 'replace',
     handoff: AppRouteHandoff | null = null,
+    options: AppRouteNavigationOptions = {},
   ) {
+    const nextTradeId = options.tradeId !== undefined ? options.tradeId : selectedTradeId
     syncRouteState(
       {
         section: null,
         view,
         docsDocumentKey: activeDocumentationDocumentKey,
-        tradeId: selectedTradeId,
+        tradeId: nextTradeId,
         handoff,
       },
       historyMode,
@@ -132,6 +148,9 @@ export function useAppRouteState() {
     setActiveNavigationSectionKey(null)
     setCurrentView(view)
     setRouteHandoff(handoff)
+    if (options.tradeId !== undefined) {
+      setSelectedTradeId(options.tradeId)
+    }
   }
 
   function hrefForView(view: ViewKey) {
@@ -173,7 +192,17 @@ export function useAppRouteState() {
   }
 
   function navigateToTrade(tradeId: string, handoff: AppRouteHandoff | null = null) {
-    const nextHandoff = handoff ? { ...handoff, tradeId } : null
+    const nextHandoff = handoff
+      ? {
+          ...handoff,
+          tradeId,
+          focus: {
+            type: 'trade' as const,
+            id: tradeId,
+            label: handoff.focus.label ?? tradeId,
+          },
+        }
+      : null
     syncRouteState(
       {
         section: null,

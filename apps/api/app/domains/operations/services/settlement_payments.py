@@ -351,7 +351,7 @@ def _aggregate_trade_payment_note(
     return None
 
 
-def _derive_trade_payment_projection(
+def derive_trade_payment_projection(
     *,
     invoices: list[TradeInvoice],
     payments_by_invoice_id: dict[int, list[TradePayment]],
@@ -481,7 +481,7 @@ def synchronize_trade_payment_projection(
     for payment in payments:
         payments_by_invoice_id.setdefault(payment.invoice_id, []).append(payment)
 
-    projection = _derive_trade_payment_projection(
+    projection = derive_trade_payment_projection(
         invoices=invoices,
         payments_by_invoice_id=payments_by_invoice_id,
         now=reference_time,

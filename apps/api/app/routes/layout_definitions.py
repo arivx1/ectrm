@@ -50,6 +50,13 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
         "scheduling-windows": ("full", "wide", "half"),
         "scheduling-handoffs": ("full", "wide", "half"),
     },
+    "pretrade": {
+        "pretrade-brief": ("full", "wide", "half"),
+        "pretrade-recommendation": ("wide", "half", "side"),
+        "pretrade-context": ("full", "wide", "half"),
+        "pretrade-scenarios": ("wide", "half", "side"),
+        "pretrade-reviews": ("wide", "half", "side"),
+    },
     "trades": {
         "create-trade": ("full", "wide"),
         "trade-inspector": ("wide", "half", "side"),

@@ -1,0 +1,42 @@
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.section-head h3 {
+  margin-top: 0.35rem;
+  font-size: 1.8rem;
+  color: #13293d;
+}
+
+.section-head p {
+  max-width: 25rem;
+  margin: 0;
+  line-height: 1.55;
+  text-align: right;
+}
+
+.section-head-control {
+  align-items: center;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.events-filter-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  align-items: end;
+}
+
+.events-search-field {
+  grid-column: 1 / -1;
+}
+

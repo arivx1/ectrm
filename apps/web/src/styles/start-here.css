@@ -1,0 +1,80 @@
+.start-here-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.start-here-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 18, 28, 0.58);
+  backdrop-filter: blur(12px);
+}
+
+.start-here-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(70rem, calc(100vw - 3rem));
+  max-height: min(90vh, 58rem);
+  overflow: auto;
+  padding: 1.35rem;
+  border-radius: 1.6rem;
+  background:
+    radial-gradient(circle at top right, rgba(18, 124, 108, 0.1), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 248, 249, 0.9));
+  box-shadow: 0 28px 80px rgba(17, 30, 41, 0.22);
+}
+
+.start-here-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.start-here-copy {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.start-here-copy h3 {
+  margin: 0;
+  font-size: clamp(2rem, 3.8vw, 3.2rem);
+  line-height: 0.95;
+  color: #13293d;
+}
+
+.start-here-copy p {
+  max-width: 46rem;
+  margin: 0;
+  color: #53616d;
+  line-height: 1.7;
+}
+
+.start-here-banner {
+  margin-top: 1rem;
+}
+
+.start-here-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  margin-top: 1rem;
+}
+
+.start-here-card {
+  min-height: 14rem;
+}
+
+.start-here-footnote {
+  margin-top: 1rem;
+}
+
+.start-here-footnote p {
+  margin: 0;
+  color: #53616d;
+  line-height: 1.6;
+}
+

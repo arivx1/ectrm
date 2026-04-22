@@ -17,6 +17,63 @@ from apps.api.app.schemas.assistant import (
 )
 
 
+def add_assistant_run(
+    *,
+    db: Session,
+    conversation_id: int | None,
+    status: str,
+    user_id: str,
+    session_id: str,
+    user_role: str,
+    workspace: str | None,
+    agent_id: str | None,
+    agent_name: str | None,
+    provider: str,
+    model: str,
+    use_live_tools: bool,
+    request_messages: Sequence[AssistantMessageIn],
+    application_context: str | None,
+    prompt_sections: Iterable[AssistantPromptSectionOut],
+    rendered_system_prompt: str,
+    warnings: Sequence[str],
+    tool_calls: Sequence[AssistantToolCallOut],
+    input_tokens: int | None,
+    output_tokens: int | None,
+    assistant_message: str | None,
+    agent_role_key: str | None = None,
+    agent_profile_kind: str | None = None,
+    error_detail: str | None = None,
+) -> AssistantRun:
+    record = _build_assistant_run(
+        conversation_id=conversation_id,
+        status=status,
+        user_id=user_id,
+        session_id=session_id,
+        user_role=user_role,
+        workspace=workspace,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        agent_role_key=agent_role_key,
+        agent_profile_kind=agent_profile_kind,
+        provider=provider,
+        model=model,
+        use_live_tools=use_live_tools,
+        request_messages=request_messages,
+        application_context=application_context,
+        prompt_sections=prompt_sections,
+        rendered_system_prompt=rendered_system_prompt,
+        warnings=warnings,
+        tool_calls=tool_calls,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        assistant_message=assistant_message,
+        error_detail=error_detail,
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
 def create_assistant_run(
     *,
     db: Session,
@@ -40,10 +97,11 @@ def create_assistant_run(
     input_tokens: int | None,
     output_tokens: int | None,
     assistant_message: str | None,
+    agent_role_key: str | None = None,
+    agent_profile_kind: str | None = None,
     error_detail: str | None = None,
 ) -> AssistantRun:
-    completed_at = datetime.now(timezone.utc)
-    record = AssistantRun(
+    record = _build_assistant_run(
         conversation_id=conversation_id,
         status=status,
         user_id=user_id,
@@ -52,32 +110,21 @@ def create_assistant_run(
         workspace=workspace,
         agent_id=agent_id,
         agent_name=agent_name,
+        agent_role_key=agent_role_key,
+        agent_profile_kind=agent_profile_kind,
         provider=provider,
         model=model,
         use_live_tools=use_live_tools,
-        request_messages=[message.model_dump(mode="json") for message in request_messages],
+        request_messages=request_messages,
         application_context=application_context,
-        prompt_sections=[
-            section.model_dump(mode="json")
-            if isinstance(section, AssistantPromptSectionOut)
-            else AssistantPromptSectionOut.model_validate(section).model_dump(mode="json")
-            for section in prompt_sections
-        ],
+        prompt_sections=prompt_sections,
         rendered_system_prompt=rendered_system_prompt,
-        warnings=list(warnings),
-        tool_calls=[
-            tool_call.model_dump(mode="json")
-            if isinstance(tool_call, AssistantToolCallOut)
-            else AssistantToolCallOut.model_validate(tool_call).model_dump(mode="json")
-            for tool_call in tool_calls
-        ],
+        warnings=warnings,
+        tool_calls=tool_calls,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        latest_user_message=_latest_user_message(request_messages),
         assistant_message=assistant_message,
         error_detail=error_detail,
-        created_at=completed_at,
-        completed_at=completed_at,
     )
     db.add(record)
     db.commit()
@@ -91,10 +138,18 @@ def list_assistant_runs(
     limit: int,
     offset: int,
     user_id: str | None = None,
+    role_key: str | None = None,
+    profile_kind: str | None = None,
 ) -> list[AssistantRun]:
     stmt = select(AssistantRun).order_by(AssistantRun.created_at.desc()).limit(limit).offset(offset)
     if user_id is not None:
         stmt = stmt.where(AssistantRun.user_id == user_id)
+    normalized_role_key = _normalize_optional_text(role_key, lowercase=True)
+    normalized_profile_kind = _normalize_optional_text(profile_kind, uppercase=True)
+    if normalized_role_key is not None:
+        stmt = stmt.where(AssistantRun.agent_role_key == normalized_role_key)
+    if normalized_profile_kind is not None:
+        stmt = stmt.where(AssistantRun.agent_profile_kind == normalized_profile_kind)
     return db.execute(stmt).scalars().all()
 
 
@@ -114,6 +169,8 @@ def to_assistant_run_summary_out(record: AssistantRun) -> AssistantRunSummaryOut
         workspace=record.workspace,
         agent_id=record.agent_id,
         agent_name=record.agent_name,
+        agent_role_key=record.agent_role_key,
+        agent_profile_kind=record.agent_profile_kind,
         provider=record.provider,
         model=record.model,
         use_live_tools=record.use_live_tools,
@@ -162,3 +219,86 @@ def _latest_user_message(messages: Sequence[AssistantMessageIn]) -> str | None:
         if message.role == "user":
             return message.content
     return None
+
+
+def _normalize_optional_text(
+    value: str | None,
+    *,
+    lowercase: bool = False,
+    uppercase: bool = False,
+) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if lowercase:
+        normalized = normalized.lower()
+    if uppercase:
+        normalized = normalized.upper()
+    return normalized or None
+
+
+def _build_assistant_run(
+    *,
+    conversation_id: int | None,
+    status: str,
+    user_id: str,
+    session_id: str,
+    user_role: str,
+    workspace: str | None,
+    agent_id: str | None,
+    agent_name: str | None,
+    provider: str,
+    model: str,
+    use_live_tools: bool,
+    request_messages: Sequence[AssistantMessageIn],
+    application_context: str | None,
+    prompt_sections: Iterable[AssistantPromptSectionOut],
+    rendered_system_prompt: str,
+    warnings: Sequence[str],
+    tool_calls: Sequence[AssistantToolCallOut],
+    input_tokens: int | None,
+    output_tokens: int | None,
+    assistant_message: str | None,
+    agent_role_key: str | None = None,
+    agent_profile_kind: str | None = None,
+    error_detail: str | None = None,
+) -> AssistantRun:
+    completed_at = datetime.now(timezone.utc)
+    return AssistantRun(
+        conversation_id=conversation_id,
+        status=status,
+        user_id=user_id,
+        session_id=session_id,
+        user_role=user_role,
+        workspace=workspace,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        agent_role_key=agent_role_key,
+        agent_profile_kind=agent_profile_kind,
+        provider=provider,
+        model=model,
+        use_live_tools=use_live_tools,
+        request_messages=[message.model_dump(mode="json") for message in request_messages],
+        application_context=application_context,
+        prompt_sections=[
+            section.model_dump(mode="json")
+            if isinstance(section, AssistantPromptSectionOut)
+            else AssistantPromptSectionOut.model_validate(section).model_dump(mode="json")
+            for section in prompt_sections
+        ],
+        rendered_system_prompt=rendered_system_prompt,
+        warnings=list(warnings),
+        tool_calls=[
+            tool_call.model_dump(mode="json")
+            if isinstance(tool_call, AssistantToolCallOut)
+            else AssistantToolCallOut.model_validate(tool_call).model_dump(mode="json")
+            for tool_call in tool_calls
+        ],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        latest_user_message=_latest_user_message(request_messages),
+        assistant_message=assistant_message,
+        error_detail=error_detail,
+        created_at=completed_at,
+        completed_at=completed_at,
+    )

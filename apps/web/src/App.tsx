@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import './App.css'
 import './appearance.css'
@@ -40,11 +40,21 @@ import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import { appConfig } from './shared/config'
 import {
   describeAppRouteHandoff,
+  getAppRouteHandoffFilterValue,
   getAppRouteHandoffKey,
+  getAppRouteHandoffTradeId,
   type AppRouteHandoff,
 } from './shared/appRouteHandoff'
 import { getAuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
 import type { AuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
+import {
+  clearPromptSignInReturnIntent,
+  formatPromptResumeIntentLabel,
+  getPromptResumeIntent,
+  getPromptSignInReturnIntent,
+  subscribePromptResumeIntent,
+  subscribePromptSignInReturnIntent,
+} from './shared/promptResumeIntent'
 import { commodityClassOrder } from './shared/trading'
 
 function WorkspaceLoadState({
@@ -135,6 +145,8 @@ function AuthenticatedWorkspaceShell({
     () => describeAppRouteHandoff(routeHandoff, currentView),
     [currentView, routeHandoff],
   )
+  const currentWorkspaceOwnsHandoffBanner =
+    currentView === 'operations' || currentView === 'settlement' || currentView === 'trades'
 
   const summary = useAppWorkspaceSummary({
     authSession: workspaceData.authSession,
@@ -511,12 +523,19 @@ function AuthenticatedWorkspaceShell({
         {!showingNavigationSectionLanding && workspaceWarning ? (
           <div className="error-banner">{workspaceData.groupErrors[workspaceWarning]}</div>
         ) : null}
-        {!showingNavigationSectionLanding && routeHandoffBanner ? (
+        {!showingNavigationSectionLanding && routeHandoffBanner && !currentWorkspaceOwnsHandoffBanner ? (
           <section className="feedback-banner workspace-handoff-banner" aria-live="polite">
             <div className="workspace-handoff-banner-copy">
               <strong>{routeHandoffBanner.title}</strong>
               <p>{routeHandoffBanner.detail}</p>
             </div>
+            <button
+              type="button"
+              className="button button-secondary workspace-window-banner-action"
+              onClick={() => route.replaceView(currentView)}
+            >
+              Clear Focus
+            </button>
           </section>
         ) : null}
 
@@ -542,6 +561,7 @@ function AuthenticatedWorkspaceShell({
               hrefForView={route.hrefForView}
               navigateToTrade={navigateToTrade}
               navigateToView={route.navigateToView}
+              replaceView={route.replaceView}
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}
@@ -592,6 +612,7 @@ function AuthenticatedWorkspaceShell({
               hrefForView={route.hrefForView}
               navigateToTrade={navigateToTrade}
               navigateToView={route.navigateToView}
+              replaceView={route.replaceView}
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}
@@ -639,6 +660,16 @@ export default function App() {
   const activeRouteHandoffFilterRef = useRef<string | null>(null)
   const appliedRouteHandoffKeyRef = useRef<string | null>(null)
   const routeHandoffKey = getAppRouteHandoffKey(routeHandoff)
+  const promptResumeIntent = useSyncExternalStore(
+    subscribePromptResumeIntent,
+    getPromptResumeIntent,
+    () => null,
+  )
+  const promptSignInReturnIntent = useSyncExternalStore(
+    subscribePromptSignInReturnIntent,
+    getPromptSignInReturnIntent,
+    () => null,
+  )
 
   function toggleNavSection(sectionKey: PrimaryNavigationSectionKey) {
     setOpenNavSectionKeys((current) =>
@@ -659,8 +690,9 @@ export default function App() {
   useEffect(() => {
     const nextHandoffFilter =
       routeHandoff && (currentView === 'operations' || currentView === 'settlement')
-        ? routeHandoff.tradeId
+        ? getAppRouteHandoffFilterValue(routeHandoff)
         : null
+    const routeHandoffTradeId = getAppRouteHandoffTradeId(routeHandoff)
 
     if (routeHandoffKey === null) {
       const previousHandoffFilter = activeRouteHandoffFilterRef.current
@@ -686,8 +718,8 @@ export default function App() {
     }
     activeRouteHandoffFilterRef.current = nextHandoffFilter
 
-    if (currentView === 'trades' && routeHandoff?.tradeId && selectedTradeId !== routeHandoff.tradeId) {
-      setSelectedTradeId(routeHandoff.tradeId)
+    if (currentView === 'trades' && routeHandoffTradeId && selectedTradeId !== routeHandoffTradeId) {
+      setSelectedTradeId(routeHandoffTradeId)
     }
 
     if (
@@ -760,13 +792,63 @@ export default function App() {
     navigateToView: route.navigateToView,
     replaceView,
   })
+  const promptResumeIntentLabel = promptResumeIntent
+    ? formatPromptResumeIntentLabel(promptResumeIntent)
+    : null
+
+  useEffect(() => {
+    if (!authSession || authInterruption.authInterruptionResume || !promptResumeIntent) {
+      return
+    }
+
+    if (currentView === 'prompt') {
+      return
+    }
+
+    dismissStartHere()
+    replaceView('prompt')
+  }, [
+    authInterruption.authInterruptionResume,
+    authSession,
+    currentView,
+    dismissStartHere,
+    promptResumeIntent,
+    replaceView,
+  ])
+
+  useEffect(() => {
+    if (
+      !authSession ||
+      authInterruption.authInterruptionResume ||
+      promptResumeIntent ||
+      !promptSignInReturnIntent
+    ) {
+      return
+    }
+
+    clearPromptSignInReturnIntent()
+    dismissStartHere()
+    if (currentView !== 'prompt') {
+      replaceView('prompt')
+    }
+  }, [
+    authInterruption.authInterruptionResume,
+    authSession,
+    currentView,
+    dismissStartHere,
+    promptResumeIntent,
+    promptSignInReturnIntent,
+    replaceView,
+  ])
 
   const showStartHereOverlay =
     startHere.showStartHere &&
     !(authSession && startHereRouting.startHereReturnIntent) &&
+    currentView !== 'prompt' &&
+    currentView !== 'settings' &&
     workspaceData.authInterruptionReason !== 'session_expired' &&
     authInterruption.authInterruptionResume === null
-  const signedOutNeedsAuthGate = !authSession && currentView !== 'guide'
+  const signedOutNeedsAuthGate = !authSession && currentView !== 'guide' && currentView !== 'prompt'
 
   if (signedOutNeedsAuthGate) {
     return (
@@ -777,6 +859,8 @@ export default function App() {
           authInterruptionMessage={authInterruption.authInterruptionMessage}
           onSessionChange={workspaceData.handleSessionChange}
           pendingStartHereReturnLabel={startHereRouting.pendingStartHereReturnLabel}
+          pendingPromptResumeLabel={promptResumeIntentLabel}
+          pendingPromptResumeWillSubmit={promptResumeIntent?.submitAfterSignIn ?? false}
         />
         {showStartHereOverlay ? (
           <AppStartHereOverlay

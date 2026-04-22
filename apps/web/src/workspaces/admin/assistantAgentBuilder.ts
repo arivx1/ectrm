@@ -1,6 +1,9 @@
 import type {
   AssistantActionType,
   AssistantAgentCapability,
+  AssistantAgentAuthorityLevel,
+  AssistantAgentProfileKind,
+  AssistantAgentRoleArchetype,
   AssistantAgentScope,
   AssistantAgentStatus,
   AssistantProvider,
@@ -15,10 +18,18 @@ export type AgentBuilderDraft = {
   scope: AssistantAgentScope
   provider: AssistantProvider | ''
   model: string
+  role_key: string
+  profile_kind: AssistantAgentProfileKind
+  specialization_summary: string
+  human_owner_role: string
+  authority_ceiling: AssistantAgentAuthorityLevel | ''
+  activation_notes: string
+  profile_request_id: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
+  daily_token_allocation: string
   system_prompt: string
 }
 
@@ -32,7 +43,34 @@ export type AgentBuilderTemplateKey =
   | 'settlement-copilot'
   | 'trade-governor'
 
-type AgentBuilderTemplateDefinition = Omit<AgentBuilderDraft, 'allowed_tools' | 'allowed_action_types'> & {
+export type AgentRoleProfileFitStatus = 'inherited' | 'narrowed' | 'customized' | 'expanded' | 'missing'
+
+export type AgentRoleProfileFitSection = {
+  label: string
+  status: AgentRoleProfileFitStatus
+  detail: string
+}
+
+export type AgentRoleProfileFit = {
+  role: AssistantAgentRoleArchetype | null
+  errors: string[]
+  warnings: string[]
+  sections: AgentRoleProfileFitSection[]
+}
+
+type AgentBuilderTemplateDefinition = Omit<
+  AgentBuilderDraft,
+  | 'role_key'
+  | 'profile_kind'
+  | 'specialization_summary'
+  | 'human_owner_role'
+  | 'authority_ceiling'
+  | 'activation_notes'
+  | 'profile_request_id'
+  | 'allowed_tools'
+  | 'allowed_action_types'
+  | 'daily_token_allocation'
+> & {
   key: AgentBuilderTemplateKey
   summary: string
   best_for: string
@@ -40,6 +78,16 @@ type AgentBuilderTemplateDefinition = Omit<AgentBuilderDraft, 'allowed_tools' | 
   recommended_tools: string[]
   recommended_action_types: AssistantActionType[]
 }
+
+type AgentBuilderTemplateProfile = Pick<
+  AgentBuilderDraft,
+  | 'role_key'
+  | 'profile_kind'
+  | 'specialization_summary'
+  | 'human_owner_role'
+  | 'authority_ceiling'
+  | 'activation_notes'
+>
 
 export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
   'dashboard',
@@ -60,6 +108,21 @@ export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
   'assistant',
 ]
 
+const AUTHORITY_RANK: Record<AssistantAgentAuthorityLevel, number> = {
+  OBSERVE: 1,
+  EXPLAIN: 2,
+  DRAFT: 3,
+  STAGE: 4,
+  EXECUTE: 5,
+  EXTERNAL_COMMIT: 6,
+}
+
+const PROFILE_KIND_LABELS: Record<AgentBuilderDraft['profile_kind'], string> = {
+  CURATED: 'Curated default',
+  ROLE_DERIVED: 'Role specialization',
+  CUSTOM: 'Custom draft',
+}
+
 function renderPromptSection(title: string, lines: string[]): string {
   return `${title}:\n${lines.map((line) => `- ${line}`).join('\n')}`
 }
@@ -78,6 +141,89 @@ function buildSystemPrompt(init: {
     renderPromptSection('Response style', init.response_style),
     renderPromptSection('Guardrails', init.guardrails),
   ].join('\n\n')
+}
+
+function buildRoleSystemPrompt(role: AssistantAgentRoleArchetype): string {
+  return [
+    `You are ${role.name}, a managed role-derived agent inside the ECTRM operator console.`,
+    renderPromptSection('Role mission', role.mission),
+    renderPromptSection('Role guidance', role.base_prompt_guidance),
+    renderPromptSection('Stop conditions', role.stop_conditions),
+    renderPromptSection('Authority boundary', [
+      `Human owner: ${role.human_owner_role}.`,
+      `Authority ceiling: ${role.authority_ceiling}.`,
+      role.maximum_action_types.length > 0
+        ? 'Stage only explicitly allowed approval-gated actions when evidence supports them.'
+        : 'Do not stage approval-gated actions for this profile.',
+    ]),
+  ].join('\n\n')
+}
+
+const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuilderTemplateProfile> = {
+  'trade-explainer': {
+    role_key: 'trade-explainer',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for explaining selected trade state, recent events, and exposure.',
+    human_owner_role: 'Trader',
+    authority_ceiling: 'EXPLAIN',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
+  'ops-coordinator': {
+    role_key: 'ops-coordinator',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for summarizing operational blockers and next-step handoffs.',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
+  'settlement-analyst': {
+    role_key: 'settlement-analyst',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for interpreting invoices, payments, aging, and settlement posture.',
+    human_owner_role: 'Settlement Lead',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
+  'document-triage': {
+    role_key: 'document-triage',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for reviewing document ingestion, linkage, and routing confidence.',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
+  'desk-briefing': {
+    role_key: 'desk-briefing',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for desk-ready briefings across exposure, workflow pressure, and market context.',
+    human_owner_role: 'Desk Lead',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
+  'trade-ops-copilot': {
+    role_key: 'trade-ops-copilot',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for coordinated trade operations follow-through.',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'STAGE',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
+  'settlement-copilot': {
+    role_key: 'settlement-copilot',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for settlement analysis and approval-gated cash action staging.',
+    human_owner_role: 'Settlement Lead',
+    authority_ceiling: 'STAGE',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
+  'trade-governor': {
+    role_key: 'trade-governor',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Role-derived profile for cancel-only trade governance review.',
+    human_owner_role: 'Trader, Desk Lead, or Admin',
+    authority_ceiling: 'STAGE',
+    activation_notes: 'Drafted from the platform role catalog preset.',
+  },
 }
 
 const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
@@ -184,6 +330,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
     recommended_tools: [
       'list_trade_invoices',
+      'list_invoice_issue_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
       'list_workflow_items',
@@ -362,6 +509,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
     recommended_tools: [
       'list_trade_invoices',
+      'list_invoice_issue_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
       'list_workflow_items',
@@ -447,10 +595,18 @@ export function createEmptyAgentBuilderDraft(): AgentBuilderDraft {
     scope: 'TEAM',
     provider: '',
     model: '',
+    role_key: '',
+    profile_kind: 'CUSTOM',
+    specialization_summary: '',
+    human_owner_role: '',
+    authority_ceiling: '',
+    activation_notes: '',
+    profile_request_id: null,
     allowed_workspaces: ['assistant'],
     capabilities: ['READ', 'EXPLAIN'],
     allowed_tools: [],
     allowed_action_types: [],
+    daily_token_allocation: '',
     system_prompt: '',
   }
 }
@@ -479,6 +635,7 @@ export function buildAgentBuilderDraft(
   availableTools: string[],
 ): AgentBuilderDraft {
   const template = getAgentBuilderTemplate(templateKey)
+  const profile = AGENT_BUILDER_TEMPLATE_PROFILE[templateKey]
   const availableToolSet = new Set(availableTools.map((toolName) => toolName.trim().toLowerCase()))
   const allowedTools =
     availableToolSet.size === 0
@@ -493,10 +650,274 @@ export function buildAgentBuilderDraft(
     scope: template.scope,
     provider: template.provider,
     model: template.model,
+    role_key: profile.role_key,
+    profile_kind: profile.profile_kind,
+    specialization_summary: profile.specialization_summary,
+    human_owner_role: profile.human_owner_role,
+    authority_ceiling: profile.authority_ceiling,
+    activation_notes: profile.activation_notes,
+    profile_request_id: null,
     allowed_workspaces: [...template.allowed_workspaces],
     capabilities: [...template.capabilities],
     allowed_tools: allowedTools,
     allowed_action_types: [...template.recommended_action_types],
+    daily_token_allocation: '',
     system_prompt: template.system_prompt,
+  }
+}
+
+export function buildAgentBuilderDraftFromRole(
+  role: AssistantAgentRoleArchetype,
+  availableTools: string[],
+): AgentBuilderDraft {
+  const availableToolSet = new Set(availableTools.map((toolName) => toolName.trim().toLowerCase()))
+  const allowedTools =
+    availableToolSet.size === 0
+      ? []
+      : role.default_tools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
+  const profileName = `${role.name} Specialization`
+
+  return {
+    agent_id: suggestAgentBuilderAgentId(profileName),
+    name: profileName,
+    description: role.description,
+    status: 'DRAFT',
+    scope: 'TEAM',
+    provider: '',
+    model: '',
+    role_key: role.role_key,
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: `Team specialization derived from the ${role.name} role archetype.`,
+    human_owner_role: role.human_owner_role,
+    authority_ceiling: role.authority_ceiling,
+    activation_notes: `Drafted from the ${role.name} role catalog entry.`,
+    profile_request_id: null,
+    allowed_workspaces: [...role.allowed_workspaces],
+    capabilities: [...role.capability_ceiling],
+    allowed_tools: allowedTools,
+    allowed_action_types: [...role.maximum_action_types],
+    daily_token_allocation: '',
+    system_prompt: buildRoleSystemPrompt(role),
+  }
+}
+
+export function describeProfileKind(profileKind: AgentBuilderDraft['profile_kind']): string {
+  return PROFILE_KIND_LABELS[profileKind]
+}
+
+export function evaluateAgentRoleProfileFit(
+  form: AgentBuilderDraft,
+  roleCatalog: AssistantAgentRoleArchetype[],
+): AgentRoleProfileFit {
+  const normalizedRoleKey = form.role_key.trim()
+  const role = normalizedRoleKey
+    ? roleCatalog.find((entry) => entry.role_key === normalizedRoleKey) ?? null
+    : null
+  const errors: string[] = []
+  const warnings: string[] = []
+  const sections: AgentRoleProfileFitSection[] = []
+  const profileKind = form.profile_kind
+  const roleBoundProfile = profileKind === 'CURATED' || profileKind === 'ROLE_DERIVED'
+
+  if (roleBoundProfile && !normalizedRoleKey) {
+    errors.push(`${describeProfileKind(profileKind)} profiles need a role archetype before save.`)
+  }
+  if (normalizedRoleKey && !role) {
+    errors.push(`Unknown role archetype: ${normalizedRoleKey}.`)
+  }
+
+  if (form.allowed_tools.length > 0 && !form.capabilities.includes('READ')) {
+    errors.push('Live tools require READ capability.')
+  }
+  if (form.allowed_action_types.length > 0 && !form.capabilities.includes('ACTION')) {
+    errors.push('Governed actions require ACTION capability.')
+  }
+  if (form.capabilities.includes('ACTION') && form.allowed_action_types.length === 0) {
+    errors.push('ACTION-capable profiles need at least one explicit governed action.')
+  }
+
+  if (role) {
+    const workspaceSection = compareSubset(
+      'Workspaces',
+      form.allowed_workspaces,
+      role.allowed_workspaces,
+      (values) => `${values.length} role workspace${values.length === 1 ? '' : 's'}`,
+    )
+    const capabilitySection = compareSubset(
+      'Capabilities',
+      form.capabilities,
+      role.capability_ceiling,
+      (values) => values.join(' · '),
+    )
+    const toolSection = compareSubset(
+      'Live tools',
+      form.allowed_tools,
+      role.default_tools,
+      (values) => `${values.length} role default tool${values.length === 1 ? '' : 's'}`,
+      {
+        emptyStatus: form.capabilities.includes('READ') ? 'inherited' : 'customized',
+        emptyDetail: form.capabilities.includes('READ')
+          ? `${role.default_tools.length} role default tool${role.default_tools.length === 1 ? '' : 's'} inherited on save`
+          : 'READ disabled, so no live tools are available',
+      },
+    )
+    const actionSection = compareSubset(
+      'Governed actions',
+      form.allowed_action_types,
+      role.maximum_action_types,
+      (values) => `${values.length} role action${values.length === 1 ? '' : 's'}`,
+      {
+        emptyStatus: form.capabilities.includes('ACTION') ? 'missing' : 'inherited',
+        emptyDetail: form.capabilities.includes('ACTION')
+          ? 'Explicit action selection required'
+          : 'No action authority requested',
+      },
+    )
+    const authoritySection = compareAuthority(form.authority_ceiling, role.authority_ceiling)
+
+    sections.push(workspaceSection, capabilitySection, toolSection, actionSection, authoritySection)
+
+    for (const section of sections) {
+      if (section.status === 'expanded') {
+        const verb = section.label === 'Authority' ? 'exceeds' : 'exceed'
+        errors.push(`${section.label} ${verb} the ${role.name} role boundary.`)
+      }
+      if (section.status === 'missing') {
+        errors.push(`${section.label} need a valid role-derived value before save.`)
+      }
+    }
+
+    if (form.status === 'ACTIVE') {
+      if (!form.specialization_summary.trim()) {
+        errors.push('Active role-derived profiles need a specialization summary.')
+      }
+      if (!form.human_owner_role.trim()) {
+        errors.push('Active role-derived profiles need a human owner role.')
+      }
+      if (!form.authority_ceiling) {
+        errors.push('Active role-derived profiles need an authority ceiling.')
+      }
+    }
+
+    if (role.catalog_status === 'PHASE_2_PLUS') {
+      warnings.push(`${role.name} is marked ${role.catalog_status}; confirm domain readiness before activation.`)
+    }
+    if (form.allowed_tools.length === 0 && form.capabilities.includes('READ')) {
+      warnings.push('Blank role-derived live tools inherit role defaults on save.')
+    }
+  }
+
+  if (!role && !roleBoundProfile) {
+    const profileSourceDetail = form.profile_request_id
+      ? `Custom profile request #${form.profile_request_id} selected for activation governance.`
+      : normalizedRoleKey
+        ? `Custom profile mapped to role archetype ${normalizedRoleKey}.`
+        : 'Custom draft with no role boundary; backend policy still enforces tool and action allowlists.'
+
+    sections.push({
+      label: 'Profile source',
+      status: form.profile_request_id || normalizedRoleKey ? 'inherited' : 'customized',
+      detail: profileSourceDetail,
+    })
+
+    if (form.status === 'ACTIVE') {
+      if (!form.human_owner_role.trim()) {
+        errors.push('Active custom profiles need a human owner role.')
+      }
+      if (!form.authority_ceiling) {
+        errors.push('Active custom profiles need an authority ceiling.')
+      }
+      if (!form.activation_notes.trim()) {
+        errors.push('Active custom profiles need activation notes confirming prompt review.')
+      }
+      if (!normalizedRoleKey && !form.profile_request_id) {
+        errors.push('Active custom profiles need an approved profile request or role mapping.')
+      }
+      if (
+        form.authority_ceiling &&
+        AUTHORITY_RANK[form.authority_ceiling] > AUTHORITY_RANK.DRAFT &&
+        !form.profile_request_id
+      ) {
+        errors.push('Custom profiles above draft-only authority need an approved specialization-specific eval case.')
+      }
+      if (form.capabilities.includes('ACTION') && !form.profile_request_id) {
+        errors.push('Action-capable custom profiles need an approved profile request with eval coverage.')
+      }
+    }
+  }
+
+  return { role, errors, warnings, sections }
+}
+
+function compareSubset<T extends string>(
+  label: string,
+  current: T[],
+  baseline: readonly T[],
+  describeBaseline: (values: readonly T[]) => string,
+  options?: {
+    emptyStatus?: AgentRoleProfileFitStatus
+    emptyDetail?: string
+  },
+): AgentRoleProfileFitSection {
+  const currentSet = new Set(current)
+  const baselineSet = new Set(baseline)
+  const outside = current.filter((value) => !baselineSet.has(value))
+  if (outside.length > 0) {
+    return {
+      label,
+      status: 'expanded',
+      detail: `Outside role: ${outside.join(' · ')}`,
+    }
+  }
+  if (current.length === 0) {
+    return {
+      label,
+      status: options?.emptyStatus ?? 'missing',
+      detail: options?.emptyDetail ?? 'No values selected',
+    }
+  }
+  if (current.length === baseline.length && baseline.every((value) => currentSet.has(value))) {
+    return {
+      label,
+      status: 'inherited',
+      detail: describeBaseline(baseline),
+    }
+  }
+  return {
+    label,
+    status: 'narrowed',
+    detail: `${current.length} of ${baseline.length} role value${baseline.length === 1 ? '' : 's'}`,
+  }
+}
+
+function compareAuthority(
+  current: AssistantAgentAuthorityLevel | '',
+  baseline: AssistantAgentAuthorityLevel,
+): AgentRoleProfileFitSection {
+  if (!current) {
+    return {
+      label: 'Authority',
+      status: 'missing',
+      detail: `Role ceiling is ${baseline}`,
+    }
+  }
+  if (AUTHORITY_RANK[current] > AUTHORITY_RANK[baseline]) {
+    return {
+      label: 'Authority',
+      status: 'expanded',
+      detail: `${current} exceeds role ceiling ${baseline}`,
+    }
+  }
+  if (current === baseline) {
+    return {
+      label: 'Authority',
+      status: 'inherited',
+      detail: baseline,
+    }
+  }
+  return {
+    label: 'Authority',
+    status: 'narrowed',
+    detail: `${current} below role ceiling ${baseline}`,
   }
 }

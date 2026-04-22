@@ -12,8 +12,22 @@ import {
   loadAssistantRuntimeSettings,
   previewAssistantPromptContext,
   streamAssistantResponse,
+  submitAssistantRunFeedback,
 } from '../../entities/assistant/api'
-import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
+import {
+  AssistantActionRequestList,
+  type AssistantActionDecisionPayload,
+} from '../../entities/assistant/AssistantActionRequestList'
+import {
+  assistantBudgetSignalClass,
+  assistantBudgetSignalLabel,
+  budgetMeterWidth,
+  describeAssistantTokenBudget,
+  formatBudgetPercent,
+  formatTokenCount,
+  isAgentBudgetDepleted,
+  isAgentBudgetNearLimit,
+} from '../../entities/assistant/budget'
 import { appConfig } from '../../shared/config'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type {
@@ -25,6 +39,8 @@ import type {
   AssistantPromptRequest,
   AssistantProvider,
   AssistantRun,
+  AssistantRunFeedback,
+  AssistantRunFeedbackRating,
   AssistantRunSummary,
   AssistantRuntimeSettings,
   EventRow,
@@ -67,6 +83,7 @@ type ChatMessage = {
     record_count: number | null
   }[]
   actionRequests?: AssistantActionRequest[]
+  feedback?: AssistantRunFeedback | null
 }
 
 function createChatMessageId(): string {
@@ -184,6 +201,8 @@ function matchesAssistantMessageFilter(message: ChatMessage, query: string): boo
     message.runRecordedAt,
     ...(message.warnings ?? []),
     ...(message.toolCalls?.flatMap((toolCall) => [toolCall.tool_name, toolCall.summary]) ?? []),
+    message.feedback?.rating,
+    message.feedback?.comment,
     ...(message.actionRequests?.flatMap((actionRequest) => [
       actionRequest.action_request_id,
       actionRequest.status,
@@ -266,6 +285,19 @@ function summarizeConversationCard(conversation: AssistantConversationSummary): 
   return pieces.join(' · ')
 }
 
+function budgetCardToneClass(budgetClass: string): string {
+  if (budgetClass === 'is-red') {
+    return 'is-budget-red'
+  }
+  if (budgetClass === 'is-amber') {
+    return 'is-budget-amber'
+  }
+  if (budgetClass === 'is-green') {
+    return 'is-budget-green'
+  }
+  return 'is-budget-pending'
+}
+
 function toChatMessagesFromConversation(conversation: AssistantConversation): ChatMessage[] {
   return conversation.messages.map((message) => ({
     id: createChatMessageId(),
@@ -277,7 +309,140 @@ function toChatMessagesFromConversation(conversation: AssistantConversation): Ch
     runRecordedAt: message.recorded_at,
     warnings: message.warnings,
     toolCalls: message.tool_calls,
+    feedback: message.feedback ?? null,
   }))
+}
+
+function formatFeedbackRating(rating: AssistantRunFeedbackRating): string {
+  return rating === 'HELPFUL' ? 'Helpful' : 'Needs work'
+}
+
+type AssistantMessageFeedbackProps = {
+  message: ChatMessage
+  disabled: boolean
+  inFlight: boolean
+  onSubmit: (
+    runId: number,
+    rating: AssistantRunFeedbackRating,
+    comment: string,
+  ) => Promise<AssistantRunFeedback>
+}
+
+function AssistantMessageFeedback({
+  message,
+  disabled,
+  inFlight,
+  onSubmit,
+}: AssistantMessageFeedbackProps) {
+  const runId = message.runId
+  const existingFeedback = message.feedback ?? null
+  const [selectedRating, setSelectedRating] = useState<AssistantRunFeedbackRating>(
+    existingFeedback?.rating ?? 'HELPFUL',
+  )
+  const [comment, setComment] = useState(existingFeedback?.comment ?? '')
+  const [detailsOpen, setDetailsOpen] = useState(Boolean(existingFeedback?.comment))
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+
+  if (message.role !== 'assistant' || !runId) {
+    return null
+  }
+
+  async function submitFeedback(rating: AssistantRunFeedbackRating, nextComment = comment) {
+    if (!runId) {
+      return
+    }
+
+    setSelectedRating(rating)
+    setStatus('')
+    setError('')
+
+    try {
+      const feedback = await onSubmit(runId, rating, nextComment)
+      setStatus(`Saved as ${formatFeedbackRating(feedback.rating).toLowerCase()}.`)
+      setComment(feedback.comment ?? '')
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Could not save feedback.')
+    }
+  }
+
+  const feedbackSummary = existingFeedback
+    ? `Saved ${formatFeedbackRating(existingFeedback.rating).toLowerCase()}`
+    : 'No feedback yet'
+
+  return (
+    <div className="assistant-feedback">
+      <div className="assistant-feedback-head">
+        <strong>Response feedback</strong>
+        <span>{feedbackSummary}</span>
+      </div>
+      <div className="assistant-feedback-actions">
+        <button
+          type="button"
+          className={`assistant-feedback-chip ${selectedRating === 'HELPFUL' ? 'is-selected' : ''}`}
+          onClick={() => void submitFeedback('HELPFUL', comment)}
+          disabled={disabled || inFlight}
+        >
+          Helpful
+        </button>
+        <button
+          type="button"
+          className={`assistant-feedback-chip ${selectedRating === 'NEEDS_WORK' ? 'is-selected' : ''}`}
+          onClick={() => {
+            setDetailsOpen(true)
+            void submitFeedback('NEEDS_WORK', comment)
+          }}
+          disabled={disabled || inFlight}
+        >
+          Needs work
+        </button>
+        <button
+          type="button"
+          className="assistant-run-link"
+          onClick={() => setDetailsOpen((current) => !current)}
+          disabled={disabled || inFlight}
+        >
+          {detailsOpen ? 'Hide note' : 'Add note'}
+        </button>
+      </div>
+
+      {detailsOpen ? (
+        <form
+          className="assistant-feedback-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submitFeedback(selectedRating, comment)
+          }}
+        >
+          <textarea
+            className="control assistant-feedback-textarea"
+            value={comment}
+            onChange={(event) => {
+              setComment(event.target.value)
+              setStatus('')
+              setError('')
+            }}
+            placeholder="What should change in this answer?"
+            disabled={disabled || inFlight}
+          />
+          <div className="assistant-feedback-footer">
+            <button
+              type="submit"
+              className="button button-ghost"
+              disabled={disabled || inFlight}
+            >
+              {inFlight ? 'Saving...' : 'Save note'}
+            </button>
+            <small>{error || status || 'Feedback is saved to this run.'}</small>
+          </div>
+        </form>
+      ) : error || status ? (
+        <small className={error ? 'assistant-feedback-error' : 'assistant-feedback-status'}>
+          {error || status}
+        </small>
+      ) : null}
+    </div>
+  )
 }
 
 export function AssistantWorkspace({
@@ -296,6 +461,7 @@ export function AssistantWorkspace({
   const [agents, setAgents] = useState<AssistantAgent[]>([])
   const [runtimeLoading, setRuntimeLoading] = useState(true)
   const [runtimeError, setRuntimeError] = useState('')
+  const [agentBudgetRefreshing, setAgentBudgetRefreshing] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<AssistantProvider | ''>('')
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [includeContext, setIncludeContext] = useState(true)
@@ -305,6 +471,7 @@ export function AssistantWorkspace({
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [actionRequestIdsInFlight, setActionRequestIdsInFlight] = useState<number[]>([])
+  const [feedbackRunIdsInFlight, setFeedbackRunIdsInFlight] = useState<number[]>([])
   const [promptPreview, setPromptPreview] = useState<AssistantPromptContext | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
@@ -480,6 +647,39 @@ export function AssistantWorkspace({
       setPendingActionRequestsLoading(false)
     }
   }, [authSession])
+
+  const refreshAssistantAgents = useCallback(
+    async (options?: { quiet?: boolean }): Promise<boolean> => {
+      try {
+        const agentPayload = await listAssistantAgents(appConfig.apiBase)
+        setAgents(agentPayload)
+        if (!options?.quiet) {
+          setRuntimeError('')
+        }
+        return true
+      } catch (error) {
+        if (!options?.quiet) {
+          setAgents([])
+          setRuntimeError(error instanceof Error ? error.message : 'Could not load assistant agents.')
+        }
+        return false
+      }
+    },
+    [],
+  )
+
+  async function handleRefreshAgentBudgets() {
+    setAgentBudgetRefreshing(true)
+    setSubmitError('')
+    try {
+      const refreshed = await refreshAssistantAgents({ quiet: true })
+      if (!refreshed) {
+        setSubmitError('Could not refresh agent token budgets.')
+      }
+    } finally {
+      setAgentBudgetRefreshing(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -782,9 +982,19 @@ export function AssistantWorkspace({
                 : typeof metadata.run_id === 'string'
                   ? Number.parseInt(metadata.run_id, 10)
                   : null
+            const conversationId =
+              typeof metadata.conversation_id === 'number'
+                ? metadata.conversation_id
+                : typeof metadata.conversation_id === 'string'
+                  ? Number.parseInt(metadata.conversation_id, 10)
+                  : null
 
             if (typeof metadata.provider === 'string') {
               setSelectedProvider(metadata.provider as AssistantProvider)
+            }
+            if (conversationId && Number.isFinite(conversationId)) {
+              setSelectedConversationId(conversationId)
+              void refreshConversationHistory(conversationId)
             }
             if (runId && Number.isFinite(runId)) {
               setSelectedRunId(runId)
@@ -881,6 +1091,7 @@ export function AssistantWorkspace({
             if (Array.isArray(completed.action_requests) && completed.action_requests.length > 0) {
               void refreshPendingActionRequests()
             }
+            void refreshAssistantAgents({ quiet: true })
             return
           }
 
@@ -903,6 +1114,7 @@ export function AssistantWorkspace({
   async function handleActionRequestDecision(
     actionRequestId: number,
     decision: 'approve' | 'reject',
+    payload: AssistantActionDecisionPayload,
   ) {
     setSubmitError('')
     setActionRequestIdsInFlight((current) => [...current, actionRequestId])
@@ -910,8 +1122,8 @@ export function AssistantWorkspace({
     try {
       const updatedActionRequest =
         decision === 'approve'
-          ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId)
-          : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId)
+          ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
+          : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
 
       setMessages((currentMessages) =>
         currentMessages.map((message) => {
@@ -941,9 +1153,53 @@ export function AssistantWorkspace({
     }
   }
 
+  async function handleAssistantRunFeedback(
+    runId: number,
+    rating: AssistantRunFeedbackRating,
+    comment: string,
+  ): Promise<AssistantRunFeedback> {
+    if (!authSession) {
+      throw new Error('Sign in before saving feedback.')
+    }
+
+    setSubmitError('')
+    setFeedbackRunIdsInFlight((current) => [...current, runId])
+
+    try {
+      const feedback = await submitAssistantRunFeedback(
+        appConfig.apiBase,
+        runId,
+        {
+          rating,
+          comment,
+        },
+        {
+          accessToken: authSession.accessToken,
+        },
+      )
+
+      setMessages((currentMessages) =>
+        currentMessages.map((message) =>
+          message.role === 'assistant' && message.runId === runId
+            ? {
+                ...message,
+                feedback,
+              }
+            : message,
+        ),
+      )
+      return feedback
+    } finally {
+      setFeedbackRunIdsInFlight((current) => current.filter((currentRunId) => currentRunId !== runId))
+    }
+  }
+
   const selectedProviderDetails =
     runtimeSettings?.providers.find((provider) => provider.provider === selectedProvider) ?? null
   const selectedAgent = agents.find((agent) => agent.agent_id === selectedAgentId) ?? null
+  const selectedAgentBudgetDepleted = isAgentBudgetDepleted(selectedAgent)
+  const depletedAgentCount = agents.filter((agent) => isAgentBudgetDepleted(agent)).length
+  const watchAgentCount = agents.filter((agent) => isAgentBudgetNearLimit(agent)).length
   const selectedConversationSummary =
     recentConversations.find((conversation) => conversation.conversation_id === selectedConversationId) ?? null
   const selectedRunSummary = recentRuns.find((run) => run.run_id === selectedRunId) ?? null
@@ -961,11 +1217,21 @@ export function AssistantWorkspace({
       (conversation) => conversation.conversation_id === selectedConversationSummary.conversation_id,
     ) &&
     visibleMessages.length === 0
+  const selectedConversationHasNoMessages =
+    selectedConversationId !== null &&
+    !conversationDetailLoading &&
+    !conversationDetailError &&
+    messages.length === 0
   const selectedRunHiddenByFilter =
     hasScreenFilter &&
     selectedRunSummary !== null &&
     !visibleRecentRuns.some((run) => run.run_id === selectedRunSummary.run_id)
-  const assistantReady = Boolean(runtimeSettings?.enabled && authSession && selectedProviderDetails?.enabled)
+  const assistantReady = Boolean(
+    runtimeSettings?.enabled &&
+      authSession &&
+      selectedProviderDetails?.enabled &&
+      !selectedAgentBudgetDepleted,
+  )
   const previewText = renderPromptPreview(promptPreview)
   const activeConversationTitle =
     selectedConversation?.title ?? selectedConversationSummary?.title ?? 'New chat draft'
@@ -976,6 +1242,15 @@ export function AssistantWorkspace({
       : messages.length > 0
         ? 'No saved thread is selected. Sending now will create a brand-new chat.'
         : 'Choose a saved chat from the sidebar or send a first prompt to start a new one.'
+  const assistantReadinessNote = !authSession
+    ? 'Sign in first. Prompt preview and assistant requests are protected.'
+    : !runtimeSettings?.enabled
+      ? 'No configured provider is currently ready on the API.'
+      : selectedAgentBudgetDepleted && selectedAgent
+        ? `${selectedAgent.name} is in the red. No token allocation remains for this agent today.`
+        : selectedProviderDetails
+          ? `Using ${selectedProviderDetails.label} with ${useLiveTools ? 'live tools enabled' : 'live tools disabled'}.`
+          : 'Select a provider to begin.'
   const assistantFilterNote = selectedConversationHiddenByFilter
     ? 'The active chat stays open even when it falls outside the current assistant filters.'
     : selectedRunHiddenByFilter
@@ -1001,12 +1276,13 @@ export function AssistantWorkspace({
         <article className="surface">
           <div className="section-head">
             <div>
-              <span className="eyebrow">Assistant Runtime</span>
-              <h3>Prompt Management Workspace</h3>
+              <span className="eyebrow">Assistant Console</span>
+              <h3>Runtime, prompt preview, and traces</h3>
             </div>
             <p>
-              Route prompts through managed providers and agent profiles, then inspect the exact
-              server-built grounding context before you send the message.
+              Use this secondary console for provider selection, managed agents, prompt preview,
+              run traces, feedback, and approval review. Operators can stay in Prompt Home for
+              normal prompt-led work.
             </p>
           </div>
 
@@ -1034,6 +1310,23 @@ export function AssistantWorkspace({
                     {agents.length > 0
                       ? 'Active prompt profiles are available for selection.'
                       : 'The platform foundation prompt is active even without a named agent.'}
+                  </p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>Token budget</span>
+                  <strong>
+                    {depletedAgentCount > 0
+                      ? `${depletedAgentCount} red`
+                      : watchAgentCount > 0
+                        ? `${watchAgentCount} watch`
+                        : 'Green'}
+                  </strong>
+                  <p>
+                    {selectedAgent
+                      ? describeAssistantTokenBudget(selectedAgent.token_budget)
+                      : agents.length > 0
+                        ? 'Select a managed agent to inspect its daily token allocation.'
+                        : 'Managed agent budgets will appear after active agents are published.'}
                   </p>
                 </article>
                 <article className="settings-summary-card">
@@ -1089,25 +1382,42 @@ export function AssistantWorkspace({
                   <small>Good for general operator questions and prompt review.</small>
                 </button>
 
-                {agents.map((agent) => (
-                  <button
-                    key={agent.agent_id}
-                    type="button"
-                    className={`assistant-agent-card ${selectedAgentId === agent.agent_id ? 'is-selected' : ''}`}
-                    onClick={() => setSelectedAgentId(agent.agent_id)}
-                  >
-                    <div className="assistant-provider-head">
-                      <strong>{agent.name}</strong>
-                      <span className="status-pill status-pill-active">{agent.scope}</span>
-                    </div>
-                    <p>{agent.description}</p>
-                    <small>
-                      {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
-                      {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
-                      {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
-                    </small>
-                  </button>
-                ))}
+                {agents.map((agent) => {
+                  const budgetClass = assistantBudgetSignalClass(agent.token_budget)
+                  return (
+                    <button
+                      key={agent.agent_id}
+                      type="button"
+                      className={[
+                        'assistant-agent-card',
+                        selectedAgentId === agent.agent_id ? 'is-selected' : '',
+                        budgetCardToneClass(budgetClass),
+                      ].join(' ')}
+                      onClick={() => setSelectedAgentId(agent.agent_id)}
+                    >
+                      <div className="assistant-provider-head">
+                        <strong>{agent.name}</strong>
+                        <span className={`assistant-budget-signal ${budgetClass}`}>
+                          {assistantBudgetSignalLabel(agent.token_budget)}
+                        </span>
+                      </div>
+                      <p>{agent.description}</p>
+                      <div className="assistant-agent-budget-row">
+                        <span>{agent.scope}</span>
+                        <span>{formatBudgetPercent(agent.token_budget)} used</span>
+                      </div>
+                      <div className={`assistant-budget-meter ${budgetClass}`} aria-hidden="true">
+                        <span style={{ width: budgetMeterWidth(agent.token_budget) }} />
+                      </div>
+                      <small>{describeAssistantTokenBudget(agent.token_budget)}</small>
+                      <small>
+                        {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
+                        {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
+                        {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
+                      </small>
+                    </button>
+                  )
+                })}
               </div>
             </>
           ) : (
@@ -1150,11 +1460,19 @@ export function AssistantWorkspace({
           <div className="assistant-chat-log">
             {visibleMessages.length === 0 ? (
               <div className="empty-state assistant-empty-state">
-                <strong>{messages.length > 0 && hasScreenFilter ? 'No chat messages match the filter' : 'No chat selected'}</strong>
+                <strong>
+                  {messages.length > 0 && hasScreenFilter
+                    ? 'No chat messages match the filter'
+                    : selectedConversationHasNoMessages
+                      ? 'This chat has no recorded messages yet'
+                      : 'No chat selected'}
+                </strong>
                 <p>
                   {messages.length > 0 && hasScreenFilter
                     ? 'Broaden the local search to bring the current chat transcript back into view.'
-                    : 'Reopen a stored conversation from the sidebar or send a first request here to begin a separate chat.'}
+                    : selectedConversationHasNoMessages
+                      ? 'This saved conversation exists, but no user or assistant messages were recorded in it.'
+                      : 'Reopen a stored conversation from the sidebar or send a first request here to begin a separate chat.'}
                 </p>
               </div>
             ) : (
@@ -1172,8 +1490,18 @@ export function AssistantWorkspace({
                   <p>{message.content}</p>
                   {message.usage ? (
                     <div className="assistant-message-meta">
-                      <span>Input tokens: {message.usage.input_tokens ?? 'n/a'}</span>
-                      <span>Output tokens: {message.usage.output_tokens ?? 'n/a'}</span>
+                      <span>
+                        Input tokens:{' '}
+                        {message.usage.input_tokens !== null
+                          ? formatTokenCount(message.usage.input_tokens)
+                          : 'n/a'}
+                      </span>
+                      <span>
+                        Output tokens:{' '}
+                        {message.usage.output_tokens !== null
+                          ? formatTokenCount(message.usage.output_tokens)
+                          : 'n/a'}
+                      </span>
                       {message.runId ? <span>Run #{message.runId}</span> : null}
                       {message.runId ? (
                         <button
@@ -1198,6 +1526,16 @@ export function AssistantWorkspace({
                       </button>
                     </div>
                   ) : null}
+                  <AssistantMessageFeedback
+                    key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
+                    message={message}
+                    disabled={!authSession}
+                    inFlight={
+                      Boolean(message.runId) &&
+                      feedbackRunIdsInFlight.includes(message.runId as number)
+                    }
+                    onSubmit={handleAssistantRunFeedback}
+                  />
                   {message.toolCalls && message.toolCalls.length > 0 ? (
                     <div className="assistant-tool-list">
                       {message.toolCalls.map((toolCall, index) => (
@@ -1312,6 +1650,35 @@ export function AssistantWorkspace({
                 <small>{selectedAgent ? selectedAgent.description : 'Platform foundation with no named agent override.'}</small>
               </div>
 
+              <div className="assistant-sidebar-block">
+                <div className="assistant-budget-block-head">
+                  <strong>Token budget</strong>
+                  {selectedAgent ? (
+                    <button
+                      type="button"
+                      className="button button-ghost assistant-budget-refresh-button"
+                      onClick={() => void handleRefreshAgentBudgets()}
+                      disabled={agentBudgetRefreshing}
+                    >
+                      {agentBudgetRefreshing ? 'Refreshing...' : 'Refresh budget'}
+                    </button>
+                  ) : null}
+                </div>
+                <small>
+                  {selectedAgent
+                    ? describeAssistantTokenBudget(selectedAgent.token_budget)
+                    : 'Choose a managed agent to see its daily allocation.'}
+                </small>
+                {selectedAgent ? (
+                  <div
+                    className={`assistant-budget-meter ${assistantBudgetSignalClass(selectedAgent.token_budget)}`}
+                    aria-hidden="true"
+                  >
+                    <span style={{ width: budgetMeterWidth(selectedAgent.token_budget) }} />
+                  </div>
+                ) : null}
+              </div>
+
               <label className="assistant-toggle">
                 <input
                   type="checkbox"
@@ -1349,15 +1716,7 @@ export function AssistantWorkspace({
             </div>
 
             <p className={`form-note ${submitError ? 'form-note-error' : ''}`}>
-              {submitError
-                ? submitError
-                : !authSession
-                  ? 'Sign in first. Prompt preview and assistant requests are protected.'
-                  : !runtimeSettings?.enabled
-                    ? 'No configured provider is currently ready on the API.'
-                    : selectedProviderDetails
-                      ? `Using ${selectedProviderDetails.label} with ${useLiveTools ? 'live tools enabled' : 'live tools disabled'}.`
-                      : 'Select a provider to begin.'}
+              {submitError || assistantReadinessNote}
             </p>
           </form>
         </article>
@@ -1559,7 +1918,8 @@ export function AssistantWorkspace({
               <article className="assistant-run-summary-card">
                 <span>Tokens</span>
                 <strong>
-                  {selectedRun.input_tokens ?? 'n/a'} / {selectedRun.output_tokens ?? 'n/a'}
+                  {selectedRun.input_tokens !== null ? formatTokenCount(selectedRun.input_tokens) : 'n/a'} /{' '}
+                  {selectedRun.output_tokens !== null ? formatTokenCount(selectedRun.output_tokens) : 'n/a'}
                 </strong>
                 <small>Input / output</small>
               </article>

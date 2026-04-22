@@ -1,0 +1,916 @@
+# Agent Knowledge Base
+
+## Purpose
+
+This file is the shared memory surface for agents working in this repo. Use it
+to preserve reusable lessons about autonomy, deterministic algorithms, action
+governance, stop conditions, and implementation patterns.
+
+The knowledge base should help future agents answer:
+
+- Has this judgment already been turned into deterministic logic?
+- Is there a known boundary where agents should draft, stage, or stop?
+- What tests, services, or docs should be updated when this pattern appears
+  again?
+- Which lessons are still proposals, and which are accepted practice?
+
+Keep entries short, cited to repo paths where possible, and safe to review in
+source control. Do not store secrets, credentials, private counterparty content,
+or raw production data.
+
+## How Agents Should Use This
+
+Before increasing autonomy or adding a new action type:
+
+1. Read [Agent Autonomy Rubric](./agent-autonomy-rubric.md).
+2. Search this file for related domains, action types, formulas, and stop
+   conditions.
+3. Prefer an existing deterministic algorithm or governance pattern when one
+   applies.
+4. If no pattern exists and the judgment is recurring, propose or implement a
+   deterministic algorithm.
+5. Add or update a lesson after the work, especially when future agents would
+   otherwise have to rediscover the same boundary.
+
+## Entry Types
+
+Use one of these types:
+
+| Type | Use when |
+| --- | --- |
+| `lesson` | A reusable practice or boundary was learned. |
+| `algorithm-candidate` | A recurring judgment should probably become deterministic logic. |
+| `algorithm-added` | Deterministic logic was implemented or promoted. |
+| `stop-condition` | Future agents should pause, narrow authority, or ask for review. |
+| `promotion-signal` | Evidence suggests an agent behavior may be safe to promote. |
+| `retirement-signal` | Evidence suggests an agent behavior should be paused, narrowed, or removed. |
+
+## Entry Template
+
+```md
+### YYYY-MM-DD - Short Title
+
+- Type: lesson | algorithm-candidate | algorithm-added | stop-condition | promotion-signal | retirement-signal
+- Domain:
+- Applies to:
+- Status: proposed | accepted | implemented | retired
+- Source:
+- Lesson:
+- Deterministic opportunity:
+- Agent autonomy impact:
+- Tests or evidence:
+- Follow-up:
+```
+
+## Deterministic Algorithm Proposal Checklist
+
+When an agent proposes a new deterministic algorithm, capture:
+
+- the business question it answers
+- the owner or reviewer role
+- required inputs and source freshness assumptions
+- row-level access or permission assumptions
+- exact outputs and allowed states
+- rule table, formula, threshold, or invariant set
+- edge cases and stop conditions
+- service, formula, policy, or projection layer where it belongs
+- tests, evals, and fixture data needed
+- audit, lineage, idempotency, and rollback expectations
+
+If the proposal touches pricing, risk, settlement, credit, compliance,
+permissions, reference data, policy, or external commitments, keep it in
+proposal form until a human owner approves the domain rule.
+
+## Lessons
+
+### 2026-04-22 - Persona Stories Need Productized Algorithms
+
+- Type: algorithm-candidate
+- Domain: trading, risk, operations, settlement, accruals
+- Applies to: market opportunity detection, freight and fee economics,
+  long/short matching, hedge instrument recommendations, checklist automation,
+  invoice/payment follow-through, accrual and reconciliation exception detection
+- Status: proposed
+- Source: [Business Use Case Roadmap](./business-use-case-roadmap.md) and
+  [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: broad persona requests such as "find opportunities," "flatten my
+  book," "tell me how to hedge," "automate reconciliations," and "identify
+  accrual issues" should be decomposed into durable work objects and
+  deterministic services before any agent receives write or execution
+  authority. Agents can explain, compare, draft, and stage reviewable work, but
+  official prices, exposure, hedge deltas, cost stacks, accruals, payments, and
+  business mutations need typed service ownership.
+- Deterministic opportunity: create explicit algorithms for opportunity
+  classification, physical movement cost stacks, long/short netting sets,
+  hedge instrument decision tables, workflow checklist policy, and accrual or
+  reconciliation exception detection.
+- Agent autonomy impact: keep trade booking, hedge execution, freight trades,
+  payment release, external communication, policy changes, and official
+  financial records human-owned or approval-gated until service rules, stale
+  checks, idempotency, audit, evals, and outcome evidence are in place.
+- Tests or evidence: each promoted algorithm should add focused service tests,
+  relevant assistant evals for prompt/tool behavior, and browser smoke coverage
+  when a new cross-workspace operator journey is introduced.
+- Follow-up: when a workstream starts, create or update the owning design doc
+  with owner, inputs, outputs, rule set, stop conditions, audit, rollback, and
+  verification expectations.
+
+### 2026-04-22 - Trader/Risk MVP Starts As Draft Authority
+
+- Type: stop-condition
+- Domain: trader and risk decision support
+- Applies to: opportunity notes, residual exposure triage, long/short netting
+  sets, hedge recommendations, pre-trade scenario handoffs
+- Status: proposed
+- Source: [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md),
+  [Human-Agent Authority Matrix](./human-agent-authority-matrix.md), and
+  [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: trader/risk recommendations can feel close to execution, so the first
+  MVP must preserve the difference between recommendation and commitment.
+  Agents and deterministic services may draft opportunity, netting, and hedge
+  analysis with source evidence, but humans continue to own trade capture,
+  hedge execution, bilateral commitments, and freight commitments.
+- Deterministic opportunity: build recommendation contracts, source freshness,
+  residual exposure triage, netting rules, and hedge decision tables as typed
+  services before considering any staged action type.
+- Agent autonomy impact: keep Market Research, Pre-Trade Structuring, and Risk
+  Sentinel roles at read/explain/draft for this slice. Add assistant evals that
+  fail if an agent claims it booked a trade, executed a hedge, guaranteed a
+  hedge choice, or ignored stale evidence.
+- Tests or evidence: TRMVP work packages require focused service tests for
+  recommendation rules, `make api-assistant-evals` for prompt/tool authority,
+  and browser smoke for the review-to-capture handoff when implemented.
+- Follow-up: only consider approval-gated action requests after typed work
+  objects, stale-state checks, idempotency, policy ownership, and outcome
+  metrics exist.
+
+### 2026-04-22 - Human Workflows Need Agent Tooling Counterparts
+
+- Type: lesson
+- Domain: agent toolkit and product workflow design
+- Applies to: trader/risk MVP, operations automation, settlement automation,
+  accruals, reconciliation, future persona-driven workflows
+- Status: proposed
+- Source: [Business Use Case Roadmap](./business-use-case-roadmap.md) and
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
+- Lesson: persona stories are requirements for both human operators and AI
+  agents. When a human workspace gains a capability, the implementation should
+  identify the matching agent toolkit surface: read tools, deterministic
+  recommendation tools, typed action-request payloads, source freshness,
+  provenance, and machine-readable stop conditions.
+- Deterministic opportunity: design service outputs once, then let both UI
+  components and assistant tools consume the same typed contract instead of
+  creating separate prompt-only reasoning paths.
+- Agent autonomy impact: adding tools does not grant execution authority. New
+  read or recommendation tools should arrive before action tools; action tools
+  require published action types, stale-state checks, idempotency, reviewer
+  roles, expected effects, and eval coverage.
+- Tests or evidence: each new agent toolkit capability should include focused
+  service tests plus assistant evals for tool selection, missing/stale evidence,
+  and no-overclaim behavior.
+- Follow-up: future work packages should include an "Agent Toolkit
+  Implications" section whenever a feature is expected to serve agents as well
+  as humans.
+
+### 2026-04-22 - Prompt Navigation Is A UI Intent
+
+- Type: lesson
+- Domain: prompt-first operator experience
+- Applies to: assistant landing surfaces, workspace routing, route handoffs,
+  prompt-led old-UX navigation, action governance
+- Status: proposed
+- Source: [Prompt-First Operator Experience Work Packages](./prompt-first-operator-experience-work-packages.md)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: prompt-led navigation should be modeled as a non-mutating UI intent,
+  separate from assistant action requests. The assistant may recommend opening,
+  focusing, or filtering a workspace, but business writes must continue through
+  typed services, permission checks, audit, and approval-gated action requests
+  where required.
+- Deterministic opportunity: repeated accepted routing decisions should become
+  deterministic intent rules with typed inputs, allowed destinations, rejection
+  reasons, and focused browser or assistant-eval coverage.
+- Agent autonomy impact: navigation intent can make the assistant feel more
+  capable without increasing mutation authority. If the request changes
+  records, emits events, or creates external commitments, reduce authority back
+  to staged action or manual workflow.
+- Tests or evidence: initial proof should cover default prompt landing,
+  accepted workspace navigation, focused trade handoff, invalid intent
+  rejection, and unsupported mutation fallback.
+- Follow-up: implement the prompt-first work packages before considering any
+  broader prompt-led execution authority.
+
+### 2026-04-22 - Assistant Feedback Belongs On Runs
+
+- Type: lesson
+- Domain: assistant outcome tracking
+- Applies to: assistant responses, run tracing, eval inputs, prompt review
+- Status: implemented
+- Source: [AI Workflow](./ai-workflow.md)
+- Lesson: user feedback on an assistant answer should be captured as a durable
+  run-level record with user/session provenance, not as loose chat text or a
+  hidden prompt adjustment.
+- Deterministic opportunity: recurring feedback comments that identify stable
+  product behavior, missing evidence rules, or repeatable answer-quality checks
+  should feed the deterministic algorithm loop instead of remaining prompt-only.
+- Agent autonomy impact: feedback improves promotion and retirement signals,
+  but it does not grant mutation authority or change business records directly.
+- Tests or evidence: focused API coverage verifies feedback creation, update,
+  access scoping, conversation reload serialization, and admin aggregation by
+  agent, workspace, recent feedback, and helpful vs. needs-work totals.
+- Follow-up: connect recurring needs-work comments to eval cases and agent
+  health reviews.
+
+### 2026-04-22 - Deterministic Algorithms Are An Agent Promotion Path
+
+- Type: lesson
+- Domain: agent governance
+- Applies to: autonomy reviews, repeated recommendations, action-governance
+  design, formula and policy promotion
+- Status: accepted
+- Source: [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: agents should not only choose between current deterministic logic and
+  open-ended reasoning. When an agent finds a recurring judgment that can be
+  expressed as rules, formulas, thresholds, decision tables, or typed service
+  behavior, it should propose or implement deterministic logic through the
+  normal engineering path.
+- Deterministic opportunity: repeated accepted recommendations, prompt
+  instructions that compensate for missing product behavior, and stable review
+  decisions should be promoted into formulas, policy rules, projection checks,
+  or domain services.
+- Agent autonomy impact: creating deterministic logic can increase safe autonomy
+  because future agents can rely on inspectable rules instead of restating the
+  same judgment in prompts.
+- Tests or evidence: algorithm proposals should identify required tests, evals,
+  fixtures, audit expectations, and reviewer ownership before promotion.
+- Follow-up: when a future agent proposes or adds a deterministic algorithm,
+  append a focused `algorithm-candidate` or `algorithm-added` entry here.
+
+### 2026-04-22 - Accepted Work Packages Are The Autonomy Handoff
+
+- Type: algorithm-added
+- Domain: agent governance, deterministic algorithm promotion
+- Applies to: generated health-review work packages, recurring deterministic
+  candidates, policy/service/eval/knowledge-base backlog items
+- Status: implemented
+- Source: `apps/api/app/domains/assistant/services/agent_work_packages.py`
+  and `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`
+- Lesson: generated health-review work packages become actionable only after an
+  admin accepts them into the durable work-package backlog. Acceptance preserves
+  the candidate, source agents, recommended owner, checks, lifecycle status,
+  actor, timestamps, and notes so the work can move from autonomy review into
+  implementation without relying on an ephemeral generated snapshot.
+- Deterministic opportunity: future lifecycle transitions should turn accepted
+  policy, service, eval, or knowledge-base packages into concrete PRs, eval
+  cases, or docs entries, then mark the package implemented when verification
+  evidence exists.
+- Agent autonomy impact: agents may propose and group deterministic candidates,
+  but accepted backlog records are the review gate before changing product
+  behavior or agent authority.
+- Tests or evidence: service and API coverage verifies candidate acceptance,
+  idempotent persistence, admin auth, and frontend API ownership.
+- Follow-up: add lifecycle update endpoints when the backlog needs in-progress,
+  implemented, or dismissed state changes from the UI.
+
+### 2026-04-22 - Freeform Output Must Not Mutate Records
+
+- Type: stop-condition
+- Domain: action governance
+- Applies to: assistant actions, automation, bulk work, record mutations
+- Status: accepted
+- Source: [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: no agent should directly mutate business records from freeform model
+  output. Proposed changes must become typed payloads and flow through the same
+  application services, permissions, policy checks, audit capture, and review
+  paths as manual UI actions.
+- Deterministic opportunity: repeated action patterns should become published
+  action types with deterministic validation, stale-state checks, idempotency,
+  reviewer metadata, and domain-service execution.
+- Agent autonomy impact: an agent can draft or stage a mutation only after a
+  typed action contract exists. Without that contract, keep the agent at explain
+  or draft.
+- Tests or evidence: add service tests for validation, permission failure,
+  stale-state handling, idempotency, and audit capture; add assistant evals for
+  action-governance prompt behavior.
+- Follow-up: when a new mutation pattern appears, create or update the action
+  gateway contract before increasing autonomy.
+
+### 2026-04-22 - Durable Work Objects Beat Chat State
+
+- Type: lesson
+- Domain: work-object governance
+- Applies to: staged actions, handoffs, reports, agent-generated work
+- Status: accepted
+- Source: [Canonical Work Object Inventory](./canonical-work-object-inventory.md)
+  and [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+- Lesson: agents and humans should operate on durable records, not loose chat
+  state. If future users need to inspect, approve, correct, or take over work,
+  the work needs ownership, lifecycle, provenance, permissions, and action
+  history.
+- Deterministic opportunity: recurring agent outputs should graduate into
+  canonical work objects, report definitions, action requests, review items, or
+  domain records with typed lifecycle states.
+- Agent autonomy impact: do not stage or execute agent work that has no owning
+  work object. Draft first, then propose the durable object if the pattern
+  repeats.
+- Tests or evidence: verify created work objects carry stable identifiers,
+  lifecycle status, actor attribution, policy status, and source links.
+- Follow-up: when an agent proposes side-channel work, map it to an existing
+  object or add an `algorithm-candidate` entry for a new object/lifecycle.
+
+### 2026-04-22 - External Commitments Stay Human-Only In Phase 1
+
+- Type: stop-condition
+- Domain: external commitment governance
+- Applies to: trade booking, trade amendment, counterparty communication,
+  scheduling commitment, payment release, bank instructions
+- Status: accepted
+- Source: [Human-Agent Authority Matrix](./human-agent-authority-matrix.md) and
+  [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+- Lesson: Phase 1 agents may not externally commit the firm. They can draft or
+  stage approved internal requests, but humans remain responsible for booking
+  trades, sending counterparty communications, committing logistics externally,
+  and releasing cash.
+- Deterministic opportunity: before any narrow external-commit case is
+  considered, the platform needs deterministic policy checks, legal/compliance
+  approval, replay, monitoring, and a kill switch.
+- Agent autonomy impact: if the request can bind the firm externally, reduce
+  autonomy to draft or human-only review.
+- Tests or evidence: evals should catch over-claims of authority, direct booking
+  attempts, payment-release attempts, and external communication send attempts.
+- Follow-up: keep external-commitment proposals in governance docs until a
+  separate control model exists.
+
+### 2026-04-22 - Operational Values Need Deterministic Formulas
+
+- Type: lesson
+- Domain: extensibility and reporting
+- Applies to: formulas, calculated columns, report values, derived KPIs
+- Status: accepted
+- Source: [User Extensibility Initiative](./user-extensibility-initiative.md)
+  and [Future-Ready Engineering Work Packages](./future-ready-engineering-work-packages.md)
+- Lesson: formulas and derived values must be deterministic, typed,
+  side-effect-free, inspectable, and built on approved semantic fields. Agents
+  can explain or propose formulas, but they must not become the source of truth
+  for operational values.
+- Deterministic opportunity: repeated calculations should become formula
+  definitions, report definitions, domain services, or promoted schema fields
+  when they affect validation, workflow branching, official reporting, or
+  integrations.
+- Agent autonomy impact: agents may draft a formula proposal and explain lineage,
+  but trusted values must be produced by deterministic logic.
+- Tests or evidence: formula validation should cover type safety, allowed
+  functions, dependency cycles, row-level access, lineage, and rollback.
+- Follow-up: when an agent notices a recurring calculation in prompts or reports,
+  add an `algorithm-candidate` entry and propose the semantic field inputs.
+
+### 2026-04-22 - Workflow Item Updates Are The First Bounded-Execute Candidate
+
+- Type: promotion-signal
+- Domain: operations workflow
+- Applies to: workflow owner, due date, status, notes, blocker triage
+- Status: proposed
+- Source: [Human-Agent Authority Matrix](./human-agent-authority-matrix.md) and
+  [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+- Lesson: workflow item updates are a strong first candidate for bounded
+  autonomous execution because they are internal, inspectable, reversible through
+  normal workflow correction, and already represented as durable work objects.
+- Deterministic opportunity: encode allowed status transitions, required owner
+  roles, stale-state checks, idempotency, due-date rules, and blocker escalation
+  as deterministic policy before execution.
+- Agent autonomy impact: agents should start at draft or stage. Promotion to
+  bounded execute needs high approval rate, low correction rate, deterministic
+  policy, eval coverage, audit, and owner sign-off.
+- Tests or evidence: service tests should cover status transition policy,
+  unauthorized owner changes, stale items, repeated requests, and audit trail.
+- Follow-up: implement [AP1-19](./agent-platform-phase-1-tickets.md) to turn
+  this promotion signal into deterministic workflow item update policy.
+
+### 2026-04-22 - Workflow Item Update Policy Belongs In The Service Layer
+
+- Type: algorithm-added
+- Domain: operations workflow
+- Applies to: `update_trade_workflow_item`, assistant-staged workflow updates,
+  manual workflow item patches, future workflow automation
+- Status: implemented
+- Source:
+  [`workflow_items.py`](../../apps/api/app/domains/operations/services/workflow_items.py),
+  [`action_runtime.py`](../../apps/api/app/domains/assistant/services/action_runtime.py),
+  and [AP1-19](./agent-platform-phase-1-tickets.md)
+- Lesson: workflow item update authority must be evaluated by a shared,
+  side-effect-free policy before any route, assistant action, or future
+  automation mutates the item. Route-only guards are insufficient because
+  assistant approvals can execute through service paths that bypass route
+  helpers.
+- Deterministic opportunity: use observed approval outcomes, reviewer
+  corrections, and policy-failure rates to define promotion thresholds before
+  any workflow update moves from staged approval to bounded execution.
+- Agent autonomy impact: agents may stage workflow updates only after the policy
+  normalizes changes, checks deterministic blockers, and emits reviewer role,
+  old/new preview values, stale-state basis, and idempotency key. This does not
+  grant bounded autonomous execution yet.
+- Tests or evidence: `apps.api.tests.test_operations_workflow_items_api` covers
+  the policy review context, terminal transition blocking, due-date windows,
+  stale-version failure, idempotent retry handling, assistant execution
+  blockers, rollup behavior, and credit constraints;
+  `apps.api.tests.test_assistant_evals` covers the assistant governance path.
+- Follow-up: use the outcome-metrics endpoint to collect enough workflow-update
+  history before proposing any bounded-execution policy expansion.
+
+### 2026-04-22 - Outcome Metrics Can Recommend Autonomy Changes, Not Apply Them
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: admin outcome reporting, action request review burden, bounded
+  execution promotion review, pause recommendations
+- Status: implemented
+- Source:
+  [`outcome_metrics.py`](../../apps/api/app/domains/assistant/services/outcome_metrics.py),
+  [`assistant.py`](../../apps/api/app/routes/assistant.py), and
+  [AP1-17](./agent-platform-phase-1-tickets.md)
+- Lesson: autonomy promotion needs deterministic observed-outcome thresholds,
+  but threshold results should remain advisory until a human owner explicitly
+  changes policy. Metrics can identify candidates and noisy agents; they should
+  not silently alter authority.
+- Deterministic rule: compute action outcome rates from decided action
+  requests, stale-action outcomes from stale failures or idempotent stale
+  retries, and pause signals from rejection, failed-execution, stale-action, and
+  aged-pending thresholds. Promotion requires enough decided outcomes, no
+  pending backlog, and rates below conservative limits.
+- Agent autonomy impact: agents can be flagged as
+  `ELIGIBLE_FOR_BOUNDED_REVIEW` or `RECOMMEND_PAUSE`, but both states require a
+  human admin decision before capabilities, action policy, or status changes.
+- Tests or evidence: `apps.api.tests.test_assistant_api` seeds contrasting
+  high-confidence and noisy agents, then verifies by-agent and by-action-type
+  recommendation behavior from the Admin metrics endpoint. The Admin workspace
+  now renders the advisory endpoint through a read-only outcome metrics panel.
+- Follow-up: add correction capture so reviewer edits, not only
+  approve/reject/failed outcomes, can inform promotion thresholds.
+
+### 2026-04-22 - Document Execution Needs Matching And Ambiguity Policy
+
+- Type: algorithm-candidate
+- Domain: document workflow
+- Applies to: document routing, linkage, reprocessing, document-created records
+- Status: proposed
+- Source: [Human-Agent Authority Matrix](./human-agent-authority-matrix.md),
+  [Agent Role Catalog](./agent-role-catalog.md), and
+  [Document Taxonomy](./document-taxonomy-trading-shipping.md)
+- Lesson: document agents are valuable for classification, explanation, and
+  ambiguity surfacing, but document linkage and document-created records need
+  explicit confidence, matching, ambiguity, and approval policy before they
+  become more autonomous.
+- Deterministic opportunity: create decision tables for document kind support,
+  candidate-record matching, minimum evidence, conflicting evidence, reprocess
+  eligibility, and manual-review escalation.
+- Agent autonomy impact: reprocessing is a safer first staged action. Linkage
+  and record creation should remain draft or approval-gated until deterministic
+  matching policy exists.
+- Tests or evidence: fixture documents should cover confident match, multiple
+  candidates, missing keys, unsupported document kind, stale target record, and
+  permission denial.
+- Follow-up: when document reviewers repeatedly resolve the same ambiguity,
+  promote that decision into matching or routing logic.
+
+### 2026-04-22 - Prompt And Tool Changes Need Evals
+
+- Type: lesson
+- Domain: assistant evals
+- Applies to: prompts, managed agents, tool allowlists, approval behavior,
+  over-claiming certainty
+- Status: accepted
+- Source: [AI Workflow](./ai-workflow.md)
+- Lesson: managed-agent changes should land with eval coverage, not just ad hoc
+  prompt spot checks. This is especially important when a change affects tool
+  access, action governance, approval boundaries, or claims of certainty without
+  a live read.
+- Deterministic opportunity: encode expected prompt sections, tool filters,
+  warnings, action-staging behavior, and permission boundaries as fixture evals.
+- Agent autonomy impact: do not promote an agent role or action type without eval
+  cases that cover the new authority boundary.
+- Tests or evidence: run or update `make api-assistant-evals` for assistant or
+  automation changes that affect provider selection, tools, prompts, approvals,
+  or over-claiming certainty.
+- Follow-up: add a knowledge-base entry when an eval reveals a new stop
+  condition or promotion signal.
+
+### 2026-04-22 - Pause Thresholds Should Become Deterministic Policy
+
+- Type: algorithm-candidate
+- Domain: control tower governance
+- Applies to: agent pause, narrow, retire, intervention, outcome review
+- Status: proposed
+- Source: [Human-Agent Authority Matrix](./human-agent-authority-matrix.md) and
+  [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+- Lesson: agents that create noisy drafts, rejected staged actions, failed
+  executions, stale-data claims, or repeated corrections should be paused,
+  narrowed, or retired based on explicit thresholds instead of subjective vibes.
+- Deterministic opportunity: define pause thresholds for rejection rate,
+  correction rate, failed-action rate, stale-data warnings, policy failures,
+  repeated unsupported requests, and reviewer override frequency.
+- Agent autonomy impact: outcome metrics should control promotion and demotion.
+  An agent should not gain authority while its value and failure signals are
+  unmeasured.
+- Tests or evidence: control tower reports should show run count, staged actions,
+  approvals, rejections, failures, corrections, pauses, and reviewer overrides.
+- Follow-up: once metrics exist, add `promotion-signal` or `retirement-signal`
+  entries based on observed thresholds.
+
+### 2026-04-22 - Projection Integrity Is Deterministic Control Logic
+
+- Type: algorithm-added
+- Domain: projection monitoring
+- Applies to: projection audit, repair, alert delivery, operational controls
+- Status: accepted
+- Source: [ADR 0003](../adr/0003-operational-framework-and-projection-monitoring.md)
+- Lesson: projection integrity monitoring should use deterministic audit checks
+  and deterministic repair paths where safe. Agents may summarize failures or
+  draft interventions, but the control itself should remain inspectable and
+  repeatable.
+- Deterministic opportunity: projection checks and safe repairs are a pattern for
+  future control-plane algorithms: define invariants, run state, alert history,
+  repair eligibility, and operator-visible outcomes.
+- Agent autonomy impact: agents can explain projection issues and recommend
+  repair actions, but autonomous repair needs deterministic eligibility,
+  persisted run state, audit, and admin-facing controls.
+- Tests or evidence: tests should cover clean runs, detected drift, safe repair,
+  unsafe repair escalation, alert delivery, and persisted run history.
+- Follow-up: use this pattern when designing other operational integrity checks.
+
+### 2026-04-22 - Policy And Reference Data Are Not Prompt Problems
+
+- Type: stop-condition
+- Domain: policy and reference data
+- Applies to: permissions, limits, reference data, approval thresholds, tool
+  access, agent configuration
+- Status: accepted
+- Source: [Human-Agent Authority Matrix](./human-agent-authority-matrix.md) and
+  [User Extensibility Initiative](./user-extensibility-initiative.md)
+- Lesson: agents may recommend policy or reference-data changes, but they should
+  not mutate policy, permissions, reference data, limits, or agent configuration
+  directly. These are versioned, owned, auditable product controls.
+- Deterministic opportunity: repeated policy decisions should become versioned
+  policy rules, typed configuration, admin workflows, or reference-data services
+  with ownership and publish controls.
+- Agent autonomy impact: keep these requests at draft recommendation unless a
+  human owner explicitly approves a governed workflow.
+- Tests or evidence: verify permission checks, ownership metadata, publish or
+  retire lifecycle, audit attribution, and rollback path.
+- Follow-up: when a prompt contains policy-like instructions, propose moving that
+  rule into versioned configuration or typed service logic.
+
+### 2026-04-22 - Internal Reports Can Be Early Autonomy With Source Links
+
+- Type: promotion-signal
+- Domain: reporting and reconciliation
+- Applies to: desk briefings, exception summaries, settlement packs, sourced
+  internal reports
+- Status: proposed
+- Source: [Human-Agent Authority Matrix](./human-agent-authority-matrix.md) and
+  [Agent Role Catalog](./agent-role-catalog.md)
+- Lesson: internal report generation is a reasonable early autonomy candidate
+  when the output is clearly sourced, not an official external commitment, and
+  review burden is lower than manual drafting.
+- Deterministic opportunity: repeated report shapes should become report
+  definitions over approved semantic fields, with deterministic filters,
+  sections, lineage, and freshness checks.
+- Agent autonomy impact: agents may generate internal draft reports earlier than
+  they may mutate records. Official publication, shared presets, or external use
+  should stay draft or stage until publication policy exists.
+- Tests or evidence: report evals should verify source links, freshness labels,
+  row-level access, no hidden data leakage, and clear uncertainty language.
+- Follow-up: promote commonly accepted report formats into governed report
+  definitions.
+
+### 2026-04-22 - Codex Dispatch Is An Admin Engineering Workflow
+
+- Type: lesson
+- Domain: engineering automation
+- Applies to: Codex task dispatch, repository-changing agent work, admin
+  workflow automation
+- Status: accepted
+- Source: [AI Workflow](./ai-workflow.md)
+- Lesson: kicking off Codex from inside ECTRM should be treated as an
+  admin-owned engineering workflow, not as a normal business assistant action.
+  The app may record a task and dispatch a configured repository workflow, but
+  Codex results should still land as reviewable code artifacts such as branches,
+  pull requests, or workflow output.
+- Deterministic opportunity: keep dispatch configuration in typed backend
+  settings and task state in durable `codex_task_requests` records with explicit
+  statuses.
+- Agent autonomy impact: assistants may draft Codex task prompts, but starting
+  repository-mutating work should remain behind admin authentication and
+  server-side credentials.
+- Tests or evidence: focused API coverage should verify disabled/config-missing
+  behavior, successful dispatch recording, and failed dispatch audit state.
+- Follow-up: if assistants later stage Codex tasks, add a typed action request
+  and approval path instead of letting chat text dispatch directly.
+
+### 2026-04-22 - Long-Running Codex Needs Explicit Stop Conditions
+
+- Type: lesson
+- Domain: engineering automation
+- Applies to: Codex task dispatch, long-running repository agents,
+  recommendation loops
+- Status: accepted
+- Source: [AI Workflow](./ai-workflow.md)
+- Lesson: letting Codex continue from one completed task into the next should be
+  modeled as a bounded loop, not as open-ended autonomy. The request must carry
+  a run mode, iteration cap, continuation question, and stop conditions so the
+  repository workflow has a deterministic contract to follow.
+- Deterministic opportunity: store loop controls on `codex_task_requests` and
+  render the continuation contract into the dispatch prompt rather than relying
+  on freeform operator wording. Track execution through a token-authenticated
+  callback that writes workflow run, branch, pull request, artifact, summary,
+  and stop-reason metadata back to the original task record.
+- Agent autonomy impact: long-running Codex may choose the next repository task
+  only when it is concrete, high-confidence, repository-local, and within the
+  original request. It must stop for protected business domains, production data
+  mutation, external commitments, or verification failures requiring human
+  review.
+- Tests or evidence: API coverage should verify loop metadata persistence,
+  prompt contract rendering, configured iteration caps, callback token
+  enforcement, and execution-state updates.
+
+### 2026-04-22 - Autonomy Reviews Need A Generated Brief
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: managed agent promotion, pause review, narrowing decisions,
+  deterministic algorithm discovery
+- Status: implemented
+- Source:
+  [`autonomy_review.py`](../../apps/api/app/domains/assistant/services/autonomy_review.py)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: before increasing or narrowing a managed agent's authority, generate
+  an autonomy review brief instead of relying on the agent profile alone. The
+  brief combines current profile authority, observed outcomes, role/profile eval
+  expectations, stop conditions, and relevant knowledge-base lessons.
+- Deterministic opportunity: recurring brief recommendations should become
+  explicit promotion, pause, or narrowing policy once the thresholds are stable
+  enough for product enforcement.
+- Agent autonomy impact: agents should use the brief as the review handoff when
+  asking for more autonomy. A brief can recommend bounded-review eligibility,
+  but only a human owner should apply the authority change.
+- Tests or evidence: focused API coverage verifies admin-only access, missing
+  agent handling, outcome metrics inclusion, eval signal projection, checklist
+  output, and knowledge-base entry selection.
+- Follow-up: use generated brief recommendations and deterministic candidates
+  during agent health review, then promote repeated candidates into governed
+  policy or service work packages.
+### 2026-04-22 - Codex Dispatch Smoke Tests Stay Two-Stage
+
+- Type: lesson
+- Domain: engineering automation
+- Applies to: Codex task dispatch, GitHub workflow callbacks, long-running
+  repository agents
+- Status: implemented
+- Source: [AI Workflow](./ai-workflow.md) and
+  [`run_codex_task_smoke.py`](../../apps/api/scripts/run_codex_task_smoke.py)
+- Lesson: verify Codex dispatch in two stages. First run the local smoke path
+  to prove the workflow contract, admin task creation, callback updates, and
+  callback-token rejection without mutating GitHub. Then run a live dispatch
+  only after the remote workflow, API environment, and GitHub secrets are
+  configured.
+- Deterministic opportunity: keep smoke readiness checks explicit so missing
+  secrets or unregistered workflows fail as setup gaps, not ambiguous task
+  failures.
+- Agent autonomy impact: local smoke coverage can validate plumbing, but it
+  does not prove repository-mutating autonomy. Live Codex runs remain
+  admin-owned and should land as reviewable branches, pull requests, or
+  artifacts.
+- Tests or evidence: `make api-codex-smoke` creates a local long-running Codex
+  task, posts running and completed callbacks, rejects a bad callback token,
+  and reports missing live prerequisites.
+- Follow-up: once the Codex workflow is present on GitHub and secrets are
+  configured, dispatch a tiny no-op admin task to exercise the full GitHub
+  Actions path.
+
+### 2026-04-22 - Corrected Approvals Still Mean Human Cleanup
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: action request approvals, outcome metrics, bounded-execution
+  promotion review, deterministic algorithm candidates
+- Status: implemented
+- Source:
+  [`action_requests.py`](../../apps/api/app/domains/assistant/services/action_requests.py),
+  [`outcome_metrics.py`](../../apps/api/app/domains/assistant/services/outcome_metrics.py),
+  and [Agent Action Request Contract](./agent-action-request-contract.md)
+- Lesson: an approved action is not always an autonomy win. If the reviewer
+  approved only after correcting the agent's evidence, payload framing, or
+  assumptions, preserve that distinction as `APPROVED_WITH_CORRECTIONS` with a
+  summary or corrected field names.
+- Deterministic opportunity: repeated corrected fields are candidates for typed
+  validation, policy checks, formula logic, stale-state enrichment, or prompt
+  evals. When the same correction recurs, propose the deterministic rule instead
+  of relying on future reviewers to catch it.
+- Agent autonomy impact: corrected approvals count against bounded-execution
+  promotion. Future agents should treat a high correction rate as evidence to
+  keep the action staged, narrow authority, or create a deterministic algorithm
+  before asking for more autonomy.
+- Tests or evidence: API coverage verifies corrected-approval persistence,
+  correction-detail validation, rejection notes, audit-trace serialization, and
+  outcome-metric correction rates and promotion blockers. Web tests verify that
+  approval and rejection calls send structured decision metadata.
+- Follow-up: review recurring `correction_fields` during autonomy reviews and
+  append `algorithm-candidate` entries when a stable rule emerges.
+
+### 2026-04-22 - Health Reviews Promote Brief Candidates Into Work Packages
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: agent health review, deterministic algorithm candidates, policy
+  work packages, service work packages
+- Status: implemented
+- Source:
+  [`autonomy_review.py`](../../apps/api/app/domains/assistant/services/autonomy_review.py)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: autonomy briefs should feed a cross-agent health review. When
+  multiple agents surface the same deterministic candidate, group it into a
+  stable work package with source agents, owner role, priority, rationale, and
+  acceptance checks.
+- Deterministic opportunity: repeated review judgments should graduate into
+  typed policy, service, or eval work packages instead of staying as prompt
+  guidance or one-off review notes.
+- Agent autonomy impact: a health-review work package is not extra autonomy by
+  itself. It is evidence that the deterministic guard should be implemented
+  before expanding authority or reducing reviewer involvement.
+- Tests or evidence: API coverage verifies admin-only health review access,
+  cross-agent candidate grouping, stable package IDs, priority assignment, owner
+  projection, and agent-to-package references. Web API coverage verifies the
+  typed Admin health-review URL and auth headers.
+- Follow-up: persist accepted work packages when the team needs lifecycle state
+  beyond generated candidate snapshots.
+
+### 2026-04-22 - Sensitive Actions Need Deterministic Preview Gates
+
+- Type: algorithm-added
+- Domain: assistant action governance
+- Applies to: staged invoice issuance, action request approval, reviewer
+  surfaces, future sensitive action previews
+- Status: implemented
+- Source:
+  [`settlement_invoices.py`](../../apps/api/app/domains/operations/services/settlement_invoices.py),
+  [`action_requests.py`](../../apps/api/app/domains/assistant/services/action_requests.py),
+  and [Agent Action Request Contract](./agent-action-request-contract.md)
+- Lesson: a sensitive staged action should expose a deterministic dry-run
+  preview before approval. For `issue_trade_invoice`, the preview resolves the
+  same invoice defaults and validation path as execution, lists affected records
+  and expected side effects, and marks the request blocked when the proposed
+  mutation is not safe to execute.
+- Deterministic opportunity: each future high-risk action preview should reuse
+  its domain service normalization and stop conditions instead of summarizing
+  model intent. Preview failures should block approval without creating side
+  effects.
+- Agent autonomy impact: preview gates make staged agent work easier to review,
+  but they do not grant execution authority. Humans still approve invoice
+  issuance, and blocked previews should be rejected or restaged with corrected
+  input.
+- Tests or evidence: focused assistant API tests cover ready preview output,
+  blocked duplicate invoice previews, missing-preview approval failure, and
+  no-side-effect guarantees. Web tests cover ready and blocked preview rendering
+  in the action request list.
+- Follow-up: extend this pattern to the next sensitive action only after its
+  domain owner can define deterministic affected-records, field-change, blocker,
+  and side-effect semantics.
+
+### 2026-04-22 - Control Tower Summaries Are Read-Only Governance Snapshots
+
+- Type: algorithm-added
+- Domain: control tower governance
+- Applies to: assistant agent roster, run monitoring, action request posture,
+  eval coverage, policy review signals
+- Status: implemented
+- Source:
+  [`control_tower.py`](../../apps/api/app/domains/assistant/services/control_tower.py)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: a control tower summary should aggregate deterministic governance
+  posture without changing agent authority. Roster counts, run warnings,
+  pending or failed actions, blocked previews, policy warnings, and eval gaps
+  are supervisory signals, not auto-pause commands.
+- Deterministic opportunity: repeated trust signals should feed typed policy,
+  service, eval, or knowledge-base work before increasing autonomy. The summary
+  should stay a compact read model until domain owners approve enforcement.
+- Agent autonomy impact: humans can use the summary to prioritize nudges,
+  narrowing, pausing, or profile edits while preserving manual fallback and
+  reviewable action requests.
+- Tests or evidence: API tests verify admin-only access, seeded roster/run/action
+  counts, oldest pending action, blocked preview counts, and trust-signal
+  serialization. Web API tests verify the typed URL and admin auth headers.
+- Follow-up: AP1-11 should render this summary in Admin without adding
+  auto-enforcement or hidden mutations.
+
+### 2026-04-22 - Signed-Out Prompt Drafts Resume Through Auth
+
+- Type: lesson
+- Domain: prompt-first UX
+- Applies to: Prompt Home, authentication gate, assistant prompt submission,
+  old-console navigation handoff
+- Status: implemented
+- Source:
+  [`PromptHomeWorkspace.tsx`](../../apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx),
+  [`App.tsx`](../../apps/web/src/App.tsx), and
+  [`promptResumeIntent.ts`](../../apps/web/src/shared/promptResumeIntent.ts)
+- Lesson: Prompt Home may be visible while signed out, but protected prompt
+  execution must wait for authentication. Store a typed local resume intent for
+  signed-out drafts, show the pending action in the auth gate, and return to
+  Prompt Home after sign-in before sending or restoring the draft.
+- Deterministic opportunity: prompt resume state is a browser-owned navigation
+  contract, not model output. Keep it normalized, length-limited, cached for
+  React external-store subscriptions, and cleared once Prompt Home consumes it.
+- Agent autonomy impact: the assistant can guide the user into the old console
+  after sign-in, but the resume flow still preserves manual fallback and never
+  lets a freeform prompt mutate business records.
+- Tests or evidence: focused web unit tests cover prompt resume normalization,
+  stable subscription snapshots, and sign-in return intent storage. Browser
+  smoke covers signed-out draft submission, post-auth prompt sending, recent
+  thread resume, and old-console handoffs into operations, settlement, and
+  trade capture.
+- Follow-up: if prompt resume grows beyond browser-local state, promote it to a
+  typed server-side session continuation contract with expiry and audit fields.
+
+### 2026-04-22 - Prompt Starters Are Deterministic UI Intents
+
+- Type: lesson
+- Domain: prompt-first UX
+- Applies to: Prompt Home, contextual starters, old-console navigation handoff,
+  assistant prompt submission
+- Status: implemented
+- Source:
+  [`promptHomeStarters.ts`](../../apps/web/src/workspaces/prompt/promptHomeStarters.ts)
+  and
+  [`PromptHomeWorkspace.tsx`](../../apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx)
+- Lesson: contextual Prompt Home starters should be typed UI intents derived
+  from deterministic workspace summary counts. They may seed or submit a prompt,
+  or open the traditional workspace directly, but they should not rely on model
+  output to decide the initial destination.
+- Deterministic opportunity: starter cards are a stable mapping from work
+  context to prompt draft and `PromptNavigationIntent`. If the mapping becomes
+  role-specific or threshold-driven, move the rule into a typed service or
+  configuration contract rather than embedding prompt instructions.
+- Agent autonomy impact: starter prompts can ask the assistant to explain and
+  route work, while direct workspace actions preserve manual fallback. Neither
+  path grants the assistant write authority.
+- Tests or evidence: web unit tests cover starter count projection and unknown
+  metrics. Browser smoke covers asking from a starter, receiving an assistant
+  handoff, and opening an old workspace directly from a starter.
+- Follow-up: future starters should declare source counts, destination intent,
+  prompt text, and stop conditions before being exposed as first-screen actions.
+
+### 2026-04-22 - Control Tower UI Separates Watching From Enforcement
+
+- Type: lesson
+- Domain: control tower governance
+- Applies to: Admin control tower, agent registry, approval inbox, outcome
+  metrics, trust signal display
+- Status: implemented
+- Source:
+  [`AssistantControlTowerPanel.tsx`](../../apps/web/src/workspaces/admin/AssistantControlTowerPanel.tsx)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: the human watch surface should make agent posture easy to inspect
+  without silently changing authority. The control tower can highlight eval
+  gaps, policy warnings, failed actions, pending backlogs, and blocked previews,
+  but pausing, narrowing, approval, or profile edits must remain explicit human
+  actions in the existing governed panels.
+- Deterministic opportunity: trust-signal presentation should link to durable
+  remediation surfaces rather than inventing new hidden workflows. If repeated
+  signals need automatic enforcement, promote that rule through policy,
+  service, eval, and approval design first.
+- Agent autonomy impact: supervisors can watch and nudge agents faster, but
+  Phase 1 authority remains observe, explain, draft, or stage unless the
+  autonomy rubric and outcome evidence justify more.
+- Tests or evidence: web rendering tests cover seeded control tower posture and
+  non-admin gating. The panel links to agent management, outcome metrics, and
+  approval inbox sections while preserving the Phase 1 autonomy statement.
+- Follow-up: AP1-12 should add explicit pause or narrowing workflows without
+  turning summary signals into automatic mutations.
+
+### 2026-04-22 - Unissued Invoices Are Candidate Trades
+
+- Type: algorithm-added
+- Domain: settlement assistant tooling
+- Applies to: pending invoice summaries, settlement copilots, invoice action
+  staging, workspace handoffs
+- Status: implemented
+- Source:
+  [`settlement_invoices.py`](../../apps/api/app/domains/operations/services/settlement_invoices.py)
+  and
+  [`tools.py`](../../apps/api/app/domains/assistant/services/tools.py)
+- Lesson: `settlement.invoice_pending_count` counts active trades that still
+  need their first invoice record, not persisted invoice rows. Settlement
+  agents should use the invoice issue candidate read model for unissued invoice
+  work and use the invoice ledger only for records that already exist.
+- Deterministic opportunity: candidate detection belongs in settlement service
+  logic with the same open-settlement and no-existing-invoice criteria as the
+  workspace summary, plus deterministic invoice-issue preview blockers before
+  any action is staged.
+- Agent autonomy impact: surfacing candidates improves read/explain/stage
+  quality without increasing authority. Issuance remains an approval-gated
+  `issue_trade_invoice` action and blocked previews should stop staging until
+  missing evidence is resolved.
+- Tests or evidence: assistant tooling coverage verifies candidate payloads and
+  recommended approval-gated actions; assistant eval coverage verifies a
+  settlement read agent can call the candidate tool for pending invoices.
+- Follow-up: if finance users need sorting or prioritization beyond oldest open
+  execution, promote that rule as a named settlement queue policy.

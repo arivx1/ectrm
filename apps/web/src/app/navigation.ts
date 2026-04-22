@@ -14,8 +14,14 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
       'Use the live desk, product guide, and guided walkthrough as your first stop before diving into a specific workflow.',
     landingBody:
       'This section answers the first question new or returning operators have: where should I start for the job in front of me?',
-    viewKeys: ['dashboard', 'guide', 'demo'],
+    viewKeys: ['prompt', 'dashboard', 'guide', 'demo'],
     startPaths: [
+      {
+        title: 'Ask the operator prompt',
+        detail: 'Start from the job in front of you and let the assistant answer, clarify, or route you to the right workspace.',
+        viewKey: 'prompt',
+        actionLabel: 'Open Prompt Home',
+      },
       {
         title: 'Get oriented',
         detail: 'Read the in-product handbook before you touch live workflows or need to explain the platform to someone new.',
@@ -45,8 +51,14 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
       'Move from ticket entry into activity, exposure, and net positions without guessing which screen owns which job.',
     landingBody:
       'Use this section when the job is booking a trade, tracing its recent changes, or understanding where open exposure sits.',
-    viewKeys: ['trades', 'events', 'risk', 'positions'],
+    viewKeys: ['pretrade', 'trades', 'events', 'risk', 'positions'],
     startPaths: [
+      {
+        title: 'Build a pre-trade view',
+        detail: 'Pull desk context, live external signals, and a proposed structure together before the trade reaches capture.',
+        viewKey: 'pretrade',
+        actionLabel: 'Open Pre-Trade',
+      },
       {
         title: 'Capture a trade',
         detail: 'Open the trade blotter and ticket-entry workflow when the desk needs to book or amend a position.',

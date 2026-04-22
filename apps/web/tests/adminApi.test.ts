@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 
-const { buildMutationHeadersMock, getMutationContextMock, postJsonMock } = vi.hoisted(() => ({
+const { buildMutationHeadersMock, fetchJsonMock, getMutationContextMock, postJsonMock, putJsonMock } = vi.hoisted(() => ({
   buildMutationHeadersMock: vi.fn(),
+  fetchJsonMock: vi.fn(),
   getMutationContextMock: vi.fn(),
   postJsonMock: vi.fn(),
+  putJsonMock: vi.fn(),
 }))
 
 vi.mock('../src/shared/api.ts', () => ({
+  fetchJson: fetchJsonMock,
   postJson: postJsonMock,
+  putJson: putJsonMock,
 }))
 
 vi.mock('../src/shared/mutation.ts', () => ({
@@ -18,17 +22,22 @@ vi.mock('../src/shared/mutation.ts', () => ({
 
 import {
   importCounterpartyCreditSnapshots,
+  loadTradeProjectionMonitoring,
   previewCounterpartyCreditImport,
   runExternalDataSync,
   runNwsWeatherSync,
+  runTradeProjectionMonitoring,
+  saveTradeProjectionMonitoring,
   seedAssistantAgents,
   seedTradingSources,
 } from '../src/entities/app/adminApi.ts'
 
 beforeEach(() => {
   buildMutationHeadersMock.mockReset()
+  fetchJsonMock.mockReset()
   getMutationContextMock.mockReset()
   postJsonMock.mockReset()
+  putJsonMock.mockReset()
 
   buildMutationHeadersMock.mockImplementation((headers?: HeadersInit) => {
     const merged = new Headers(headers)
@@ -122,10 +131,25 @@ test('seedTradingSources keeps replaceExisting inside the typed admin helper', a
 test('seedAssistantAgents routes through the typed admin seed helper', async () => {
   const expected = {
     requested_by: 'ops.admin',
-    total_templates: 3,
+    total_profiles: 13,
+    total_templates: 13,
     created_count: 2,
     updated_count: 1,
-    agent_ids: ['trade-ops-copilot', 'settlement-copilot', 'trade-governor'],
+    agent_ids: [
+      'trade-ops-copilot',
+      'settlement-copilot',
+      'trade-governor',
+      'trade-explainer',
+      'ops-coordinator',
+      'settlement-analyst',
+      'document-triage',
+      'desk-briefing',
+      'market-research-agent',
+      'pre-trade-structuring-agent',
+      'document-agent',
+      'risk-sentinel',
+      'reporting-reconciliation-agent',
+    ],
   }
   postJsonMock.mockResolvedValueOnce(expected)
 
@@ -150,5 +174,196 @@ test('runNwsWeatherSync routes through the typed weather admin helper', async ()
   assert.equal(url, 'http://api.test/admin/weather/sync/nws')
   assert.deepEqual(body, {
     requested_by: 'ops.admin',
+  })
+})
+
+test('loadTradeProjectionMonitoring reads the protected monitoring endpoint', async () => {
+  const expected = {
+    document: {
+      policy_key: 'projection_integrity_monitoring.v1',
+      schedule: {
+        enabled: true,
+        cadence_minutes: 240,
+        auto_clean_mode: 'clean_auto_cleanable',
+        max_cleanup_trades_per_run: 25,
+      },
+      alerting: {
+        enabled: true,
+        issue_count_threshold: 1,
+        impacted_trade_threshold: 1,
+        minimum_alert_interval_minutes: 60,
+        channels: ['ADMIN_WORKSPACE', 'EMAIL'],
+        routing_note: 'Route through admin workspace.',
+      },
+    },
+    updated_at: null,
+    updated_by: null,
+    version: 0,
+    is_default: true,
+    recent_revisions: [],
+    runtime: {
+      last_evaluated_at: null,
+      last_evaluated_by: null,
+      last_issue_count: 0,
+      last_impacted_trade_count: 0,
+      last_auto_cleaned_trade_count: 0,
+      last_auto_cleaned_trade_ids: [],
+      last_cycle_status: 'idle',
+      last_alert_at: null,
+      last_alert_reason: null,
+      last_alert_severity: null,
+    },
+    recent_alerts: [],
+    recent_deliveries: [],
+    live_status: {
+      health_status: 'attention',
+      evaluation_due: true,
+      next_evaluation_at: null,
+      live_issue_count: 0,
+      live_impacted_trade_count: 0,
+      should_alert: false,
+      alert_messages: ['Projection monitoring is due for a fresh evaluation.'],
+      last_evaluated_at: null,
+      last_evaluated_by: null,
+      last_alert_at: null,
+      last_alert_reason: null,
+    },
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await loadTradeProjectionMonitoring('http://api.test', 'session-token')
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/data/projection-monitoring')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer session-token')
+})
+
+test('saveTradeProjectionMonitoring writes the monitoring policy through the typed admin helper', async () => {
+  const document = {
+    policy_key: 'projection_integrity_monitoring.v1',
+    schedule: {
+      enabled: true,
+      cadence_minutes: 120,
+      auto_clean_mode: 'clean_auto_cleanable',
+      max_cleanup_trades_per_run: 10,
+    },
+    alerting: {
+      enabled: true,
+      issue_count_threshold: 1,
+      impacted_trade_threshold: 1,
+      minimum_alert_interval_minutes: 30,
+      channels: ['ADMIN_WORKSPACE'],
+      routing_note: 'Desk review required.',
+    },
+  } as const
+  const expected = {
+    document,
+    updated_at: '2026-04-15T12:00:00Z',
+    updated_by: 'ops.admin',
+    version: 1,
+    is_default: false,
+    recent_revisions: [],
+    runtime: {
+      last_evaluated_at: null,
+      last_evaluated_by: null,
+      last_issue_count: 0,
+      last_impacted_trade_count: 0,
+      last_auto_cleaned_trade_count: 0,
+      last_auto_cleaned_trade_ids: [],
+      last_cycle_status: 'idle',
+      last_alert_at: null,
+      last_alert_reason: null,
+      last_alert_severity: null,
+    },
+    recent_alerts: [],
+    recent_deliveries: [],
+    live_status: {
+      health_status: 'attention',
+      evaluation_due: true,
+      next_evaluation_at: null,
+      live_issue_count: 0,
+      live_impacted_trade_count: 0,
+      should_alert: false,
+      alert_messages: [],
+      last_evaluated_at: null,
+      last_evaluated_by: null,
+      last_alert_at: null,
+      last_alert_reason: null,
+    },
+  }
+  putJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await saveTradeProjectionMonitoring(
+    'http://api.test',
+    'session-token',
+    document,
+    'ops.admin',
+  )
+
+  assert.equal(payload, expected)
+  const [url, body, init] = putJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/data/projection-monitoring')
+  assert.deepEqual(body, {
+    document,
+    updated_by: 'ops.admin',
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer session-token')
+})
+
+test('runTradeProjectionMonitoring routes a forced run through the typed admin mutation helper', async () => {
+  const expected = {
+    cycle_status: 'issues_detected',
+    executed: true,
+    requested_by: 'ops.admin',
+    evaluated_at: '2026-04-15T12:00:00Z',
+    issue_count_before: 2,
+    issue_count_after: 1,
+    impacted_trade_count_after: 1,
+    auto_cleaned_trade_ids: ['T-ORPHAN'],
+    emitted_alerts: [],
+    emitted_deliveries: [
+      {
+        delivery_id: 'delivery-1',
+        alert_id: 'alert-1',
+        channel: 'ADMIN_WORKSPACE',
+        status: 'delivered',
+        target: 'admin-workspace',
+        title: 'Projection monitoring alert',
+        body: '1 issue remains.',
+        recipients: [],
+        created_at: '2026-04-15T12:00:00Z',
+        delivered_at: '2026-04-15T12:00:00Z',
+        error: null,
+      },
+      {
+        delivery_id: 'delivery-2',
+        alert_id: 'alert-1',
+        channel: 'EMAIL',
+        status: 'delivered',
+        target: 'local-email-archive',
+        title: 'Projection monitoring alert',
+        body: '1 issue remains.',
+        recipients: ['ops@example.com'],
+        created_at: '2026-04-15T12:00:00Z',
+        delivered_at: '2026-04-15T12:00:00Z',
+        error: null,
+      },
+    ],
+    summary: 'Projection monitoring found 1 remaining issue across 1 trade. 2 channel deliveries were recorded.',
+    next_evaluation_at: '2026-04-15T16:00:00Z',
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await runTradeProjectionMonitoring('http://api.test')
+
+  assert.equal(payload, expected)
+  const [url, body] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/data/projection-monitoring/run')
+  assert.deepEqual(body, {
+    requested_by: 'ops.admin',
+    force: true,
   })
 })

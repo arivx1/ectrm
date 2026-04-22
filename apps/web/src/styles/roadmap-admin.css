@@ -1,0 +1,500 @@
+.admin-explainability-grid,
+.admin-summary-grid,
+.dashboard-report-grid,
+.market-context-section-grid,
+.market-price-grid,
+.roadmap-admin-meta-grid,
+.roadmap-admin-phase-grid,
+.roadmap-admin-milestone-grid,
+.domain-map-grid,
+.schema-explorer-grid,
+.admin-provenance-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-sync-status-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-explainability-grid {
+  grid-template-columns: minmax(0, 1.15fr) minmax(22rem, 0.85fr);
+}
+
+.admin-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-snapshot-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.dashboard-report-grid {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.operations-workspace .dashboard-report-grid {
+  gap: 0.75rem;
+}
+
+.market-context-section-grid {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.market-price-grid {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.market-context-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.external-series-panel,
+.external-series-layout,
+.external-series-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.external-series-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 1fr);
+  align-items: start;
+}
+
+.external-series-filter-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.external-series-filter-grid .field-wide {
+  grid-column: 1 / -1;
+}
+
+.external-series-row,
+.external-series-observation-row {
+  width: 100%;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.external-series-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  text-align: left;
+}
+
+.external-series-row.is-active {
+  border-color: rgba(61, 214, 160, 0.18);
+  box-shadow: 0 0 0 1px rgba(61, 214, 160, 0.08);
+}
+
+.external-series-row-copy,
+.external-series-observation-copy,
+.external-series-observation-meta {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.external-series-row-copy span,
+.external-series-observation-copy span,
+.external-series-observation-meta span {
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.external-series-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.external-series-observation-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0.85rem 1rem;
+}
+
+.weather-intelligence-panel,
+.weather-intelligence-grid,
+.weather-intelligence-signal-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.weather-intelligence-grid {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.weather-intelligence-summary {
+  gap: 0.85rem;
+}
+
+.weather-intelligence-signal {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.weather-risk-chip-active {
+  border-color: rgba(61, 214, 160, 0.16);
+}
+
+.weather-risk-chip-in-progress {
+  border-color: rgba(245, 190, 103, 0.18);
+}
+
+.weather-risk-chip-blocked {
+  border-color: rgba(255, 139, 127, 0.2);
+}
+
+.market-context-section,
+.market-context-freshness-card {
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 250, 0.9));
+  padding: 1rem;
+}
+
+.market-context-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.market-context-section-head {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.market-context-section-head strong,
+.market-context-row-copy strong,
+.market-context-row-meta strong,
+.market-context-freshness-head strong {
+  color: #13293d;
+}
+
+.market-context-section-head p,
+.market-context-row-copy p,
+.market-context-row-meta span,
+.market-context-freshness-card p {
+  margin: 0;
+  color: #66717c;
+}
+
+.market-context-list,
+.market-context-freshness {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.market-context-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.market-context-row-copy,
+.market-context-row-meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.market-context-row-meta {
+  justify-items: end;
+  text-align: right;
+}
+
+.market-context-freshness {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.market-context-freshness-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.roadmap-admin-meta-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.roadmap-admin-phase-grid,
+.roadmap-admin-milestone-grid {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.roadmap-admin-history-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.admin-sync-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.admin-sync-head {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.admin-sync-head-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.admin-run-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-run-row {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 1rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.9rem 1rem;
+}
+
+.admin-run-row p {
+  color: rgba(15, 23, 42, 0.72);
+  margin: 0.25rem 0 0;
+}
+
+.admin-run-meta {
+  color: rgba(15, 23, 42, 0.72);
+  display: grid;
+  gap: 0.2rem;
+  justify-items: end;
+  text-align: right;
+}
+
+.admin-weather-row {
+  align-items: start;
+}
+
+.admin-weather-row-selected {
+  border-color: rgba(61, 214, 160, 0.2);
+  box-shadow: 0 0 0 1px rgba(61, 214, 160, 0.08);
+}
+
+.admin-weather-row-main {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.admin-weather-row-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.admin-weather-row-detail span {
+  color: rgba(15, 23, 42, 0.72);
+  font-size: 0.88rem;
+}
+
+.admin-weather-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  margin-top: 1rem;
+}
+
+.admin-weather-form-card,
+.admin-weather-preview-card,
+.admin-weather-preview,
+.admin-weather-preview-section {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.admin-weather-form-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-weather-form-grid .field-wide {
+  grid-column: 1 / -1;
+}
+
+.roadmap-admin-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.roadmap-admin-lock {
+  align-items: center;
+  background: rgba(248, 250, 249, 0.9);
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.2rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 1rem 1.1rem;
+}
+
+.roadmap-admin-lock p,
+.roadmap-admin-note {
+  color: #66717c;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.roadmap-admin-phase-card,
+.roadmap-admin-item-card,
+.roadmap-admin-milestone-card {
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.15rem;
+  background: rgba(248, 250, 249, 0.88);
+}
+
+.roadmap-admin-phase-card,
+.roadmap-admin-milestone-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.roadmap-admin-item-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.95rem;
+}
+
+.roadmap-admin-phase-head,
+.roadmap-admin-item-head {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.roadmap-admin-phase-head h4 {
+  margin: 0.28rem 0 0;
+  color: #13293d;
+}
+
+.roadmap-admin-phase-head > span,
+.roadmap-admin-item-footer small,
+.roadmap-admin-item-head p {
+  color: #66717c;
+}
+
+.roadmap-admin-phase-card > p,
+.roadmap-admin-item-head p {
+  margin: 0.25rem 0 0;
+  line-height: 1.55;
+}
+
+.roadmap-admin-item-stack {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.roadmap-admin-field-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.roadmap-admin-field-grid-compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roadmap-admin-item-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  justify-content: space-between;
+}
+
+.roadmap-admin-section-head {
+  margin-top: 1.5rem;
+}
+
+.roadmap-admin-history-card {
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.15rem;
+  background: rgba(248, 250, 249, 0.88);
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.roadmap-admin-history-head {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.roadmap-admin-history-head p {
+  color: #66717c;
+  margin: 0.3rem 0 0;
+  line-height: 1.55;
+}
+
+.roadmap-admin-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  color: #66717c;
+  font-size: 0.84rem;
+}
+
+.domain-map-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.schema-explorer-grid {
+  grid-template-columns: minmax(13rem, 0.42fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.admin-provenance-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.surface {
+  border-radius: 1.7rem;
+  padding: 1.25rem;
+}
+
+.feature-panel {
+  padding: 1.4rem;
+}
+

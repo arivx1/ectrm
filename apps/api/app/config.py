@@ -72,8 +72,20 @@ class Settings(BaseSettings):
         "implicit row edits."
     )
     ASSISTANT_TIMEOUT_SECONDS: int = Field(default=60, ge=5, le=300)
-    ASSISTANT_MAX_OUTPUT_TOKENS: int = Field(default=1200, ge=128, le=8192)
+    ASSISTANT_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=128, le=8192)
     ASSISTANT_MAX_TOOL_ROUNDS: int = Field(default=4, ge=0, le=12)
+    ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION: int = Field(default=100_000, ge=0, le=100_000_000)
+    CODEX_TASKS_ENABLED: bool = False
+    CODEX_GITHUB_REPOSITORY: str = ""
+    CODEX_GITHUB_WORKFLOW_ID: str = ""
+    CODEX_GITHUB_REF: str = "main"
+    CODEX_GITHUB_PROMPT_INPUT: str = "prompt"
+    CODEX_GITHUB_TOKEN: str = ""
+    CODEX_REQUEST_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    CODEX_CALLBACK_BASE_URL: str = ""
+    CODEX_CALLBACK_TOKEN: str = ""
+    CODEX_LONG_RUNNING_DEFAULT_MAX_ITERATIONS: int = Field(default=5, ge=2, le=25)
+    CODEX_LONG_RUNNING_MAX_ITERATIONS: int = Field(default=10, ge=2, le=50)
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5-mini"
@@ -125,6 +137,20 @@ class Settings(BaseSettings):
     NWS_SYNC_SUCCESS_SLA_HOURS: int = Field(default=6, ge=1, le=168)
     NWS_FORECAST_FRESHNESS_HOURS: int = Field(default=8, ge=1, le=168)
     NWS_OBSERVATION_FRESHNESS_HOURS: int = Field(default=4, ge=1, le=168)
+    PROJECTION_MONITORING_EMAIL_RECIPIENTS: str = ""
+    PROJECTION_MONITORING_EMAIL_FROM: str = "projection-monitoring@localhost"
+    PROJECTION_MONITORING_EMAIL_SMTP_HOST: str = ""
+    PROJECTION_MONITORING_EMAIL_SMTP_PORT: int = Field(default=587, ge=1, le=65535)
+    PROJECTION_MONITORING_EMAIL_SMTP_USERNAME: str = ""
+    PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD: str = ""
+    PROJECTION_MONITORING_EMAIL_SMTP_USE_STARTTLS: bool = True
+    PROJECTION_MONITORING_EMAIL_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
+    PROJECTION_MONITORING_SLACK_WEBHOOK_URL: str = ""
+    PROJECTION_MONITORING_SLACK_CHANNEL: str = "#projection-monitoring"
+    PROJECTION_MONITORING_SLACK_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
+    PROJECTION_MONITORING_INCIDENT_QUEUE_NAME: str = "projection-monitoring"
+    PROJECTION_MONITORING_INCIDENT_WEBHOOK_URL: str = ""
+    PROJECTION_MONITORING_INCIDENT_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
 
     @property
     def cors_allow_origins(self) -> list[str]:
@@ -133,6 +159,14 @@ class Settings(BaseSettings):
     @property
     def cors_allow_origin_regex(self) -> str | None:
         return LOOPBACK_CORS_ORIGIN_REGEX if any(_origin_is_loopback(origin) for origin in self.cors_allow_origins) else None
+
+    @property
+    def projection_monitoring_email_recipients(self) -> list[str]:
+        return [
+            recipient.strip().lower()
+            for recipient in self.PROJECTION_MONITORING_EMAIL_RECIPIENTS.split(",")
+            if recipient.strip()
+        ]
 
     def is_cors_origin_allowed(self, origin: str | None) -> bool:
         if origin is None:

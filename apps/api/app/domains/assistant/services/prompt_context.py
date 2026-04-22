@@ -54,6 +54,8 @@ class AssistantPromptEnvelope:
     generated_at: datetime
     agent_id: str | None
     agent_name: str | None
+    agent_role_key: str | None
+    agent_profile_kind: str | None
     system_prompt: str
     sections: tuple[AssistantPromptSection, ...]
     warnings: tuple[str, ...] = ()
@@ -96,6 +98,8 @@ def build_prompt_context(
         generated_at=generated_at,
         agent_id=agent_definition.agent_id if agent_definition is not None else None,
         agent_name=agent_definition.name if agent_definition is not None else None,
+        agent_role_key=agent_definition.role_key if agent_definition is not None else None,
+        agent_profile_kind=agent_definition.profile_kind if agent_definition is not None else None,
         system_prompt=rendered_prompt,
         sections=tuple(sections),
     )
@@ -227,19 +231,35 @@ def _build_agent_section(agent_definition: ManagedAssistantAgent) -> AssistantPr
     capabilities = ", ".join(agent_definition.capabilities)
     workspaces = ", ".join(agent_definition.allowed_workspaces)
     allowed_tools = ", ".join(agent_definition.allowed_tools) if agent_definition.allowed_tools else "all published read-only tools"
+    profile_lines = [
+        f"agent_id: {agent_definition.agent_id}",
+        f"name: {agent_definition.name}",
+        f"scope: {agent_definition.scope}",
+        f"profile_kind: {agent_definition.profile_kind}",
+    ]
+    if agent_definition.role_key:
+        profile_lines.append(f"role_key: {agent_definition.role_key}")
+    if agent_definition.human_owner_role:
+        profile_lines.append(f"human_owner_role: {agent_definition.human_owner_role}")
+    if agent_definition.authority_ceiling:
+        profile_lines.append(f"authority_ceiling: {agent_definition.authority_ceiling}")
+    if agent_definition.specialization_summary:
+        profile_lines.append(f"specialization_summary: {agent_definition.specialization_summary}")
+    if agent_definition.activation_notes:
+        profile_lines.append(f"activation_notes: {agent_definition.activation_notes}")
+    profile_lines.extend(
+        [
+            f"capabilities: {capabilities}",
+            f"allowed_workspaces: {workspaces}",
+            f"allowed_tools: {allowed_tools}",
+            f"instructions:\n{agent_definition.system_prompt}",
+        ]
+    )
     return AssistantPromptSection(
         key="managed-agent",
         title="Managed Agent Profile",
         source="agent",
-        content=(
-            f"agent_id: {agent_definition.agent_id}\n"
-            f"name: {agent_definition.name}\n"
-            f"scope: {agent_definition.scope}\n"
-            f"capabilities: {capabilities}\n"
-            f"allowed_workspaces: {workspaces}\n"
-            f"allowed_tools: {allowed_tools}\n"
-            f"instructions:\n{agent_definition.system_prompt}"
-        ),
+        content="\n".join(profile_lines),
     )
 
 

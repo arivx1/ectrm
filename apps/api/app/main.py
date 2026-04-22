@@ -181,6 +181,12 @@ def _requires_authenticated_read(request: Request) -> bool:
     return request.method.upper() == "GET" and request.url.path.startswith(AUTHENTICATED_READ_PATH_PREFIXES)
 
 
+def _is_public_write_path(request_path: str) -> bool:
+    return request_path in PUBLIC_WRITE_PATHS or (
+        request_path.startswith("/codex/tasks/") and request_path.endswith("/callback")
+    )
+
+
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
@@ -202,7 +208,7 @@ async def add_correlation_id(request: Request, call_next):
             principal = resolve_session_principal(db, request.headers.get("authorization"))
         except AuthError as exc:
             request_path = request.url.path
-            protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
+            protected_write = request.method.upper() in PROTECTED_METHODS and not _is_public_write_path(request_path)
             protected_read = _requires_authenticated_read(request)
             admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
             if protected_write or protected_read or admin_path:
@@ -226,7 +232,7 @@ async def add_correlation_id(request: Request, call_next):
 
     try:
         request_path = request.url.path
-        protected_write = request.method.upper() in PROTECTED_METHODS and request_path not in PUBLIC_WRITE_PATHS
+        protected_write = request.method.upper() in PROTECTED_METHODS and not _is_public_write_path(request_path)
         protected_read = _requires_authenticated_read(request)
         admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
 

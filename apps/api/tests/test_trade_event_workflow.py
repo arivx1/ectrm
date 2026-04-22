@@ -1382,7 +1382,7 @@ class TradeEventWorkflowTests(unittest.TestCase):
                 item_id=confirmation_item.id,
                 actor_id="ops.user",
                 actor_role="OPERATIONS",
-                changes={"status": "CONFIRMED", "notes": "Counterparty verbally matched."},
+                changes={"owner": "ops.user", "notes": "Counterparty verbally matched."},
                 now=self.now,
             )
             session.commit()

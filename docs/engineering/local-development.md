@@ -66,6 +66,7 @@ Run these from the repo root:
 
 ```bash
 make api-contract-check
+make api-assistant-evals
 make api-test
 make web-build
 make web-lint
@@ -103,8 +104,12 @@ This browser path is intentionally separate from `make verify` during Wave 0.
 It starts a Vite app server plus a deterministic mock API fixture inside the
 Playwright run, so no separately running API or demo database is required.
 
-The CI workflows introduced under the future-ready Wave 0 plan should reuse
-these same verification targets instead of redefining parallel command sets.
+The CI workflows introduced under the future-ready plan should reuse these same
+verification targets instead of redefining parallel command sets.
+
+Use `make api-assistant-evals` explicitly whenever changes affect assistant or
+automation behavior. That lane is also part of the repo-level `make verify`
+contract now.
 
 The first backend CI lane runs on Python `3.12`, checks the committed trade
 metadata contract artifact with `make api-contract-check`, and currently does

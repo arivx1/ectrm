@@ -1,0 +1,112 @@
+.workspace-window-shell {
+  gap: 1rem;
+}
+
+.workspace-handoff-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  background:
+    linear-gradient(135deg, rgba(238, 247, 244, 0.94), rgba(247, 251, 249, 0.92)),
+    rgba(255, 255, 255, 0.94);
+}
+
+.workspace-handoff-banner-copy {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.workspace-handoff-banner-copy p {
+  margin: 0;
+}
+
+.workspace-focus-banner {
+  margin-bottom: 1rem;
+}
+
+.workspace-handoff-meta,
+.workspace-handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.workspace-handoff-meta {
+  margin-top: 0.35rem;
+}
+
+.workspace-handoff-meta span {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgba(18, 124, 108, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  font-size: 0.82rem;
+}
+
+.workspace-handoff-actions {
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.workspace-window-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.workspace-window-banner-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workspace-window-banner-copy p {
+  margin: 0;
+}
+
+.workspace-window-banner-action {
+  flex-shrink: 0;
+}
+
+.trade-structure-note {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.trade-structure-note p {
+  margin: 0;
+}
+
+.trade-review-card {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.trade-review-card strong {
+  color: #13293d;
+}
+
+.change-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.change-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.72rem;
+  border-radius: 999px;
+  background: rgba(18, 124, 108, 0.1);
+  color: #0f5f53;
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.change-pill-muted {
+  background: rgba(18, 42, 56, 0.06);
+  color: #66717c;
+}

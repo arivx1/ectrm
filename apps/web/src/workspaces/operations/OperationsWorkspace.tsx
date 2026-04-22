@@ -9,12 +9,13 @@ import type {
 } from '../../entities/confirmations/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
-import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
+import { normalizeAppRouteHandoff, type AppRouteHandoff } from '../../shared/appRouteHandoff'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import { buildOpenOptionActionQueue, type OpenOptionValuation } from '../../shared/optionExposure'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type {
   DeliveryRecord,
@@ -28,7 +29,6 @@ import type {
 import type { StoredAuthSession } from '../../shared/mutation'
 import type { OptionLifecycleEventType } from '../../shared/trading'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
-import { describeEventWorkspaceHandoff } from '../events/eventHelpers'
 import { DocumentIngestionPanel } from './DocumentIngestionPanel'
 import { OperationalBoardController } from './OperationalBoardController'
 import { renderOperationalInlineBoard } from './operationalInlineBoardRegistry'
@@ -62,6 +62,7 @@ type OperationsWorkspaceProps = {
     tradeId: string,
     payload: Omit<CreateTradeWorkflowItemInput, 'trade_id'>,
   ) => Promise<void>
+  onClearHandoff: () => void
   onOpenTrade: (tradeId: string) => void
   onOptionLifecycleEvent: (tradeId: string, eventType: OptionLifecycleEventType) => Promise<void>
   optionLifecycleSubmittingEvent: OptionLifecycleEventType | null
@@ -286,6 +287,7 @@ export function OperationsWorkspace({
   onIssueConfirmation,
   onRespondConfirmation,
   onCreateWorkflowItem,
+  onClearHandoff,
   onOpenTrade,
   onOptionLifecycleEvent,
   optionLifecycleSubmittingEvent,
@@ -398,10 +400,17 @@ export function OperationsWorkspace({
     'workflowQueue',
     operationalResourceDescriptors,
   )
-  const workspaceFocusBanner =
-    routeHandoff?.source === 'events'
-      ? describeEventWorkspaceHandoff('operations', routeHandoff.tradeId, routeHandoff.eventType)
-      : null
+  const normalizedRouteHandoff = normalizeAppRouteHandoff(routeHandoff)
+  const routeHandoffFocusTradeId =
+    normalizedRouteHandoff?.focus.type === 'trade'
+      ? normalizedRouteHandoff.focus.id
+      : normalizedRouteHandoff && normalizedRouteHandoff.tradeId !== normalizedRouteHandoff.focus.id
+        ? normalizedRouteHandoff.tradeId
+        : null
+  function clearWorkspaceHandoff() {
+    setScreenFilter('')
+    onClearHandoff()
+  }
   const operationsSnapshotCards: TileSectionGridItem[] = [
     {
       id: 'open-workflow',
@@ -479,14 +488,22 @@ export function OperationsWorkspace({
         authSession={authSession}
         headerContent={
           <>
-            {workspaceFocusBanner ? (
-              <section className="feedback-banner feedback-banner-success workspace-focus-banner">
-                <div className="workspace-handoff-banner-copy">
-                  <strong>{workspaceFocusBanner.title}</strong>
-                  <p>{workspaceFocusBanner.detail}</p>
-                </div>
-              </section>
-            ) : null}
+            <WorkspaceHandoffFocusBanner
+              handoff={routeHandoff}
+              currentView="operations"
+              clearLabel="Show Full Queue"
+              onClear={clearWorkspaceHandoff}
+              actions={
+                routeHandoffFocusTradeId
+                  ? [
+                      {
+                        label: 'Open Focused Trade',
+                        onClick: () => onOpenTrade(routeHandoffFocusTradeId),
+                      },
+                    ]
+                  : []
+              }
+            />
             <WorkspaceLocalFilterBar
               value={screenFilter}
               onChange={setScreenFilter}

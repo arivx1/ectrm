@@ -14,6 +14,17 @@ responses from a managed prompt foundation that combines:
 
 This keeps prompts explainable, reviewable, and ready for future governance.
 
+Related governance:
+
+- [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
+- [Agent Platform Phase 1 Tickets](./agent-platform-phase-1-tickets.md)
+- [Agent Action Request Contract](./agent-action-request-contract.md)
+- [Agent Role Catalog](./agent-role-catalog.md)
+- [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- [Agent Knowledge Base](./agent-knowledge-base.md)
+- [Human-Agent Authority Matrix](./human-agent-authority-matrix.md)
+- [Agent Role Configuration Work Packages](./agent-role-configuration-work-packages.md)
+
 ## Current Prompt Layers
 
 When `/assistant/respond` is called, the API now assembles a server-owned prompt
@@ -132,6 +143,24 @@ The API returns `run_id` on successful responses, exposes current-user run
 lookup on `/assistant/runs/*`, and exposes recent admin run listings on
 `/admin/assistant/runs`.
 
+## Run Feedback
+
+Assistant answers can receive user feedback directly from the response surface.
+The feedback is stored as an `assistant_run_feedback` record tied to the run,
+conversation, user, session, rating, optional comment, and timestamps. Use
+`POST /assistant/runs/{run_id}/feedback` to create or update the current user's
+feedback for a run.
+
+Feedback is an outcome signal for review, tuning, and future evaluation work.
+It should not directly mutate business records or silently alter deterministic
+services. Recurring comments that point to stable product behavior should be
+promoted through the deterministic algorithm loop.
+
+Admin outcome metrics include feedback totals, helpful vs. needs-work rates,
+workspace-level feedback rows, and recent run feedback notes so reviewers can
+spot agent or workspace patterns without turning comments into automatic
+authority changes.
+
 ## Assistant Evals
 
 Managed-agent changes should land with eval coverage, not just ad hoc prompt
@@ -144,18 +173,117 @@ The harness seeds realistic users, trades, and managed agents, runs
 `/assistant/respond` through the real route stack, captures mocked provider
 requests, and verifies:
 
+- default-provider fallback when the preferred default is unavailable
 - resolved agent, provider, and model metadata
 - expected warnings
 - expected live-tool traces and filtered tool catalogs
+- context-only fallback when live tools are unavailable on the current worker
 - approval-gated action-request staging
+- approval execution outcomes and cross-user permission boundaries
 - persisted run traces and prompt sections
 
 Run it with:
 
 ```bash
-PYTHONPATH=/Users/anthonyrivich/Documents/GitHub/ectrm ./.venv/bin/python -m unittest \
-  apps.api.tests.test_assistant_evals
+make api-assistant-evals
 ```
+
+`make verify` and the GitHub `Backend` workflow now run this eval lane before
+the broader backend suite, so assistant regressions fail under an explicit
+named gate instead of only appearing inside general test discovery.
+
+### Eval Entry Rule
+
+Add or update an assistant eval whenever a change affects any of these:
+
+- provider or model selection behavior, including fallback semantics
+- tool allowlists, tool-round limits, or live-read availability handling
+- approval-gated action requests or action-governance prompt behavior
+- assistant approval access control, especially cross-user review boundaries
+- prompt section composition, managed-agent instructions, or explainability
+  warnings
+- automation or assistant behavior that could over-claim certainty without a
+  live read
+
+At minimum:
+
+- run `make api-assistant-evals` locally for assistant or automation changes
+- add a new fixture case or update an existing one when behavior changes
+- note the eval case added, updated, or intentionally not needed in the change
+  notes or PR description
+
+## Codex Task Dispatch
+
+The admin workspace can now record and dispatch Codex engineering tasks through
+a configured GitHub Actions workflow. This is separate from `/assistant/respond`:
+it starts repository work, not ECTRM business-record mutations.
+
+Admin API:
+
+- `GET /admin/codex/settings`
+- `GET /admin/codex/tasks`
+- `POST /admin/codex/tasks`
+
+Backend configuration:
+
+- `CODEX_TASKS_ENABLED`
+- `CODEX_GITHUB_REPOSITORY`
+- `CODEX_GITHUB_WORKFLOW_ID`
+- `CODEX_GITHUB_REF`
+- `CODEX_GITHUB_PROMPT_INPUT`
+- `CODEX_GITHUB_TOKEN`
+- `CODEX_REQUEST_TIMEOUT_SECONDS`
+- `CODEX_CALLBACK_BASE_URL`
+- `CODEX_CALLBACK_TOKEN`
+- `CODEX_LONG_RUNNING_DEFAULT_MAX_ITERATIONS`
+- `CODEX_LONG_RUNNING_MAX_ITERATIONS`
+
+The dispatcher stores a `codex_task_requests` row before calling GitHub. A
+successful workflow dispatch marks the task `DISPATCHED`; provider or ref
+errors mark it `FAILED` so the attempt remains visible to admins.
+
+The checked-in `.github/workflows/codex.yml` workflow accepts `prompt`,
+`task_id`, `callback_url`, `run_mode`, and `max_iterations` workflow-dispatch
+inputs. It runs Codex, opens a draft pull request when repository files change,
+uploads the raw Codex output as a workflow artifact, and posts execution updates
+back to `POST /codex/tasks/{task_id}/callback`.
+
+GitHub must provide these secrets:
+
+- `OPENAI_API_KEY`: used by Codex CLI inside the workflow.
+- `ECTRM_CODEX_CALLBACK_TOKEN`: must match the API's `CODEX_CALLBACK_TOKEN`.
+
+Use `make api-codex-smoke` before a live dispatch. The smoke script checks the
+local workflow contract, reports missing live GitHub/API prerequisites, creates
+a local long-running task through the admin route, posts running and completed
+callbacks, and verifies that an invalid callback token is rejected. It does not
+dispatch a GitHub workflow; a live run still requires the workflow to exist on
+GitHub and the secrets above to be configured.
+
+Callback statuses update the same task record through the token-authenticated
+non-admin callback route. `RUNNING` records workflow/branch metadata;
+`COMPLETED`, `STOPPED`, or `FAILED` records terminal summary, stop reason,
+artifact, workflow run, and pull request links when available.
+
+Codex tasks support two run modes:
+
+- `SINGLE_TASK`: Codex should complete only the requested task and may list
+  follow-up recommendations without executing them.
+- `LONG_RUNNING`: Codex should complete the requested task, ask "What is the
+  next recommended task?", execute only concrete repository-local
+  recommendations that stay inside the original request, and continue until no
+  recommendation remains or the configured iteration cap is reached.
+
+Long-running mode is still reviewable engineering automation, not autonomous
+business execution. Stop conditions are part of the dispatched prompt: stop
+when the next task needs human judgment, protected business authority,
+production data mutation, external commitments, or failed verification before
+more work can safely continue.
+
+Keep this surface admin-owned. Codex task prompts may ask a coding agent to
+modify the repository, so credentials stay server-side and the result should
+land as reviewable repository work such as a branch, pull request, or workflow
+artifact.
 
 ## Configuration
 

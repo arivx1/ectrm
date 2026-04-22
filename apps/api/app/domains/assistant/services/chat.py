@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
+from apps.api.app.domains.assistant.services.action_catalog import ASSISTANT_ACTION_CATALOG
+from apps.api.app.domains.assistant.services.policies import evaluate_tool_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptEnvelope
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
 from apps.api.app.domains.assistant.services.tools import (
@@ -56,41 +58,8 @@ VALID_PROVIDERS: tuple[AssistantProvider, ...] = ("openai", "anthropic", "google
 logger = get_logger(__name__)
 
 ASSISTANT_ACTION_DEFINITIONS: tuple[AssistantActionDefinitionOut, ...] = (
-    AssistantActionDefinitionOut(
-        name="cancel_trade",
-        label="Cancel trade",
-        description="Cancel a trade through the approval queue when the user explicitly requests an unwind or void and the live trade evidence supports it.",
-    ),
-    AssistantActionDefinitionOut(
-        name="issue_trade_confirmation",
-        label="Issue confirmation",
-        description="Issue a trade confirmation for a selected trade when operations is ready to send it for review or acknowledgement.",
-    ),
-    AssistantActionDefinitionOut(
-        name="record_trade_confirmation_response",
-        label="Record confirmation response",
-        description="Capture a received confirmation response such as agreed, disputed, or acknowledged when the outcome is supported by the current workflow context.",
-    ),
-    AssistantActionDefinitionOut(
-        name="update_trade_workflow_item",
-        label="Update workflow item",
-        description="Reassign, reprioritize, close, or otherwise update a workflow item when the requested change is specific and grounded in the open queue state.",
-    ),
-    AssistantActionDefinitionOut(
-        name="issue_trade_invoice",
-        label="Issue invoice",
-        description="Create or issue a trade invoice through approval when settlement evidence supports the amount, timing, and trade linkage.",
-    ),
-    AssistantActionDefinitionOut(
-        name="create_trade_payment",
-        label="Create payment",
-        description="Record a trade payment through approval when the payment details are sufficiently specified and tied to the correct trade or invoice.",
-    ),
-    AssistantActionDefinitionOut(
-        name="reprocess_document_ingestion",
-        label="Reprocess document ingestion",
-        description="Re-run document ingestion and extraction when a document needs another pass because routing, classification, or linkage signals look incomplete.",
-    ),
+    AssistantActionDefinitionOut(name=entry.name, label=entry.label, description=entry.description)
+    for entry in ASSISTANT_ACTION_CATALOG
 )
 
 
@@ -194,6 +163,16 @@ class AssistantService:
                 prompt_context.agent_name
                 if prompt_context is not None
                 else agent_definition.name if agent_definition is not None else None
+            ),
+            agent_role_key=(
+                prompt_context.agent_role_key
+                if prompt_context is not None
+                else agent_definition.role_key if agent_definition is not None else None
+            ),
+            agent_profile_kind=(
+                prompt_context.agent_profile_kind
+                if prompt_context is not None
+                else agent_definition.profile_kind if agent_definition is not None else None
             ),
             provider=completion.provider,
             model=completion.model,
@@ -382,6 +361,8 @@ class AssistantService:
             response_text = _extract_openai_text(response_payload)
             if response_text:
                 last_response_text = response_text
+            if _openai_response_reached_output_limit(response_payload):
+                _append_warning_once(warnings, _output_limit_warning(provider.label))
 
             pending_calls = _extract_openai_tool_calls(response_payload) if tool_definitions else []
             if pending_calls:
@@ -500,6 +481,8 @@ class AssistantService:
             response_text = _extract_anthropic_text(content_blocks)
             if response_text:
                 last_response_text = response_text
+            if _anthropic_response_reached_output_limit(response_payload):
+                _append_warning_once(warnings, _output_limit_warning(provider.label))
 
             pending_calls = _extract_anthropic_tool_calls(content_blocks) if tool_definitions else []
             if pending_calls:
@@ -656,6 +639,8 @@ class AssistantService:
             response_text = _extract_google_text(parts)
             if response_text:
                 last_response_text = response_text
+            if _google_candidate_reached_output_limit(candidate):
+                _append_warning_once(warnings, _output_limit_warning(provider.label))
 
             pending_calls = _extract_google_tool_calls(parts) if tool_definitions else []
             if pending_calls:
@@ -746,14 +731,25 @@ class AssistantService:
                 f"{agent_definition.name} does not include READ capability, so live tools were disabled for this response."
             )
             return [], warnings
-        if agent_definition is None or not agent_definition.allowed_tools:
-            return self._tool_definitions, warnings
+        if agent_definition is None:
+            return [
+                tool_definition
+                for tool_definition in self._tool_definitions
+                if evaluate_tool_policy(
+                    agent=None,
+                    tool_id=tool_definition.name,
+                    workspace=payload.workspace,
+                ).allowed
+            ], warnings
 
-        allowed_tool_names = set(agent_definition.allowed_tools)
         filtered_tool_definitions = [
             tool_definition
             for tool_definition in self._tool_definitions
-            if tool_definition.name in allowed_tool_names
+            if evaluate_tool_policy(
+                agent=agent_definition,
+                tool_id=tool_definition.name,
+                workspace=payload.workspace,
+            ).allowed
         ]
         if filtered_tool_definitions:
             return filtered_tool_definitions, warnings
@@ -850,6 +846,14 @@ def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
             {"name": tool.name, "description": tool.description}
             for tool in available_tools
         ],
+        available_action_types=[
+            {
+                "name": action_type.name,
+                "label": action_type.label,
+                "description": action_type.description,
+            }
+            for action_type in ASSISTANT_ACTION_DEFINITIONS
+        ],
     )
 
 
@@ -928,6 +932,18 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
         seen.add(value)
         deduped_values.append(value)
     return deduped_values
+
+
+def _append_warning_once(warnings: list[str], warning: str) -> None:
+    if warning not in warnings:
+        warnings.append(warning)
+
+
+def _output_limit_warning(provider_label: str) -> str:
+    return (
+        f"{provider_label} reached ASSISTANT_MAX_OUTPUT_TOKENS "
+        f"({settings.ASSISTANT_MAX_OUTPUT_TOKENS:,}) before finishing, so the answer may be cut off."
+    )
 
 
 def normalize_default_provider(value: str) -> AssistantProvider:
@@ -1284,6 +1300,24 @@ def _extract_openai_text(response_payload: dict[str, Any]) -> str:
     return "\n".join(text for text in texts if text).strip()
 
 
+def _openai_response_reached_output_limit(response_payload: dict[str, Any]) -> bool:
+    incomplete_details = response_payload.get("incomplete_details")
+    if isinstance(incomplete_details, dict) and incomplete_details.get("reason") == "max_output_tokens":
+        return True
+
+    for item in response_payload.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        item_incomplete_details = item.get("incomplete_details")
+        if (
+            item.get("status") == "incomplete"
+            and isinstance(item_incomplete_details, dict)
+            and item_incomplete_details.get("reason") == "max_output_tokens"
+        ):
+            return True
+    return False
+
+
 def _extract_openai_tool_calls(response_payload: dict[str, Any]) -> list[PendingToolCall]:
     pending_calls: list[PendingToolCall] = []
     for item in response_payload.get("output", []):
@@ -1313,6 +1347,10 @@ def _extract_anthropic_text(content_blocks: Any) -> str:
     ).strip()
 
 
+def _anthropic_response_reached_output_limit(response_payload: dict[str, Any]) -> bool:
+    return response_payload.get("stop_reason") == "max_tokens"
+
+
 def _extract_anthropic_tool_calls(content_blocks: Any) -> list[PendingToolCall]:
     pending_calls: list[PendingToolCall] = []
     for block in content_blocks:
@@ -1340,6 +1378,10 @@ def _extract_google_text(parts: Any) -> str:
         for part in parts
         if isinstance(part, dict) and part.get("text")
     ).strip()
+
+
+def _google_candidate_reached_output_limit(candidate: dict[str, Any]) -> bool:
+    return candidate.get("finishReason") == "MAX_TOKENS"
 
 
 def _extract_google_tool_calls(parts: Any) -> list[PendingToolCall]:
