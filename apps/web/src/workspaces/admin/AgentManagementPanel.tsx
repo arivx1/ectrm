@@ -15,6 +15,7 @@ import {
   budgetMeterWidth,
   describeAssistantTokenBudget,
   formatBudgetPercent,
+  formatTokenCount,
   isAgentBudgetDepleted,
   isAgentBudgetNearLimit,
 } from '../../entities/assistant/budget'
@@ -128,6 +129,24 @@ function normalizeDailyTokenAllocation(value: string): number | null {
   }
   const parsed = Number.parseInt(normalized, 10)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function describeDailyTokenAllocationMode(
+  value: string,
+  inheritedAllocation?: number | null,
+): string {
+  const trimmedValue = value.trim()
+  const allocation = normalizeDailyTokenAllocation(value)
+  if (allocation !== null) {
+    return `Custom cap: ${formatTokenCount(allocation)} tokens per daily window.`
+  }
+  if (trimmedValue) {
+    return 'Enter a whole number, or leave blank to inherit the platform default.'
+  }
+  if (typeof inheritedAllocation === 'number') {
+    return `Inherited default: ${formatTokenCount(inheritedAllocation)} tokens per daily window.`
+  }
+  return 'Inherited default: the platform cap will be resolved after save.'
 }
 
 function budgetCardToneClass(budgetClass: string): string {
@@ -941,7 +960,8 @@ export function AgentManagementPanel({
                       placeholder="Inherit backend default"
                     />
                     <small className="form-note">
-                      Leave blank to inherit the platform default; set 0 to hold the agent in the red.
+                      {describeDailyTokenAllocationMode(createForm.daily_token_allocation)} Leave blank to inherit;
+                      set 0 to hold the agent in the red.
                     </small>
                   </label>
                 </div>
@@ -1208,7 +1228,11 @@ export function AgentManagementPanel({
                       placeholder="Inherit backend default"
                     />
                     <small className="form-note">
-                      Leave blank to inherit the platform default; set 0 to stop this agent immediately.
+                      {describeDailyTokenAllocationMode(
+                        editForm.daily_token_allocation,
+                        selectedAgent.token_budget?.allocated_tokens,
+                      )}{' '}
+                      Leave blank to inherit; set 0 to stop this agent immediately.
                     </small>
                   </label>
                 </div>

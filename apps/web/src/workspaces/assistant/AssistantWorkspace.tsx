@@ -319,6 +319,7 @@ export function AssistantWorkspace({
   const [agents, setAgents] = useState<AssistantAgent[]>([])
   const [runtimeLoading, setRuntimeLoading] = useState(true)
   const [runtimeError, setRuntimeError] = useState('')
+  const [agentBudgetRefreshing, setAgentBudgetRefreshing] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<AssistantProvider | ''>('')
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [includeContext, setIncludeContext] = useState(true)
@@ -503,6 +504,39 @@ export function AssistantWorkspace({
       setPendingActionRequestsLoading(false)
     }
   }, [authSession])
+
+  const refreshAssistantAgents = useCallback(
+    async (options?: { quiet?: boolean }): Promise<boolean> => {
+      try {
+        const agentPayload = await listAssistantAgents(appConfig.apiBase)
+        setAgents(agentPayload)
+        if (!options?.quiet) {
+          setRuntimeError('')
+        }
+        return true
+      } catch (error) {
+        if (!options?.quiet) {
+          setAgents([])
+          setRuntimeError(error instanceof Error ? error.message : 'Could not load assistant agents.')
+        }
+        return false
+      }
+    },
+    [],
+  )
+
+  async function handleRefreshAgentBudgets() {
+    setAgentBudgetRefreshing(true)
+    setSubmitError('')
+    try {
+      const refreshed = await refreshAssistantAgents({ quiet: true })
+      if (!refreshed) {
+        setSubmitError('Could not refresh agent token budgets.')
+      }
+    } finally {
+      setAgentBudgetRefreshing(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -914,6 +948,7 @@ export function AssistantWorkspace({
             if (Array.isArray(completed.action_requests) && completed.action_requests.length > 0) {
               void refreshPendingActionRequests()
             }
+            void refreshAssistantAgents({ quiet: true })
             return
           }
 
@@ -1420,7 +1455,19 @@ export function AssistantWorkspace({
               </div>
 
               <div className="assistant-sidebar-block">
-                <strong>Token budget</strong>
+                <div className="assistant-budget-block-head">
+                  <strong>Token budget</strong>
+                  {selectedAgent ? (
+                    <button
+                      type="button"
+                      className="button button-ghost assistant-budget-refresh-button"
+                      onClick={() => void handleRefreshAgentBudgets()}
+                      disabled={agentBudgetRefreshing}
+                    >
+                      {agentBudgetRefreshing ? 'Refreshing...' : 'Refresh budget'}
+                    </button>
+                  ) : null}
+                </div>
                 <small>
                   {selectedAgent
                     ? describeAssistantTokenBudget(selectedAgent.token_budget)
