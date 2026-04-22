@@ -12,6 +12,7 @@ from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.schemas.assistant import (
     AssistantAgentAdminOut,
+    AssistantAgentEvalGateOut,
     AssistantAgentOut,
     AssistantAgentTokenBudgetOut,
     AssistantWorkspace,
@@ -96,6 +97,7 @@ def to_public_agent_out(
     record: AssistantAgent,
     *,
     token_budget: AssistantAgentTokenBudgetOut | None = None,
+    eval_gate: AssistantAgentEvalGateOut | None = None,
 ) -> AssistantAgentOut:
     return AssistantAgentOut(
         agent_id=record.agent_id,
@@ -119,6 +121,7 @@ def to_public_agent_out(
         daily_token_allocation=record.daily_token_allocation,
         token_budget=token_budget or _build_empty_token_budget(record),
         effective_policy=build_effective_policy_for_agent(to_managed_agent(record)),
+        eval_gate=eval_gate,
     )
 
 
@@ -126,6 +129,7 @@ def to_admin_agent_out(
     record: AssistantAgent,
     *,
     token_budget: AssistantAgentTokenBudgetOut | None = None,
+    eval_gate: AssistantAgentEvalGateOut | None = None,
 ) -> AssistantAgentAdminOut:
     return AssistantAgentAdminOut(
         agent_id=record.agent_id,
@@ -149,6 +153,7 @@ def to_admin_agent_out(
         daily_token_allocation=record.daily_token_allocation,
         token_budget=token_budget or _build_empty_token_budget(record),
         effective_policy=build_effective_policy_for_agent(to_managed_agent(record)),
+        eval_gate=eval_gate,
         system_prompt=record.system_prompt,
         created_at=record.created_at,
         created_by=record.created_by,

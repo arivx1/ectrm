@@ -17,6 +17,10 @@ import type {
   AssistantAgentEval,
   AssistantAgentEvalRun,
   AssistantAutonomyReviewBrief,
+  AssistantActionReviewOutcome,
+  AssistantAdminAgent,
+  AssistantAgent,
+  AssistantAgentEval,
   AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
   AssistantConversation,
@@ -84,6 +88,20 @@ export type DecideAssistantAgentProfileRequestInput = {
   rejection_reason?: string
 }
 
+export type CreateAssistantAgentEvalInput = {
+  agent_id: string
+  name: string
+  workspace: AssistantAgentEval['workspace']
+  prompt: string
+  context?: string | null
+  use_live_tools: boolean
+  expected_substrings: string[]
+  expected_tool_names: string[]
+  expected_action_types: AssistantAgentEval['expected_action_types']
+}
+
+export type UpdateAssistantAgentEvalInput = Omit<CreateAssistantAgentEvalInput, 'agent_id'>
+
 export type BuildAssistantAgentDraftInput = {
   brief: string
   current_draft?: {
@@ -118,6 +136,13 @@ export type AssistantStreamEvent = {
 export type SubmitAssistantRunFeedbackInput = {
   rating: AssistantRunFeedbackRating
   comment?: string
+}
+
+export type AssistantActionDecisionInput = {
+  reviewOutcome?: AssistantActionReviewOutcome
+  decisionNote?: string
+  correctionSummary?: string
+  correctionFields?: string[]
 }
 
 export type SimulateAssistantAgentPolicyInput = {
@@ -263,6 +288,26 @@ function agentEvalQuery(init?: {
     params.set('offset', String(init.offset))
   }
   return params.size > 0 ? `?${params.toString()}` : ''
+}
+
+function assistantActionDecisionPayload(payload: AssistantActionDecisionInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {}
+  if (payload.reviewOutcome) {
+    body.review_outcome = payload.reviewOutcome
+  }
+  if (payload.decisionNote?.trim()) {
+    body.decision_note = payload.decisionNote.trim()
+  }
+  if (payload.correctionSummary?.trim()) {
+    body.correction_summary = payload.correctionSummary.trim()
+  }
+  const correctionFields = (payload.correctionFields ?? [])
+    .map((field) => field.trim())
+    .filter(Boolean)
+  if (correctionFields.length > 0) {
+    body.correction_fields = Array.from(new Set(correctionFields))
+  }
+  return body
 }
 
 export async function loadAssistantRuntimeSettings(apiBase: string): Promise<AssistantRuntimeSettings> {
@@ -504,10 +549,11 @@ function parseAssistantStreamEvent(rawEvent: string): AssistantStreamEvent | nul
 export async function approveAssistantActionRequest(
   apiBase: string,
   actionRequestId: number,
+  payload: AssistantActionDecisionInput = {},
 ): Promise<AssistantActionRequest> {
   return postJson<AssistantActionRequest>(
     `${apiBase}/assistant/action-requests/${actionRequestId}/approve`,
-    {},
+    assistantActionDecisionPayload(payload),
     {
       headers: assistantMutationHeaders(),
     },
@@ -517,10 +563,11 @@ export async function approveAssistantActionRequest(
 export async function rejectAssistantActionRequest(
   apiBase: string,
   actionRequestId: number,
+  payload: AssistantActionDecisionInput = {},
 ): Promise<AssistantActionRequest> {
   return postJson<AssistantActionRequest>(
     `${apiBase}/assistant/action-requests/${actionRequestId}/reject`,
-    {},
+    assistantActionDecisionPayload(payload),
     {
       headers: assistantMutationHeaders(),
     },

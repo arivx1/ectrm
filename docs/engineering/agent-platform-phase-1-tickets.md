@@ -389,6 +389,23 @@ L
 Sensitive staged actions fail safely when the underlying work object changed
 or when an approval is retried.
 
+### Status
+
+Implemented for the current Phase 1 action gateway.
+
+### Implementation note
+
+Approval now requires a non-empty `review_context.stale_state_basis` and an
+`idempotency_key` before execution. Action handlers re-read the current work
+object state at approval time and fail the request without side effects when
+the staged evidence is stale. The current stale-state coverage includes trade
+cancellation, confirmation issue/response, workflow item update, invoice issue,
+payment creation, and document reprocessing. Invoice and payment staging also
+tracks the relevant invoice/payment collection state so manual side effects
+between staging and approval are detected before a duplicate or stale settlement
+mutation can execute. Workflow item updates support bounded idempotent retries
+when the requested change was already applied.
+
 ### Scope
 
 - define stale-state checks for each current action type

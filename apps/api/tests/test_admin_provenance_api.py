@@ -83,7 +83,7 @@ class AdminProvenanceApiTests(unittest.TestCase):
                         agent_id="ops-guide",
                         name="Ops Guide",
                         description="Explains governed admin changes.",
-                        status="ACTIVE",
+                        status="DRAFT",
                         scope="TEAM",
                         provider="openai",
                         model="gpt-5-mini",

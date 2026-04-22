@@ -253,6 +253,13 @@ GitHub must provide these secrets:
 - `OPENAI_API_KEY`: used by Codex CLI inside the workflow.
 - `ECTRM_CODEX_CALLBACK_TOKEN`: must match the API's `CODEX_CALLBACK_TOKEN`.
 
+Use `make api-codex-smoke` before a live dispatch. The smoke script checks the
+local workflow contract, reports missing live GitHub/API prerequisites, creates
+a local long-running task through the admin route, posts running and completed
+callbacks, and verifies that an invalid callback token is rejected. It does not
+dispatch a GitHub workflow; a live run still requires the workflow to exist on
+GitHub and the secrets above to be configured.
+
 Callback statuses update the same task record through the token-authenticated
 non-admin callback route. `RUNNING` records workflow/branch metadata;
 `COMPLETED`, `STOPPED`, or `FAILED` records terminal summary, stop reason,

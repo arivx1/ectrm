@@ -499,16 +499,49 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(adapters_response.json()[1]["adapter_key"], "counterparty-credit")
         self.assertTrue(adapters_response.json()[1]["required_for_recommendation"])
 
+        changed_snapshots = self._escalating_recommendation_input_snapshots()
+        changed_snapshots[2]["freshness"] = "STALE"
+        changed_snapshots[2]["payload"] = {"latest_mark": 2.2}
+        second_run_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "May gas hedge recommendation refresh",
+                "source_scenario_id": scenario["scenario_id"],
+                "input_snapshots": changed_snapshots,
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(second_run_response.status_code, 201)
+        second_run = second_run_response.json()
+        self.assertEqual(second_run["recommendation"]["stance"], "ESCALATE")
+
         list_response = self.client.get(
             f"/pretrade/recommendations/runs?source_scenario_id={scenario['scenario_id']}",
             headers=self.trader_one_headers,
         )
         self.assertEqual(list_response.status_code, 200)
         listed_runs = list_response.json()
-        self.assertEqual(len(listed_runs), 1)
-        self.assertEqual(listed_runs[0]["run_id"], run["run_id"])
-        self.assertEqual(listed_runs[0]["input_snapshots"][1]["source_key"], "counterparty-credit")
-        self.assertEqual(listed_runs[0]["input_snapshots"][3]["quality_status"], "MISSING")
+        self.assertEqual(len(listed_runs), 2)
+        self.assertEqual(listed_runs[0]["run_id"], second_run["run_id"])
+        self.assertEqual(listed_runs[1]["run_id"], run["run_id"])
+        comparison = listed_runs[0]["comparison"]
+        self.assertEqual(comparison["previous_run_id"], run["run_id"])
+        self.assertTrue(comparison["stance_changed"])
+        self.assertEqual(comparison["previous_stance"], "PROCEED")
+        self.assertLess(comparison["score_delta"], 0)
+        self.assertTrue(any("Projected credit utilization" in driver for driver in comparison["added_primary_drivers"]))
+        self.assertTrue(any(change["adapter_key"] == "latest-mark" for change in comparison["source_quality_changes"]))
+        self.assertTrue(any(change["adapter_key"] == "counterparty-credit" for change in comparison["input_snapshot_changes"]))
+        self.assertIn("Stance changed", comparison["summary"])
+        self.assertEqual(listed_runs[1]["input_snapshots"][1]["source_key"], "counterparty-credit")
+        self.assertEqual(listed_runs[1]["input_snapshots"][3]["quality_status"], "MISSING")
+
+        refreshed_run_response = self.client.get(
+            f"/pretrade/recommendations/runs/{second_run['run_id']}",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(refreshed_run_response.status_code, 200)
+        self.assertEqual(refreshed_run_response.json()["comparison"]["previous_run_id"], run["run_id"])
 
         governance_response = self.client.get(
             "/pretrade/governance/summary",

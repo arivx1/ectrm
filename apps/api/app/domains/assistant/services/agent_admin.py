@@ -101,7 +101,8 @@ def upsert_admin_assistant_agent(
     commit: bool,
     record_provenance: bool = False,
 ) -> AssistantAgentMutationResult:
-    _validate_agent_definition(db, definition)
+    _validate_agent_policy_definition(definition)
+    _validate_agent_daily_token_allocation(definition)
     now = datetime.now(timezone.utc)
     record = db.get(AssistantAgent, definition.agent_id)
     if record is None:
@@ -137,6 +138,7 @@ def upsert_admin_assistant_agent(
         db.add(record)
         db.flush()
         _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
+        _validate_agent_activation_definition(db, definition)
         if record_provenance:
             _record_agent_provenance(db, record=record, operation_key="assistant_agent.created", action="created")
         if commit:
@@ -158,6 +160,7 @@ def upsert_admin_assistant_agent(
         record.version += 1
         db.flush()
         _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
+        _validate_agent_activation_definition(db, definition)
         if record_provenance:
             _record_agent_provenance(
                 db,
@@ -172,6 +175,7 @@ def upsert_admin_assistant_agent(
 
     db.flush()
     _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
+    _validate_agent_activation_definition(db, definition)
     if commit:
         db.commit()
         db.refresh(record)
@@ -248,7 +252,7 @@ def _definition_from_update(
     )
 
 
-def _validate_agent_definition(db: Session, definition: AssistantAgentMutationInput) -> None:
+def _validate_agent_policy_definition(definition: AssistantAgentMutationInput) -> None:
     try:
         validate_agent_profile_definition(
             agent_name=definition.name,
@@ -266,6 +270,9 @@ def _validate_agent_definition(db: Session, definition: AssistantAgentMutationIn
             status_code=422,
             detail=str(exc),
         ) from exc
+
+
+def _validate_agent_activation_definition(db: Session, definition: AssistantAgentMutationInput) -> None:
     validate_agent_activation_requirements(
         db,
         agent_id=definition.agent_id,
@@ -280,11 +287,33 @@ def _validate_agent_definition(db: Session, definition: AssistantAgentMutationIn
         capabilities=definition.capabilities,
         allowed_action_types=definition.allowed_action_types,
     )
+
+
+def _validate_agent_daily_token_allocation(definition: AssistantAgentMutationInput) -> None:
     if definition.daily_token_allocation is not None and definition.daily_token_allocation < 0:
         raise AssistantServiceError(
             status_code=422,
             detail="daily_token_allocation must be greater than or equal to 0",
         )
+
+
+def _seed_profile_request_evals_for_agent(
+    db: Session,
+    *,
+    record: AssistantAgent,
+    actor_id: str,
+) -> None:
+    if record.profile_request_id is None:
+        return
+    profile_request = db.get(AssistantAgentProfileRequest, record.profile_request_id)
+    if profile_request is None or profile_request.status not in {"APPROVED", "ACTIVATED"}:
+        return
+    seed_agent_evals_from_profile_request(
+        db,
+        agent=record,
+        profile_request=profile_request,
+        actor_id=actor_id,
+    )
 
 
 def _apply_agent_definition(

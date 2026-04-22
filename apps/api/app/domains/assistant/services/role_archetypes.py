@@ -8,6 +8,7 @@ from apps.api.app.schemas.assistant import (
     ALL_ASSISTANT_ACTION_TYPES,
     AssistantAgentAuthorityLevel,
     AssistantAgentCapability,
+    AssistantAgentEvalGateOut,
     AssistantAgentRoleArchetypeOut,
     AssistantAgentRoleCatalogStatus,
     AssistantWorkspace,
@@ -521,7 +522,11 @@ def get_role_archetype(role_key: str) -> AssistantAgentRoleArchetype | None:
     return None
 
 
-def to_role_archetype_out(role: AssistantAgentRoleArchetype) -> AssistantAgentRoleArchetypeOut:
+def to_role_archetype_out(
+    role: AssistantAgentRoleArchetype,
+    *,
+    eval_gate: AssistantAgentEvalGateOut | None = None,
+) -> AssistantAgentRoleArchetypeOut:
     return AssistantAgentRoleArchetypeOut(
         role_key=role.role_key,
         name=role.name,
@@ -539,6 +544,7 @@ def to_role_archetype_out(role: AssistantAgentRoleArchetype) -> AssistantAgentRo
         stop_conditions=list(role.stop_conditions),
         success_metrics=list(role.success_metrics),
         required_eval_coverage=list(role.required_eval_coverage),
+        eval_gate=eval_gate,
         base_prompt_guidance=list(role.base_prompt_guidance),
         current_profile_ids=list(role.current_profile_ids),
     )
@@ -604,9 +610,23 @@ def validate_role_archetype_registry() -> None:
             errors.append(f"{role.role_key}: stop_conditions are required")
         if not role.required_eval_coverage:
             errors.append(f"{role.role_key}: required_eval_coverage is required")
+        errors.extend(_role_action_eval_errors(role))
 
     if errors:
         raise AssistantAgentRoleRegistryError("; ".join(errors))
+
+
+def _role_action_eval_errors(role: AssistantAgentRoleArchetype) -> list[str]:
+    if not role.maximum_action_types and "ACTION" not in set(role.capability_ceiling):
+        return []
+
+    coverage_text = " ".join(role.required_eval_coverage).lower()
+    errors: list[str] = []
+    if not any(keyword in coverage_text for keyword in ("allowed", "staging", "stage")):
+        errors.append(f"{role.role_key}: action-capable roles need an allowed action behavior eval case")
+    if not any(keyword in coverage_text for keyword in ("denied", "stale", "ambiguous", "unsupported", "no ")):
+        errors.append(f"{role.role_key}: action-capable roles need a denied or stale action behavior eval case")
+    return errors
 
 
 def _append_unknown_values(

@@ -40,6 +40,18 @@ import {
 type SmokeTradeRow = (typeof trades)[number]
 type SmokeEventRow = (typeof selectedTradeEvents)[number]
 type SmokeAssistantActionRequestRow = (typeof assistantActionRequests)[number]
+type SmokeAssistantFeedbackRating = 'HELPFUL' | 'NEEDS_WORK'
+type SmokeAssistantFeedbackRow = {
+  feedback_id: number
+  run_id: number
+  conversation_id: number
+  user_id: string
+  user_role: string
+  rating: SmokeAssistantFeedbackRating
+  comment: string | null
+  created_at: string
+  updated_at: string
+}
 
 type MockApiServer = {
   baseUrl: string
@@ -183,6 +195,24 @@ function writeNoContent(response: ServerResponse): void {
   response.end()
 }
 
+function writeSse(
+  response: ServerResponse,
+  events: Array<{ event: string; data: Record<string, unknown> }>,
+): void {
+  response.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-store',
+    Connection: 'keep-alive',
+  })
+
+  for (const event of events) {
+    response.write(`event: ${event.event}\n`)
+    response.write(`data: ${JSON.stringify(event.data)}\n\n`)
+  }
+
+  response.end()
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = []
   for await (const chunk of request) {
@@ -209,6 +239,22 @@ function requireAuthorization(
   return false
 }
 
+function normalizedReviewText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalizedCorrectionFields(value: unknown): string[] {
+  return Array.isArray(value)
+    ? Array.from(
+        new Set(
+          value
+            .map((field) => (typeof field === 'string' ? field.trim() : ''))
+            .filter(Boolean),
+        ),
+      )
+    : []
+}
+
 async function startMockApiServer(
   options: StartSmokeHarnessOptions = {},
 ): Promise<MockApiServer> {
@@ -223,10 +269,197 @@ async function startMockApiServer(
     payload: { ...request.payload },
     result: request.result ? { ...request.result } : null,
   }))
+  const assistantRunFeedbackByRunId = new Map<number, SmokeAssistantFeedbackRow>()
+  const assistantConversationId = 902
+  const assistantRunId = 8801
+  const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
+  const assistantUserPrompt = 'Where should I handle the confirmation blocker?'
+  const assistantResponseContent = [
+    'Operations is the right place to continue because the blocker is tied to the confirmation queue.',
+    '```navigation_intent',
+    JSON.stringify({
+      kind: 'open_workspace',
+      targetView: 'operations',
+      label: 'Open Work Queue',
+      rationale: 'Review the confirmation blocker with the operations owner before changing trade state.',
+      focus: {
+        type: 'trade',
+        id: 'T-AMEND-100',
+        label: 'T-AMEND-100',
+      },
+      inspectorTab: 'events',
+    }),
+    '```',
+  ].join('\n')
   let sessionExpired = false
   const runtimeSettings = {
     ...publicRuntimeSettings,
     single_user_auth_enabled: options.singleUserAuthEnabled ?? publicRuntimeSettings.single_user_auth_enabled,
+  }
+
+  function buildAssistantConversationSummary() {
+    return {
+      conversation_id: assistantConversationId,
+      created_at: '2026-04-11T09:00:00Z',
+      updated_at: assistantRunRecordedAt,
+      user_id: smokeSession.user.user_id,
+      user_role: smokeSession.user.role,
+      workspace: 'assistant',
+      agent_id: null,
+      agent_name: null,
+      provider: 'openai',
+      model: 'gpt-5.4',
+      use_live_tools: true,
+      title: 'Recent blocker triage',
+      run_count: 1,
+      latest_run_id: assistantRunId,
+      latest_user_message: assistantUserPrompt,
+      latest_assistant_message: 'Operations is the right place to continue.',
+    }
+  }
+
+  function buildAssistantConversation() {
+    return {
+      ...buildAssistantConversationSummary(),
+      messages: [
+        {
+          role: 'user',
+          content: assistantUserPrompt,
+          recorded_at: '2026-04-11T09:07:00Z',
+          run_id: null,
+          provider: null,
+          model: null,
+          warnings: [],
+          tool_calls: [],
+          feedback: null,
+        },
+        {
+          role: 'assistant',
+          content: assistantResponseContent,
+          recorded_at: assistantRunRecordedAt,
+          run_id: assistantRunId,
+          provider: 'openai',
+          model: 'gpt-5.4',
+          warnings: [],
+          tool_calls: [],
+          feedback: assistantRunFeedbackByRunId.get(assistantRunId) ?? null,
+        },
+      ],
+    }
+  }
+
+  function buildAssistantRunSummary() {
+    return {
+      conversation_id: assistantConversationId,
+      run_id: assistantRunId,
+      status: 'COMPLETED',
+      created_at: assistantRunRecordedAt,
+      completed_at: assistantRunRecordedAt,
+      user_id: smokeSession.user.user_id,
+      user_role: smokeSession.user.role,
+      workspace: 'assistant',
+      agent_id: null,
+      agent_name: null,
+      agent_role_key: null,
+      agent_profile_kind: null,
+      provider: 'openai',
+      model: 'gpt-5.4',
+      use_live_tools: true,
+      warning_count: 0,
+      tool_call_count: 0,
+      input_tokens: 120,
+      output_tokens: 60,
+      latest_user_message: assistantUserPrompt,
+      assistant_message: assistantResponseContent,
+      error_detail: null,
+    }
+  }
+
+  function buildAssistantRun() {
+    return {
+      ...buildAssistantRunSummary(),
+      request_messages: [{ role: 'user', content: assistantUserPrompt }],
+      application_context: 'Selected trade T-AMEND-100.',
+      prompt_sections: [
+        {
+          key: 'workspace',
+          title: 'Workspace',
+          source: 'workspace',
+          content: 'Assistant workspace smoke context.',
+        },
+      ],
+      rendered_system_prompt: 'Answer with grounded operational context and stage reviewable actions only.',
+      warnings: [],
+      tool_calls: [],
+    }
+  }
+
+  function buildAssistantResponseMetadata() {
+    return {
+      conversation_id: assistantConversationId,
+      conversation_updated_at: assistantRunRecordedAt,
+      run_id: assistantRunId,
+      run_recorded_at: assistantRunRecordedAt,
+      agent_id: null,
+      agent_name: null,
+      agent_role_key: null,
+      agent_profile_kind: null,
+      provider: 'openai',
+      model: 'gpt-5.4',
+      usage: {
+        input_tokens: 120,
+        output_tokens: 60,
+      },
+      warnings: [],
+      tool_calls: [],
+      action_requests: [],
+    }
+  }
+
+  function buildAssistantOutcomeMetrics() {
+    const feedbackRows = Array.from(assistantRunFeedbackByRunId.values())
+    if (feedbackRows.length === 0) {
+      return assistantOutcomeMetrics
+    }
+
+    const helpfulFeedbackDelta = feedbackRows.filter((row) => row.rating === 'HELPFUL').length
+    const needsWorkFeedbackDelta = feedbackRows.filter((row) => row.rating === 'NEEDS_WORK').length
+    const totalFeedbackCount = assistantOutcomeMetrics.total_feedback_count + feedbackRows.length
+    const helpfulFeedbackCount = assistantOutcomeMetrics.helpful_feedback_count + helpfulFeedbackDelta
+    const needsWorkFeedbackCount = assistantOutcomeMetrics.needs_work_feedback_count + needsWorkFeedbackDelta
+
+    return {
+      ...assistantOutcomeMetrics,
+      total_feedback_count: totalFeedbackCount,
+      helpful_feedback_count: helpfulFeedbackCount,
+      needs_work_feedback_count: needsWorkFeedbackCount,
+      feedback_helpful_rate: helpfulFeedbackCount / totalFeedbackCount,
+      by_workspace: assistantOutcomeMetrics.by_workspace.map((row) => {
+        if (row.workspace !== 'assistant') {
+          return row
+        }
+
+        const workspaceFeedbackCount = row.feedback_count + feedbackRows.length
+        const workspaceHelpfulFeedbackCount = row.helpful_feedback_count + helpfulFeedbackDelta
+        return {
+          ...row,
+          run_count: row.run_count + feedbackRows.length,
+          helpful_feedback_count: workspaceHelpfulFeedbackCount,
+          needs_work_feedback_count: row.needs_work_feedback_count + needsWorkFeedbackDelta,
+          feedback_count: workspaceFeedbackCount,
+          feedback_helpful_rate: workspaceHelpfulFeedbackCount / workspaceFeedbackCount,
+        }
+      }),
+      recent_feedback: [
+        ...feedbackRows.map((row) => ({
+          ...row,
+          agent_id: null,
+          agent_name: null,
+          workspace: 'assistant',
+        })),
+        ...assistantOutcomeMetrics.recent_feedback,
+      ],
+    }
   }
 
   const server = createHttpServer(async (request, response) => {
@@ -321,6 +554,132 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/assistant/agents' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/assistant/conversations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [buildAssistantConversationSummary()])
+      return
+    }
+
+    const assistantConversationMatch = url.pathname.match(/^\/assistant\/conversations\/(\d+)$/)
+    if (assistantConversationMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const conversationId = Number(assistantConversationMatch[1])
+      if (conversationId !== assistantConversationId) {
+        writeJson(response, { detail: 'Assistant conversation not found.' }, 404)
+        return
+      }
+
+      writeJson(response, buildAssistantConversation())
+      return
+    }
+
+    if (url.pathname === '/assistant/runs' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [buildAssistantRunSummary()])
+      return
+    }
+
+    const assistantRunMatch = url.pathname.match(/^\/assistant\/runs\/(\d+)$/)
+    if (assistantRunMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const runId = Number(assistantRunMatch[1])
+      if (runId !== assistantRunId) {
+        writeJson(response, { detail: 'Assistant run not found.' }, 404)
+        return
+      }
+
+      writeJson(response, buildAssistantRun())
+      return
+    }
+
+    const assistantRunFeedbackMatch = url.pathname.match(/^\/assistant\/runs\/(\d+)\/feedback$/)
+    if (assistantRunFeedbackMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const runId = Number(assistantRunFeedbackMatch[1])
+      if (runId !== assistantRunId) {
+        writeJson(response, { detail: 'Assistant run not found.' }, 404)
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      const feedbackPayload = payload as {
+        rating?: unknown
+        comment?: unknown
+      }
+      if (feedbackPayload.rating !== 'HELPFUL' && feedbackPayload.rating !== 'NEEDS_WORK') {
+        writeJson(response, { detail: 'Unsupported feedback rating.' }, 422)
+        return
+      }
+
+      const previousFeedback = assistantRunFeedbackByRunId.get(runId)
+      const feedback: SmokeAssistantFeedbackRow = {
+        feedback_id: previousFeedback?.feedback_id ?? 990,
+        run_id: runId,
+        conversation_id: assistantConversationId,
+        user_id: smokeSession.user.user_id,
+        user_role: smokeSession.user.role,
+        rating: feedbackPayload.rating,
+        comment: normalizeOptionalText(feedbackPayload.comment),
+        created_at: previousFeedback?.created_at ?? '2026-04-11T09:12:00Z',
+        updated_at: '2026-04-11T09:12:00Z',
+      }
+
+      assistantRunFeedbackByRunId.set(runId, feedback)
+      writeJson(response, feedback)
+      return
+    }
+
+    if (url.pathname === '/assistant/context' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      writeJson(response, {
+        agent_id: null,
+        agent_name: null,
+        agent_role_key: null,
+        agent_profile_kind: null,
+        provider: 'openai',
+        model: 'gpt-5.4',
+        generated_at: assistantRunRecordedAt,
+        warnings: [],
+        sections: [
+          {
+            key: 'workspace',
+            title: 'Workspace',
+            source: 'workspace',
+            content: 'Assistant workspace smoke context.',
+          },
+        ],
+        rendered_system_prompt: 'Answer with grounded operational context and stage reviewable actions only.',
+      })
+      return
+    }
+
     if (url.pathname === '/assistant/respond' && method === 'POST') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -329,44 +688,55 @@ async function startMockApiServer(
       assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
 
       writeJson(response, {
-        conversation_id: 902,
-        conversation_updated_at: '2026-04-11T09:08:00Z',
-        run_id: 8801,
-        run_recorded_at: '2026-04-11T09:08:00Z',
-        agent_id: null,
-        agent_name: null,
-        agent_role_key: null,
-        agent_profile_kind: null,
-        provider: 'openai',
-        model: 'gpt-5.4',
+        ...buildAssistantResponseMetadata(),
         message: {
           role: 'assistant',
-          content: [
-            'Operations is the right place to continue because the blocker is tied to the confirmation queue.',
-            '```navigation_intent',
-            JSON.stringify({
-              kind: 'open_workspace',
-              targetView: 'operations',
-              label: 'Open Work Queue',
-              rationale: 'Review the confirmation blocker with the operations owner before changing trade state.',
-              focus: {
-                type: 'trade',
-                id: 'T-AMEND-100',
-                label: 'T-AMEND-100',
-              },
-              inspectorTab: 'events',
-            }),
-            '```',
-          ].join('\n'),
+          content: assistantResponseContent,
         },
-        usage: {
-          input_tokens: 120,
-          output_tokens: 60,
-        },
-        warnings: [],
-        tool_calls: [],
-        action_requests: [],
       })
+      return
+    }
+
+    if (url.pathname === '/assistant/respond/stream' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      const metadata = buildAssistantResponseMetadata()
+      writeSse(response, [
+        {
+          event: 'conversation',
+          data: {
+            conversation_id: assistantConversationId,
+            updated_at: assistantRunRecordedAt,
+          },
+        },
+        {
+          event: 'assistant.metadata',
+          data: metadata,
+        },
+        {
+          event: 'assistant.delta',
+          data: {
+            delta: assistantResponseContent,
+          },
+        },
+        {
+          event: 'assistant.complete',
+          data: metadata,
+        },
+      ])
+      return
+    }
+
+    if (url.pathname === '/assistant/action-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
       return
     }
 
@@ -411,6 +781,24 @@ async function startMockApiServer(
           current_profile_ids: [...role.current_profile_ids],
         })),
       )
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/profile-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/agent-evals' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
       return
     }
 
@@ -665,6 +1053,9 @@ async function startMockApiServer(
         executed_count: filteredRequests.filter((requestRow) => requestRow.status === 'EXECUTED').length,
         rejected_count: filteredRequests.filter((requestRow) => requestRow.status === 'REJECTED').length,
         failed_count: filteredRequests.filter((requestRow) => requestRow.status === 'FAILED').length,
+        correction_count: filteredRequests.filter(
+          (requestRow) => requestRow.review_outcome === 'APPROVED_WITH_CORRECTIONS',
+        ).length,
         avg_decision_seconds:
           decidedRequests.length > 0 ? totalDecisionSeconds / decidedRequests.length : null,
       }
@@ -685,7 +1076,7 @@ async function startMockApiServer(
         return
       }
 
-      writeJson(response, assistantOutcomeMetrics)
+      writeJson(response, buildAssistantOutcomeMetrics())
       return
     }
 
@@ -801,6 +1192,16 @@ async function startMockApiServer(
         return
       }
 
+      const decisionPayload = await readJsonBody(request)
+      const decisionRecord =
+        decisionPayload && typeof decisionPayload === 'object' && !Array.isArray(decisionPayload)
+          ? (decisionPayload as Record<string, unknown>)
+          : {}
+      const reviewOutcome =
+        decisionRecord.review_outcome === 'APPROVED_WITH_CORRECTIONS'
+          ? 'APPROVED_WITH_CORRECTIONS'
+          : 'APPROVED_AS_IS'
+      const correctionFields = normalizedCorrectionFields(decisionRecord.correction_fields)
       const tradeId =
         typeof currentRequest.payload.trade_id === 'string' && currentRequest.payload.trade_id.trim()
           ? currentRequest.payload.trade_id.trim()
@@ -836,6 +1237,13 @@ async function startMockApiServer(
         },
         decided_at: '2026-04-11T09:05:00Z',
         decided_by: smokeSession.user.user_id,
+        review_outcome: reviewOutcome,
+        decision_note: normalizedReviewText(decisionRecord.decision_note),
+        correction_summary:
+          reviewOutcome === 'APPROVED_WITH_CORRECTIONS'
+            ? normalizedReviewText(decisionRecord.correction_summary)
+            : null,
+        correction_fields: reviewOutcome === 'APPROVED_WITH_CORRECTIONS' ? correctionFields : [],
       } satisfies SmokeAssistantActionRequestRow
 
       assistantActionRequestRows[actionRequestIndex] = updatedRequest
@@ -865,6 +1273,11 @@ async function startMockApiServer(
         return
       }
 
+      const decisionPayload = await readJsonBody(request)
+      const decisionRecord =
+        decisionPayload && typeof decisionPayload === 'object' && !Array.isArray(decisionPayload)
+          ? (decisionPayload as Record<string, unknown>)
+          : {}
       const updatedRequest = {
         ...currentRequest,
         status: 'REJECTED',
@@ -882,6 +1295,10 @@ async function startMockApiServer(
         result: null,
         decided_at: '2026-04-11T09:05:00Z',
         decided_by: smokeSession.user.user_id,
+        review_outcome: 'REJECTED',
+        decision_note: normalizedReviewText(decisionRecord.decision_note),
+        correction_summary: null,
+        correction_fields: [],
       } satisfies SmokeAssistantActionRequestRow
 
       assistantActionRequestRows[actionRequestIndex] = updatedRequest

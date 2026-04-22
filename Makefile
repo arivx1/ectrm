@@ -1,4 +1,4 @@
-.PHONY: db-up db-down api-install api-dev api-test api-assistant-evals api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
+.PHONY: db-up db-down api-install api-dev api-test api-assistant-evals api-codex-smoke api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
 
 VENV_PYTHON := ./.venv/bin/python
 WEB_DIR := apps/web
@@ -22,6 +22,10 @@ api-test:
 api-assistant-evals:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
 	PYTHONPATH=. $(VENV_PYTHON) -m unittest apps.api.tests.test_assistant_evals
+
+api-codex-smoke:
+	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
+	PYTHONPATH=. $(VENV_PYTHON) apps/api/scripts/run_codex_task_smoke.py
 
 api-contract-refresh:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)

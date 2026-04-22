@@ -155,6 +155,10 @@ export function buildAssistantAgentOutcomeRows(
         { label: 'Approval rate', value: formatAssistantOutcomeRate(row.approval_rate) },
         { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
         { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
+        {
+          label: 'Corrections',
+          value: `${row.correction_count} (${formatAssistantOutcomeRate(row.correction_rate)})`,
+        },
         { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
         { label: 'Unsupported', value: String(row.unsupported_attempt_count) },
         { label: 'Policy drift', value: String(row.policy_drift_count) },
@@ -265,6 +269,10 @@ export function buildAssistantActionTypeOutcomeRows(
       { label: 'Approval rate', value: formatAssistantOutcomeRate(row.approval_rate) },
       { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
       { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
+      {
+        label: 'Corrections',
+        value: `${row.correction_count} (${formatAssistantOutcomeRate(row.correction_rate)})`,
+      },
       { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
       { label: 'Unsupported', value: String(row.unsupported_attempt_count) },
       { label: 'Policy drift', value: String(row.policy_drift_count) },

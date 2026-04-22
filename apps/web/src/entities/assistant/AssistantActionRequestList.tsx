@@ -1,17 +1,47 @@
+import { useState } from 'react'
+
 import type {
   AssistantActionRequest,
   AssistantActionReviewContext,
   AssistantActionReviewObjectRef,
+  AssistantActionReviewOutcome,
   AssistantActionRequestLifecycleTone,
 } from '../../shared/models'
+
+export type AssistantActionDecisionPayload = {
+  reviewOutcome?: AssistantActionReviewOutcome
+  decisionNote?: string
+  correctionSummary?: string
+  correctionFields?: string[]
+}
 
 type AssistantActionRequestListProps = {
   actionRequests: AssistantActionRequest[]
   actionRequestIdsInFlight?: number[]
   formatDate: (value: string | null | undefined) => string
-  onDecision?: (actionRequestId: number, decision: 'approve' | 'reject') => void
+  onDecision?: (
+    actionRequestId: number,
+    decision: 'approve' | 'reject',
+    payload: AssistantActionDecisionPayload,
+  ) => void
   onOpenRun?: (runId: number) => void
   showUserId?: boolean
+}
+
+type DecisionDraft = {
+  reviewOutcome: Exclude<AssistantActionReviewOutcome, 'REJECTED'>
+  decisionNote: string
+  correctionSummary: string
+  correctionFields: string
+  error: string
+}
+
+const DEFAULT_DECISION_DRAFT: DecisionDraft = {
+  reviewOutcome: 'APPROVED_AS_IS',
+  decisionNote: '',
+  correctionSummary: '',
+  correctionFields: '',
+  error: '',
 }
 
 function statusPillToneForLifecycle(
@@ -49,6 +79,18 @@ function formatReviewerRole(value: string): string {
     .join(' ')
 }
 
+function formatReviewOutcome(value: AssistantActionReviewOutcome): string {
+  switch (value) {
+    case 'APPROVED_WITH_CORRECTIONS':
+      return 'Approved with corrections'
+    case 'APPROVED_AS_IS':
+      return 'Approved as-is'
+    case 'REJECTED':
+    default:
+      return 'Rejected'
+  }
+}
+
 function formatReviewValue(value: unknown): string {
   if (value === null) {
     return 'null'
@@ -57,6 +99,17 @@ function formatReviewValue(value: unknown): string {
     return JSON.stringify(value)
   }
   return String(value)
+}
+
+function parseCorrectionFields(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(',')
+        .map((field) => field.trim())
+        .filter(Boolean),
+    ),
+  )
 }
 
 function renderReviewList(title: string, items: string[]) {
@@ -149,8 +202,59 @@ export function AssistantActionRequestList({
   onOpenRun,
   showUserId = false,
 }: AssistantActionRequestListProps) {
+  const [decisionDrafts, setDecisionDrafts] = useState<Record<number, DecisionDraft>>({})
+
   if (actionRequests.length === 0) {
     return null
+  }
+
+  function decisionDraftFor(actionRequestId: number): DecisionDraft {
+    return decisionDrafts[actionRequestId] ?? DEFAULT_DECISION_DRAFT
+  }
+
+  function updateDecisionDraft(actionRequestId: number, patch: Partial<DecisionDraft>) {
+    setDecisionDrafts((current) => ({
+      ...current,
+      [actionRequestId]: {
+        ...DEFAULT_DECISION_DRAFT,
+        ...current[actionRequestId],
+        ...patch,
+        error: patch.error ?? '',
+      },
+    }))
+  }
+
+  function submitDecision(actionRequestId: number, decision: 'approve' | 'reject') {
+    if (!onDecision) {
+      return
+    }
+
+    const draft = decisionDraftFor(actionRequestId)
+    const correctionFields = parseCorrectionFields(draft.correctionFields)
+    if (
+      decision === 'approve' &&
+      draft.reviewOutcome === 'APPROVED_WITH_CORRECTIONS' &&
+      !draft.correctionSummary.trim() &&
+      correctionFields.length === 0
+    ) {
+      updateDecisionDraft(actionRequestId, {
+        error: 'Add a correction summary or corrected field before approving with corrections.',
+      })
+      return
+    }
+
+    onDecision(actionRequestId, decision, {
+      reviewOutcome: decision === 'approve' ? draft.reviewOutcome : 'REJECTED',
+      decisionNote: draft.decisionNote,
+      correctionSummary:
+        decision === 'approve' && draft.reviewOutcome === 'APPROVED_WITH_CORRECTIONS'
+          ? draft.correctionSummary
+          : undefined,
+      correctionFields:
+        decision === 'approve' && draft.reviewOutcome === 'APPROVED_WITH_CORRECTIONS'
+          ? correctionFields
+          : undefined,
+    })
   }
 
   return (
@@ -159,6 +263,7 @@ export function AssistantActionRequestList({
         const { lifecycle } = actionRequest
         const actionBusy = actionRequestIdsInFlight.includes(actionRequest.action_request_id)
         const actionDecidable = lifecycle.can_approve || lifecycle.can_reject
+        const decisionDraft = decisionDraftFor(actionRequest.action_request_id)
 
         return (
           <article key={actionRequest.action_request_id} className="assistant-action-card">
@@ -232,28 +337,113 @@ export function AssistantActionRequestList({
               </div>
             ) : null}
 
+            {actionRequest.review_outcome ? (
+              <div className="assistant-message-meta assistant-action-meta">
+                <span>Review: {formatReviewOutcome(actionRequest.review_outcome)}</span>
+                {actionRequest.decision_note ? <span>Note: {actionRequest.decision_note}</span> : null}
+                {actionRequest.correction_summary ? (
+                  <span>Corrections: {actionRequest.correction_summary}</span>
+                ) : null}
+                {actionRequest.correction_fields.length > 0 ? (
+                  <span>Fields: {actionRequest.correction_fields.join(', ')}</span>
+                ) : null}
+              </div>
+            ) : null}
+
             {actionDecidable && onDecision ? (
-              <div className="assistant-action-actions">
-                {lifecycle.can_approve ? (
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={actionBusy}
-                    onClick={() => onDecision(actionRequest.action_request_id, 'approve')}
-                  >
-                    {actionBusy ? 'Working...' : 'Approve'}
-                  </button>
+              <div className="assistant-action-decision-panel">
+                <div className="assistant-action-decision-grid">
+                  <label className="assistant-action-decision-field">
+                    <span>Approval outcome</span>
+                    <select
+                      className="control"
+                      value={decisionDraft.reviewOutcome}
+                      disabled={actionBusy}
+                      onChange={(event) =>
+                        updateDecisionDraft(actionRequest.action_request_id, {
+                          reviewOutcome: event.target.value as DecisionDraft['reviewOutcome'],
+                        })
+                      }
+                    >
+                      <option value="APPROVED_AS_IS">Approve as-is</option>
+                      <option value="APPROVED_WITH_CORRECTIONS">Approve after corrections</option>
+                    </select>
+                  </label>
+                  <label className="assistant-action-decision-field">
+                    <span>Decision note</span>
+                    <input
+                      className="control"
+                      value={decisionDraft.decisionNote}
+                      disabled={actionBusy}
+                      onChange={(event) =>
+                        updateDecisionDraft(actionRequest.action_request_id, {
+                          decisionNote: event.target.value,
+                        })
+                      }
+                      placeholder="Optional reviewer note"
+                    />
+                  </label>
+                </div>
+
+                {decisionDraft.reviewOutcome === 'APPROVED_WITH_CORRECTIONS' ? (
+                  <div className="assistant-action-decision-grid">
+                    <label className="assistant-action-decision-field">
+                      <span>Correction summary</span>
+                      <textarea
+                        className="control assistant-action-decision-textarea"
+                        value={decisionDraft.correctionSummary}
+                        disabled={actionBusy}
+                        onChange={(event) =>
+                          updateDecisionDraft(actionRequest.action_request_id, {
+                            correctionSummary: event.target.value,
+                          })
+                        }
+                        placeholder="What changed before approval"
+                      />
+                    </label>
+                    <label className="assistant-action-decision-field">
+                      <span>Corrected fields</span>
+                      <input
+                        className="control"
+                        value={decisionDraft.correctionFields}
+                        disabled={actionBusy}
+                        onChange={(event) =>
+                          updateDecisionDraft(actionRequest.action_request_id, {
+                            correctionFields: event.target.value,
+                          })
+                        }
+                        placeholder="field_one, field_two"
+                      />
+                    </label>
+                  </div>
                 ) : null}
-                {lifecycle.can_reject ? (
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    disabled={actionBusy}
-                    onClick={() => onDecision(actionRequest.action_request_id, 'reject')}
-                  >
-                    Reject
-                  </button>
+
+                {decisionDraft.error ? (
+                  <p className="assistant-action-decision-error">{decisionDraft.error}</p>
                 ) : null}
+
+                <div className="assistant-action-actions">
+                  {lifecycle.can_approve ? (
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={actionBusy}
+                      onClick={() => submitDecision(actionRequest.action_request_id, 'approve')}
+                    >
+                      {actionBusy ? 'Working...' : 'Approve'}
+                    </button>
+                  ) : null}
+                  {lifecycle.can_reject ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={actionBusy}
+                      onClick={() => submitDecision(actionRequest.action_request_id, 'reject')}
+                    >
+                      Reject
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </article>

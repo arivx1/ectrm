@@ -227,6 +227,10 @@ def _build_timeline(
                         metadata={
                             "action_request_id": action_record.id,
                             "decided_by": action_record.decided_by,
+                            "review_outcome": action_record.review_outcome,
+                            "decision_note": action_record.decision_note,
+                            "correction_summary": action_record.correction_summary,
+                            "correction_fields": list(action_record.correction_fields or []),
                             "result": action_record.result if isinstance(action_record.result, dict) else {},
                             "error_detail": action_record.error_detail,
                         },

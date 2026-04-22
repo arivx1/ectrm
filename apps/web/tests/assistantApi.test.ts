@@ -33,6 +33,7 @@ vi.mock('../src/shared/api.ts', () => ({
 }))
 
 import {
+  approveAssistantActionRequest,
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
   createAssistantAgentEval,
@@ -50,6 +51,7 @@ import {
   listAssistantActionRequests,
   listAssistantConversations,
   previewAssistantPromptContext,
+  rejectAssistantActionRequest,
   rejectAssistantAgentProfileRequest,
   runAssistantAgentEval,
   runAssistantAgentEvalSuite,
@@ -127,6 +129,7 @@ test('listAdminAssistantActionRequests includes history filters and returns the 
       executed_count: 0,
       rejected_count: 1,
       failed_count: 0,
+      correction_count: 0,
       avg_decision_seconds: 90,
     },
   }
@@ -166,10 +169,11 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
     created_before: '2026-04-30T23:59:59',
     thresholds: {
       min_decided_actions_for_promotion: 10,
-      max_rejection_rate_for_promotion: 0.1,
-      max_failed_execution_rate_for_promotion: 0.02,
-      max_stale_action_rate_for_promotion: 0.05,
-      max_pending_actions_for_promotion: 0,
+    max_rejection_rate_for_promotion: 0.1,
+    max_failed_execution_rate_for_promotion: 0.02,
+    max_stale_action_rate_for_promotion: 0.05,
+    max_correction_rate_for_promotion: 0.1,
+    max_pending_actions_for_promotion: 0,
       min_decided_actions_for_pause_signal: 5,
       rejection_rate_pause_threshold: 0.4,
       failed_execution_rate_pause_threshold: 0.1,
@@ -246,6 +250,50 @@ test('getAdminAssistantAutonomyReview owns the typed review brief URL and admin 
     url,
     'http://api.test/admin/assistant/agents/ops-governor/autonomy-review?created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
   )
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('approveAssistantActionRequest posts structured reviewer correction metadata', async () => {
+  const expected = { action_request_id: 7, review_outcome: 'APPROVED_WITH_CORRECTIONS' }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await approveAssistantActionRequest('http://api.test', 7, {
+    reviewOutcome: 'APPROVED_WITH_CORRECTIONS',
+    decisionNote: 'Approved after desk correction.',
+    correctionSummary: 'Adjusted reviewer owner before execution.',
+    correctionFields: ['owner', ' owner ', 'notes'],
+  })
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/action-requests/7/approve')
+  assert.deepEqual(body, {
+    review_outcome: 'APPROVED_WITH_CORRECTIONS',
+    decision_note: 'Approved after desk correction.',
+    correction_summary: 'Adjusted reviewer owner before execution.',
+    correction_fields: ['owner', 'notes'],
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('rejectAssistantActionRequest posts rejection notes with review outcome', async () => {
+  const expected = { action_request_id: 8, review_outcome: 'REJECTED' }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await rejectAssistantActionRequest('http://api.test', 8, {
+    reviewOutcome: 'REJECTED',
+    decisionNote: 'Evidence did not support the action.',
+  })
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/action-requests/8/reject')
+  assert.deepEqual(body, {
+    review_outcome: 'REJECTED',
+    decision_note: 'Evidence did not support the action.',
+  })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })
@@ -385,6 +433,85 @@ test('listAdminAssistantProfileRequests loads the admin request queue with mutat
   assert.equal(url, 'http://api.test/admin/assistant/profile-requests')
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('admin assistant eval helpers own catalog URLs and mutation actors', async () => {
+  fetchJsonMock.mockResolvedValueOnce([{ eval_id: 21, agent_id: 'weather-dispatch-analyst' }])
+  postJsonMock.mockResolvedValueOnce({ eval_id: 22, agent_id: 'weather-dispatch-analyst' })
+  putJsonMock.mockResolvedValueOnce({ eval_id: 22, name: 'Updated stale evidence gate' })
+  requestOkMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+  const listPayload = await listAdminAssistantAgentEvals('http://api.test', {
+    agentId: ' weather-dispatch-analyst ',
+    limit: 25,
+    offset: 5,
+  })
+  const created = await createAssistantAgentEval('http://api.test', {
+    agent_id: 'weather-dispatch-analyst',
+    name: 'Blocks stale evidence',
+    workspace: 'assistant',
+    prompt: 'Handle a stale weather exception.',
+    context: null,
+    use_live_tools: true,
+    expected_substrings: ['stale evidence'],
+    expected_tool_names: ['list_workflow_items'],
+    expected_action_types: ['update_trade_workflow_item'],
+  })
+  const updated = await updateAssistantAgentEval('http://api.test', 22, {
+    name: 'Updated stale evidence gate',
+    workspace: 'operations',
+    prompt: 'Handle an updated stale weather exception.',
+    context: 'Workflow item W-1',
+    use_live_tools: false,
+    expected_substrings: [],
+    expected_tool_names: [],
+    expected_action_types: [],
+  })
+  await deleteAssistantAgentEval('http://api.test', 22)
+
+  assert.deepEqual(listPayload, [{ eval_id: 21, agent_id: 'weather-dispatch-analyst' }])
+  assert.deepEqual(created, { eval_id: 22, agent_id: 'weather-dispatch-analyst' })
+  assert.deepEqual(updated, { eval_id: 22, name: 'Updated stale evidence gate' })
+  assert.equal(
+    fetchJsonMock.mock.calls[0][0],
+    'http://api.test/admin/assistant/agent-evals?agent_id=weather-dispatch-analyst&limit=25&offset=5',
+  )
+  assert.equal(postJsonMock.mock.calls[0][0], 'http://api.test/admin/assistant/agent-evals')
+  assert.deepEqual(postJsonMock.mock.calls[0][1], {
+    agent_id: 'weather-dispatch-analyst',
+    name: 'Blocks stale evidence',
+    workspace: 'assistant',
+    prompt: 'Handle a stale weather exception.',
+    context: null,
+    use_live_tools: true,
+    expected_substrings: ['stale evidence'],
+    expected_tool_names: ['list_workflow_items'],
+    expected_action_types: ['update_trade_workflow_item'],
+    created_by: 'assistant_user',
+  })
+  assert.equal(putJsonMock.mock.calls[0][0], 'http://api.test/admin/assistant/agent-evals/22')
+  assert.deepEqual(putJsonMock.mock.calls[0][1], {
+    name: 'Updated stale evidence gate',
+    workspace: 'operations',
+    prompt: 'Handle an updated stale weather exception.',
+    context: 'Workflow item W-1',
+    use_live_tools: false,
+    expected_substrings: [],
+    expected_tool_names: [],
+    expected_action_types: [],
+    updated_by: 'assistant_user',
+  })
+  assert.equal(requestOkMock.mock.calls[0][0], 'http://api.test/admin/assistant/agent-evals/22')
+  assert.equal((requestOkMock.mock.calls[0][1] as RequestInit).method, 'DELETE')
+  for (const call of [
+    fetchJsonMock.mock.calls[0],
+    postJsonMock.mock.calls[0],
+    putJsonMock.mock.calls[0],
+    requestOkMock.mock.calls[0],
+  ]) {
+    const headers = new Headers((call[call.length - 1] as RequestInit | undefined)?.headers)
+    assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+  }
 })
 
 test('createAssistantAgentProfileRequest posts requested_by from mutation context', async () => {

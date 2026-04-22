@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.assistant import AssistantPromptRequest
 
@@ -49,6 +51,22 @@ class AssistantActionRuntimeResult:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class AssistantActionPlanningContext:
+    message: str
+    message_lower: str
+    context: str | None
+    context_fields: dict[str, str]
+    db: Session
+
+
+class AssistantActionPlanner(Protocol):
+    action_type: str
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        ...
+
+
 def _object_ref(record_type: str, record_id: object, label: str | None = None) -> dict[str, object]:
     normalized_id = str(record_id)
     return {
@@ -68,6 +86,34 @@ def _supporting_record(
         **_object_ref(record_type, record_id, label),
         "summary": summary,
     }
+
+
+def _invoice_state_token(invoices: list[TradeInvoice]) -> list[dict[str, object | None]]:
+    return [
+        {
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "status": invoice.status,
+            "invoice_amount": float(invoice.invoice_amount),
+            "billed_quantity": float(invoice.billed_quantity) if invoice.billed_quantity is not None else None,
+            "version": invoice.version,
+        }
+        for invoice in invoices
+    ]
+
+
+def _payment_state_token(payments: list[TradePayment]) -> list[dict[str, object | None]]:
+    return [
+        {
+            "payment_id": payment.id,
+            "payment_reference": payment.payment_reference,
+            "status": payment.status,
+            "payment_amount": float(payment.payment_amount),
+            "payment_currency_code": payment.payment_currency_code,
+            "version": payment.version,
+        }
+        for payment in payments
+    ]
 
 
 def _with_review_context(
@@ -100,6 +146,109 @@ def _with_review_context(
         },
     }
 
+
+class CancelTradeActionPlanner:
+    action_type = "cancel_trade"
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        return _plan_cancel_trade(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            db=context.db,
+        )
+
+
+class IssueTradeConfirmationActionPlanner:
+    action_type = "issue_trade_confirmation"
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        return _plan_issue_trade_confirmation(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class UpdateTradeWorkflowItemActionPlanner:
+    action_type = "update_trade_workflow_item"
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        return _plan_update_trade_workflow_item(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class RecordTradeConfirmationResponseActionPlanner:
+    action_type = "record_trade_confirmation_response"
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        return _plan_record_trade_confirmation_response(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class IssueTradeInvoiceActionPlanner:
+    action_type = "issue_trade_invoice"
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        return _plan_issue_trade_invoice(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class CreateTradePaymentActionPlanner:
+    action_type = "create_trade_payment"
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        return _plan_create_trade_payment(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class ReprocessDocumentIngestionActionPlanner:
+    action_type = "reprocess_document_ingestion"
+
+    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
+        return _plan_reprocess_document_ingestion(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+ACTION_PLANNER_SEQUENCE: tuple[AssistantActionPlanner, ...] = (
+    CancelTradeActionPlanner(),
+    IssueTradeConfirmationActionPlanner(),
+    UpdateTradeWorkflowItemActionPlanner(),
+    RecordTradeConfirmationResponseActionPlanner(),
+    IssueTradeInvoiceActionPlanner(),
+    CreateTradePaymentActionPlanner(),
+    ReprocessDocumentIngestionActionPlanner(),
+)
+ACTION_PLANNERS: dict[str, AssistantActionPlanner] = {
+    planner.action_type: planner for planner in ACTION_PLANNER_SEQUENCE
+}
+
+
 def plan_action_requests(
     *,
     payload: AssistantPromptRequest,
@@ -117,49 +266,14 @@ def plan_action_requests(
 
     latest_message_lower = latest_message.lower()
     context_fields = _parse_key_value_fields(payload.context)
-    planning_candidate = (
-        _plan_cancel_trade(message=latest_message, message_lower=latest_message_lower, context=payload.context, db=db)
-        or _plan_issue_trade_confirmation(
-            message=latest_message,
-            message_lower=latest_message_lower,
-            context=payload.context,
-            context_fields=context_fields,
-            db=db,
-        )
-        or _plan_update_trade_workflow_item(
-            message=latest_message,
-            message_lower=latest_message_lower,
-            context_fields=context_fields,
-            db=db,
-        )
-        or _plan_record_trade_confirmation_response(
-            message=latest_message,
-            message_lower=latest_message_lower,
-            context=payload.context,
-            context_fields=context_fields,
-            db=db,
-        )
-        or _plan_issue_trade_invoice(
-            message=latest_message,
-            message_lower=latest_message_lower,
-            context=payload.context,
-            context_fields=context_fields,
-            db=db,
-        )
-        or _plan_create_trade_payment(
-            message=latest_message,
-            message_lower=latest_message_lower,
-            context_fields=context_fields,
-            db=db,
-        )
-        or _plan_reprocess_document_ingestion(
-            message=latest_message,
-            message_lower=latest_message_lower,
-            context=payload.context,
-            context_fields=context_fields,
-            db=db,
-        )
+    planning_context = AssistantActionPlanningContext(
+        message=latest_message,
+        message_lower=latest_message_lower,
+        context=payload.context,
+        context_fields=context_fields,
+        db=db,
     )
+    planning_candidate = _first_matching_action_plan(planning_context)
     if planning_candidate is None:
         return AssistantActionRuntimeResult(sections=(), proposals=())
     if planning_candidate.warning:
@@ -183,6 +297,16 @@ def plan_action_requests(
         sections=(_build_action_prompt_section(proposal),),
         proposals=(proposal,),
     )
+
+
+def _first_matching_action_plan(
+    planning_context: AssistantActionPlanningContext,
+) -> _ActionPlanningCandidate | None:
+    for planner in ACTION_PLANNER_SEQUENCE:
+        planning_candidate = planner.plan(planning_context)
+        if planning_candidate is not None:
+            return planning_candidate
+    return None
 
 
 def _latest_user_message(payload: AssistantPromptRequest) -> str | None:
@@ -735,6 +859,13 @@ def _plan_issue_trade_invoice(
         return _ActionPlanningCandidate(
             warning=f"Trade {trade_id} was not found, so no approval request was staged."
         )
+    existing_invoices = list(
+        db.execute(
+            select(TradeInvoice)
+            .where(TradeInvoice.trade_id == trade_id)
+            .order_by(TradeInvoice.created_at.asc(), TradeInvoice.id.asc())
+        ).scalars().all()
+    )
 
     invoice_amount = (
         _parse_optional_float_value(_first_present_value(context_fields, "invoice_amount"))
@@ -801,6 +932,8 @@ def _plan_issue_trade_invoice(
                     "trade_status": trade.status,
                     "settlement_status": trade.settlement_status,
                     "last_event_id": trade.last_event_id,
+                    "existing_invoice_count": len(existing_invoices),
+                    "invoice_state_token": _invoice_state_token(existing_invoices),
                 },
                 idempotency_key=(
                     f"assistant-action:issue_trade_invoice:{trade_id}:{invoice_payload.get('invoice_number') or trade.last_event_id}"
@@ -831,6 +964,13 @@ def _plan_create_trade_payment(
         return _ActionPlanningCandidate(
             warning=f"Invoice {invoice_id} was not found, so no approval request was staged."
         )
+    existing_payments = list(
+        db.execute(
+            select(TradePayment)
+            .where(TradePayment.invoice_id == invoice_id)
+            .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+        ).scalars().all()
+    )
 
     payment_amount = (
         _parse_optional_float_value(_first_present_value(context_fields, "payment_amount"))
@@ -893,6 +1033,8 @@ def _plan_create_trade_payment(
                     "invoice_status": invoice.status,
                     "invoice_amount": float(invoice.invoice_amount),
                     "version": invoice.version,
+                    "existing_payment_count": len(existing_payments),
+                    "payment_state_token": _payment_state_token(existing_payments),
                 },
                 idempotency_key=(
                     f"assistant-action:create_trade_payment:{invoice_id}:{_first_present_value(context_fields, 'payment_reference') or invoice.version}"

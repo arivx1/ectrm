@@ -6,7 +6,10 @@ import {
   listAdminAssistantActionRequests,
   rejectAssistantActionRequest,
 } from '../../entities/assistant/api'
-import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
+import {
+  AssistantActionRequestList,
+  type AssistantActionDecisionPayload,
+} from '../../entities/assistant/AssistantActionRequestList'
 import { appConfig } from '../../shared/config'
 import {
   ASSISTANT_ACTION_TYPES,
@@ -54,6 +57,7 @@ const EMPTY_ACTION_REQUEST_SUMMARY: AssistantActionRequestAdminSummary = {
   executed_count: 0,
   rejected_count: 0,
   failed_count: 0,
+  correction_count: 0,
   avg_decision_seconds: null,
 }
 
@@ -305,15 +309,19 @@ export function AssistantApprovalInboxPanel({
     setTraceError('')
   }
 
-  async function handleDecision(actionRequestId: number, decision: 'approve' | 'reject') {
+  async function handleDecision(
+    actionRequestId: number,
+    decision: 'approve' | 'reject',
+    payload: AssistantActionDecisionPayload,
+  ) {
     setFlash(null)
     setActionRequestIdsInFlight((current) => [...current, actionRequestId])
 
     try {
       const updatedActionRequest =
         decision === 'approve'
-          ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId)
-          : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId)
+          ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
+          : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
 
       await refreshActionRequests()
       if (selectedTraceRunId === updatedActionRequest.run_id) {
@@ -388,7 +396,7 @@ export function AssistantApprovalInboxPanel({
               <strong>{formatDecisionDuration(actionRequestSummary.avg_decision_seconds)}</strong>
               <small>
                 {actionRequestSummary.executed_count} executed / {actionRequestSummary.rejected_count} rejected /{' '}
-                {actionRequestSummary.failed_count} failed
+                {actionRequestSummary.failed_count} failed / {actionRequestSummary.correction_count} corrected
               </small>
             </article>
           </div>

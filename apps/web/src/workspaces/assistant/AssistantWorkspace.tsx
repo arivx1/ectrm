@@ -14,7 +14,10 @@ import {
   streamAssistantResponse,
   submitAssistantRunFeedback,
 } from '../../entities/assistant/api'
-import { AssistantActionRequestList } from '../../entities/assistant/AssistantActionRequestList'
+import {
+  AssistantActionRequestList,
+  type AssistantActionDecisionPayload,
+} from '../../entities/assistant/AssistantActionRequestList'
 import {
   assistantBudgetSignalClass,
   assistantBudgetSignalLabel,
@@ -1111,6 +1114,7 @@ export function AssistantWorkspace({
   async function handleActionRequestDecision(
     actionRequestId: number,
     decision: 'approve' | 'reject',
+    payload: AssistantActionDecisionPayload,
   ) {
     setSubmitError('')
     setActionRequestIdsInFlight((current) => [...current, actionRequestId])
@@ -1118,8 +1122,8 @@ export function AssistantWorkspace({
     try {
       const updatedActionRequest =
         decision === 'approve'
-          ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId)
-          : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId)
+          ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
+          : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
 
       setMessages((currentMessages) =>
         currentMessages.map((message) => {
@@ -1272,12 +1276,13 @@ export function AssistantWorkspace({
         <article className="surface">
           <div className="section-head">
             <div>
-              <span className="eyebrow">Assistant Runtime</span>
-              <h3>Prompt Management Workspace</h3>
+              <span className="eyebrow">Assistant Console</span>
+              <h3>Runtime, prompt preview, and traces</h3>
             </div>
             <p>
-              Route prompts through managed providers and agent profiles, then inspect the exact
-              server-built grounding context before you send the message.
+              Use this secondary console for provider selection, managed agents, prompt preview,
+              run traces, feedback, and approval review. Operators can stay in Prompt Home for
+              normal prompt-led work.
             </p>
           </div>
 

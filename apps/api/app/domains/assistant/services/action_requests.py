@@ -32,6 +32,7 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
+from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.assistant import AssistantActionRequestOut
 
@@ -42,6 +43,19 @@ class AssistantActionRequestError(Exception):
         self.detail = detail
 
 
+REVIEW_OUTCOME_APPROVED_AS_IS = "APPROVED_AS_IS"
+REVIEW_OUTCOME_APPROVED_WITH_CORRECTIONS = "APPROVED_WITH_CORRECTIONS"
+REVIEW_OUTCOME_REJECTED = "REJECTED"
+
+
+@dataclass(frozen=True)
+class AssistantActionDecision:
+    review_outcome: str | None = None
+    decision_note: str | None = None
+    correction_summary: str | None = None
+    correction_fields: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class AssistantActionRequestAdminSummary:
     total_count: int
@@ -49,6 +63,7 @@ class AssistantActionRequestAdminSummary:
     executed_count: int
     rejected_count: int
     failed_count: int
+    correction_count: int
     avg_decision_seconds: float | None
 
 
@@ -288,10 +303,19 @@ class IssueTradeInvoiceActionHandler(NonIdempotentActionHandler):
         trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
         if trade is None:
             raise AssistantActionRequestError(f"Trade {trade_id} was not found during approval stale-state recheck.")
+        existing_invoices = list(
+            db.execute(
+                select(TradeInvoice)
+                .where(TradeInvoice.trade_id == trade_id)
+                .order_by(TradeInvoice.created_at.asc(), TradeInvoice.id.asc())
+            ).scalars().all()
+        )
         return {
             "trade_status": trade.status,
             "settlement_status": trade.settlement_status,
             "last_event_id": trade.last_event_id,
+            "existing_invoice_count": len(existing_invoices),
+            "invoice_state_token": _invoice_state_token(existing_invoices),
         }
 
 
@@ -318,10 +342,19 @@ class CreateTradePaymentActionHandler(NonIdempotentActionHandler):
             raise AssistantActionRequestError(
                 f"Invoice {invoice_id} was not found during approval stale-state recheck."
             )
+        existing_payments = list(
+            db.execute(
+                select(TradePayment)
+                .where(TradePayment.invoice_id == invoice_id)
+                .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+            ).scalars().all()
+        )
         return {
             "invoice_status": invoice.status,
             "invoice_amount": float(invoice.invoice_amount),
             "version": invoice.version,
+            "existing_payment_count": len(existing_payments),
+            "payment_state_token": _payment_state_token(existing_payments),
         }
 
 
@@ -519,13 +552,20 @@ def reject_action_request(
     db: Session,
     record: AssistantActionRequest,
     actor_id: str,
+    decision: AssistantActionDecision | None = None,
 ) -> AssistantActionRequest:
     if record.status != "PENDING":
         raise AssistantActionRequestError("Only pending assistant action requests can be rejected.")
 
+    decision_metadata = _normalize_action_decision(
+        decision,
+        default_review_outcome=REVIEW_OUTCOME_REJECTED,
+        allowed_review_outcomes=(REVIEW_OUTCOME_REJECTED,),
+    )
     record.status = "REJECTED"
     record.decided_at = datetime.now(timezone.utc)
     record.decided_by = actor_id
+    _apply_action_decision(record, decision_metadata)
     record.error_detail = None
     db.commit()
     db.refresh(record)
@@ -538,10 +578,16 @@ def approve_action_request(
     record: AssistantActionRequest,
     actor_id: str,
     actor_role: str | None = None,
+    decision: AssistantActionDecision | None = None,
 ) -> AssistantActionRequest:
     if record.status != "PENDING":
         raise AssistantActionRequestError("Only pending assistant action requests can be approved.")
 
+    decision_metadata = _normalize_action_decision(
+        decision,
+        default_review_outcome=REVIEW_OUTCOME_APPROVED_AS_IS,
+        allowed_review_outcomes=(REVIEW_OUTCOME_APPROVED_AS_IS, REVIEW_OUTCOME_APPROVED_WITH_CORRECTIONS),
+    )
     policy_decision = _evaluate_stored_action_policy(
         db=db,
         record=record,
@@ -568,6 +614,7 @@ def approve_action_request(
             actor_id=actor_id,
             decided_at=decided_at,
             error_detail=exc.detail,
+            decision=decision_metadata,
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
         return _mark_action_request_failed(
@@ -576,17 +623,74 @@ def approve_action_request(
             actor_id=actor_id,
             decided_at=decided_at,
             error_detail=str(exc) or "Assistant action execution failed unexpectedly.",
+            decision=decision_metadata,
         )
 
     result["approval_policy"] = approval_policy
     record.status = "EXECUTED"
     record.decided_at = decided_at
     record.decided_by = actor_id
+    _apply_action_decision(record, decision_metadata)
     record.result = result
     record.error_detail = None
     db.commit()
     db.refresh(record)
     return record
+
+
+def _normalize_action_decision(
+    decision: AssistantActionDecision | None,
+    *,
+    default_review_outcome: str,
+    allowed_review_outcomes: tuple[str, ...],
+) -> AssistantActionDecision:
+    review_outcome = _normalize_optional_text(decision.review_outcome if decision is not None else None)
+    normalized_outcome = (review_outcome or default_review_outcome).upper()
+    if normalized_outcome not in allowed_review_outcomes:
+        allowed = ", ".join(allowed_review_outcomes)
+        raise AssistantActionRequestError(f"Review outcome must be one of: {allowed}.")
+
+    decision_note = _normalize_optional_text(decision.decision_note if decision is not None else None)
+    correction_summary = _normalize_optional_text(decision.correction_summary if decision is not None else None)
+    correction_fields = _normalize_correction_fields(decision.correction_fields if decision is not None else ())
+
+    if normalized_outcome == REVIEW_OUTCOME_APPROVED_WITH_CORRECTIONS:
+        if correction_summary is None and not correction_fields:
+            raise AssistantActionRequestError(
+                "Approvals with corrections require a correction summary or at least one corrected field."
+            )
+    else:
+        correction_summary = None
+        correction_fields = ()
+
+    return AssistantActionDecision(
+        review_outcome=normalized_outcome,
+        decision_note=decision_note,
+        correction_summary=correction_summary,
+        correction_fields=correction_fields,
+    )
+
+
+def _normalize_correction_fields(values: Sequence[str]) -> tuple[str, ...]:
+    fields: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = _normalize_optional_text(value)
+        if normalized is None or normalized in seen:
+            continue
+        fields.append(normalized)
+        seen.add(normalized)
+    return tuple(fields)
+
+
+def _apply_action_decision(
+    record: AssistantActionRequest,
+    decision: AssistantActionDecision,
+) -> None:
+    record.review_outcome = decision.review_outcome
+    record.decision_note = decision.decision_note
+    record.correction_summary = decision.correction_summary
+    record.correction_fields = list(decision.correction_fields) if decision.correction_fields else None
 
 
 def _evaluate_stored_action_policy(
@@ -628,6 +732,10 @@ def to_action_request_out(record: AssistantActionRequest) -> AssistantActionRequ
         lifecycle=_build_action_request_lifecycle(record, review_context),
         result=dict(record.result) if isinstance(record.result, dict) else record.result,
         error_detail=record.error_detail,
+        review_outcome=record.review_outcome,
+        decision_note=record.decision_note,
+        correction_summary=record.correction_summary,
+        correction_fields=list(record.correction_fields or []),
         created_at=record.created_at,
         decided_at=record.decided_at,
         decided_by=record.decided_by,
@@ -823,6 +931,7 @@ def _summarize_action_requests(
     summary_subquery = _apply_action_request_filters(
         select(
             AssistantActionRequest.status.label("status"),
+            AssistantActionRequest.review_outcome.label("review_outcome"),
             AssistantActionRequest.created_at.label("created_at"),
             AssistantActionRequest.decided_at.label("decided_at"),
         ),
@@ -854,6 +963,14 @@ def _summarize_action_requests(
         if row_status in status_counts:
             status_counts[str(row_status)] = int(row_count)
 
+    correction_count = int(
+        db.execute(
+            select(func.count())
+            .select_from(summary_subquery)
+            .where(summary_subquery.c.review_outcome == REVIEW_OUTCOME_APPROVED_WITH_CORRECTIONS)
+        ).scalar_one()
+    )
+
     latency_rows = db.execute(
         select(summary_subquery.c.created_at, summary_subquery.c.decided_at).where(
             summary_subquery.c.decided_at.is_not(None)
@@ -874,6 +991,7 @@ def _summarize_action_requests(
         executed_count=status_counts["EXECUTED"],
         rejected_count=status_counts["REJECTED"],
         failed_count=status_counts["FAILED"],
+        correction_count=correction_count,
         avg_decision_seconds=avg_decision_seconds,
     )
 
@@ -926,6 +1044,12 @@ def _validate_approval_contract(
     if review_context is None:
         raise AssistantActionRequestError(
             "Assistant action approval requires review_context with reviewer, stale-state, and idempotency evidence."
+        )
+
+    stale_state_basis = review_context.get("stale_state_basis")
+    if not isinstance(stale_state_basis, dict) or not stale_state_basis:
+        raise AssistantActionRequestError(
+            "Assistant action approval requires review_context.stale_state_basis before execution."
         )
 
     idempotency_key = _review_context_text_value(review_context, "idempotency_key")
@@ -1074,6 +1198,34 @@ def _current_stale_state_for_action(
     return _action_handler_for(record).current_stale_state(db=db, record=record)
 
 
+def _invoice_state_token(invoices: list[TradeInvoice]) -> list[dict[str, object | None]]:
+    return [
+        {
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "status": invoice.status,
+            "invoice_amount": float(invoice.invoice_amount),
+            "billed_quantity": float(invoice.billed_quantity) if invoice.billed_quantity is not None else None,
+            "version": invoice.version,
+        }
+        for invoice in invoices
+    ]
+
+
+def _payment_state_token(payments: list[TradePayment]) -> list[dict[str, object | None]]:
+    return [
+        {
+            "payment_id": payment.id,
+            "payment_reference": payment.payment_reference,
+            "status": payment.status,
+            "payment_amount": float(payment.payment_amount),
+            "payment_currency_code": payment.payment_currency_code,
+            "version": payment.version,
+        }
+        for payment in payments
+    ]
+
+
 def _action_payload_is_idempotent_retry(*, db: Session, record: AssistantActionRequest) -> bool:
     return _action_handler_for(record).is_idempotent_retry(db=db, record=record)
 
@@ -1144,6 +1296,7 @@ def _mark_action_request_failed(
     actor_id: str,
     decided_at: datetime,
     error_detail: str,
+    decision: AssistantActionDecision | None = None,
 ) -> AssistantActionRequest:
     db.rollback()
     record = db.get(AssistantActionRequest, record_id)
@@ -1153,6 +1306,8 @@ def _mark_action_request_failed(
     record.status = "FAILED"
     record.decided_at = decided_at
     record.decided_by = actor_id
+    if decision is not None:
+        _apply_action_decision(record, decision)
     record.result = None
     record.error_detail = error_detail
     db.commit()

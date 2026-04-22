@@ -18,6 +18,7 @@ from apps.api.app.domains.assistant.services.chat import AssistantServiceError
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
+from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.schemas.assistant import AssistantAgentCreate, AssistantAgentUpdate

@@ -15,6 +15,7 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
 from apps.api.app.domains.assistant.services.audit_traces import build_assistant_run_audit_trace
 from apps.api.app.domains.assistant.services.action_requests import (
+    AssistantActionDecision,
     list_action_requests,
     list_action_request_page,
     to_action_request_out,
@@ -34,6 +35,11 @@ from apps.api.app.domains.assistant.services.agent_evals import (
     update_agent_eval,
 )
 from apps.api.app.domains.assistant.services.autonomy_review import build_assistant_autonomy_review_brief
+    list_agent_evals,
+    seed_agent_evals_from_profile_request,
+    to_agent_eval_out,
+    update_agent_eval,
+)
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
     AssistantServiceError,
@@ -48,6 +54,10 @@ from apps.api.app.domains.assistant.services.conversations import (
 from apps.api.app.domains.assistant.services.feedback import (
     to_assistant_run_feedback_out,
     upsert_assistant_run_feedback,
+)
+from apps.api.app.domains.assistant.services.eval_gates import (
+    build_agent_eval_gate,
+    build_role_archetype_eval_gate,
 )
 from apps.api.app.domains.assistant.services.outcome_metrics import (
     summarize_assistant_outcome_metrics,
@@ -107,6 +117,7 @@ from apps.api.app.domains.assistant.services.registry import (
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.schemas.assistant import (
+    AssistantActionDecisionRequest,
     AssistantActionRequestAdminPageOut,
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
@@ -147,6 +158,17 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
 admin_router = APIRouter(prefix="/admin/assistant", tags=["assistant-admin"])
 
 
+def _action_decision_from_payload(payload: AssistantActionDecisionRequest | None) -> AssistantActionDecision | None:
+    if payload is None:
+        return None
+    return AssistantActionDecision(
+        review_outcome=payload.review_outcome,
+        decision_note=payload.decision_note,
+        correction_summary=payload.correction_summary,
+        correction_fields=tuple(payload.correction_fields),
+    )
+
+
 def get_assistant_service(db: Session) -> AssistantService:
     return AssistantService(db)
 
@@ -161,7 +183,11 @@ def list_assistant_agents(db: Session = Depends(get_db)) -> list[AssistantAgentO
     records = list_public_agent_records(db)
     token_budgets = summarize_agent_token_budgets(db, records)
     return [
-        to_public_agent_out(record, token_budget=token_budgets.get(record.agent_id))
+        to_public_agent_out(
+            record,
+            token_budget=token_budgets.get(record.agent_id),
+            eval_gate=build_agent_eval_gate(db, record),
+        )
         for record in records
     ]
 
@@ -306,6 +332,7 @@ def list_current_user_assistant_action_requests(
 def approve_current_user_assistant_action_request(
     action_request_id: int,
     request: Request,
+    payload: AssistantActionDecisionRequest | None = None,
     db: Session = Depends(get_db),
 ) -> AssistantActionRequestOut:
     try:
@@ -315,6 +342,7 @@ def approve_current_user_assistant_action_request(
                 db=db,
                 action_request_id=action_request_id,
                 user=user,
+                decision=_action_decision_from_payload(payload),
             )
         )
     except AssistantServiceError as exc:
@@ -325,6 +353,7 @@ def approve_current_user_assistant_action_request(
 def reject_current_user_assistant_action_request(
     action_request_id: int,
     request: Request,
+    payload: AssistantActionDecisionRequest | None = None,
     db: Session = Depends(get_db),
 ) -> AssistantActionRequestOut:
     try:
@@ -334,6 +363,7 @@ def reject_current_user_assistant_action_request(
                 db=db,
                 action_request_id=action_request_id,
                 user=user,
+                decision=_action_decision_from_payload(payload),
             )
         )
     except AssistantServiceError as exc:
@@ -464,7 +494,10 @@ async def stream_assistant_response(
 
 @admin_router.get("/role-archetypes", response_model=list[AssistantAgentRoleArchetypeOut])
 def list_admin_assistant_role_archetypes() -> list[AssistantAgentRoleArchetypeOut]:
-    return [to_role_archetype_out(role) for role in list_role_archetypes()]
+    return [
+        to_role_archetype_out(role, eval_gate=build_role_archetype_eval_gate(role))
+        for role in list_role_archetypes()
+    ]
 
 
 @admin_router.get("/role-archetypes/{role_key}", response_model=AssistantAgentRoleArchetypeOut)
@@ -472,7 +505,7 @@ def get_admin_assistant_role_archetype(role_key: str) -> AssistantAgentRoleArche
     role = get_role_archetype(role_key)
     if role is None:
         raise HTTPException(status_code=404, detail="Assistant agent role archetype not found")
-    return to_role_archetype_out(role)
+    return to_role_archetype_out(role, eval_gate=build_role_archetype_eval_gate(role))
 
 
 @admin_router.get("/profile-requests", response_model=list[AssistantAgentProfileRequestOut])
@@ -539,6 +572,9 @@ def list_admin_assistant_agent_evals(
     return [
         to_agent_eval_out(record, latest_run=latest_runs.get(record.id))
         for record in records
+    return [
+        to_agent_eval_out(record)
+        for record in list_agent_evals(db, agent_id=agent_id, limit=limit, offset=offset)
     ]
 
 
@@ -653,7 +689,11 @@ def list_admin_assistant_agents(db: Session = Depends(get_db)) -> list[Assistant
     records = list_admin_agent_records(db)
     token_budgets = summarize_agent_token_budgets(db, records)
     return [
-        to_admin_agent_out(record, token_budget=token_budgets.get(record.agent_id))
+        to_admin_agent_out(
+            record,
+            token_budget=token_budgets.get(record.agent_id),
+            eval_gate=build_agent_eval_gate(db, record),
+        )
         for record in records
     ]
 
@@ -819,6 +859,7 @@ def list_admin_assistant_action_requests(
             "executed_count": page.summary.executed_count,
             "rejected_count": page.summary.rejected_count,
             "failed_count": page.summary.failed_count,
+            "correction_count": page.summary.correction_count,
             "avg_decision_seconds": page.summary.avg_decision_seconds,
         },
     )
@@ -855,7 +896,6 @@ def create_assistant_agent(
     now = datetime.now(timezone.utc)
     actor_id = resolve_audit_actor_id(payload.created_by)
     policy_defaults = _resolve_agent_profile_defaults(payload)
-    _validate_agent_activation(db, agent_id=payload.agent_id, payload=payload)
     record = AssistantAgent(
         agent_id=payload.agent_id,
         name=payload.name,
@@ -886,6 +926,7 @@ def create_assistant_agent(
     db.add(record)
     db.flush()
     _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
+    _validate_agent_activation(db, agent_id=payload.agent_id, payload=payload)
     if record.status == "ACTIVE":
         _mark_profile_request_activated_for_agent(db, record=record, actor_id=actor_id)
     _record_agent_provenance(db, record=record, operation_key="assistant_agent.created", action="created")
@@ -895,7 +936,11 @@ def create_assistant_agent(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assistant agent already exists") from exc
     db.refresh(record)
-    return to_admin_agent_out(record, token_budget=summarize_agent_token_budget(db, record))
+    return to_admin_agent_out(
+        record,
+        token_budget=summarize_agent_token_budget(db, record),
+        eval_gate=build_agent_eval_gate(db, record),
+    )
 
 
 @admin_router.put("/agents/{agent_id}", response_model=AssistantAgentAdminOut)
@@ -910,7 +955,6 @@ def update_assistant_agent(
 
     old_status = record.status
     policy_defaults = _resolve_agent_profile_defaults(payload)
-    _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
     record.name = payload.name
     record.description = payload.description
     record.status = payload.status
@@ -935,6 +979,7 @@ def update_assistant_agent(
     record.version += 1
     db.flush()
     _seed_profile_request_evals_for_agent(db, record=record, actor_id=record.updated_by)
+    _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
     if old_status != "ACTIVE" and record.status == "ACTIVE":
         _mark_profile_request_activated_for_agent(db, record=record, actor_id=record.updated_by)
     _record_agent_provenance(
@@ -945,7 +990,11 @@ def update_assistant_agent(
     )
     db.commit()
     db.refresh(record)
-    return to_admin_agent_out(record, token_budget=summarize_agent_token_budget(db, record))
+    return to_admin_agent_out(
+        record,
+        token_budget=summarize_agent_token_budget(db, record),
+        eval_gate=build_agent_eval_gate(db, record),
+    )
 
 
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:

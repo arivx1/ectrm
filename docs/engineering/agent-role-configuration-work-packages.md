@@ -477,6 +477,25 @@ Backend/test engineer with assistant eval harness familiarity.
   behavior
 - admin output can show eval coverage status for a role/profile
 
+### Implementation notes
+
+- Added a deterministic assistant eval-gate service that turns role
+  `required_eval_coverage`, custom profile request eval cases, authority
+  ceiling, and action capability into a `PASS`, `BLOCKED`, or `NOT_REQUIRED`
+  status.
+- Role archetype validation now requires action-capable roles to include both
+  allowed-action and denied/stale-action eval coverage, keeping seeded role
+  contracts aligned with the behavior suite.
+- Active custom profiles above draft-only authority now need an approved
+  specialization-specific eval case, even when they map to an existing role.
+  Role-mapped profiles still inherit the role matrix; the custom request adds
+  local regression coverage.
+- Admin role and agent outputs include `eval_gate`, and the Admin UI surfaces
+  coverage status on role details, agent cards, and the selected agent editor.
+- `make api-assistant-evals` remains the executable local behavior gate; the
+  eval gate records whether the profile has the coverage required before a
+  promotion is allowed.
+
 ## WP-07: Control Tower Metrics And Auto-Pause Signals
 
 ### Priority

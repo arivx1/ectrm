@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_admin_role, resolve_session_principal
 from apps.api.app.domains.assistant.services.action_requests import (
+    AssistantActionDecision,
     AssistantActionRequestError,
     approve_action_request,
     create_action_requests,
@@ -198,6 +199,7 @@ def approve_assistant_action_request_for_user(
     db: Session,
     action_request_id: int,
     user: AssistantPromptUser,
+    decision: AssistantActionDecision | None = None,
 ) -> AssistantActionRequest:
     record = resolve_accessible_assistant_action_request(
         db=db,
@@ -210,6 +212,7 @@ def approve_assistant_action_request_for_user(
             record=record,
             actor_id=user.user_id,
             actor_role=user.role,
+            decision=decision,
         )
     except AssistantActionRequestError as exc:
         raise AssistantServiceError(status_code=409, detail=exc.detail) from exc
@@ -220,6 +223,7 @@ def reject_assistant_action_request_for_user(
     db: Session,
     action_request_id: int,
     user: AssistantPromptUser,
+    decision: AssistantActionDecision | None = None,
 ) -> AssistantActionRequest:
     record = resolve_accessible_assistant_action_request(
         db=db,
@@ -231,6 +235,7 @@ def reject_assistant_action_request_for_user(
             db=db,
             record=record,
             actor_id=user.user_id,
+            decision=decision,
         )
     except AssistantActionRequestError as exc:
         raise AssistantServiceError(status_code=409, detail=exc.detail) from exc

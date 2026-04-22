@@ -50,6 +50,7 @@ AssistantAgentProfileKind = Literal["CURATED", "ROLE_DERIVED", "CUSTOM"]
 AssistantAgentProfileRequestStatus = Literal["REQUESTED", "APPROVED", "REJECTED", "ACTIVATED"]
 AssistantAgentEvalRunStatus = Literal["PASS", "FAIL", "ERROR"]
 AssistantAgentAuthorityLevel = Literal["OBSERVE", "EXPLAIN", "DRAFT", "STAGE", "EXECUTE", "EXTERNAL_COMMIT"]
+AssistantAgentEvalGateStatus = Literal["PASS", "BLOCKED", "NOT_REQUIRED"]
 AssistantPolicyResourceType = Literal["tool", "action"]
 AssistantPolicyRiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 AssistantActionType = Literal[
@@ -64,6 +65,7 @@ AssistantActionType = Literal[
 AssistantActionRequestStatus = Literal["PENDING", "REJECTED", "EXECUTED", "FAILED"]
 AssistantActionRequestLifecycleStage = Literal["AWAITING_REVIEW", "EXECUTED", "REJECTED", "FAILED"]
 AssistantActionRequestLifecycleTone = Literal["attention", "success", "neutral", "danger"]
+AssistantActionReviewOutcome = Literal["APPROVED_AS_IS", "APPROVED_WITH_CORRECTIONS", "REJECTED"]
 AssistantOutcomeMetricRecommendationAction = Literal[
     "INSUFFICIENT_DATA",
     "KEEP_STAGED",
@@ -301,6 +303,31 @@ class AssistantActionRequestLifecycleOut(BaseModel):
     review_risk_flags: list[str] = Field(default_factory=list)
 
 
+class AssistantActionDecisionRequest(BaseModel):
+    review_outcome: Optional[AssistantActionReviewOutcome] = None
+    decision_note: Optional[str] = None
+    correction_summary: Optional[str] = None
+    correction_fields: list[str] = Field(default_factory=list)
+
+    @field_validator("decision_note", "correction_summary")
+    @classmethod
+    def normalize_optional_decision_text(cls, value: Optional[str], info) -> Optional[str]:
+        return normalize_optional_text(value, field_name=info.field_name)
+
+    @field_validator("correction_fields")
+    @classmethod
+    def normalize_correction_fields(cls, value: list[str]) -> list[str]:
+        fields: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            normalized = normalize_optional_text(item, field_name="correction_fields")
+            if normalized is None or normalized in seen:
+                continue
+            fields.append(normalized)
+            seen.add(normalized)
+        return fields
+
+
 class AssistantActionRequestOut(BaseModel):
     action_request_id: int
     run_id: int
@@ -317,6 +344,10 @@ class AssistantActionRequestOut(BaseModel):
     lifecycle: AssistantActionRequestLifecycleOut
     result: Optional[dict[str, object]] = None
     error_detail: Optional[str] = None
+    review_outcome: Optional[AssistantActionReviewOutcome] = None
+    decision_note: Optional[str] = None
+    correction_summary: Optional[str] = None
+    correction_fields: list[str] = Field(default_factory=list)
     created_at: datetime
     decided_at: Optional[datetime] = None
     decided_by: Optional[str] = None
@@ -328,6 +359,7 @@ class AssistantActionRequestAdminSummaryOut(BaseModel):
     executed_count: int
     rejected_count: int
     failed_count: int
+    correction_count: int = 0
     avg_decision_seconds: Optional[float] = None
 
 
@@ -345,6 +377,7 @@ class AssistantOutcomeMetricThresholdsOut(BaseModel):
     max_rejection_rate_for_promotion: float
     max_failed_execution_rate_for_promotion: float
     max_stale_action_rate_for_promotion: float
+    max_correction_rate_for_promotion: float
     max_pending_actions_for_promotion: int
     min_decided_actions_for_pause_signal: int
     rejection_rate_pause_threshold: float
@@ -369,6 +402,7 @@ class AssistantOutcomeMetricCountersOut(BaseModel):
     executed_action_count: int
     rejected_action_count: int
     failed_action_count: int
+    correction_count: int
     decided_action_count: int
     stale_action_count: int
     unsupported_attempt_count: int
@@ -376,6 +410,7 @@ class AssistantOutcomeMetricCountersOut(BaseModel):
     approval_rate: Optional[float] = None
     rejection_rate: Optional[float] = None
     failed_execution_rate: Optional[float] = None
+    correction_rate: Optional[float] = None
     stale_action_rate: Optional[float] = None
     avg_decision_seconds: Optional[float] = None
     oldest_pending_age_seconds: Optional[float] = None
@@ -959,6 +994,16 @@ class AssistantAgentTokenBudgetOut(BaseModel):
     reset_at: datetime
 
 
+class AssistantAgentEvalGateOut(BaseModel):
+    status: AssistantAgentEvalGateStatus
+    role_key: Optional[str] = None
+    required_cases: list[str] = Field(default_factory=list)
+    covered_cases: list[str] = Field(default_factory=list)
+    missing_cases: list[str] = Field(default_factory=list)
+    custom_case_count: int = 0
+    notes: list[str] = Field(default_factory=list)
+
+
 class AssistantAgentOut(BaseModel):
     agent_id: str
     name: str
@@ -981,6 +1026,7 @@ class AssistantAgentOut(BaseModel):
     daily_token_allocation: Optional[int]
     token_budget: AssistantAgentTokenBudgetOut
     effective_policy: AssistantAgentEffectivePolicyOut
+    eval_gate: Optional[AssistantAgentEvalGateOut] = None
 
 
 class AssistantAgentAdminOut(AssistantAgentOut):
@@ -1009,6 +1055,7 @@ class AssistantAgentRoleArchetypeOut(BaseModel):
     stop_conditions: list[str]
     success_metrics: list[str]
     required_eval_coverage: list[str]
+    eval_gate: Optional[AssistantAgentEvalGateOut] = None
     base_prompt_guidance: list[str]
     current_profile_ids: list[str]
 

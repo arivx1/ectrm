@@ -927,11 +927,11 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
   },
   assistant: {
     key: 'assistant',
-    label: 'Assistant',
-    kicker: 'AI',
-    heroTitle: 'Analyst copilot for the desk',
+    label: 'Assistant Console',
+    kicker: 'AI Ops',
+    heroTitle: 'Assistant runtime and trace console',
     heroBody:
-      'Ask for grounded analysis with the desk state already loaded so AI stays anchored to what operations can see.',
+      'Inspect provider readiness, managed agents, prompt previews, saved conversations, run traces, feedback, and governed approval paths.',
     dataGroups: ['trades', 'events', 'positions'],
     blockingGroups: ['trades', 'events', 'positions'],
   },

@@ -98,6 +98,10 @@ function resolveApiBase(): string {
   }
 
   const configuredPort = readEnvString('VITE_API_PORT') ?? '8000'
+  if (typeof window === 'undefined') {
+    return `http://localhost:${configuredPort}`
+  }
+
   return `${window.location.protocol}//${window.location.hostname}:${configuredPort}`
 }
 
