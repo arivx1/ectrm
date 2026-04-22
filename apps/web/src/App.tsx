@@ -40,7 +40,9 @@ import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import { appConfig } from './shared/config'
 import {
   describeAppRouteHandoff,
+  getAppRouteHandoffFilterValue,
   getAppRouteHandoffKey,
+  getAppRouteHandoffTradeId,
   type AppRouteHandoff,
 } from './shared/appRouteHandoff'
 import { getAuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
@@ -517,6 +519,13 @@ function AuthenticatedWorkspaceShell({
               <strong>{routeHandoffBanner.title}</strong>
               <p>{routeHandoffBanner.detail}</p>
             </div>
+            <button
+              type="button"
+              className="button button-secondary workspace-window-banner-action"
+              onClick={() => route.replaceView(currentView)}
+            >
+              Clear Focus
+            </button>
           </section>
         ) : null}
 
@@ -659,8 +668,9 @@ export default function App() {
   useEffect(() => {
     const nextHandoffFilter =
       routeHandoff && (currentView === 'operations' || currentView === 'settlement')
-        ? routeHandoff.tradeId
+        ? getAppRouteHandoffFilterValue(routeHandoff)
         : null
+    const routeHandoffTradeId = getAppRouteHandoffTradeId(routeHandoff)
 
     if (routeHandoffKey === null) {
       const previousHandoffFilter = activeRouteHandoffFilterRef.current
@@ -686,8 +696,8 @@ export default function App() {
     }
     activeRouteHandoffFilterRef.current = nextHandoffFilter
 
-    if (currentView === 'trades' && routeHandoff?.tradeId && selectedTradeId !== routeHandoff.tradeId) {
-      setSelectedTradeId(routeHandoff.tradeId)
+    if (currentView === 'trades' && routeHandoffTradeId && selectedTradeId !== routeHandoffTradeId) {
+      setSelectedTradeId(routeHandoffTradeId)
     }
 
     if (

@@ -243,6 +243,7 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/auth/heartbeat') &&
       !(method === 'POST' && url.pathname === '/auth/session') &&
       !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
+      !(method === 'POST' && url.pathname === '/assistant/respond') &&
       !(method === 'PUT' && url.pathname === '/layout-definitions/trades') &&
       !(method === 'PUT' && url.pathname === '/layout-definitions/dashboard')
     ) {
@@ -317,6 +318,55 @@ async function startMockApiServer(
 
     if (url.pathname === '/assistant/settings' && method === 'GET') {
       writeJson(response, assistantRuntimeSettings)
+      return
+    }
+
+    if (url.pathname === '/assistant/respond' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      writeJson(response, {
+        conversation_id: 902,
+        conversation_updated_at: '2026-04-11T09:08:00Z',
+        run_id: 8801,
+        run_recorded_at: '2026-04-11T09:08:00Z',
+        agent_id: null,
+        agent_name: null,
+        agent_role_key: null,
+        agent_profile_kind: null,
+        provider: 'openai',
+        model: 'gpt-5.4',
+        message: {
+          role: 'assistant',
+          content: [
+            'Operations is the right place to continue because the blocker is tied to the confirmation queue.',
+            '```navigation_intent',
+            JSON.stringify({
+              kind: 'open_workspace',
+              targetView: 'operations',
+              label: 'Open Work Queue',
+              rationale: 'Review the confirmation blocker with the operations owner before changing trade state.',
+              focus: {
+                type: 'trade',
+                id: 'T-AMEND-100',
+                label: 'T-AMEND-100',
+              },
+              inspectorTab: 'events',
+            }),
+            '```',
+          ].join('\n'),
+        },
+        usage: {
+          input_tokens: 120,
+          output_tokens: 60,
+        },
+        warnings: [],
+        tool_calls: [],
+        action_requests: [],
+      })
       return
     }
 
@@ -951,6 +1001,11 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/confirmations' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/deliveries' && method === 'GET') {
       writeJson(response, [])
       return
     }

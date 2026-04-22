@@ -5,12 +5,15 @@ import {
   requestAssistantResponse,
 } from '../../entities/assistant/api'
 import {
+  buildPromptNavigationRouteHandoff,
   normalizePromptNavigationIntent,
+  parsePromptNavigationIntentsFromAssistantContent,
   promptNavigationIntentDetail,
   promptNavigationIntentLabel,
   type PromptNavigationIntent,
 } from '../../entities/app/promptNavigationIntent'
 import { appConfig } from '../../shared/config'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   AssistantActionRequest,
   AssistantProvider,
@@ -31,7 +34,7 @@ type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null
   health: string
   counts: PromptHomeCounts
-  onOpenView: (view: ViewKey) => void
+  onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
 }
 
 type PromptHomeMessage = {
@@ -43,6 +46,7 @@ type PromptHomeMessage = {
   runId?: number | null
   warnings?: string[]
   actionRequests?: AssistantActionRequest[]
+  navigationIntents?: PromptNavigationIntent[]
 }
 
 const QUICK_PROMPTS = [
@@ -111,6 +115,7 @@ function buildPromptHomeContext(args: {
     `Payments due: ${formatCount(args.counts.paymentsDue)}.`,
     `Dashboard attention items: ${formatCount(args.counts.attentionItems)}.`,
     'If the user needs to perform a business write, stage or describe the governed action path instead of claiming it has been executed.',
+    'When opening an existing workspace would help, include a fenced navigation_intent JSON block after the user-facing answer. Use shape {"kind":"open_workspace","targetView":"operations","label":"Open Work Queue","rationale":"Why this is the right destination","focus":{"type":"trade","id":"TRD-1001","label":"TRD-1001"},"inspectorTab":"events"}. Navigation intents move the UI only and never execute business changes.',
   ].join('\n')
 }
 
@@ -202,19 +207,25 @@ export function PromptHomeWorkspace({
           accessToken: authSession.accessToken,
         },
       )
+      const responseConversationId = response.conversation_id ?? conversationId
+      const parsedResponse = parsePromptNavigationIntentsFromAssistantContent(response.message.content, {
+        sourceRunId: response.run_id,
+        sourceConversationId: responseConversationId,
+      })
 
-      setConversationId(response.conversation_id ?? conversationId)
+      setConversationId(responseConversationId)
       setMessages((current) => [
         ...current,
         {
           id: createPromptMessageId(),
           role: 'assistant',
-          content: response.message.content,
+          content: parsedResponse.content || response.message.content,
           provider: response.provider,
           model: response.model,
           runId: response.run_id,
           warnings: response.warnings,
           actionRequests: response.action_requests,
+          navigationIntents: parsedResponse.intents,
         },
       ])
     } catch (error) {
@@ -229,14 +240,17 @@ export function PromptHomeWorkspace({
     void submitPrompt(draft)
   }
 
-  function handleNavigationIntent(intent: PromptNavigationIntent) {
+  function handleNavigationIntent(intent: PromptNavigationIntent, includeHandoff = true) {
     const normalizedIntent = normalizePromptNavigationIntent(intent)
     if (!normalizedIntent) {
       setSubmitError('That navigation suggestion is no longer available.')
       return
     }
 
-    onOpenView(normalizedIntent.targetView)
+    onOpenView(
+      normalizedIntent.targetView,
+      includeHandoff ? buildPromptNavigationRouteHandoff(normalizedIntent) : null,
+    )
   }
 
   const runtimeNote = runtimeError
@@ -348,6 +362,21 @@ export function PromptHomeWorkspace({
                       </button>
                     </div>
                   ) : null}
+                  {message.navigationIntents && message.navigationIntents.length > 0 ? (
+                    <div className="prompt-home-handoff-list" aria-label="Assistant workspace handoffs">
+                      {message.navigationIntents.map((intent) => (
+                        <button
+                          key={`${intent.targetView}-${intent.focus?.type ?? 'workspace'}-${intent.focus?.id ?? intent.label ?? intent.rationale ?? 'handoff'}`}
+                          type="button"
+                          className="prompt-home-handoff"
+                          onClick={() => handleNavigationIntent(intent)}
+                        >
+                          <strong>{promptNavigationIntentLabel(intent)}</strong>
+                          <span>{promptNavigationIntentDetail(intent)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   {message.warnings && message.warnings.length > 0 ? (
                     <div className="assistant-message-meta">
                       {message.warnings.map((warning) => (
@@ -376,7 +405,7 @@ export function PromptHomeWorkspace({
                 key={intent.targetView}
                 type="button"
                 className="prompt-home-destination"
-                onClick={() => handleNavigationIntent(intent)}
+                onClick={() => handleNavigationIntent(intent, false)}
               >
                 <strong>{promptNavigationIntentLabel(intent)}</strong>
                 <span>{promptNavigationIntentDetail(intent)}</span>

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import type { OperationalResourceDescriptor, WorkspaceSettlementSummary } from '../../entities/app/api'
-import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
+import { describeAppRouteHandoff, type AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   CreateTradeInvoiceInput,
   CreateTradePaymentInput,
@@ -15,7 +15,6 @@ import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileS
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type { Trade, TradeInvoiceRecord, TradePaymentRecord, TradeWorkflowItemRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
-import { describeEventWorkspaceHandoff } from '../events/eventHelpers'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalInlineBoard } from '../operations/operationalInlineBoardRegistry'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
@@ -303,10 +302,7 @@ export function SettlementWorkspace({
   const settlementExceptionTitle = hasSettlementExceptions ? 'Settlement Exceptions' : 'No active settlement exceptions'
   const invoiceLedgerWorkboard = resolveOperationalWorkboardDefinition('invoiceLedger', operationalResourceDescriptors)
   const paymentLedgerWorkboard = resolveOperationalWorkboardDefinition('paymentLedger', operationalResourceDescriptors)
-  const workspaceFocusBanner =
-    routeHandoff?.source === 'events'
-      ? describeEventWorkspaceHandoff('settlement', routeHandoff.tradeId, routeHandoff.eventType)
-      : null
+  const workspaceFocusBanner = describeAppRouteHandoff(routeHandoff, 'settlement')
   const settlementSummaryCards: TileSectionGridItem[] = [
     {
       id: 'open-settlement',

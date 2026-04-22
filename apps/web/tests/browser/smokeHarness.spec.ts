@@ -130,6 +130,39 @@ test('single-user smoke signs into the prompt home when one-click access is enab
   }
 })
 
+test('prompt home accepts an assistant handoff into the old operations workspace', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+    await dismissStartHereOverlay(page)
+
+    await page.getByLabel('Operator prompt').fill('Where should I handle the confirmation blocker?')
+    await page.getByRole('button', { name: 'Send Prompt' }).click()
+
+    const assistantHandoff = page.locator('.prompt-home-handoff').filter({ hasText: 'Open Work Queue' })
+    await expect(assistantHandoff).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant')).not.toContainText('navigation_intent')
+
+    await assistantHandoff.click()
+
+    await expect(page).toHaveURL(/view=operations/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page).toHaveURL(/focusTrade=T-AMEND-100/)
+    await expect(page.getByText('Review the confirmation blocker with the operations owner')).toBeVisible()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
 test('signed-out start-here routes trade capture intent into the auth gate', async ({ page }) => {
   const harness = await startSmokeHarness()
 

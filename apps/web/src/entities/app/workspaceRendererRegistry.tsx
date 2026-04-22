@@ -100,8 +100,19 @@ function buildActivityFeedHandoff(
   return {
     source: 'events',
     tradeId,
+    focus: {
+      type: 'trade',
+      id: tradeId,
+      label: tradeId,
+    },
     tradeInspectorTab,
     eventType,
+    label: null,
+    rationale: null,
+    filter: null,
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
   }
 }
 const ReportsWorkspace = lazy(() =>

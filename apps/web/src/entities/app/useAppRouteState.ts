@@ -175,7 +175,17 @@ export function useAppRouteState() {
   }
 
   function navigateToTrade(tradeId: string, handoff: AppRouteHandoff | null = null) {
-    const nextHandoff = handoff ? { ...handoff, tradeId } : null
+    const nextHandoff = handoff
+      ? {
+          ...handoff,
+          tradeId,
+          focus: {
+            type: 'trade' as const,
+            id: tradeId,
+            label: handoff.focus.label ?? tradeId,
+          },
+        }
+      : null
     syncRouteState(
       {
         section: null,

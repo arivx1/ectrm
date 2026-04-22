@@ -9,7 +9,7 @@ import type {
 } from '../../entities/confirmations/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
-import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
+import { describeAppRouteHandoff, type AppRouteHandoff } from '../../shared/appRouteHandoff'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import { buildOpenOptionActionQueue, type OpenOptionValuation } from '../../shared/optionExposure'
@@ -28,7 +28,6 @@ import type {
 import type { StoredAuthSession } from '../../shared/mutation'
 import type { OptionLifecycleEventType } from '../../shared/trading'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
-import { describeEventWorkspaceHandoff } from '../events/eventHelpers'
 import { DocumentIngestionPanel } from './DocumentIngestionPanel'
 import { OperationalBoardController } from './OperationalBoardController'
 import { renderOperationalInlineBoard } from './operationalInlineBoardRegistry'
@@ -398,10 +397,7 @@ export function OperationsWorkspace({
     'workflowQueue',
     operationalResourceDescriptors,
   )
-  const workspaceFocusBanner =
-    routeHandoff?.source === 'events'
-      ? describeEventWorkspaceHandoff('operations', routeHandoff.tradeId, routeHandoff.eventType)
-      : null
+  const workspaceFocusBanner = describeAppRouteHandoff(routeHandoff, 'operations')
   const operationsSnapshotCards: TileSectionGridItem[] = [
     {
       id: 'open-workflow',
