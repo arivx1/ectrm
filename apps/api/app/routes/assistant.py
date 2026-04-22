@@ -34,11 +34,9 @@ from apps.api.app.domains.assistant.services.agent_evals import (
     to_agent_eval_run_out,
     update_agent_eval,
 )
-from apps.api.app.domains.assistant.services.autonomy_review import build_assistant_autonomy_review_brief
-    list_agent_evals,
-    seed_agent_evals_from_profile_request,
-    to_agent_eval_out,
-    update_agent_eval,
+from apps.api.app.domains.assistant.services.autonomy_review import (
+    build_assistant_agent_health_review,
+    build_assistant_autonomy_review_brief,
 )
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
@@ -121,6 +119,7 @@ from apps.api.app.schemas.assistant import (
     AssistantActionRequestAdminPageOut,
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
+    AssistantAgentHealthReviewOut,
     AssistantAutonomyReviewBriefOut,
     AssistantAgentBuildRequest,
     AssistantAgentBuildSuggestionOut,
@@ -572,9 +571,6 @@ def list_admin_assistant_agent_evals(
     return [
         to_agent_eval_out(record, latest_run=latest_runs.get(record.id))
         for record in records
-    return [
-        to_agent_eval_out(record)
-        for record in list_agent_evals(db, agent_id=agent_id, limit=limit, offset=offset)
     ]
 
 
@@ -757,6 +753,28 @@ def get_admin_assistant_outcome_metrics(
         created_before=created_before,
     )
     return AssistantOutcomeMetricsOut.model_validate(asdict(snapshot))
+
+
+@admin_router.get("/agent-health-review", response_model=AssistantAgentHealthReviewOut)
+def get_admin_assistant_agent_health_review(
+    request: Request,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> AssistantAgentHealthReviewOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    snapshot = build_assistant_agent_health_review(
+        db,
+        created_after=created_after,
+        created_before=created_before,
+    )
+    return AssistantAgentHealthReviewOut.model_validate(asdict(snapshot))
 
 
 @admin_router.get("/agents/{agent_id}/autonomy-review", response_model=AssistantAutonomyReviewBriefOut)

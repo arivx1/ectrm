@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
@@ -23,17 +23,6 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentEvalUpdate,
     AssistantMessageIn,
     AssistantPromptRequest,
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
-from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
-from apps.api.app.domains.assistant.services.chat import AssistantServiceError
-from apps.api.app.models.assistant_agent import AssistantAgent
-from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
-from apps.api.app.schemas.assistant import (
-    AssistantAgentEvalCreate,
-    AssistantAgentEvalOut,
-    AssistantAgentEvalUpdate,
 )
 
 
@@ -99,6 +88,8 @@ def latest_eval_runs_by_eval_id(
     for record in db.scalars(stmt).all():
         latest.setdefault(record.eval_id, record)
     return latest
+
+
 def count_agent_evals(db: Session, *, agent_id: str) -> int:
     return int(
         db.scalar(
@@ -265,7 +256,6 @@ def to_agent_eval_out(
     *,
     latest_run: AssistantAgentEvalRun | None = None,
 ) -> AssistantAgentEvalOut:
-def to_agent_eval_out(record: AssistantAgentEval) -> AssistantAgentEvalOut:
     return AssistantAgentEvalOut(
         eval_id=record.id,
         agent_id=record.agent_id,
@@ -407,9 +397,6 @@ def _evaluate_response(
             failure_reasons.append(f"Missing expected action request: {expected_action_type}")
 
     return failure_reasons
-
-
-    )
 
 
 def _get_agent_eval_or_error(db: Session, eval_id: int) -> AssistantAgentEval:

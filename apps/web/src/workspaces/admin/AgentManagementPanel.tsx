@@ -704,9 +704,6 @@ export function AgentManagementPanel({
   const [submittingProfileRequest, setSubmittingProfileRequest] = useState(false)
   const [decidingProfileRequestId, setDecidingProfileRequestId] = useState<number | null>(null)
   const [selectedEvalId, setSelectedEvalId] = useState<number | null>(null)
-  const [agentEvalForm, setAgentEvalForm] = useState<AgentEvalForm>(() => createEmptyAgentEvalForm())
-  const [savingAgentEval, setSavingAgentEval] = useState(false)
-  const [deletingAgentEvalId, setDeletingAgentEvalId] = useState<number | null>(null)
   const [createForm, setCreateForm] = useState<AgentForm>(() => createEmptyAgentBuilderDraft())
   const [editForm, setEditForm] = useState<AgentForm>(() => createEmptyAgentBuilderDraft())
   const [builderBrief, setBuilderBrief] = useState('')
@@ -744,16 +741,17 @@ export function AgentManagementPanel({
     [agentRecords, selectedAgentId],
   )
   const selectedAgentEvalRecords = useMemo(
-  const selectedAgentEvals = useMemo(
     () =>
       selectedAgent
         ? agentEvalRecords.filter((record) => record.agent_id === selectedAgent.agent_id)
         : [],
     [agentEvalRecords, selectedAgent],
   )
+  const selectedAgentEvals = selectedAgentEvalRecords
   const selectedAgentEval = useMemo(
     () => selectedAgentEvalRecords.find((record) => record.eval_id === selectedAgentEvalId) ?? null,
     [selectedAgentEvalId, selectedAgentEvalRecords],
+  )
   const selectedEvalRecord = useMemo(
     () => selectedAgentEvals.find((record) => record.eval_id === selectedEvalId) ?? null,
     [selectedAgentEvals, selectedEvalId],
