@@ -4,12 +4,14 @@ import { test } from 'vitest'
 import type {
   AssistantActionTypeOutcomeMetricRow,
   AssistantAgentOutcomeMetricRow,
+  AssistantWorkspaceFeedbackMetricRow,
 } from '../src/shared/models'
 import {
   assistantOutcomeRecommendationLabel,
   assistantOutcomeRecommendationTone,
   buildAssistantActionTypeOutcomeRows,
   buildAssistantAgentOutcomeRows,
+  buildAssistantWorkspaceFeedbackRows,
   formatAssistantActionTypeLabel,
   formatAssistantOutcomeDuration,
   formatAssistantOutcomeRate,
@@ -101,4 +103,36 @@ test('assistant outcome action rows summarize action-type readiness', () => {
     displayRow?.metrics.find((metric) => metric.label === 'Avg decision'),
     { label: 'Avg decision', value: '1.5h' },
   )
+})
+
+test('assistant workspace feedback rows put needs-work workspaces first', () => {
+  const rows: AssistantWorkspaceFeedbackMetricRow[] = [
+    {
+      workspace: 'trades',
+      run_count: 5,
+      helpful_feedback_count: 3,
+      needs_work_feedback_count: 0,
+      feedback_count: 3,
+      feedback_helpful_rate: 1,
+    },
+    {
+      workspace: 'assistant',
+      run_count: 2,
+      helpful_feedback_count: 0,
+      needs_work_feedback_count: 1,
+      feedback_count: 1,
+      feedback_helpful_rate: 0,
+    },
+  ]
+
+  const [firstRow, secondRow] = buildAssistantWorkspaceFeedbackRows(rows)
+
+  assert.equal(firstRow?.key, 'assistant')
+  assert.equal(firstRow?.tone, 'attention')
+  assert.deepEqual(
+    firstRow?.metrics.find((metric) => metric.label === 'Feedback'),
+    { label: 'Feedback', value: '0/1 helpful' },
+  )
+  assert.equal(secondRow?.key, 'trades')
+  assert.equal(secondRow?.tone, 'success')
 })
