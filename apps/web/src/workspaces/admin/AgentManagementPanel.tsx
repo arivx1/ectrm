@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
+  createAssistantAgentProfileRequest,
   createAssistantAgent,
   listAdminAssistantAgents,
+  listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
+  rejectAssistantAgentProfileRequest,
   simulateAssistantAgentPolicy,
   updateAssistantAgent,
   type CreateAssistantAgentInput,
+  type CreateAssistantAgentProfileRequestInput,
   type SimulateAssistantAgentPolicyInput,
   type UpdateAssistantAgentInput,
 } from '../../entities/assistant/api'
@@ -32,6 +37,7 @@ import type {
   AssistantAgentAuthorityLevel,
   AssistantAgentCapability,
   AssistantAgentProfileKind,
+  AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
   AssistantAgentScope,
   AssistantAgentStatus,
@@ -72,6 +78,21 @@ type FlashMessage = {
 
 type AgentForm = AgentBuilderDraft
 
+type ProfileRequestForm = {
+  requested_agent_id: string
+  business_problem: string
+  proposed_mission: string
+  human_owner_role: string
+  requested_workspaces: ViewKey[]
+  work_objects: string
+  requested_inputs_tools: string[]
+  expected_outputs: string
+  requested_authority_ceiling: AssistantAgentAuthorityLevel
+  stop_conditions: string
+  success_metrics: string
+  proposed_eval_cases: string
+}
+
 const STATUS_OPTIONS: AssistantAgentStatus[] = ['DRAFT', 'ACTIVE', 'PAUSED', 'RETIRED']
 const SCOPE_OPTIONS: AssistantAgentScope[] = ['PERSONAL', 'TEAM', 'ORGANIZATION']
 const PROVIDER_OPTIONS: Array<AssistantProvider | ''> = ['', 'openai', 'anthropic', 'google']
@@ -95,6 +116,47 @@ const ACTION_TYPE_LABELS: Record<AssistantActionType, string> = {
   issue_trade_invoice: 'Issue invoice',
   create_trade_payment: 'Create payment',
   reprocess_document_ingestion: 'Reprocess document ingestion',
+}
+
+function createEmptyProfileRequestForm(): ProfileRequestForm {
+  return {
+    requested_agent_id: '',
+    business_problem: '',
+    proposed_mission: '',
+    human_owner_role: '',
+    requested_workspaces: ['assistant'],
+    work_objects: '',
+    requested_inputs_tools: [],
+    expected_outputs: '',
+    requested_authority_ceiling: 'DRAFT',
+    stop_conditions: '',
+    success_metrics: '',
+    proposed_eval_cases: '',
+  }
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split('\n')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
+
+function normalizeProfileRequestPayload(form: ProfileRequestForm): CreateAssistantAgentProfileRequestInput {
+  return {
+    requested_agent_id: form.requested_agent_id.trim() || null,
+    business_problem: form.business_problem.trim(),
+    proposed_mission: form.proposed_mission.trim(),
+    human_owner_role: form.human_owner_role.trim(),
+    requested_workspaces: form.requested_workspaces,
+    work_objects: splitLines(form.work_objects),
+    requested_inputs_tools: form.requested_inputs_tools,
+    expected_outputs: splitLines(form.expected_outputs),
+    requested_authority_ceiling: form.requested_authority_ceiling,
+    stop_conditions: splitLines(form.stop_conditions),
+    success_metrics: splitLines(form.success_metrics),
+    proposed_eval_cases: splitLines(form.proposed_eval_cases),
+  }
 }
 
 function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {
@@ -260,6 +322,44 @@ function describeActionPlan(form: AgentForm): string {
   return 'Choose at least one explicit governed action before saving an ACTION-capable agent.'
 }
 
+function profileRequestStatusTone(
+  status: AssistantAgentProfileRequest['status'],
+): 'planned' | 'active' | 'cancelled' {
+  if (status === 'APPROVED' || status === 'ACTIVATED') {
+    return 'active'
+  }
+  if (status === 'REJECTED') {
+    return 'cancelled'
+  }
+  return 'planned'
+}
+
+function titleFromAgentId(agentId: string | null): string {
+  if (!agentId) {
+    return ''
+  }
+  return agentId
+    .split(/[-_]+/g)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(' ')
+}
+
+function renderPromptList(title: string, values: readonly string[]): string {
+  return `${title}:\n${values.map((value) => `- ${value}`).join('\n')}`
+}
+
+function buildPromptFromProfileRequest(request: AssistantAgentProfileRequest): string {
+  return [
+    `You are ${titleFromAgentId(request.requested_agent_id) || 'a specialized managed agent'} inside the ECTRM operator console.`,
+    `Business problem: ${request.business_problem}`,
+    `Mission: ${request.proposed_mission}`,
+    renderPromptList('Expected outputs', request.expected_outputs),
+    renderPromptList('Stop conditions', request.stop_conditions),
+    renderPromptList('Success metrics', request.success_metrics),
+  ].join('\n\n')
+}
+
 function describeEffectivePolicy(agent: AssistantAdminAgent): string {
   const policy = agent.effective_policy
   if (!policy) {
@@ -403,6 +503,7 @@ export function AgentManagementPanel({
   const adminEnabled = hasAdministrativeAccess(authSession)
 
   const [agentRecords, setAgentRecords] = useState<AssistantAdminAgent[]>([])
+  const [profileRequests, setProfileRequests] = useState<AssistantAgentProfileRequest[]>([])
   const [availableTools, setAvailableTools] = useState<string[]>([])
   const [roleArchetypes, setRoleArchetypes] = useState<AssistantAgentRoleArchetype[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
@@ -412,6 +513,13 @@ export function AgentManagementPanel({
   const [selectedCreateRoleKey, setSelectedCreateRoleKey] = useState<string | null>(null)
   const [selectedCreateTemplateKey, setSelectedCreateTemplateKey] =
     useState<AgentBuilderTemplateKey | null>(null)
+  const [profileRequestForm, setProfileRequestForm] = useState<ProfileRequestForm>(() =>
+    createEmptyProfileRequestForm(),
+  )
+  const [profileRequestApprovalNotes, setProfileRequestApprovalNotes] = useState<Record<number, string>>({})
+  const [profileRequestRejectionReasons, setProfileRequestRejectionReasons] = useState<Record<number, string>>({})
+  const [submittingProfileRequest, setSubmittingProfileRequest] = useState(false)
+  const [decidingProfileRequestId, setDecidingProfileRequestId] = useState<number | null>(null)
   const [createForm, setCreateForm] = useState<AgentForm>(() => createEmptyAgentBuilderDraft())
   const [editForm, setEditForm] = useState<AgentForm>(() => createEmptyAgentBuilderDraft())
   const [builderBrief, setBuilderBrief] = useState('')
@@ -446,6 +554,10 @@ export function AgentManagementPanel({
         ? roleArchetypes.find((role) => role.role_key === selectedCreateRoleKey) ?? null
         : null,
     [roleArchetypes, selectedCreateRoleKey],
+  )
+  const approvedProfileRequests = useMemo(
+    () => profileRequests.filter((request) => request.status === 'APPROVED' || request.status === 'ACTIVATED'),
+    [profileRequests],
   )
   const createFormRole = useMemo(
     () => findRoleForForm(createForm, roleArchetypes),
@@ -496,6 +608,17 @@ export function AgentManagementPanel({
   const openAiBuilderReady = Boolean(openAiProviderStatus?.configured)
   const createBlockedByProfilePolicy = createProfileFit.errors.length > 0
   const editBlockedByProfilePolicy = editProfileFit.errors.length > 0
+  const pendingProfileRequestCount = profileRequests.filter((request) => request.status === 'REQUESTED').length
+  const profileRequestReady = Boolean(
+    profileRequestForm.business_problem.trim() &&
+      profileRequestForm.proposed_mission.trim() &&
+      profileRequestForm.human_owner_role.trim() &&
+      splitLines(profileRequestForm.work_objects).length > 0 &&
+      splitLines(profileRequestForm.expected_outputs).length > 0 &&
+      splitLines(profileRequestForm.stop_conditions).length > 0 &&
+      splitLines(profileRequestForm.success_metrics).length > 0 &&
+      splitLines(profileRequestForm.proposed_eval_cases).length > 0,
+  )
 
   const refreshAgents = useCallback(
     async (preferredAgentId: string | null = null) => {
@@ -509,15 +632,17 @@ export function AgentManagementPanel({
       setAgentsError('')
 
       try {
-        const [nextAgents, runtimeSettings, nextRoles] = await Promise.all([
+        const [nextAgents, runtimeSettings, nextRoles, nextProfileRequests] = await Promise.all([
           listAdminAssistantAgents(appConfig.apiBase),
           loadAssistantRuntimeSettings(appConfig.apiBase),
           listAdminAssistantRoleArchetypes(appConfig.apiBase),
+          listAdminAssistantProfileRequests(appConfig.apiBase),
         ])
         if (requestSequenceRef.current !== requestId) {
           return
         }
         setAgentRecords(nextAgents)
+        setProfileRequests(nextProfileRequests)
         setRoleArchetypes(nextRoles)
         setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
         setOpenAiProviderStatus(
@@ -543,6 +668,7 @@ export function AgentManagementPanel({
           return
         }
         setAgentRecords([])
+        setProfileRequests([])
         setRoleArchetypes([])
         setAvailableTools([])
         setOpenAiProviderStatus(null)
@@ -563,6 +689,7 @@ export function AgentManagementPanel({
 
     if (!adminEnabled) {
       setAgentRecords([])
+      setProfileRequests([])
       setRoleArchetypes([])
       setAvailableTools([])
       setAgentsError('')
@@ -570,6 +697,11 @@ export function AgentManagementPanel({
       setSelectedAgentId(null)
       setSelectedCreateRoleKey(null)
       setSelectedCreateTemplateKey(null)
+      setProfileRequestForm(createEmptyProfileRequestForm())
+      setProfileRequestApprovalNotes({})
+      setProfileRequestRejectionReasons({})
+      setSubmittingProfileRequest(false)
+      setDecidingProfileRequestId(null)
       setCreateForm(createEmptyAgentBuilderDraft())
       setEditForm(createEmptyAgentBuilderDraft())
       setBuilderBrief('')
@@ -712,6 +844,7 @@ export function AgentManagementPanel({
         human_owner_role: createForm.human_owner_role,
         authority_ceiling: createForm.authority_ceiling,
         activation_notes: createForm.activation_notes,
+        profile_request_id: createForm.profile_request_id,
         allowed_workspaces: [...suggestion.allowed_workspaces],
         capabilities: [...suggestion.capabilities],
         allowed_tools: [...suggestion.allowed_tools],
@@ -753,6 +886,180 @@ export function AgentManagementPanel({
     } finally {
       setSeedingRecommendedAgents(false)
     }
+  }
+
+  async function handleCreateProfileRequest(event: React.FormEvent) {
+    event.preventDefault()
+    setAgentFlash(null)
+
+    if (!profileRequestReady) {
+      setAgentFlash({
+        tone: 'error',
+        message: 'Complete the custom profile request, including at least one eval case.',
+      })
+      return
+    }
+
+    setSubmittingProfileRequest(true)
+
+    try {
+      const created = await createAssistantAgentProfileRequest(
+        appConfig.apiBase,
+        normalizeProfileRequestPayload(profileRequestForm),
+      )
+      setProfileRequestForm(createEmptyProfileRequestForm())
+      await refreshAgents()
+      setAgentFlash({
+        tone: 'success',
+        message: `Profile request #${created.request_id} is queued for review.`,
+      })
+    } catch (error) {
+      setAgentFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not create profile request.',
+      })
+    } finally {
+      setSubmittingProfileRequest(false)
+    }
+  }
+
+  async function handleApproveProfileRequest(requestId: number) {
+    const approvalNotes = profileRequestApprovalNotes[requestId]?.trim()
+    if (!approvalNotes) {
+      setAgentFlash({
+        tone: 'error',
+        message: 'Approval notes are required before a custom profile request can activate.',
+      })
+      return
+    }
+
+    setDecidingProfileRequestId(requestId)
+    setAgentFlash(null)
+
+    try {
+      await approveAssistantAgentProfileRequest(appConfig.apiBase, requestId, {
+        approval_notes: approvalNotes,
+      })
+      setProfileRequestApprovalNotes((current) => {
+        const next = { ...current }
+        delete next[requestId]
+        return next
+      })
+      await refreshAgents()
+      setAgentFlash({
+        tone: 'success',
+        message: `Profile request #${requestId} is approved for draft activation.`,
+      })
+    } catch (error) {
+      setAgentFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not approve profile request.',
+      })
+    } finally {
+      setDecidingProfileRequestId(null)
+    }
+  }
+
+  async function handleRejectProfileRequest(requestId: number) {
+    const rejectionReason = profileRequestRejectionReasons[requestId]?.trim()
+    if (!rejectionReason) {
+      setAgentFlash({
+        tone: 'error',
+        message: 'A rejection reason is required to close a custom profile request.',
+      })
+      return
+    }
+
+    setDecidingProfileRequestId(requestId)
+    setAgentFlash(null)
+
+    try {
+      await rejectAssistantAgentProfileRequest(appConfig.apiBase, requestId, {
+        rejection_reason: rejectionReason,
+      })
+      setProfileRequestRejectionReasons((current) => {
+        const next = { ...current }
+        delete next[requestId]
+        return next
+      })
+      await refreshAgents()
+      setAgentFlash({
+        tone: 'success',
+        message: `Profile request #${requestId} was rejected.`,
+      })
+    } catch (error) {
+      setAgentFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not reject profile request.',
+      })
+    } finally {
+      setDecidingProfileRequestId(null)
+    }
+  }
+
+  function handleApplyProfileRequestToDraft(request: AssistantAgentProfileRequest) {
+    if (request.status === 'ACTIVATED' && request.linked_agent_id) {
+      setSelectedAgentId(request.linked_agent_id)
+      setAgentFlash({
+        tone: 'success',
+        message: `Opened the agent linked to profile request #${request.request_id}.`,
+      })
+      return
+    }
+    if (request.status !== 'APPROVED') {
+      setAgentFlash({
+        tone: 'error',
+        message: 'Only approved custom profile requests can be loaded into a draft.',
+      })
+      return
+    }
+
+    const requestedName = titleFromAgentId(request.requested_agent_id)
+    const name = requestedName || `Custom Profile Request ${request.request_id}`
+    const availableToolSet = new Set(availableTools.map((toolName) => toolName.toLowerCase()))
+    const allowedTools =
+      availableToolSet.size === 0
+        ? [...request.requested_inputs_tools]
+        : request.requested_inputs_tools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
+    const capabilities: AssistantAgentCapability[] =
+      request.requested_authority_ceiling === 'OBSERVE'
+        ? ['READ']
+        : request.requested_authority_ceiling === 'EXPLAIN'
+          ? ['READ', 'EXPLAIN']
+          : ['READ', 'EXPLAIN', 'DRAFT']
+
+    setSelectedCreateTemplateKey(null)
+    setSelectedCreateRoleKey(null)
+    setBuilderWarnings([])
+    setBuilderBrief('')
+    setCreateForm({
+      agent_id: request.requested_agent_id || suggestAgentBuilderAgentId(name),
+      name,
+      description: request.business_problem,
+      status: 'DRAFT',
+      scope: 'TEAM',
+      provider: '',
+      model: '',
+      role_key: '',
+      profile_kind: 'CUSTOM',
+      specialization_summary: request.proposed_mission,
+      human_owner_role: request.human_owner_role,
+      authority_ceiling: request.requested_authority_ceiling,
+      activation_notes: request.approval_notes
+        ? `Approved profile request #${request.request_id}: ${request.approval_notes}`
+        : `Approved profile request #${request.request_id}.`,
+      profile_request_id: request.request_id,
+      allowed_workspaces: [...request.requested_workspaces],
+      capabilities,
+      allowed_tools: allowedTools,
+      allowed_action_types: [],
+      daily_token_allocation: '',
+      system_prompt: buildPromptFromProfileRequest(request),
+    })
+    setAgentFlash({
+      tone: 'success',
+      message: `Loaded profile request #${request.request_id} into the builder as a draft-only custom agent.`,
+    })
   }
 
   async function handleCreateAgent(event: React.FormEvent) {
@@ -963,6 +1270,357 @@ export function AgentManagementPanel({
               {agentFlash.message}
             </div>
           ) : null}
+
+          <div className="assistant-profile-request-panel">
+            <div className="assistant-admin-section-head">
+              <div>
+                <span className="eyebrow">Custom Requests</span>
+                <h4>Specialized Profile Intake</h4>
+              </div>
+              <span>
+                {pendingProfileRequestCount} pending · {approvedProfileRequests.length} approved or active
+              </span>
+            </div>
+
+            <div className="assistant-profile-request-grid">
+              <form className="assistant-profile-request-form" onSubmit={handleCreateProfileRequest}>
+                <div className="assistant-admin-form-grid">
+                  <label className="field">
+                    <span>Requested Agent ID</span>
+                    <input
+                      className="control"
+                      value={profileRequestForm.requested_agent_id}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          requested_agent_id: event.target.value,
+                        }))
+                      }
+                      placeholder="weather-dispatch-analyst"
+                    />
+                    <small className="form-note">Optional stable ID; leave blank to choose it during draft setup.</small>
+                  </label>
+                  <label className="field">
+                    <span>Human Owner Role</span>
+                    <input
+                      className="control"
+                      value={profileRequestForm.human_owner_role}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          human_owner_role: event.target.value,
+                        }))
+                      }
+                      placeholder="Operations Lead"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Requested Authority</span>
+                    <select
+                      className="control"
+                      value={profileRequestForm.requested_authority_ceiling}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          requested_authority_ceiling: event.target.value as AssistantAgentAuthorityLevel,
+                        }))
+                      }
+                    >
+                      {AUTHORITY_OPTIONS.map((authority) => (
+                        <option key={authority} value={authority}>
+                          {authority}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Business Problem</span>
+                    <textarea
+                      className="control"
+                      value={profileRequestForm.business_problem}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          business_problem: event.target.value,
+                        }))
+                      }
+                      placeholder="Describe the workflow gap that existing role archetypes do not cover."
+                    />
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>Proposed Mission</span>
+                  <textarea
+                    className="control"
+                    value={profileRequestForm.proposed_mission}
+                    onChange={(event) =>
+                      setProfileRequestForm((current) => ({
+                        ...current,
+                        proposed_mission: event.target.value,
+                      }))
+                    }
+                    placeholder="What should the specialized profile do, and where should it stop?"
+                  />
+                </label>
+
+                <div className="assistant-admin-option-grid">
+                  <div className="assistant-admin-option-group">
+                    <strong>Requested workspaces</strong>
+                    <div className="chip-row">
+                      {WORKSPACE_OPTIONS.map((workspace) => (
+                        <button
+                          key={workspace}
+                          type="button"
+                          className={`entity-chip ${profileRequestForm.requested_workspaces.includes(workspace) ? '' : 'entity-chip-soft'}`}
+                          onClick={() =>
+                            setProfileRequestForm((current) => ({
+                              ...current,
+                              requested_workspaces: toggleSelection(current.requested_workspaces, workspace, {
+                                minSelections: 1,
+                              }),
+                            }))
+                          }
+                        >
+                          {workspaceLabel(workspace)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="assistant-admin-option-group">
+                    <strong>Requested inputs and tools</strong>
+                    {availableTools.length > 0 ? (
+                      <div className="chip-row">
+                        {availableTools.map((toolName) => (
+                          <button
+                            key={toolName}
+                            type="button"
+                            className={`entity-chip ${profileRequestForm.requested_inputs_tools.includes(toolName) ? '' : 'entity-chip-soft'}`}
+                            onClick={() =>
+                              setProfileRequestForm((current) => ({
+                                ...current,
+                                requested_inputs_tools: toggleSelection(
+                                  current.requested_inputs_tools,
+                                  toolName,
+                                ),
+                              }))
+                            }
+                          >
+                            {toolName}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>Runtime tool options will appear once assistant settings load.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="assistant-admin-form-grid">
+                  <label className="field">
+                    <span>Work Objects</span>
+                    <textarea
+                      className="control"
+                      value={profileRequestForm.work_objects}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          work_objects: event.target.value,
+                        }))
+                      }
+                      placeholder="trade&#10;workflow item"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Expected Outputs</span>
+                    <textarea
+                      className="control"
+                      value={profileRequestForm.expected_outputs}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          expected_outputs: event.target.value,
+                        }))
+                      }
+                      placeholder="Exception summary&#10;Reviewer-ready next steps"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Stop Conditions</span>
+                    <textarea
+                      className="control"
+                      value={profileRequestForm.stop_conditions}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          stop_conditions: event.target.value,
+                        }))
+                      }
+                      placeholder="Evidence is stale or contradictory."
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Success Metrics</span>
+                    <textarea
+                      className="control"
+                      value={profileRequestForm.success_metrics}
+                      onChange={(event) =>
+                        setProfileRequestForm((current) => ({
+                          ...current,
+                          success_metrics: event.target.value,
+                        }))
+                      }
+                      placeholder="Lower time to triage exceptions."
+                    />
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>Proposed Eval Cases</span>
+                  <textarea
+                    className="control"
+                    value={profileRequestForm.proposed_eval_cases}
+                    onChange={(event) =>
+                      setProfileRequestForm((current) => ({
+                        ...current,
+                        proposed_eval_cases: event.target.value,
+                      }))
+                    }
+                    placeholder="Allows supported exception summary.&#10;Blocks stale evidence action staging."
+                  />
+                  <small className="form-note">
+                    Action-capable custom profiles cannot activate without eval coverage and approval notes.
+                  </small>
+                </label>
+
+                <div className="toolbar settings-actions">
+                  <button
+                    type="submit"
+                    className="button button-secondary"
+                    disabled={submittingProfileRequest || !profileRequestReady}
+                  >
+                    {submittingProfileRequest ? 'Submitting Request...' : 'Submit Profile Request'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => setProfileRequestForm(createEmptyProfileRequestForm())}
+                  >
+                    Reset Request
+                  </button>
+                </div>
+              </form>
+
+              <div className="assistant-profile-request-list">
+                {profileRequests.length === 0 ? (
+                  <div className="empty-state">
+                    <strong>No custom requests yet</strong>
+                    <p>Requests appear here before they can become active custom profiles.</p>
+                  </div>
+                ) : (
+                  profileRequests.map((request) => (
+                    <article key={request.request_id} className="assistant-profile-request-card">
+                      <div className="assistant-provider-head">
+                        <strong>
+                          #{request.request_id}{' '}
+                          {titleFromAgentId(request.requested_agent_id) || 'Custom specialization'}
+                        </strong>
+                        <span className={`status-pill status-pill-${profileRequestStatusTone(request.status)}`}>
+                          {request.status}
+                        </span>
+                      </div>
+                      <p>{request.business_problem}</p>
+                      <small>
+                        {request.human_owner_role} · {request.requested_authority_ceiling} ·{' '}
+                        {request.requested_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
+                      </small>
+                      <small>
+                        {request.proposed_eval_cases.length} eval case
+                        {request.proposed_eval_cases.length === 1 ? '' : 's'} · requested by{' '}
+                        {request.requested_by}
+                        {request.reviewed_by ? ` · reviewed by ${request.reviewed_by}` : ''}
+                      </small>
+
+                      {request.status === 'REQUESTED' ? (
+                        <div className="assistant-profile-request-decision-grid">
+                          <label className="field">
+                            <span>Approval Notes</span>
+                            <textarea
+                              className="control"
+                              value={profileRequestApprovalNotes[request.request_id] ?? ''}
+                              onChange={(event) =>
+                                setProfileRequestApprovalNotes((current) => ({
+                                  ...current,
+                                  [request.request_id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Owner, prompt, tools/actions, and eval cases reviewed."
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Rejection Reason</span>
+                            <textarea
+                              className="control"
+                              value={profileRequestRejectionReasons[request.request_id] ?? ''}
+                              onChange={(event) =>
+                                setProfileRequestRejectionReasons((current) => ({
+                                  ...current,
+                                  [request.request_id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Why this should become a role, narrow, or stop."
+                            />
+                          </label>
+                          <div className="toolbar settings-actions">
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              disabled={
+                                decidingProfileRequestId === request.request_id ||
+                                !profileRequestApprovalNotes[request.request_id]?.trim()
+                              }
+                              onClick={() => void handleApproveProfileRequest(request.request_id)}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              disabled={
+                                decidingProfileRequestId === request.request_id ||
+                                !profileRequestRejectionReasons[request.request_id]?.trim()
+                              }
+                              onClick={() => void handleRejectProfileRequest(request.request_id)}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="assistant-profile-request-review-note">
+                          <strong>{request.status === 'REJECTED' ? 'Decision' : 'Review'}</strong>
+                          <p>{request.rejection_reason || request.approval_notes || 'No review note recorded.'}</p>
+                        </div>
+                      )}
+
+                      {request.status === 'APPROVED' || request.status === 'ACTIVATED' ? (
+                        <div className="toolbar settings-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => handleApplyProfileRequestToDraft(request)}
+                          >
+                            {request.status === 'ACTIVATED' ? 'Open Linked Agent' : 'Load Builder Draft'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
 
           <div className="assistant-admin-grid">
             <div className="assistant-admin-column">
@@ -1428,6 +2086,8 @@ export function AgentManagementPanel({
                             ...current,
                             profile_kind: nextProfileKind,
                             role_key: nextProfileKind === 'CUSTOM' ? '' : current.role_key,
+                            profile_request_id:
+                              nextProfileKind === 'CUSTOM' ? current.profile_request_id : null,
                           }))
                         }}
                       >
@@ -1451,6 +2111,7 @@ export function AgentManagementPanel({
                             ...current,
                             role_key: nextRoleKey,
                             profile_kind: nextRoleKey && current.profile_kind === 'CUSTOM' ? 'ROLE_DERIVED' : current.profile_kind,
+                            profile_request_id: nextRoleKey ? null : current.profile_request_id,
                           }))
                         }}
                       >
@@ -1461,6 +2122,30 @@ export function AgentManagementPanel({
                           </option>
                         ))}
                       </select>
+                    </label>
+                    <label className="field">
+                      <span>Profile Request</span>
+                      <select
+                        className="control"
+                        value={createForm.profile_request_id ?? ''}
+                        disabled={createForm.profile_kind !== 'CUSTOM'}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            profile_request_id: event.target.value ? Number(event.target.value) : null,
+                          }))
+                        }
+                      >
+                        <option value="">No approved request</option>
+                        {approvedProfileRequests.map((request) => (
+                          <option key={request.request_id} value={request.request_id}>
+                            #{request.request_id} {titleFromAgentId(request.requested_agent_id) || request.human_owner_role}
+                          </option>
+                        ))}
+                      </select>
+                      <small className="form-note">
+                        Active custom profiles need an approved request unless they are role-mapped.
+                      </small>
                     </label>
                     <label className="field">
                       <span>Human Owner Role</span>
@@ -2001,6 +2686,8 @@ export function AgentManagementPanel({
                             ...current,
                             profile_kind: nextProfileKind,
                             role_key: nextProfileKind === 'CUSTOM' ? '' : current.role_key,
+                            profile_request_id:
+                              nextProfileKind === 'CUSTOM' ? current.profile_request_id : null,
                           }))
                         }}
                       >
@@ -2025,6 +2712,7 @@ export function AgentManagementPanel({
                               event.target.value && current.profile_kind === 'CUSTOM'
                                 ? 'ROLE_DERIVED'
                                 : current.profile_kind,
+                            profile_request_id: event.target.value ? null : current.profile_request_id,
                           }))
                         }
                       >
@@ -2035,6 +2723,30 @@ export function AgentManagementPanel({
                           </option>
                         ))}
                       </select>
+                    </label>
+                    <label className="field">
+                      <span>Profile Request</span>
+                      <select
+                        className="control"
+                        value={editForm.profile_request_id ?? ''}
+                        disabled={editForm.profile_kind !== 'CUSTOM'}
+                        onChange={(event) =>
+                          setEditForm((current) => ({
+                            ...current,
+                            profile_request_id: event.target.value ? Number(event.target.value) : null,
+                          }))
+                        }
+                      >
+                        <option value="">No approved request</option>
+                        {approvedProfileRequests.map((request) => (
+                          <option key={request.request_id} value={request.request_id}>
+                            #{request.request_id} {titleFromAgentId(request.requested_agent_id) || request.human_owner_role}
+                          </option>
+                        ))}
+                      </select>
+                      <small className="form-note">
+                        Binding an approved request preserves custom activation audit history.
+                      </small>
                     </label>
                     <label className="field">
                       <span>Human Owner Role</span>
@@ -2112,6 +2824,7 @@ export function AgentManagementPanel({
                             ...current,
                             profile_kind: 'ROLE_DERIVED',
                             role_key: roleDraft.role_key,
+                            profile_request_id: null,
                             human_owner_role: roleDraft.human_owner_role,
                             authority_ceiling: roleDraft.authority_ceiling,
                             activation_notes: current.activation_notes || roleDraft.activation_notes,

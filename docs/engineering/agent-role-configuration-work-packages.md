@@ -395,6 +395,27 @@ Full-stack engineer with governance input from operations or platform owner.
 - docs describe when to create a specialized profile versus a new role
   archetype
 
+### Implementation notes
+
+- Added `assistant_agent_profile_requests` as the governance intake record for
+  business problem, proposed mission, owner, workspaces, work objects, requested
+  tools, expected outputs, authority ceiling, stop conditions, success metrics,
+  and eval cases.
+- Custom agents can remain `DRAFT` without a completed request, but `ACTIVE`
+  custom profiles require a named owner, authority ceiling, activation notes,
+  and either a role mapping or an approved profile request. `ACTION` custom
+  profiles additionally require an approved request with eval and approval
+  metadata.
+- Admin UI now has a specialized profile request queue. Requested profiles can
+  be approved or rejected with reviewer notes, and approved requests can seed a
+  draft-only custom agent with the approved request ID attached.
+- Mutation provenance records request, approval, activation, pause, and
+  retirement events so profile lifecycle history is reviewable from audit data.
+- Use a specialized profile when the role mission is still local to a team,
+  workflow, or narrow exception path. Create or extend a role archetype when the
+  mission should become reusable across teams, define shared authority defaults,
+  or carry platform-level eval and policy expectations.
+
 ## WP-06: Role Eval Matrix And Promotion Gates
 
 ### Priority

@@ -806,11 +806,35 @@ export function evaluateAgentRoleProfileFit(
   }
 
   if (!role && !roleBoundProfile) {
+    const profileSourceDetail = form.profile_request_id
+      ? `Custom profile request #${form.profile_request_id} selected for activation governance.`
+      : normalizedRoleKey
+        ? `Custom profile mapped to role archetype ${normalizedRoleKey}.`
+        : 'Custom draft with no role boundary; backend policy still enforces tool and action allowlists.'
+
     sections.push({
       label: 'Profile source',
-      status: 'customized',
-      detail: 'Custom draft with no role boundary; backend policy still enforces tool and action allowlists.',
+      status: form.profile_request_id || normalizedRoleKey ? 'inherited' : 'customized',
+      detail: profileSourceDetail,
     })
+
+    if (form.status === 'ACTIVE') {
+      if (!form.human_owner_role.trim()) {
+        errors.push('Active custom profiles need a human owner role.')
+      }
+      if (!form.authority_ceiling) {
+        errors.push('Active custom profiles need an authority ceiling.')
+      }
+      if (!form.activation_notes.trim()) {
+        errors.push('Active custom profiles need activation notes confirming prompt review.')
+      }
+      if (!normalizedRoleKey && !form.profile_request_id) {
+        errors.push('Active custom profiles need an approved profile request or role mapping.')
+      }
+      if (form.capabilities.includes('ACTION') && !form.profile_request_id) {
+        errors.push('Action-capable custom profiles need an approved profile request with eval coverage.')
+      }
+    }
   }
 
   return { role, errors, warnings, sections }

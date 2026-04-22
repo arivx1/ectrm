@@ -97,6 +97,8 @@
   .assistant-builder-template-grid,
   .assistant-role-catalog-grid,
   .assistant-profile-fit-grid,
+  .assistant-profile-request-grid,
+  .assistant-profile-request-decision-grid,
   .assistant-builder-preview-grid,
   .user-management-grid,
   .user-management-summary-grid {
@@ -284,6 +286,8 @@
   .assistant-builder-template-grid,
   .assistant-role-catalog-grid,
   .assistant-profile-fit-grid,
+  .assistant-profile-request-grid,
+  .assistant-profile-request-decision-grid,
   .assistant-builder-preview-grid,
   .user-management-summary-grid {
     grid-template-columns: 1fr;

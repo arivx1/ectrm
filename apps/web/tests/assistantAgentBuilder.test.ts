@@ -173,4 +173,56 @@ describe('assistant agent builder helpers', () => {
     expect(fit.errors).toContain('ACTION-capable profiles need at least one explicit governed action.')
     expect(fit.sections.find((section) => section.label === 'Governed actions')?.status).toBe('missing')
   })
+
+  it('allows custom profiles to stay draft-only before governance is complete', () => {
+    const draft = {
+      ...createEmptyAgentBuilderDraft(),
+      name: 'Weather Dispatch Analyst',
+      agent_id: 'weather-dispatch-analyst',
+      description: 'Summarizes weather exceptions.',
+      system_prompt: 'Summarize weather exceptions.',
+    }
+
+    const fit = evaluateAgentRoleProfileFit(draft, [tradeOpsRole])
+
+    expect(fit.errors).toEqual([])
+    expect(fit.sections.find((section) => section.label === 'Profile source')?.status).toBe(
+      'customized',
+    )
+  })
+
+  it('blocks active custom profiles without approved request governance', () => {
+    const draft = {
+      ...createEmptyAgentBuilderDraft(),
+      name: 'Weather Dispatch Analyst',
+      agent_id: 'weather-dispatch-analyst',
+      description: 'Summarizes weather exceptions.',
+      status: 'ACTIVE',
+      human_owner_role: 'Operations Lead',
+      authority_ceiling: 'DRAFT',
+      activation_notes: 'Prompt reviewed.',
+      system_prompt: 'Summarize weather exceptions.',
+    }
+
+    const fit = evaluateAgentRoleProfileFit(draft, [tradeOpsRole])
+
+    expect(fit.errors).toContain('Active custom profiles need an approved profile request or role mapping.')
+  })
+
+  it('requires request-backed eval coverage for action-capable active custom profiles', () => {
+    const draft = {
+      ...createEmptyAgentBuilderDraft(),
+      status: 'ACTIVE',
+      human_owner_role: 'Operations Lead',
+      authority_ceiling: 'STAGE',
+      activation_notes: 'Prompt reviewed.',
+      capabilities: ['READ', 'EXPLAIN', 'ACTION'],
+      allowed_action_types: ['update_trade_workflow_item'],
+      system_prompt: 'Stage supported workflow updates only.',
+    }
+
+    const fit = evaluateAgentRoleProfileFit(draft, [tradeOpsRole])
+
+    expect(fit.errors).toContain('Action-capable custom profiles need an approved profile request with eval coverage.')
+  })
 })
