@@ -331,6 +331,36 @@ class PreTradeRecommendationResultOut(BaseModel):
     next_actions: list[str]
 
 
+class PreTradeRecommendationSourceQualityDeltaOut(BaseModel):
+    adapter_key: str
+    adapter_label: str
+    previous_quality_status: PreTradeRecommendationSourceQuality | None = None
+    current_quality_status: PreTradeRecommendationSourceQuality | None = None
+    previous_freshness: PreTradeRecommendationFreshness | None = None
+    current_freshness: PreTradeRecommendationFreshness | None = None
+
+
+class PreTradeRecommendationInputDeltaOut(BaseModel):
+    adapter_key: str
+    adapter_label: str
+    change_type: Literal["ADDED", "REMOVED", "CHANGED"]
+
+
+class PreTradeRecommendationRunComparisonOut(BaseModel):
+    previous_run_id: int
+    previous_run_key: str
+    previous_created_at: datetime
+    previous_stance: PreTradeRecommendationStance
+    previous_score: int = Field(..., ge=0, le=100)
+    stance_changed: bool
+    score_delta: int
+    added_primary_drivers: list[str] = Field(default_factory=list)
+    removed_primary_drivers: list[str] = Field(default_factory=list)
+    source_quality_changes: list[PreTradeRecommendationSourceQualityDeltaOut] = Field(default_factory=list)
+    input_snapshot_changes: list[PreTradeRecommendationInputDeltaOut] = Field(default_factory=list)
+    summary: str
+
+
 class PreTradeRecommendationRunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -368,6 +398,7 @@ class PreTradeRecommendationRunOut(BaseModel):
     source_review_id: int | None = None
     input_snapshots: list[PreTradeRecommendationSourceSnapshot]
     recommendation: PreTradeRecommendationResultOut
+    comparison: PreTradeRecommendationRunComparisonOut | None = None
     created_at: datetime
     created_by: str
     updated_at: datetime

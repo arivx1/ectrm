@@ -831,6 +831,13 @@ export function evaluateAgentRoleProfileFit(
       if (!normalizedRoleKey && !form.profile_request_id) {
         errors.push('Active custom profiles need an approved profile request or role mapping.')
       }
+      if (
+        form.authority_ceiling &&
+        AUTHORITY_RANK[form.authority_ceiling] > AUTHORITY_RANK.DRAFT &&
+        !form.profile_request_id
+      ) {
+        errors.push('Custom profiles above draft-only authority need an approved specialization-specific eval case.')
+      }
       if (form.capabilities.includes('ACTION') && !form.profile_request_id) {
         errors.push('Action-capable custom profiles need an approved profile request with eval coverage.')
       }

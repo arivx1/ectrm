@@ -1,5 +1,6 @@
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
@@ -61,6 +62,7 @@ from apps.api.app.models.weather_observation import WeatherObservation
 __all__ = [
     "AssistantActionRequest",
     "AssistantAgent",
+    "AssistantAgentEval",
     "AssistantAgentProfileRequest",
     "AssistantConversation",
     "AssistantRun",

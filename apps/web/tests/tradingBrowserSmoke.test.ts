@@ -576,6 +576,60 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/assistant/conversations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, [
+        {
+          conversation_id: 902,
+          created_at: '2026-04-11T09:00:00Z',
+          updated_at: '2026-04-11T09:08:00Z',
+          user_id: smokeSession.user.user_id,
+          user_role: smokeSession.user.role,
+          workspace: 'assistant',
+          agent_id: null,
+          agent_name: null,
+          provider: 'openai',
+          model: 'gpt-5.4',
+          use_live_tools: true,
+          title: 'Recent blocker triage',
+          run_count: 1,
+          latest_run_id: 8801,
+          latest_user_message: 'Where should I handle the confirmation blocker?',
+          latest_assistant_message: 'Operations is the right place to continue.',
+        },
+      ])
+      return
+    }
+
+    const assistantConversationMatch = url.pathname.match(/^\/assistant\/conversations\/(\d+)$/)
+    if (assistantConversationMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, {
+        conversation_id: Number(assistantConversationMatch[1]),
+        created_at: '2026-04-11T09:00:00Z',
+        updated_at: '2026-04-11T09:08:00Z',
+        user_id: smokeSession.user.user_id,
+        user_role: smokeSession.user.role,
+        workspace: 'assistant',
+        agent_id: null,
+        agent_name: null,
+        provider: 'openai',
+        model: 'gpt-5.4',
+        use_live_tools: true,
+        title: 'Recent blocker triage',
+        run_count: 1,
+        latest_run_id: 8801,
+        latest_user_message: 'Where should I handle the confirmation blocker?',
+        latest_assistant_message: 'Operations is the right place to continue.',
+        messages: [],
+      })
+      return
+    }
+
     if (url.pathname === '/operations/workspace-summary' && method === 'GET') {
       writeJson(response, buildWorkspaceSummary())
       return

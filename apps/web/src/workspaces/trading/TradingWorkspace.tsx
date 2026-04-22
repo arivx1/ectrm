@@ -1591,20 +1591,33 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         <p className="field-error">{linkedPreTradeRecommendationRunError}</p>
                       ) : null}
                       {linkedPreTradeRecommendationRun ? (
-                        <div className="pretrade-card-list">
-                          {linkedPreTradeRecommendationRun.input_snapshots.slice(0, 4).map((snapshot) => (
-                            <article key={snapshot.source_key} className="pretrade-record-card pretrade-record-static">
-                              <div>
-                                <strong>{snapshot.source_key.replaceAll('-', ' ')}</strong>
-                                <span>{snapshot.source_type} | {snapshot.freshness} | {snapshot.quality_status}</span>
-                              </div>
+                        <>
+                          {linkedPreTradeRecommendationRun.comparison ? (
+                            <div className="surface pretrade-next-actions">
+                              <span className="eyebrow">Recommendation Audit</span>
+                              <p>{linkedPreTradeRecommendationRun.comparison.summary}</p>
                               <small>
-                                {snapshot.summary ?? 'No source summary captured.'}
-                                {snapshot.provenance.provider ? ` | ${snapshot.provenance.provider}` : ''}
+                                Previous #{linkedPreTradeRecommendationRun.comparison.previous_run_id}
+                                {` | ${linkedPreTradeRecommendationRun.comparison.previous_stance.replaceAll('_', ' ')}`}
+                                {` | score delta ${linkedPreTradeRecommendationRun.comparison.score_delta > 0 ? '+' : ''}${linkedPreTradeRecommendationRun.comparison.score_delta}`}
                               </small>
-                            </article>
-                          ))}
-                        </div>
+                            </div>
+                          ) : null}
+                          <div className="pretrade-card-list">
+                            {linkedPreTradeRecommendationRun.input_snapshots.slice(0, 4).map((snapshot) => (
+                              <article key={snapshot.source_key} className="pretrade-record-card pretrade-record-static">
+                                <div>
+                                  <strong>{snapshot.source_key.replaceAll('-', ' ')}</strong>
+                                  <span>{snapshot.source_type} | {snapshot.freshness} | {snapshot.quality_status}</span>
+                                </div>
+                                <small>
+                                  {snapshot.summary ?? 'No source summary captured.'}
+                                  {snapshot.provenance.provider ? ` | ${snapshot.provenance.provider}` : ''}
+                                </small>
+                              </article>
+                            ))}
+                          </div>
+                        </>
                       ) : null}
                     </div>
                   ) : null}

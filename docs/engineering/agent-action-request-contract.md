@@ -42,6 +42,9 @@ approval shell:
 | `payload` | Typed action payload consumed by execution code. |
 | `result` | Execution result after approval succeeds. |
 | `error_detail` | Failure reason after approval fails. |
+| `review_outcome` | Reviewer decision classification: approved as-is, approved with corrections, or rejected. |
+| `decision_note` | Optional reviewer note captured with the approval or rejection. |
+| `correction_summary` and `correction_fields` | Structured reviewer correction evidence when approval required edits. |
 | `created_at`, `decided_at`, `decided_by` | Review and decision audit. |
 
 Phase 1 should preserve this shell while making the `payload` and reviewer
@@ -66,6 +69,9 @@ top-level columns or a structured metadata envelope.
 | `expected_downstream_effects` | Yes | Describes projections, workflow state, or records expected to change. |
 | `stale_state_basis` | Yes | Captures version/status fields used to block stale approvals. |
 | `idempotency_key` | Yes | Prevents duplicate side effects on retry or replay. |
+| `review_outcome` | On decision | Distinguishes approved-as-is, approved-with-corrections, and rejected outcomes. |
+| `decision_note` | Optional on decision | Captures concise reviewer reasoning. |
+| `correction_summary` and `correction_fields` | Required for corrected approval | Captures what the reviewer changed before approving. |
 
 ## Recommended Payload Envelope
 
@@ -127,6 +133,25 @@ payments, and document reprocessing. Workflow item updates may still allow an
 idempotent retry when the requested mutation is already reflected on the target
 record.
 
+## Reviewer Decision Capture
+
+Every terminal review should preserve the reviewer outcome, not just the final
+request status. Use these outcomes:
+
+- `APPROVED_AS_IS`: the reviewer accepted the staged action without material
+  correction.
+- `APPROVED_WITH_CORRECTIONS`: the reviewer approved after correcting evidence,
+  payload details, assumptions, or expected effects. Capture a correction
+  summary or corrected field names before execution.
+- `REJECTED`: the reviewer declined the request. Capture a decision note when
+  the reason would help future prompt, policy, or deterministic-algorithm work.
+
+Correction metadata is an autonomy signal. A high approval rate with frequent
+corrections should not be treated as ready for bounded execution, because the
+human reviewer is still doing material cleanup. Outcome metrics should count
+corrected approvals separately and block promotion when correction rate exceeds
+the configured threshold.
+
 ## Current Action Type Map
 
 | Action type | Owning work object | Reviewer role | Current required payload | Expected effect | Phase 1 contract gap |
@@ -155,6 +180,7 @@ Approval surfaces should make these fields visible before the decision:
 - expected downstream effects
 - stale-state warning when applicable
 - previous failure detail if the request is no longer pending
+- terminal review outcome, decision note, and correction details after decision
 
 The reviewer should not need to open the original chat to understand the
 request.

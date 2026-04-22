@@ -225,4 +225,22 @@ describe('assistant agent builder helpers', () => {
 
     expect(fit.errors).toContain('Action-capable custom profiles need an approved profile request with eval coverage.')
   })
+
+  it('requires specialization eval coverage before custom profiles exceed draft authority', () => {
+    const draft = {
+      ...createEmptyAgentBuilderDraft(),
+      status: 'ACTIVE',
+      human_owner_role: 'Operations Lead',
+      authority_ceiling: 'STAGE',
+      activation_notes: 'Prompt reviewed.',
+      capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+      system_prompt: 'Draft and stage exception follow-up only after evidence review.',
+    }
+
+    const fit = evaluateAgentRoleProfileFit(draft, [tradeOpsRole])
+
+    expect(fit.errors).toContain(
+      'Custom profiles above draft-only authority need an approved specialization-specific eval case.',
+    )
+  })
 })

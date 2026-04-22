@@ -28,7 +28,7 @@ describe('workspace registry', () => {
 
   it('preserves labels and hero copy through the registry', () => {
     expect(workspaceLabel('prompt')).toBe('Prompt Home')
-    expect(workspaceLabel('assistant')).toBe('Assistant')
+    expect(workspaceLabel('assistant')).toBe('Assistant Console')
     expect(HERO_TITLE_BY_VIEW.prompt).toBe('Start from the prompt')
     expect(HERO_TITLE_BY_VIEW.dashboard).toBe('Live desk overview and market pulse')
     expect(HERO_BODY_BY_VIEW.reference).toContain('books')

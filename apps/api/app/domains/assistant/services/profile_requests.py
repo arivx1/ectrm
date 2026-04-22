@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError
+from apps.api.app.domains.assistant.services.eval_gates import evaluate_agent_eval_gate
 from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
+from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.schemas.assistant import (
     AssistantAgentProfileRequestActivation,
@@ -206,10 +208,26 @@ def validate_agent_activation_requirements(
             if profile_request is None:
                 errors.append(f"{agent_name} action-capable custom profiles need an approved profile request.")
             else:
-                if not profile_request.proposed_eval_cases:
-                    errors.append(f"{agent_name} action-capable custom profiles need proposed eval coverage.")
+                persisted_eval_count = db.query(AssistantAgentEval).filter(
+                    AssistantAgentEval.agent_id == agent_id
+                ).count()
+                if persisted_eval_count <= 0:
+                    errors.append(f"{agent_name} action-capable custom profiles need at least one persisted eval case.")
                 if not profile_request.approval_notes:
                     errors.append(f"{agent_name} action-capable custom profiles need approval notes.")
+
+    eval_gate = evaluate_agent_eval_gate(
+        db,
+        agent_id=agent_id,
+        profile_kind=profile_kind,
+        role_key=role_key,
+        profile_request_id=profile_request_id,
+        authority_ceiling=authority_ceiling,
+        capabilities=capabilities,
+        allowed_action_types=allowed_action_types,
+    )
+    if eval_gate.status == "BLOCKED":
+        errors.extend(eval_gate.missing_cases)
 
     if errors:
         raise AssistantServiceError(status_code=422, detail="; ".join(errors))

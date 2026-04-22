@@ -1,6 +1,8 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import {
+  getAssistantConversation,
+  listAssistantConversations,
   loadAssistantRuntimeSettings,
   requestAssistantResponse,
 } from '../../entities/assistant/api'
@@ -16,6 +18,8 @@ import { appConfig } from '../../shared/config'
 import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   AssistantActionRequest,
+  AssistantConversation,
+  AssistantConversationSummary,
   AssistantProvider,
   AssistantRuntimeSettings,
   ViewKey,
@@ -91,6 +95,27 @@ function formatCount(value: number | null): string {
   return typeof value === 'number' ? value.toLocaleString() : 'n/a'
 }
 
+function formatPromptTimestamp(value: string | null | undefined): string {
+  if (!value) {
+    return 'n/a'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleString()
+}
+
+function summarizePromptConversation(conversation: AssistantConversationSummary): string {
+  const pieces = [conversation.provider, conversation.model]
+  if (conversation.agent_name) {
+    pieces.push(conversation.agent_name)
+  }
+  return pieces.join(' · ')
+}
+
 function resolveDefaultProvider(settings: AssistantRuntimeSettings): AssistantProvider | '' {
   return (
     settings.effective_default_provider ??
@@ -119,6 +144,29 @@ function buildPromptHomeContext(args: {
   ].join('\n')
 }
 
+function promptMessagesFromConversation(conversation: AssistantConversation): PromptHomeMessage[] {
+  return conversation.messages.map((message) => {
+    const parsedResponse =
+      message.role === 'assistant'
+        ? parsePromptNavigationIntentsFromAssistantContent(message.content, {
+            sourceRunId: message.run_id,
+            sourceConversationId: conversation.conversation_id,
+          })
+        : { content: message.content, intents: [] }
+
+    return {
+      id: createPromptMessageId(),
+      role: message.role,
+      content: parsedResponse.content || message.content,
+      provider: message.provider ?? undefined,
+      model: message.model ?? undefined,
+      runId: message.run_id,
+      warnings: message.warnings,
+      navigationIntents: parsedResponse.intents,
+    }
+  })
+}
+
 export function PromptHomeWorkspace({
   authSession,
   health,
@@ -132,6 +180,11 @@ export function PromptHomeWorkspace({
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [recentConversations, setRecentConversations] = useState<AssistantConversationSummary[]>([])
+  const [conversationHistoryLoading, setConversationHistoryLoading] = useState(false)
+  const [conversationHistoryError, setConversationHistoryError] = useState('')
+  const [conversationDetailLoading, setConversationDetailLoading] = useState(false)
+  const [conversationDetailError, setConversationDetailError] = useState('')
 
   const operatorContext = useMemo(
     () =>
@@ -142,6 +195,34 @@ export function PromptHomeWorkspace({
       }),
     [authSession?.user.display_name, counts, health],
   )
+
+  const refreshRecentConversations = useCallback(async () => {
+    if (!authSession) {
+      setRecentConversations([])
+      setConversationHistoryError('')
+      return
+    }
+
+    setConversationHistoryLoading(true)
+    setConversationHistoryError('')
+    try {
+      const conversations = await listAssistantConversations(appConfig.apiBase, {
+        accessToken: authSession.accessToken,
+        limit: 4,
+      })
+      setRecentConversations(conversations)
+    } catch (error) {
+      setConversationHistoryError(
+        error instanceof Error ? error.message : 'Could not load recent prompt threads.',
+      )
+    } finally {
+      setConversationHistoryLoading(false)
+    }
+  }, [authSession])
+
+  useEffect(() => {
+    void refreshRecentConversations()
+  }, [refreshRecentConversations])
 
   async function loadRuntimeSettings(): Promise<AssistantRuntimeSettings> {
     if (runtimeSettings) {
@@ -228,10 +309,37 @@ export function PromptHomeWorkspace({
           navigationIntents: parsedResponse.intents,
         },
       ])
+      void refreshRecentConversations()
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Assistant request failed.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function resumeConversation(conversation: AssistantConversationSummary) {
+    if (!authSession || submitting || conversationDetailLoading) {
+      return
+    }
+
+    setConversationDetailLoading(true)
+    setConversationDetailError('')
+    setSubmitError('')
+    try {
+      const payload = await getAssistantConversation(
+        appConfig.apiBase,
+        conversation.conversation_id,
+        { accessToken: authSession.accessToken },
+      )
+      setConversationId(payload.conversation_id)
+      setMessages(promptMessagesFromConversation(payload))
+      setDraft('')
+    } catch (error) {
+      setConversationDetailError(
+        error instanceof Error ? error.message : 'Could not reopen that prompt thread.',
+      )
+    } finally {
+      setConversationDetailLoading(false)
     }
   }
 
@@ -258,6 +366,19 @@ export function PromptHomeWorkspace({
     : runtimeSettings
       ? `Using ${runtimeSettings.effective_default_provider ?? 'the first enabled provider'} when you send.`
       : 'Assistant runtime will be checked when you send the first prompt.'
+  const conversationHistoryNote = !authSession
+    ? 'Sign in to reopen recent prompt threads.'
+    : conversationHistoryLoading
+      ? 'Loading recent prompt threads.'
+      : conversationHistoryError
+        ? conversationHistoryError
+        : conversationDetailLoading
+          ? 'Reopening selected prompt thread.'
+          : conversationDetailError
+            ? conversationDetailError
+            : recentConversations.length > 0
+              ? `${recentConversations.length} recent prompt thread${recentConversations.length === 1 ? '' : 's'} available.`
+              : 'No recent prompt threads yet.'
 
   return (
     <div className="prompt-home">
@@ -295,7 +416,7 @@ export function PromptHomeWorkspace({
               {submitting ? 'Sending...' : 'Send Prompt'}
             </button>
             <button type="button" className="button button-ghost" onClick={() => onOpenView('assistant')}>
-              Prompt Management
+              Assistant Console
             </button>
           </div>
 
@@ -346,7 +467,7 @@ export function PromptHomeWorkspace({
                     <div className="assistant-message-meta">
                       <span>Run #{message.runId}</span>
                       <button type="button" className="assistant-run-link" onClick={() => onOpenView('assistant')}>
-                        Open trace
+                        Open diagnostics
                       </button>
                     </div>
                   ) : null}
@@ -390,28 +511,75 @@ export function PromptHomeWorkspace({
           </div>
         </article>
 
-        <aside className="surface prompt-home-destinations">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Old Console</span>
-              <h3>Open a workspace</h3>
-            </div>
-            <p>The traditional screens are still here when you already know where the work belongs.</p>
-          </div>
-
-          <div className="prompt-home-destination-list">
-            {NAVIGATION_INTENTS.map((intent) => (
+        <aside className="prompt-home-sidecar">
+          <section className="surface prompt-home-recent">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Resume</span>
+                <h3>Recent prompt threads</h3>
+              </div>
               <button
-                key={intent.targetView}
                 type="button"
-                className="prompt-home-destination"
-                onClick={() => handleNavigationIntent(intent, false)}
+                className="button button-ghost"
+                onClick={() => void refreshRecentConversations()}
+                disabled={!authSession || conversationHistoryLoading}
               >
-                <strong>{promptNavigationIntentLabel(intent)}</strong>
-                <span>{promptNavigationIntentDetail(intent)}</span>
+                Refresh
               </button>
-            ))}
-          </div>
+            </div>
+            <p className={`form-note ${conversationHistoryError || conversationDetailError ? 'form-note-error' : ''}`}>
+              {conversationHistoryNote}
+            </p>
+            {recentConversations.length > 0 ? (
+              <div className="prompt-home-thread-list">
+                {recentConversations.map((conversation) => (
+                  <button
+                    key={conversation.conversation_id}
+                    type="button"
+                    className={`prompt-home-thread ${conversationId === conversation.conversation_id ? 'is-selected' : ''}`}
+                    onClick={() => void resumeConversation(conversation)}
+                    disabled={submitting || conversationDetailLoading}
+                  >
+                    <strong>{conversation.title}</strong>
+                    <span>
+                      {conversation.latest_user_message ??
+                        conversation.latest_assistant_message ??
+                        'Stored prompt thread.'}
+                    </span>
+                    <small>
+                      {summarizePromptConversation(conversation)} · {conversation.run_count} run
+                      {conversation.run_count === 1 ? '' : 's'} · Updated{' '}
+                      {formatPromptTimestamp(conversation.updated_at)}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="surface prompt-home-destinations">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Old Console</span>
+                <h3>Open a workspace</h3>
+              </div>
+              <p>The traditional screens are still here when you already know where the work belongs.</p>
+            </div>
+
+            <div className="prompt-home-destination-list">
+              {NAVIGATION_INTENTS.map((intent) => (
+                <button
+                  key={intent.targetView}
+                  type="button"
+                  className="prompt-home-destination"
+                  onClick={() => handleNavigationIntent(intent, false)}
+                >
+                  <strong>{promptNavigationIntentLabel(intent)}</strong>
+                  <span>{promptNavigationIntentDetail(intent)}</span>
+                </button>
+              ))}
+            </div>
+          </section>
         </aside>
       </section>
     </div>

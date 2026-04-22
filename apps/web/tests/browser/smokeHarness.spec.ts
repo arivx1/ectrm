@@ -123,6 +123,8 @@ test('single-user smoke signs into the prompt home when one-click access is enab
 
     await expect(page.getByText('Start with the job in front of you')).toBeVisible()
     await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
+    await expect(page.getByRole('button', { name: /Assistant Console/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Recent blocker triage/ })).toBeVisible()
 
     assertNoHarnessRequestFailures(harness)
   } finally {
@@ -158,6 +160,102 @@ test('prompt home accepts an assistant handoff into the old operations workspace
     await expect(page.getByText('Review the confirmation blocker with the operations owner')).toBeVisible()
 
     assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home reopens recent prompt threads without entering the assistant console', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+    await dismissStartHereOverlay(page)
+
+    await page.getByRole('button', { name: /Recent blocker triage/ }).click()
+
+    await expect(page.locator('.assistant-message-user').getByText('Where should I handle the confirmation blocker?')).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant').getByText('Operations is the right place to continue')).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant')).not.toContainText('navigation_intent')
+    await expect(page.locator('.prompt-home-handoff').filter({ hasText: 'Open Work Queue' })).toBeVisible()
+    await expect(page).toHaveURL(/^(?!.*view=assistant).*$/)
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('assistant feedback smoke persists response feedback through chat reload and admin outcome metrics', async ({ page }) => {
+  const harness = await startSmokeHarness()
+  const feedbackNote = 'Surface the confirmation queue owner before routing.'
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(`${harness.origin}/?view=assistant`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+
+    const composer = page.locator('form.assistant-composer')
+    await expect(composer).toBeVisible()
+    await composer.getByLabel('Prompt').fill('Where should I handle the confirmation blocker?')
+    await composer.getByRole('button', { name: 'Send Prompt' }).click()
+
+    const assistantMessage = page
+      .locator('.assistant-message-assistant')
+      .filter({ hasText: 'Operations is the right place to continue' })
+    await expect(assistantMessage).toBeVisible()
+
+    await assistantMessage.getByRole('button', { name: 'Add note' }).click()
+    await assistantMessage.getByPlaceholder('What should change in this answer?').fill(feedbackNote)
+    await assistantMessage.getByRole('button', { name: 'Needs work' }).click()
+
+    await expect(assistantMessage.getByText('Saved needs work')).toBeVisible()
+    await expect(assistantMessage.getByPlaceholder('What should change in this answer?')).toHaveValue(feedbackNote)
+
+    await page.getByRole('button', { name: 'Start new chat' }).click()
+    await expect(page.getByText('No chat selected')).toBeVisible()
+    await page.getByRole('button', { name: /Recent blocker triage/ }).click()
+
+    const reloadedAssistantMessage = page
+      .locator('.assistant-message-assistant')
+      .filter({ hasText: 'Operations is the right place to continue' })
+    await expect(reloadedAssistantMessage.getByText('Saved needs work')).toBeVisible()
+    await expect(reloadedAssistantMessage.getByPlaceholder('What should change in this answer?')).toHaveValue(feedbackNote)
+
+    await page.goto(`${harness.origin}/?view=admin`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const outcomeSection = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Outcome Metrics' }) })
+      .first()
+    const feedbackSummary = outcomeSection.locator('.assistant-run-summary-card').filter({ hasText: 'User feedback' })
+
+    await expect(outcomeSection).toBeVisible()
+    await expect(feedbackSummary.getByText('1/3')).toBeVisible()
+    await expect(outcomeSection.getByRole('heading', { name: 'Workspace Signals' })).toBeVisible()
+    await expect(outcomeSection.getByRole('heading', { name: 'Recent Run Notes' })).toBeVisible()
+    await expect(outcomeSection.getByText(feedbackNote)).toBeVisible()
+
+    expect(harness.mutationRequests).toContainEqual({
+      method: 'POST',
+      path: '/assistant/runs/8801/feedback',
+      search: '',
+    })
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toHaveLength(0)
   } finally {
     await harness.close()
   }

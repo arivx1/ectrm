@@ -16,6 +16,7 @@ PROMOTION_MIN_DECIDED_ACTIONS = 10
 PROMOTION_MAX_REJECTION_RATE = 0.10
 PROMOTION_MAX_FAILED_EXECUTION_RATE = 0.02
 PROMOTION_MAX_STALE_ACTION_RATE = 0.05
+PROMOTION_MAX_CORRECTION_RATE = 0.10
 PROMOTION_MAX_PENDING_ACTIONS = 0
 
 PAUSE_MIN_DECIDED_ACTIONS = 5
@@ -36,6 +37,7 @@ class AssistantOutcomeMetricThresholds:
     max_rejection_rate_for_promotion: float = PROMOTION_MAX_REJECTION_RATE
     max_failed_execution_rate_for_promotion: float = PROMOTION_MAX_FAILED_EXECUTION_RATE
     max_stale_action_rate_for_promotion: float = PROMOTION_MAX_STALE_ACTION_RATE
+    max_correction_rate_for_promotion: float = PROMOTION_MAX_CORRECTION_RATE
     max_pending_actions_for_promotion: int = PROMOTION_MAX_PENDING_ACTIONS
     min_decided_actions_for_pause_signal: int = PAUSE_MIN_DECIDED_ACTIONS
     rejection_rate_pause_threshold: float = PAUSE_REJECTION_RATE
@@ -59,11 +61,13 @@ class AssistantOutcomeMetricCounters:
     executed_action_count: int
     rejected_action_count: int
     failed_action_count: int
+    correction_count: int
     decided_action_count: int
     stale_action_count: int
     approval_rate: float | None
     rejection_rate: float | None
     failed_execution_rate: float | None
+    correction_rate: float | None
     stale_action_rate: float | None
     avg_decision_seconds: float | None
     oldest_pending_age_seconds: float | None
@@ -142,6 +146,7 @@ class _ActionAccumulator:
     executed_action_count: int = 0
     rejected_action_count: int = 0
     failed_action_count: int = 0
+    correction_count: int = 0
     stale_action_count: int = 0
     decision_seconds: list[float] = field(default_factory=list)
     pending_ages_seconds: list[float] = field(default_factory=list)
@@ -433,6 +438,9 @@ def _accumulate_action_request(
     elif status == "FAILED":
         accumulator.failed_action_count += 1
 
+    if str(record.review_outcome or "").upper() == "APPROVED_WITH_CORRECTIONS":
+        accumulator.correction_count += 1
+
     if record.decided_at is not None:
         decided_at = _coerce_aware_datetime(record.decided_at)
         created_at = _coerce_aware_datetime(record.created_at)
@@ -529,11 +537,13 @@ def _build_action_counters(accumulator: _ActionAccumulator) -> AssistantOutcomeM
         executed_action_count=accumulator.executed_action_count,
         rejected_action_count=accumulator.rejected_action_count,
         failed_action_count=accumulator.failed_action_count,
+        correction_count=accumulator.correction_count,
         decided_action_count=decided_action_count,
         stale_action_count=accumulator.stale_action_count,
         approval_rate=_safe_ratio(accumulator.executed_action_count, decided_action_count),
         rejection_rate=_safe_ratio(accumulator.rejected_action_count, decided_action_count),
         failed_execution_rate=_safe_ratio(accumulator.failed_action_count, decided_action_count),
+        correction_rate=_safe_ratio(accumulator.correction_count, decided_action_count),
         stale_action_rate=_safe_ratio(accumulator.stale_action_count, decided_action_count),
         avg_decision_seconds=_average(accumulator.decision_seconds),
         oldest_pending_age_seconds=max(accumulator.pending_ages_seconds) if accumulator.pending_ages_seconds else None,
@@ -622,6 +632,8 @@ def _promotion_blockers(
         blockers.append("Failed execution rate is above the promotion threshold.")
     if _rate_exceeds(counters.stale_action_rate, thresholds.max_stale_action_rate_for_promotion):
         blockers.append("Stale-action rate is above the promotion threshold.")
+    if _rate_exceeds(counters.correction_rate, thresholds.max_correction_rate_for_promotion):
+        blockers.append("Reviewer correction rate is above the promotion threshold.")
     return blockers
 
 

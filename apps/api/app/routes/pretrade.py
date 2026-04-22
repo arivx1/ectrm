@@ -212,6 +212,31 @@ def _review_recommendation_summary_lookup(
     )
 
 
+def _same_recommendation_comparison_group(left: ReportPreset, right: ReportPreset) -> bool:
+    left_review_id = recommendation_run_source_review_id(left)
+    right_review_id = recommendation_run_source_review_id(right)
+    if left_review_id is not None or right_review_id is not None:
+        return left_review_id is not None and left_review_id == right_review_id
+
+    left_scenario_id = recommendation_run_source_scenario_id(left)
+    right_scenario_id = recommendation_run_source_scenario_id(right)
+    return left_scenario_id is not None and left_scenario_id == right_scenario_id
+
+
+def _previous_recommendation_run_record(
+    records: list[ReportPreset],
+    current_record: ReportPreset,
+) -> ReportPreset | None:
+    matching_older_records = [
+        record
+        for record in records
+        if record.id != current_record.id
+        and _same_recommendation_comparison_group(current_record, record)
+        and (record.created_at, record.id) < (current_record.created_at, current_record.id)
+    ]
+    return max(matching_older_records, key=lambda record: (record.created_at, record.id), default=None)
+
+
 @router.get("/scenarios", response_model=list[PreTradeScenarioOut])
 def get_pretrade_scenarios(
     request: Request,
@@ -357,13 +382,23 @@ def get_pretrade_recommendation_runs(
         )
     ).scalars().all()
 
-    runs: list[PreTradeRecommendationRunOut] = []
+    filtered_records: list[ReportPreset] = []
     for record in records:
         if source_scenario_id is not None and recommendation_run_source_scenario_id(record) != source_scenario_id:
             continue
         if source_review_id is not None and recommendation_run_source_review_id(record) != source_review_id:
             continue
-        runs.append(to_recommendation_run_out(record, actor_id=actor_id))
+        filtered_records.append(record)
+
+    runs: list[PreTradeRecommendationRunOut] = []
+    for record in filtered_records[:limit]:
+        runs.append(
+            to_recommendation_run_out(
+                record,
+                actor_id=actor_id,
+                previous_record=_previous_recommendation_run_record(filtered_records, record),
+            )
+        )
         if len(runs) >= limit:
             break
     return runs
@@ -381,7 +416,17 @@ def get_pretrade_recommendation_run(
         recommendation_run_id=run_id,
         actor_id=actor_id,
     )
-    return to_recommendation_run_out(record, actor_id=actor_id)
+    records = db.execute(
+        pretrade_recommendation_run_records_stmt(actor_id).order_by(
+            ReportPreset.created_at.desc(),
+            ReportPreset.id.desc(),
+        )
+    ).scalars().all()
+    return to_recommendation_run_out(
+        record,
+        actor_id=actor_id,
+        previous_record=_previous_recommendation_run_record(records, record),
+    )
 
 
 @router.post("/recommendations/runs", response_model=PreTradeRecommendationRunOut, status_code=status.HTTP_201_CREATED)

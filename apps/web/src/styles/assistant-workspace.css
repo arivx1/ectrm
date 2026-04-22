@@ -527,6 +527,18 @@
   gap: 0.65rem;
 }
 
+.assistant-action-decision-panel {
+  display: grid;
+  gap: 0.7rem;
+  padding-top: 0.2rem;
+}
+
+.assistant-action-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
 .assistant-action-decision-field {
   display: grid;
   gap: 0.45rem;

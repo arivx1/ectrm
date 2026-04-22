@@ -152,6 +152,10 @@ export function buildAssistantAgentOutcomeRows(
         { label: 'Approval rate', value: formatAssistantOutcomeRate(row.approval_rate) },
         { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
         { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
+        {
+          label: 'Corrections',
+          value: `${row.correction_count} (${formatAssistantOutcomeRate(row.correction_rate)})`,
+        },
         { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
         { label: 'Pending age', value: formatAssistantOutcomeDuration(row.oldest_pending_age_seconds) },
       ],
@@ -202,6 +206,10 @@ export function buildAssistantActionTypeOutcomeRows(
       { label: 'Approval rate', value: formatAssistantOutcomeRate(row.approval_rate) },
       { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
       { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
+      {
+        label: 'Corrections',
+        value: `${row.correction_count} (${formatAssistantOutcomeRate(row.correction_rate)})`,
+      },
       { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
       { label: 'Avg decision', value: formatAssistantOutcomeDuration(row.avg_decision_seconds) },
     ],

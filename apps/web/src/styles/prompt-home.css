@@ -54,6 +54,7 @@
 }
 
 .prompt-home-chat,
+.prompt-home-sidecar,
 .prompt-home-destinations {
   display: grid;
   gap: 1rem;
@@ -116,6 +117,37 @@
   gap: 0.65rem;
 }
 
+.prompt-home-thread-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.prompt-home-thread {
+  display: grid;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.85rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-home-thread:hover,
+.prompt-home-thread:focus-visible,
+.prompt-home-thread.is-selected {
+  border-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.34);
+  outline: none;
+}
+
+.prompt-home-thread span,
+.prompt-home-thread small {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.45;
+}
+
 .prompt-home-destination {
   display: grid;
   gap: 0.35rem;
@@ -145,8 +177,15 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+:root[data-color-mode='dark'] .prompt-home-thread {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+
 :root[data-color-mode='dark'] .prompt-home-heading p,
 :root[data-color-mode='dark'] .prompt-home-handoff span,
+:root[data-color-mode='dark'] .prompt-home-thread span,
+:root[data-color-mode='dark'] .prompt-home-thread small,
 :root[data-color-mode='dark'] .prompt-home-destination span {
   color: #b7c7d9;
 }

@@ -13,11 +13,14 @@ from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationCheckOut,
     PreTradeRecommendationConfidence,
     PreTradeRecommendationExplanationOut,
+    PreTradeRecommendationInputDeltaOut,
     PreTradeRecommendationResultOut,
+    PreTradeRecommendationRunComparisonOut,
     PreTradeRecommendationRunOut,
     PreTradeRecommendationSourceAdapterOut,
     PreTradeRecommendationSourceProvenance,
     PreTradeRecommendationSourceQuality,
+    PreTradeRecommendationSourceQualityDeltaOut,
     PreTradeRecommendationSourceSnapshot,
     PreTradeRecommendationStance,
     PreTradeRecommendationSourceType,
@@ -810,7 +813,123 @@ def recommendation_run_input_snapshots(record: ReportPreset) -> list[PreTradeRec
     return snapshots
 
 
-def to_recommendation_run_out(record: ReportPreset, *, actor_id: str) -> PreTradeRecommendationRunOut:
+def _snapshot_audit_key(snapshot: PreTradeRecommendationSourceSnapshot) -> str:
+    return snapshot.adapter_key or snapshot.source_key
+
+
+def _snapshot_audit_label(snapshot: PreTradeRecommendationSourceSnapshot) -> str:
+    return snapshot.adapter_label or snapshot.source_key.replace("-", " ").title()
+
+
+def _snapshot_audit_payload(snapshot: PreTradeRecommendationSourceSnapshot) -> dict[str, object]:
+    return {
+        "payload": snapshot.payload,
+        "freshness": snapshot.freshness,
+        "quality_status": snapshot.quality_status,
+        "source_available": snapshot.source_available,
+        "captured_at": snapshot.captured_at.isoformat() if snapshot.captured_at else None,
+        "provenance": snapshot.provenance.model_dump(mode="json", exclude_none=True),
+    }
+
+
+def _ordered_text_delta(current: list[str], previous: list[str]) -> tuple[list[str], list[str]]:
+    current_set = set(current)
+    previous_set = set(previous)
+    return (
+        [item for item in current if item not in previous_set],
+        [item for item in previous if item not in current_set],
+    )
+
+
+def build_recommendation_run_comparison(
+    *,
+    current: PreTradeRecommendationRunOut,
+    previous: PreTradeRecommendationRunOut,
+) -> PreTradeRecommendationRunComparisonOut:
+    current_snapshots = {_snapshot_audit_key(snapshot): snapshot for snapshot in current.input_snapshots}
+    previous_snapshots = {_snapshot_audit_key(snapshot): snapshot for snapshot in previous.input_snapshots}
+
+    source_quality_changes: list[PreTradeRecommendationSourceQualityDeltaOut] = []
+    input_snapshot_changes: list[PreTradeRecommendationInputDeltaOut] = []
+    for adapter_key in sorted(set(current_snapshots) | set(previous_snapshots)):
+        current_snapshot = current_snapshots.get(adapter_key)
+        previous_snapshot = previous_snapshots.get(adapter_key)
+        label = _snapshot_audit_label(current_snapshot or previous_snapshot)  # type: ignore[arg-type]
+
+        if current_snapshot is None:
+            input_snapshot_changes.append(
+                PreTradeRecommendationInputDeltaOut(
+                    adapter_key=adapter_key,
+                    adapter_label=label,
+                    change_type="REMOVED",
+                )
+            )
+            continue
+        if previous_snapshot is None:
+            input_snapshot_changes.append(
+                PreTradeRecommendationInputDeltaOut(
+                    adapter_key=adapter_key,
+                    adapter_label=label,
+                    change_type="ADDED",
+                )
+            )
+            continue
+
+        if (
+            current_snapshot.quality_status != previous_snapshot.quality_status
+            or current_snapshot.freshness != previous_snapshot.freshness
+        ):
+            source_quality_changes.append(
+                PreTradeRecommendationSourceQualityDeltaOut(
+                    adapter_key=adapter_key,
+                    adapter_label=label,
+                    previous_quality_status=previous_snapshot.quality_status,
+                    current_quality_status=current_snapshot.quality_status,
+                    previous_freshness=previous_snapshot.freshness,
+                    current_freshness=current_snapshot.freshness,
+                )
+            )
+        if _snapshot_audit_payload(current_snapshot) != _snapshot_audit_payload(previous_snapshot):
+            input_snapshot_changes.append(
+                PreTradeRecommendationInputDeltaOut(
+                    adapter_key=adapter_key,
+                    adapter_label=label,
+                    change_type="CHANGED",
+                )
+            )
+
+    added_drivers, removed_drivers = _ordered_text_delta(
+        current.recommendation.explanation.primary_drivers,
+        previous.recommendation.explanation.primary_drivers,
+    )
+    score_delta = current.recommendation.score - previous.recommendation.score
+    stance_changed = current.recommendation.stance != previous.recommendation.stance
+    stance_summary = (
+        f"Stance changed from {previous.recommendation.stance.replace('_', ' ')} to {current.recommendation.stance.replace('_', ' ')}."
+        if stance_changed
+        else f"Stance held at {current.recommendation.stance.replace('_', ' ')}."
+    )
+    score_summary = f" Score moved {score_delta:+d} points."
+    driver_summary = f" {len(added_drivers)} new driver{'s' if len(added_drivers) != 1 else ''}."
+    source_summary = f" {len(source_quality_changes)} source quality change{'s' if len(source_quality_changes) != 1 else ''}."
+
+    return PreTradeRecommendationRunComparisonOut(
+        previous_run_id=previous.run_id,
+        previous_run_key=previous.run_key,
+        previous_created_at=previous.created_at,
+        previous_stance=previous.recommendation.stance,
+        previous_score=previous.recommendation.score,
+        stance_changed=stance_changed,
+        score_delta=score_delta,
+        added_primary_drivers=added_drivers,
+        removed_primary_drivers=removed_drivers,
+        source_quality_changes=source_quality_changes,
+        input_snapshot_changes=input_snapshot_changes,
+        summary=f"{stance_summary}{score_summary}{driver_summary}{source_summary}",
+    )
+
+
+def _to_recommendation_run_out_base(record: ReportPreset, *, actor_id: str) -> PreTradeRecommendationRunOut:
     payload = recommendation_run_payload(record)
     draft = PreTradeScenarioDraft.model_validate(payload.get("draft") or {})
     input_snapshots = normalize_recommendation_input_snapshots(
@@ -844,6 +963,26 @@ def to_recommendation_run_out(record: ReportPreset, *, actor_id: str) -> PreTrad
         updated_by=record.updated_by,
         version=record.version,
         can_edit=record.scope_owner_key == actor_id or record.created_by == actor_id,
+    )
+
+
+def to_recommendation_run_out(
+    record: ReportPreset,
+    *,
+    actor_id: str,
+    previous_record: ReportPreset | None = None,
+) -> PreTradeRecommendationRunOut:
+    run = _to_recommendation_run_out_base(record, actor_id=actor_id)
+    if previous_record is None:
+        return run
+    previous_run = _to_recommendation_run_out_base(previous_record, actor_id=actor_id)
+    return run.model_copy(
+        update={
+            "comparison": build_recommendation_run_comparison(
+                current=run,
+                previous=previous_run,
+            )
+        }
     )
 
 

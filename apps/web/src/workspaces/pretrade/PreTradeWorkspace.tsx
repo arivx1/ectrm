@@ -293,6 +293,10 @@ function sourceQualitySummary(snapshots: PreTradeRecommendationSourceSnapshotRec
   return `${impaired.length} source${impaired.length === 1 ? '' : 's'} need attention`
 }
 
+function formatRecommendationScoreDelta(value: number): string {
+  return value > 0 ? `+${value}` : String(value)
+}
+
 export function PreTradeWorkspace({
   authSession,
   activeBooks,
@@ -1299,6 +1303,28 @@ export function PreTradeWorkspace({
                     <small>
                       {run.recommendation.stance.replaceAll('_', ' ')} | score {run.recommendation.score} | {run.input_snapshots.length} sources | {sourceQualitySummary(run.input_snapshots)} | saved {formatDate(run.created_at)}
                     </small>
+                    {run.comparison ? (
+                      <div className="surface pretrade-next-actions">
+                        <span className="eyebrow">Changed Since Prior Run</span>
+                        <p>{run.comparison.summary}</p>
+                        <small>
+                          Previous #{run.comparison.previous_run_id} | {run.comparison.previous_stance.replaceAll('_', ' ')} | score {run.comparison.previous_score} | delta {formatRecommendationScoreDelta(run.comparison.score_delta)}
+                        </small>
+                        {run.comparison.added_primary_drivers.length > 0 ? (
+                          <p className="form-note">New driver: {run.comparison.added_primary_drivers[0]}</p>
+                        ) : null}
+                        {run.comparison.source_quality_changes.length > 0 ? (
+                          <p className="form-note">
+                            Source quality: {run.comparison.source_quality_changes.map((change) => `${change.adapter_label} ${change.previous_quality_status ?? 'n/a'} to ${change.current_quality_status ?? 'n/a'}`).join('; ')}
+                          </p>
+                        ) : null}
+                        {run.comparison.input_snapshot_changes.length > 0 ? (
+                          <p className="form-note">
+                            Inputs: {run.comparison.input_snapshot_changes.slice(0, 3).map((change) => `${change.adapter_label} ${change.change_type.toLowerCase()}`).join('; ')}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </article>
                 ))}
               </div>

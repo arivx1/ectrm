@@ -982,7 +982,7 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
                         "assumptions": [],
                         "missing_evidence": [],
                         "expected_downstream_effects": ["Attempt workflow update through approval gateway."],
-                        "stale_state_basis": {},
+                        "stale_state_basis": {"workflow_item_version": 1},
                         "idempotency_key": f"test:update-workflow-item:{item_id}:record-managed",
                     },
                 },

@@ -516,3 +516,61 @@ proposal form until a human owner approves the domain rule.
 - Tests or evidence: API coverage should verify loop metadata persistence,
   prompt contract rendering, configured iteration caps, callback token
   enforcement, and execution-state updates.
+
+### 2026-04-22 - Codex Dispatch Smoke Tests Stay Two-Stage
+
+- Type: lesson
+- Domain: engineering automation
+- Applies to: Codex task dispatch, GitHub workflow callbacks, long-running
+  repository agents
+- Status: implemented
+- Source: [AI Workflow](./ai-workflow.md) and
+  [`run_codex_task_smoke.py`](../../apps/api/scripts/run_codex_task_smoke.py)
+- Lesson: verify Codex dispatch in two stages. First run the local smoke path
+  to prove the workflow contract, admin task creation, callback updates, and
+  callback-token rejection without mutating GitHub. Then run a live dispatch
+  only after the remote workflow, API environment, and GitHub secrets are
+  configured.
+- Deterministic opportunity: keep smoke readiness checks explicit so missing
+  secrets or unregistered workflows fail as setup gaps, not ambiguous task
+  failures.
+- Agent autonomy impact: local smoke coverage can validate plumbing, but it
+  does not prove repository-mutating autonomy. Live Codex runs remain
+  admin-owned and should land as reviewable branches, pull requests, or
+  artifacts.
+- Tests or evidence: `make api-codex-smoke` creates a local long-running Codex
+  task, posts running and completed callbacks, rejects a bad callback token,
+  and reports missing live prerequisites.
+- Follow-up: once the Codex workflow is present on GitHub and secrets are
+  configured, dispatch a tiny no-op admin task to exercise the full GitHub
+  Actions path.
+
+### 2026-04-22 - Corrected Approvals Still Mean Human Cleanup
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: action request approvals, outcome metrics, bounded-execution
+  promotion review, deterministic algorithm candidates
+- Status: implemented
+- Source:
+  [`action_requests.py`](../../apps/api/app/domains/assistant/services/action_requests.py),
+  [`outcome_metrics.py`](../../apps/api/app/domains/assistant/services/outcome_metrics.py),
+  and [Agent Action Request Contract](./agent-action-request-contract.md)
+- Lesson: an approved action is not always an autonomy win. If the reviewer
+  approved only after correcting the agent's evidence, payload framing, or
+  assumptions, preserve that distinction as `APPROVED_WITH_CORRECTIONS` with a
+  summary or corrected field names.
+- Deterministic opportunity: repeated corrected fields are candidates for typed
+  validation, policy checks, formula logic, stale-state enrichment, or prompt
+  evals. When the same correction recurs, propose the deterministic rule instead
+  of relying on future reviewers to catch it.
+- Agent autonomy impact: corrected approvals count against bounded-execution
+  promotion. Future agents should treat a high correction rate as evidence to
+  keep the action staged, narrow authority, or create a deterministic algorithm
+  before asking for more autonomy.
+- Tests or evidence: API coverage verifies corrected-approval persistence,
+  correction-detail validation, rejection notes, audit-trace serialization, and
+  outcome-metric correction rates and promotion blockers. Web tests verify that
+  approval and rejection calls send structured decision metadata.
+- Follow-up: review recurring `correction_fields` during autonomy reviews and
+  append `algorithm-candidate` entries when a stable rule emerges.

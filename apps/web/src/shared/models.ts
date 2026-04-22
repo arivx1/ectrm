@@ -1504,6 +1504,36 @@ export type PreTradeRecommendationResultRecord = {
   next_actions: string[]
 }
 
+export type PreTradeRecommendationSourceQualityDeltaRecord = {
+  adapter_key: string
+  adapter_label: string
+  previous_quality_status: PreTradeRecommendationSourceQuality | null
+  current_quality_status: PreTradeRecommendationSourceQuality | null
+  previous_freshness: PreTradeRecommendationFreshness | null
+  current_freshness: PreTradeRecommendationFreshness | null
+}
+
+export type PreTradeRecommendationInputDeltaRecord = {
+  adapter_key: string
+  adapter_label: string
+  change_type: 'ADDED' | 'REMOVED' | 'CHANGED'
+}
+
+export type PreTradeRecommendationRunComparisonRecord = {
+  previous_run_id: number
+  previous_run_key: string
+  previous_created_at: string
+  previous_stance: PreTradeRecommendationStance
+  previous_score: number
+  stance_changed: boolean
+  score_delta: number
+  added_primary_drivers: string[]
+  removed_primary_drivers: string[]
+  source_quality_changes: PreTradeRecommendationSourceQualityDeltaRecord[]
+  input_snapshot_changes: PreTradeRecommendationInputDeltaRecord[]
+  summary: string
+}
+
 export type PreTradeRecommendationRunRecord = {
   run_id: number
   run_key: string
@@ -1514,6 +1544,7 @@ export type PreTradeRecommendationRunRecord = {
   source_review_id: number | null
   input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
   recommendation: PreTradeRecommendationResultRecord
+  comparison: PreTradeRecommendationRunComparisonRecord | null
   created_at: string
   created_by: string
   updated_at: string
@@ -1847,6 +1878,7 @@ export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
 export type AssistantAgentRoleCatalogStatus = 'SEEDED' | 'TEMPLATE' | 'PHASE_1' | 'PHASE_2_PLUS'
 export type AssistantAgentProfileKind = 'CURATED' | 'ROLE_DERIVED' | 'CUSTOM'
 export type AssistantAgentProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
+export type AssistantAgentEvalGateStatus = 'PASS' | 'BLOCKED' | 'NOT_REQUIRED'
 export type AssistantAgentAuthorityLevel =
   | 'OBSERVE'
   | 'EXPLAIN'
@@ -1871,6 +1903,7 @@ export type AssistantActionRequestLifecycleStage =
   | 'REJECTED'
   | 'FAILED'
 export type AssistantActionRequestLifecycleTone = 'attention' | 'success' | 'neutral' | 'danger'
+export type AssistantActionReviewOutcome = 'APPROVED_AS_IS' | 'APPROVED_WITH_CORRECTIONS' | 'REJECTED'
 
 export type AssistantProviderStatus = {
   provider: AssistantProvider
@@ -1907,6 +1940,33 @@ export type AssistantAgentEffectivePolicy = {
   allowed_actions: AssistantPolicyDecision[]
   blocked_actions: AssistantPolicyDecision[]
   policy_notes: string[]
+}
+
+export type AssistantAgentEvalGate = {
+  status: AssistantAgentEvalGateStatus
+  role_key?: string | null
+  required_cases: string[]
+  covered_cases: string[]
+  missing_cases: string[]
+  custom_case_count: number
+  notes: string[]
+}
+
+export type AssistantAgentEval = {
+  eval_id: number
+  agent_id: string
+  name: string
+  workspace: ViewKey
+  prompt: string
+  context: string | null
+  use_live_tools: boolean
+  expected_substrings: string[]
+  expected_tool_names: string[]
+  expected_action_types: AssistantActionType[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
 }
 
 export type AssistantPolicySimulationPhase = 'stage' | 'execute'
@@ -1971,6 +2031,7 @@ export type AssistantAgent = {
   daily_token_allocation?: number | null
   token_budget?: AssistantAgentTokenBudget
   effective_policy?: AssistantAgentEffectivePolicy
+  eval_gate?: AssistantAgentEvalGate | null
 }
 
 export type AssistantAgentTokenBudgetStatus = 'GREEN' | 'AMBER' | 'RED'
@@ -2014,6 +2075,7 @@ export type AssistantAgentRoleArchetype = {
   stop_conditions: string[]
   success_metrics: string[]
   required_eval_coverage: string[]
+  eval_gate?: AssistantAgentEvalGate | null
   base_prompt_guidance: string[]
   current_profile_ids: string[]
 }
@@ -2113,6 +2175,10 @@ export type AssistantActionRequest = {
   lifecycle: AssistantActionRequestLifecycle
   result?: Record<string, unknown> | null
   error_detail?: string | null
+  review_outcome?: AssistantActionReviewOutcome | null
+  decision_note?: string | null
+  correction_summary?: string | null
+  correction_fields: string[]
   created_at: string
   decided_at?: string | null
   decided_by?: string | null
@@ -2124,6 +2190,7 @@ export type AssistantActionRequestAdminSummary = {
   executed_count: number
   rejected_count: number
   failed_count: number
+  correction_count: number
   avg_decision_seconds?: number | null
 }
 
@@ -2147,6 +2214,7 @@ export type AssistantOutcomeMetricThresholds = {
   max_rejection_rate_for_promotion: number
   max_failed_execution_rate_for_promotion: number
   max_stale_action_rate_for_promotion: number
+  max_correction_rate_for_promotion: number
   max_pending_actions_for_promotion: number
   min_decided_actions_for_pause_signal: number
   rejection_rate_pause_threshold: number
@@ -2168,11 +2236,13 @@ export type AssistantOutcomeMetricCounters = {
   executed_action_count: number
   rejected_action_count: number
   failed_action_count: number
+  correction_count: number
   decided_action_count: number
   stale_action_count: number
   approval_rate?: number | null
   rejection_rate?: number | null
   failed_execution_rate?: number | null
+  correction_rate?: number | null
   stale_action_rate?: number | null
   avg_decision_seconds?: number | null
   oldest_pending_age_seconds?: number | null
