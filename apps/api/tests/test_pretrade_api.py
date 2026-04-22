@@ -482,6 +482,8 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(run["recommendation"]["score"], 100)
         self.assertEqual(run["recommendation"]["checks"][0]["key"], "source-quality")
         self.assertEqual(run["recommendation"]["checks"][0]["status"], "good")
+        self.assertIn("Proceed is supported", run["recommendation"]["explanation"]["stance_rationale"])
+        self.assertIn("Required source adapters", run["recommendation"]["explanation"]["source_quality_rationale"])
         self.assertEqual(run["recommendation"]["estimated_notional"], 71000)
         self.assertEqual(run["recommendation"]["related_active_trade_count"], 1)
         self.assertTrue(run["run_key"])
@@ -554,6 +556,7 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(review_payload["recommendation_run_id"], recommendation_run_id)
         self.assertEqual(review_payload["recommendation_summary"]["run_id"], recommendation_run_id)
         self.assertEqual(review_payload["recommendation_summary"]["stance"], "ESCALATE")
+        self.assertIn("Escalate because", review_payload["recommendation_summary"]["explanation"]["stance_rationale"])
         self.assertEqual(review_payload["recommendation_summary"]["input_snapshot_count"], 5)
 
         visible_attached_run = self.client.get(

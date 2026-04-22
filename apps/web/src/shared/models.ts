@@ -1400,6 +1400,7 @@ export type PreTradeReviewRecommendationSummaryRecord = {
   headline: string
   confidence: PreTradeRecommendationConfidence
   score: number
+  explanation: PreTradeRecommendationExplanationRecord | null
   source_scenario_id: number | null
   source_review_id: number | null
   input_snapshot_count: number
@@ -1478,6 +1479,14 @@ export type PreTradeRecommendationCheckRecord = {
   score_impact: number
 }
 
+export type PreTradeRecommendationExplanationRecord = {
+  stance_rationale: string
+  source_quality_rationale: string
+  confidence_rationale: string
+  primary_drivers: string[]
+  reviewer_focus: string[]
+}
+
 export type PreTradeRecommendationResultRecord = {
   stance: PreTradeRecommendationStance
   headline: string
@@ -1490,6 +1499,7 @@ export type PreTradeRecommendationResultRecord = {
   related_active_trade_count: number
   latest_mark: number | null
   mark_gap_pct: number | null
+  explanation: PreTradeRecommendationExplanationRecord
   checks: PreTradeRecommendationCheckRecord[]
   next_actions: string[]
 }
@@ -1523,6 +1533,7 @@ export type PreTradeReviewCaptureContext = {
   recommendationHeadline: string | null
   recommendationStance: PreTradeRecommendationStance | null
   recommendationScore: number | null
+  recommendationRationale: string | null
   recommendationOverrideReason: string | null
   recommendationOverrideBy: string | null
   recommendationOverrideAt: string | null

@@ -458,6 +458,9 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
                 {`Recommendation #${preTradeReviewContext.recommendationRunId} is attached${preTradeReviewContext.recommendationScore !== null ? ` with score ${preTradeReviewContext.recommendationScore}` : ''}.`}
               </p>
             ) : null}
+            {preTradeReviewContext.recommendationRationale ? (
+              <p>{`Rationale: ${preTradeReviewContext.recommendationRationale}`}</p>
+            ) : null}
             {preTradeReviewContext.recommendationOverrideReason ? (
               <p>
                 {`Recommendation override: ${preTradeReviewContext.recommendationOverrideReason}`}

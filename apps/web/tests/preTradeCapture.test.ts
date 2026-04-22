@@ -93,6 +93,7 @@ describe('applyPreTradeScenarioToCaptureForm', () => {
       recommendationHeadline: 'Proceed with standard controls.',
       recommendationStance: 'PROCEED',
       recommendationScore: 96,
+      recommendationRationale: 'Proceed is supported because all required checks passed.',
       recommendationOverrideReason: null,
       recommendationOverrideBy: null,
       recommendationOverrideAt: null,
@@ -144,6 +145,7 @@ describe('buildPreTradeWorkflowNote', () => {
       recommendationHeadline: 'Proceed with standard controls.',
       recommendationStance: 'PROCEED',
       recommendationScore: 96,
+      recommendationRationale: 'Proceed is supported because all required checks passed.',
       recommendationOverrideReason: 'Credit approved the temporary utilization overage.',
       recommendationOverrideBy: 'chief.risk',
       recommendationOverrideAt: '2026-04-15T15:29:00Z',
@@ -157,6 +159,7 @@ describe('buildPreTradeWorkflowNote', () => {
     expect(note).toContain('Source scenario: #7')
     expect(note).toContain('Recommendation run: #99 • PROCEED • score 96')
     expect(note).toContain('Recommendation: Proceed with standard controls.')
+    expect(note).toContain('Recommendation rationale: Proceed is supported because all required checks passed.')
     expect(note).toContain('Recommendation override: Credit approved the temporary utilization overage. • chief.risk • 2026-04-15T15:29:00Z')
     expect(note).toContain('Review notes: Approved for capture once the desk locks the fixed strip.')
   })

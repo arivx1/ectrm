@@ -30,8 +30,17 @@ export type PreTradeRecommendation = {
   related_active_trade_count: number
   latest_mark: number | null
   mark_gap_pct: number | null
+  explanation: PreTradeRecommendationExplanation
   checks: PreTradeRecommendationCheck[]
   next_actions: string[]
+}
+
+export type PreTradeRecommendationExplanation = {
+  stance_rationale: string
+  source_quality_rationale: string
+  confidence_rationale: string
+  primary_drivers: string[]
+  reviewer_focus: string[]
 }
 
 type BuildPreTradeRecommendationArgs = {
@@ -141,6 +150,38 @@ function marketFreshnessNeedsCare(marketContext: MarketContextRecord | null): bo
       entry.health_status.toUpperCase() !== 'HEALTHY' ||
       (typeof entry.observation_age_hours === 'number' && entry.observation_age_hours > 24),
   )
+}
+
+function buildRecommendationExplanation(args: {
+  stance: PreTradeRecommendationStance
+  confidence: PreTradeRecommendation['confidence']
+  checks: PreTradeRecommendationCheck[]
+}): PreTradeRecommendationExplanation {
+  const blockingChecks = args.checks.filter((check) => check.status === 'block')
+  const watchChecks = args.checks.filter((check) => check.status === 'watch')
+  const attentionChecks = blockingChecks.length > 0 ? blockingChecks : watchChecks
+  const primaryDrivers =
+    attentionChecks.length > 0
+      ? attentionChecks.slice(0, 3).map((check) => check.detail)
+      : ['All required pricing, credit, and positioning checks are aligned enough for standard controls.']
+  const sourceQualityCheck = args.checks.find((check) => check.key === 'source-quality')
+  const driverSummary = primaryDrivers[0]
+  const stancePrefix: Record<PreTradeRecommendationStance, string> = {
+    PROCEED: 'Proceed is supported because',
+    PROCEED_WITH_CARE: 'Proceed with care because',
+    ESCALATE: 'Escalate because',
+    WAIT_FOR_DATA: 'Wait for data because',
+  }
+
+  return {
+    stance_rationale: `${stancePrefix[args.stance]} ${driverSummary.charAt(0).toLowerCase()}${driverSummary.slice(1)}`,
+    source_quality_rationale: sourceQualityCheck?.detail ?? 'Live draft recommendation uses currently loaded workspace evidence.',
+    confidence_rationale: `${args.confidence.toLowerCase()} confidence reflects ${blockingChecks.length} blocking check${blockingChecks.length === 1 ? '' : 's'} and ${watchChecks.length} watch check${watchChecks.length === 1 ? '' : 's'}.`,
+    primary_drivers: primaryDrivers,
+    reviewer_focus: attentionChecks.length > 0
+      ? attentionChecks.slice(0, 3).map((check) => check.detail)
+      : ['Confirm desk intent, sizing, and standard booking controls before capture.'],
+  }
 }
 
 export function buildPreTradeRecommendation({
@@ -369,6 +410,7 @@ export function buildPreTradeRecommendation({
   const blockCount = checks.filter((check) => check.status === 'block').length
   const confidence: PreTradeRecommendation['confidence'] =
     blockCount > 0 ? 'LOW' : watchCount > 1 ? 'MEDIUM' : 'HIGH'
+  const explanation = buildRecommendationExplanation({ stance, confidence, checks })
 
   return {
     stance,
@@ -381,6 +423,7 @@ export function buildPreTradeRecommendation({
     related_active_trade_count: relatedTrades.length,
     latest_mark: bestMark,
     mark_gap_pct: markGapPct,
+    explanation,
     checks,
     next_actions:
       nextActions.length > 0

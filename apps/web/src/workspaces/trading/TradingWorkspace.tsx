@@ -1577,6 +1577,9 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         {` | score ${linkedPreTradeReview.recommendation_summary.score}`}
                         {` | ${linkedPreTradeReview.recommendation_summary.input_snapshot_count} source snapshots`}
                       </p>
+                      {linkedPreTradeReview.recommendation_summary.explanation ? (
+                        <p>{linkedPreTradeReview.recommendation_summary.explanation.stance_rationale}</p>
+                      ) : null}
                       {linkedPreTradeReview.recommendation_override_reason ? (
                         <p>
                           Override: {linkedPreTradeReview.recommendation_override_reason}

@@ -40,6 +40,7 @@ describe('buildPreTradeRecommendation', () => {
 
     expect(recommendation.stance).toBe('WAIT_FOR_DATA')
     expect(recommendation.checks.some((check) => check.status === 'block')).toBe(true)
+    expect(recommendation.explanation.stance_rationale).toContain('Wait for data')
   })
 
   it('escalates when projected credit utilization breaches the limit', () => {
@@ -135,6 +136,7 @@ describe('buildPreTradeRecommendation', () => {
 
     expect(recommendation.stance).toBe('ESCALATE')
     expect(recommendation.projected_credit_utilization_pct).not.toBeNull()
+    expect(recommendation.explanation.primary_drivers[0]).toContain('Projected credit utilization')
   })
 
   it('proceeds when credit and pricing checks are within tolerance', () => {
@@ -182,5 +184,6 @@ describe('buildPreTradeRecommendation', () => {
 
     expect(recommendation.stance).toBe('PROCEED')
     expect(recommendation.next_actions[0]).toContain('No blocking gaps')
+    expect(recommendation.explanation.reviewer_focus[0]).toContain('Confirm desk intent')
   })
 })

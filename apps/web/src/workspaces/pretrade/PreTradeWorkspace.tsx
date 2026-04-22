@@ -196,6 +196,7 @@ function buildApprovedReviewCaptureContext(review: PreTradeReviewItemRecord): Pr
     recommendationHeadline: review.recommendation_summary?.headline ?? null,
     recommendationStance: review.recommendation_summary?.stance ?? null,
     recommendationScore: review.recommendation_summary?.score ?? null,
+    recommendationRationale: review.recommendation_summary?.explanation?.stance_rationale ?? null,
     recommendationOverrideReason: review.recommendation_override_reason,
     recommendationOverrideBy: review.recommendation_override_by,
     recommendationOverrideAt: review.recommendation_override_at,
@@ -1236,6 +1237,11 @@ export function PreTradeWorkspace({
               Save Run
             </button>
           </div>
+          <div className="surface pretrade-next-actions">
+            <span className="eyebrow">Why This Stance</span>
+            <p>{recommendation.explanation.stance_rationale}</p>
+            <p className="form-note">{recommendation.explanation.confidence_rationale}</p>
+          </div>
           <div className="pretrade-metric-grid">
             <article className="pretrade-metric-card">
               <span>Estimated Notional</span>
@@ -1289,6 +1295,7 @@ export function PreTradeWorkspace({
                       <strong>{run.name}</strong>
                       <span>{run.recommendation.headline}</span>
                     </div>
+                    <p>{run.recommendation.explanation.stance_rationale}</p>
                     <small>
                       {run.recommendation.stance.replaceAll('_', ' ')} | score {run.recommendation.score} | {run.input_snapshots.length} sources | {sourceQualitySummary(run.input_snapshots)} | saved {formatDate(run.created_at)}
                     </small>
@@ -1546,6 +1553,9 @@ export function PreTradeWorkspace({
                       <small>
                         {review.recommendation_summary.stance.replaceAll('_', ' ')} | score {review.recommendation_summary.score} | {review.recommendation_summary.input_snapshot_count} sources
                       </small>
+                      {review.recommendation_summary.explanation ? (
+                        <p>{review.recommendation_summary.explanation.stance_rationale}</p>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="form-note">No saved recommendation run is attached to this review yet.</p>

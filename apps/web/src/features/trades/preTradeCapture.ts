@@ -73,6 +73,9 @@ export function buildPreTradeWorkflowNote(reviewContext: PreTradeReviewCaptureCo
   if (reviewContext.recommendationHeadline) {
     lines.push(`Recommendation: ${reviewContext.recommendationHeadline}`)
   }
+  if (reviewContext.recommendationRationale) {
+    lines.push(`Recommendation rationale: ${reviewContext.recommendationRationale}`)
+  }
   if (reviewContext.recommendationOverrideReason) {
     const overrideSummary = [
       normalizeOptionalText(reviewContext.recommendationOverrideReason),

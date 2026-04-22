@@ -204,6 +204,7 @@ class PreTradeReviewRecommendationSummary(BaseModel):
     headline: str
     confidence: PreTradeRecommendationConfidence
     score: int = Field(..., ge=0, le=100)
+    explanation: "PreTradeRecommendationExplanationOut | None" = None
     source_scenario_id: int | None = None
     source_review_id: int | None = None
     input_snapshot_count: int = 0
@@ -305,6 +306,14 @@ class PreTradeRecommendationCheckOut(BaseModel):
     score_impact: int = 0
 
 
+class PreTradeRecommendationExplanationOut(BaseModel):
+    stance_rationale: str
+    source_quality_rationale: str
+    confidence_rationale: str
+    primary_drivers: list[str] = Field(default_factory=list)
+    reviewer_focus: list[str] = Field(default_factory=list)
+
+
 class PreTradeRecommendationResultOut(BaseModel):
     stance: PreTradeRecommendationStance
     headline: str
@@ -317,6 +326,7 @@ class PreTradeRecommendationResultOut(BaseModel):
     related_active_trade_count: int = 0
     latest_mark: float | None = None
     mark_gap_pct: float | None = None
+    explanation: PreTradeRecommendationExplanationOut
     checks: list[PreTradeRecommendationCheckOut]
     next_actions: list[str]
 

@@ -11,6 +11,8 @@ from apps.api.app.domains.reports.services.pretrade_reviews import PRETRADE_SHAR
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationCheckOut,
+    PreTradeRecommendationConfidence,
+    PreTradeRecommendationExplanationOut,
     PreTradeRecommendationResultOut,
     PreTradeRecommendationRunOut,
     PreTradeRecommendationSourceAdapterOut,
@@ -384,6 +386,51 @@ def _build_check(
     )
 
 
+def _build_recommendation_explanation(
+    *,
+    stance: PreTradeRecommendationStance,
+    confidence: PreTradeRecommendationConfidence,
+    score: int,
+    checks: list[PreTradeRecommendationCheckOut],
+) -> PreTradeRecommendationExplanationOut:
+    blocking_checks = [check for check in checks if check.status == "block"]
+    watch_checks = [check for check in checks if check.status == "watch"]
+    attention_checks = blocking_checks or watch_checks
+    source_quality_check = next((check for check in checks if check.key == "source-quality"), None)
+    primary_drivers = [check.detail for check in attention_checks[:3]]
+    if not primary_drivers:
+        primary_drivers = ["All required source, pricing, credit, and positioning checks are aligned enough for standard controls."]
+
+    reviewer_focus = [check.detail for check in attention_checks[:3]]
+    if not reviewer_focus:
+        reviewer_focus = ["Confirm desk intent, sizing, and standard booking controls before capture."]
+
+    driver_summary = primary_drivers[0]
+    stance_prefix = {
+        "PROCEED": "Proceed is supported because",
+        "PROCEED_WITH_CARE": "Proceed with care because",
+        "ESCALATE": "Escalate because",
+        "WAIT_FOR_DATA": "Wait for data because",
+    }[stance]
+    confidence_detail = (
+        f"{confidence.title()} confidence is based on {len(blocking_checks)} blocking check"
+        f"{'' if len(blocking_checks) == 1 else 's'}, {len(watch_checks)} watch check"
+        f"{'' if len(watch_checks) == 1 else 's'}, and a recommendation score of {score}."
+    )
+
+    return PreTradeRecommendationExplanationOut(
+        stance_rationale=f"{stance_prefix} {driver_summary[0].lower() + driver_summary[1:]}",
+        source_quality_rationale=(
+            source_quality_check.detail
+            if source_quality_check is not None
+            else "Source adapter quality was not available for this recommendation run."
+        ),
+        confidence_rationale=confidence_detail,
+        primary_drivers=primary_drivers,
+        reviewer_focus=reviewer_focus,
+    )
+
+
 def _snapshot_has_degraded_external_context(snapshots: list[PreTradeRecommendationSourceSnapshot]) -> bool:
     if any(snapshot.source_type == "EXTERNAL" and snapshot.freshness in {"STALE", "DEGRADED"} for snapshot in snapshots):
         return True
@@ -681,6 +728,12 @@ def build_pretrade_recommendation_result(
     block_count = sum(1 for check in checks if check.status == "block")
     score = max(0, min(100, 100 + sum(check.score_impact for check in checks)))
     confidence = "LOW" if block_count > 0 or len(input_snapshots) < 2 else "MEDIUM" if watch_count > 1 else "HIGH"
+    explanation = _build_recommendation_explanation(
+        stance=stance,
+        confidence=confidence,  # type: ignore[arg-type]
+        score=score,
+        checks=checks,
+    )
 
     headline_by_stance = {
         "PROCEED": "Proceed with standard controls.",
@@ -707,6 +760,7 @@ def build_pretrade_recommendation_result(
         related_active_trade_count=related_active_trade_count,
         latest_mark=latest_mark,
         mark_gap_pct=mark_gap_pct,
+        explanation=explanation,
         checks=checks,
         next_actions=next_actions
         or ["No blocking gaps were detected. Hand the scenario into trade capture when the desk is ready."],
@@ -803,6 +857,7 @@ def to_recommendation_summary(record: ReportPreset) -> PreTradeReviewRecommendat
         headline=run.recommendation.headline,
         confidence=run.recommendation.confidence,
         score=run.recommendation.score,
+        explanation=run.recommendation.explanation,
         source_scenario_id=run.source_scenario_id,
         source_review_id=run.source_review_id,
         input_snapshot_count=len(run.input_snapshots),
