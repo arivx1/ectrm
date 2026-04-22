@@ -177,6 +177,10 @@ export const assistantOutcomeMetrics = {
     stale_action_rate_pause_threshold: 0.25,
     oldest_pending_hours_pause_threshold: 72,
   },
+  total_feedback_count: 2,
+  helpful_feedback_count: 1,
+  needs_work_feedback_count: 1,
+  feedback_helpful_rate: 0.5,
   by_agent: [
     {
       agent_id: 'ops-governor',
@@ -213,6 +217,24 @@ export const assistantOutcomeMetrics = {
       },
     },
   ],
+  by_workspace: [
+    {
+      workspace: 'trades',
+      run_count: 8,
+      helpful_feedback_count: 1,
+      needs_work_feedback_count: 0,
+      feedback_count: 1,
+      feedback_helpful_rate: 1,
+    },
+    {
+      workspace: 'assistant',
+      run_count: 4,
+      helpful_feedback_count: 0,
+      needs_work_feedback_count: 1,
+      feedback_count: 1,
+      feedback_helpful_rate: 0,
+    },
+  ],
   by_action_type: [
     {
       action_type: 'cancel_trade',
@@ -235,6 +257,36 @@ export const assistantOutcomeMetrics = {
         pause_recommended: false,
         reasons: ['One pending cancel_trade action is still waiting for review.'],
       },
+    },
+  ],
+  recent_feedback: [
+    {
+      feedback_id: 901,
+      run_id: 701,
+      conversation_id: 601,
+      agent_id: 'ops-governor',
+      agent_name: 'Ops Governor',
+      workspace: 'assistant',
+      user_id: 'trader.alpha',
+      user_role: 'TRADER',
+      rating: 'NEEDS_WORK',
+      comment: 'Show the cancellation policy evidence before staging.',
+      created_at: '2026-04-11T09:00:00Z',
+      updated_at: '2026-04-11T09:00:00Z',
+    },
+    {
+      feedback_id: 900,
+      run_id: 700,
+      conversation_id: 600,
+      agent_id: 'ops-governor',
+      agent_name: 'Ops Governor',
+      workspace: 'trades',
+      user_id: 'trader.alpha',
+      user_role: 'TRADER',
+      rating: 'HELPFUL',
+      comment: 'Clear and actionable.',
+      created_at: '2026-04-11T08:30:00Z',
+      updated_at: '2026-04-11T08:30:00Z',
     },
   ],
 } as const

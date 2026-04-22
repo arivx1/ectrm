@@ -161,8 +161,14 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
       stale_action_rate_pause_threshold: 0.25,
       oldest_pending_hours_pause_threshold: 72,
     },
+    total_feedback_count: 0,
+    helpful_feedback_count: 0,
+    needs_work_feedback_count: 0,
+    feedback_helpful_rate: null,
     by_agent: [],
+    by_workspace: [],
     by_action_type: [],
+    recent_feedback: [],
   }
   fetchJsonMock.mockResolvedValueOnce(expected)
 

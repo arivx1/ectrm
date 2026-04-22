@@ -239,6 +239,7 @@ export function AssistantOutcomeMetricsPanel({
     () => buildAssistantWorkspaceFeedbackRows(metrics?.by_workspace ?? []),
     [metrics],
   )
+  const recentFeedbackRows = metrics?.recent_feedback ?? []
   const advisoryRows = useMemo(
     () => [...(metrics?.by_agent ?? []), ...(metrics?.by_action_type ?? [])],
     [metrics],
@@ -472,10 +473,10 @@ export function AssistantOutcomeMetricsPanel({
                   <span className="eyebrow">Feedback</span>
                   <h4>Recent Run Notes</h4>
                 </div>
-                <span>{metrics?.recent_feedback.length ?? 0} item{metrics?.recent_feedback.length === 1 ? '' : 's'}</span>
+                <span>{recentFeedbackRows.length} item{recentFeedbackRows.length === 1 ? '' : 's'}</span>
               </div>
               <div className="assistant-feedback-insight-list">
-                {renderRecentFeedbackRows(metrics?.recent_feedback ?? [], loading, formatDate)}
+                {renderRecentFeedbackRows(recentFeedbackRows, loading, formatDate)}
               </div>
             </div>
           </div>
