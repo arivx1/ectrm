@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { loadMarketContext } from '../../entities/market-data/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
@@ -1039,7 +1039,7 @@ export function PreTradeWorkspace({
     })
   }
 
-  function governanceReviewItemsForBucket(bucket: GovernanceReviewBucketKey): PreTradeReviewItemRecord[] {
+  const governanceReviewItemsForBucket = useCallback((bucket: GovernanceReviewBucketKey): PreTradeReviewItemRecord[] => {
     switch (bucket) {
       case 'pending':
         return governanceItems?.pending_reviews ?? []
@@ -1050,7 +1050,7 @@ export function PreTradeWorkspace({
       case 'booked-with-override':
         return governanceItems?.booked_with_override_reviews ?? []
     }
-  }
+  }, [governanceItems])
 
   function handleGovernanceMetricSelect(bucket: GovernanceBucketKey) {
     setSelectedGovernanceBucket(bucket)
@@ -1106,7 +1106,7 @@ export function PreTradeWorkspace({
 
     const reviewIds = new Set(governanceReviewItemsForBucket(reviewQueueFilter).map((review) => review.review_id))
     return reviews.filter((review) => reviewIds.has(review.review_id))
-  }, [governanceItems, reviewQueueFilter, reviews])
+  }, [governanceReviewItemsForBucket, reviewQueueFilter, reviews])
 
   useEffect(() => {
     if (focusedReviewId === null || typeof document === 'undefined') {
@@ -1602,6 +1602,78 @@ export function PreTradeWorkspace({
               </strong>
             </article>
           </div>
+          {recommendation.opportunity_summary ? (
+            <div className="surface pretrade-next-actions">
+              <span className="eyebrow">Opportunity Summary</span>
+              <p>
+                <strong>{recommendation.opportunity_summary.title}</strong>
+                {` | ${recommendation.opportunity_summary.category.replaceAll('_', ' ')}`}
+              </p>
+              <p>{recommendation.opportunity_summary.detail}</p>
+            </div>
+          ) : null}
+          {recommendation.residual_exposure || recommendation.hedge_recommendation ? (
+            <div className="pretrade-metric-grid">
+              <article className="pretrade-metric-card">
+                <span>Proposed Delta</span>
+                <strong>
+                  {recommendation.residual_exposure?.proposed_trade_delta === null ||
+                  recommendation.residual_exposure?.proposed_trade_delta === undefined
+                    ? 'n/a'
+                    : `${recommendation.residual_exposure.proposed_trade_delta > 0 ? '+' : ''}${formatNumber(recommendation.residual_exposure.proposed_trade_delta, 0)}`}
+                </strong>
+              </article>
+              <article className="pretrade-metric-card">
+                <span>Residual After Draft</span>
+                <strong>
+                  {recommendation.residual_exposure?.residual_after_trade === null ||
+                  recommendation.residual_exposure?.residual_after_trade === undefined
+                    ? 'n/a'
+                    : `${recommendation.residual_exposure.residual_after_trade > 0 ? '+' : ''}${formatNumber(recommendation.residual_exposure.residual_after_trade, 0)}`}
+                </strong>
+              </article>
+              <article className="pretrade-metric-card">
+                <span>Exposure Effect</span>
+                <strong>{recommendation.residual_exposure?.exposure_effect.replaceAll('_', ' ') ?? 'n/a'}</strong>
+              </article>
+              <article className="pretrade-metric-card">
+                <span>Hedge Draft</span>
+                <strong>{recommendation.hedge_recommendation?.instrument_type.replaceAll('_', ' ') ?? 'n/a'}</strong>
+              </article>
+            </div>
+          ) : null}
+          {recommendation.hedge_recommendation ? (
+            <div className="surface pretrade-next-actions">
+              <span className="eyebrow">Hedge Draft</span>
+              <p>{recommendation.hedge_recommendation.rationale}</p>
+              {recommendation.hedge_recommendation.policy_stops.length > 0 ? (
+                <ul className="pretrade-bullet-list">
+                  {recommendation.hedge_recommendation.policy_stops.map((stop) => (
+                    <li key={stop}>{stop}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {recommendation.netting_candidates.length > 0 ? (
+            <div className="surface pretrade-next-actions">
+              <span className="eyebrow">Netting Candidates</span>
+              <div className="pretrade-card-list">
+                {recommendation.netting_candidates.map((candidate) => (
+                  <article key={candidate.candidate_id} className="pretrade-record-card pretrade-record-static">
+                    <div>
+                      <strong>{candidate.label}</strong>
+                      <span>{candidate.match_quality.replaceAll('_', ' ')}</span>
+                    </div>
+                    <small>
+                      Matched {formatNumber(candidate.matched_quantity, 0)} | residual {formatNumber(candidate.residual_quantity, 0)}
+                    </small>
+                    {candidate.rejection_reasons.length > 0 ? <p>{candidate.rejection_reasons.join(' ')}</p> : null}
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="pretrade-check-list">
             {recommendation.checks.map((check) => (
               <article key={check.key} className={`pretrade-check-card pretrade-check-card-${check.status}`}>
@@ -1621,6 +1693,29 @@ export function PreTradeWorkspace({
               ))}
             </ul>
           </div>
+          {recommendation.missing_evidence.length > 0 || recommendation.rejected_alternatives.length > 0 ? (
+            <div className="surface pretrade-next-actions">
+              <span className="eyebrow">Agent-Readable Evidence</span>
+              {recommendation.missing_evidence.length > 0 ? (
+                <ul className="pretrade-bullet-list">
+                  {recommendation.missing_evidence.slice(0, 4).map((item) => (
+                    <li key={item.evidence_key}>
+                      {item.severity}: {item.detail}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {recommendation.rejected_alternatives.length > 0 ? (
+                <ul className="pretrade-bullet-list">
+                  {recommendation.rejected_alternatives.map((alternative) => (
+                    <li key={alternative.alternative}>
+                      Rejected {alternative.alternative.replaceAll('_', ' ')}: {alternative.reason}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           <div className="surface pretrade-next-actions">
             <span className="eyebrow">Saved Provenance</span>
             {currentRecommendationRuns.length > 0 ? (

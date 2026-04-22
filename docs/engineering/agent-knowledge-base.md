@@ -245,6 +245,32 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: when a future agent proposes or adds a deterministic algorithm,
   append a focused `algorithm-candidate` or `algorithm-added` entry here.
 
+### 2026-04-22 - Accepted Work Packages Are The Autonomy Handoff
+
+- Type: algorithm-added
+- Domain: agent governance, deterministic algorithm promotion
+- Applies to: generated health-review work packages, recurring deterministic
+  candidates, policy/service/eval/knowledge-base backlog items
+- Status: implemented
+- Source: `apps/api/app/domains/assistant/services/agent_work_packages.py`
+  and `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`
+- Lesson: generated health-review work packages become actionable only after an
+  admin accepts them into the durable work-package backlog. Acceptance preserves
+  the candidate, source agents, recommended owner, checks, lifecycle status,
+  actor, timestamps, and notes so the work can move from autonomy review into
+  implementation without relying on an ephemeral generated snapshot.
+- Deterministic opportunity: future lifecycle transitions should turn accepted
+  policy, service, eval, or knowledge-base packages into concrete PRs, eval
+  cases, or docs entries, then mark the package implemented when verification
+  evidence exists.
+- Agent autonomy impact: agents may propose and group deterministic candidates,
+  but accepted backlog records are the review gate before changing product
+  behavior or agent authority.
+- Tests or evidence: service and API coverage verifies candidate acceptance,
+  idempotent persistence, admin auth, and frontend API ownership.
+- Follow-up: add lifecycle update endpoints when the backlog needs in-progress,
+  implemented, or dismissed state changes from the UI.
+
 ### 2026-04-22 - Freeform Output Must Not Mutate Records
 
 - Type: stop-condition
@@ -803,3 +829,88 @@ proposal form until a human owner approves the domain rule.
   trade capture.
 - Follow-up: if prompt resume grows beyond browser-local state, promote it to a
   typed server-side session continuation contract with expiry and audit fields.
+
+### 2026-04-22 - Prompt Starters Are Deterministic UI Intents
+
+- Type: lesson
+- Domain: prompt-first UX
+- Applies to: Prompt Home, contextual starters, old-console navigation handoff,
+  assistant prompt submission
+- Status: implemented
+- Source:
+  [`promptHomeStarters.ts`](../../apps/web/src/workspaces/prompt/promptHomeStarters.ts)
+  and
+  [`PromptHomeWorkspace.tsx`](../../apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx)
+- Lesson: contextual Prompt Home starters should be typed UI intents derived
+  from deterministic workspace summary counts. They may seed or submit a prompt,
+  or open the traditional workspace directly, but they should not rely on model
+  output to decide the initial destination.
+- Deterministic opportunity: starter cards are a stable mapping from work
+  context to prompt draft and `PromptNavigationIntent`. If the mapping becomes
+  role-specific or threshold-driven, move the rule into a typed service or
+  configuration contract rather than embedding prompt instructions.
+- Agent autonomy impact: starter prompts can ask the assistant to explain and
+  route work, while direct workspace actions preserve manual fallback. Neither
+  path grants the assistant write authority.
+- Tests or evidence: web unit tests cover starter count projection and unknown
+  metrics. Browser smoke covers asking from a starter, receiving an assistant
+  handoff, and opening an old workspace directly from a starter.
+- Follow-up: future starters should declare source counts, destination intent,
+  prompt text, and stop conditions before being exposed as first-screen actions.
+
+### 2026-04-22 - Control Tower UI Separates Watching From Enforcement
+
+- Type: lesson
+- Domain: control tower governance
+- Applies to: Admin control tower, agent registry, approval inbox, outcome
+  metrics, trust signal display
+- Status: implemented
+- Source:
+  [`AssistantControlTowerPanel.tsx`](../../apps/web/src/workspaces/admin/AssistantControlTowerPanel.tsx)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: the human watch surface should make agent posture easy to inspect
+  without silently changing authority. The control tower can highlight eval
+  gaps, policy warnings, failed actions, pending backlogs, and blocked previews,
+  but pausing, narrowing, approval, or profile edits must remain explicit human
+  actions in the existing governed panels.
+- Deterministic opportunity: trust-signal presentation should link to durable
+  remediation surfaces rather than inventing new hidden workflows. If repeated
+  signals need automatic enforcement, promote that rule through policy,
+  service, eval, and approval design first.
+- Agent autonomy impact: supervisors can watch and nudge agents faster, but
+  Phase 1 authority remains observe, explain, draft, or stage unless the
+  autonomy rubric and outcome evidence justify more.
+- Tests or evidence: web rendering tests cover seeded control tower posture and
+  non-admin gating. The panel links to agent management, outcome metrics, and
+  approval inbox sections while preserving the Phase 1 autonomy statement.
+- Follow-up: AP1-12 should add explicit pause or narrowing workflows without
+  turning summary signals into automatic mutations.
+
+### 2026-04-22 - Unissued Invoices Are Candidate Trades
+
+- Type: algorithm-added
+- Domain: settlement assistant tooling
+- Applies to: pending invoice summaries, settlement copilots, invoice action
+  staging, workspace handoffs
+- Status: implemented
+- Source:
+  [`settlement_invoices.py`](../../apps/api/app/domains/operations/services/settlement_invoices.py)
+  and
+  [`tools.py`](../../apps/api/app/domains/assistant/services/tools.py)
+- Lesson: `settlement.invoice_pending_count` counts active trades that still
+  need their first invoice record, not persisted invoice rows. Settlement
+  agents should use the invoice issue candidate read model for unissued invoice
+  work and use the invoice ledger only for records that already exist.
+- Deterministic opportunity: candidate detection belongs in settlement service
+  logic with the same open-settlement and no-existing-invoice criteria as the
+  workspace summary, plus deterministic invoice-issue preview blockers before
+  any action is staged.
+- Agent autonomy impact: surfacing candidates improves read/explain/stage
+  quality without increasing authority. Issuance remains an approval-gated
+  `issue_trade_invoice` action and blocked previews should stop staging until
+  missing evidence is resolved.
+- Tests or evidence: assistant tooling coverage verifies candidate payloads and
+  recommended approval-gated actions; assistant eval coverage verifies a
+  settlement read agent can call the candidate tool for pending invoices.
+- Follow-up: if finance users need sorting or prioritization beyond oldest open
+  execution, promote that rule as a named settlement queue policy.

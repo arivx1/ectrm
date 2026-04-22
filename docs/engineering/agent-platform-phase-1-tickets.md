@@ -527,6 +527,14 @@ trust signals.
 
 ## AP1-11: Admin Control Tower Overview
 
+### Status
+
+Implemented on 2026-04-22. The Admin workspace now has an Agent Control Tower
+overview that loads the AP1-10 summary, shows roster posture, run and action
+signals, oldest pending action, trust signals, and links to the agent registry,
+outcome metrics, and approval inbox while preserving a conservative Phase 1
+autonomy statement.
+
 ### Size
 
 M

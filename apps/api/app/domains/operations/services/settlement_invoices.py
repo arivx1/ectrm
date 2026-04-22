@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.operations.services.actualizations import (
@@ -60,6 +60,7 @@ from apps.api.app.schemas.operations import OperationalRowActionStateOut
 from apps.api.app.schemas.settlement import TradeInvoiceOut
 from apps.api.app.shared.enums import InvoiceStatus
 from apps.api.app.shared.enums import PaymentStatus
+from apps.api.app.shared.enums import SettlementStatus
 from apps.api.app.shared.enums import TradeNature
 from apps.api.app.shared.enums import TradeStatus
 from apps.api.app.shared.enums import TradeWorkflowType
@@ -91,6 +92,33 @@ class InvoiceListRequest(OperationalResourceListRequest):
 @dataclass(frozen=True)
 class InvoiceListContext:
     payments_by_invoice_id: dict[int, list[TradePayment]]
+
+
+@dataclass(frozen=True)
+class InvoiceIssueCandidate:
+    trade_id: str
+    trade_nature: str
+    book: str
+    portfolio: str | None
+    counterparty: str | None
+    commodity_class: str
+    commodity: str
+    trader_user: str | None
+    trade_date: date | None
+    execution_timestamp: datetime | None
+    delivery_start: date | None
+    delivery_end: date | None
+    trade_currency_code: str | None
+    invoice_status: str
+    payment_status: str
+    settlement_status: str
+    notional_amount: Decimal | None
+    age_days: int | None
+    readiness_status: str
+    preview_summary: str
+    blocking_reasons: tuple[str, ...]
+    assumptions: tuple[str, ...]
+    recommended_action: dict[str, object]
 
 
 def _audit_invoice_payload(invoice: TradeInvoiceOut) -> dict[str, object]:
@@ -814,6 +842,112 @@ def trade_has_invoice_record(db: Session, *, trade_id: str) -> bool:
         db.execute(select(TradeInvoice.id).where(TradeInvoice.trade_id == trade_id).limit(1)).scalar_one_or_none()
         is not None
     )
+
+
+def _invoice_issue_candidate_conditions() -> tuple[object, ...]:
+    invoice_record_exists = select(TradeInvoice.id).where(TradeInvoice.trade_id == Trade.trade_id).exists()
+    open_settlement_trade_condition = ~and_(
+        Trade.settlement_status == SettlementStatus.SETTLED.value,
+        Trade.payment_status.in_((PaymentStatus.PAID.value, PaymentStatus.NOT_REQUIRED.value)),
+    )
+    return (
+        Trade.status == TradeStatus.ACTIVE.value,
+        open_settlement_trade_condition,
+        Trade.invoice_status != InvoiceStatus.NOT_REQUIRED.value,
+        ~invoice_record_exists,
+    )
+
+
+def count_invoice_issue_candidates(db: Session) -> int:
+    return int(
+        db.execute(
+            select(func.count())
+            .select_from(Trade)
+            .where(*_invoice_issue_candidate_conditions())
+        ).scalar_one()
+    )
+
+
+def _trade_age_days(trade: Trade, *, reference_time: datetime) -> int | None:
+    execution_timestamp = _coerce_utc(trade.execution_timestamp)
+    if execution_timestamp is not None:
+        return max(0, int((reference_time - execution_timestamp).total_seconds() // 86_400))
+    if trade.trade_date is not None:
+        return max(0, (reference_time.date() - trade.trade_date).days)
+    return None
+
+
+def _to_invoice_issue_candidate(
+    db: Session,
+    *,
+    trade: Trade,
+    reference_time: datetime,
+) -> InvoiceIssueCandidate:
+    preview = preview_trade_invoice_issue(
+        db,
+        trade_id=trade.trade_id,
+        now=reference_time,
+    )
+    readiness_status = str(preview.get("status") or "UNKNOWN")
+    return InvoiceIssueCandidate(
+        trade_id=trade.trade_id,
+        trade_nature=trade.trade_nature,
+        book=trade.book,
+        portfolio=trade.portfolio,
+        counterparty=trade.counterparty,
+        commodity_class=trade.commodity_class,
+        commodity=trade.commodity,
+        trader_user=trade.trader_user,
+        trade_date=trade.trade_date,
+        execution_timestamp=_coerce_utc(trade.execution_timestamp),
+        delivery_start=trade.delivery_start,
+        delivery_end=trade.delivery_end,
+        trade_currency_code=trade.trade_currency_code,
+        invoice_status=trade.invoice_status,
+        payment_status=trade.payment_status,
+        settlement_status=trade.settlement_status,
+        notional_amount=_trade_notional_amount(trade),
+        age_days=_trade_age_days(trade, reference_time=reference_time),
+        readiness_status=readiness_status,
+        preview_summary=str(preview.get("summary") or ""),
+        blocking_reasons=tuple(str(reason) for reason in preview.get("blocking_reasons") or ()),
+        assumptions=tuple(str(assumption) for assumption in preview.get("assumptions") or ()),
+        recommended_action={
+            "action_type": "issue_trade_invoice",
+            "requires_approval": True,
+            "payload": {"trade_id": trade.trade_id},
+            "preview_status": readiness_status,
+        },
+    )
+
+
+def list_invoice_issue_candidates(
+    db: Session,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+    now: Optional[datetime] = None,
+) -> list[InvoiceIssueCandidate]:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    stmt = (
+        select(Trade)
+        .where(*_invoice_issue_candidate_conditions())
+        .order_by(
+            Trade.execution_timestamp.is_(None).asc(),
+            Trade.execution_timestamp.asc(),
+            Trade.trade_id.asc(),
+        )
+    )
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+
+    trades = db.execute(stmt).scalars().all()
+    return [
+        _to_invoice_issue_candidate(db, trade=trade, reference_time=reference_time)
+        for trade in trades
+    ]
 
 
 def _load_trade_invoice_rows(

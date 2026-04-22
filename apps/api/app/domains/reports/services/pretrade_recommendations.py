@@ -12,9 +12,19 @@ from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationCheckOut,
     PreTradeRecommendationConfidence,
+    PreTradeRecommendationEvidenceRefOut,
+    PreTradeExposureDirection,
+    PreTradeExposureEffect,
     PreTradeRecommendationExplanationOut,
+    PreTradeRecommendationHedgeRecommendationOut,
     PreTradeRecommendationInputDeltaOut,
+    PreTradeRecommendationMissingEvidenceOut,
+    PreTradeRecommendationNettingCandidateOut,
+    PreTradeOpportunityCategory,
+    PreTradeRecommendationOpportunitySummaryOut,
     PreTradeRecommendationResultOut,
+    PreTradeRecommendationRejectedAlternativeOut,
+    PreTradeRecommendationResidualExposureOut,
     PreTradeRecommendationRunComparisonOut,
     PreTradeRecommendationRunOut,
     PreTradeRecommendationSourceAdapterOut,
@@ -109,6 +119,16 @@ SOURCE_ADAPTERS: tuple[SourceAdapterDefinition, ...] = (
         required_for_recommendation=False,
         payload_keys=("weather_high_risk_count", "live_weather_location_count"),
         provenance_dataset="weather-intelligence",
+    ),
+    SourceAdapterDefinition(
+        adapter_key="option-exposure",
+        label="Option exposure",
+        source_type="DERIVED",
+        description="Derived option delta and sensitivity context used to avoid treating nonlinear exposure as simple linear delta.",
+        freshness_sla_hours=24,
+        required_for_recommendation=False,
+        payload_keys=("has_option_exposure", "option_delta", "option_gamma", "option_vega"),
+        provenance_dataset="option-exposures",
     ),
 )
 
@@ -387,6 +407,303 @@ def _build_check(
         detail=detail,
         score_impact=impact_by_status[status],
     )
+
+
+def _evidence_ref(snapshot: PreTradeRecommendationSourceSnapshot) -> PreTradeRecommendationEvidenceRefOut:
+    return PreTradeRecommendationEvidenceRefOut(
+        source_key=snapshot.source_key,
+        adapter_key=snapshot.adapter_key,
+        adapter_label=snapshot.adapter_label,
+        source_type=snapshot.source_type,
+        freshness=snapshot.freshness,
+        quality_status=snapshot.quality_status,
+        record_id=snapshot.provenance.record_id,
+        summary=snapshot.summary,
+    )
+
+
+def _evidence_refs_for_adapter_keys(
+    snapshots: Iterable[PreTradeRecommendationSourceSnapshot],
+    adapter_keys: Iterable[str],
+) -> list[PreTradeRecommendationEvidenceRefOut]:
+    wanted = set(adapter_keys)
+    return [
+        _evidence_ref(snapshot)
+        for snapshot in snapshots
+        if (snapshot.adapter_key or snapshot.source_key) in wanted
+    ]
+
+
+def _direction(value: float | None) -> PreTradeExposureDirection:
+    if value is None:
+        return "UNKNOWN"
+    if value > 0:
+        return "LONG"
+    if value < 0:
+        return "SHORT"
+    return "FLAT"
+
+
+def _proposed_trade_delta(draft: PreTradeScenarioDraft) -> float | None:
+    if draft.target_volume is None:
+        return None
+    return draft.target_volume if draft.trade_side == "BUY" else -draft.target_volume
+
+
+def _exposure_effect(
+    *,
+    current_net_position: float | None,
+    proposed_trade_delta: float | None,
+) -> PreTradeExposureEffect:
+    if current_net_position is None or proposed_trade_delta is None:
+        return "UNKNOWN"
+    before_abs = abs(current_net_position)
+    after_abs = abs(current_net_position + proposed_trade_delta)
+    if after_abs < before_abs:
+        return "OFFSETS"
+    if after_abs > before_abs:
+        return "DEEPENS"
+    return "NEUTRAL"
+
+
+def _build_missing_evidence(
+    *,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+    required_adapter_keys: set[str],
+) -> list[PreTradeRecommendationMissingEvidenceOut]:
+    missing: list[PreTradeRecommendationMissingEvidenceOut] = []
+    for snapshot in snapshots:
+        adapter_key = snapshot.adapter_key or snapshot.source_key
+        if snapshot.quality_status not in {"STALE", "DEGRADED", "MISSING"}:
+            continue
+
+        required = adapter_key in required_adapter_keys
+        label = snapshot.adapter_label or snapshot.source_key.replace("-", " ").title()
+        if snapshot.quality_status == "MISSING":
+            detail = f"{label} did not provide usable evidence for this recommendation."
+        else:
+            detail = f"{label} evidence is {snapshot.quality_status.lower()} for this recommendation."
+
+        missing.append(
+            PreTradeRecommendationMissingEvidenceOut(
+                evidence_key=adapter_key,
+                label=label,
+                severity="BLOCKING" if required and snapshot.quality_status == "MISSING" else "WARNING",
+                detail=detail,
+                source_refs=[_evidence_ref(snapshot)],
+            )
+        )
+    return missing
+
+
+def _build_residual_exposure(
+    *,
+    draft: PreTradeScenarioDraft,
+    current_net_position: float | None,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> PreTradeRecommendationResidualExposureOut:
+    proposed_delta = _proposed_trade_delta(draft)
+    residual_after_trade = (
+        current_net_position + proposed_delta
+        if current_net_position is not None and proposed_delta is not None
+        else None
+    )
+    effect = _exposure_effect(current_net_position=current_net_position, proposed_trade_delta=proposed_delta)
+    detail_by_effect = {
+        "OFFSETS": "The proposed trade reduces the absolute open position for the selected commodity.",
+        "DEEPENS": "The proposed trade increases the absolute open position for the selected commodity.",
+        "NEUTRAL": "The proposed trade leaves the absolute open position broadly unchanged.",
+        "UNKNOWN": "Residual exposure cannot be calculated until current position and target size are both available.",
+    }
+    return PreTradeRecommendationResidualExposureOut(
+        current_net_position=current_net_position,
+        proposed_trade_delta=proposed_delta,
+        residual_after_trade=residual_after_trade,
+        direction_before=_direction(current_net_position),
+        direction_after=_direction(residual_after_trade),
+        exposure_effect=effect,
+        detail=detail_by_effect[effect],
+        source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context",)),
+    )
+
+
+def _build_netting_candidates(
+    *,
+    draft: PreTradeScenarioDraft,
+    residual_exposure: PreTradeRecommendationResidualExposureOut,
+) -> list[PreTradeRecommendationNettingCandidateOut]:
+    current = residual_exposure.current_net_position
+    proposed = residual_exposure.proposed_trade_delta
+    residual = residual_exposure.residual_after_trade
+    if current is None or proposed is None or residual is None:
+        return []
+
+    constraints = [
+        f"commodity={draft.commodity}",
+        f"unit={draft.unit_of_measure or 'UNKNOWN'}",
+        f"location={draft.location_code or 'UNKNOWN'}",
+    ]
+    if residual_exposure.exposure_effect == "OFFSETS":
+        matched_quantity = min(abs(current), abs(proposed))
+        return [
+            PreTradeRecommendationNettingCandidateOut(
+                candidate_id="current-position-offset",
+                label="Current net position offset",
+                match_quality="EXACT" if residual == 0 else "PARTIAL",
+                matched_quantity=matched_quantity,
+                residual_quantity=abs(residual),
+                constraints=constraints,
+                source_refs=residual_exposure.source_refs,
+            )
+        ]
+
+    return [
+        PreTradeRecommendationNettingCandidateOut(
+            candidate_id="current-position-offset",
+            label="Current net position offset",
+            match_quality="REJECTED",
+            matched_quantity=0,
+            residual_quantity=abs(residual),
+            constraints=constraints,
+            rejection_reasons=["The proposed side does not reduce the current net position."],
+            source_refs=residual_exposure.source_refs,
+        )
+    ]
+
+
+def _build_opportunity_summary(
+    *,
+    stance: PreTradeRecommendationStance,
+    mark_gap_pct: float | None,
+    residual_exposure: PreTradeRecommendationResidualExposureOut,
+    checks: list[PreTradeRecommendationCheckOut],
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> PreTradeRecommendationOpportunitySummaryOut:
+    attention_keys = [check.key for check in checks if check.status != "good"]
+    if stance == "WAIT_FOR_DATA":
+        category: PreTradeOpportunityCategory = "WAIT_FOR_DATA"
+        title = "Wait for required evidence"
+        detail = "Required context or source evidence is missing, so this should not be promoted as an opportunity yet."
+    elif mark_gap_pct is not None and mark_gap_pct >= 7:
+        category = "MARK_GAP"
+        title = "Pricing gap review"
+        detail = f"Target economics are {_format_percent(mark_gap_pct)} away from the captured mark."
+    elif residual_exposure.exposure_effect == "OFFSETS":
+        category = "EXPOSURE_OFFSET"
+        title = "Exposure offset review"
+        detail = "The draft appears to reduce current net exposure and may be useful for risk reduction."
+    elif residual_exposure.exposure_effect == "DEEPENS":
+        category = "RISK_INCREASE"
+        title = "Risk-increasing review"
+        detail = "The draft appears to deepen current net exposure, so sizing and hedge intent need review."
+    else:
+        category = "STANDARD_REVIEW"
+        title = "Standard pre-trade review"
+        detail = "No single pricing or exposure driver dominates the recommendation."
+
+    return PreTradeRecommendationOpportunitySummaryOut(
+        category=category,
+        title=title,
+        detail=detail,
+        driver_keys=attention_keys,
+        source_refs=_evidence_refs_for_adapter_keys(
+            snapshots,
+            ("desk-context", "latest-mark", "market-context", "weather-intelligence"),
+        ),
+    )
+
+
+def _build_hedge_recommendation(
+    *,
+    draft: PreTradeScenarioDraft,
+    stance: PreTradeRecommendationStance,
+    residual_exposure: PreTradeRecommendationResidualExposureOut,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> PreTradeRecommendationHedgeRecommendationOut:
+    residual = residual_exposure.residual_after_trade
+    option_delta = _payload_number(snapshots, ("option_delta", "delta"))
+    option_gamma = _payload_number(snapshots, ("option_gamma", "gamma"))
+    has_option_exposure = _payload_bool(snapshots, ("has_option_exposure",))
+    policy_stops: list[str] = []
+
+    if stance == "WAIT_FOR_DATA" or residual is None:
+        if residual is None:
+            policy_stops.append("Residual exposure is unavailable.")
+        return PreTradeRecommendationHedgeRecommendationOut(
+            instrument_type="WAIT_FOR_DATA",
+            rationale="Do not select a hedge instrument until residual exposure and required evidence are available.",
+            policy_stops=policy_stops,
+            source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "latest-mark", "option-exposure")),
+        )
+
+    if residual == 0:
+        return PreTradeRecommendationHedgeRecommendationOut(
+            instrument_type="NO_HEDGE",
+            rationale="The draft fully offsets the current net position, so no residual hedge delta is suggested.",
+            target_delta=0,
+            hedge_ratio=0,
+            source_refs=residual_exposure.source_refs,
+        )
+
+    if has_option_exposure or (option_delta is not None and option_delta != 0) or (option_gamma is not None and option_gamma != 0):
+        return PreTradeRecommendationHedgeRecommendationOut(
+            instrument_type="OPTIONS",
+            rationale="Review option hedges because nonlinear option exposure evidence is present.",
+            target_delta=-residual,
+            hedge_ratio=1,
+            source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "option-exposure")),
+        )
+
+    if draft.pricing_type.upper() == "FIXED":
+        return PreTradeRecommendationHedgeRecommendationOut(
+            instrument_type="FUTURES",
+            rationale="Review a listed futures hedge for the remaining linear fixed-price delta.",
+            target_delta=-residual,
+            hedge_ratio=1,
+            source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "latest-mark")),
+        )
+
+    return PreTradeRecommendationHedgeRecommendationOut(
+        instrument_type="SWAP",
+        rationale="Review an index-linked swap for the remaining floating-price exposure and basis profile.",
+        target_delta=-residual,
+        hedge_ratio=1,
+        source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "latest-mark")),
+    )
+
+
+def _build_rejected_alternatives(
+    *,
+    hedge_recommendation: PreTradeRecommendationHedgeRecommendationOut,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> list[PreTradeRecommendationRejectedAlternativeOut]:
+    selected = hedge_recommendation.instrument_type
+    rejected: list[PreTradeRecommendationRejectedAlternativeOut] = []
+    if selected not in {"OPTIONS", "WAIT_FOR_DATA"}:
+        rejected.append(
+            PreTradeRecommendationRejectedAlternativeOut(
+                alternative="OPTIONS",
+                reason="No fresh option exposure evidence requires an option hedge in this draft.",
+                source_refs=_evidence_refs_for_adapter_keys(snapshots, ("option-exposure",)),
+            )
+        )
+    if selected not in {"FUTURES", "NO_HEDGE", "WAIT_FOR_DATA"}:
+        rejected.append(
+            PreTradeRecommendationRejectedAlternativeOut(
+                alternative="FUTURES",
+                reason="A futures hedge may not match the draft's floating or basis-sensitive exposure as directly as the selected instrument.",
+                source_refs=_evidence_refs_for_adapter_keys(snapshots, ("latest-mark",)),
+            )
+        )
+    if selected not in {"PHYSICAL_OFFSET", "NO_HEDGE", "WAIT_FOR_DATA"}:
+        rejected.append(
+            PreTradeRecommendationRejectedAlternativeOut(
+                alternative="PHYSICAL_OFFSET",
+                reason="No separate physical offset candidate has been validated beyond the draft scenario itself.",
+                source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context",)),
+            )
+        )
+    return rejected[:3]
 
 
 def _build_recommendation_explanation(
@@ -737,6 +1054,24 @@ def build_pretrade_recommendation_result(
         score=score,
         checks=checks,
     )
+    residual_exposure = _build_residual_exposure(
+        draft=draft,
+        current_net_position=current_net_position,
+        snapshots=input_snapshots,
+    )
+    opportunity_summary = _build_opportunity_summary(
+        stance=stance,
+        mark_gap_pct=mark_gap_pct,
+        residual_exposure=residual_exposure,
+        checks=checks,
+        snapshots=input_snapshots,
+    )
+    hedge_recommendation = _build_hedge_recommendation(
+        draft=draft,
+        stance=stance,
+        residual_exposure=residual_exposure,
+        snapshots=input_snapshots,
+    )
 
     headline_by_stance = {
         "PROCEED": "Proceed with standard controls.",
@@ -767,6 +1102,21 @@ def build_pretrade_recommendation_result(
         checks=checks,
         next_actions=next_actions
         or ["No blocking gaps were detected. Hand the scenario into trade capture when the desk is ready."],
+        opportunity_summary=opportunity_summary,
+        residual_exposure=residual_exposure,
+        netting_candidates=_build_netting_candidates(
+            draft=draft,
+            residual_exposure=residual_exposure,
+        ),
+        hedge_recommendation=hedge_recommendation,
+        rejected_alternatives=_build_rejected_alternatives(
+            hedge_recommendation=hedge_recommendation,
+            snapshots=input_snapshots,
+        ),
+        missing_evidence=_build_missing_evidence(
+            snapshots=input_snapshots,
+            required_adapter_keys=required_adapter_keys,
+        ),
     )
 
 

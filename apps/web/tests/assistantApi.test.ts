@@ -34,6 +34,7 @@ vi.mock('../src/shared/api.ts', () => ({
 
 import {
   approveAssistantActionRequest,
+  acceptAdminAssistantAgentHealthWorkPackage,
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
   createAssistantAgentEval,
@@ -45,6 +46,7 @@ import {
   getAdminAssistantOutcomeMetrics,
   getAdminAssistantRunAuditTrace,
   getAssistantConversation,
+  listAdminAssistantAgentWorkPackages,
   listAdminAssistantAgentEvals,
   listAdminAssistantAgentEvalRuns,
   listAdminAssistantActionRequests,
@@ -393,6 +395,96 @@ test('getAdminAssistantAgentHealthReview owns the workflow URL and admin auth', 
     url,
     'http://api.test/admin/assistant/agent-health-review?created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
   )
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('listAdminAssistantAgentWorkPackages owns the persisted work package URL and admin auth', async () => {
+  const expected = [
+    {
+      id: 11,
+      work_package_id: 'policy-review-update-trade-workflow-item-12345678',
+      title: 'Policy: Review workflow blockers',
+      package_type: 'POLICY',
+      priority: 'P2',
+      status: 'ACCEPTED',
+      source_agent_ids: ['ops-governor'],
+      source_agent_names: ['Ops Governor'],
+      source_recommendations: ['KEEP_STAGED'],
+      source_candidates: ['Review workflow blockers and promote recurring reviewer decisions.'],
+      recommended_owner_role: 'Operations Lead',
+      rationale: 'Autonomy review surfaced a recurring deterministic candidate.',
+      acceptance_checks: ['Run policy simulation for every affected action type before rollout.'],
+      knowledge_base_titles: [],
+      accepted_at: '2026-04-22T18:00:00Z',
+      accepted_by: 'ops_admin',
+      notes: null,
+      created_at: '2026-04-22T18:00:00Z',
+      created_by: 'ops_admin',
+      updated_at: '2026-04-22T18:00:00Z',
+      updated_by: 'ops_admin',
+    },
+  ]
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await listAdminAssistantAgentWorkPackages('http://api.test', {
+    status: 'ACCEPTED',
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agent-work-packages?status=ACCEPTED')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('acceptAdminAssistantAgentHealthWorkPackage posts accepted candidate metadata', async () => {
+  const expected = {
+    id: 11,
+    work_package_id: 'policy-review-update-trade-workflow-item-12345678',
+    title: 'Policy: Review workflow blockers',
+    package_type: 'POLICY',
+    priority: 'P2',
+    status: 'ACCEPTED',
+    source_agent_ids: ['ops-governor'],
+    source_agent_names: ['Ops Governor'],
+    source_recommendations: ['KEEP_STAGED'],
+    source_candidates: ['Review workflow blockers and promote recurring reviewer decisions.'],
+    recommended_owner_role: 'Operations Lead',
+    rationale: 'Autonomy review surfaced a recurring deterministic candidate.',
+    acceptance_checks: ['Run policy simulation for every affected action type before rollout.'],
+    knowledge_base_titles: [],
+    accepted_at: '2026-04-22T18:00:00Z',
+    accepted_by: 'ops_admin',
+    notes: 'Promote into policy backlog.',
+    created_at: '2026-04-22T18:00:00Z',
+    created_by: 'ops_admin',
+    updated_at: '2026-04-22T18:00:00Z',
+    updated_by: 'ops_admin',
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await acceptAdminAssistantAgentHealthWorkPackage(
+    'http://api.test',
+    ' policy-review-update-trade-workflow-item-12345678 ',
+    {
+      acceptedBy: ' ops_admin ',
+      notes: ' Promote into policy backlog. ',
+      createdAfter: '2026-04-01T00:00:00',
+      createdBefore: '2026-04-30T23:59:59',
+    },
+  )
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/agent-health-review/work-packages/policy-review-update-trade-workflow-item-12345678/accept?created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
+  )
+  assert.deepEqual(body, {
+    accepted_by: 'ops_admin',
+    notes: 'Promote into policy backlog.',
+  })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })

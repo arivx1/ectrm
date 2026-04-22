@@ -170,6 +170,60 @@ test('signed-out prompt draft resumes and sends after sign-in', async ({ page })
   }
 })
 
+test('prompt home contextual starter asks from live context and hands off to operations', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await signInFromPromptHome(page)
+
+    const operationsStarter = page.locator('.prompt-home-starter').filter({ hasText: 'Clear operations blockers' })
+    await expect(operationsStarter).toBeVisible()
+    await operationsStarter.getByRole('button', { name: 'Ask about operations blockers' }).click()
+
+    await expect(page.locator('.assistant-message-user').getByText('Summarize the open operations queue')).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant').getByText('Operations is the right place to continue')).toBeVisible()
+
+    const assistantHandoff = page.locator('.prompt-home-handoff').filter({ hasText: 'Open Work Queue' })
+    await expect(assistantHandoff).toBeVisible()
+    await assistantHandoff.click()
+
+    await expect(page).toHaveURL(/view=operations/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page.getByText('Assistant run #8801')).toBeVisible()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home contextual starter can open the old workspace directly', async ({ page }) => {
+  const harness = await startSmokeHarness()
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const settlementStarter = page.locator('.prompt-home-starter').filter({ hasText: 'Review invoices and payments' })
+    await expect(settlementStarter).toBeVisible()
+    await settlementStarter.getByRole('button', { name: 'Open Settlement' }).click()
+
+    await expect(page).toHaveURL(/view=settlement/)
+    await expect(page.getByRole('heading', { name: 'Issue invoices, track cash, and clear disputes' })).toBeVisible()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
 test('prompt home accepts an assistant handoff into the old operations workspace', async ({ page }) => {
   const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
 

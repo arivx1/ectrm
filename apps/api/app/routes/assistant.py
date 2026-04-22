@@ -38,6 +38,11 @@ from apps.api.app.domains.assistant.services.autonomy_review import (
     build_assistant_agent_health_review,
     build_assistant_autonomy_review_brief,
 )
+from apps.api.app.domains.assistant.services.agent_work_packages import (
+    accept_generated_agent_work_package,
+    list_agent_work_packages,
+    to_agent_work_package_out,
+)
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
     AssistantServiceError,
@@ -123,6 +128,8 @@ from apps.api.app.schemas.assistant import (
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
     AssistantAgentHealthReviewOut,
+    AssistantAgentWorkPackageAcceptRequest,
+    AssistantAgentWorkPackageOut,
     AssistantAutonomyReviewBriefOut,
     AssistantAgentBuildRequest,
     AssistantAgentBuildSuggestionOut,
@@ -801,6 +808,59 @@ def get_admin_assistant_agent_health_review(
         created_before=created_before,
     )
     return AssistantAgentHealthReviewOut.model_validate(asdict(snapshot))
+
+
+@admin_router.get("/agent-work-packages", response_model=list[AssistantAgentWorkPackageOut])
+def list_admin_assistant_agent_work_packages(
+    request: Request,
+    status: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentWorkPackageOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        records = list_agent_work_packages(db, status=status)
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return [to_agent_work_package_out(record) for record in records]
+
+
+@admin_router.post(
+    "/agent-health-review/work-packages/{work_package_id}/accept",
+    response_model=AssistantAgentWorkPackageOut,
+)
+def accept_admin_assistant_agent_health_work_package(
+    work_package_id: str,
+    request: Request,
+    payload: AssistantAgentWorkPackageAcceptRequest | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> AssistantAgentWorkPackageOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        record = accept_generated_agent_work_package(
+            db,
+            work_package_id=work_package_id,
+            accepted_by=payload.accepted_by if payload and payload.accepted_by else user.user_id,
+            notes=payload.notes if payload else None,
+            created_after=created_after,
+            created_before=created_before,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_agent_work_package_out(record)
 
 
 @admin_router.get("/agents/{agent_id}/autonomy-review", response_model=AssistantAutonomyReviewBriefOut)

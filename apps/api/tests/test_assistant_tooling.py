@@ -886,6 +886,89 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["items"][0]["outstanding_amount"], 2250.0)
         self.assertEqual(trace.tool_name, "list_trade_invoices")
 
+    def test_tool_service_lists_invoice_issue_candidates(self) -> None:
+        now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                Trade(
+                    trade_id="T-OPEN-INVOICE",
+                    external_trade_id="EXT-OPEN-INVOICE",
+                    source_system="ops",
+                    created_at=now,
+                    updated_at=now,
+                    execution_timestamp=now,
+                    trade_date=now.date(),
+                    trade_currency_code="USD",
+                    delivery_start=now.date(),
+                    delivery_end=now.date(),
+                    unit_of_measure="MMBTU",
+                    price_unit_code="USD_MMBTU",
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="GAS-US",
+                    portfolio="NORTH",
+                    counterparty="ACME",
+                    commodity_class="GAS",
+                    commodity="HH",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    price_index_code=None,
+                    price=4.25,
+                    volume=2000,
+                    confirmation_status="CONFIRMED",
+                    nomination_status="COMPLETED",
+                    allocation_status="COMPLETED",
+                    actualization_status="ACTUALIZED",
+                    invoice_status="PENDING",
+                    payment_status="PENDING",
+                    settlement_status="PENDING",
+                    trader_user="trader_1",
+                    status="ACTIVE",
+                    last_event_id="evt-open-invoice",
+                )
+            )
+            session.add(
+                TradeActualization(
+                    delivery_id="DLV-T-OPEN-INVOICE",
+                    trade_id="T-OPEN-INVOICE",
+                    leg_no=None,
+                    actual_quantity=2000,
+                    actualized_at=now,
+                    source="scheduler",
+                    notes="Ready for settlement invoice.",
+                    created_at=now,
+                    created_by="scheduler",
+                    updated_at=now,
+                    updated_by="scheduler",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_invoice_issue_candidates",
+                {"limit": 10},
+            )
+
+        rows_by_trade_id = {row["trade_id"]: row for row in result.output["items"]}
+        self.assertIn("T-OPEN-INVOICE", rows_by_trade_id)
+        candidate = rows_by_trade_id["T-OPEN-INVOICE"]
+        self.assertEqual(candidate["readiness_status"], "READY")
+        self.assertEqual(candidate["notional_amount"], 8500.0)
+        self.assertEqual(
+            candidate["recommended_action"],
+            {
+                "action_type": "issue_trade_invoice",
+                "requires_approval": True,
+                "payload": {"trade_id": "T-OPEN-INVOICE"},
+                "preview_status": "READY",
+            },
+        )
+        self.assertEqual(trace.tool_name, "list_invoice_issue_candidates")
+        self.assertIn("invoice issue candidate", trace.summary)
+
     def test_tool_service_builds_trade_settlement_summary(self) -> None:
         with self.SessionLocal() as session:
             service = AssistantToolService(session)

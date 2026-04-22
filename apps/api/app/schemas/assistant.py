@@ -86,6 +86,7 @@ AssistantAutonomyReviewEvalStatus = Literal[
 AssistantAgentHealthWorkPackageType = Literal["POLICY", "SERVICE", "EVAL", "KNOWLEDGE_BASE"]
 AssistantAgentHealthWorkPackagePriority = Literal["P1", "P2", "P3", "P4"]
 AssistantAgentHealthWorkPackageStatus = Literal["CANDIDATE"]
+AssistantAgentWorkPackageStatus = Literal["CANDIDATE", "ACCEPTED", "IN_PROGRESS", "IMPLEMENTED", "DISMISSED"]
 AssistantRunStatus = Literal["COMPLETED", "FAILED"]
 AssistantRunFeedbackRating = Literal["HELPFUL", "NEEDS_WORK"]
 AssistantControlTowerTrustSignalType = Literal[
@@ -695,6 +696,40 @@ class AssistantAgentHealthReviewOut(BaseModel):
     work_package_count: int
     review_items: list[AssistantAgentHealthReviewItemOut] = Field(default_factory=list)
     work_packages: list[AssistantAgentHealthWorkPackageOut] = Field(default_factory=list)
+
+
+class AssistantAgentWorkPackageOut(BaseModel):
+    id: int
+    work_package_id: str
+    title: str
+    package_type: AssistantAgentHealthWorkPackageType
+    priority: AssistantAgentHealthWorkPackagePriority
+    status: AssistantAgentWorkPackageStatus
+    source_agent_ids: list[str] = Field(default_factory=list)
+    source_agent_names: list[str] = Field(default_factory=list)
+    source_recommendations: list[AssistantAutonomyReviewRecommendationAction] = Field(default_factory=list)
+    source_candidates: list[str] = Field(default_factory=list)
+    recommended_owner_role: Optional[str] = None
+    rationale: str
+    acceptance_checks: list[str] = Field(default_factory=list)
+    knowledge_base_titles: list[str] = Field(default_factory=list)
+    accepted_at: Optional[datetime] = None
+    accepted_by: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+
+
+class AssistantAgentWorkPackageAcceptRequest(BaseModel):
+    accepted_by: Optional[str] = None
+    notes: Optional[str] = None
+
+    @field_validator("accepted_by", "notes")
+    @classmethod
+    def normalize_optional_accept_text(cls, value: Optional[str], info) -> Optional[str]:
+        return normalize_optional_text(value, field_name=info.field_name)
 
 
 class AssistantPromptResponse(BaseModel):

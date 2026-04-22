@@ -3,7 +3,14 @@ import type {
   CounterpartyExternalCreditSnapshotRecord,
   MarketContextRecord,
   PositionRow,
+  PreTradeHedgeInstrumentType,
+  PreTradeMissingEvidenceSeverity,
+  PreTradeNettingCandidateMatchQuality,
+  PreTradeOpportunityCategory,
   PreTradeScenarioDraft,
+  PreTradeRecommendationFreshness,
+  PreTradeRecommendationSourceQuality,
+  PreTradeRecommendationSourceType,
   PriceIndexObservationRecord,
   Trade,
   WeatherIntelligenceOverviewRecord,
@@ -17,6 +24,70 @@ export type PreTradeRecommendationCheck = {
   label: string
   status: PreTradeCheckStatus
   detail: string
+}
+
+export type PreTradeRecommendationEvidenceRef = {
+  source_key: string
+  adapter_key: string | null
+  adapter_label: string | null
+  source_type: PreTradeRecommendationSourceType
+  freshness: PreTradeRecommendationFreshness
+  quality_status: PreTradeRecommendationSourceQuality
+  record_id: string | null
+  summary: string | null
+}
+
+export type PreTradeRecommendationOpportunitySummary = {
+  category: PreTradeOpportunityCategory
+  title: string
+  detail: string
+  driver_keys: string[]
+  source_refs: PreTradeRecommendationEvidenceRef[]
+}
+
+export type PreTradeRecommendationResidualExposure = {
+  current_net_position: number | null
+  proposed_trade_delta: number | null
+  residual_after_trade: number | null
+  direction_before: 'LONG' | 'SHORT' | 'FLAT' | 'UNKNOWN'
+  direction_after: 'LONG' | 'SHORT' | 'FLAT' | 'UNKNOWN'
+  exposure_effect: 'OFFSETS' | 'DEEPENS' | 'NEUTRAL' | 'UNKNOWN'
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRef[]
+}
+
+export type PreTradeRecommendationNettingCandidate = {
+  candidate_id: string
+  label: string
+  match_quality: PreTradeNettingCandidateMatchQuality
+  matched_quantity: number | null
+  residual_quantity: number | null
+  constraints: string[]
+  rejection_reasons: string[]
+  source_refs: PreTradeRecommendationEvidenceRef[]
+}
+
+export type PreTradeRecommendationHedgeRecommendation = {
+  instrument_type: PreTradeHedgeInstrumentType
+  rationale: string
+  target_delta: number | null
+  hedge_ratio: number | null
+  policy_stops: string[]
+  source_refs: PreTradeRecommendationEvidenceRef[]
+}
+
+export type PreTradeRecommendationRejectedAlternative = {
+  alternative: PreTradeHedgeInstrumentType
+  reason: string
+  source_refs: PreTradeRecommendationEvidenceRef[]
+}
+
+export type PreTradeRecommendationMissingEvidence = {
+  evidence_key: string
+  label: string
+  severity: PreTradeMissingEvidenceSeverity
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRef[]
 }
 
 export type PreTradeRecommendation = {
@@ -33,6 +104,12 @@ export type PreTradeRecommendation = {
   explanation: PreTradeRecommendationExplanation
   checks: PreTradeRecommendationCheck[]
   next_actions: string[]
+  opportunity_summary: PreTradeRecommendationOpportunitySummary | null
+  residual_exposure: PreTradeRecommendationResidualExposure | null
+  netting_candidates: PreTradeRecommendationNettingCandidate[]
+  hedge_recommendation: PreTradeRecommendationHedgeRecommendation | null
+  rejected_alternatives: PreTradeRecommendationRejectedAlternative[]
+  missing_evidence: PreTradeRecommendationMissingEvidence[]
 }
 
 export type PreTradeRecommendationExplanation = {
@@ -128,6 +205,268 @@ function bestAvailableMark(
 
 function formatPercent(value: number | null): string {
   return value === null ? 'n/a' : `${Math.round(value)}%`
+}
+
+function liveEvidenceRef(args: {
+  sourceKey: string
+  label: string
+  sourceType: PreTradeRecommendationSourceType
+  available: boolean
+  summary: string
+}): PreTradeRecommendationEvidenceRef {
+  return {
+    source_key: args.sourceKey,
+    adapter_key: args.sourceKey,
+    adapter_label: args.label,
+    source_type: args.sourceType,
+    freshness: args.available ? 'FRESH' : 'UNKNOWN',
+    quality_status: args.available ? 'OK' : 'MISSING',
+    record_id: null,
+    summary: args.summary,
+  }
+}
+
+function exposureDirection(value: number | null): PreTradeRecommendationResidualExposure['direction_before'] {
+  if (value === null) {
+    return 'UNKNOWN'
+  }
+  if (value > 0) {
+    return 'LONG'
+  }
+  if (value < 0) {
+    return 'SHORT'
+  }
+  return 'FLAT'
+}
+
+function proposedTradeDelta(draft: PreTradeScenarioDraft): number | null {
+  if (draft.target_volume === null) {
+    return null
+  }
+  return draft.trade_side === 'BUY' ? draft.target_volume : -draft.target_volume
+}
+
+function exposureEffect(
+  currentNetPosition: number | null,
+  proposedDelta: number | null,
+): PreTradeRecommendationResidualExposure['exposure_effect'] {
+  if (currentNetPosition === null || proposedDelta === null) {
+    return 'UNKNOWN'
+  }
+  const before = Math.abs(currentNetPosition)
+  const after = Math.abs(currentNetPosition + proposedDelta)
+  if (after < before) {
+    return 'OFFSETS'
+  }
+  if (after > before) {
+    return 'DEEPENS'
+  }
+  return 'NEUTRAL'
+}
+
+function buildResidualExposure(
+  draft: PreTradeScenarioDraft,
+  currentNetPosition: number | null,
+): PreTradeRecommendationResidualExposure {
+  const proposedDelta = proposedTradeDelta(draft)
+  const residualAfterTrade =
+    currentNetPosition !== null && proposedDelta !== null ? currentNetPosition + proposedDelta : null
+  const effect = exposureEffect(currentNetPosition, proposedDelta)
+  const detailByEffect: Record<PreTradeRecommendationResidualExposure['exposure_effect'], string> = {
+    OFFSETS: 'The proposed trade reduces the absolute open position for the selected commodity.',
+    DEEPENS: 'The proposed trade increases the absolute open position for the selected commodity.',
+    NEUTRAL: 'The proposed trade leaves the absolute open position broadly unchanged.',
+    UNKNOWN: 'Residual exposure cannot be calculated until current position and target size are both available.',
+  }
+
+  return {
+    current_net_position: currentNetPosition,
+    proposed_trade_delta: proposedDelta,
+    residual_after_trade: residualAfterTrade,
+    direction_before: exposureDirection(currentNetPosition),
+    direction_after: exposureDirection(residualAfterTrade),
+    exposure_effect: effect,
+    detail: detailByEffect[effect],
+    source_refs: [
+      liveEvidenceRef({
+        sourceKey: 'desk-context',
+        label: 'Desk exposure context',
+        sourceType: 'INTERNAL',
+        available: currentNetPosition !== null,
+        summary: currentNetPosition === null ? 'Current net position is not loaded.' : 'Current net position is loaded.',
+      }),
+    ],
+  }
+}
+
+function buildNettingCandidates(
+  draft: PreTradeScenarioDraft,
+  residualExposure: PreTradeRecommendationResidualExposure,
+): PreTradeRecommendationNettingCandidate[] {
+  const current = residualExposure.current_net_position
+  const proposed = residualExposure.proposed_trade_delta
+  const residual = residualExposure.residual_after_trade
+  if (current === null || proposed === null || residual === null) {
+    return []
+  }
+
+  const constraints = [
+    `commodity=${draft.commodity}`,
+    `unit=${draft.unit_of_measure ?? 'UNKNOWN'}`,
+    `location=${draft.location_code ?? 'UNKNOWN'}`,
+  ]
+  if (residualExposure.exposure_effect === 'OFFSETS') {
+    return [{
+      candidate_id: 'current-position-offset',
+      label: 'Current net position offset',
+      match_quality: residual === 0 ? 'EXACT' : 'PARTIAL',
+      matched_quantity: Math.min(Math.abs(current), Math.abs(proposed)),
+      residual_quantity: Math.abs(residual),
+      constraints,
+      rejection_reasons: [],
+      source_refs: residualExposure.source_refs,
+    }]
+  }
+
+  return [{
+    candidate_id: 'current-position-offset',
+    label: 'Current net position offset',
+    match_quality: 'REJECTED',
+    matched_quantity: 0,
+    residual_quantity: Math.abs(residual),
+    constraints,
+    rejection_reasons: ['The proposed side does not reduce the current net position.'],
+    source_refs: residualExposure.source_refs,
+  }]
+}
+
+function buildOpportunitySummary(args: {
+  stance: PreTradeRecommendationStance
+  markGapPct: number | null
+  residualExposure: PreTradeRecommendationResidualExposure
+  checks: PreTradeRecommendationCheck[]
+  sourceRefs: PreTradeRecommendationEvidenceRef[]
+}): PreTradeRecommendationOpportunitySummary {
+  const driverKeys = args.checks.filter((check) => check.status !== 'good').map((check) => check.key)
+  if (args.stance === 'WAIT_FOR_DATA') {
+    return {
+      category: 'WAIT_FOR_DATA',
+      title: 'Wait for required evidence',
+      detail: 'Required context or source evidence is missing, so this should not be promoted as an opportunity yet.',
+      driver_keys: driverKeys,
+      source_refs: args.sourceRefs,
+    }
+  }
+  if (args.markGapPct !== null && args.markGapPct >= 7) {
+    return {
+      category: 'MARK_GAP',
+      title: 'Pricing gap review',
+      detail: `Target economics are ${formatPercent(args.markGapPct)} away from the latest available mark.`,
+      driver_keys: driverKeys,
+      source_refs: args.sourceRefs,
+    }
+  }
+  if (args.residualExposure.exposure_effect === 'OFFSETS') {
+    return {
+      category: 'EXPOSURE_OFFSET',
+      title: 'Exposure offset review',
+      detail: 'The draft appears to reduce current net exposure and may be useful for risk reduction.',
+      driver_keys: driverKeys,
+      source_refs: args.sourceRefs,
+    }
+  }
+  if (args.residualExposure.exposure_effect === 'DEEPENS') {
+    return {
+      category: 'RISK_INCREASE',
+      title: 'Risk-increasing review',
+      detail: 'The draft appears to deepen current net exposure, so sizing and hedge intent need review.',
+      driver_keys: driverKeys,
+      source_refs: args.sourceRefs,
+    }
+  }
+  return {
+    category: 'STANDARD_REVIEW',
+    title: 'Standard pre-trade review',
+    detail: 'No single pricing or exposure driver dominates the recommendation.',
+    driver_keys: driverKeys,
+    source_refs: args.sourceRefs,
+  }
+}
+
+function buildHedgeRecommendation(
+  draft: PreTradeScenarioDraft,
+  stance: PreTradeRecommendationStance,
+  residualExposure: PreTradeRecommendationResidualExposure,
+  sourceRefs: PreTradeRecommendationEvidenceRef[],
+): PreTradeRecommendationHedgeRecommendation {
+  const residual = residualExposure.residual_after_trade
+  if (stance === 'WAIT_FOR_DATA' || residual === null) {
+    return {
+      instrument_type: 'WAIT_FOR_DATA',
+      rationale: 'Do not select a hedge instrument until residual exposure and required evidence are available.',
+      target_delta: null,
+      hedge_ratio: null,
+      policy_stops: residual === null ? ['Residual exposure is unavailable.'] : [],
+      source_refs: sourceRefs,
+    }
+  }
+  if (residual === 0) {
+    return {
+      instrument_type: 'NO_HEDGE',
+      rationale: 'The draft fully offsets the current net position, so no residual hedge delta is suggested.',
+      target_delta: 0,
+      hedge_ratio: 0,
+      policy_stops: [],
+      source_refs: residualExposure.source_refs,
+    }
+  }
+  if (draft.pricing_type.toUpperCase() === 'FIXED') {
+    return {
+      instrument_type: 'FUTURES',
+      rationale: 'Review a listed futures hedge for the remaining linear fixed-price delta.',
+      target_delta: -residual,
+      hedge_ratio: 1,
+      policy_stops: [],
+      source_refs: sourceRefs,
+    }
+  }
+  return {
+    instrument_type: 'SWAP',
+    rationale: 'Review an index-linked swap for the remaining floating-price exposure and basis profile.',
+    target_delta: -residual,
+    hedge_ratio: 1,
+    policy_stops: [],
+    source_refs: sourceRefs,
+  }
+}
+
+function buildRejectedAlternatives(
+  hedgeRecommendation: PreTradeRecommendationHedgeRecommendation,
+  sourceRefs: PreTradeRecommendationEvidenceRef[],
+): PreTradeRecommendationRejectedAlternative[] {
+  const rejected: PreTradeRecommendationRejectedAlternative[] = []
+  if (!['OPTIONS', 'WAIT_FOR_DATA'].includes(hedgeRecommendation.instrument_type)) {
+    rejected.push({
+      alternative: 'OPTIONS',
+      reason: 'No fresh option exposure evidence requires an option hedge in this draft.',
+      source_refs: sourceRefs.filter((source) => source.source_key === 'option-exposure'),
+    })
+  }
+  if (!['FUTURES', 'NO_HEDGE', 'WAIT_FOR_DATA'].includes(hedgeRecommendation.instrument_type)) {
+    rejected.push({
+      alternative: 'FUTURES',
+      reason: 'A futures hedge may not match the draft exposure as directly as the selected instrument.',
+      source_refs: sourceRefs.filter((source) => source.source_key === 'latest-mark'),
+    })
+  }
+  if (!['PHYSICAL_OFFSET', 'NO_HEDGE', 'WAIT_FOR_DATA'].includes(hedgeRecommendation.instrument_type)) {
+    rejected.push({
+      alternative: 'PHYSICAL_OFFSET',
+      reason: 'No separate physical offset candidate has been validated beyond the draft scenario itself.',
+      source_refs: sourceRefs.filter((source) => source.source_key === 'desk-context'),
+    })
+  }
+  return rejected.slice(0, 3)
 }
 
 function weatherNeedsCare(overview: WeatherIntelligenceOverviewRecord | null): boolean {
@@ -411,6 +750,64 @@ export function buildPreTradeRecommendation({
   const confidence: PreTradeRecommendation['confidence'] =
     blockCount > 0 ? 'LOW' : watchCount > 1 ? 'MEDIUM' : 'HIGH'
   const explanation = buildRecommendationExplanation({ stance, confidence, checks })
+  const sourceRefs: PreTradeRecommendationEvidenceRef[] = [
+    liveEvidenceRef({
+      sourceKey: 'desk-context',
+      label: 'Desk exposure context',
+      sourceType: 'INTERNAL',
+      available: currentNetPosition !== null,
+      summary: currentNetPosition === null ? 'Current net position is not loaded.' : 'Current net position is loaded.',
+    }),
+    liveEvidenceRef({
+      sourceKey: 'latest-mark',
+      label: 'Latest price-index mark',
+      sourceType: 'EXTERNAL',
+      available: bestMark !== null,
+      summary: bestMark === null ? 'No current mark is loaded.' : 'A current mark is loaded for comparison.',
+    }),
+    liveEvidenceRef({
+      sourceKey: 'market-context',
+      label: 'Market context',
+      sourceType: 'EXTERNAL',
+      available: marketContext !== null,
+      summary: marketContext === null ? 'Market context is not loaded.' : 'Market context is loaded.',
+    }),
+    liveEvidenceRef({
+      sourceKey: 'weather-intelligence',
+      label: 'Weather intelligence',
+      sourceType: 'EXTERNAL',
+      available: weatherOverview !== null,
+      summary: weatherOverview === null ? 'Weather intelligence is not loaded.' : 'Weather intelligence is loaded.',
+    }),
+    liveEvidenceRef({
+      sourceKey: 'option-exposure',
+      label: 'Option exposure',
+      sourceType: 'DERIVED',
+      available: false,
+      summary: 'Option exposure evidence is not loaded in the local draft helper.',
+    }),
+  ]
+  const residualExposure = buildResidualExposure(draft, currentNetPosition)
+  const opportunitySummary = buildOpportunitySummary({
+    stance,
+    markGapPct,
+    residualExposure,
+    checks,
+    sourceRefs,
+  })
+  const hedgeRecommendation = buildHedgeRecommendation(draft, stance, residualExposure, sourceRefs)
+  const missingEvidence: PreTradeRecommendationMissingEvidence[] = sourceRefs
+    .filter((source) => source.quality_status === 'MISSING')
+    .map((source) => ({
+      evidence_key: source.source_key,
+      label: source.adapter_label ?? source.source_key,
+      severity:
+        source.source_key === 'desk-context' || (source.source_key === 'latest-mark' && draft.pricing_type.toUpperCase() !== 'FIXED')
+          ? 'BLOCKING'
+          : 'WARNING',
+      detail: `${source.adapter_label ?? source.source_key} did not provide usable evidence for this recommendation.`,
+      source_refs: [source],
+    }))
 
   return {
     stance,
@@ -429,5 +826,11 @@ export function buildPreTradeRecommendation({
       nextActions.length > 0
         ? nextActions
         : ['No blocking gaps were detected. Hand the scenario into trade capture when the desk is ready.'],
+    opportunity_summary: opportunitySummary,
+    residual_exposure: residualExposure,
+    netting_candidates: buildNettingCandidates(draft, residualExposure),
+    hedge_recommendation: hedgeRecommendation,
+    rejected_alternatives: buildRejectedAlternatives(hedgeRecommendation, sourceRefs),
+    missing_evidence: missingEvidence,
   }
 }

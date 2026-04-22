@@ -38,6 +38,7 @@ from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
+from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
@@ -145,6 +146,7 @@ class AssistantApiTests(unittest.TestCase):
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
             session.query(TradeWorkflowItem).delete()
+            session.query(AssistantAgentWorkPackage).delete()
             session.query(AssistantActionRequest).delete()
             session.query(AssistantRunFeedback).delete()
             session.query(AssistantAgentEvalRun).delete()
@@ -3330,6 +3332,31 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn(package["work_package_id"], item_ids["workflow-alpha"])
         self.assertIn(package["work_package_id"], item_ids["workflow-beta"])
 
+        accept_response = self.client.post(
+            f"/admin/assistant/agent-health-review/work-packages/{package['work_package_id']}/accept",
+            json={"notes": "Promote into the policy backlog."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(accept_response.status_code, 200)
+        accepted_package = accept_response.json()
+        self.assertEqual(accepted_package["work_package_id"], package["work_package_id"])
+        self.assertEqual(accepted_package["status"], "ACCEPTED")
+        self.assertEqual(accepted_package["accepted_by"], "assistant_user")
+        self.assertEqual(accepted_package["notes"], "Promote into the policy backlog.")
+
+        list_response = self.client.get(
+            "/admin/assistant/agent-work-packages?status=ACCEPTED",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual([row["work_package_id"] for row in list_response.json()], [package["work_package_id"]])
+
+        invalid_filter_response = self.client.get(
+            "/admin/assistant/agent-work-packages?status=UNKNOWN",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(invalid_filter_response.status_code, 400)
+
     def test_admin_agent_health_review_requires_admin_role(self) -> None:
         token = self._create_session_token(
             user_id="desk_user",
@@ -3344,6 +3371,62 @@ class AssistantApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+        list_response = self.client.get(
+            "/admin/assistant/agent-work-packages",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(list_response.status_code, 403)
+
+        accept_response = self.client.post(
+            "/admin/assistant/agent-health-review/work-packages/missing/accept",
+            json={"notes": "Nope."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(accept_response.status_code, 403)
+
+    def test_admin_accepts_agent_health_work_package_into_persisted_backlog(self) -> None:
+        admin_token = self._create_session_token()
+        self._seed_repeated_workflow_action_candidates(now=datetime.now(timezone.utc))
+
+        review_response = self.client.get(
+            "/admin/assistant/agent-health-review",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(review_response.status_code, 200)
+        package = next(
+            row
+            for row in review_response.json()["work_packages"]
+            if row["source_candidates"] and "update_trade_workflow_item" in row["source_candidates"][0]
+        )
+
+        accept_response = self.client.post(
+            f"/admin/assistant/agent-health-review/work-packages/{package['work_package_id']}/accept",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "accepted_by": "ops_lead",
+                "notes": "Promote repeated workflow decisions into typed policy.",
+            },
+        )
+
+        self.assertEqual(accept_response.status_code, 200)
+        accepted = accept_response.json()
+        self.assertEqual(accepted["work_package_id"], package["work_package_id"])
+        self.assertEqual(accepted["status"], "ACCEPTED")
+        self.assertEqual(accepted["accepted_by"], "ops_lead")
+        self.assertEqual(accepted["source_agent_ids"], ["workflow-alpha", "workflow-beta"])
+        self.assertEqual(accepted["notes"], "Promote repeated workflow decisions into typed policy.")
+
+        list_response = self.client.get(
+            "/admin/assistant/agent-work-packages?status=ACCEPTED",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(list_response.status_code, 200)
+        records = list_response.json()
+        self.assertEqual([row["work_package_id"] for row in records], [package["work_package_id"]])
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(AssistantAgentWorkPackage).count(), 1)
 
     def test_admin_control_tower_summary_reports_roster_activity_and_trust_signals(self) -> None:
         admin_token = self._create_session_token()
@@ -4450,6 +4533,89 @@ class AssistantApiTests(unittest.TestCase):
             assert user is not None
             _, token = create_user_session(session, user)
             return token
+
+    def _seed_repeated_workflow_action_candidates(self, *, now: datetime) -> None:
+        with self.SessionLocal() as session:
+            for index, agent_id in enumerate(("workflow-alpha", "workflow-beta")):
+                agent_name = f"Workflow {index + 1}"
+                agent = AssistantAgent(
+                    agent_id=agent_id,
+                    name=agent_name,
+                    description="Stages workflow updates for operations review.",
+                    status="ACTIVE",
+                    scope="TEAM",
+                    provider="openai",
+                    model="gpt-5-mini",
+                    role_key="trade-ops-copilot",
+                    profile_kind="ROLE_DERIVED",
+                    specialization_summary="Workflow item update specialist.",
+                    human_owner_role="Operations Lead",
+                    authority_ceiling="STAGE",
+                    activation_notes="Approved for staged workflow update review.",
+                    profile_request_id=None,
+                    allowed_workspaces=["assistant", "operations"],
+                    capabilities=["READ", "EXPLAIN", "ACTION"],
+                    allowed_tools=["list_workflow_items"],
+                    allowed_action_types=["update_trade_workflow_item"],
+                    daily_token_allocation=None,
+                    system_prompt="Stage only reviewable workflow updates.",
+                    created_at=now - timedelta(days=1),
+                    created_by="ops_admin",
+                    updated_at=now - timedelta(days=1),
+                    updated_by="ops_admin",
+                    version=1,
+                )
+                run = AssistantRun(
+                    conversation_id=None,
+                    status="COMPLETED",
+                    user_id=f"ops_{index}",
+                    session_id=f"workflow-session-{index}",
+                    user_role="OPS_ADMIN",
+                    workspace="operations",
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    agent_role_key="trade-ops-copilot",
+                    agent_profile_kind="ROLE_DERIVED",
+                    provider="openai",
+                    model="gpt-5-mini",
+                    use_live_tools=False,
+                    request_messages=[{"role": "user", "content": "Review workflow items."}],
+                    application_context=None,
+                    prompt_sections=[],
+                    rendered_system_prompt="System prompt.",
+                    warnings=[],
+                    tool_calls=[],
+                    input_tokens=100,
+                    output_tokens=40,
+                    latest_user_message="Review workflow items.",
+                    assistant_message="Staged workflow updates.",
+                    error_detail=None,
+                    created_at=now - timedelta(hours=2),
+                    completed_at=now - timedelta(hours=2),
+                )
+                session.add_all([agent, run])
+                session.flush()
+                session.add(
+                    AssistantActionRequest(
+                        run_id=run.id,
+                        status="EXECUTED",
+                        user_id=f"ops_{index}",
+                        session_id=f"workflow-session-{index}",
+                        workspace="operations",
+                        agent_id=agent_id,
+                        agent_name=agent_name,
+                        action_type="update_trade_workflow_item",
+                        summary="Workflow update",
+                        description="Update a workflow item.",
+                        payload={"review_context": {"stale_state_basis": {"version": index}}},
+                        result={"workflow_item": {"id": index + 1}},
+                        error_detail=None,
+                        created_at=now - timedelta(minutes=30 + index),
+                        decided_at=now - timedelta(minutes=20 + index),
+                        decided_by="ops_lead",
+                    )
+                )
+            session.commit()
 
     def _create_agent(
         self,

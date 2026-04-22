@@ -105,6 +105,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
         default_tools=(
             "list_trade_invoices",
+            "list_invoice_issue_candidates",
             "list_trade_payments",
             "get_trade_settlement_summary",
             "list_workflow_items",
@@ -235,6 +236,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
         default_tools=(
             "list_trade_invoices",
+            "list_invoice_issue_candidates",
             "list_trade_payments",
             "get_trade_settlement_summary",
             "list_workflow_items",
@@ -413,6 +415,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "get_workspace_summary",
             "list_positions",
             "list_trade_invoices",
+            "list_invoice_issue_candidates",
             "list_trade_payments",
             "get_market_context",
             "list_workflow_items",
@@ -458,6 +461,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         default_tools=(
             "get_trade_settlement_summary",
             "list_trade_invoices",
+            "list_invoice_issue_candidates",
             "list_trade_payments",
             "get_workspace_summary",
         ),

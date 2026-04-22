@@ -1,6 +1,6 @@
 """create assistant agent eval runs
 
-Revision ID: q4f5a6b7c8d9
+Revision ID: r4f5a6b7c8d9
 Revises: p3e4f5a6b7c8
 Create Date: 2026-04-22 16:15:00.000000
 """
@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "q4f5a6b7c8d9"
+revision: str = "r4f5a6b7c8d9"
 down_revision: Union[str, Sequence[str], None] = "p3e4f5a6b7c8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

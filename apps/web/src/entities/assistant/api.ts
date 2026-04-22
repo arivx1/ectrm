@@ -15,6 +15,8 @@ import type {
   AssistantAdminAgent,
   AssistantAgent,
   AssistantAgentHealthReview,
+  AssistantAgentWorkPackage,
+  AssistantAgentWorkPackageStatus,
   AssistantAgentEval,
   AssistantAgentEvalRun,
   AssistantAutonomyReviewBrief,
@@ -152,6 +154,13 @@ export type CreateAssistantAgentEvalInput = {
 
 export type UpdateAssistantAgentEvalInput = Omit<CreateAssistantAgentEvalInput, 'agent_id'>
 
+export type AcceptAssistantAgentWorkPackageInput = {
+  acceptedBy?: string
+  notes?: string
+  createdAfter?: string
+  createdBefore?: string
+}
+
 function assistantMutationHeaders(): Headers {
   return buildMutationHeaders()
 }
@@ -253,6 +262,16 @@ function outcomeMetricsQuery(init?: {
   }
   if (init?.createdBefore?.trim()) {
     params.set('created_before', init.createdBefore.trim())
+  }
+  return params.size > 0 ? `?${params.toString()}` : ''
+}
+
+function agentWorkPackageQuery(init?: {
+  status?: AssistantAgentWorkPackageStatus
+}): string {
+  const params = new URLSearchParams()
+  if (init?.status) {
+    params.set('status', init.status)
   }
   return params.size > 0 ? `?${params.toString()}` : ''
 }
@@ -629,6 +648,41 @@ export async function getAdminAssistantAgentHealthReview(
 ): Promise<AssistantAgentHealthReview> {
   return fetchJson<AssistantAgentHealthReview>(
     `${apiBase}/admin/assistant/agent-health-review${outcomeMetricsQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function listAdminAssistantAgentWorkPackages(
+  apiBase: string,
+  init?: {
+    status?: AssistantAgentWorkPackageStatus
+  },
+): Promise<AssistantAgentWorkPackage[]> {
+  return fetchJson<AssistantAgentWorkPackage[]>(
+    `${apiBase}/admin/assistant/agent-work-packages${agentWorkPackageQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function acceptAdminAssistantAgentHealthWorkPackage(
+  apiBase: string,
+  workPackageId: string,
+  payload: AcceptAssistantAgentWorkPackageInput = {},
+): Promise<AssistantAgentWorkPackage> {
+  const body: Record<string, unknown> = {}
+  if (payload.acceptedBy?.trim()) {
+    body.accepted_by = payload.acceptedBy.trim()
+  }
+  if (payload.notes?.trim()) {
+    body.notes = payload.notes.trim()
+  }
+  return postJson<AssistantAgentWorkPackage>(
+    `${apiBase}/admin/assistant/agent-health-review/work-packages/${encodeURIComponent(workPackageId.trim())}/accept${outcomeMetricsQuery(payload)}`,
+    body,
     {
       headers: assistantMutationHeaders(),
     },

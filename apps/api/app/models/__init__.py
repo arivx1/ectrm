@@ -3,6 +3,7 @@ from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
+from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
@@ -66,6 +67,7 @@ __all__ = [
     "AssistantAgentEval",
     "AssistantAgentEvalRun",
     "AssistantAgentProfileRequest",
+    "AssistantAgentWorkPackage",
     "AssistantConversation",
     "AssistantRun",
     "AssistantRunFeedback",

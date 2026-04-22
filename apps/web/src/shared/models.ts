@@ -1383,6 +1383,18 @@ export type PreTradeRecommendationSourceType = 'USER_INPUT' | 'INTERNAL' | 'EXTE
 export type PreTradeRecommendationFreshness = 'FRESH' | 'STALE' | 'DEGRADED' | 'UNKNOWN'
 export type PreTradeRecommendationSourceQuality = 'OK' | 'STALE' | 'DEGRADED' | 'MISSING'
 export type PreTradeGovernanceRiskStatus = 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
+export type PreTradeOpportunityCategory =
+  | 'MARK_GAP'
+  | 'EXPOSURE_OFFSET'
+  | 'RISK_REDUCTION'
+  | 'RISK_INCREASE'
+  | 'STANDARD_REVIEW'
+  | 'WAIT_FOR_DATA'
+export type PreTradeExposureDirection = 'LONG' | 'SHORT' | 'FLAT' | 'UNKNOWN'
+export type PreTradeExposureEffect = 'OFFSETS' | 'DEEPENS' | 'NEUTRAL' | 'UNKNOWN'
+export type PreTradeNettingCandidateMatchQuality = 'EXACT' | 'PARTIAL' | 'REJECTED'
+export type PreTradeHedgeInstrumentType = 'FUTURES' | 'OPTIONS' | 'SWAP' | 'PHYSICAL_OFFSET' | 'NO_HEDGE' | 'WAIT_FOR_DATA'
+export type PreTradeMissingEvidenceSeverity = 'BLOCKING' | 'WARNING'
 export type PreTradeGovernanceAuditCategory =
   | 'PENDING_REVIEW'
   | 'RISKY_RECOMMENDATION'
@@ -1513,6 +1525,70 @@ export type PreTradeRecommendationExplanationRecord = {
   reviewer_focus: string[]
 }
 
+export type PreTradeRecommendationEvidenceRefRecord = {
+  source_key: string
+  adapter_key: string | null
+  adapter_label: string | null
+  source_type: PreTradeRecommendationSourceType
+  freshness: PreTradeRecommendationFreshness
+  quality_status: PreTradeRecommendationSourceQuality
+  record_id: string | null
+  summary: string | null
+}
+
+export type PreTradeRecommendationOpportunitySummaryRecord = {
+  category: PreTradeOpportunityCategory
+  title: string
+  detail: string
+  driver_keys: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationResidualExposureRecord = {
+  current_net_position: number | null
+  proposed_trade_delta: number | null
+  residual_after_trade: number | null
+  direction_before: PreTradeExposureDirection
+  direction_after: PreTradeExposureDirection
+  exposure_effect: PreTradeExposureEffect
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationNettingCandidateRecord = {
+  candidate_id: string
+  label: string
+  match_quality: PreTradeNettingCandidateMatchQuality
+  matched_quantity: number | null
+  residual_quantity: number | null
+  constraints: string[]
+  rejection_reasons: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationHedgeRecommendationRecord = {
+  instrument_type: PreTradeHedgeInstrumentType
+  rationale: string
+  target_delta: number | null
+  hedge_ratio: number | null
+  policy_stops: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationRejectedAlternativeRecord = {
+  alternative: PreTradeHedgeInstrumentType
+  reason: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationMissingEvidenceRecord = {
+  evidence_key: string
+  label: string
+  severity: PreTradeMissingEvidenceSeverity
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
 export type PreTradeRecommendationResultRecord = {
   stance: PreTradeRecommendationStance
   headline: string
@@ -1528,6 +1604,12 @@ export type PreTradeRecommendationResultRecord = {
   explanation: PreTradeRecommendationExplanationRecord
   checks: PreTradeRecommendationCheckRecord[]
   next_actions: string[]
+  opportunity_summary: PreTradeRecommendationOpportunitySummaryRecord | null
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  netting_candidates: PreTradeRecommendationNettingCandidateRecord[]
+  hedge_recommendation: PreTradeRecommendationHedgeRecommendationRecord | null
+  rejected_alternatives: PreTradeRecommendationRejectedAlternativeRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
 }
 
 export type PreTradeRecommendationSourceQualityDeltaRecord = {
@@ -2600,6 +2682,13 @@ export type AssistantAgentHealthWorkPackagePriority = 'P1' | 'P2' | 'P3' | 'P4'
 
 export type AssistantAgentHealthWorkPackageStatus = 'CANDIDATE'
 
+export type AssistantAgentWorkPackageStatus =
+  | 'CANDIDATE'
+  | 'ACCEPTED'
+  | 'IN_PROGRESS'
+  | 'IMPLEMENTED'
+  | 'DISMISSED'
+
 export type AssistantAgentHealthReviewItem = {
   agent_id: string
   agent_name: string
@@ -2644,6 +2733,30 @@ export type AssistantAgentHealthReview = {
   work_package_count: number
   review_items: AssistantAgentHealthReviewItem[]
   work_packages: AssistantAgentHealthWorkPackage[]
+}
+
+export type AssistantAgentWorkPackage = {
+  id: number
+  work_package_id: string
+  title: string
+  package_type: AssistantAgentHealthWorkPackageType
+  priority: AssistantAgentHealthWorkPackagePriority
+  status: AssistantAgentWorkPackageStatus
+  source_agent_ids: string[]
+  source_agent_names: string[]
+  source_recommendations: AssistantAutonomyReviewRecommendationAction[]
+  source_candidates: string[]
+  recommended_owner_role?: string | null
+  rationale: string
+  acceptance_checks: string[]
+  knowledge_base_titles: string[]
+  accepted_at?: string | null
+  accepted_by?: string | null
+  notes?: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
 }
 
 export type AssistantPromptResponse = {

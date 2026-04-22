@@ -114,6 +114,74 @@ MANAGED_AGENT_EVAL_CASES = (
         ),
     ),
     AssistantEvalCase(
+        name="settlement-read-agent-lists-invoice-issue-candidates",
+        agent=AssistantEvalAgentFixture(
+            agent_id="settlement-candidate-reader",
+            name="Settlement Candidate Reader",
+            capabilities=("READ", "EXPLAIN"),
+            allowed_workspaces=("assistant", "settlement"),
+            allowed_tools=("list_invoice_issue_candidates",),
+            system_prompt=(
+                "Use live settlement candidate reads when the user asks about pending or unissued invoices."
+            ),
+        ),
+        trades=(AssistantEvalTradeFixture(trade_id="T-2001I"),),
+        request_payload={
+            "agent_id": "settlement-candidate-reader",
+            "workspace": "settlement",
+            "context": "Workspace summary:\n- settlement.invoice_pending_count: 1",
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Which pending invoice should I handle first?"},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-invoice-candidates-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_invoice_candidates_1",
+                        "call_id": "call_eval_invoice_candidates_1",
+                        "name": "list_invoice_issue_candidates",
+                        "arguments": '{"limit":10}',
+                    }
+                ],
+                "usage": {"input_tokens": 18, "output_tokens": 7},
+            },
+            {
+                "id": "eval-invoice-candidates-2",
+                "output_text": "The live candidate read found trade T-2001I still needs its first invoice record; stage issuance only after the preview evidence is clear.",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "The live candidate read found trade T-2001I still needs its first invoice record; stage issuance only after the preview evidence is clear.",
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": 22},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="settlement-candidate-reader",
+            agent_name="Settlement Candidate Reader",
+            message_contains=("trade T-2001I", "first invoice record", "only after"),
+            warning_count=0,
+            tool_names=("list_invoice_issue_candidates",),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_tool_names=("list_invoice_issue_candidates",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
         name="managed-read-agent-prefers-live-evidence-over-stale-context",
         agent=AssistantEvalAgentFixture(
             agent_id="trade-reader-live-evidence",

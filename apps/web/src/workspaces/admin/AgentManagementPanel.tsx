@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  acceptAdminAssistantAgentHealthWorkPackage,
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
   createAssistantAgentProfileRequest,
@@ -12,6 +13,7 @@ import {
   listAdminAssistantAgentEvalRuns,
   listAdminAssistantAgentEvals,
   listAdminAssistantAgents,
+  listAdminAssistantAgentWorkPackages,
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
@@ -55,6 +57,7 @@ import type {
   AssistantAgentEvalRun,
   AssistantAgentEvalRunStatus,
   AssistantAgentHealthReview,
+  AssistantAgentWorkPackage,
   AssistantAutonomyReviewBrief,
   AssistantAgentCapability,
   AssistantAgentEvalGateStatus,
@@ -710,6 +713,10 @@ export function AgentManagementPanel({
   const [agentHealthReview, setAgentHealthReview] = useState<AssistantAgentHealthReview | null>(null)
   const [agentHealthReviewLoading, setAgentHealthReviewLoading] = useState(false)
   const [agentHealthReviewError, setAgentHealthReviewError] = useState('')
+  const [agentWorkPackages, setAgentWorkPackages] = useState<AssistantAgentWorkPackage[]>([])
+  const [agentWorkPackagesLoading, setAgentWorkPackagesLoading] = useState(false)
+  const [agentWorkPackageError, setAgentWorkPackageError] = useState('')
+  const [acceptingWorkPackageId, setAcceptingWorkPackageId] = useState<string | null>(null)
   const [selectedAgentEvalId, setSelectedAgentEvalId] = useState<number | null>(null)
   const [agentEvalForm, setAgentEvalForm] = useState<AgentEvalForm>(() => createEmptyAgentEvalForm())
   const [agentEvalRuns, setAgentEvalRuns] = useState<AssistantAgentEvalRun[]>([])
@@ -810,6 +817,10 @@ export function AgentManagementPanel({
   const createBlockedByProfilePolicy = createProfileFit.errors.length > 0
   const editBlockedByProfilePolicy = editProfileFit.errors.length > 0
   const pendingProfileRequestCount = profileRequests.filter((request) => request.status === 'REQUESTED').length
+  const trackedWorkPackageIds = useMemo(
+    () => new Set(agentWorkPackages.map((workPackage) => workPackage.work_package_id)),
+    [agentWorkPackages],
+  )
   const profileRequestReady = Boolean(
     profileRequestForm.business_problem.trim() &&
       profileRequestForm.proposed_mission.trim() &&
@@ -890,6 +901,29 @@ export function AgentManagementPanel({
     [adminEnabled],
   )
 
+  const loadAgentWorkPackages = useCallback(async () => {
+    if (!adminEnabled) {
+      setAgentWorkPackages([])
+      setAgentWorkPackageError('')
+      setAgentWorkPackagesLoading(false)
+      return
+    }
+
+    setAgentWorkPackagesLoading(true)
+    setAgentWorkPackageError('')
+    try {
+      const records = await listAdminAssistantAgentWorkPackages(appConfig.apiBase)
+      setAgentWorkPackages(records)
+    } catch (error) {
+      setAgentWorkPackages([])
+      setAgentWorkPackageError(
+        error instanceof Error ? error.message : 'Could not load tracked agent work packages.',
+      )
+    } finally {
+      setAgentWorkPackagesLoading(false)
+    }
+  }, [adminEnabled])
+
   useEffect(() => {
     requestSequenceRef.current += 1
     setAgentFlash(null)
@@ -928,6 +962,13 @@ export function AgentManagementPanel({
       setAutonomyReview(null)
       setAutonomyReviewError('')
       setAutonomyReviewLoading(false)
+      setAgentHealthReview(null)
+      setAgentHealthReviewError('')
+      setAgentHealthReviewLoading(false)
+      setAgentWorkPackages([])
+      setAgentWorkPackageError('')
+      setAgentWorkPackagesLoading(false)
+      setAcceptingWorkPackageId(null)
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -947,6 +988,10 @@ export function AgentManagementPanel({
 
     void refreshAgents()
   }, [adminEnabled, authSession?.user.role, refreshAgents])
+
+  useEffect(() => {
+    void loadAgentWorkPackages()
+  }, [loadAgentWorkPackages])
 
   useEffect(() => {
     if (!selectedAgent) {
@@ -1508,12 +1553,37 @@ export function AgentManagementPanel({
     try {
       const result = await getAdminAssistantAgentHealthReview(appConfig.apiBase)
       setAgentHealthReview(result)
+      await loadAgentWorkPackages()
     } catch (error) {
       setAgentHealthReviewError(
         error instanceof Error ? error.message : 'Could not generate the agent health review.',
       )
     } finally {
       setAgentHealthReviewLoading(false)
+    }
+  }
+
+  async function handleAcceptHealthWorkPackage(workPackageId: string) {
+    setAcceptingWorkPackageId(workPackageId)
+    setAgentHealthReviewError('')
+    setAgentWorkPackageError('')
+    setAgentFlash(null)
+
+    try {
+      const accepted = await acceptAdminAssistantAgentHealthWorkPackage(appConfig.apiBase, workPackageId, {
+        acceptedBy: authSession?.user.user_id,
+      })
+      await loadAgentWorkPackages()
+      setAgentFlash({
+        tone: 'success',
+        message: `${accepted.title} accepted into the agent work package backlog.`,
+      })
+    } catch (error) {
+      setAgentWorkPackageError(
+        error instanceof Error ? error.message : 'Could not accept the agent work package.',
+      )
+    } finally {
+      setAcceptingWorkPackageId(null)
     }
   }
 
@@ -1742,6 +1812,7 @@ export function AgentManagementPanel({
                 {agentHealthReview
                   ? `${agentHealthReview.work_package_count} candidate package${agentHealthReview.work_package_count === 1 ? '' : 's'} · ${agentHealthReview.pause_count} pause signal${agentHealthReview.pause_count === 1 ? '' : 's'}`
                   : 'Generate from autonomy briefs'}
+                {` · ${agentWorkPackages.length} tracked`}
               </span>
             </div>
 
@@ -1754,10 +1825,21 @@ export function AgentManagementPanel({
               >
                 {agentHealthReviewLoading ? 'Generating Health Review...' : 'Generate Health Review'}
               </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => void loadAgentWorkPackages()}
+                disabled={agentWorkPackagesLoading}
+              >
+                {agentWorkPackagesLoading ? 'Refreshing Backlog...' : 'Refresh Backlog'}
+              </button>
             </div>
 
             {agentHealthReviewError ? (
               <div className="feedback-banner feedback-banner-error">{agentHealthReviewError}</div>
+            ) : null}
+            {agentWorkPackageError ? (
+              <div className="feedback-banner feedback-banner-error">{agentWorkPackageError}</div>
             ) : null}
 
             {agentHealthReview ? (
@@ -1771,30 +1853,59 @@ export function AgentManagementPanel({
                     {agentHealthReview.keep_staged_count} staged
                   </small>
                 </div>
-                {agentHealthReview.work_packages.slice(0, 3).map((workPackage) => (
-                  <div key={workPackage.work_package_id} className="assistant-sidebar-block">
+                {agentHealthReview.work_packages.slice(0, 3).map((workPackage) => {
+                  const isTracked = trackedWorkPackageIds.has(workPackage.work_package_id)
+                  const isAccepting = acceptingWorkPackageId === workPackage.work_package_id
+                  return (
+                    <div key={workPackage.work_package_id} className="assistant-sidebar-block">
+                      <strong>
+                        {healthReviewPriorityLabel(workPackage.priority)} · {workPackage.package_type}
+                      </strong>
+                      <p>{workPackage.title}</p>
+                      <small>
+                        {workPackage.source_agent_names.join(' · ')}
+                        {workPackage.recommended_owner_role
+                          ? ` · owner ${workPackage.recommended_owner_role}`
+                          : ''}
+                      </small>
+                      <div className="toolbar settings-actions">
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleAcceptHealthWorkPackage(workPackage.work_package_id)}
+                          disabled={isTracked || isAccepting}
+                        >
+                          {isTracked ? 'Tracked' : isAccepting ? 'Accepting...' : 'Accept Package'}
+                        </button>
+                        {workPackage.source_agent_ids.slice(0, 2).map((agentId) => (
+                          <button
+                            key={`${workPackage.work_package_id}-${agentId}`}
+                            type="button"
+                            className="button button-ghost"
+                            onClick={() => setSelectedAgentId(agentId)}
+                          >
+                            Open {agentId}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
+
+            {agentWorkPackages.length > 0 ? (
+              <div className="assistant-builder-preview-grid">
+                {agentWorkPackages.slice(0, 3).map((workPackage) => (
+                  <div key={`tracked-${workPackage.work_package_id}`} className="assistant-sidebar-block">
                     <strong>
-                      {healthReviewPriorityLabel(workPackage.priority)} · {workPackage.package_type}
+                      {workPackage.status} · {healthReviewPriorityLabel(workPackage.priority)}
                     </strong>
                     <p>{workPackage.title}</p>
                     <small>
                       {workPackage.source_agent_names.join(' · ')}
-                      {workPackage.recommended_owner_role
-                        ? ` · owner ${workPackage.recommended_owner_role}`
-                        : ''}
+                      {workPackage.accepted_by ? ` · accepted by ${workPackage.accepted_by}` : ''}
                     </small>
-                    <div className="toolbar settings-actions">
-                      {workPackage.source_agent_ids.slice(0, 2).map((agentId) => (
-                        <button
-                          key={`${workPackage.work_package_id}-${agentId}`}
-                          type="button"
-                          className="button button-ghost"
-                          onClick={() => setSelectedAgentId(agentId)}
-                        >
-                          Open {agentId}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 ))}
               </div>

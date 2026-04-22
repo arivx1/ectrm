@@ -9,6 +9,9 @@ from apps.api.app.domains.operations.services.workflow_items import (
     WORKFLOW_CLOSED_STATUS_VALUES,
     WORKFLOW_TYPE_TO_QUEUE,
 )
+from apps.api.app.domains.operations.services.settlement_invoices import (
+    count_invoice_issue_candidates,
+)
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
@@ -197,14 +200,6 @@ def _build_settlement_summary(db: Session, *, now: datetime) -> dict[str, object
         payment_item_open_condition,
     )
 
-    invoice_record_exists = (
-        select(TradeInvoice.id).where(TradeInvoice.trade_id == Trade.trade_id).exists()
-    )
-    open_settlement_trade_condition = ~and_(
-        Trade.settlement_status == "SETTLED",
-        Trade.payment_status.in_(("PAID", "NOT_REQUIRED")),
-    )
-
     breakdown_counts = {
         str(status): int(count)
         for status, count in db.execute(
@@ -223,18 +218,7 @@ def _build_settlement_summary(db: Session, *, now: datetime) -> dict[str, object
                 .where(settlement_open_work_item_condition)
             ).scalar_one()
         ),
-        "invoice_pending_count": int(
-            db.execute(
-                select(func.count())
-                .select_from(Trade)
-                .where(
-                    Trade.status == ACTIVE_TRADE_STATUS,
-                    open_settlement_trade_condition,
-                    Trade.invoice_status != "NOT_REQUIRED",
-                    ~invoice_record_exists,
-                )
-            ).scalar_one()
-        ),
+        "invoice_pending_count": count_invoice_issue_candidates(db),
         "payment_due_count": _count_trades(db, Trade.payment_status.in_(("DUE", "OVERDUE"))),
         "settled_count": _count_trades(
             db,

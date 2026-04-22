@@ -482,7 +482,7 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(run["source_scenario_id"], scenario["scenario_id"])
         self.assertIsNone(run["source_review_id"])
         self.assertEqual(run["draft"]["commodity"], "HENRY_HUB")
-        self.assertEqual(len(run["input_snapshots"]), 5)
+        self.assertEqual(len(run["input_snapshots"]), 6)
         self.assertEqual(run["input_snapshots"][0]["adapter_key"], "desk-context")
         self.assertEqual(run["input_snapshots"][0]["quality_status"], "OK")
         self.assertEqual(run["input_snapshots"][0]["provenance"]["dataset"], "active-trades-and-positions")
@@ -495,6 +495,14 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertIn("Required source adapters", run["recommendation"]["explanation"]["source_quality_rationale"])
         self.assertEqual(run["recommendation"]["estimated_notional"], 71000)
         self.assertEqual(run["recommendation"]["related_active_trade_count"], 1)
+        self.assertEqual(run["recommendation"]["opportunity_summary"]["category"], "RISK_INCREASE")
+        self.assertEqual(run["recommendation"]["residual_exposure"]["exposure_effect"], "DEEPENS")
+        self.assertEqual(run["recommendation"]["residual_exposure"]["residual_after_trade"], 26000)
+        self.assertEqual(run["recommendation"]["netting_candidates"][0]["match_quality"], "REJECTED")
+        self.assertEqual(run["recommendation"]["hedge_recommendation"]["instrument_type"], "SWAP")
+        self.assertTrue(
+            any(item["evidence_key"] == "option-exposure" for item in run["recommendation"]["missing_evidence"])
+        )
         self.assertTrue(run["run_key"])
 
         adapters_response = self.client.get(
@@ -597,6 +605,72 @@ class PreTradeApiTests(unittest.TestCase):
         )
         self.assertEqual(missing_scenario_response.status_code, 404)
 
+    def test_legacy_recommendation_runs_without_structured_sections_still_load(self) -> None:
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=self._scenario_payload(),
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario = scenario_response.json()
+
+        with self.SessionLocal() as session:
+            legacy_run = ReportPreset(
+                preset_key="pretrade_recommendation_run",
+                scope="personal",
+                scope_owner_key="trader_one",
+                name="Legacy pre-trade run",
+                name_key="legacy-pre-trade-run",
+                filters_json={
+                    "thesis": "Legacy recommendation payload.",
+                    "draft": self._scenario_payload()["draft"],
+                    "source_scenario_id": scenario["scenario_id"],
+                    "source_review_id": None,
+                    "input_snapshots": [],
+                    "recommendation": {
+                        "stance": "PROCEED",
+                        "headline": "Proceed with standard controls.",
+                        "summary": "Legacy summary.",
+                        "confidence": "HIGH",
+                        "score": 100,
+                        "estimated_notional": 71000,
+                        "projected_credit_utilization_pct": None,
+                        "current_net_position": None,
+                        "related_active_trade_count": 0,
+                        "latest_mark": None,
+                        "mark_gap_pct": None,
+                        "explanation": {
+                            "stance_rationale": "Proceed is supported because legacy checks passed.",
+                            "source_quality_rationale": "Legacy source quality.",
+                            "confidence_rationale": "High confidence.",
+                            "primary_drivers": [],
+                            "reviewer_focus": [],
+                        },
+                        "checks": [],
+                        "next_actions": ["Review manually."],
+                    },
+                },
+                created_at=self.now,
+                created_by="trader_one",
+                updated_at=self.now,
+                updated_by="trader_one",
+                version=1,
+            )
+            session.add(legacy_run)
+            session.commit()
+            run_id = legacy_run.id
+
+        response = self.client.get(
+            f"/pretrade/recommendations/runs/{run_id}",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["recommendation"]["headline"], "Proceed with standard controls.")
+        self.assertIsNone(payload["recommendation"]["opportunity_summary"])
+        self.assertEqual(payload["recommendation"]["netting_candidates"], [])
+        self.assertEqual(payload["recommendation"]["missing_evidence"], [])
+
     def test_trade_creation_links_approved_review_and_prevents_duplicate_booking(self) -> None:
         self._seed_trade_reference_data()
 
@@ -640,7 +714,7 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(review_payload["recommendation_summary"]["run_id"], recommendation_run_id)
         self.assertEqual(review_payload["recommendation_summary"]["stance"], "ESCALATE")
         self.assertIn("Escalate because", review_payload["recommendation_summary"]["explanation"]["stance_rationale"])
-        self.assertEqual(review_payload["recommendation_summary"]["input_snapshot_count"], 5)
+        self.assertEqual(review_payload["recommendation_summary"]["input_snapshot_count"], 6)
 
         visible_attached_run = self.client.get(
             f"/pretrade/recommendations/runs/{recommendation_run_id}",

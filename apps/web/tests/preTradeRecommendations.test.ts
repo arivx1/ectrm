@@ -41,6 +41,8 @@ describe('buildPreTradeRecommendation', () => {
     expect(recommendation.stance).toBe('WAIT_FOR_DATA')
     expect(recommendation.checks.some((check) => check.status === 'block')).toBe(true)
     expect(recommendation.explanation.stance_rationale).toContain('Wait for data')
+    expect(recommendation.hedge_recommendation?.instrument_type).toBe('WAIT_FOR_DATA')
+    expect(recommendation.missing_evidence.some((item) => item.severity === 'BLOCKING')).toBe(true)
   })
 
   it('escalates when projected credit utilization breaches the limit', () => {
@@ -137,6 +139,9 @@ describe('buildPreTradeRecommendation', () => {
     expect(recommendation.stance).toBe('ESCALATE')
     expect(recommendation.projected_credit_utilization_pct).not.toBeNull()
     expect(recommendation.explanation.primary_drivers[0]).toContain('Projected credit utilization')
+    expect(recommendation.residual_exposure?.exposure_effect).toBe('DEEPENS')
+    expect(recommendation.opportunity_summary?.category).toBe('RISK_INCREASE')
+    expect(recommendation.netting_candidates[0].match_quality).toBe('REJECTED')
   })
 
   it('proceeds when credit and pricing checks are within tolerance', () => {
@@ -185,5 +190,9 @@ describe('buildPreTradeRecommendation', () => {
     expect(recommendation.stance).toBe('PROCEED')
     expect(recommendation.next_actions[0]).toContain('No blocking gaps')
     expect(recommendation.explanation.reviewer_focus[0]).toContain('Confirm desk intent')
+    expect(recommendation.opportunity_summary?.category).toBe('RISK_INCREASE')
+    expect(recommendation.residual_exposure?.residual_after_trade).toBe(26000)
+    expect(recommendation.hedge_recommendation?.instrument_type).toBe('SWAP')
+    expect(recommendation.rejected_alternatives.some((alternative) => alternative.alternative === 'OPTIONS')).toBe(true)
   })
 })

@@ -13,6 +13,7 @@ import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar
 import { type StoredAuthSession } from '../../shared/mutation'
 import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
+import { AssistantControlTowerPanel } from './AssistantControlTowerPanel'
 import { AssistantOutcomeMetricsPanel } from './AssistantOutcomeMetricsPanel'
 import { CodexTaskPanel } from './CodexTaskPanel'
 import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
@@ -1626,24 +1627,36 @@ export function AdminWorkspace({
         onRoadmapPublished={onRoadmapPublished}
       />
 
-      <AgentManagementPanel
+      <AssistantControlTowerPanel
         authSession={authSession}
         formatDate={formatDate}
         onOpenSettings={onOpenSettings}
       />
 
-      <AssistantOutcomeMetricsPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
+      <div id="assistant-agent-management">
+        <AgentManagementPanel
+          authSession={authSession}
+          formatDate={formatDate}
+          onOpenSettings={onOpenSettings}
+        />
+      </div>
 
-      <AssistantApprovalInboxPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-        onRefreshData={onRefreshData}
-      />
+      <div id="assistant-outcome-metrics">
+        <AssistantOutcomeMetricsPanel
+          authSession={authSession}
+          formatDate={formatDate}
+          onOpenSettings={onOpenSettings}
+        />
+      </div>
+
+      <div id="assistant-approval-inbox">
+        <AssistantApprovalInboxPanel
+          authSession={authSession}
+          formatDate={formatDate}
+          onOpenSettings={onOpenSettings}
+          onRefreshData={onRefreshData}
+        />
+      </div>
 
       <CodexTaskPanel
         authSession={authSession}

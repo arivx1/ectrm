@@ -330,6 +330,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
     recommended_tools: [
       'list_trade_invoices',
+      'list_invoice_issue_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
       'list_workflow_items',
@@ -508,6 +509,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
     recommended_tools: [
       'list_trade_invoices',
+      'list_invoice_issue_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
       'list_workflow_items',

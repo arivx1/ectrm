@@ -17,6 +17,12 @@ from apps.api.app.domains.documents.services.ingestion import (
 )
 from apps.api.app.domains.operations.services import build_workspace_bootstrap_summary
 from apps.api.app.domains.operations.services.settlement_invoices import (
+    count_invoice_issue_candidates as load_invoice_issue_candidate_count,
+)
+from apps.api.app.domains.operations.services.settlement_invoices import (
+    list_invoice_issue_candidates as load_invoice_issue_candidates,
+)
+from apps.api.app.domains.operations.services.settlement_invoices import (
     list_trade_invoices as load_trade_invoices,
 )
 from apps.api.app.domains.operations.services.settlement_payments import (
@@ -488,9 +494,10 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
         AssistantToolDefinition(
             name="list_trade_invoices",
             description=(
-                "Load settlement invoice records with outstanding and paid amounts already projected. Use "
-                "this when the user asks what has been billed, which invoices are overdue, or what remains "
-                "open for a trade."
+                "Load persisted settlement invoice records with outstanding and paid amounts already projected. "
+                "Use this when the user asks what has already been billed, which existing invoices are overdue, "
+                "or what remains open on created invoice records. For pending or unissued first-invoice work, "
+                "use list_invoice_issue_candidates."
             ),
             parameters={
                 "type": "object",
@@ -515,6 +522,30 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
                 "additionalProperties": False,
             },
             executor=_list_trade_invoices,
+        ),
+        AssistantToolDefinition(
+            name="list_invoice_issue_candidates",
+            description=(
+                "Load active trades that need their first settlement invoice record, including deterministic "
+                "invoice-issue preview status and blockers. Use this when the workspace summary shows pending "
+                "or unissued invoices, or when the user asks to handle open invoice work that is not yet an "
+                "invoice ledger row."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "ready_only": {
+                        "type": "boolean",
+                        "description": "Whether to return only candidates whose invoice-issue preview is READY. Defaults to false.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of rows to return. Defaults to 10 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_list_invoice_issue_candidates,
         ),
         AssistantToolDefinition(
             name="list_trade_payments",
@@ -1217,6 +1248,44 @@ def _list_trade_invoices(db: Session, arguments: dict[str, Any]) -> AssistantToo
         summary = f"Returned {len(items)} trade invoice row(s) for trade {trade_id}."
     if overdue_count:
         summary += f" {overdue_count} invoice(s) are overdue."
+    if not items and trade_id is None and not status and not overdue_only:
+        candidate_count = load_invoice_issue_candidate_count(db)
+        if candidate_count:
+            payload["unissued_invoice_candidate_count"] = candidate_count
+            payload["suggested_next_tool"] = "list_invoice_issue_candidates"
+            summary += (
+                f" {candidate_count} active trade(s) need first invoice records; "
+                "use list_invoice_issue_candidates to inspect those candidates."
+            )
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
+
+
+def _list_invoice_issue_candidates(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    ready_only = _normalize_bool(
+        arguments.get("ready_only"),
+        default=False,
+        field_name="ready_only",
+    )
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+
+    rows = load_invoice_issue_candidates(db, limit=None)
+    if ready_only:
+        rows = [row for row in rows if row.readiness_status == "READY"]
+    rows = rows[:limit]
+
+    items = [_dump_invoice_issue_candidate(row) for row in rows]
+    ready_count = sum(1 for row in rows if row.readiness_status == "READY")
+    blocked_count = sum(1 for row in rows if row.readiness_status == "BLOCKED")
+    payload = {
+        "count": len(items),
+        "ready_count": ready_count,
+        "blocked_count": blocked_count,
+        "items": items,
+    }
+    summary = (
+        f"Returned {len(items)} invoice issue candidate trade(s): "
+        f"{ready_count} ready and {blocked_count} blocked by deterministic preview checks."
+    )
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
 
 
@@ -1866,6 +1935,34 @@ def _summarize_document(document: Any) -> dict[str, Any]:
         "processing_error_count": len(document.processing_errors or []),
         "created_at": _json_default(document.created_at),
         "updated_at": _json_default(document.updated_at),
+    }
+
+
+def _dump_invoice_issue_candidate(value: Any) -> dict[str, Any]:
+    return {
+        "trade_id": value.trade_id,
+        "trade_nature": value.trade_nature,
+        "book": value.book,
+        "portfolio": value.portfolio,
+        "counterparty": value.counterparty,
+        "commodity_class": value.commodity_class,
+        "commodity": value.commodity,
+        "trader_user": value.trader_user,
+        "trade_date": _json_default(value.trade_date),
+        "execution_timestamp": _json_default(value.execution_timestamp),
+        "delivery_start": _json_default(value.delivery_start),
+        "delivery_end": _json_default(value.delivery_end),
+        "trade_currency_code": value.trade_currency_code,
+        "invoice_status": value.invoice_status,
+        "payment_status": value.payment_status,
+        "settlement_status": value.settlement_status,
+        "notional_amount": _json_default(value.notional_amount),
+        "age_days": value.age_days,
+        "readiness_status": value.readiness_status,
+        "preview_summary": value.preview_summary,
+        "blocking_reasons": list(value.blocking_reasons),
+        "assumptions": list(value.assumptions),
+        "recommended_action": value.recommended_action,
     }
 
 
