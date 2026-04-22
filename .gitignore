@@ -2,7 +2,7 @@
 .DS_Store
 
 # Python
-.venv/
+.venv*/
 venv/
 __pycache__/
 *.py[cod]
@@ -20,6 +20,7 @@ dist/
 *.tsbuildinfo
 playwright-report/
 test-results/
+tmp/
 
 # IDEs
 .idea/
