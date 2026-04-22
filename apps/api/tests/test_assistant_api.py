@@ -3345,6 +3345,258 @@ class AssistantApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_admin_control_tower_summary_reports_roster_activity_and_trust_signals(self) -> None:
+        admin_token = self._create_session_token()
+        now = datetime.now(timezone.utc)
+        self._create_agent(
+            agent_id="watch-agent",
+            name="Watch Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN"],
+            allowed_tools=["get_trade_by_id"],
+            allowed_action_types=[],
+            authority_ceiling="EXPLAIN",
+        )
+        self._create_agent(
+            agent_id="risky-agent",
+            name="Risky Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "operations"],
+            capabilities=["READ", "EXPLAIN", "ACTION"],
+            allowed_tools=["list_workflow_items"],
+            allowed_action_types=[],
+            authority_ceiling="STAGE",
+        )
+        self._create_agent(
+            agent_id="draft-agent",
+            name="Draft Agent",
+            status="DRAFT",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ"],
+            allowed_tools=["get_trade_by_id"],
+            allowed_action_types=[],
+        )
+        self._create_agent(
+            agent_id="paused-agent",
+            name="Paused Agent",
+            status="PAUSED",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ"],
+            allowed_tools=["get_trade_by_id"],
+            allowed_action_types=[],
+        )
+        self._create_agent(
+            agent_id="retired-agent",
+            name="Retired Agent",
+            status="RETIRED",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ"],
+            allowed_tools=["get_trade_by_id"],
+            allowed_action_types=[],
+        )
+
+        with self.SessionLocal() as session:
+            watch_run = AssistantRun(
+                conversation_id=None,
+                status="COMPLETED",
+                user_id="ops_alpha",
+                session_id="watch-session",
+                user_role="OPS_ADMIN",
+                workspace="assistant",
+                agent_id="watch-agent",
+                agent_name="Watch Agent",
+                agent_role_key=None,
+                agent_profile_kind="CUSTOM",
+                provider="openai",
+                model="gpt-5-mini",
+                use_live_tools=True,
+                request_messages=[{"role": "user", "content": "Watch the queue."}],
+                application_context=None,
+                prompt_sections=[],
+                rendered_system_prompt="System prompt.",
+                warnings=["Tool response was truncated."],
+                tool_calls=[{"name": "get_trade_by_id"}, {"name": "list_workflow_items"}],
+                input_tokens=100,
+                output_tokens=40,
+                latest_user_message="Watch the queue.",
+                assistant_message="Queue reviewed.",
+                error_detail=None,
+                created_at=now - timedelta(hours=3),
+                completed_at=now - timedelta(hours=3),
+            )
+            risky_run = AssistantRun(
+                conversation_id=None,
+                status="FAILED",
+                user_id="ops_beta",
+                session_id="risky-session",
+                user_role="OPS_ADMIN",
+                workspace="operations",
+                agent_id="risky-agent",
+                agent_name="Risky Agent",
+                agent_role_key=None,
+                agent_profile_kind="CUSTOM",
+                provider="openai",
+                model="gpt-5-mini",
+                use_live_tools=False,
+                request_messages=[{"role": "user", "content": "Stage the action."}],
+                application_context=None,
+                prompt_sections=[],
+                rendered_system_prompt="System prompt.",
+                warnings=[],
+                tool_calls=[],
+                input_tokens=80,
+                output_tokens=20,
+                latest_user_message="Stage the action.",
+                assistant_message=None,
+                error_detail="Policy validation failed.",
+                created_at=now - timedelta(hours=2),
+                completed_at=now - timedelta(hours=2),
+            )
+            session.add_all([watch_run, risky_run])
+            session.flush()
+            session.add_all(
+                [
+                    AssistantActionRequest(
+                        run_id=risky_run.id,
+                        status="PENDING",
+                        user_id="ops_beta",
+                        session_id="risky-session",
+                        workspace="operations",
+                        agent_id="risky-agent",
+                        agent_name="Risky Agent",
+                        action_type="issue_trade_invoice",
+                        summary="Issue invoice",
+                        description="Issue an invoice for review.",
+                        payload={"review_context": {"action_preview": {"status": "BLOCKED"}}},
+                        result=None,
+                        error_detail=None,
+                        created_at=now - timedelta(hours=5),
+                        decided_at=None,
+                        decided_by=None,
+                    ),
+                    AssistantActionRequest(
+                        run_id=risky_run.id,
+                        status="FAILED",
+                        user_id="ops_beta",
+                        session_id="risky-session",
+                        workspace="operations",
+                        agent_id="risky-agent",
+                        agent_name="Risky Agent",
+                        action_type="issue_trade_invoice",
+                        summary="Failed invoice",
+                        description="Attempted invoice execution.",
+                        payload={"invoice_id": "INV-1"},
+                        result=None,
+                        error_detail="Preview was blocked.",
+                        created_at=now - timedelta(hours=2, minutes=30),
+                        decided_at=now - timedelta(hours=2),
+                        decided_by="ops_lead",
+                    ),
+                    AssistantActionRequest(
+                        run_id=watch_run.id,
+                        status="REJECTED",
+                        user_id="ops_alpha",
+                        session_id="watch-session",
+                        workspace="assistant",
+                        agent_id="watch-agent",
+                        agent_name="Watch Agent",
+                        action_type="cancel_trade",
+                        summary="Reject cancellation",
+                        description="Cancel a trade.",
+                        payload={"trade_id": "T-1"},
+                        result=None,
+                        error_detail=None,
+                        created_at=now - timedelta(hours=1),
+                        decided_at=now - timedelta(minutes=50),
+                        decided_by="ops_lead",
+                    ),
+                    AssistantActionRequest(
+                        run_id=watch_run.id,
+                        status="EXECUTED",
+                        user_id="ops_alpha",
+                        session_id="watch-session",
+                        workspace="assistant",
+                        agent_id="watch-agent",
+                        agent_name="Watch Agent",
+                        action_type="update_trade_workflow_item",
+                        summary="Update workflow",
+                        description="Update a workflow item.",
+                        payload={"workflow_item_id": 1},
+                        result={"workflow_item": {"id": 1}},
+                        error_detail=None,
+                        created_at=now - timedelta(minutes=45),
+                        decided_at=now - timedelta(minutes=30),
+                        decided_by="ops_lead",
+                    ),
+                ]
+            )
+            session.commit()
+
+        response = self.client.get(
+            "/admin/assistant/control-tower/summary",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["created_after"], None)
+        self.assertEqual(payload["created_before"], None)
+        self.assertEqual(payload["roster"]["total_count"], 5)
+        self.assertEqual(payload["roster"]["active_count"], 2)
+        self.assertEqual(payload["roster"]["draft_count"], 1)
+        self.assertEqual(payload["roster"]["paused_count"], 1)
+        self.assertEqual(payload["roster"]["retired_count"], 1)
+        self.assertEqual(payload["roster"]["action_capable_count"], 1)
+        self.assertEqual(payload["roster"]["missing_eval_coverage_count"], 1)
+        self.assertEqual(payload["roster"]["policy_warning_count"], 1)
+
+        self.assertEqual(payload["runs"]["total_count"], 2)
+        self.assertEqual(payload["runs"]["completed_count"], 1)
+        self.assertEqual(payload["runs"]["failed_count"], 1)
+        self.assertEqual(payload["runs"]["warning_count"], 1)
+        self.assertEqual(payload["runs"]["tool_call_count"], 2)
+        self.assertIsNotNone(payload["runs"]["latest_run_at"])
+
+        self.assertEqual(payload["actions"]["total_count"], 4)
+        self.assertEqual(payload["actions"]["pending_count"], 1)
+        self.assertEqual(payload["actions"]["failed_count"], 1)
+        self.assertEqual(payload["actions"]["rejected_count"], 1)
+        self.assertEqual(payload["actions"]["executed_count"], 1)
+        self.assertEqual(payload["actions"]["preview_blocked_count"], 1)
+        oldest_pending = payload["actions"]["oldest_pending_action"]
+        self.assertEqual(oldest_pending["agent_id"], "risky-agent")
+        self.assertEqual(oldest_pending["action_type"], "issue_trade_invoice")
+        self.assertGreaterEqual(oldest_pending["age_seconds"], 4 * 60 * 60)
+
+        signals = {(row["agent_id"], row["signal_type"]): row for row in payload["trust_signals"]}
+        self.assertIn(("risky-agent", "MISSING_EVAL_COVERAGE"), signals)
+        self.assertIn(("risky-agent", "POLICY_WARNING"), signals)
+        self.assertIn(("risky-agent", "ACTION_BACKLOG"), signals)
+        self.assertIn(("risky-agent", "FAILED_ACTIONS"), signals)
+        self.assertIn(("watch-agent", "RUN_WARNING"), signals)
+        self.assertEqual(signals[("risky-agent", "POLICY_WARNING")]["severity"], "danger")
+        self.assertEqual(signals[("risky-agent", "MISSING_EVAL_COVERAGE")]["eval_status"], "BLOCKED")
+        self.assertIn(
+            "must declare explicit allowed_action_types",
+            signals[("risky-agent", "POLICY_WARNING")]["details"][0],
+        )
+
+    def test_admin_control_tower_summary_requires_admin_role(self) -> None:
+        token = self._create_session_token(
+            user_id="desk_user",
+            email="desk@example.com",
+            display_name="Desk User",
+            role="TRADER",
+        )
+
+        response = self.client.get(
+            "/admin/assistant/control-tower/summary",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_admin_assistant_run_audit_trace_links_approved_action_mutation(self) -> None:
         admin_token = self._create_session_token()
         action_request_id = self._create_cancel_trade_action_request(

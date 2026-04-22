@@ -49,6 +49,9 @@ from apps.api.app.domains.assistant.services.conversations import (
     to_assistant_conversation_out,
     to_assistant_conversation_summary_out,
 )
+from apps.api.app.domains.assistant.services.control_tower import (
+    build_assistant_control_tower_summary,
+)
 from apps.api.app.domains.assistant.services.feedback import (
     to_assistant_run_feedback_out,
     upsert_assistant_run_feedback,
@@ -124,6 +127,7 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentBuildRequest,
     AssistantAgentBuildSuggestionOut,
     AssistantAgentCreate,
+    AssistantControlTowerSummaryOut,
     AssistantAgentEvalCreate,
     AssistantAgentEvalOut,
     AssistantAgentEvalRunOut,
@@ -723,6 +727,28 @@ def list_admin_assistant_runs(
             profile_kind=profile_kind,
         )
     ]
+
+
+@admin_router.get("/control-tower/summary", response_model=AssistantControlTowerSummaryOut)
+def get_admin_assistant_control_tower_summary(
+    request: Request,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> AssistantControlTowerSummaryOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    snapshot = build_assistant_control_tower_summary(
+        db,
+        created_after=created_after,
+        created_before=created_before,
+    )
+    return AssistantControlTowerSummaryOut.model_validate(asdict(snapshot))
 
 
 @admin_router.get("/outcome-metrics", response_model=AssistantOutcomeMetricsOut)

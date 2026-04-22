@@ -1742,7 +1742,7 @@ test(
         window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
       }, { apiBaseOverride: `${appServer.origin}/api` })
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -1818,7 +1818,7 @@ test(
         },
       )
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -1887,7 +1887,7 @@ test(
         },
       )
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -1945,7 +1945,7 @@ test(
         window.localStorage.setItem('ectrm.api-base-override', apiBaseOverride)
       }, { apiBaseOverride: `${appServer.origin}/api` })
 
-      await page.goto(appServer.origin, {
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
 
@@ -2109,22 +2109,14 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      const signedOutOverlay = page.locator('.start-here-dialog')
-      await signedOutOverlay.waitFor()
-      await signedOutOverlay.getByRole('button', { name: 'Not Now' }).click()
-      await signedOutOverlay.waitFor({ state: 'hidden' })
+      await page.getByText('Start with the job in front of you').waitFor()
+      await page.getByRole('button', { name: 'Sign In', exact: true }).click()
 
       const authGate = page.locator('.auth-gate-stage')
       await authGate.waitFor()
       await authGate.getByText('Password · Single-user').waitFor()
 
       await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
-
-      const signedInOverlay = page.locator('.start-here-dialog')
-      await signedInOverlay.waitFor()
-      await signedInOverlay.getByText('Signed in as Ops Admin').waitFor()
-      await signedInOverlay.getByRole('button', { name: 'Not Now' }).click()
-      await signedInOverlay.waitFor({ state: 'hidden' })
 
       await page.waitForFunction(() => !document.querySelector('.auth-gate-stage'))
       await page.getByText('Start with the job in front of you').waitFor()

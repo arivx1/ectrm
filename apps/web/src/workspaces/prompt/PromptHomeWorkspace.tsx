@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from 'react'
 
 import {
   getAssistantConversation,
@@ -25,6 +34,13 @@ import type {
   ViewKey,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  clearPromptResumeIntent,
+  getPromptResumeIntent,
+  savePromptResumeIntent,
+  savePromptSignInReturnIntent,
+  subscribePromptResumeIntent,
+} from '../../shared/promptResumeIntent'
 
 type PromptHomeCounts = {
   activeTrades: number | null
@@ -185,6 +201,12 @@ export function PromptHomeWorkspace({
   const [conversationHistoryError, setConversationHistoryError] = useState('')
   const [conversationDetailLoading, setConversationDetailLoading] = useState(false)
   const [conversationDetailError, setConversationDetailError] = useState('')
+  const promptResumeIntent = useSyncExternalStore(
+    subscribePromptResumeIntent,
+    getPromptResumeIntent,
+    () => null,
+  )
+  const consumedPromptResumeKeyRef = useRef<string | null>(null)
 
   const operatorContext = useMemo(
     () =>
@@ -317,6 +339,31 @@ export function PromptHomeWorkspace({
     }
   }
 
+  const submitResumedPrompt = useEffectEvent((prompt: string) => {
+    void submitPrompt(prompt)
+  })
+
+  useEffect(() => {
+    if (!authSession || !promptResumeIntent) {
+      return
+    }
+
+    const resumeKey = `${promptResumeIntent.createdAt}:${promptResumeIntent.draft}`
+    if (consumedPromptResumeKeyRef.current === resumeKey) {
+      return
+    }
+
+    consumedPromptResumeKeyRef.current = resumeKey
+    clearPromptResumeIntent()
+    setDraft(promptResumeIntent.draft)
+    setSubmitError('')
+    setConversationDetailError('')
+
+    if (promptResumeIntent.submitAfterSignIn) {
+      submitResumedPrompt(promptResumeIntent.draft)
+    }
+  }, [authSession, promptResumeIntent])
+
   async function resumeConversation(conversation: AssistantConversationSummary) {
     if (!authSession || submitting || conversationDetailLoading) {
       return
@@ -345,7 +392,37 @@ export function PromptHomeWorkspace({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!authSession) {
+      const trimmedDraft = draft.trim()
+      if (!trimmedDraft) {
+        return
+      }
+
+      savePromptResumeIntent({
+        draft: trimmedDraft,
+        submitAfterSignIn: true,
+      })
+      setSubmitError('')
+      onOpenView('settings')
+      return
+    }
+
     void submitPrompt(draft)
+  }
+
+  function handleSignIn() {
+    const trimmedDraft = draft.trim()
+    if (trimmedDraft) {
+      savePromptResumeIntent({
+        draft: trimmedDraft,
+        submitAfterSignIn: false,
+      })
+    } else {
+      savePromptSignInReturnIntent()
+    }
+
+    setSubmitError('')
+    onOpenView('settings')
   }
 
   function handleNavigationIntent(intent: PromptNavigationIntent, includeHandoff = true) {
@@ -411,17 +488,26 @@ export function PromptHomeWorkspace({
             <button
               type="submit"
               className="button button-primary"
-              disabled={!authSession || !draft.trim() || submitting}
+              disabled={!draft.trim() || submitting}
             >
-              {submitting ? 'Sending...' : 'Send Prompt'}
+              {submitting ? 'Sending...' : authSession ? 'Send Prompt' : 'Sign In to Send Prompt'}
             </button>
-            <button type="button" className="button button-ghost" onClick={() => onOpenView('assistant')}>
-              Assistant Console
-            </button>
+            {authSession ? (
+              <button type="button" className="button button-ghost" onClick={() => onOpenView('assistant')}>
+                Assistant Console
+              </button>
+            ) : (
+              <button type="button" className="button button-ghost" onClick={handleSignIn}>
+                Sign In
+              </button>
+            )}
           </div>
 
           <p className={`form-note ${submitError ? 'form-note-error' : ''}`}>
-            {submitError || (!authSession ? 'Sign in before sending a protected prompt.' : runtimeNote)}
+            {submitError ||
+              (!authSession
+                ? 'You can draft the prompt here. We will only send it after you sign in.'
+                : runtimeNote)}
           </p>
         </form>
 

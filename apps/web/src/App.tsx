@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import './App.css'
 import './appearance.css'
@@ -47,6 +47,14 @@ import {
 } from './shared/appRouteHandoff'
 import { getAuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
 import type { AuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
+import {
+  clearPromptSignInReturnIntent,
+  formatPromptResumeIntentLabel,
+  getPromptResumeIntent,
+  getPromptSignInReturnIntent,
+  subscribePromptResumeIntent,
+  subscribePromptSignInReturnIntent,
+} from './shared/promptResumeIntent'
 import { commodityClassOrder } from './shared/trading'
 
 function WorkspaceLoadState({
@@ -652,6 +660,16 @@ export default function App() {
   const activeRouteHandoffFilterRef = useRef<string | null>(null)
   const appliedRouteHandoffKeyRef = useRef<string | null>(null)
   const routeHandoffKey = getAppRouteHandoffKey(routeHandoff)
+  const promptResumeIntent = useSyncExternalStore(
+    subscribePromptResumeIntent,
+    getPromptResumeIntent,
+    () => null,
+  )
+  const promptSignInReturnIntent = useSyncExternalStore(
+    subscribePromptSignInReturnIntent,
+    getPromptSignInReturnIntent,
+    () => null,
+  )
 
   function toggleNavSection(sectionKey: PrimaryNavigationSectionKey) {
     setOpenNavSectionKeys((current) =>
@@ -774,13 +792,63 @@ export default function App() {
     navigateToView: route.navigateToView,
     replaceView,
   })
+  const promptResumeIntentLabel = promptResumeIntent
+    ? formatPromptResumeIntentLabel(promptResumeIntent)
+    : null
+
+  useEffect(() => {
+    if (!authSession || authInterruption.authInterruptionResume || !promptResumeIntent) {
+      return
+    }
+
+    if (currentView === 'prompt') {
+      return
+    }
+
+    dismissStartHere()
+    replaceView('prompt')
+  }, [
+    authInterruption.authInterruptionResume,
+    authSession,
+    currentView,
+    dismissStartHere,
+    promptResumeIntent,
+    replaceView,
+  ])
+
+  useEffect(() => {
+    if (
+      !authSession ||
+      authInterruption.authInterruptionResume ||
+      promptResumeIntent ||
+      !promptSignInReturnIntent
+    ) {
+      return
+    }
+
+    clearPromptSignInReturnIntent()
+    dismissStartHere()
+    if (currentView !== 'prompt') {
+      replaceView('prompt')
+    }
+  }, [
+    authInterruption.authInterruptionResume,
+    authSession,
+    currentView,
+    dismissStartHere,
+    promptResumeIntent,
+    promptSignInReturnIntent,
+    replaceView,
+  ])
 
   const showStartHereOverlay =
     startHere.showStartHere &&
     !(authSession && startHereRouting.startHereReturnIntent) &&
+    currentView !== 'prompt' &&
+    currentView !== 'settings' &&
     workspaceData.authInterruptionReason !== 'session_expired' &&
     authInterruption.authInterruptionResume === null
-  const signedOutNeedsAuthGate = !authSession && currentView !== 'guide'
+  const signedOutNeedsAuthGate = !authSession && currentView !== 'guide' && currentView !== 'prompt'
 
   if (signedOutNeedsAuthGate) {
     return (
@@ -791,6 +859,8 @@ export default function App() {
           authInterruptionMessage={authInterruption.authInterruptionMessage}
           onSessionChange={workspaceData.handleSessionChange}
           pendingStartHereReturnLabel={startHereRouting.pendingStartHereReturnLabel}
+          pendingPromptResumeLabel={promptResumeIntentLabel}
+          pendingPromptResumeWillSubmit={promptResumeIntent?.submitAfterSignIn ?? false}
         />
         {showStartHereOverlay ? (
           <AppStartHereOverlay

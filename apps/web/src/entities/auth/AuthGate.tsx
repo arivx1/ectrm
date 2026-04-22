@@ -16,6 +16,8 @@ type AuthGateProps = {
   authInterruptionMessage?: string | null
   onSessionChange: (session: StoredAuthSession | null) => Promise<void> | void
   pendingStartHereReturnLabel?: string | null
+  pendingPromptResumeLabel?: string | null
+  pendingPromptResumeWillSubmit?: boolean
 }
 
 type FlashMessage = {
@@ -38,6 +40,8 @@ export function AuthGate({
   authInterruptionMessage = null,
   onSessionChange,
   pendingStartHereReturnLabel = null,
+  pendingPromptResumeLabel = null,
+  pendingPromptResumeWillSubmit = false,
 }: AuthGateProps) {
   const [loginForm, setLoginForm] = useState({ identifier: '', password: '' })
   const [bootstrapForm, setBootstrapForm] = useState({
@@ -389,6 +393,13 @@ export function AuthGate({
           {pendingStartHereReturnLabel ? (
             <div className="feedback-banner feedback-banner-success">
               {`After sign-in, opening ${pendingStartHereReturnLabel}. We'll take you straight there after authentication succeeds.`}
+            </div>
+          ) : null}
+          {pendingPromptResumeLabel ? (
+            <div className="feedback-banner feedback-banner-success">
+              {pendingPromptResumeWillSubmit
+                ? `After sign-in, sending ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`
+                : `After sign-in, reopening Prompt Home with ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`}
             </div>
           ) : null}
 

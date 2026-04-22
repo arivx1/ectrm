@@ -56,6 +56,77 @@ Start with the primary workspace for your role, then use the supporting
 surfaces in the order shown to widen from entry, to investigation, to
 downstream follow-through.
 
+### Trader
+
+Start in `Live Desk` when you need the current operating picture, then move to
+`Exposure`, `Net Positions`, and `Trade Capture` as the question becomes more
+specific.
+
+Use this path for:
+
+- finding open exposure, pricing gaps, and volatility-sensitive opportunities
+- comparing a trade idea against the current book before capture
+- checking whether active longs and shorts are offsetting as expected
+- validating position, exposure, and P&L context after a new or amended trade
+
+Today, trade entry still belongs in `Trade Capture`. Future pre-trade,
+opportunity, freight-cost, and book-flattening recommendations should hand off
+to the same workspace instead of bypassing the normal trade review path.
+
+### Risk Manager
+
+Start in `Exposure` when the job is concentration, pricing coverage, option
+sensitivity, or residual delta. Move to `Net Positions` for commodity and book
+balance, then to `Reports` for broader risk and P&L context.
+
+Use this path for:
+
+- seeing the gross and net exposure that needs review
+- identifying hedge candidates or residual deltas
+- checking whether stale marks, missing prices, or option sensitivity explain a
+  risk change
+- reviewing how asset forecasts or physical commitments should affect forward
+  views once those inputs are modeled
+
+Hedge recommendations should be treated as reviewable analysis. Futures,
+options, swaps, physical offsets, and other hedge actions remain human-owned
+until deterministic policy, approval, and execution controls exist.
+
+### Operations Manager
+
+Start in `Operations` when the question is ownership, blockers, approvals, or
+queue work. Move to `Deliveries`, `Scheduling`, or `Settlement` when the queue
+item points to a specific movement, schedule, confirmation, invoice, or payment.
+
+Use this path for:
+
+- clearing overdue workflow items
+- checking confirmation, delivery, scheduling, and document follow-through
+- turning repeated manual checklists into workflow templates
+- finding reconciliations that should become deterministic controls
+
+Agents can help summarize blockers and stage approved internal workflow updates.
+External logistics commitments and ambiguous actualization changes should stay
+with human operators until the policy path is explicit.
+
+### Accountant / Settlement User
+
+Start in `Settlement` when the job is invoice, payment, aging, cash forecast,
+or reconciliation follow-through. Move to `Reports` for broader summaries and
+to `Operations` when a finance issue needs ownership or escalation.
+
+Use this path for:
+
+- seeing which invoices are due, issued, disputed, overdue, paid, or open
+- finding payment mismatches, short pays, overpayments, and unreconciled cash
+- confirming whether settlement status lines up with trade and delivery context
+- reviewing accrual and billed-versus-collected questions as the accrual domain
+  matures
+
+Invoice and payment actions should remain approval-gated. Accrual recognition,
+cash application, write-offs, and payment release need deterministic services,
+clear audit trails, and human finance ownership.
+
 ## Troubleshooting Matrix
 
 Use this matrix when you are diagnosing a symptom instead of performing a

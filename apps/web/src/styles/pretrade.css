@@ -225,6 +225,18 @@
   gap: 0.65rem;
 }
 
+.pretrade-review-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.pretrade-review-filter-row .button-active {
+  border-color: rgba(61, 214, 160, 0.28);
+  color: var(--terminal-text);
+  box-shadow: 0 0 0 1px rgba(61, 214, 160, 0.1);
+}
+
 .pretrade-metric-grid,
 .pretrade-context-grid {
   display: grid;
@@ -371,6 +383,14 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.03),
     0 0 0 1px rgba(61, 214, 160, 0.08);
+}
+
+.pretrade-record-card.is-focused {
+  border-color: rgba(245, 190, 103, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 0 0 1px rgba(245, 190, 103, 0.16),
+    0 18px 36px rgba(245, 190, 103, 0.08);
 }
 
 .pretrade-recommendation-head {

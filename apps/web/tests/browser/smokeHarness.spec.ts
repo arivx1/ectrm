@@ -43,6 +43,14 @@ async function selectExactSearchValue(
   await expect(input).toHaveValue(expectedDisplayValue)
 }
 
+async function signInFromPromptHome(page: Page): Promise<void> {
+  await expect(page.getByText('Start with the job in front of you')).toBeVisible()
+  await page.getByRole('button', { name: 'Sign In', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Use local OPS_ADMIN session' })).toBeVisible()
+  await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+  await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
+}
+
 test('dashboard smoke boots against the seeded browser harness', async ({ page }) => {
   const harness = await startSmokeHarness()
 
@@ -115,16 +123,46 @@ test('single-user smoke signs into the prompt home when one-click access is enab
       waitUntil: 'domcontentloaded',
     })
 
-    await dismissStartHereOverlay(page)
-    await expect(page.getByRole('button', { name: 'Use local OPS_ADMIN session' })).toBeVisible()
-
-    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
-    await dismissStartHereOverlay(page)
+    await expect(page.getByText('Start with the job in front of you')).toBeVisible()
+    await expect(page.getByText('You can draft the prompt here. We will only send it after you sign in.')).toBeVisible()
+    await signInFromPromptHome(page)
 
     await expect(page.getByText('Start with the job in front of you')).toBeVisible()
     await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
     await expect(page.getByRole('button', { name: /Assistant Console/ })).toBeVisible()
     await expect(page.getByRole('button', { name: /Recent blocker triage/ })).toBeVisible()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('signed-out prompt draft resumes and sends after sign-in', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await expect(page.getByText('Start with the job in front of you')).toBeVisible()
+    await page.getByLabel('Operator prompt').fill('Where should I handle the confirmation blocker?')
+    await page.getByRole('button', { name: 'Sign In to Send Prompt' }).click()
+
+    await expect(page).toHaveURL(/view=settings/)
+    await expect(page.getByText('After sign-in, sending your prompt:')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Use local OPS_ADMIN session' })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+
+    await expect(page).toHaveURL(/^(?!.*view=settings).*$/)
+    await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
+    await expect(page.locator('.assistant-message-user').getByText('Where should I handle the confirmation blocker?')).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant').getByText('Operations is the right place to continue')).toBeVisible()
+    await expect(page.locator('.assistant-message-assistant')).not.toContainText('navigation_intent')
+    await expect(page.locator('.prompt-home-handoff').filter({ hasText: 'Open Work Queue' })).toBeVisible()
 
     assertNoHarnessRequestFailures(harness)
   } finally {
@@ -141,9 +179,7 @@ test('prompt home accepts an assistant handoff into the old operations workspace
       waitUntil: 'domcontentloaded',
     })
 
-    await dismissStartHereOverlay(page)
-    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
-    await dismissStartHereOverlay(page)
+    await signInFromPromptHome(page)
 
     await page.getByLabel('Operator prompt').fill('Where should I handle the confirmation blocker?')
     await page.getByRole('button', { name: 'Send Prompt' }).click()
@@ -181,9 +217,7 @@ test('prompt home accepts an assistant handoff into settlement workspace', async
       waitUntil: 'domcontentloaded',
     })
 
-    await dismissStartHereOverlay(page)
-    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
-    await dismissStartHereOverlay(page)
+    await signInFromPromptHome(page)
 
     await page.getByLabel('Operator prompt').fill('Where should I handle the invoice settlement item?')
     await page.getByRole('button', { name: 'Send Prompt' }).click()
@@ -222,9 +256,7 @@ test('prompt home accepts an assistant handoff into trade capture', async ({ pag
       waitUntil: 'domcontentloaded',
     })
 
-    await dismissStartHereOverlay(page)
-    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
-    await dismissStartHereOverlay(page)
+    await signInFromPromptHome(page)
 
     await page.getByLabel('Operator prompt').fill('Open trade capture to amend T-AMEND-100')
     await page.getByRole('button', { name: 'Send Prompt' }).click()
@@ -265,9 +297,7 @@ test('prompt home reopens recent prompt threads without entering the assistant c
       waitUntil: 'domcontentloaded',
     })
 
-    await dismissStartHereOverlay(page)
-    await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
-    await dismissStartHereOverlay(page)
+    await signInFromPromptHome(page)
 
     await page.getByRole('button', { name: /Recent blocker triage/ }).click()
 
@@ -402,7 +432,7 @@ test('signed-out start-here routes trade capture intent into the auth gate', asy
 
   try {
     await seedApiBaseOverride(page, harness)
-    await page.goto(harness.origin, {
+    await page.goto(`${harness.origin}/?view=dashboard`, {
       waitUntil: 'domcontentloaded',
     })
 

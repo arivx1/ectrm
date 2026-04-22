@@ -88,6 +88,14 @@ AssistantAgentHealthWorkPackagePriority = Literal["P1", "P2", "P3", "P4"]
 AssistantAgentHealthWorkPackageStatus = Literal["CANDIDATE"]
 AssistantRunStatus = Literal["COMPLETED", "FAILED"]
 AssistantRunFeedbackRating = Literal["HELPFUL", "NEEDS_WORK"]
+AssistantControlTowerTrustSignalType = Literal[
+    "MISSING_EVAL_COVERAGE",
+    "POLICY_WARNING",
+    "RUN_WARNING",
+    "ACTION_BACKLOG",
+    "FAILED_ACTIONS",
+]
+AssistantControlTowerTrustSignalSeverity = Literal["info", "warning", "danger"]
 ALL_ASSISTANT_ACTION_TYPES: tuple[str, ...] = get_args(AssistantActionType)
 
 AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
@@ -535,6 +543,73 @@ class AssistantOutcomeMetricsOut(BaseModel):
     by_workspace: list[AssistantWorkspaceFeedbackMetricRowOut] = Field(default_factory=list)
     by_action_type: list[AssistantActionTypeOutcomeMetricRowOut] = Field(default_factory=list)
     recent_feedback: list[AssistantRunFeedbackInsightOut] = Field(default_factory=list)
+
+
+class AssistantControlTowerAgentRosterSummaryOut(BaseModel):
+    total_count: int = 0
+    active_count: int = 0
+    draft_count: int = 0
+    paused_count: int = 0
+    retired_count: int = 0
+    action_capable_count: int = 0
+    missing_eval_coverage_count: int = 0
+    policy_warning_count: int = 0
+
+
+class AssistantControlTowerRunSummaryOut(BaseModel):
+    total_count: int = 0
+    completed_count: int = 0
+    failed_count: int = 0
+    warning_count: int = 0
+    tool_call_count: int = 0
+    latest_run_at: Optional[datetime] = None
+
+
+class AssistantControlTowerOldestPendingActionOut(BaseModel):
+    action_request_id: int
+    action_type: str
+    summary: str
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    user_id: str
+    created_at: datetime
+    age_seconds: float
+
+
+class AssistantControlTowerActionSummaryOut(BaseModel):
+    total_count: int = 0
+    pending_count: int = 0
+    failed_count: int = 0
+    rejected_count: int = 0
+    executed_count: int = 0
+    preview_blocked_count: int = 0
+    oldest_pending_action: Optional[AssistantControlTowerOldestPendingActionOut] = None
+
+
+class AssistantControlTowerAgentTrustSignalOut(BaseModel):
+    agent_id: str
+    agent_name: str
+    status: AssistantAgentStatus
+    role_key: Optional[str] = None
+    profile_kind: Optional[AssistantAgentProfileKind] = None
+    signal_type: AssistantControlTowerTrustSignalType
+    severity: AssistantControlTowerTrustSignalSeverity
+    summary: str
+    details: list[str] = Field(default_factory=list)
+    pending_action_count: int = 0
+    failed_action_count: int = 0
+    warning_run_count: int = 0
+    eval_status: Optional[AssistantAgentEvalGateStatus] = None
+
+
+class AssistantControlTowerSummaryOut(BaseModel):
+    generated_at: datetime
+    created_after: Optional[datetime] = None
+    created_before: Optional[datetime] = None
+    roster: AssistantControlTowerAgentRosterSummaryOut
+    runs: AssistantControlTowerRunSummaryOut
+    actions: AssistantControlTowerActionSummaryOut
+    trust_signals: list[AssistantControlTowerAgentTrustSignalOut] = Field(default_factory=list)
 
 
 class AssistantAutonomyKnowledgeEntryOut(BaseModel):

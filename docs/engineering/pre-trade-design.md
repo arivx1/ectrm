@@ -75,3 +75,6 @@ The recommendation engine emits individual signals plus an overall stance:
 2. Push the recommendation engine into an API/domain service once the rules stabilize.
 3. Expand the scenario draft with optional fixed-price economics, delivery intent, and richer portfolio constraints.
 4. Expand analysis with portfolio limits, historical volatility, optionality, and richer source weighting.
+
+The trader/risk MVP delivery breakdown lives in
+[Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md).

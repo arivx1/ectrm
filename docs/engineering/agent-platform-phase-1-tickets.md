@@ -480,6 +480,14 @@ mutation before approval.
 
 ## AP1-10: Control Tower Summary API
 
+### Status
+
+Implemented on 2026-04-22. Admins can load a typed read-only control tower
+summary covering agent roster counts, run counts, action request posture,
+oldest pending action, blocked previews, and deterministic trust signals for
+policy warnings, missing eval coverage, run warnings, pending backlogs, and
+failed actions.
+
 ### Size
 
 M

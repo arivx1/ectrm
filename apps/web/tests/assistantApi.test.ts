@@ -41,6 +41,7 @@ import {
   deleteAssistantAgentEval,
   getAdminAssistantAgentHealthReview,
   getAdminAssistantAutonomyReview,
+  getAdminAssistantControlTowerSummary,
   getAdminAssistantOutcomeMetrics,
   getAdminAssistantRunAuditTrace,
   getAssistantConversation,
@@ -211,6 +212,84 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
   assert.equal(
     url,
     'http://api.test/admin/assistant/outcome-metrics?agent_id=ops-governor&action_type=cancel_trade&role_key=trade-ops-copilot&profile_kind=ROLE_DERIVED&created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
+  )
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('getAdminAssistantControlTowerSummary owns the summary URL and admin auth', async () => {
+  const expected = {
+    generated_at: '2026-04-11T09:00:00Z',
+    created_after: '2026-04-01T00:00:00',
+    created_before: '2026-04-30T23:59:59',
+    roster: {
+      total_count: 5,
+      active_count: 2,
+      draft_count: 1,
+      paused_count: 1,
+      retired_count: 1,
+      action_capable_count: 1,
+      missing_eval_coverage_count: 1,
+      policy_warning_count: 1,
+    },
+    runs: {
+      total_count: 2,
+      completed_count: 1,
+      failed_count: 1,
+      warning_count: 1,
+      tool_call_count: 2,
+      latest_run_at: '2026-04-11T08:30:00Z',
+    },
+    actions: {
+      total_count: 4,
+      pending_count: 1,
+      failed_count: 1,
+      rejected_count: 1,
+      executed_count: 1,
+      preview_blocked_count: 1,
+      oldest_pending_action: {
+        action_request_id: 42,
+        action_type: 'issue_trade_invoice',
+        summary: 'Issue invoice',
+        agent_id: 'risky-agent',
+        agent_name: 'Risky Agent',
+        user_id: 'ops_beta',
+        created_at: '2026-04-11T04:30:00Z',
+        age_seconds: 18000,
+      },
+    },
+    trust_signals: [
+      {
+        agent_id: 'risky-agent',
+        agent_name: 'Risky Agent',
+        status: 'ACTIVE',
+        role_key: null,
+        profile_kind: 'CUSTOM',
+        signal_type: 'POLICY_WARNING',
+        severity: 'danger',
+        summary: 'Policy definition needs review.',
+        details: [
+          'Risky Agent has ACTION capability and must declare explicit allowed_action_types.',
+        ],
+        pending_action_count: 1,
+        failed_action_count: 1,
+        warning_run_count: 0,
+        eval_status: 'BLOCKED',
+      },
+    ],
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await getAdminAssistantControlTowerSummary('http://api.test', {
+    createdAfter: '2026-04-01T00:00:00',
+    createdBefore: '2026-04-30T23:59:59',
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/control-tower/summary?created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
   )
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')

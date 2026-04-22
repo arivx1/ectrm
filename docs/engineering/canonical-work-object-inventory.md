@@ -17,6 +17,7 @@ Related docs:
 - [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
 - [Document Taxonomy](./document-taxonomy-trading-shipping.md)
 - [Accruals Functionality Redesign](./accruals-functionality-redesign.md)
+- [Business Use Case Roadmap](./business-use-case-roadmap.md)
 
 ## Status Legend
 
@@ -47,6 +48,11 @@ Related docs:
 | Price term | Emerging | Trading | Pricing fields and price index reference data | Needed for agents to reason about fixed, index, formula, and hybrid pricing. |
 | Position | Existing | Risk / Projections | `PositionRow` | Agents use this to explain net exposure and downstream impact. |
 | Option exposure | Existing | Risk | `OptionExposureRow` | Agents use this for option-sensitive risk review. |
+| Netting set | Planned | Risk / Trading | Positions, trade legs, delivery windows | Needed to explain which longs and shorts can offset and what residual exposure remains. |
+| Hedge recommendation | Planned | Risk | Exposure reports, pre-trade scenarios | Lets risk agents draft futures, options, swaps, or physical-offset recommendations without executing hedges. |
+| Asset forecast input | Planned | Risk / Operations | Weather intelligence, market context, future asset model | Connects refineries, production, processing, generation, and consumption facilities to forward exposure. |
+| Risk scenario | Planned | Risk / Reports | Reports, market context, pre-trade scenarios | Gives stress, basis, volatility, weather, and asset-output analysis a durable review object. |
+| Freight trade | Planned | Trading / Logistics | Future trade structures and delivery records | Allows freight exposure to be captured and governed as a tradeable commercial object. |
 | Risk exception | Planned | Risk / Operations | Credit workflow items, exposure reports | Needed for explicit risk sentinel work and escalation. |
 | Credit approval decision | Existing | Operations / Risk | `TradeCreditApprovalDecisionRecord` | Controls credit exceptions and should remain human governed. |
 | Credit exception | Existing | Operations / Risk | `TradeCreditExceptionRecord` | Helps agents distinguish approved envelope from unresolved breach. |
@@ -56,6 +62,8 @@ Related docs:
 | Work object | Status | Owning domain | Current anchor | Agent relevance |
 | --- | --- | --- | --- | --- |
 | Workflow item | Existing | Operations / Settlement | `TradeWorkflowItemRecord` | Core queue object for blockers, ownership, due dates, approvals, and handoffs. |
+| Checklist template | Planned | Operations | Workflow item patterns and future workflow metadata | Needed to turn repeated manual operating steps into governed workflow automation. |
+| Operational reconciliation exception | Planned | Operations / Reports | Workflow items, settlement exceptions, document links | Gives recurring breaks an owner, lifecycle, evidence, and escalation path. |
 | Confirmation | Existing | Operations | `TradeConfirmationRecord` | Allows agents to issue, track, and record confirmation follow-through through approval gates. |
 | Confirmation mismatch | Existing | Operations | `TradeConfirmationMismatchRecord` | Lets agents explain why a confirmation is blocked or disputed. |
 | Delivery obligation | Existing | Operations | `DeliveryRecord` / `ShipmentRecord` | Primary post-trade movement object for physical and scheduled products. |
@@ -84,6 +92,7 @@ Related docs:
 | Payment | Existing | Settlement | `TradePaymentRecord` | Lets agents explain and stage payment recording. |
 | Settlement exception | Derived | Reports / Settlement | `SettlementExceptionReport` rows | Should become action-driving queue context for settlement agents. |
 | Settlement aging row | Derived | Reports / Settlement | `SettlementAgingReport` rows | Helps agents prioritize collection and overdue review. |
+| Movement cost estimate | Planned | Trading / Settlement | Delivery records, future fee model | Needed to show freight, tariffs, broker charges, storage, taxes, and other physical-movement economics. |
 | Fee item | Planned | Settlement / Trading | Future fee model | Needed to detect, accrue, invoice, and reconcile fees. |
 | Accrual lot | Planned | Accruals | Accruals redesign document | Needed to separate delivered, accrued, billed, and collected economics. |
 | Accrual entry | Planned | Accruals | Accruals redesign document | Needed for immutable economic rollforward. |
@@ -150,4 +159,3 @@ the objects that already exist and can support supervised agent value quickly:
   activity.
 - Keep manual takeover possible at the object level, not only at the agent
   level.
-

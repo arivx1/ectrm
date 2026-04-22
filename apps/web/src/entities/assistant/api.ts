@@ -23,6 +23,7 @@ import type {
   AssistantAgentRoleArchetype,
   AssistantConversation,
   AssistantConversationSummary,
+  AssistantControlTowerSummary,
   AssistantOutcomeMetrics,
   AssistantPolicySimulation,
   AssistantPolicySimulationPhase,
@@ -598,6 +599,21 @@ export async function getAdminAssistantOutcomeMetrics(
 ): Promise<AssistantOutcomeMetrics> {
   return fetchJson<AssistantOutcomeMetrics>(
     `${apiBase}/admin/assistant/outcome-metrics${outcomeMetricsQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function getAdminAssistantControlTowerSummary(
+  apiBase: string,
+  init?: {
+    createdAfter?: string
+    createdBefore?: string
+  },
+): Promise<AssistantControlTowerSummary> {
+  return fetchJson<AssistantControlTowerSummary>(
+    `${apiBase}/admin/assistant/control-tower/summary${outcomeMetricsQuery(init)}`,
     {
       headers: assistantMutationHeaders(),
     },

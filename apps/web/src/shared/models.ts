@@ -1938,6 +1938,13 @@ export type AssistantActionRequestLifecycleStage =
   | 'FAILED'
 export type AssistantActionRequestLifecycleTone = 'attention' | 'success' | 'neutral' | 'danger'
 export type AssistantActionReviewOutcome = 'APPROVED_AS_IS' | 'APPROVED_WITH_CORRECTIONS' | 'REJECTED'
+export type AssistantControlTowerTrustSignalType =
+  | 'MISSING_EVAL_COVERAGE'
+  | 'POLICY_WARNING'
+  | 'RUN_WARNING'
+  | 'ACTION_BACKLOG'
+  | 'FAILED_ACTIONS'
+export type AssistantControlTowerTrustSignalSeverity = 'info' | 'warning' | 'danger'
 
 export type AssistantProviderStatus = {
   provider: AssistantProvider
@@ -2421,6 +2428,73 @@ export type AssistantOutcomeMetrics = {
   by_workspace: AssistantWorkspaceFeedbackMetricRow[]
   by_action_type: AssistantActionTypeOutcomeMetricRow[]
   recent_feedback: AssistantRunFeedbackInsight[]
+}
+
+export type AssistantControlTowerAgentRosterSummary = {
+  total_count: number
+  active_count: number
+  draft_count: number
+  paused_count: number
+  retired_count: number
+  action_capable_count: number
+  missing_eval_coverage_count: number
+  policy_warning_count: number
+}
+
+export type AssistantControlTowerRunSummary = {
+  total_count: number
+  completed_count: number
+  failed_count: number
+  warning_count: number
+  tool_call_count: number
+  latest_run_at?: string | null
+}
+
+export type AssistantControlTowerOldestPendingAction = {
+  action_request_id: number
+  action_type: string
+  summary: string
+  agent_id?: string | null
+  agent_name?: string | null
+  user_id: string
+  created_at: string
+  age_seconds: number
+}
+
+export type AssistantControlTowerActionSummary = {
+  total_count: number
+  pending_count: number
+  failed_count: number
+  rejected_count: number
+  executed_count: number
+  preview_blocked_count: number
+  oldest_pending_action?: AssistantControlTowerOldestPendingAction | null
+}
+
+export type AssistantControlTowerAgentTrustSignal = {
+  agent_id: string
+  agent_name: string
+  status: AssistantAgentStatus
+  role_key?: string | null
+  profile_kind?: AssistantAgentProfileKind | null
+  signal_type: AssistantControlTowerTrustSignalType
+  severity: AssistantControlTowerTrustSignalSeverity
+  summary: string
+  details: string[]
+  pending_action_count: number
+  failed_action_count: number
+  warning_run_count: number
+  eval_status?: AssistantAgentEvalGateStatus | null
+}
+
+export type AssistantControlTowerSummary = {
+  generated_at: string
+  created_after?: string | null
+  created_before?: string | null
+  roster: AssistantControlTowerAgentRosterSummary
+  runs: AssistantControlTowerRunSummary
+  actions: AssistantControlTowerActionSummary
+  trust_signals: AssistantControlTowerAgentTrustSignal[]
 }
 
 export type AssistantAutonomyReviewRecommendationAction =

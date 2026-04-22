@@ -83,6 +83,95 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-04-22 - Persona Stories Need Productized Algorithms
+
+- Type: algorithm-candidate
+- Domain: trading, risk, operations, settlement, accruals
+- Applies to: market opportunity detection, freight and fee economics,
+  long/short matching, hedge instrument recommendations, checklist automation,
+  invoice/payment follow-through, accrual and reconciliation exception detection
+- Status: proposed
+- Source: [Business Use Case Roadmap](./business-use-case-roadmap.md) and
+  [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: broad persona requests such as "find opportunities," "flatten my
+  book," "tell me how to hedge," "automate reconciliations," and "identify
+  accrual issues" should be decomposed into durable work objects and
+  deterministic services before any agent receives write or execution
+  authority. Agents can explain, compare, draft, and stage reviewable work, but
+  official prices, exposure, hedge deltas, cost stacks, accruals, payments, and
+  business mutations need typed service ownership.
+- Deterministic opportunity: create explicit algorithms for opportunity
+  classification, physical movement cost stacks, long/short netting sets,
+  hedge instrument decision tables, workflow checklist policy, and accrual or
+  reconciliation exception detection.
+- Agent autonomy impact: keep trade booking, hedge execution, freight trades,
+  payment release, external communication, policy changes, and official
+  financial records human-owned or approval-gated until service rules, stale
+  checks, idempotency, audit, evals, and outcome evidence are in place.
+- Tests or evidence: each promoted algorithm should add focused service tests,
+  relevant assistant evals for prompt/tool behavior, and browser smoke coverage
+  when a new cross-workspace operator journey is introduced.
+- Follow-up: when a workstream starts, create or update the owning design doc
+  with owner, inputs, outputs, rule set, stop conditions, audit, rollback, and
+  verification expectations.
+
+### 2026-04-22 - Trader/Risk MVP Starts As Draft Authority
+
+- Type: stop-condition
+- Domain: trader and risk decision support
+- Applies to: opportunity notes, residual exposure triage, long/short netting
+  sets, hedge recommendations, pre-trade scenario handoffs
+- Status: proposed
+- Source: [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md),
+  [Human-Agent Authority Matrix](./human-agent-authority-matrix.md), and
+  [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: trader/risk recommendations can feel close to execution, so the first
+  MVP must preserve the difference between recommendation and commitment.
+  Agents and deterministic services may draft opportunity, netting, and hedge
+  analysis with source evidence, but humans continue to own trade capture,
+  hedge execution, bilateral commitments, and freight commitments.
+- Deterministic opportunity: build recommendation contracts, source freshness,
+  residual exposure triage, netting rules, and hedge decision tables as typed
+  services before considering any staged action type.
+- Agent autonomy impact: keep Market Research, Pre-Trade Structuring, and Risk
+  Sentinel roles at read/explain/draft for this slice. Add assistant evals that
+  fail if an agent claims it booked a trade, executed a hedge, guaranteed a
+  hedge choice, or ignored stale evidence.
+- Tests or evidence: TRMVP work packages require focused service tests for
+  recommendation rules, `make api-assistant-evals` for prompt/tool authority,
+  and browser smoke for the review-to-capture handoff when implemented.
+- Follow-up: only consider approval-gated action requests after typed work
+  objects, stale-state checks, idempotency, policy ownership, and outcome
+  metrics exist.
+
+### 2026-04-22 - Human Workflows Need Agent Tooling Counterparts
+
+- Type: lesson
+- Domain: agent toolkit and product workflow design
+- Applies to: trader/risk MVP, operations automation, settlement automation,
+  accruals, reconciliation, future persona-driven workflows
+- Status: proposed
+- Source: [Business Use Case Roadmap](./business-use-case-roadmap.md) and
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
+- Lesson: persona stories are requirements for both human operators and AI
+  agents. When a human workspace gains a capability, the implementation should
+  identify the matching agent toolkit surface: read tools, deterministic
+  recommendation tools, typed action-request payloads, source freshness,
+  provenance, and machine-readable stop conditions.
+- Deterministic opportunity: design service outputs once, then let both UI
+  components and assistant tools consume the same typed contract instead of
+  creating separate prompt-only reasoning paths.
+- Agent autonomy impact: adding tools does not grant execution authority. New
+  read or recommendation tools should arrive before action tools; action tools
+  require published action types, stale-state checks, idempotency, reviewer
+  roles, expected effects, and eval coverage.
+- Tests or evidence: each new agent toolkit capability should include focused
+  service tests plus assistant evals for tool selection, missing/stale evidence,
+  and no-overclaim behavior.
+- Follow-up: future work packages should include an "Agent Toolkit
+  Implications" section whenever a feature is expected to serve agents as well
+  as humans.
+
 ### 2026-04-22 - Prompt Navigation Is A UI Intent
 
 - Type: lesson
@@ -659,3 +748,58 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: extend this pattern to the next sensitive action only after its
   domain owner can define deterministic affected-records, field-change, blocker,
   and side-effect semantics.
+
+### 2026-04-22 - Control Tower Summaries Are Read-Only Governance Snapshots
+
+- Type: algorithm-added
+- Domain: control tower governance
+- Applies to: assistant agent roster, run monitoring, action request posture,
+  eval coverage, policy review signals
+- Status: implemented
+- Source:
+  [`control_tower.py`](../../apps/api/app/domains/assistant/services/control_tower.py)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: a control tower summary should aggregate deterministic governance
+  posture without changing agent authority. Roster counts, run warnings,
+  pending or failed actions, blocked previews, policy warnings, and eval gaps
+  are supervisory signals, not auto-pause commands.
+- Deterministic opportunity: repeated trust signals should feed typed policy,
+  service, eval, or knowledge-base work before increasing autonomy. The summary
+  should stay a compact read model until domain owners approve enforcement.
+- Agent autonomy impact: humans can use the summary to prioritize nudges,
+  narrowing, pausing, or profile edits while preserving manual fallback and
+  reviewable action requests.
+- Tests or evidence: API tests verify admin-only access, seeded roster/run/action
+  counts, oldest pending action, blocked preview counts, and trust-signal
+  serialization. Web API tests verify the typed URL and admin auth headers.
+- Follow-up: AP1-11 should render this summary in Admin without adding
+  auto-enforcement or hidden mutations.
+
+### 2026-04-22 - Signed-Out Prompt Drafts Resume Through Auth
+
+- Type: lesson
+- Domain: prompt-first UX
+- Applies to: Prompt Home, authentication gate, assistant prompt submission,
+  old-console navigation handoff
+- Status: implemented
+- Source:
+  [`PromptHomeWorkspace.tsx`](../../apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx),
+  [`App.tsx`](../../apps/web/src/App.tsx), and
+  [`promptResumeIntent.ts`](../../apps/web/src/shared/promptResumeIntent.ts)
+- Lesson: Prompt Home may be visible while signed out, but protected prompt
+  execution must wait for authentication. Store a typed local resume intent for
+  signed-out drafts, show the pending action in the auth gate, and return to
+  Prompt Home after sign-in before sending or restoring the draft.
+- Deterministic opportunity: prompt resume state is a browser-owned navigation
+  contract, not model output. Keep it normalized, length-limited, cached for
+  React external-store subscriptions, and cleared once Prompt Home consumes it.
+- Agent autonomy impact: the assistant can guide the user into the old console
+  after sign-in, but the resume flow still preserves manual fallback and never
+  lets a freeform prompt mutate business records.
+- Tests or evidence: focused web unit tests cover prompt resume normalization,
+  stable subscription snapshots, and sign-in return intent storage. Browser
+  smoke covers signed-out draft submission, post-auth prompt sending, recent
+  thread resume, and old-console handoffs into operations, settlement, and
+  trade capture.
+- Follow-up: if prompt resume grows beyond browser-local state, promote it to a
+  typed server-side session continuation contract with expiry and audit fields.

@@ -49,6 +49,8 @@ import { buildPreTradeRecommendation } from './preTradeRecommendations'
 
 type PositionedRow = PositionRow & { commodity_class?: string }
 type GovernanceBucketKey = 'pending' | 'risky' | 'overrides' | 'stale-evidence' | 'booked-with-override'
+type GovernanceReviewBucketKey = Exclude<GovernanceBucketKey, 'stale-evidence'>
+type ReviewQueueFilterKey = 'all' | GovernanceReviewBucketKey
 
 const GOVERNANCE_BUCKET_LABELS: Record<GovernanceBucketKey, string> = {
   pending: 'Pending Reviews',
@@ -56,6 +58,14 @@ const GOVERNANCE_BUCKET_LABELS: Record<GovernanceBucketKey, string> = {
   overrides: 'Overrides',
   'stale-evidence': 'Stale Evidence',
   'booked-with-override': 'Booked With Override',
+}
+
+const REVIEW_QUEUE_FILTER_LABELS: Record<ReviewQueueFilterKey, string> = {
+  all: 'All Reviews',
+  pending: GOVERNANCE_BUCKET_LABELS.pending,
+  risky: GOVERNANCE_BUCKET_LABELS.risky,
+  overrides: GOVERNANCE_BUCKET_LABELS.overrides,
+  'booked-with-override': GOVERNANCE_BUCKET_LABELS['booked-with-override'],
 }
 
 type PreTradeWorkspaceProps = {
@@ -195,6 +205,10 @@ function normalizeScenarioDraft(
 function buildScenarioTitle(draft: PreTradeScenarioDraft): string {
   const commodity = draft.commodity || 'trade'
   return `${draft.book || 'desk'} ${commodity} ${draft.trade_side.toLowerCase()}`
+}
+
+function preTradeReviewElementId(reviewId: number): string {
+  return `pretrade-review-${reviewId}`
 }
 
 function buildApprovedReviewCaptureContext(review: PreTradeReviewItemRecord): PreTradeReviewCaptureContext {
@@ -392,6 +406,9 @@ export function PreTradeWorkspace({
   const [governanceSummary, setGovernanceSummary] = useState<PreTradeGovernanceSummaryRecord | null>(null)
   const [governanceItems, setGovernanceItems] = useState<PreTradeGovernanceItemsRecord | null>(null)
   const [selectedGovernanceBucket, setSelectedGovernanceBucket] = useState<GovernanceBucketKey>('pending')
+  const [reviewQueueFilter, setReviewQueueFilter] = useState<ReviewQueueFilterKey>('all')
+  const [focusedReviewId, setFocusedReviewId] = useState<number | null>(null)
+  const [reviewFocusSequence, setReviewFocusSequence] = useState(0)
   const [reviewCommentDrafts, setReviewCommentDrafts] = useState<Record<number, string>>({})
   const [reviewOverrideDrafts, setReviewOverrideDrafts] = useState<Record<number, string>>({})
   const [collectionLoading, setCollectionLoading] = useState(false)
@@ -458,6 +475,8 @@ export function PreTradeWorkspace({
       setRecommendationRuns([])
       setGovernanceSummary(null)
       setGovernanceItems(null)
+      setReviewQueueFilter('all')
+      setFocusedReviewId(null)
       setCollectionError('')
       return
     }
@@ -996,6 +1015,34 @@ export function PreTradeWorkspace({
     })
   }
 
+  function governanceReviewItemsForBucket(bucket: GovernanceReviewBucketKey): PreTradeReviewItemRecord[] {
+    switch (bucket) {
+      case 'pending':
+        return governanceItems?.pending_reviews ?? []
+      case 'risky':
+        return governanceItems?.risky_recommendation_reviews ?? []
+      case 'overrides':
+        return governanceItems?.override_reviews ?? []
+      case 'booked-with-override':
+        return governanceItems?.booked_with_override_reviews ?? []
+    }
+  }
+
+  function handleGovernanceMetricSelect(bucket: GovernanceBucketKey) {
+    setSelectedGovernanceBucket(bucket)
+    if (bucket !== 'stale-evidence') {
+      setReviewQueueFilter(bucket)
+      setFocusedReviewId(null)
+    }
+  }
+
+  function handleFocusReviewFromGovernance(review: PreTradeReviewItemRecord, bucket: GovernanceReviewBucketKey) {
+    setSelectedGovernanceBucket(bucket)
+    setReviewQueueFilter(bucket)
+    setFocusedReviewId(review.review_id)
+    setReviewFocusSequence((current) => current + 1)
+  }
+
   const governanceStatus = governanceSummary?.risk_status ?? null
   const governanceTitle = governanceSummary
     ? `Governance ${governanceStatusLabel(governanceSummary.risk_status)}`
@@ -1020,20 +1067,36 @@ export function PreTradeWorkspace({
       count: governanceSummary?.booked_with_override_count ?? null,
     },
   ]
-  const selectedGovernanceReviewItems =
-    selectedGovernanceBucket === 'pending'
-      ? (governanceItems?.pending_reviews ?? [])
-      : selectedGovernanceBucket === 'risky'
-        ? (governanceItems?.risky_recommendation_reviews ?? [])
-        : selectedGovernanceBucket === 'overrides'
-          ? (governanceItems?.override_reviews ?? [])
-          : selectedGovernanceBucket === 'booked-with-override'
-            ? (governanceItems?.booked_with_override_reviews ?? [])
-            : []
+  const selectedGovernanceReviewBucket = selectedGovernanceBucket === 'stale-evidence' ? null : selectedGovernanceBucket
+  const selectedGovernanceReviewItems = selectedGovernanceReviewBucket
+    ? governanceReviewItemsForBucket(selectedGovernanceReviewBucket)
+    : []
   const selectedGovernanceStaleEvidenceRuns = selectedGovernanceBucket === 'stale-evidence'
     ? (governanceItems?.stale_evidence_runs ?? [])
     : []
   const selectedGovernanceMetric = governanceMetricCards.find((metric) => metric.bucket === selectedGovernanceBucket)
+  const filteredReviews = useMemo(() => {
+    if (reviewQueueFilter === 'all') {
+      return reviews
+    }
+
+    const reviewIds = new Set(governanceReviewItemsForBucket(reviewQueueFilter).map((review) => review.review_id))
+    return reviews.filter((review) => reviewIds.has(review.review_id))
+  }, [governanceItems, reviewQueueFilter, reviews])
+
+  useEffect(() => {
+    if (focusedReviewId === null || typeof document === 'undefined') {
+      return
+    }
+    if (!filteredReviews.some((review) => review.review_id === focusedReviewId)) {
+      return
+    }
+
+    document.getElementById(preTradeReviewElementId(focusedReviewId))?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+  }, [focusedReviewId, filteredReviews, reviewFocusSequence])
 
   const tiles: WorkspaceTile[] = [
     {
@@ -1061,7 +1124,7 @@ export function PreTradeWorkspace({
                 key={metric.bucket}
                 type="button"
                 className={`pretrade-metric-card pretrade-governance-metric ${selectedGovernanceBucket === metric.bucket ? 'is-selected' : ''}`}
-                onClick={() => setSelectedGovernanceBucket(metric.bucket)}
+                onClick={() => handleGovernanceMetricSelect(metric.bucket)}
               >
                 <span>{metric.label}</span>
                 <strong>{metric.count ?? 'n/a'}</strong>
@@ -1157,6 +1220,15 @@ export function PreTradeWorkspace({
                       </small>
                     ) : null}
                     <div className="pretrade-inline-actions">
+                      {selectedGovernanceReviewBucket ? (
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => handleFocusReviewFromGovernance(review, selectedGovernanceReviewBucket)}
+                        >
+                          Focus In Queue
+                        </button>
+                      ) : null}
                       {review.linked_trade_id ? (
                         <button type="button" className="button button-secondary" onClick={() => onOpenTrade(review.linked_trade_id!)}>
                           View Trade
@@ -1763,8 +1835,29 @@ export function PreTradeWorkspace({
       availableSpans: ['wide', 'half', 'side'],
       content: (
         <div className="stack">
+          <div className="pretrade-review-filter-row">
+            {(['all', 'pending', 'risky', 'overrides', 'booked-with-override'] as ReviewQueueFilterKey[]).map((filterKey) => (
+              <button
+                key={filterKey}
+                type="button"
+                className={`button button-secondary ${reviewQueueFilter === filterKey ? 'button-active' : ''}`}
+                onClick={() => {
+                  setReviewQueueFilter(filterKey)
+                  setFocusedReviewId(null)
+                }}
+              >
+                {REVIEW_QUEUE_FILTER_LABELS[filterKey]}
+              </button>
+            ))}
+          </div>
+          {reviewQueueFilter !== 'all' ? (
+            <p className="form-note">
+              Showing {filteredReviews.length} {REVIEW_QUEUE_FILTER_LABELS[reviewQueueFilter].toLowerCase()} item
+              {filteredReviews.length === 1 ? '' : 's'} from governance drill-through.
+            </p>
+          ) : null}
           <div className="pretrade-card-list">
-            {reviews.map((review) => {
+            {filteredReviews.map((review) => {
               const commentDraft = reviewCommentDraft(review.review_id)
               const overrideDraft = reviewOverrideDraft(review.review_id)
               const existingOverrideReason = review.recommendation_override_reason?.trim() ?? ''
@@ -1778,7 +1871,11 @@ export function PreTradeWorkspace({
               )
 
               return (
-                <article key={review.review_id} className="pretrade-record-card pretrade-record-static">
+                <article
+                  key={review.review_id}
+                  id={preTradeReviewElementId(review.review_id)}
+                  className={`pretrade-record-card pretrade-record-static ${focusedReviewId === review.review_id ? 'is-focused' : ''}`}
+                >
                   <div className="pretrade-review-head">
                     <div>
                       <strong>{review.name}</strong>
@@ -1921,6 +2018,9 @@ export function PreTradeWorkspace({
             })}
             {!collectionLoading && reviews.length === 0 ? (
               <p className="form-note">The shared review queue is empty. Submit the current draft when you want desk review before capture.</p>
+            ) : null}
+            {!collectionLoading && reviews.length > 0 && filteredReviews.length === 0 ? (
+              <p className="form-note">No reviews match the selected governance filter. Switch back to all reviews to see the full queue.</p>
             ) : null}
           </div>
         </div>

@@ -181,6 +181,8 @@ dependencies.
 
 ## Additional Docs
 
+- [Business use case roadmap](docs/engineering/business-use-case-roadmap.md)
+- [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)
 - [Trading source candidates](docs/engineering/trading-source-candidates.csv)
