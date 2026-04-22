@@ -266,7 +266,7 @@ class AssistantApiTests(unittest.TestCase):
         seed_response = self.client.post(
             "/admin/data/assistant-agents/seed",
             headers={"Authorization": f"Bearer {token}"},
-            json={"requested_by": "ops-admin"},
+            json={"requested_by": "assistant_user"},
         )
 
         self.assertEqual(seed_response.status_code, 200)
