@@ -16,6 +16,7 @@ PreTradeRecommendationCheckStatus = Literal["good", "watch", "block"]
 PreTradeRecommendationSourceType = Literal["USER_INPUT", "INTERNAL", "EXTERNAL", "DERIVED"]
 PreTradeRecommendationFreshness = Literal["FRESH", "STALE", "DEGRADED", "UNKNOWN"]
 PreTradeRecommendationSourceQuality = Literal["OK", "STALE", "DEGRADED", "MISSING"]
+PreTradeGovernanceRiskStatus = Literal["CLEAR", "WATCH", "ACTION_REQUIRED"]
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -238,6 +239,24 @@ class PreTradeReviewItemOut(BaseModel):
     updated_by: str
     version: int
     can_edit: bool
+
+
+class PreTradeGovernanceSummaryOut(BaseModel):
+    generated_at: datetime
+    risk_status: PreTradeGovernanceRiskStatus
+    open_review_count: int = 0
+    in_review_count: int = 0
+    approved_review_count: int = 0
+    rejected_review_count: int = 0
+    pending_review_count: int = 0
+    booked_review_count: int = 0
+    risky_recommendation_count: int = 0
+    unresolved_risky_recommendation_count: int = 0
+    override_count: int = 0
+    booked_with_override_count: int = 0
+    stale_evidence_run_count: int = 0
+    stale_evidence_source_count: int = 0
+    recommendation_run_count: int = 0
 
 
 class PreTradeRecommendationSourceSnapshot(BaseModel):

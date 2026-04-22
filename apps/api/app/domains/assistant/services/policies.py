@@ -3,10 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from apps.api.app.domains.assistant.services.action_catalog import (
+    ALL_CATALOG_ACTION_TYPES,
+    ASSISTANT_ACTION_CATALOG,
+    AssistantActionCatalogEntry,
+)
 from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
 from apps.api.app.domains.assistant.services.tools import build_tool_definitions
 from apps.api.app.schemas.assistant import (
-    ALL_ASSISTANT_ACTION_TYPES,
     AssistantAgentEffectivePolicyOut,
     AssistantPolicyDecisionOut,
 )
@@ -63,6 +67,20 @@ AUTHORITY_RANK = {
     "EXTERNAL_COMMIT": 6,
 }
 
+
+def _action_policy_from_catalog_entry(entry: AssistantActionCatalogEntry) -> AssistantCapabilityPolicy:
+    return AssistantCapabilityPolicy(
+        policy_key=entry.policy_key,
+        resource_type="action",
+        resource_id=entry.name,
+        risk_level=entry.risk_level,
+        max_scope=entry.max_scope,
+        approval_required=entry.approval_required,
+        roles=entry.reviewer_roles,
+        workspaces=entry.workspaces,
+    )
+
+
 POLICY_RULES: tuple[AssistantCapabilityPolicy, ...] = (
     AssistantCapabilityPolicy(
         policy_key="assistant.tools.read_catalog.v1",
@@ -71,76 +89,7 @@ POLICY_RULES: tuple[AssistantCapabilityPolicy, ...] = (
         risk_level="LOW",
         max_scope="ORGANIZATION",
     ),
-    AssistantCapabilityPolicy(
-        policy_key="assistant.actions.cancel_trade.v1",
-        resource_type="action",
-        resource_id="cancel_trade",
-        risk_level="HIGH",
-        max_scope="TEAM",
-        approval_required=True,
-        roles=("OPS_ADMIN", "ADMIN"),
-        workspaces=("assistant", "trades", "admin"),
-    ),
-    AssistantCapabilityPolicy(
-        policy_key="assistant.actions.trade_confirmation.v1",
-        resource_type="action",
-        resource_id="issue_trade_confirmation",
-        risk_level="MEDIUM",
-        max_scope="TEAM",
-        approval_required=True,
-        roles=("OPS_ADMIN", "ADMIN"),
-        workspaces=("assistant", "operations", "admin"),
-    ),
-    AssistantCapabilityPolicy(
-        policy_key="assistant.actions.confirmation_response.v1",
-        resource_type="action",
-        resource_id="record_trade_confirmation_response",
-        risk_level="MEDIUM",
-        max_scope="TEAM",
-        approval_required=True,
-        roles=("OPS_ADMIN", "ADMIN"),
-        workspaces=("assistant", "operations", "admin"),
-    ),
-    AssistantCapabilityPolicy(
-        policy_key="assistant.actions.workflow_update.v1",
-        resource_type="action",
-        resource_id="update_trade_workflow_item",
-        risk_level="MEDIUM",
-        max_scope="TEAM",
-        approval_required=True,
-        roles=("OPS_ADMIN", "ADMIN"),
-        workspaces=("assistant", "operations", "settlement", "admin"),
-    ),
-    AssistantCapabilityPolicy(
-        policy_key="assistant.actions.invoice_issue.v1",
-        resource_type="action",
-        resource_id="issue_trade_invoice",
-        risk_level="HIGH",
-        max_scope="TEAM",
-        approval_required=True,
-        roles=("OPS_ADMIN", "ADMIN"),
-        workspaces=("assistant", "settlement", "admin"),
-    ),
-    AssistantCapabilityPolicy(
-        policy_key="assistant.actions.payment_create.v1",
-        resource_type="action",
-        resource_id="create_trade_payment",
-        risk_level="HIGH",
-        max_scope="TEAM",
-        approval_required=True,
-        roles=("OPS_ADMIN", "ADMIN"),
-        workspaces=("assistant", "settlement", "admin"),
-    ),
-    AssistantCapabilityPolicy(
-        policy_key="assistant.actions.document_reprocess.v1",
-        resource_type="action",
-        resource_id="reprocess_document_ingestion",
-        risk_level="MEDIUM",
-        max_scope="TEAM",
-        approval_required=True,
-        roles=("OPS_ADMIN", "ADMIN"),
-        workspaces=("assistant", "admin"),
-    ),
+    *(_action_policy_from_catalog_entry(entry) for entry in ASSISTANT_ACTION_CATALOG),
 )
 
 
@@ -201,7 +150,7 @@ def validate_agent_profile_definition(
         errors,
         field_name="allowed_action_types",
         values=allowed_action_types,
-        valid_values=set(ALL_ASSISTANT_ACTION_TYPES),
+        valid_values=set(ALL_CATALOG_ACTION_TYPES),
     )
 
     if allowed_tools and "READ" not in normalized_capabilities:
@@ -269,7 +218,7 @@ def build_effective_policy_for_agent(agent: PolicyAgent) -> AssistantAgentEffect
             workspace=None,
             phase="stage",
         )
-        for action_type in ALL_ASSISTANT_ACTION_TYPES
+        for action_type in ALL_CATALOG_ACTION_TYPES
     ]
     return AssistantAgentEffectivePolicyOut(
         allowed_tools=[decision for decision in tool_decisions if decision.allowed],

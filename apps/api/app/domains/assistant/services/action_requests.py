@@ -27,6 +27,7 @@ from apps.api.app.domains.trading.services.trade_event_support import (
 from apps.api.app.domains.trading.services.trade_event_support import trade_snapshot
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
+from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
@@ -444,6 +445,8 @@ def list_action_request_page(
     status: str | None = None,
     action_type: str | None = None,
     agent_id: str | None = None,
+    role_key: str | None = None,
+    profile_kind: str | None = None,
     requester_user_id: str | None = None,
     decided_by: str | None = None,
     search: str | None = None,
@@ -458,6 +461,8 @@ def list_action_request_page(
         status=status,
         action_type=action_type,
         agent_id=agent_id,
+        role_key=role_key,
+        profile_kind=profile_kind,
         requester_user_id=requester_user_id,
         decided_by=decided_by,
         search=search,
@@ -481,6 +486,8 @@ def list_action_request_page(
         status=status,
         action_type=action_type,
         agent_id=agent_id,
+        role_key=role_key,
+        profile_kind=profile_kind,
         requester_user_id=requester_user_id,
         decided_by=decided_by,
         search=search,
@@ -734,6 +741,8 @@ def _apply_action_request_filters(
     status: str | None = None,
     action_type: str | None = None,
     agent_id: str | None = None,
+    role_key: str | None = None,
+    profile_kind: str | None = None,
     requester_user_id: str | None = None,
     decided_by: str | None = None,
     search: str | None = None,
@@ -745,10 +754,14 @@ def _apply_action_request_filters(
     normalized_status = _normalize_optional_text(status, uppercase=True)
     normalized_action_type = _normalize_optional_text(action_type)
     normalized_agent_id = _normalize_optional_text(agent_id, lowercase=True)
+    normalized_role_key = _normalize_optional_text(role_key, lowercase=True)
+    normalized_profile_kind = _normalize_optional_text(profile_kind, uppercase=True)
     normalized_requester_user_id = _normalize_optional_text(requester_user_id)
     normalized_decided_by = _normalize_optional_text(decided_by)
     normalized_search = _normalize_optional_text(search, lowercase=True)
 
+    if normalized_role_key is not None or normalized_profile_kind is not None:
+        stmt = stmt.join(AssistantRun, AssistantRun.id == AssistantActionRequest.run_id)
     if user_id is not None:
         stmt = stmt.where(AssistantActionRequest.user_id == user_id)
     if normalized_status is not None:
@@ -757,6 +770,10 @@ def _apply_action_request_filters(
         stmt = stmt.where(AssistantActionRequest.action_type == normalized_action_type)
     if normalized_agent_id is not None:
         stmt = stmt.where(AssistantActionRequest.agent_id == normalized_agent_id)
+    if normalized_role_key is not None:
+        stmt = stmt.where(AssistantRun.agent_role_key == normalized_role_key)
+    if normalized_profile_kind is not None:
+        stmt = stmt.where(AssistantRun.agent_profile_kind == normalized_profile_kind)
     if normalized_requester_user_id is not None:
         stmt = stmt.where(AssistantActionRequest.user_id == normalized_requester_user_id)
     if normalized_decided_by is not None:
@@ -793,6 +810,8 @@ def _summarize_action_requests(
     status: str | None,
     action_type: str | None,
     agent_id: str | None,
+    role_key: str | None,
+    profile_kind: str | None,
     requester_user_id: str | None,
     decided_by: str | None,
     search: str | None,
@@ -811,6 +830,8 @@ def _summarize_action_requests(
         status=status,
         action_type=action_type,
         agent_id=agent_id,
+        role_key=role_key,
+        profile_kind=profile_kind,
         requester_user_id=requester_user_id,
         decided_by=decided_by,
         search=search,

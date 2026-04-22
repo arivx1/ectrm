@@ -516,3 +516,30 @@ proposal form until a human owner approves the domain rule.
 - Tests or evidence: API coverage should verify loop metadata persistence,
   prompt contract rendering, configured iteration caps, callback token
   enforcement, and execution-state updates.
+
+### 2026-04-22 - Autonomy Reviews Need A Generated Brief
+
+- Type: algorithm-added
+- Domain: assistant governance
+- Applies to: managed agent promotion, pause review, narrowing decisions,
+  deterministic algorithm discovery
+- Status: implemented
+- Source:
+  [`autonomy_review.py`](../../apps/api/app/domains/assistant/services/autonomy_review.py)
+  and [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
+- Lesson: before increasing or narrowing a managed agent's authority, generate
+  an autonomy review brief instead of relying on the agent profile alone. The
+  brief combines current profile authority, observed outcomes, role/profile eval
+  expectations, stop conditions, and relevant knowledge-base lessons.
+- Deterministic opportunity: recurring brief recommendations should become
+  explicit promotion, pause, or narrowing policy once the thresholds are stable
+  enough for product enforcement.
+- Agent autonomy impact: agents should use the brief as the review handoff when
+  asking for more autonomy. A brief can recommend bounded-review eligibility,
+  but only a human owner should apply the authority change.
+- Tests or evidence: focused API coverage verifies admin-only access, missing
+  agent handling, outcome metrics inclusion, eval signal projection, checklist
+  output, and knowledge-base entry selection.
+- Follow-up: use generated brief recommendations and deterministic candidates
+  during agent health review, then promote repeated candidates into governed
+  policy or service work packages.

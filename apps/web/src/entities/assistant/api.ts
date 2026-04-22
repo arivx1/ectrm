@@ -11,8 +11,12 @@ import type {
   AssistantActionRequest,
   AssistantActionRequestAdminPage,
   AssistantActionRequestStatus,
+  AssistantActionType,
   AssistantAdminAgent,
   AssistantAgent,
+  AssistantAgentEval,
+  AssistantAgentEvalRun,
+  AssistantAutonomyReviewBrief,
   AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
   AssistantConversation,
@@ -124,6 +128,20 @@ export type SimulateAssistantAgentPolicyInput = {
   phase?: AssistantPolicySimulationPhase
 }
 
+export type CreateAssistantAgentEvalInput = {
+  agent_id: string
+  name: string
+  workspace: ViewKey
+  prompt: string
+  context?: string | null
+  use_live_tools: boolean
+  expected_substrings: string[]
+  expected_tool_names: string[]
+  expected_action_types: AssistantActionType[]
+}
+
+export type UpdateAssistantAgentEvalInput = Omit<CreateAssistantAgentEvalInput, 'agent_id'>
+
 function assistantMutationHeaders(): Headers {
   return buildMutationHeaders()
 }
@@ -141,6 +159,8 @@ function actionRequestQuery(init?: {
   status?: AssistantActionRequestStatus
   actionType?: string
   agentId?: string
+  roleKey?: string
+  profileKind?: string
   userId?: string
   decidedBy?: string
   search?: string
@@ -160,6 +180,12 @@ function actionRequestQuery(init?: {
   }
   if (init?.agentId?.trim()) {
     params.set('agent_id', init.agentId.trim())
+  }
+  if (init?.roleKey?.trim()) {
+    params.set('role_key', init.roleKey.trim())
+  }
+  if (init?.profileKind?.trim()) {
+    params.set('profile_kind', init.profileKind.trim())
   }
   if (init?.userId?.trim()) {
     params.set('user_id', init.userId.trim())
@@ -194,6 +220,8 @@ function actionRequestQuery(init?: {
 function outcomeMetricsQuery(init?: {
   agentId?: string
   actionType?: string
+  roleKey?: string
+  profileKind?: string
   createdAfter?: string
   createdBefore?: string
 }): string {
@@ -204,11 +232,35 @@ function outcomeMetricsQuery(init?: {
   if (init?.actionType?.trim()) {
     params.set('action_type', init.actionType.trim())
   }
+  if (init?.roleKey?.trim()) {
+    params.set('role_key', init.roleKey.trim())
+  }
+  if (init?.profileKind?.trim()) {
+    params.set('profile_kind', init.profileKind.trim())
+  }
   if (init?.createdAfter?.trim()) {
     params.set('created_after', init.createdAfter.trim())
   }
   if (init?.createdBefore?.trim()) {
     params.set('created_before', init.createdBefore.trim())
+  }
+  return params.size > 0 ? `?${params.toString()}` : ''
+}
+
+function agentEvalQuery(init?: {
+  agentId?: string
+  limit?: number
+  offset?: number
+}): string {
+  const params = new URLSearchParams()
+  if (init?.agentId?.trim()) {
+    params.set('agent_id', init.agentId.trim())
+  }
+  if (typeof init?.limit === 'number') {
+    params.set('limit', String(init.limit))
+  }
+  if (typeof init?.offset === 'number') {
+    params.set('offset', String(init.offset))
   }
   return params.size > 0 ? `?${params.toString()}` : ''
 }
@@ -481,6 +533,8 @@ export async function listAdminAssistantActionRequests(
     status?: AssistantActionRequestStatus
     actionType?: string
     agentId?: string
+    roleKey?: string
+    profileKind?: string
     userId?: string
     decidedBy?: string
     search?: string
@@ -505,12 +559,30 @@ export async function getAdminAssistantOutcomeMetrics(
   init?: {
     agentId?: string
     actionType?: string
+    roleKey?: string
+    profileKind?: string
     createdAfter?: string
     createdBefore?: string
   },
 ): Promise<AssistantOutcomeMetrics> {
   return fetchJson<AssistantOutcomeMetrics>(
     `${apiBase}/admin/assistant/outcome-metrics${outcomeMetricsQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function getAdminAssistantAutonomyReview(
+  apiBase: string,
+  agentId: string,
+  init?: {
+    createdAfter?: string
+    createdBefore?: string
+  },
+): Promise<AssistantAutonomyReviewBrief> {
+  return fetchJson<AssistantAutonomyReviewBrief>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId.trim())}/autonomy-review${outcomeMetricsQuery(init)}`,
     {
       headers: assistantMutationHeaders(),
     },
@@ -533,6 +605,102 @@ export async function listAdminAssistantProfileRequests(
 ): Promise<AssistantAgentProfileRequest[]> {
   return fetchJson<AssistantAgentProfileRequest[]>(
     `${apiBase}/admin/assistant/profile-requests`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function listAdminAssistantAgentEvals(
+  apiBase: string,
+  init?: { agentId?: string; limit?: number; offset?: number },
+): Promise<AssistantAgentEval[]> {
+  return fetchJson<AssistantAgentEval[]>(
+    `${apiBase}/admin/assistant/agent-evals${agentEvalQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function createAssistantAgentEval(
+  apiBase: string,
+  payload: CreateAssistantAgentEvalInput,
+): Promise<AssistantAgentEval> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantAgentEval>(
+    `${apiBase}/admin/assistant/agent-evals`,
+    {
+      ...payload,
+      agent_id: payload.agent_id.trim(),
+      created_by: actorId,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function updateAssistantAgentEval(
+  apiBase: string,
+  evalId: number,
+  payload: UpdateAssistantAgentEvalInput,
+): Promise<AssistantAgentEval> {
+  const { actorId } = getMutationContext()
+
+  return putJson<AssistantAgentEval>(
+    `${apiBase}/admin/assistant/agent-evals/${encodeURIComponent(String(evalId))}`,
+    {
+      ...payload,
+      updated_by: actorId,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function deleteAssistantAgentEval(apiBase: string, evalId: number): Promise<void> {
+  await requestOk(`${apiBase}/admin/assistant/agent-evals/${encodeURIComponent(String(evalId))}`, {
+    method: 'DELETE',
+    headers: assistantMutationHeaders(),
+  })
+}
+
+export async function listAdminAssistantAgentEvalRuns(
+  apiBase: string,
+  evalId: number,
+  init?: { limit?: number; offset?: number },
+): Promise<AssistantAgentEvalRun[]> {
+  return fetchJson<AssistantAgentEvalRun[]>(
+    `${apiBase}/admin/assistant/agent-evals/${encodeURIComponent(String(evalId))}/runs${agentEvalQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function runAssistantAgentEval(
+  apiBase: string,
+  evalId: number,
+): Promise<AssistantAgentEvalRun> {
+  return postJson<AssistantAgentEvalRun>(
+    `${apiBase}/admin/assistant/agent-evals/${encodeURIComponent(String(evalId))}/run`,
+    {},
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function runAssistantAgentEvalSuite(
+  apiBase: string,
+  agentId: string,
+): Promise<AssistantAgentEvalRun[]> {
+  return postJson<AssistantAgentEvalRun[]>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId.trim())}/evals/run`,
+    {},
     {
       headers: assistantMutationHeaders(),
     },

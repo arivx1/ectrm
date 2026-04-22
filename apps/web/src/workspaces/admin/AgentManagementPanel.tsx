@@ -5,16 +5,26 @@ import {
   buildAssistantAgentDraft,
   createAssistantAgentProfileRequest,
   createAssistantAgent,
+  createAssistantAgentEval,
+  deleteAssistantAgentEval,
+  getAdminAssistantAutonomyReview,
+  listAdminAssistantAgentEvals,
+  listAdminAssistantAgentEvalRuns,
   listAdminAssistantAgents,
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
   rejectAssistantAgentProfileRequest,
+  runAssistantAgentEval,
+  runAssistantAgentEvalSuite,
   simulateAssistantAgentPolicy,
+  updateAssistantAgentEval,
   updateAssistantAgent,
   type CreateAssistantAgentInput,
+  type CreateAssistantAgentEvalInput,
   type CreateAssistantAgentProfileRequestInput,
   type SimulateAssistantAgentPolicyInput,
+  type UpdateAssistantAgentEvalInput,
   type UpdateAssistantAgentInput,
 } from '../../entities/assistant/api'
 import {
@@ -35,6 +45,10 @@ import type {
   AssistantActionType,
   AssistantAdminAgent,
   AssistantAgentAuthorityLevel,
+  AssistantAgentEval,
+  AssistantAgentEvalRun,
+  AssistantAgentEvalRunStatus,
+  AssistantAutonomyReviewBrief,
   AssistantAgentCapability,
   AssistantAgentProfileKind,
   AssistantAgentProfileRequest,
@@ -93,6 +107,17 @@ type ProfileRequestForm = {
   proposed_eval_cases: string
 }
 
+type AgentEvalForm = {
+  name: string
+  workspace: ViewKey
+  prompt: string
+  context: string
+  use_live_tools: boolean
+  expected_substrings: string
+  expected_tool_names: string
+  expected_action_types: AssistantActionType[]
+}
+
 const STATUS_OPTIONS: AssistantAgentStatus[] = ['DRAFT', 'ACTIVE', 'PAUSED', 'RETIRED']
 const SCOPE_OPTIONS: AssistantAgentScope[] = ['PERSONAL', 'TEAM', 'ORGANIZATION']
 const PROVIDER_OPTIONS: Array<AssistantProvider | ''> = ['', 'openai', 'anthropic', 'google']
@@ -135,11 +160,50 @@ function createEmptyProfileRequestForm(): ProfileRequestForm {
   }
 }
 
+function createEmptyAgentEvalForm(agent: AssistantAdminAgent | null = null): AgentEvalForm {
+  return {
+    name: '',
+    workspace: agent?.allowed_workspaces[0] ?? 'assistant',
+    prompt: '',
+    context: '',
+    use_live_tools: agent ? agent.capabilities.includes('READ') : true,
+    expected_substrings: '',
+    expected_tool_names: '',
+    expected_action_types: [],
+  }
+}
+
 function splitLines(value: string): string[] {
   return value
     .split('\n')
     .map((entry) => entry.trim())
     .filter(Boolean)
+}
+
+function toAgentEvalForm(record: AssistantAgentEval): AgentEvalForm {
+  return {
+    name: record.name,
+    workspace: record.workspace,
+    prompt: record.prompt,
+    context: record.context ?? '',
+    use_live_tools: record.use_live_tools,
+    expected_substrings: record.expected_substrings.join('\n'),
+    expected_tool_names: record.expected_tool_names.join('\n'),
+    expected_action_types: [...record.expected_action_types],
+  }
+}
+
+function normalizeAgentEvalPayload(form: AgentEvalForm): UpdateAssistantAgentEvalInput {
+  return {
+    name: form.name.trim(),
+    workspace: form.workspace,
+    prompt: form.prompt.trim(),
+    context: form.context.trim() || null,
+    use_live_tools: form.use_live_tools,
+    expected_substrings: splitLines(form.expected_substrings),
+    expected_tool_names: splitLines(form.expected_tool_names),
+    expected_action_types: form.expected_action_types,
+  }
 }
 
 function normalizeProfileRequestPayload(form: ProfileRequestForm): CreateAssistantAgentProfileRequestInput {
@@ -420,6 +484,29 @@ function actionSummary(values: readonly AssistantActionType[]): string {
     : 'No governed actions'
 }
 
+function agentEvalExpectationSummary(record: AssistantAgentEval): string {
+  const segments = [
+    `${record.expected_substrings.length} text check${record.expected_substrings.length === 1 ? '' : 's'}`,
+    `${record.expected_tool_names.length} tool check${record.expected_tool_names.length === 1 ? '' : 's'}`,
+    `${record.expected_action_types.length} action check${record.expected_action_types.length === 1 ? '' : 's'}`,
+  ]
+  return segments.join(' · ')
+}
+
+function evalRunStatusTone(status: AssistantAgentEvalRunStatus): 'active' | 'cancelled' {
+  return status === 'PASS' ? 'active' : 'cancelled'
+}
+
+function evalRunStatusLabel(status: AssistantAgentEvalRunStatus): string {
+  if (status === 'PASS') {
+    return 'Passed'
+  }
+  if (status === 'FAIL') {
+    return 'Failed'
+  }
+  return 'Errored'
+}
+
 function policyResourceLabel(resourceId: string): string {
   return ACTION_TYPE_LABELS[resourceId as AssistantActionType] ?? resourceId
 }
@@ -435,6 +522,21 @@ function policyDecisionSummary(
 
 function firstPolicyDecisionReason(decisions: readonly AssistantPolicyDecision[]): string {
   return decisions[0]?.reason ?? 'No policy decisions in this bucket.'
+}
+
+function autonomyReviewRecommendationLabel(
+  recommendation: AssistantAutonomyReviewBrief['recommended_next_authority'],
+): string {
+  if (recommendation === 'ELIGIBLE_FOR_BOUNDED_REVIEW') {
+    return 'Bounded review candidate'
+  }
+  if (recommendation === 'PAUSE') {
+    return 'Pause'
+  }
+  if (recommendation === 'NARROW') {
+    return 'Narrow'
+  }
+  return 'Keep staged'
 }
 
 function PromptProfilePreview({
@@ -504,6 +606,7 @@ export function AgentManagementPanel({
 
   const [agentRecords, setAgentRecords] = useState<AssistantAdminAgent[]>([])
   const [profileRequests, setProfileRequests] = useState<AssistantAgentProfileRequest[]>([])
+  const [agentEvalRecords, setAgentEvalRecords] = useState<AssistantAgentEval[]>([])
   const [availableTools, setAvailableTools] = useState<string[]>([])
   const [roleArchetypes, setRoleArchetypes] = useState<AssistantAgentRoleArchetype[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
@@ -539,10 +642,33 @@ export function AgentManagementPanel({
   const [policySimulation, setPolicySimulation] = useState<AssistantPolicySimulation | null>(null)
   const [policySimulationLoading, setPolicySimulationLoading] = useState(false)
   const [policySimulationError, setPolicySimulationError] = useState('')
+  const [autonomyReview, setAutonomyReview] = useState<AssistantAutonomyReviewBrief | null>(null)
+  const [autonomyReviewLoading, setAutonomyReviewLoading] = useState(false)
+  const [autonomyReviewError, setAutonomyReviewError] = useState('')
+  const [selectedAgentEvalId, setSelectedAgentEvalId] = useState<number | null>(null)
+  const [agentEvalForm, setAgentEvalForm] = useState<AgentEvalForm>(() => createEmptyAgentEvalForm())
+  const [agentEvalRuns, setAgentEvalRuns] = useState<AssistantAgentEvalRun[]>([])
+  const [agentEvalRunsLoading, setAgentEvalRunsLoading] = useState(false)
+  const [agentEvalError, setAgentEvalError] = useState('')
+  const [savingAgentEval, setSavingAgentEval] = useState(false)
+  const [deletingAgentEvalId, setDeletingAgentEvalId] = useState<number | null>(null)
+  const [runningAgentEvalId, setRunningAgentEvalId] = useState<number | null>(null)
+  const [runningAgentEvalSuite, setRunningAgentEvalSuite] = useState(false)
 
   const selectedAgent = useMemo(
     () => agentRecords.find((agent) => agent.agent_id === selectedAgentId) ?? null,
     [agentRecords, selectedAgentId],
+  )
+  const selectedAgentEvalRecords = useMemo(
+    () =>
+      selectedAgent
+        ? agentEvalRecords.filter((record) => record.agent_id === selectedAgent.agent_id)
+        : [],
+    [agentEvalRecords, selectedAgent],
+  )
+  const selectedAgentEval = useMemo(
+    () => selectedAgentEvalRecords.find((record) => record.eval_id === selectedAgentEvalId) ?? null,
+    [selectedAgentEvalId, selectedAgentEvalRecords],
   )
   const selectedCreateTemplate = useMemo(
     () => (selectedCreateTemplateKey ? getAgentBuilderTemplate(selectedCreateTemplateKey) : null),
@@ -632,17 +758,19 @@ export function AgentManagementPanel({
       setAgentsError('')
 
       try {
-        const [nextAgents, runtimeSettings, nextRoles, nextProfileRequests] = await Promise.all([
+        const [nextAgents, runtimeSettings, nextRoles, nextProfileRequests, nextAgentEvals] = await Promise.all([
           listAdminAssistantAgents(appConfig.apiBase),
           loadAssistantRuntimeSettings(appConfig.apiBase),
           listAdminAssistantRoleArchetypes(appConfig.apiBase),
           listAdminAssistantProfileRequests(appConfig.apiBase),
+          listAdminAssistantAgentEvals(appConfig.apiBase, { limit: 500 }),
         ])
         if (requestSequenceRef.current !== requestId) {
           return
         }
         setAgentRecords(nextAgents)
         setProfileRequests(nextProfileRequests)
+        setAgentEvalRecords(nextAgentEvals)
         setRoleArchetypes(nextRoles)
         setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
         setOpenAiProviderStatus(
@@ -669,6 +797,7 @@ export function AgentManagementPanel({
         }
         setAgentRecords([])
         setProfileRequests([])
+        setAgentEvalRecords([])
         setRoleArchetypes([])
         setAvailableTools([])
         setOpenAiProviderStatus(null)
@@ -690,6 +819,7 @@ export function AgentManagementPanel({
     if (!adminEnabled) {
       setAgentRecords([])
       setProfileRequests([])
+      setAgentEvalRecords([])
       setRoleArchetypes([])
       setAvailableTools([])
       setAgentsError('')
@@ -712,6 +842,18 @@ export function AgentManagementPanel({
       setPolicySimulation(null)
       setPolicySimulationError('')
       setPolicySimulationLoading(false)
+      setAutonomyReview(null)
+      setAutonomyReviewError('')
+      setAutonomyReviewLoading(false)
+      setSelectedAgentEvalId(null)
+      setAgentEvalForm(createEmptyAgentEvalForm())
+      setAgentEvalRuns([])
+      setAgentEvalRunsLoading(false)
+      setAgentEvalError('')
+      setSavingAgentEval(false)
+      setDeletingAgentEvalId(null)
+      setRunningAgentEvalId(null)
+      setRunningAgentEvalSuite(false)
       setSimulationPrompt('')
       setSimulationContext('')
       setSimulationWorkspace('assistant')
@@ -729,18 +871,75 @@ export function AgentManagementPanel({
       setPolicySimulation(null)
       setPolicySimulationError('')
       setPolicySimulationLoading(false)
+      setAutonomyReview(null)
+      setAutonomyReviewError('')
+      setAutonomyReviewLoading(false)
+      setSelectedAgentEvalId(null)
+      setAgentEvalForm(createEmptyAgentEvalForm())
+      setAgentEvalRuns([])
+      setAgentEvalRunsLoading(false)
+      setAgentEvalError('')
       return
     }
     setEditForm(toAgentForm(selectedAgent))
     setPolicySimulation(null)
     setPolicySimulationError('')
     setPolicySimulationLoading(false)
+    setAutonomyReview(null)
+    setAutonomyReviewError('')
+    setAutonomyReviewLoading(false)
+    setAgentEvalRuns([])
+    setAgentEvalRunsLoading(false)
+    setAgentEvalError('')
+    setSelectedAgentEvalId((current) => {
+      if (current && selectedAgentEvalRecords.some((record) => record.eval_id === current)) {
+        return current
+      }
+      return selectedAgentEvalRecords[0]?.eval_id ?? null
+    })
     setSimulationWorkspace(
       selectedAgent.allowed_workspaces.includes('assistant')
         ? 'assistant'
         : selectedAgent.allowed_workspaces[0] ?? 'assistant',
     )
-  }, [selectedAgent])
+  }, [selectedAgent, selectedAgentEvalRecords])
+
+  useEffect(() => {
+    if (selectedAgentEval) {
+      setAgentEvalForm(toAgentEvalForm(selectedAgentEval))
+      return
+    }
+    setAgentEvalForm(createEmptyAgentEvalForm(selectedAgent))
+  }, [selectedAgent, selectedAgentEval])
+
+  const loadAgentEvalRunHistory = useCallback(
+    async (evalId: number) => {
+      if (!adminEnabled) {
+        return
+      }
+      setAgentEvalRunsLoading(true)
+      try {
+        const runs = await listAdminAssistantAgentEvalRuns(appConfig.apiBase, evalId, { limit: 8 })
+        setAgentEvalRuns(runs)
+      } catch (error) {
+        setAgentEvalError(error instanceof Error ? error.message : 'Could not load eval run history.')
+        setAgentEvalRuns([])
+      } finally {
+        setAgentEvalRunsLoading(false)
+      }
+    },
+    [adminEnabled],
+  )
+
+  useEffect(() => {
+    if (!selectedAgentEvalId) {
+      setAgentEvalRuns([])
+      setAgentEvalRunsLoading(false)
+      return
+    }
+    setAgentEvalError('')
+    void loadAgentEvalRunHistory(selectedAgentEvalId)
+  }, [loadAgentEvalRunHistory, selectedAgentEvalId])
 
   useEffect(() => {
     setSimulationActorRole((current) =>
@@ -1186,6 +1385,157 @@ export function AgentManagementPanel({
       )
     } finally {
       setPolicySimulationLoading(false)
+    }
+  }
+
+  async function handleGenerateAutonomyReview() {
+    if (!selectedAgent) {
+      return
+    }
+
+    setAutonomyReviewLoading(true)
+    setAutonomyReviewError('')
+    setAutonomyReview(null)
+
+    try {
+      const result = await getAdminAssistantAutonomyReview(appConfig.apiBase, selectedAgent.agent_id)
+      setAutonomyReview(result)
+    } catch (error) {
+      setAutonomyReviewError(
+        error instanceof Error ? error.message : 'Could not generate the autonomy review brief.',
+      )
+    } finally {
+      setAutonomyReviewLoading(false)
+    }
+  }
+
+  function handleCreateNewEvalCase() {
+    setSelectedAgentEvalId(null)
+    setAgentEvalForm(createEmptyAgentEvalForm(selectedAgent))
+    setAgentEvalRuns([])
+    setAgentEvalError('')
+  }
+
+  async function handleSaveAgentEval() {
+    if (!selectedAgent) {
+      return
+    }
+    if (!agentEvalForm.name.trim() || !agentEvalForm.prompt.trim()) {
+      setAgentEvalError('Eval name and prompt are required before saving.')
+      return
+    }
+
+    setSavingAgentEval(true)
+    setAgentEvalError('')
+    setAgentFlash(null)
+
+    try {
+      const payload = normalizeAgentEvalPayload(agentEvalForm)
+      const saved = selectedAgentEval
+        ? await updateAssistantAgentEval(
+            appConfig.apiBase,
+            selectedAgentEval.eval_id,
+            payload,
+          )
+        : await createAssistantAgentEval(appConfig.apiBase, {
+            ...payload,
+            agent_id: selectedAgent.agent_id,
+          } satisfies CreateAssistantAgentEvalInput)
+      await refreshAgents(selectedAgent.agent_id)
+      setSelectedAgentEvalId(saved.eval_id)
+      setAgentFlash({
+        tone: 'success',
+        message: `${saved.name} eval case saved.`,
+      })
+    } catch (error) {
+      setAgentEvalError(error instanceof Error ? error.message : 'Could not save eval case.')
+    } finally {
+      setSavingAgentEval(false)
+    }
+  }
+
+  async function handleDeleteAgentEval(evalId: number) {
+    if (!selectedAgent) {
+      return
+    }
+
+    setDeletingAgentEvalId(evalId)
+    setAgentEvalError('')
+    setAgentFlash(null)
+
+    try {
+      await deleteAssistantAgentEval(appConfig.apiBase, evalId)
+      await refreshAgents(selectedAgent.agent_id)
+      setSelectedAgentEvalId(null)
+      setAgentEvalRuns([])
+      setAgentFlash({
+        tone: 'success',
+        message: 'Eval case deleted.',
+      })
+    } catch (error) {
+      setAgentEvalError(error instanceof Error ? error.message : 'Could not delete eval case.')
+    } finally {
+      setDeletingAgentEvalId(null)
+    }
+  }
+
+  async function handleRunAgentEval(evalId: number) {
+    if (!selectedAgent) {
+      return
+    }
+
+    setRunningAgentEvalId(evalId)
+    setAgentEvalError('')
+    setAgentFlash(null)
+
+    try {
+      const result = await runAssistantAgentEval(appConfig.apiBase, evalId)
+      await refreshAgents(selectedAgent.agent_id)
+      setSelectedAgentEvalId(evalId)
+      await loadAgentEvalRunHistory(evalId)
+      setAgentFlash({
+        tone: result.status === 'PASS' ? 'success' : 'error',
+        message:
+          result.status === 'PASS'
+            ? 'Eval case passed.'
+            : `Eval case ${evalRunStatusLabel(result.status).toLowerCase()}: ${
+                result.failure_reasons[0] ?? 'review the run history for details'
+              }.`,
+      })
+    } catch (error) {
+      setAgentEvalError(error instanceof Error ? error.message : 'Could not run eval case.')
+    } finally {
+      setRunningAgentEvalId(null)
+    }
+  }
+
+  async function handleRunAgentEvalSuite() {
+    if (!selectedAgent || selectedAgentEvalRecords.length === 0) {
+      return
+    }
+
+    setRunningAgentEvalSuite(true)
+    setAgentEvalError('')
+    setAgentFlash(null)
+
+    try {
+      const results = await runAssistantAgentEvalSuite(appConfig.apiBase, selectedAgent.agent_id)
+      await refreshAgents(selectedAgent.agent_id)
+      if (selectedAgentEvalId) {
+        await loadAgentEvalRunHistory(selectedAgentEvalId)
+      }
+      const failedCount = results.filter((result) => result.status !== 'PASS').length
+      setAgentFlash({
+        tone: failedCount === 0 ? 'success' : 'error',
+        message:
+          failedCount === 0
+            ? `Eval suite passed ${results.length} case${results.length === 1 ? '' : 's'}.`
+            : `Eval suite completed with ${failedCount} failing case${failedCount === 1 ? '' : 's'}.`,
+      })
+    } catch (error) {
+      setAgentEvalError(error instanceof Error ? error.message : 'Could not run eval suite.')
+    } finally {
+      setRunningAgentEvalSuite(false)
     }
   }
 
@@ -2401,6 +2751,336 @@ export function AgentManagementPanel({
                     <small>
                       {selectedAgent.effective_policy.policy_notes.join(' ')}
                     </small>
+                  ) : null}
+                </div>
+
+                <div className="assistant-builder-preview assistant-policy-simulator">
+                  <div className="assistant-admin-section-head">
+                    <div>
+                      <span className="eyebrow">Eval Catalog</span>
+                      <h4>Regression Cases</h4>
+                    </div>
+                    <span>
+                      {selectedAgentEvalRecords.length} saved case
+                      {selectedAgentEvalRecords.length === 1 ? '' : 's'} for this agent
+                    </span>
+                  </div>
+
+                  <div className="toolbar settings-actions">
+                    <button type="button" className="button button-ghost" onClick={handleCreateNewEvalCase}>
+                      New Eval Case
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleRunAgentEvalSuite()}
+                      disabled={runningAgentEvalSuite || selectedAgentEvalRecords.length === 0}
+                    >
+                      {runningAgentEvalSuite ? 'Running Suite...' : 'Run Suite'}
+                    </button>
+                  </div>
+
+                  {agentEvalError ? (
+                    <div className="feedback-banner feedback-banner-error">{agentEvalError}</div>
+                  ) : null}
+
+                  {selectedAgentEvalRecords.length === 0 ? (
+                    <div className="empty-state">
+                      <strong>No eval cases yet</strong>
+                      <p>
+                        Save one prompt expectation here, then run it whenever the agent prompt, tools, or
+                        authority changes.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="assistant-builder-warning-list">
+                      {selectedAgentEvalRecords.map((record) => (
+                        <button
+                          key={record.eval_id}
+                          type="button"
+                          className={`assistant-admin-agent-card ${
+                            selectedAgentEval?.eval_id === record.eval_id ? 'is-selected' : ''
+                          }`}
+                          onClick={() => setSelectedAgentEvalId(record.eval_id)}
+                        >
+                          <div>
+                            <strong>{record.name}</strong>
+                            <span>{workspaceLabel(record.workspace)} · {agentEvalExpectationSummary(record)}</span>
+                          </div>
+                          {record.latest_run ? (
+                            <span className={`status-pill status-pill-${evalRunStatusTone(record.latest_run.status)}`}>
+                              {evalRunStatusLabel(record.latest_run.status)}
+                            </span>
+                          ) : (
+                            <span className="status-pill status-pill-planned">Not run</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="assistant-admin-form-grid">
+                    <label className="field">
+                      <span>Eval Name</span>
+                      <input
+                        className="control"
+                        value={agentEvalForm.name}
+                        onChange={(event) =>
+                          setAgentEvalForm((current) => ({ ...current, name: event.target.value }))
+                        }
+                        placeholder="Allowed workflow update staging"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Workspace</span>
+                      <select
+                        className="control"
+                        value={agentEvalForm.workspace}
+                        onChange={(event) =>
+                          setAgentEvalForm((current) => ({
+                            ...current,
+                            workspace: event.target.value as ViewKey,
+                          }))
+                        }
+                      >
+                        {WORKSPACE_OPTIONS.map((workspace) => (
+                          <option key={workspace} value={workspace}>
+                            {workspaceLabel(workspace)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>Prompt</span>
+                    <textarea
+                      className="control assistant-admin-prompt"
+                      value={agentEvalForm.prompt}
+                      onChange={(event) =>
+                        setAgentEvalForm((current) => ({ ...current, prompt: event.target.value }))
+                      }
+                      placeholder="Review the selected workflow item and stage the allowed update."
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Context</span>
+                    <textarea
+                      className="control"
+                      value={agentEvalForm.context}
+                      onChange={(event) =>
+                        setAgentEvalForm((current) => ({ ...current, context: event.target.value }))
+                      }
+                      placeholder="Optional deterministic fixture context for the case."
+                    />
+                  </label>
+
+                  <div className="assistant-admin-form-grid">
+                    <label className="field">
+                      <span>Expected Text</span>
+                      <textarea
+                        className="control"
+                        value={agentEvalForm.expected_substrings}
+                        onChange={(event) =>
+                          setAgentEvalForm((current) => ({
+                            ...current,
+                            expected_substrings: event.target.value,
+                          }))
+                        }
+                        placeholder="One required response substring per line"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Expected Tools</span>
+                      <textarea
+                        className="control"
+                        value={agentEvalForm.expected_tool_names}
+                        onChange={(event) =>
+                          setAgentEvalForm((current) => ({
+                            ...current,
+                            expected_tool_names: event.target.value,
+                          }))
+                        }
+                        placeholder="list_workflow_items"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="assistant-admin-option-group">
+                    <strong>Expected action types</strong>
+                    <div className="chip-row">
+                      {ACTION_TYPE_OPTIONS.map((actionType) => (
+                        <button
+                          key={actionType}
+                          type="button"
+                          className={`entity-chip ${agentEvalForm.expected_action_types.includes(actionType) ? '' : 'entity-chip-soft'}`}
+                          onClick={() =>
+                            setAgentEvalForm((current) => ({
+                              ...current,
+                              expected_action_types: toggleSelection(current.expected_action_types, actionType),
+                            }))
+                          }
+                        >
+                          {ACTION_TYPE_LABELS[actionType]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="assistant-admin-toggle">
+                    <input
+                      type="checkbox"
+                      checked={agentEvalForm.use_live_tools}
+                      onChange={(event) =>
+                        setAgentEvalForm((current) => ({
+                          ...current,
+                          use_live_tools: event.target.checked,
+                        }))
+                      }
+                    />
+                    <span>Allow live tools during this eval run</span>
+                  </label>
+
+                  <div className="toolbar settings-actions">
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => void handleSaveAgentEval()}
+                      disabled={savingAgentEval}
+                    >
+                      {savingAgentEval ? 'Saving Eval...' : selectedAgentEval ? 'Save Eval Case' : 'Create Eval Case'}
+                    </button>
+                    {selectedAgentEval ? (
+                      <>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleRunAgentEval(selectedAgentEval.eval_id)}
+                          disabled={runningAgentEvalId === selectedAgentEval.eval_id}
+                        >
+                          {runningAgentEvalId === selectedAgentEval.eval_id ? 'Running Eval...' : 'Run Case'}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => void handleDeleteAgentEval(selectedAgentEval.eval_id)}
+                          disabled={deletingAgentEvalId === selectedAgentEval.eval_id}
+                        >
+                          {deletingAgentEvalId === selectedAgentEval.eval_id ? 'Deleting...' : 'Delete Case'}
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+
+                  {agentEvalRunsLoading ? (
+                    <small className="form-note">Loading eval run history...</small>
+                  ) : agentEvalRuns.length > 0 ? (
+                    <div className="assistant-builder-warning-list">
+                      {agentEvalRuns.map((run) => (
+                        <div key={run.eval_run_id} className="assistant-sidebar-block">
+                          <strong>
+                            <span className={`status-pill status-pill-${evalRunStatusTone(run.status)}`}>
+                              {evalRunStatusLabel(run.status)}
+                            </span>{' '}
+                            {formatDate(run.completed_at)}
+                          </strong>
+                          <p>
+                            {run.failure_reasons[0] ??
+                              `${run.observed_tool_names.length} tool call${run.observed_tool_names.length === 1 ? '' : 's'} observed`}
+                          </p>
+                          <small>
+                            Run by {run.run_by}
+                            {run.run_id ? ` · Assistant run #${run.run_id}` : ''}
+                          </small>
+                        </div>
+                      ))}
+                    </div>
+                  ) : selectedAgentEval ? (
+                    <small className="form-note">No run history recorded for this eval case yet.</small>
+                  ) : null}
+                </div>
+
+                <div className="assistant-builder-preview assistant-policy-simulator">
+                  <div className="assistant-admin-section-head">
+                    <div>
+                      <span className="eyebrow">Autonomy Review</span>
+                      <h4>Generated Brief</h4>
+                    </div>
+                    <span>Outcome metrics, eval expectations, and knowledge-base lessons</span>
+                  </div>
+
+                  <div className="toolbar settings-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleGenerateAutonomyReview()}
+                      disabled={autonomyReviewLoading}
+                    >
+                      {autonomyReviewLoading ? 'Generating Brief...' : 'Generate Autonomy Brief'}
+                    </button>
+                  </div>
+
+                  {autonomyReviewError ? (
+                    <div className="feedback-banner feedback-banner-error">{autonomyReviewError}</div>
+                  ) : null}
+
+                  {autonomyReview ? (
+                    <>
+                      <div className="assistant-builder-preview-grid">
+                        <div className="assistant-sidebar-block">
+                          <strong>Recommendation</strong>
+                          <p>{autonomyReviewRecommendationLabel(autonomyReview.recommended_next_authority)}</p>
+                          <small>{autonomyReview.recommendation_reasons[0] ?? 'No reason returned.'}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Outcome evidence</strong>
+                          <p>{autonomyReview.outcome_metrics?.decided_action_count ?? 0} decided</p>
+                          <small>
+                            {autonomyReview.outcome_metrics
+                              ? `${autonomyReview.outcome_metrics.executed_action_count} executed · ${autonomyReview.outcome_metrics.rejected_action_count} rejected · ${autonomyReview.outcome_metrics.failed_action_count} failed`
+                              : 'No agent outcome metrics in the selected window'}
+                          </small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Eval signal</strong>
+                          <p>{autonomyReview.eval_signal.status.replace(/_/g, ' ')}</p>
+                          <small>
+                            {autonomyReview.eval_signal.required_cases.length +
+                              autonomyReview.eval_signal.proposed_cases.length}{' '}
+                            declared case
+                            {autonomyReview.eval_signal.required_cases.length +
+                              autonomyReview.eval_signal.proposed_cases.length ===
+                            1
+                              ? ''
+                              : 's'}
+                          </small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Knowledge base</strong>
+                          <p>{autonomyReview.knowledge_base_entries.length} matched lessons</p>
+                          <small>
+                            {autonomyReview.deterministic_algorithm_candidates.length} deterministic candidate
+                            {autonomyReview.deterministic_algorithm_candidates.length === 1 ? '' : 's'}
+                          </small>
+                        </div>
+                      </div>
+
+                      <div className="assistant-builder-warning-list">
+                        {autonomyReview.stop_conditions.slice(0, 3).map((condition) => (
+                          <small key={condition} className="form-note">
+                            {condition}
+                          </small>
+                        ))}
+                      </div>
+
+                      {autonomyReview.deterministic_algorithm_candidates.length > 0 ? (
+                        <div className="assistant-sidebar-block">
+                          <strong>Deterministic candidates</strong>
+                          <p>{autonomyReview.deterministic_algorithm_candidates[0]}</p>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
 

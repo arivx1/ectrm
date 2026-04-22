@@ -14,6 +14,7 @@ import {
   type AssistantActionRequestAdminSummary,
   type AssistantActionRequestStatus,
   type AssistantActionType,
+  type AssistantAgentProfileKind,
   type AssistantRunAuditTrace,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
@@ -36,6 +37,8 @@ type ActionRequestHistoryFilters = {
   status: ActionRequestStatusFilter
   actionType: AssistantActionType | ''
   agentId: string
+  roleKey: string
+  profileKind: AssistantAgentProfileKind | ''
   userId: string
   decidedBy: string
   search: string
@@ -58,6 +61,8 @@ const INITIAL_ACTION_REQUEST_FILTERS: ActionRequestHistoryFilters = {
   status: 'PENDING',
   actionType: '',
   agentId: '',
+  roleKey: '',
+  profileKind: '',
   userId: '',
   decidedBy: '',
   search: '',
@@ -153,6 +158,8 @@ export function AssistantApprovalInboxPanel({
     filters.status !== 'PENDING' ||
     Boolean(filters.actionType) ||
     Boolean(filters.agentId.trim()) ||
+    Boolean(filters.roleKey.trim()) ||
+    Boolean(filters.profileKind) ||
     Boolean(filters.userId.trim()) ||
     Boolean(filters.decidedBy.trim()) ||
     Boolean(filters.search.trim()) ||
@@ -186,6 +193,8 @@ export function AssistantApprovalInboxPanel({
         status: filters.status === 'ALL' ? undefined : filters.status,
         actionType: filters.actionType || undefined,
         agentId: filters.agentId,
+        roleKey: filters.roleKey,
+        profileKind: filters.profileKind || undefined,
         userId: filters.userId,
         decidedBy: filters.decidedBy,
         search: filters.search,
@@ -392,7 +401,7 @@ export function AssistantApprovalInboxPanel({
 
           <div className="assistant-sidebar-block">
             <strong>Approval history filters</strong>
-            <p>Search the recoverable approval ledger by status, actor, agent, action type, and created date.</p>
+            <p>Search the recoverable approval ledger by status, actor, agent role, profile, action type, and created date.</p>
             <div className="assistant-admin-form-grid">
               <label className="field">
                 <span>Status</span>
@@ -451,6 +460,30 @@ export function AssistantApprovalInboxPanel({
                   onChange={(event) => updateFilter('agentId', event.target.value)}
                   placeholder="ops-governor"
                 />
+              </label>
+              <label className="field">
+                <span>Role key</span>
+                <input
+                  className="control"
+                  value={filters.roleKey}
+                  onChange={(event) => updateFilter('roleKey', event.target.value)}
+                  placeholder="operations-coordinator"
+                />
+              </label>
+              <label className="field">
+                <span>Profile kind</span>
+                <select
+                  className="control"
+                  value={filters.profileKind}
+                  onChange={(event) =>
+                    updateFilter('profileKind', event.target.value as ActionRequestHistoryFilters['profileKind'])
+                  }
+                >
+                  <option value="">All profile kinds</option>
+                  <option value="CURATED">Curated</option>
+                  <option value="ROLE_DERIVED">Role derived</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
               </label>
               <label className="field">
                 <span>Decided by</span>

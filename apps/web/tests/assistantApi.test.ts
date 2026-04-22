@@ -35,10 +35,15 @@ vi.mock('../src/shared/api.ts', () => ({
 import {
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
+  createAssistantAgentEval,
   createAssistantAgentProfileRequest,
+  deleteAssistantAgentEval,
+  getAdminAssistantAutonomyReview,
   getAdminAssistantOutcomeMetrics,
   getAdminAssistantRunAuditTrace,
   getAssistantConversation,
+  listAdminAssistantAgentEvals,
+  listAdminAssistantAgentEvalRuns,
   listAdminAssistantActionRequests,
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
@@ -46,8 +51,11 @@ import {
   listAssistantConversations,
   previewAssistantPromptContext,
   rejectAssistantAgentProfileRequest,
+  runAssistantAgentEval,
+  runAssistantAgentEvalSuite,
   simulateAssistantAgentPolicy,
   streamAssistantResponse,
+  updateAssistantAgentEval,
 } from '../src/entities/assistant/api.ts'
 
 beforeEach(() => {
@@ -128,6 +136,8 @@ test('listAdminAssistantActionRequests includes history filters and returns the 
     status: 'REJECTED',
     actionType: 'cancel_trade',
     agentId: 'ops-governor',
+    roleKey: 'trade-ops-copilot',
+    profileKind: 'ROLE_DERIVED',
     userId: 'trader.alpha',
     decidedBy: 'ops_admin',
     search: 'T-1014',
@@ -143,7 +153,7 @@ test('listAdminAssistantActionRequests includes history filters and returns the 
   const [url, init] = fetchJsonMock.mock.calls[0]
   assert.equal(
     url,
-    'http://api.test/admin/assistant/action-requests?status=REJECTED&action_type=cancel_trade&agent_id=ops-governor&user_id=trader.alpha&decided_by=ops_admin&search=T-1014&created_after=2026-04-01&created_before=2026-04-30&decided_after=2026-04-02&decided_before=2026-04-29&limit=20&offset=40',
+    'http://api.test/admin/assistant/action-requests?status=REJECTED&action_type=cancel_trade&agent_id=ops-governor&role_key=trade-ops-copilot&profile_kind=ROLE_DERIVED&user_id=trader.alpha&decided_by=ops_admin&search=T-1014&created_after=2026-04-01&created_before=2026-04-30&decided_after=2026-04-02&decided_before=2026-04-29&limit=20&offset=40',
   )
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
@@ -165,12 +175,17 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
       failed_execution_rate_pause_threshold: 0.1,
       stale_action_rate_pause_threshold: 0.25,
       oldest_pending_hours_pause_threshold: 72,
+      repeated_failed_actions_pause_threshold: 3,
+      unsupported_attempt_pause_threshold: 1,
+      policy_drift_pause_threshold: 1,
     },
     total_feedback_count: 0,
     helpful_feedback_count: 0,
     needs_work_feedback_count: 0,
     feedback_helpful_rate: null,
     by_agent: [],
+    by_role: [],
+    by_profile: [],
     by_workspace: [],
     by_action_type: [],
     recent_feedback: [],
@@ -180,6 +195,8 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
   const payload = await getAdminAssistantOutcomeMetrics('http://api.test', {
     agentId: ' ops-governor ',
     actionType: ' cancel_trade ',
+    roleKey: ' trade-ops-copilot ',
+    profileKind: ' ROLE_DERIVED ',
     createdAfter: '2026-04-01T00:00:00',
     createdBefore: '2026-04-30T23:59:59',
   })
@@ -188,7 +205,46 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
   const [url, init] = fetchJsonMock.mock.calls[0]
   assert.equal(
     url,
-    'http://api.test/admin/assistant/outcome-metrics?agent_id=ops-governor&action_type=cancel_trade&created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
+    'http://api.test/admin/assistant/outcome-metrics?agent_id=ops-governor&action_type=cancel_trade&role_key=trade-ops-copilot&profile_kind=ROLE_DERIVED&created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
+  )
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('getAdminAssistantAutonomyReview owns the typed review brief URL and admin auth', async () => {
+  const expected = {
+    generated_at: '2026-04-11T09:00:00Z',
+    agent_id: 'ops-governor',
+    agent_name: 'Ops Governor',
+    current_status: 'ACTIVE',
+    current_authority: 'STAGE',
+    recommended_next_authority: 'KEEP_STAGED',
+    recommendation_reasons: ['Collect more outcomes.'],
+    eval_signal: {
+      status: 'DECLARED',
+      required_cases: ['Allowed operational action staging.'],
+      proposed_cases: [],
+      notes: [],
+    },
+    allowed_action_types: ['update_trade_workflow_item'],
+    action_type_metrics: [],
+    stop_conditions: [],
+    knowledge_base_entries: [],
+    deterministic_algorithm_candidates: [],
+    review_checklist: [],
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await getAdminAssistantAutonomyReview('http://api.test', ' ops-governor ', {
+    createdAfter: '2026-04-01T00:00:00',
+    createdBefore: '2026-04-30T23:59:59',
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/agents/ops-governor/autonomy-review?created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
   )
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
@@ -210,6 +266,93 @@ test('getAdminAssistantRunAuditTrace owns the admin trace URL and mutation auth'
   assert.equal(url, 'http://api.test/admin/assistant/runs/701/audit-trace')
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('listAdminAssistantAgentEvals scopes catalog reads by agent and admin auth', async () => {
+  const expected = [{ eval_id: 12, agent_id: 'ops-governor' }]
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await listAdminAssistantAgentEvals('http://api.test', {
+    agentId: ' ops-governor ',
+    limit: 25,
+    offset: 5,
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agent-evals?agent_id=ops-governor&limit=25&offset=5')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('createAssistantAgentEval and updateAssistantAgentEval stamp reviewer provenance', async () => {
+  const created = { eval_id: 12, agent_id: 'ops-governor', name: 'Allowed staging' }
+  const updated = { eval_id: 12, agent_id: 'ops-governor', name: 'Allowed staging v2' }
+  postJsonMock.mockResolvedValueOnce(created)
+  putJsonMock.mockResolvedValueOnce(updated)
+
+  const createPayload = {
+    agent_id: ' ops-governor ',
+    name: 'Allowed staging',
+    workspace: 'operations',
+    prompt: 'Stage the workflow update.',
+    context: null,
+    use_live_tools: false,
+    expected_substrings: ['staged'],
+    expected_tool_names: ['list_workflow_items'],
+    expected_action_types: ['update_trade_workflow_item'],
+  } as const
+  const createResult = await createAssistantAgentEval('http://api.test', createPayload)
+  const updateResult = await updateAssistantAgentEval('http://api.test', 12, {
+    ...createPayload,
+    name: 'Allowed staging v2',
+  })
+
+  assert.equal(createResult, created)
+  assert.equal(updateResult, updated)
+  const [createUrl, createBody, createInit] = postJsonMock.mock.calls[0]
+  assert.equal(createUrl, 'http://api.test/admin/assistant/agent-evals')
+  assert.deepEqual(createBody, {
+    ...createPayload,
+    agent_id: 'ops-governor',
+    created_by: 'assistant_user',
+  })
+  assert.equal(new Headers((createInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer mutation-token')
+  const [updateUrl, updateBody, updateInit] = putJsonMock.mock.calls[0]
+  assert.equal(updateUrl, 'http://api.test/admin/assistant/agent-evals/12')
+  assert.deepEqual(updateBody, {
+    ...createPayload,
+    name: 'Allowed staging v2',
+    updated_by: 'assistant_user',
+  })
+  assert.equal(new Headers((updateInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer mutation-token')
+})
+
+test('assistant agent eval run helpers own run, suite, history, and delete routes', async () => {
+  const run = { eval_run_id: 99, eval_id: 12, status: 'PASS' }
+  const suite = [{ eval_run_id: 100, eval_id: 13, status: 'FAIL' }]
+  const history = [run]
+  postJsonMock.mockResolvedValueOnce(run).mockResolvedValueOnce(suite)
+  fetchJsonMock.mockResolvedValueOnce(history)
+  requestOkMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+  const runResult = await runAssistantAgentEval('http://api.test', 12)
+  const suiteResult = await runAssistantAgentEvalSuite('http://api.test', ' ops-governor ')
+  const historyResult = await listAdminAssistantAgentEvalRuns('http://api.test', 12, { limit: 8 })
+  await deleteAssistantAgentEval('http://api.test', 12)
+
+  assert.equal(runResult, run)
+  assert.equal(suiteResult, suite)
+  assert.equal(historyResult, history)
+  assert.equal(postJsonMock.mock.calls[0][0], 'http://api.test/admin/assistant/agent-evals/12/run')
+  assert.deepEqual(postJsonMock.mock.calls[0][1], {})
+  assert.equal(postJsonMock.mock.calls[1][0], 'http://api.test/admin/assistant/agents/ops-governor/evals/run')
+  assert.deepEqual(postJsonMock.mock.calls[1][1], {})
+  assert.equal(fetchJsonMock.mock.calls[0][0], 'http://api.test/admin/assistant/agent-evals/12/runs?limit=8')
+  const [deleteUrl, deleteInit] = requestOkMock.mock.calls[0]
+  assert.equal(deleteUrl, 'http://api.test/admin/assistant/agent-evals/12')
+  assert.equal((deleteInit as RequestInit | undefined)?.method, 'DELETE')
+  assert.equal(new Headers((deleteInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer mutation-token')
 })
 
 test('listAdminAssistantRoleArchetypes loads the server-owned role catalog with admin auth', async () => {

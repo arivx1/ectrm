@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
+from apps.api.app.domains.assistant.services.action_catalog import ASSISTANT_ACTION_CATALOG
 from apps.api.app.domains.assistant.services.policies import evaluate_tool_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptEnvelope
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
@@ -57,41 +58,8 @@ VALID_PROVIDERS: tuple[AssistantProvider, ...] = ("openai", "anthropic", "google
 logger = get_logger(__name__)
 
 ASSISTANT_ACTION_DEFINITIONS: tuple[AssistantActionDefinitionOut, ...] = (
-    AssistantActionDefinitionOut(
-        name="cancel_trade",
-        label="Cancel trade",
-        description="Cancel a trade through the approval queue when the user explicitly requests an unwind or void and the live trade evidence supports it.",
-    ),
-    AssistantActionDefinitionOut(
-        name="issue_trade_confirmation",
-        label="Issue confirmation",
-        description="Issue a trade confirmation for a selected trade when operations is ready to send it for review or acknowledgement.",
-    ),
-    AssistantActionDefinitionOut(
-        name="record_trade_confirmation_response",
-        label="Record confirmation response",
-        description="Capture a received confirmation response such as agreed, disputed, or acknowledged when the outcome is supported by the current workflow context.",
-    ),
-    AssistantActionDefinitionOut(
-        name="update_trade_workflow_item",
-        label="Update workflow item",
-        description="Reassign, reprioritize, close, or otherwise update a workflow item when the requested change is specific and grounded in the open queue state.",
-    ),
-    AssistantActionDefinitionOut(
-        name="issue_trade_invoice",
-        label="Issue invoice",
-        description="Create or issue a trade invoice through approval when settlement evidence supports the amount, timing, and trade linkage.",
-    ),
-    AssistantActionDefinitionOut(
-        name="create_trade_payment",
-        label="Create payment",
-        description="Record a trade payment through approval when the payment details are sufficiently specified and tied to the correct trade or invoice.",
-    ),
-    AssistantActionDefinitionOut(
-        name="reprocess_document_ingestion",
-        label="Reprocess document ingestion",
-        description="Re-run document ingestion and extraction when a document needs another pass because routing, classification, or linkage signals look incomplete.",
-    ),
+    AssistantActionDefinitionOut(name=entry.name, label=entry.label, description=entry.description)
+    for entry in ASSISTANT_ACTION_CATALOG
 )
 
 

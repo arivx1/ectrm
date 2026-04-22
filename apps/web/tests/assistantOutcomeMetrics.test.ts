@@ -4,6 +4,8 @@ import { test } from 'vitest'
 import type {
   AssistantActionTypeOutcomeMetricRow,
   AssistantAgentOutcomeMetricRow,
+  AssistantProfileOutcomeMetricRow,
+  AssistantRoleOutcomeMetricRow,
   AssistantWorkspaceFeedbackMetricRow,
 } from '../src/shared/models'
 import {
@@ -11,6 +13,8 @@ import {
   assistantOutcomeRecommendationTone,
   buildAssistantActionTypeOutcomeRows,
   buildAssistantAgentOutcomeRows,
+  buildAssistantProfileOutcomeRows,
+  buildAssistantRoleOutcomeRows,
   buildAssistantWorkspaceFeedbackRows,
   formatAssistantActionTypeLabel,
   formatAssistantOutcomeDuration,
@@ -25,6 +29,8 @@ const baseCounters = {
   failed_action_count: 1,
   decided_action_count: 12,
   stale_action_count: 0,
+  unsupported_attempt_count: 1,
+  policy_drift_count: 0,
   approval_rate: 0.8333,
   rejection_rate: 0.0833,
   failed_execution_rate: 0.0833,
@@ -57,6 +63,8 @@ test('assistant outcome agent rows expose recommendations and guardrail metrics'
     warning_count: 1,
     warning_rate: 0.0714,
     tool_call_count: 21,
+    tool_error_count: 2,
+    tool_error_rate: 0.0952,
     helpful_feedback_count: 7,
     needs_work_feedback_count: 1,
     feedback_helpful_rate: 0.875,
@@ -78,6 +86,14 @@ test('assistant outcome agent rows expose recommendations and guardrail metrics'
   assert.deepEqual(
     displayRow?.metrics.find((metric) => metric.label === 'Approval rate'),
     { label: 'Approval rate', value: '83%' },
+  )
+  assert.deepEqual(
+    displayRow?.metrics.find((metric) => metric.label === 'Tool errors'),
+    { label: 'Tool errors', value: '2 (9.5%)' },
+  )
+  assert.deepEqual(
+    displayRow?.metrics.find((metric) => metric.label === 'Unsupported'),
+    { label: 'Unsupported', value: '1' },
   )
 })
 
@@ -102,6 +118,55 @@ test('assistant outcome action rows summarize action-type readiness', () => {
   assert.deepEqual(
     displayRow?.metrics.find((metric) => metric.label === 'Avg decision'),
     { label: 'Avg decision', value: '1.5h' },
+  )
+})
+
+test('assistant outcome role and profile rows expose health signals', () => {
+  const roleRow: AssistantRoleOutcomeMetricRow = {
+    ...baseCounters,
+    agent_role_key: 'operations-coordinator',
+    run_count: 4,
+    completed_run_count: 4,
+    failed_run_count: 0,
+    warning_count: 1,
+    warning_rate: 0.25,
+    tool_call_count: 8,
+    tool_error_count: 1,
+    tool_error_rate: 0.125,
+    recommendation: {
+      recommended_action: 'RECOMMEND_PAUSE',
+      promotion_candidate: false,
+      pause_recommended: true,
+      reasons: ['Unsupported tool or action attempts were observed.'],
+    },
+  }
+  const profileRow: AssistantProfileOutcomeMetricRow = {
+    ...baseCounters,
+    agent_profile_kind: 'ROLE_DERIVED',
+    run_count: 4,
+    completed_run_count: 4,
+    failed_run_count: 0,
+    warning_count: 1,
+    warning_rate: 0.25,
+    tool_call_count: 8,
+    tool_error_count: 1,
+    tool_error_rate: 0.125,
+    recommendation: roleRow.recommendation,
+  }
+
+  const [roleDisplayRow] = buildAssistantRoleOutcomeRows([roleRow])
+  const [profileDisplayRow] = buildAssistantProfileOutcomeRows([profileRow])
+
+  assert.equal(roleDisplayRow?.title, 'operations-coordinator')
+  assert.equal(roleDisplayRow?.recommendationLabel, 'Pause recommended')
+  assert.deepEqual(
+    roleDisplayRow?.metrics.find((metric) => metric.label === 'Tool errors'),
+    { label: 'Tool errors', value: '1 (13%)' },
+  )
+  assert.equal(profileDisplayRow?.title, 'role derived')
+  assert.deepEqual(
+    profileDisplayRow?.metrics.find((metric) => metric.label === 'Policy drift'),
+    { label: 'Policy drift', value: '0' },
   )
 })
 

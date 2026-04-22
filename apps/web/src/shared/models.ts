@@ -1382,6 +1382,7 @@ export type PreTradeRecommendationCheckStatus = 'good' | 'watch' | 'block'
 export type PreTradeRecommendationSourceType = 'USER_INPUT' | 'INTERNAL' | 'EXTERNAL' | 'DERIVED'
 export type PreTradeRecommendationFreshness = 'FRESH' | 'STALE' | 'DEGRADED' | 'UNKNOWN'
 export type PreTradeRecommendationSourceQuality = 'OK' | 'STALE' | 'DEGRADED' | 'MISSING'
+export type PreTradeGovernanceRiskStatus = 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
 
 export type PreTradeReviewActivityRecord = {
   activity_id: string
@@ -1434,6 +1435,24 @@ export type PreTradeReviewItemRecord = {
   updated_by: string
   version: number
   can_edit: boolean
+}
+
+export type PreTradeGovernanceSummaryRecord = {
+  generated_at: string
+  risk_status: PreTradeGovernanceRiskStatus
+  open_review_count: number
+  in_review_count: number
+  approved_review_count: number
+  rejected_review_count: number
+  pending_review_count: number
+  booked_review_count: number
+  risky_recommendation_count: number
+  unresolved_risky_recommendation_count: number
+  override_count: number
+  booked_with_override_count: number
+  stale_evidence_run_count: number
+  stale_evidence_source_count: number
+  recommendation_run_count: number
 }
 
 export type PreTradeRecommendationSourceSnapshotRecord = {
@@ -2045,6 +2064,41 @@ export type AssistantAgentProfileRequest = {
   updated_at: string
 }
 
+export type AssistantAgentEvalRunStatus = 'PASS' | 'FAIL' | 'ERROR'
+
+export type AssistantAgentEvalRun = {
+  eval_run_id: number
+  eval_id: number
+  agent_id: string
+  run_id?: number | null
+  status: AssistantAgentEvalRunStatus
+  failure_reasons: string[]
+  observed_tool_names: string[]
+  observed_action_types: AssistantActionType[]
+  response_message?: string | null
+  started_at: string
+  completed_at: string
+  run_by: string
+}
+
+export type AssistantAgentEval = {
+  eval_id: number
+  agent_id: string
+  name: string
+  workspace: ViewKey
+  prompt: string
+  context?: string | null
+  use_live_tools: boolean
+  expected_substrings: string[]
+  expected_tool_names: string[]
+  expected_action_types: AssistantActionType[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  latest_run?: AssistantAgentEvalRun | null
+}
+
 export type AssistantPromptRequest = {
   conversation_id?: number
   agent_id?: string
@@ -2153,6 +2207,9 @@ export type AssistantOutcomeMetricThresholds = {
   failed_execution_rate_pause_threshold: number
   stale_action_rate_pause_threshold: number
   oldest_pending_hours_pause_threshold: number
+  repeated_failed_actions_pause_threshold: number
+  unsupported_attempt_pause_threshold: number
+  policy_drift_pause_threshold: number
 }
 
 export type AssistantOutcomeMetricRecommendation = {
@@ -2170,6 +2227,8 @@ export type AssistantOutcomeMetricCounters = {
   failed_action_count: number
   decided_action_count: number
   stale_action_count: number
+  unsupported_attempt_count: number
+  policy_drift_count: number
   approval_rate?: number | null
   rejection_rate?: number | null
   failed_execution_rate?: number | null
@@ -2189,9 +2248,37 @@ export type AssistantAgentOutcomeMetricRow = AssistantOutcomeMetricCounters & {
   warning_count: number
   warning_rate?: number | null
   tool_call_count: number
+  tool_error_count: number
+  tool_error_rate?: number | null
   helpful_feedback_count: number
   needs_work_feedback_count: number
   feedback_helpful_rate?: number | null
+  recommendation: AssistantOutcomeMetricRecommendation
+}
+
+export type AssistantRoleOutcomeMetricRow = AssistantOutcomeMetricCounters & {
+  agent_role_key?: string | null
+  run_count: number
+  completed_run_count: number
+  failed_run_count: number
+  warning_count: number
+  warning_rate?: number | null
+  tool_call_count: number
+  tool_error_count: number
+  tool_error_rate?: number | null
+  recommendation: AssistantOutcomeMetricRecommendation
+}
+
+export type AssistantProfileOutcomeMetricRow = AssistantOutcomeMetricCounters & {
+  agent_profile_kind?: AssistantAgentProfileKind | null
+  run_count: number
+  completed_run_count: number
+  failed_run_count: number
+  warning_count: number
+  warning_rate?: number | null
+  tool_call_count: number
+  tool_error_count: number
+  tool_error_rate?: number | null
   recommendation: AssistantOutcomeMetricRecommendation
 }
 
@@ -2234,9 +2321,61 @@ export type AssistantOutcomeMetrics = {
   needs_work_feedback_count: number
   feedback_helpful_rate?: number | null
   by_agent: AssistantAgentOutcomeMetricRow[]
+  by_role: AssistantRoleOutcomeMetricRow[]
+  by_profile: AssistantProfileOutcomeMetricRow[]
   by_workspace: AssistantWorkspaceFeedbackMetricRow[]
   by_action_type: AssistantActionTypeOutcomeMetricRow[]
   recent_feedback: AssistantRunFeedbackInsight[]
+}
+
+export type AssistantAutonomyReviewRecommendationAction =
+  | 'KEEP_STAGED'
+  | 'NARROW'
+  | 'PAUSE'
+  | 'ELIGIBLE_FOR_BOUNDED_REVIEW'
+
+export type AssistantAutonomyReviewEvalStatus =
+  | 'MISSING_EVAL_PLAN'
+  | 'DECLARED'
+  | 'ACTIONABLE'
+
+export type AssistantAutonomyKnowledgeEntry = {
+  title: string
+  entry_type?: string | null
+  domain?: string | null
+  applies_to?: string | null
+  status?: string | null
+  lesson?: string | null
+  deterministic_opportunity?: string | null
+  agent_autonomy_impact?: string | null
+}
+
+export type AssistantAutonomyEvalSignal = {
+  status: AssistantAutonomyReviewEvalStatus
+  required_cases: string[]
+  proposed_cases: string[]
+  notes: string[]
+}
+
+export type AssistantAutonomyReviewBrief = {
+  generated_at: string
+  agent_id: string
+  agent_name: string
+  current_status: AssistantAgentStatus
+  current_authority?: AssistantAgentAuthorityLevel | null
+  recommended_next_authority: AssistantAutonomyReviewRecommendationAction
+  recommendation_reasons: string[]
+  human_owner_role?: string | null
+  allowed_action_types: AssistantActionType[]
+  outcome_window_created_after?: string | null
+  outcome_window_created_before?: string | null
+  outcome_metrics?: AssistantAgentOutcomeMetricRow | null
+  action_type_metrics: AssistantActionTypeOutcomeMetricRow[]
+  eval_signal: AssistantAutonomyEvalSignal
+  stop_conditions: string[]
+  knowledge_base_entries: AssistantAutonomyKnowledgeEntry[]
+  deterministic_algorithm_candidates: string[]
+  review_checklist: string[]
 }
 
 export type AssistantPromptResponse = {

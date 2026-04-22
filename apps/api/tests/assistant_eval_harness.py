@@ -26,6 +26,7 @@ from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
@@ -208,7 +209,9 @@ class AssistantApiEvalHarness(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(UserSession).delete()
             session.query(AssistantActionRequest).delete()
+            session.query(AssistantAgentEvalRun).delete()
             session.query(AssistantRun).delete()
+            session.query(AssistantAgentEval).delete()
             session.query(AssistantAgent).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()

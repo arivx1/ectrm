@@ -98,6 +98,7 @@ def resolve_agent_definition_for_request(
     *,
     db: Session,
     payload: AssistantPromptContextRequest,
+    require_active: bool = True,
 ) -> ManagedAssistantAgent | None:
     if payload.agent_id is None:
         return None
@@ -105,7 +106,7 @@ def resolve_agent_definition_for_request(
     record = get_agent_record(db, payload.agent_id)
     if record is None:
         raise AssistantServiceError(status_code=404, detail="Assistant agent not found")
-    if record.status != ACTIVE_ASSISTANT_AGENT_STATUS:
+    if require_active and record.status != ACTIVE_ASSISTANT_AGENT_STATUS:
         raise AssistantServiceError(
             status_code=409,
             detail=f"{record.name} is not active and cannot answer requests.",
@@ -240,10 +241,16 @@ def prepare_assistant_execution(
     db: Session,
     payload: AssistantPromptRequest,
     authorization_header: str | None,
+    user: AssistantPromptUser | None = None,
+    require_active_agent: bool = True,
 ) -> PreparedAssistantExecution:
-    agent_definition = resolve_agent_definition_for_request(db=db, payload=payload)
+    agent_definition = resolve_agent_definition_for_request(
+        db=db,
+        payload=payload,
+        require_active=require_active_agent,
+    )
     ensure_agent_has_token_allocation(db=db, agent_definition=agent_definition)
-    user = resolve_prompt_user(db=db, authorization_header=authorization_header)
+    user = user or resolve_prompt_user(db=db, authorization_header=authorization_header)
     provider_config, model_name, runtime_warnings = resolve_effective_runtime(payload, agent_definition)
     conversation = _resolve_existing_conversation_for_request(
         db=db,

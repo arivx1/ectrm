@@ -20,7 +20,13 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.config import settings
 from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.services.action_catalog import (
+    ALL_CATALOG_ACTION_TYPES,
+    ASSISTANT_ACTION_CATALOG,
+)
 from apps.api.app.domains.assistant.services.action_requests import ACTION_HANDLERS
+from apps.api.app.domains.assistant.services.chat import ASSISTANT_ACTION_DEFINITIONS
+from apps.api.app.domains.assistant.services.policies import POLICY_RULES
 from apps.api.app.domains.assistant.services.role_archetypes import validate_role_archetype_registry
 from apps.api.app.domains.assistant.services.execution import prepare_assistant_execution
 from apps.api.app.domains.assistant.services.tools import build_tool_definitions
@@ -28,6 +34,7 @@ from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
@@ -138,8 +145,10 @@ class AssistantApiTests(unittest.TestCase):
             session.query(TradeWorkflowItem).delete()
             session.query(AssistantActionRequest).delete()
             session.query(AssistantRunFeedback).delete()
+            session.query(AssistantAgentEvalRun).delete()
             session.query(AssistantRun).delete()
             session.query(AssistantConversation).delete()
+            session.query(AssistantAgentEval).delete()
             session.query(AssistantAgent).delete()
             session.query(AssistantAgentProfileRequest).delete()
             session.query(MutationProvenanceRecord).delete()
@@ -232,6 +241,31 @@ class AssistantApiTests(unittest.TestCase):
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_HANDLERS), set(ALL_ASSISTANT_ACTION_TYPES))
+
+    def test_action_catalog_drives_backend_action_surfaces(self) -> None:
+        catalog_names = tuple(entry.name for entry in ASSISTANT_ACTION_CATALOG)
+        self.assertEqual(catalog_names, ALL_CATALOG_ACTION_TYPES)
+        self.assertEqual(catalog_names, ALL_ASSISTANT_ACTION_TYPES)
+        self.assertEqual(set(catalog_names), set(ACTION_HANDLERS))
+        self.assertEqual(
+            tuple(definition.name for definition in ASSISTANT_ACTION_DEFINITIONS),
+            catalog_names,
+        )
+
+        action_policy_rules = {
+            rule.resource_id: rule
+            for rule in POLICY_RULES
+            if rule.resource_type == "action"
+        }
+        self.assertEqual(set(action_policy_rules), set(catalog_names))
+        for entry in ASSISTANT_ACTION_CATALOG:
+            rule = action_policy_rules[entry.name]
+            self.assertEqual(rule.policy_key, entry.policy_key)
+            self.assertEqual(rule.risk_level, entry.risk_level)
+            self.assertEqual(rule.max_scope, entry.max_scope)
+            self.assertEqual(rule.roles, entry.reviewer_roles)
+            self.assertEqual(rule.workspaces, entry.workspaces)
+            self.assertEqual(rule.approval_required, entry.approval_required)
 
     def test_admin_role_archetype_detail_normalizes_role_key(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
@@ -374,6 +408,112 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("assistant_agent_profile_request.approved", operation_keys)
         self.assertIn("assistant_agent_profile_request.activated", operation_keys)
         self.assertIn("assistant_agent.activated", operation_keys)
+
+    def test_admin_agent_eval_catalog_crud_and_run_history(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+        self._create_agent(
+            agent_id="trade-eval-agent",
+            name="Trade Eval Agent",
+            status="DRAFT",
+            allowed_workspaces=["assistant", "trades"],
+            capabilities=["READ", "EXPLAIN"],
+            allowed_tools=["get_trade_by_id"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+
+        create_response = self.client.post(
+            "/admin/assistant/agent-evals",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "agent_id": "trade-eval-agent",
+                "name": "Explains selected trade evidence",
+                "workspace": "assistant",
+                "prompt": "Explain selected trade T-1000 and cite the evidence.",
+                "context": "Selected trade:\n- trade_id: T-1000",
+                "use_live_tools": False,
+                "expected_substrings": ["Trade Eval Agent"],
+                "expected_tool_names": [],
+                "expected_action_types": [],
+                "created_by": "assistant_user",
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        created_eval = create_response.json()
+        self.assertEqual(created_eval["agent_id"], "trade-eval-agent")
+        self.assertIsNone(created_eval["latest_run"])
+
+        fake_service = _FakeAssistantService()
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            run_response = self.client.post(
+                f"/admin/assistant/agent-evals/{created_eval['eval_id']}/run",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        self.assertEqual(run_response.status_code, 200)
+        run_payload = run_response.json()
+        self.assertEqual(run_payload["status"], "PASS")
+        self.assertEqual(run_payload["failure_reasons"], [])
+        self.assertIsNotNone(run_payload["run_id"])
+        self.assertEqual(run_payload["run_by"], "assistant_user")
+        self.assertEqual(fake_service.calls[0]["agent_definition"].status, "DRAFT")
+
+        listing_response = self.client.get(
+            "/admin/assistant/agent-evals?agent_id=trade-eval-agent",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(listing_response.status_code, 200)
+        self.assertEqual(listing_response.json()[0]["latest_run"]["status"], "PASS")
+
+        update_response = self.client.put(
+            f"/admin/assistant/agent-evals/{created_eval['eval_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "name": "Explains selected trade evidence",
+                "workspace": "assistant",
+                "prompt": "Explain selected trade T-1000 and cite the evidence.",
+                "context": "Selected trade:\n- trade_id: T-1000",
+                "use_live_tools": False,
+                "expected_substrings": ["not present in the response"],
+                "expected_tool_names": [],
+                "expected_action_types": [],
+                "updated_by": "assistant_user",
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=_FakeAssistantService(),
+        ):
+            failed_run_response = self.client.post(
+                f"/admin/assistant/agent-evals/{created_eval['eval_id']}/run",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        self.assertEqual(failed_run_response.status_code, 200)
+        self.assertEqual(failed_run_response.json()["status"], "FAIL")
+        self.assertEqual(
+            failed_run_response.json()["failure_reasons"],
+            ["Missing expected text: not present in the response"],
+        )
+
+        run_history_response = self.client.get(
+            f"/admin/assistant/agent-evals/{created_eval['eval_id']}/runs",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(run_history_response.status_code, 200)
+        self.assertEqual([row["status"] for row in run_history_response.json()], ["FAIL", "PASS"])
+
+        delete_response = self.client.delete(
+            f"/admin/assistant/agent-evals/{created_eval['eval_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(delete_response.status_code, 204)
 
     def test_admin_custom_agent_activation_requires_approved_profile_request(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
@@ -1984,7 +2124,13 @@ class AssistantApiTests(unittest.TestCase):
                 prompt_sections=[],
                 rendered_system_prompt="System prompt.",
                 warnings=["Missing source citation."],
-                tool_calls=[{"tool_name": "get_trade_by_id", "summary": "Fetch trade", "arguments": {}}],
+                tool_calls=[
+                    {
+                        "tool_name": "get_trade_by_id",
+                        "summary": "Fetch trade failed: unsupported lookup.",
+                        "arguments": {},
+                    }
+                ],
                 input_tokens=80,
                 output_tokens=20,
                 latest_user_message="Review cancellations.",
@@ -2036,7 +2182,18 @@ class AssistantApiTests(unittest.TestCase):
                         action_type="update_trade_workflow_item",
                         summary=f"Workflow update {index}",
                         description="Update a workflow item.",
-                        payload={"review_context": {"stale_state_basis": {"version": index}}},
+                        payload={
+                            "review_context": {
+                                "owning_work_object": {
+                                    "type": "trade_workflow_item",
+                                    "id": str(index + 1),
+                                    "label": f"Workflow item {index + 1}",
+                                },
+                                "required_reviewer_role": "OPS_ADMIN",
+                                "business_rationale": "Operations owner review is required before workflow mutation.",
+                                "stale_state_basis": {"version": index},
+                            }
+                        },
                         result={"workflow_item": {"id": index + 1}},
                         error_detail=None,
                         created_at=now - timedelta(minutes=30 + index),
@@ -2089,6 +2246,46 @@ class AssistantApiTests(unittest.TestCase):
             session.add(
                 AssistantActionRequest(
                     run_id=noisy_run.id,
+                    status="FAILED",
+                    user_id="ops_beta",
+                    session_id="noisy-session",
+                    workspace="assistant",
+                    agent_id="noisy-agent",
+                    agent_name="Noisy Agent",
+                    action_type="cancel_trade",
+                    summary="Unsupported cancellation",
+                    description="Attempt an unsupported cancellation path.",
+                    payload={"trade_id": "T-UNSUPPORTED"},
+                    result=None,
+                    error_detail="Unsupported action attempt: unknown action type for this role.",
+                    created_at=now - timedelta(minutes=17),
+                    decided_at=now - timedelta(minutes=7),
+                    decided_by="desk_lead",
+                )
+            )
+            session.add(
+                AssistantActionRequest(
+                    run_id=noisy_run.id,
+                    status="FAILED",
+                    user_id="ops_beta",
+                    session_id="noisy-session",
+                    workspace="assistant",
+                    agent_id="noisy-agent",
+                    agent_name="Noisy Agent",
+                    action_type="cancel_trade",
+                    summary="Policy drift cancellation",
+                    description="Attempt a cancellation after role policy changed.",
+                    payload={"trade_id": "T-POLICY"},
+                    result=None,
+                    error_detail="Policy drift after role change: cancel_trade is no longer allowed.",
+                    created_at=now - timedelta(minutes=15),
+                    decided_at=now - timedelta(minutes=5),
+                    decided_by="desk_lead",
+                )
+            )
+            session.add(
+                AssistantActionRequest(
+                    run_id=noisy_run.id,
                     status="EXECUTED",
                     user_id="ops_beta",
                     session_id="noisy-session",
@@ -2116,6 +2313,9 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["thresholds"]["min_decided_actions_for_promotion"], 10)
+        self.assertEqual(payload["thresholds"]["repeated_failed_actions_pause_threshold"], 3)
+        self.assertEqual(payload["thresholds"]["unsupported_attempt_pause_threshold"], 1)
+        self.assertEqual(payload["thresholds"]["policy_drift_pause_threshold"], 1)
         self.assertEqual(payload["total_feedback_count"], 2)
         self.assertEqual(payload["helpful_feedback_count"], 1)
         self.assertEqual(payload["needs_work_feedback_count"], 1)
@@ -2139,13 +2339,45 @@ class AssistantApiTests(unittest.TestCase):
         noisy_row = agent_rows["noisy-agent"]
         self.assertEqual(noisy_row["warning_count"], 1)
         self.assertEqual(noisy_row["tool_call_count"], 1)
+        self.assertEqual(noisy_row["tool_error_count"], 1)
+        self.assertEqual(noisy_row["tool_error_rate"], 1)
         self.assertEqual(noisy_row["stale_action_count"], 1)
+        self.assertEqual(noisy_row["unsupported_attempt_count"], 1)
+        self.assertEqual(noisy_row["policy_drift_count"], 1)
         self.assertEqual(noisy_row["helpful_feedback_count"], 0)
         self.assertEqual(noisy_row["needs_work_feedback_count"], 1)
         self.assertEqual(noisy_row["feedback_helpful_rate"], 0)
         self.assertEqual(noisy_row["recommendation"]["recommended_action"], "RECOMMEND_PAUSE")
         self.assertTrue(noisy_row["recommendation"]["pause_recommended"])
+        self.assertIn(
+            "Repeated failed actions exceed the pause threshold.",
+            noisy_row["recommendation"]["reasons"],
+        )
+        self.assertIn(
+            "Unsupported tool or action attempts were observed.",
+            noisy_row["recommendation"]["reasons"],
+        )
+        self.assertIn(
+            "Policy validation drift was observed after role or permission changes.",
+            noisy_row["recommendation"]["reasons"],
+        )
         self.assertGreater(noisy_row["rejection_rate"], 0.4)
+
+        role_rows = {row["agent_role_key"]: row for row in payload["by_role"]}
+        self.assertEqual(role_rows["operations-coordinator"]["staged_action_count"], 10)
+        self.assertEqual(
+            role_rows["operations-coordinator"]["recommendation"]["recommended_action"],
+            "ELIGIBLE_FOR_BOUNDED_REVIEW",
+        )
+        self.assertEqual(role_rows["trade-captain"]["tool_error_count"], 1)
+        self.assertEqual(role_rows["trade-captain"]["unsupported_attempt_count"], 1)
+        self.assertEqual(role_rows["trade-captain"]["policy_drift_count"], 1)
+        self.assertEqual(role_rows["trade-captain"]["recommendation"]["recommended_action"], "RECOMMEND_PAUSE")
+
+        profile_rows = {row["agent_profile_kind"]: row for row in payload["by_profile"]}
+        self.assertEqual(profile_rows["ROLE_DERIVED"]["staged_action_count"], 10)
+        self.assertEqual(profile_rows["CUSTOM"]["unsupported_attempt_count"], 1)
+        self.assertEqual(profile_rows["CUSTOM"]["recommendation"]["recommended_action"], "RECOMMEND_PAUSE")
 
         workspace_rows = {row["workspace"]: row for row in payload["by_workspace"]}
         self.assertEqual(workspace_rows["operations"]["feedback_count"], 1)
@@ -2167,7 +2399,178 @@ class AssistantApiTests(unittest.TestCase):
             "ELIGIBLE_FOR_BOUNDED_REVIEW",
         )
         self.assertEqual(action_rows["cancel_trade"]["stale_action_count"], 1)
+        self.assertEqual(action_rows["cancel_trade"]["unsupported_attempt_count"], 1)
+        self.assertEqual(action_rows["cancel_trade"]["policy_drift_count"], 1)
         self.assertEqual(action_rows["cancel_trade"]["recommendation"]["recommended_action"], "RECOMMEND_PAUSE")
+
+        filtered_metrics_response = self.client.get(
+            "/admin/assistant/outcome-metrics?role_key=operations-coordinator&profile_kind=ROLE_DERIVED",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(filtered_metrics_response.status_code, 200)
+        filtered_metrics = filtered_metrics_response.json()
+        self.assertEqual([row["agent_id"] for row in filtered_metrics["by_agent"]], ["workflow-agent"])
+        self.assertEqual([row["agent_role_key"] for row in filtered_metrics["by_role"]], ["operations-coordinator"])
+        self.assertEqual([row["agent_profile_kind"] for row in filtered_metrics["by_profile"]], ["ROLE_DERIVED"])
+        self.assertEqual(
+            [row["action_type"] for row in filtered_metrics["by_action_type"]],
+            ["update_trade_workflow_item"],
+        )
+
+        filtered_runs_response = self.client.get(
+            "/admin/assistant/runs?role_key=operations-coordinator&profile_kind=ROLE_DERIVED",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(filtered_runs_response.status_code, 200)
+        filtered_runs = filtered_runs_response.json()
+        self.assertEqual([row["agent_id"] for row in filtered_runs], ["workflow-agent"])
+        self.assertEqual(filtered_runs[0]["agent_role_key"], "operations-coordinator")
+        self.assertEqual(filtered_runs[0]["agent_profile_kind"], "ROLE_DERIVED")
+
+        filtered_actions_response = self.client.get(
+            "/admin/assistant/action-requests?role_key=operations-coordinator&profile_kind=ROLE_DERIVED",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(filtered_actions_response.status_code, 200)
+        filtered_actions = filtered_actions_response.json()
+        self.assertEqual(filtered_actions["total_count"], 10)
+        self.assertEqual(filtered_actions["summary"]["executed_count"], 10)
+        self.assertTrue(
+            all(row["action_type"] == "update_trade_workflow_item" for row in filtered_actions["items"])
+        )
+
+    def test_admin_autonomy_review_brief_combines_metrics_eval_and_knowledge_base(self) -> None:
+        admin_token = self._create_session_token()
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            agent = AssistantAgent(
+                agent_id="workflow-agent",
+                name="Workflow Agent",
+                description="Stages workflow updates for operations review.",
+                status="ACTIVE",
+                scope="TEAM",
+                provider="openai",
+                model="gpt-5-mini",
+                role_key="trade-ops-copilot",
+                profile_kind="ROLE_DERIVED",
+                specialization_summary="Workflow item update specialist.",
+                human_owner_role="Operations Lead",
+                authority_ceiling="STAGE",
+                activation_notes="Approved for staged workflow update review.",
+                profile_request_id=None,
+                allowed_workspaces=["assistant", "operations"],
+                capabilities=["READ", "EXPLAIN", "ACTION"],
+                allowed_tools=["list_workflow_items"],
+                allowed_action_types=["update_trade_workflow_item"],
+                daily_token_allocation=None,
+                system_prompt="Stage only reviewable workflow updates.",
+                created_at=now - timedelta(days=1),
+                created_by="ops_admin",
+                updated_at=now - timedelta(days=1),
+                updated_by="ops_admin",
+                version=1,
+            )
+            run = AssistantRun(
+                conversation_id=None,
+                status="COMPLETED",
+                user_id="ops_alpha",
+                session_id="workflow-session",
+                user_role="OPS_ADMIN",
+                workspace="operations",
+                agent_id="workflow-agent",
+                agent_name="Workflow Agent",
+                agent_role_key="trade-ops-copilot",
+                agent_profile_kind="ROLE_DERIVED",
+                provider="openai",
+                model="gpt-5-mini",
+                use_live_tools=False,
+                request_messages=[{"role": "user", "content": "Review workflow items."}],
+                application_context=None,
+                prompt_sections=[],
+                rendered_system_prompt="System prompt.",
+                warnings=[],
+                tool_calls=[],
+                input_tokens=100,
+                output_tokens=40,
+                latest_user_message="Review workflow items.",
+                assistant_message="Staged workflow updates.",
+                error_detail=None,
+                created_at=now - timedelta(hours=2),
+                completed_at=now - timedelta(hours=2),
+            )
+            session.add_all([agent, run])
+            session.flush()
+
+            for index in range(10):
+                session.add(
+                    AssistantActionRequest(
+                        run_id=run.id,
+                        status="EXECUTED",
+                        user_id="ops_alpha",
+                        session_id="workflow-session",
+                        workspace="operations",
+                        agent_id="workflow-agent",
+                        agent_name="Workflow Agent",
+                        action_type="update_trade_workflow_item",
+                        summary=f"Workflow update {index}",
+                        description="Update a workflow item.",
+                        payload={"review_context": {"stale_state_basis": {"version": index}}},
+                        result={"workflow_item": {"id": index + 1}},
+                        error_detail=None,
+                        created_at=now - timedelta(minutes=30 + index),
+                        decided_at=now - timedelta(minutes=20 + index),
+                        decided_by="ops_lead",
+                    )
+                )
+            session.commit()
+
+        response = self.client.get(
+            "/admin/assistant/agents/workflow-agent/autonomy-review",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent_id"], "workflow-agent")
+        self.assertEqual(payload["current_authority"], "STAGE")
+        self.assertEqual(payload["recommended_next_authority"], "ELIGIBLE_FOR_BOUNDED_REVIEW")
+        self.assertIn("Observed action outcomes pass", payload["recommendation_reasons"][0])
+        self.assertEqual(payload["outcome_metrics"]["decided_action_count"], 10)
+        self.assertEqual(
+            payload["outcome_metrics"]["recommendation"]["recommended_action"],
+            "ELIGIBLE_FOR_BOUNDED_REVIEW",
+        )
+        self.assertEqual(payload["action_type_metrics"][0]["action_type"], "update_trade_workflow_item")
+        self.assertEqual(payload["eval_signal"]["status"], "DECLARED")
+        self.assertIn("Allowed operational action staging.", payload["eval_signal"]["required_cases"])
+        self.assertIn("Operations Lead", payload["human_owner_role"])
+        self.assertTrue(payload["knowledge_base_entries"])
+        self.assertTrue(any(entry["entry_type"] for entry in payload["knowledge_base_entries"]))
+        self.assertIn(
+            "Run policy simulation for each allowed action type before increasing autonomy.",
+            payload["review_checklist"],
+        )
+
+    def test_admin_autonomy_review_requires_admin_and_existing_agent(self) -> None:
+        trader_token = self._create_session_token(
+            user_id="desk_user",
+            email="desk@example.com",
+            display_name="Desk User",
+            role="TRADER",
+        )
+        admin_token = self._create_session_token()
+
+        non_admin_response = self.client.get(
+            "/admin/assistant/agents/missing-agent/autonomy-review",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(non_admin_response.status_code, 403)
+
+        missing_response = self.client.get(
+            "/admin/assistant/agents/missing-agent/autonomy-review",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(missing_response.status_code, 404)
 
     def test_admin_assistant_run_audit_trace_links_approved_action_mutation(self) -> None:
         admin_token = self._create_session_token()

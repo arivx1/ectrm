@@ -491,6 +491,15 @@
   display: block;
 }
 
+.assistant-admin-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #3f5161;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .assistant-profile-request-decision-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

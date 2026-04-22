@@ -497,9 +497,25 @@ not anecdotes.
 
 The first deterministic metrics slice is available through
 `GET /admin/assistant/outcome-metrics` and the Admin workspace outcome metrics
-panel. It reports by-agent and by-action-type outcomes, including advisory
-promotion and pause recommendations. The endpoint and panel do not auto-pause
-or grant additional authority.
+panel. It reports by-agent, by-role, by-profile, and by-action-type outcomes,
+including advisory promotion and pause recommendations. The endpoint and panel
+do not auto-pause or grant additional authority.
+
+The Admin approval inbox accepts `role_key` and `profile_kind` filters for
+action requests, and the admin run history endpoint accepts the same filters
+for recent runs. The outcome metrics endpoint also accepts these filters so an
+admin can isolate a noisy role/profile before opening the related action
+requests or run audit traces.
+
+Initial pause signals are advisory only. The system calculates repeated failed
+actions, high rejection rate, stale pending backlog, stale-action rate,
+unsupported tool/action attempts, and policy validation drift after role or
+permission changes. A recommended pause should trigger investigation of recent
+run warnings, tool errors, rejected/failed actions, and policy simulation
+results. Reactivation or authority expansion remains a human-governed change:
+clear or reject stale pending actions, repair role/profile policy, rerun evals,
+and only then update the agent/profile status or authority through the admin
+governance flow.
 
 ### Scope
 

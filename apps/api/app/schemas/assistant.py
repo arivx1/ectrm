@@ -48,6 +48,7 @@ AssistantAgentTokenAllocationSource = Literal["AGENT", "DEFAULT"]
 AssistantAgentRoleCatalogStatus = Literal["SEEDED", "TEMPLATE", "PHASE_1", "PHASE_2_PLUS"]
 AssistantAgentProfileKind = Literal["CURATED", "ROLE_DERIVED", "CUSTOM"]
 AssistantAgentProfileRequestStatus = Literal["REQUESTED", "APPROVED", "REJECTED", "ACTIVATED"]
+AssistantAgentEvalRunStatus = Literal["PASS", "FAIL", "ERROR"]
 AssistantAgentAuthorityLevel = Literal["OBSERVE", "EXPLAIN", "DRAFT", "STAGE", "EXECUTE", "EXTERNAL_COMMIT"]
 AssistantPolicyResourceType = Literal["tool", "action"]
 AssistantPolicyRiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -68,6 +69,17 @@ AssistantOutcomeMetricRecommendationAction = Literal[
     "KEEP_STAGED",
     "ELIGIBLE_FOR_BOUNDED_REVIEW",
     "RECOMMEND_PAUSE",
+]
+AssistantAutonomyReviewRecommendationAction = Literal[
+    "KEEP_STAGED",
+    "NARROW",
+    "PAUSE",
+    "ELIGIBLE_FOR_BOUNDED_REVIEW",
+]
+AssistantAutonomyReviewEvalStatus = Literal[
+    "MISSING_EVAL_PLAN",
+    "DECLARED",
+    "ACTIONABLE",
 ]
 AssistantRunStatus = Literal["COMPLETED", "FAILED"]
 AssistantRunFeedbackRating = Literal["HELPFUL", "NEEDS_WORK"]
@@ -339,6 +351,9 @@ class AssistantOutcomeMetricThresholdsOut(BaseModel):
     failed_execution_rate_pause_threshold: float
     stale_action_rate_pause_threshold: float
     oldest_pending_hours_pause_threshold: int
+    repeated_failed_actions_pause_threshold: int
+    unsupported_attempt_pause_threshold: int
+    policy_drift_pause_threshold: int
 
 
 class AssistantOutcomeMetricRecommendationOut(BaseModel):
@@ -356,6 +371,8 @@ class AssistantOutcomeMetricCountersOut(BaseModel):
     failed_action_count: int
     decided_action_count: int
     stale_action_count: int
+    unsupported_attempt_count: int
+    policy_drift_count: int
     approval_rate: Optional[float] = None
     rejection_rate: Optional[float] = None
     failed_execution_rate: Optional[float] = None
@@ -375,9 +392,37 @@ class AssistantAgentOutcomeMetricRowOut(AssistantOutcomeMetricCountersOut):
     warning_count: int
     warning_rate: Optional[float] = None
     tool_call_count: int
+    tool_error_count: int
+    tool_error_rate: Optional[float] = None
     helpful_feedback_count: int
     needs_work_feedback_count: int
     feedback_helpful_rate: Optional[float] = None
+    recommendation: AssistantOutcomeMetricRecommendationOut
+
+
+class AssistantRoleOutcomeMetricRowOut(AssistantOutcomeMetricCountersOut):
+    agent_role_key: Optional[str] = None
+    run_count: int
+    completed_run_count: int
+    failed_run_count: int
+    warning_count: int
+    warning_rate: Optional[float] = None
+    tool_call_count: int
+    tool_error_count: int
+    tool_error_rate: Optional[float] = None
+    recommendation: AssistantOutcomeMetricRecommendationOut
+
+
+class AssistantProfileOutcomeMetricRowOut(AssistantOutcomeMetricCountersOut):
+    agent_profile_kind: Optional[AssistantAgentProfileKind] = None
+    run_count: int
+    completed_run_count: int
+    failed_run_count: int
+    warning_count: int
+    warning_rate: Optional[float] = None
+    tool_call_count: int
+    tool_error_count: int
+    tool_error_rate: Optional[float] = None
     recommendation: AssistantOutcomeMetricRecommendationOut
 
 
@@ -420,9 +465,50 @@ class AssistantOutcomeMetricsOut(BaseModel):
     needs_work_feedback_count: int = 0
     feedback_helpful_rate: Optional[float] = None
     by_agent: list[AssistantAgentOutcomeMetricRowOut] = Field(default_factory=list)
+    by_role: list[AssistantRoleOutcomeMetricRowOut] = Field(default_factory=list)
+    by_profile: list[AssistantProfileOutcomeMetricRowOut] = Field(default_factory=list)
     by_workspace: list[AssistantWorkspaceFeedbackMetricRowOut] = Field(default_factory=list)
     by_action_type: list[AssistantActionTypeOutcomeMetricRowOut] = Field(default_factory=list)
     recent_feedback: list[AssistantRunFeedbackInsightOut] = Field(default_factory=list)
+
+
+class AssistantAutonomyKnowledgeEntryOut(BaseModel):
+    title: str
+    entry_type: Optional[str] = None
+    domain: Optional[str] = None
+    applies_to: Optional[str] = None
+    status: Optional[str] = None
+    lesson: Optional[str] = None
+    deterministic_opportunity: Optional[str] = None
+    agent_autonomy_impact: Optional[str] = None
+
+
+class AssistantAutonomyEvalSignalOut(BaseModel):
+    status: AssistantAutonomyReviewEvalStatus
+    required_cases: list[str] = Field(default_factory=list)
+    proposed_cases: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class AssistantAutonomyReviewBriefOut(BaseModel):
+    generated_at: datetime
+    agent_id: str
+    agent_name: str
+    current_status: AssistantAgentStatus
+    current_authority: Optional[AssistantAgentAuthorityLevel] = None
+    recommended_next_authority: AssistantAutonomyReviewRecommendationAction
+    recommendation_reasons: list[str] = Field(default_factory=list)
+    human_owner_role: Optional[str] = None
+    allowed_action_types: list[AssistantActionType] = Field(default_factory=list)
+    outcome_window_created_after: Optional[datetime] = None
+    outcome_window_created_before: Optional[datetime] = None
+    outcome_metrics: Optional[AssistantAgentOutcomeMetricRowOut] = None
+    action_type_metrics: list[AssistantActionTypeOutcomeMetricRowOut] = Field(default_factory=list)
+    eval_signal: AssistantAutonomyEvalSignalOut
+    stop_conditions: list[str] = Field(default_factory=list)
+    knowledge_base_entries: list[AssistantAutonomyKnowledgeEntryOut] = Field(default_factory=list)
+    deterministic_algorithm_candidates: list[str] = Field(default_factory=list)
+    review_checklist: list[str] = Field(default_factory=list)
 
 
 class AssistantPromptResponse(BaseModel):
@@ -754,6 +840,111 @@ class AssistantAgentProfileRequestOut(BaseModel):
     activated_at: Optional[datetime]
     activated_by: Optional[str]
     updated_at: datetime
+
+
+class AssistantAgentEvalRunOut(BaseModel):
+    eval_run_id: int
+    eval_id: int
+    agent_id: str
+    run_id: Optional[int]
+    status: AssistantAgentEvalRunStatus
+    failure_reasons: list[str]
+    observed_tool_names: list[str]
+    observed_action_types: list[AssistantActionType]
+    response_message: Optional[str]
+    started_at: datetime
+    completed_at: datetime
+    run_by: str
+
+
+class AssistantAgentEvalBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    workspace: AssistantWorkspace = "assistant"
+    prompt: str = Field(..., min_length=1, max_length=20_000)
+    context: Optional[str] = Field(default=None, max_length=20_000)
+    use_live_tools: bool = True
+    expected_substrings: list[str] = Field(default_factory=list, max_length=24)
+    expected_tool_names: list[str] = Field(default_factory=list, max_length=16)
+    expected_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_eval_name(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="name")
+
+    @field_validator("prompt")
+    @classmethod
+    def normalize_eval_prompt(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="prompt")
+
+    @field_validator("context")
+    @classmethod
+    def normalize_eval_context(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="context")
+
+    @field_validator("expected_substrings")
+    @classmethod
+    def normalize_expected_substrings(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="expected_substrings")
+
+    @field_validator("expected_tool_names")
+    @classmethod
+    def normalize_expected_tool_names(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="expected_tool_names", lowercase=True)
+
+    @field_validator("expected_action_types")
+    @classmethod
+    def normalize_expected_action_types(cls, value: list[AssistantActionType]) -> list[AssistantActionType]:
+        normalized = [
+            normalize_required_text(action_type, field_name="expected_action_types", lowercase=True)
+            for action_type in value
+        ]
+        return _ensure_distinct_values(normalized, field_name="expected_action_types")
+
+
+class AssistantAgentEvalCreate(AssistantAgentEvalBase):
+    agent_id: str = Field(..., min_length=2, max_length=64)
+    created_by: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("agent_id")
+    @classmethod
+    def normalize_eval_agent_id(cls, value: str) -> str:
+        normalized = normalize_required_text(value, field_name="agent_id", lowercase=True)
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("created_by")
+    @classmethod
+    def normalize_eval_created_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="created_by")
+
+
+class AssistantAgentEvalUpdate(AssistantAgentEvalBase):
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("updated_by")
+    @classmethod
+    def normalize_eval_updated_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="updated_by")
+
+
+class AssistantAgentEvalOut(BaseModel):
+    eval_id: int
+    agent_id: str
+    name: str
+    workspace: AssistantWorkspace
+    prompt: str
+    context: Optional[str]
+    use_live_tools: bool
+    expected_substrings: list[str]
+    expected_tool_names: list[str]
+    expected_action_types: list[AssistantActionType]
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    latest_run: Optional[AssistantAgentEvalRunOut] = None
 
 
 class AssistantAgentTokenBudgetOut(BaseModel):

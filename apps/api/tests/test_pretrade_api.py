@@ -327,6 +327,9 @@ class PreTradeApiTests(unittest.TestCase):
         response = self.client.get("/pretrade/scenarios")
         self.assertEqual(response.status_code, 401)
 
+        response = self.client.get("/pretrade/governance/summary")
+        self.assertEqual(response.status_code, 401)
+
         response = self.client.post("/pretrade/scenarios", json=self._scenario_payload())
         self.assertEqual(response.status_code, 401)
 
@@ -506,6 +509,17 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(listed_runs[0]["run_id"], run["run_id"])
         self.assertEqual(listed_runs[0]["input_snapshots"][1]["source_key"], "counterparty-credit")
         self.assertEqual(listed_runs[0]["input_snapshots"][3]["quality_status"], "MISSING")
+
+        governance_response = self.client.get(
+            "/pretrade/governance/summary",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(governance_response.status_code, 200)
+        governance = governance_response.json()
+        self.assertEqual(governance["pending_review_count"], 0)
+        self.assertEqual(governance["recommendation_run_count"], 1)
+        self.assertEqual(governance["stale_evidence_run_count"], 1)
+        self.assertEqual(governance["stale_evidence_source_count"], 1)
 
         missing_scenario_response = self.client.post(
             "/pretrade/recommendations/runs",
@@ -690,6 +704,19 @@ class PreTradeApiTests(unittest.TestCase):
         )
         self.assertEqual(linked_payload["activity"][-1]["payload"]["recommendation_override_by"], "trader_two")
         self.assertIsNotNone(linked_payload["activity"][-1]["payload"]["recommendation_override_at"])
+
+        governance_response = self.client.get(
+            "/pretrade/governance/summary",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(governance_response.status_code, 200)
+        governance = governance_response.json()
+        self.assertEqual(governance["pending_review_count"], 0)
+        self.assertEqual(governance["booked_review_count"], 1)
+        self.assertEqual(governance["risky_recommendation_count"], 1)
+        self.assertEqual(governance["unresolved_risky_recommendation_count"], 0)
+        self.assertEqual(governance["override_count"], 1)
+        self.assertEqual(governance["booked_with_override_count"], 1)
 
         booked_status_update = self.client.patch(
             f"/pretrade/reviews/{review_id}",

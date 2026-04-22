@@ -19,6 +19,7 @@ from apps.api.app.domains.reports.services.pretrade_reviews import (
     review_draft,
     review_linked_trade_id,
     review_owner,
+    review_recommendation_override_reason,
     review_recommendation_run_id,
     review_record_payload,
     review_source_scenario_id,
@@ -41,6 +42,7 @@ from apps.api.app.domains.reports.services.pretrade_recommendations import (
 )
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.schemas.pretrade import (
+    PreTradeGovernanceSummaryOut,
     PreTradeRecommendationRunCreate,
     PreTradeRecommendationRunOut,
     PreTradeRecommendationSourceAdapterOut,
@@ -59,6 +61,7 @@ router = APIRouter(prefix="/pretrade", tags=["pretrade"])
 
 PRETRADE_SCENARIO_PRESET_KEY = "pretrade"
 RECOMMENDATION_OVERRIDE_STANCES = {"ESCALATE", "WAIT_FOR_DATA"}
+IMPAIRED_SOURCE_QUALITY_STATUSES = {"STALE", "DEGRADED", "MISSING"}
 
 
 def _preset_name_key(name: str) -> str:
@@ -212,6 +215,35 @@ def _review_recommendation_summary_lookup(
     )
 
 
+def _governance_recommendation_run_records(
+    db: Session,
+    *,
+    actor_id: str,
+    review_records: list[ReportPreset],
+) -> list[ReportPreset]:
+    records_by_id = {
+        record.id: record
+        for record in db.execute(pretrade_recommendation_run_records_stmt(actor_id)).scalars().all()
+    }
+    attached_run_ids = sorted(
+        {
+            recommendation_run_id
+            for recommendation_run_id in (review_recommendation_run_id(record) for record in review_records)
+            if recommendation_run_id is not None and recommendation_run_id not in records_by_id
+        }
+    )
+    if attached_run_ids:
+        attached_records = db.execute(
+            select(ReportPreset).where(
+                ReportPreset.preset_key == PRETRADE_RECOMMENDATION_RUN_PRESET_KEY,
+                ReportPreset.id.in_(attached_run_ids),
+            )
+        ).scalars().all()
+        records_by_id.update({record.id: record for record in attached_records})
+
+    return sorted(records_by_id.values(), key=lambda record: (record.created_at, record.id), reverse=True)
+
+
 @router.get("/scenarios", response_model=list[PreTradeScenarioOut])
 def get_pretrade_scenarios(
     request: Request,
@@ -339,6 +371,99 @@ def get_pretrade_recommendation_source_adapters(
 ) -> list[PreTradeRecommendationSourceAdapterOut]:
     require_authenticated_actor(request)
     return list_pretrade_source_adapters()
+
+
+@router.get("/governance/summary", response_model=PreTradeGovernanceSummaryOut)
+def get_pretrade_governance_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeGovernanceSummaryOut:
+    actor_id = require_authenticated_actor(request)
+    review_records = db.execute(_visible_reviews_stmt()).scalars().all()
+    recommendation_summary_by_id = _review_recommendation_summary_lookup(db, review_records)
+
+    open_review_count = 0
+    in_review_count = 0
+    approved_review_count = 0
+    rejected_review_count = 0
+    booked_review_count = 0
+    risky_recommendation_count = 0
+    unresolved_risky_recommendation_count = 0
+    override_count = 0
+    booked_with_override_count = 0
+
+    for record in review_records:
+        status_value = review_status(record)
+        if status_value == "OPEN":
+            open_review_count += 1
+        elif status_value == "IN_REVIEW":
+            in_review_count += 1
+        elif status_value == "APPROVED":
+            approved_review_count += 1
+        elif status_value == "REJECTED":
+            rejected_review_count += 1
+
+        override_reason = review_recommendation_override_reason(record)
+        linked_trade_id = review_linked_trade_id(record)
+        if override_reason is not None:
+            override_count += 1
+        if linked_trade_id is not None:
+            booked_review_count += 1
+            if override_reason is not None:
+                booked_with_override_count += 1
+
+        recommendation_run_id = review_recommendation_run_id(record)
+        recommendation_summary = (
+            recommendation_summary_by_id.get(recommendation_run_id)
+            if recommendation_run_id is not None
+            else None
+        )
+        if recommendation_summary is not None and recommendation_summary.stance in RECOMMENDATION_OVERRIDE_STANCES:
+            risky_recommendation_count += 1
+            if status_value != "APPROVED" or override_reason is None:
+                unresolved_risky_recommendation_count += 1
+
+    recommendation_run_records = _governance_recommendation_run_records(
+        db,
+        actor_id=actor_id,
+        review_records=review_records,
+    )
+    stale_evidence_run_count = 0
+    stale_evidence_source_count = 0
+    for record in recommendation_run_records:
+        run = to_recommendation_run_out(record, actor_id=actor_id)
+        impaired_source_count = sum(
+            1 for snapshot in run.input_snapshots if snapshot.quality_status in IMPAIRED_SOURCE_QUALITY_STATUSES
+        )
+        if impaired_source_count:
+            stale_evidence_run_count += 1
+            stale_evidence_source_count += impaired_source_count
+
+    pending_review_count = open_review_count + in_review_count
+    if pending_review_count or unresolved_risky_recommendation_count:
+        risk_status = "ACTION_REQUIRED"
+    elif stale_evidence_run_count or override_count or booked_with_override_count or approved_review_count:
+        risk_status = "WATCH"
+    else:
+        risk_status = "CLEAR"
+
+    return PreTradeGovernanceSummaryOut(
+        generated_at=datetime.now(timezone.utc),
+        risk_status=risk_status,  # type: ignore[arg-type]
+        open_review_count=open_review_count,
+        in_review_count=in_review_count,
+        approved_review_count=approved_review_count,
+        rejected_review_count=rejected_review_count,
+        pending_review_count=pending_review_count,
+        booked_review_count=booked_review_count,
+        risky_recommendation_count=risky_recommendation_count,
+        unresolved_risky_recommendation_count=unresolved_risky_recommendation_count,
+        override_count=override_count,
+        booked_with_override_count=booked_with_override_count,
+        stale_evidence_run_count=stale_evidence_run_count,
+        stale_evidence_source_count=stale_evidence_source_count,
+        recommendation_run_count=len(recommendation_run_records),
+    )
 
 
 @router.get("/recommendations/runs", response_model=list[PreTradeRecommendationRunOut])

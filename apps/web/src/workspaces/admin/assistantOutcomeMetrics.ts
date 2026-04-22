@@ -2,6 +2,8 @@ import type {
   AssistantActionTypeOutcomeMetricRow,
   AssistantAgentOutcomeMetricRow,
   AssistantOutcomeMetricRecommendationAction,
+  AssistantProfileOutcomeMetricRow,
+  AssistantRoleOutcomeMetricRow,
   AssistantWorkspaceFeedbackMetricRow,
 } from '../../shared/models'
 
@@ -143,6 +145,7 @@ export function buildAssistantAgentOutcomeRows(
       metrics: [
         { label: 'Runs', value: `${row.completed_run_count}/${row.run_count}` },
         { label: 'Warnings', value: `${row.warning_count} (${formatAssistantOutcomeRate(row.warning_rate)})` },
+        { label: 'Tool errors', value: `${row.tool_error_count} (${formatAssistantOutcomeRate(row.tool_error_rate)})` },
         {
           label: 'Feedback',
           value: formatFeedbackCounts(row.helpful_feedback_count, row.needs_work_feedback_count),
@@ -153,6 +156,66 @@ export function buildAssistantAgentOutcomeRows(
         { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
         { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
         { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
+        { label: 'Unsupported', value: String(row.unsupported_attempt_count) },
+        { label: 'Policy drift', value: String(row.policy_drift_count) },
+        { label: 'Pending age', value: formatAssistantOutcomeDuration(row.oldest_pending_age_seconds) },
+      ],
+    }
+  })
+}
+
+export function buildAssistantRoleOutcomeRows(
+  rows: AssistantRoleOutcomeMetricRow[],
+): AssistantOutcomeMetricDisplayRow[] {
+  return rows.map((row) => ({
+    key: row.agent_role_key ?? 'unknown-role',
+    title: row.agent_role_key ?? 'Unknown role',
+    subtitle: `${row.completed_run_count}/${row.run_count} completed runs`,
+    recommendationLabel: assistantOutcomeRecommendationLabel(row.recommendation.recommended_action),
+    recommendationTone: assistantOutcomeRecommendationTone(row.recommendation.recommended_action),
+    reasons: recommendationReasons(row.recommendation.reasons),
+    metrics: [
+      { label: 'Runs', value: `${row.completed_run_count}/${row.run_count}` },
+      { label: 'Warnings', value: `${row.warning_count} (${formatAssistantOutcomeRate(row.warning_rate)})` },
+      { label: 'Tool errors', value: `${row.tool_error_count} (${formatAssistantOutcomeRate(row.tool_error_rate)})` },
+      { label: 'Staged actions', value: String(row.staged_action_count) },
+      { label: 'Approval rate', value: formatAssistantOutcomeRate(row.approval_rate) },
+      { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
+      { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
+      { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
+      { label: 'Unsupported', value: String(row.unsupported_attempt_count) },
+      { label: 'Policy drift', value: String(row.policy_drift_count) },
+      { label: 'Pending age', value: formatAssistantOutcomeDuration(row.oldest_pending_age_seconds) },
+    ],
+  }))
+}
+
+export function buildAssistantProfileOutcomeRows(
+  rows: AssistantProfileOutcomeMetricRow[],
+): AssistantOutcomeMetricDisplayRow[] {
+  return rows.map((row) => {
+    const profileLabel = row.agent_profile_kind
+      ? row.agent_profile_kind.toLowerCase().replace(/_/g, ' ')
+      : 'Unknown profile'
+
+    return {
+      key: row.agent_profile_kind ?? 'unknown-profile',
+      title: profileLabel,
+      subtitle: `${row.completed_run_count}/${row.run_count} completed runs`,
+      recommendationLabel: assistantOutcomeRecommendationLabel(row.recommendation.recommended_action),
+      recommendationTone: assistantOutcomeRecommendationTone(row.recommendation.recommended_action),
+      reasons: recommendationReasons(row.recommendation.reasons),
+      metrics: [
+        { label: 'Runs', value: `${row.completed_run_count}/${row.run_count}` },
+        { label: 'Warnings', value: `${row.warning_count} (${formatAssistantOutcomeRate(row.warning_rate)})` },
+        { label: 'Tool errors', value: `${row.tool_error_count} (${formatAssistantOutcomeRate(row.tool_error_rate)})` },
+        { label: 'Staged actions', value: String(row.staged_action_count) },
+        { label: 'Approval rate', value: formatAssistantOutcomeRate(row.approval_rate) },
+        { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
+        { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
+        { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
+        { label: 'Unsupported', value: String(row.unsupported_attempt_count) },
+        { label: 'Policy drift', value: String(row.policy_drift_count) },
         { label: 'Pending age', value: formatAssistantOutcomeDuration(row.oldest_pending_age_seconds) },
       ],
     }
@@ -203,6 +266,8 @@ export function buildAssistantActionTypeOutcomeRows(
       { label: 'Rejected', value: formatAssistantOutcomeRate(row.rejection_rate) },
       { label: 'Failed', value: formatAssistantOutcomeRate(row.failed_execution_rate) },
       { label: 'Stale', value: formatAssistantOutcomeRate(row.stale_action_rate) },
+      { label: 'Unsupported', value: String(row.unsupported_attempt_count) },
+      { label: 'Policy drift', value: String(row.policy_drift_count) },
       { label: 'Avg decision', value: formatAssistantOutcomeDuration(row.avg_decision_seconds) },
     ],
   }))

@@ -8,6 +8,7 @@ import {
   createPreTradeReviewItem,
   createPreTradeScenario,
   deletePreTradeScenario,
+  loadPreTradeGovernanceSummary,
   loadPreTradeRecommendationRuns,
   loadPreTradeReviewItems,
   loadPreTradeScenarios,
@@ -25,6 +26,7 @@ import type {
   MarketContextRecord,
   PortfolioRecord,
   PositionRow,
+  PreTradeGovernanceSummaryRecord,
   PreTradeRecommendationStance,
   PreTradeRecommendationRunRecord,
   PreTradeRecommendationSourceSnapshotRecord,
@@ -229,6 +231,31 @@ function recommendationTone(stance: ReturnType<typeof buildPreTradeRecommendatio
   }
 }
 
+function governanceTone(status: PreTradeGovernanceSummaryRecord['risk_status'] | null | undefined): 'active' | 'in-progress' | 'blocked' {
+  switch (status) {
+    case 'CLEAR':
+      return 'active'
+    case 'WATCH':
+      return 'in-progress'
+    case 'ACTION_REQUIRED':
+    default:
+      return 'blocked'
+  }
+}
+
+function governanceStatusLabel(status: PreTradeGovernanceSummaryRecord['risk_status'] | null | undefined): string {
+  switch (status) {
+    case 'CLEAR':
+      return 'Clear'
+    case 'WATCH':
+      return 'Watch'
+    case 'ACTION_REQUIRED':
+      return 'Action Required'
+    default:
+      return 'Not Loaded'
+  }
+}
+
 function recommendationRequiresOverride(stance: PreTradeRecommendationStance | null | undefined): boolean {
   return stance === 'ESCALATE' || stance === 'WAIT_FOR_DATA'
 }
@@ -347,6 +374,7 @@ export function PreTradeWorkspace({
   const [scenarios, setScenarios] = useState<PreTradeScenarioRecord[]>([])
   const [reviews, setReviews] = useState<PreTradeReviewItemRecord[]>([])
   const [recommendationRuns, setRecommendationRuns] = useState<PreTradeRecommendationRunRecord[]>([])
+  const [governanceSummary, setGovernanceSummary] = useState<PreTradeGovernanceSummaryRecord | null>(null)
   const [reviewCommentDrafts, setReviewCommentDrafts] = useState<Record<number, string>>({})
   const [reviewOverrideDrafts, setReviewOverrideDrafts] = useState<Record<number, string>>({})
   const [collectionLoading, setCollectionLoading] = useState(false)
@@ -387,14 +415,16 @@ export function PreTradeWorkspace({
     setCollectionLoading(true)
     setCollectionError('')
     try {
-      const [nextScenarios, nextReviews, nextRecommendationRuns] = await Promise.all([
+      const [nextScenarios, nextReviews, nextRecommendationRuns, nextGovernanceSummary] = await Promise.all([
         loadPreTradeScenarios(appConfig.apiBase, accessToken),
         loadPreTradeReviewItems(appConfig.apiBase, accessToken),
         loadPreTradeRecommendationRuns(appConfig.apiBase, accessToken, { limit: 20 }),
+        loadPreTradeGovernanceSummary(appConfig.apiBase, accessToken),
       ])
       setScenarios(nextScenarios)
       setReviews(nextReviews)
       setRecommendationRuns(nextRecommendationRuns)
+      setGovernanceSummary(nextGovernanceSummary)
     } catch (error) {
       setCollectionError(error instanceof Error ? error.message : 'Could not load pre-trade scenarios or review queue.')
     } finally {
@@ -407,6 +437,7 @@ export function PreTradeWorkspace({
       setScenarios([])
       setReviews([])
       setRecommendationRuns([])
+      setGovernanceSummary(null)
       setCollectionError('')
       return
     }
@@ -945,7 +976,74 @@ export function PreTradeWorkspace({
     })
   }
 
+  const governanceStatus = governanceSummary?.risk_status ?? null
+  const governanceTitle = governanceSummary
+    ? `Governance ${governanceStatusLabel(governanceSummary.risk_status)}`
+    : 'Pre-Trade Governance'
+  const governanceReadout = governanceSummary
+    ? governanceSummary.unresolved_risky_recommendation_count > 0
+      ? `${governanceSummary.unresolved_risky_recommendation_count} risky recommendation${governanceSummary.unresolved_risky_recommendation_count === 1 ? '' : 's'} still need an approval override or final disposition.`
+      : governanceSummary.stale_evidence_run_count > 0
+        ? `${governanceSummary.stale_evidence_run_count} recommendation run${governanceSummary.stale_evidence_run_count === 1 ? '' : 's'} include stale, degraded, or missing source evidence.`
+        : governanceSummary.pending_review_count > 0
+          ? `${governanceSummary.pending_review_count} review${governanceSummary.pending_review_count === 1 ? '' : 's'} remain open or in review.`
+          : 'No open review queue blockers are visible right now.'
+    : 'Sign in to load queue-level controls across reviews, recommendation risk, and booking overrides.'
+
   const tiles: WorkspaceTile[] = [
+    {
+      id: 'pretrade-governance',
+      eyebrow: 'Governance',
+      title: governanceTitle,
+      description: 'Queue-level controls for reviews, recommendation risk, source evidence, and override booking.',
+      span: 'wide',
+      availableSpans: ['full', 'wide', 'half'],
+      content: (
+        <div className="stack">
+          <div className="pretrade-recommendation-head">
+            <span className={`status-pill status-pill-${governanceTone(governanceStatus)}`}>
+              {governanceStatusLabel(governanceStatus)}
+            </span>
+            <span className="entity-chip entity-chip-soft">
+              {governanceSummary ? `Generated ${formatDate(governanceSummary.generated_at)}` : 'Connect to load controls'}
+            </span>
+          </div>
+          {collectionLoading ? <p className="form-note">Loading governance summary...</p> : null}
+          {collectionError ? <p className="form-note">{collectionError}</p> : null}
+          <div className="pretrade-metric-grid">
+            <article className="pretrade-metric-card">
+              <span>Pending Reviews</span>
+              <strong>{governanceSummary?.pending_review_count ?? 'n/a'}</strong>
+            </article>
+            <article className="pretrade-metric-card">
+              <span>Risky Recommendations</span>
+              <strong>{governanceSummary?.risky_recommendation_count ?? 'n/a'}</strong>
+            </article>
+            <article className="pretrade-metric-card">
+              <span>Overrides</span>
+              <strong>{governanceSummary?.override_count ?? 'n/a'}</strong>
+            </article>
+            <article className="pretrade-metric-card">
+              <span>Stale Evidence Runs</span>
+              <strong>{governanceSummary?.stale_evidence_run_count ?? 'n/a'}</strong>
+            </article>
+            <article className="pretrade-metric-card">
+              <span>Booked With Override</span>
+              <strong>{governanceSummary?.booked_with_override_count ?? 'n/a'}</strong>
+            </article>
+          </div>
+          <div className="surface pretrade-next-actions">
+            <span className="eyebrow">Control Readout</span>
+            <p>{governanceReadout}</p>
+            {governanceSummary ? (
+              <p className="form-note">
+                {governanceSummary.open_review_count} open | {governanceSummary.in_review_count} in review | {governanceSummary.approved_review_count} approved | {governanceSummary.rejected_review_count} rejected | {governanceSummary.stale_evidence_source_count} impaired source snapshots | {governanceSummary.recommendation_run_count} recommendation runs
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ),
+    },
     {
       id: 'pretrade-brief',
       eyebrow: 'Scenario',

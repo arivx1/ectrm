@@ -5,6 +5,7 @@ import { appConfig } from '../../shared/config'
 import {
   ASSISTANT_ACTION_TYPES,
   type AssistantActionType,
+  type AssistantAgentProfileKind,
   type AssistantOutcomeMetrics,
   type AssistantRunFeedbackInsight,
 } from '../../shared/models'
@@ -12,6 +13,8 @@ import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildAssistantActionTypeOutcomeRows,
   buildAssistantAgentOutcomeRows,
+  buildAssistantProfileOutcomeRows,
+  buildAssistantRoleOutcomeRows,
   buildAssistantWorkspaceFeedbackRows,
   formatAssistantActionTypeLabel,
   formatAssistantOutcomeDuration,
@@ -29,6 +32,8 @@ type AssistantOutcomeMetricsPanelProps = {
 
 type OutcomeMetricsFilters = {
   agentId: string
+  roleKey: string
+  profileKind: AssistantAgentProfileKind | ''
   actionType: AssistantActionType | ''
   createdAfter: string
   createdBefore: string
@@ -36,6 +41,8 @@ type OutcomeMetricsFilters = {
 
 const INITIAL_OUTCOME_FILTERS: OutcomeMetricsFilters = {
   agentId: '',
+  roleKey: '',
+  profileKind: '',
   actionType: '',
   createdAfter: '',
   createdBefore: '',
@@ -235,13 +242,26 @@ export function AssistantOutcomeMetricsPanel({
     () => buildAssistantActionTypeOutcomeRows(metrics?.by_action_type ?? []),
     [metrics],
   )
+  const roleRows = useMemo(
+    () => buildAssistantRoleOutcomeRows(metrics?.by_role ?? []),
+    [metrics],
+  )
+  const profileRows = useMemo(
+    () => buildAssistantProfileOutcomeRows(metrics?.by_profile ?? []),
+    [metrics],
+  )
   const workspaceFeedbackRows = useMemo(
     () => buildAssistantWorkspaceFeedbackRows(metrics?.by_workspace ?? []),
     [metrics],
   )
   const recentFeedbackRows = metrics?.recent_feedback ?? []
   const advisoryRows = useMemo(
-    () => [...(metrics?.by_agent ?? []), ...(metrics?.by_action_type ?? [])],
+    () => [
+      ...(metrics?.by_agent ?? []),
+      ...(metrics?.by_role ?? []),
+      ...(metrics?.by_profile ?? []),
+      ...(metrics?.by_action_type ?? []),
+    ],
     [metrics],
   )
   const totalStagedActions = useMemo(
@@ -274,6 +294,8 @@ export function AssistantOutcomeMetricsPanel({
   }, null)
   const hasFilters =
     Boolean(filters.agentId.trim()) ||
+    Boolean(filters.roleKey.trim()) ||
+    Boolean(filters.profileKind) ||
     Boolean(filters.actionType) ||
     Boolean(filters.createdAfter) ||
     Boolean(filters.createdBefore)
@@ -295,6 +317,8 @@ export function AssistantOutcomeMetricsPanel({
     try {
       const payload = await getAdminAssistantOutcomeMetrics(appConfig.apiBase, {
         agentId: filters.agentId,
+        roleKey: filters.roleKey,
+        profileKind: filters.profileKind || undefined,
         actionType: filters.actionType || undefined,
         createdAfter: createdAfterBoundary(filters.createdAfter),
         createdBefore: createdBeforeBoundary(filters.createdBefore),
@@ -406,6 +430,30 @@ export function AssistantOutcomeMetricsPanel({
                 />
               </label>
               <label className="field">
+                <span>Role key</span>
+                <input
+                  className="control"
+                  value={filters.roleKey}
+                  onChange={(event) => updateFilter('roleKey', event.target.value)}
+                  placeholder="operations-coordinator"
+                />
+              </label>
+              <label className="field">
+                <span>Profile kind</span>
+                <select
+                  className="control"
+                  value={filters.profileKind}
+                  onChange={(event) =>
+                    updateFilter('profileKind', event.target.value as OutcomeMetricsFilters['profileKind'])
+                  }
+                >
+                  <option value="">All profile kinds</option>
+                  <option value="CURATED">Curated</option>
+                  <option value="ROLE_DERIVED">Role derived</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </label>
+              <label className="field">
                 <span>Action type</span>
                 <select
                   className="control"
@@ -496,6 +544,42 @@ export function AssistantOutcomeMetricsPanel({
                   loading,
                   'No agent outcome rows',
                   'No managed assistant has staged actions in the current outcome window.',
+                )}
+              </div>
+            </div>
+
+            <div className="assistant-outcome-column">
+              <div className="assistant-admin-section-head">
+                <div>
+                  <span className="eyebrow">Roles</span>
+                  <h4>Role Health</h4>
+                </div>
+                <span>{roleRows.length} row{roleRows.length === 1 ? '' : 's'}</span>
+              </div>
+              <div className="assistant-outcome-list">
+                {renderOutcomeRows(
+                  roleRows,
+                  loading,
+                  'No role outcome rows',
+                  'No agent role has staged actions in the current outcome window.',
+                )}
+              </div>
+            </div>
+
+            <div className="assistant-outcome-column">
+              <div className="assistant-admin-section-head">
+                <div>
+                  <span className="eyebrow">Profiles</span>
+                  <h4>Profile Health</h4>
+                </div>
+                <span>{profileRows.length} row{profileRows.length === 1 ? '' : 's'}</span>
+              </div>
+              <div className="assistant-outcome-list">
+                {renderOutcomeRows(
+                  profileRows,
+                  loading,
+                  'No profile outcome rows',
+                  'No agent profile kind has staged actions in the current outcome window.',
                 )}
               </div>
             </div>

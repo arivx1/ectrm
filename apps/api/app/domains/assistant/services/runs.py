@@ -138,10 +138,18 @@ def list_assistant_runs(
     limit: int,
     offset: int,
     user_id: str | None = None,
+    role_key: str | None = None,
+    profile_kind: str | None = None,
 ) -> list[AssistantRun]:
     stmt = select(AssistantRun).order_by(AssistantRun.created_at.desc()).limit(limit).offset(offset)
     if user_id is not None:
         stmt = stmt.where(AssistantRun.user_id == user_id)
+    normalized_role_key = _normalize_optional_text(role_key, lowercase=True)
+    normalized_profile_kind = _normalize_optional_text(profile_kind, uppercase=True)
+    if normalized_role_key is not None:
+        stmt = stmt.where(AssistantRun.agent_role_key == normalized_role_key)
+    if normalized_profile_kind is not None:
+        stmt = stmt.where(AssistantRun.agent_profile_kind == normalized_profile_kind)
     return db.execute(stmt).scalars().all()
 
 
@@ -211,6 +219,22 @@ def _latest_user_message(messages: Sequence[AssistantMessageIn]) -> str | None:
         if message.role == "user":
             return message.content
     return None
+
+
+def _normalize_optional_text(
+    value: str | None,
+    *,
+    lowercase: bool = False,
+    uppercase: bool = False,
+) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if lowercase:
+        normalized = normalized.lower()
+    if uppercase:
+        normalized = normalized.upper()
+    return normalized or None
 
 
 def _build_assistant_run(

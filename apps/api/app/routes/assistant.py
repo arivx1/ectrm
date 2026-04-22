@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -20,6 +20,20 @@ from apps.api.app.domains.assistant.services.action_requests import (
     to_action_request_out,
     to_action_request_out_list,
 )
+from apps.api.app.domains.assistant.services.agent_evals import (
+    create_agent_eval,
+    delete_agent_eval,
+    latest_eval_runs_by_eval_id,
+    list_agent_eval_runs,
+    list_agent_evals,
+    run_agent_eval,
+    run_agent_eval_suite,
+    seed_agent_evals_from_profile_request,
+    to_agent_eval_out,
+    to_agent_eval_run_out,
+    update_agent_eval,
+)
+from apps.api.app.domains.assistant.services.autonomy_review import build_assistant_autonomy_review_brief
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
     AssistantServiceError,
@@ -91,13 +105,19 @@ from apps.api.app.domains.assistant.services.registry import (
     to_public_agent_out,
 )
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.schemas.assistant import (
     AssistantActionRequestAdminPageOut,
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
+    AssistantAutonomyReviewBriefOut,
     AssistantAgentBuildRequest,
     AssistantAgentBuildSuggestionOut,
     AssistantAgentCreate,
+    AssistantAgentEvalCreate,
+    AssistantAgentEvalOut,
+    AssistantAgentEvalRunOut,
+    AssistantAgentEvalUpdate,
     AssistantAgentOut,
     AssistantAgentProfileRequestActivation,
     AssistantAgentProfileRequestCreate,
@@ -507,6 +527,127 @@ def reject_admin_assistant_profile_request(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@admin_router.get("/agent-evals", response_model=list[AssistantAgentEvalOut])
+def list_admin_assistant_agent_evals(
+    agent_id: str | None = None,
+    limit: int = ADMIN_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentEvalOut]:
+    records = list_agent_evals(db, agent_id=agent_id, limit=limit, offset=offset)
+    latest_runs = latest_eval_runs_by_eval_id(db, [record.id for record in records])
+    return [
+        to_agent_eval_out(record, latest_run=latest_runs.get(record.id))
+        for record in records
+    ]
+
+
+@admin_router.post(
+    "/agent-evals",
+    response_model=AssistantAgentEvalOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_admin_assistant_agent_eval(
+    payload: AssistantAgentEvalCreate,
+    db: Session = Depends(get_db),
+) -> AssistantAgentEvalOut:
+    try:
+        return to_agent_eval_out(create_agent_eval(db, payload))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.put("/agent-evals/{eval_id}", response_model=AssistantAgentEvalOut)
+def update_admin_assistant_agent_eval(
+    eval_id: int,
+    payload: AssistantAgentEvalUpdate,
+    db: Session = Depends(get_db),
+) -> AssistantAgentEvalOut:
+    try:
+        return to_agent_eval_out(update_agent_eval(db, eval_id=eval_id, payload=payload))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.delete("/agent-evals/{eval_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+def delete_admin_assistant_agent_eval(
+    eval_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        delete_agent_eval(db, eval_id=eval_id)
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@admin_router.get("/agent-evals/{eval_id}/runs", response_model=list[AssistantAgentEvalRunOut])
+def list_admin_assistant_agent_eval_runs(
+    eval_id: int,
+    limit: int = ADMIN_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentEvalRunOut]:
+    try:
+        return [
+            to_agent_eval_run_out(record)
+            for record in list_agent_eval_runs(db, eval_id=eval_id, limit=limit, offset=offset)
+        ]
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.post("/agent-evals/{eval_id}/run", response_model=AssistantAgentEvalRunOut)
+async def run_admin_assistant_agent_eval(
+    eval_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantAgentEvalRunOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+    try:
+        return to_agent_eval_run_out(
+            await run_agent_eval(
+                db,
+                eval_id=eval_id,
+                user=user,
+                assistant_service=get_assistant_service(db),
+            )
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.post("/agents/{agent_id}/evals/run", response_model=list[AssistantAgentEvalRunOut])
+async def run_admin_assistant_agent_eval_suite(
+    agent_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentEvalRunOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+    try:
+        return [
+            to_agent_eval_run_out(record)
+            for record in await run_agent_eval_suite(
+                db,
+                agent_id=agent_id,
+                user=user,
+                assistant_service=get_assistant_service(db),
+            )
+        ]
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @admin_router.get("/agents", response_model=list[AssistantAgentAdminOut])
 def list_admin_assistant_agents(db: Session = Depends(get_db)) -> list[AssistantAgentAdminOut]:
     records = list_admin_agent_records(db)
@@ -530,13 +671,21 @@ async def build_admin_assistant_agent(
 
 @admin_router.get("/runs", response_model=list[AssistantRunSummaryOut])
 def list_admin_assistant_runs(
+    role_key: str | None = None,
+    profile_kind: str | None = None,
     limit: int = ADMIN_LIST_LIMIT_QUERY,
     offset: int = LIST_OFFSET_QUERY,
     db: Session = Depends(get_db),
 ) -> list[AssistantRunSummaryOut]:
     return [
         to_assistant_run_summary_out(record)
-        for record in list_assistant_runs(db, limit=limit, offset=offset)
+        for record in list_assistant_runs(
+            db,
+            limit=limit,
+            offset=offset,
+            role_key=role_key,
+            profile_kind=profile_kind,
+        )
     ]
 
 
@@ -545,6 +694,8 @@ def get_admin_assistant_outcome_metrics(
     request: Request,
     agent_id: str | None = None,
     action_type: str | None = None,
+    role_key: str | None = None,
+    profile_kind: str | None = None,
     created_after: datetime | None = None,
     created_before: datetime | None = None,
     db: Session = Depends(get_db),
@@ -560,10 +711,39 @@ def get_admin_assistant_outcome_metrics(
         db,
         agent_id=agent_id,
         action_type=action_type,
+        role_key=role_key,
+        profile_kind=profile_kind,
         created_after=created_after,
         created_before=created_before,
     )
     return AssistantOutcomeMetricsOut.model_validate(asdict(snapshot))
+
+
+@admin_router.get("/agents/{agent_id}/autonomy-review", response_model=AssistantAutonomyReviewBriefOut)
+def get_admin_assistant_autonomy_review(
+    agent_id: str,
+    request: Request,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> AssistantAutonomyReviewBriefOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        brief = build_assistant_autonomy_review_brief(
+            db,
+            agent_id=agent_id,
+            created_after=created_after,
+            created_before=created_before,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return AssistantAutonomyReviewBriefOut.model_validate(asdict(brief))
 
 
 @admin_router.get("/runs/{run_id}/audit-trace", response_model=AssistantRunAuditTraceOut)
@@ -591,6 +771,8 @@ def list_admin_assistant_action_requests(
     status: str | None = None,
     action_type: str | None = None,
     agent_id: str | None = None,
+    role_key: str | None = None,
+    profile_kind: str | None = None,
     user_id: str | None = None,
     decided_by: str | None = None,
     search: str | None = None,
@@ -615,6 +797,8 @@ def list_admin_assistant_action_requests(
         status=status,
         action_type=action_type,
         agent_id=agent_id,
+        role_key=role_key,
+        profile_kind=profile_kind,
         requester_user_id=user_id,
         decided_by=decided_by,
         search=search,
@@ -700,6 +884,8 @@ def create_assistant_agent(
         version=1,
     )
     db.add(record)
+    db.flush()
+    _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
     if record.status == "ACTIVE":
         _mark_profile_request_activated_for_agent(db, record=record, actor_id=actor_id)
     _record_agent_provenance(db, record=record, operation_key="assistant_agent.created", action="created")
@@ -747,6 +933,8 @@ def update_assistant_agent(
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = resolve_audit_actor_id(payload.updated_by)
     record.version += 1
+    db.flush()
+    _seed_profile_request_evals_for_agent(db, record=record, actor_id=record.updated_by)
     if old_status != "ACTIVE" and record.status == "ACTIVE":
         _mark_profile_request_activated_for_agent(db, record=record, actor_id=record.updated_by)
     _record_agent_provenance(
@@ -848,6 +1036,25 @@ def _mark_profile_request_activated_for_agent(
         )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+def _seed_profile_request_evals_for_agent(
+    db: Session,
+    *,
+    record: AssistantAgent,
+    actor_id: str,
+) -> None:
+    if record.profile_request_id is None:
+        return
+    profile_request = db.get(AssistantAgentProfileRequest, record.profile_request_id)
+    if profile_request is None or profile_request.status not in {"APPROVED", "ACTIVATED"}:
+        return
+    seed_agent_evals_from_profile_request(
+        db,
+        agent=record,
+        profile_request=profile_request,
+        actor_id=actor_id,
+    )
 
 
 def _agent_status_operation_key(*, old_status: str, new_status: str) -> str:

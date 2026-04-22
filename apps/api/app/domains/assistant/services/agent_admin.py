@@ -7,6 +7,7 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
+from apps.api.app.domains.assistant.services.agent_evals import seed_agent_evals_from_profile_request
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError
 from apps.api.app.domains.assistant.services.policies import (
     AssistantAgentProfilePolicyError,
@@ -15,6 +16,7 @@ from apps.api.app.domains.assistant.services.policies import (
 )
 from apps.api.app.domains.assistant.services.profile_requests import validate_agent_activation_requirements
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.schemas.assistant import (
     AssistantAgentCreate,
     AssistantAgentUpdate,
@@ -134,6 +136,7 @@ def upsert_admin_assistant_agent(
         )
         db.add(record)
         db.flush()
+        _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
         if record_provenance:
             _record_agent_provenance(db, record=record, operation_key="assistant_agent.created", action="created")
         if commit:
@@ -154,6 +157,7 @@ def upsert_admin_assistant_agent(
         record.updated_by = actor_id
         record.version += 1
         db.flush()
+        _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
         if record_provenance:
             _record_agent_provenance(
                 db,
@@ -167,6 +171,7 @@ def upsert_admin_assistant_agent(
         return AssistantAgentMutationResult(record=record, created=False, updated=True)
 
     db.flush()
+    _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
     if commit:
         db.commit()
         db.refresh(record)
@@ -314,6 +319,25 @@ def _apply_agent_definition(
             setattr(record, field_name, next_value)
             changed = True
     return changed
+
+
+def _seed_profile_request_evals_for_agent(
+    db: Session,
+    *,
+    record: AssistantAgent,
+    actor_id: str,
+) -> None:
+    if record.profile_request_id is None:
+        return
+    profile_request = db.get(AssistantAgentProfileRequest, record.profile_request_id)
+    if profile_request is None or profile_request.status not in {"APPROVED", "ACTIVATED"}:
+        return
+    seed_agent_evals_from_profile_request(
+        db,
+        agent=record,
+        profile_request=profile_request,
+        actor_id=actor_id,
+    )
 
 
 def _record_agent_provenance(
