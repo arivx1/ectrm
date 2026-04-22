@@ -3,15 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
-  createAssistantAgentEval,
   createAssistantAgentProfileRequest,
   createAssistantAgent,
   createAssistantAgentEval,
   deleteAssistantAgentEval,
+  getAdminAssistantAgentHealthReview,
   getAdminAssistantAutonomyReview,
-  listAdminAssistantAgentEvals,
   listAdminAssistantAgentEvalRuns,
-  deleteAssistantAgentEval,
   listAdminAssistantAgentEvals,
   listAdminAssistantAgents,
   listAdminAssistantProfileRequests,
@@ -40,20 +38,25 @@ import {
   isAgentBudgetDepleted,
   isAgentBudgetNearLimit,
 } from '../../entities/assistant/budget'
+import {
+  assistantActionTypeOptions,
+  buildAssistantActionDefinitionMap,
+  formatAssistantActionTypeLabel,
+} from '../../entities/assistant/actionCatalog'
 import { seedAssistantAgents } from '../../entities/app/adminApi'
 import { workspaceLabel } from '../../entities/app/appViews'
 import { appConfig } from '../../shared/config'
-import { ASSISTANT_ACTION_TYPES } from '../../shared/models'
 import type {
+  AssistantActionDefinition,
   AssistantActionType,
   AssistantAdminAgent,
   AssistantAgentAuthorityLevel,
   AssistantAgentEval,
   AssistantAgentEvalRun,
   AssistantAgentEvalRunStatus,
+  AssistantAgentHealthReview,
   AssistantAutonomyReviewBrief,
   AssistantAgentCapability,
-  AssistantAgentEval,
   AssistantAgentEvalGateStatus,
   AssistantAgentProfileKind,
   AssistantAgentProfileRequest,
@@ -137,17 +140,6 @@ const AUTHORITY_OPTIONS: AssistantAgentAuthorityLevel[] = [
   'EXECUTE',
   'EXTERNAL_COMMIT',
 ]
-const ACTION_TYPE_OPTIONS: AssistantActionType[] = [...ASSISTANT_ACTION_TYPES]
-const ACTION_TYPE_LABELS: Record<AssistantActionType, string> = {
-  cancel_trade: 'Cancel trade',
-  issue_trade_confirmation: 'Issue confirmation',
-  record_trade_confirmation_response: 'Record confirmation response',
-  update_trade_workflow_item: 'Update workflow item',
-  issue_trade_invoice: 'Issue invoice',
-  create_trade_payment: 'Create payment',
-  reprocess_document_ingestion: 'Reprocess document ingestion',
-}
-
 function createEmptyProfileRequestForm(): ProfileRequestForm {
   return {
     requested_agent_id: '',
@@ -168,7 +160,6 @@ function createEmptyProfileRequestForm(): ProfileRequestForm {
 function createEmptyAgentEvalForm(agent: AssistantAdminAgent | null = null): AgentEvalForm {
   return {
     name: '',
-    workspace: agent?.allowed_workspaces[0] ?? 'assistant',
     workspace: agent?.allowed_workspaces.includes('assistant')
       ? 'assistant'
       : agent?.allowed_workspaces[0] ?? 'assistant',
@@ -228,36 +219,6 @@ function normalizeProfileRequestPayload(form: ProfileRequestForm): CreateAssista
     stop_conditions: splitLines(form.stop_conditions),
     success_metrics: splitLines(form.success_metrics),
     proposed_eval_cases: splitLines(form.proposed_eval_cases),
-  }
-}
-
-function toAgentEvalForm(record: AssistantAgentEval): AgentEvalForm {
-  return {
-    name: record.name,
-    workspace: record.workspace,
-    prompt: record.prompt,
-    context: record.context ?? '',
-    use_live_tools: record.use_live_tools,
-    expected_substrings: record.expected_substrings.join('\n'),
-    expected_tool_names: record.expected_tool_names.join('\n'),
-    expected_action_types: [...record.expected_action_types],
-  }
-}
-
-function normalizeAgentEvalPayload(
-  agentId: string,
-  form: AgentEvalForm,
-): CreateAssistantAgentEvalInput {
-  return {
-    agent_id: agentId,
-    name: form.name.trim(),
-    workspace: form.workspace,
-    prompt: form.prompt.trim(),
-    context: form.context.trim() ? form.context.trim() : null,
-    use_live_tools: form.use_live_tools,
-    expected_substrings: splitLines(form.expected_substrings),
-    expected_tool_names: splitLines(form.expected_tool_names),
-    expected_action_types: form.expected_action_types,
   }
 }
 
@@ -546,7 +507,7 @@ function roleCatalogStatusLabel(role: AssistantAgentRoleArchetype): string {
     return 'Seeded'
   }
   if (role.catalog_status === 'TEMPLATE') {
-    return 'Template'
+    return 'Role preset'
   }
   if (role.catalog_status === 'PHASE_1') {
     return 'Phase 1'
@@ -558,9 +519,12 @@ function listSummary(values: readonly string[], emptyLabel: string): string {
   return values.length > 0 ? values.join(' · ') : emptyLabel
 }
 
-function actionSummary(values: readonly AssistantActionType[]): string {
+function actionSummary(
+  values: readonly AssistantActionType[],
+  actionDefinitionsByName: ReadonlyMap<string, AssistantActionDefinition>,
+): string {
   return values.length > 0
-    ? values.map((actionType) => ACTION_TYPE_LABELS[actionType]).join(' · ')
+    ? values.map((actionType) => formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)).join(' · ')
     : 'No governed actions'
 }
 
@@ -587,16 +551,20 @@ function evalRunStatusLabel(status: AssistantAgentEvalRunStatus): string {
   return 'Errored'
 }
 
-function policyResourceLabel(resourceId: string): string {
-  return ACTION_TYPE_LABELS[resourceId as AssistantActionType] ?? resourceId
+function policyResourceLabel(
+  resourceId: string,
+  actionDefinitionsByName: ReadonlyMap<string, AssistantActionDefinition>,
+): string {
+  return formatAssistantActionTypeLabel(resourceId, actionDefinitionsByName)
 }
 
 function policyDecisionSummary(
   decisions: readonly AssistantPolicyDecision[],
   emptyLabel: string,
+  actionDefinitionsByName: ReadonlyMap<string, AssistantActionDefinition>,
 ): string {
   return decisions.length > 0
-    ? decisions.map((decision) => policyResourceLabel(decision.resource_id)).join(' · ')
+    ? decisions.map((decision) => policyResourceLabel(decision.resource_id, actionDefinitionsByName)).join(' · ')
     : emptyLabel
 }
 
@@ -617,6 +585,19 @@ function autonomyReviewRecommendationLabel(
     return 'Narrow'
   }
   return 'Keep staged'
+}
+
+function healthReviewPriorityLabel(priority: string): string {
+  if (priority === 'P1') {
+    return 'High'
+  }
+  if (priority === 'P2') {
+    return 'Medium'
+  }
+  if (priority === 'P3') {
+    return 'Planned'
+  }
+  return 'Watch'
 }
 
 function PromptProfilePreview({
@@ -688,6 +669,7 @@ export function AgentManagementPanel({
   const [profileRequests, setProfileRequests] = useState<AssistantAgentProfileRequest[]>([])
   const [agentEvalRecords, setAgentEvalRecords] = useState<AssistantAgentEval[]>([])
   const [availableTools, setAvailableTools] = useState<string[]>([])
+  const [availableActionDefinitions, setAvailableActionDefinitions] = useState<AssistantActionDefinition[]>([])
   const [roleArchetypes, setRoleArchetypes] = useState<AssistantAgentRoleArchetype[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
   const [agentsError, setAgentsError] = useState('')
@@ -703,7 +685,6 @@ export function AgentManagementPanel({
   const [profileRequestRejectionReasons, setProfileRequestRejectionReasons] = useState<Record<number, string>>({})
   const [submittingProfileRequest, setSubmittingProfileRequest] = useState(false)
   const [decidingProfileRequestId, setDecidingProfileRequestId] = useState<number | null>(null)
-  const [selectedEvalId, setSelectedEvalId] = useState<number | null>(null)
   const [createForm, setCreateForm] = useState<AgentForm>(() => createEmptyAgentBuilderDraft())
   const [editForm, setEditForm] = useState<AgentForm>(() => createEmptyAgentBuilderDraft())
   const [builderBrief, setBuilderBrief] = useState('')
@@ -726,6 +707,9 @@ export function AgentManagementPanel({
   const [autonomyReview, setAutonomyReview] = useState<AssistantAutonomyReviewBrief | null>(null)
   const [autonomyReviewLoading, setAutonomyReviewLoading] = useState(false)
   const [autonomyReviewError, setAutonomyReviewError] = useState('')
+  const [agentHealthReview, setAgentHealthReview] = useState<AssistantAgentHealthReview | null>(null)
+  const [agentHealthReviewLoading, setAgentHealthReviewLoading] = useState(false)
+  const [agentHealthReviewError, setAgentHealthReviewError] = useState('')
   const [selectedAgentEvalId, setSelectedAgentEvalId] = useState<number | null>(null)
   const [agentEvalForm, setAgentEvalForm] = useState<AgentEvalForm>(() => createEmptyAgentEvalForm())
   const [agentEvalRuns, setAgentEvalRuns] = useState<AssistantAgentEvalRun[]>([])
@@ -747,15 +731,12 @@ export function AgentManagementPanel({
         : [],
     [agentEvalRecords, selectedAgent],
   )
-  const selectedAgentEvals = selectedAgentEvalRecords
   const selectedAgentEval = useMemo(
     () => selectedAgentEvalRecords.find((record) => record.eval_id === selectedAgentEvalId) ?? null,
     [selectedAgentEvalId, selectedAgentEvalRecords],
   )
-  const selectedEvalRecord = useMemo(
-    () => selectedAgentEvals.find((record) => record.eval_id === selectedEvalId) ?? null,
-    [selectedAgentEvals, selectedEvalId],
-  )
+  const selectedAgentEvals = selectedAgentEvalRecords
+  const selectedEvalRecord = selectedAgentEval
   const selectedCreateTemplate = useMemo(
     () => (selectedCreateTemplateKey ? getAgentBuilderTemplate(selectedCreateTemplateKey) : null),
     [selectedCreateTemplateKey],
@@ -812,6 +793,14 @@ export function AgentManagementPanel({
   const createCanStageActions = createForm.capabilities.includes('ACTION')
   const editCanStageActions = editForm.capabilities.includes('ACTION')
   const createSuggestedAgentId = suggestAgentBuilderAgentId(createForm.name)
+  const actionDefinitionsByName = useMemo(
+    () => buildAssistantActionDefinitionMap(availableActionDefinitions),
+    [availableActionDefinitions],
+  )
+  const actionTypeOptions = useMemo(
+    () => assistantActionTypeOptions(availableActionDefinitions),
+    [availableActionDefinitions],
+  )
   const createWorkspaceSummary = createForm.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')
   const createCapabilitySummary = createForm.capabilities.join(' · ')
   const createLiveToolSummary = describeLiveToolPlan(createForm, availableTools)
@@ -851,7 +840,6 @@ export function AgentManagementPanel({
           listAdminAssistantRoleArchetypes(appConfig.apiBase),
           listAdminAssistantProfileRequests(appConfig.apiBase),
           listAdminAssistantAgentEvals(appConfig.apiBase, { limit: 500 }),
-          listAdminAssistantAgentEvals(appConfig.apiBase),
         ])
         if (requestSequenceRef.current !== requestId) {
           return
@@ -861,6 +849,7 @@ export function AgentManagementPanel({
         setAgentEvalRecords(nextAgentEvals)
         setRoleArchetypes(nextRoles)
         setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
+        setAvailableActionDefinitions(runtimeSettings.available_action_types)
         setOpenAiProviderStatus(
           runtimeSettings.providers.find((provider) => provider.provider === 'openai') ?? null,
         )
@@ -888,6 +877,7 @@ export function AgentManagementPanel({
         setAgentEvalRecords([])
         setRoleArchetypes([])
         setAvailableTools([])
+        setAvailableActionDefinitions([])
         setOpenAiProviderStatus(null)
         setSelectedAgentId(null)
         setAgentsError(error instanceof Error ? error.message : 'Could not load assistant agents.')
@@ -910,6 +900,7 @@ export function AgentManagementPanel({
       setAgentEvalRecords([])
       setRoleArchetypes([])
       setAvailableTools([])
+      setAvailableActionDefinitions([])
       setAgentsError('')
       setAgentsLoading(false)
       setSelectedAgentId(null)
@@ -920,7 +911,7 @@ export function AgentManagementPanel({
       setProfileRequestRejectionReasons({})
       setSubmittingProfileRequest(false)
       setDecidingProfileRequestId(null)
-      setSelectedEvalId(null)
+      setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setSavingAgentEval(false)
       setDeletingAgentEvalId(null)
@@ -960,7 +951,7 @@ export function AgentManagementPanel({
   useEffect(() => {
     if (!selectedAgent) {
       setEditForm(createEmptyAgentBuilderDraft())
-      setSelectedEvalId(null)
+      setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setSavingAgentEval(false)
       setDeletingAgentEvalId(null)
@@ -978,7 +969,7 @@ export function AgentManagementPanel({
       return
     }
     setEditForm(toAgentForm(selectedAgent))
-    setSelectedEvalId(null)
+    setSelectedAgentEvalId(null)
     setAgentEvalForm(createEmptyAgentEvalForm(selectedAgent))
     setSavingAgentEval(false)
     setDeletingAgentEvalId(null)
@@ -1175,12 +1166,12 @@ export function AgentManagementPanel({
       await refreshAgents(payload.agent_ids[0] ?? null)
       setAgentFlash({
         tone: 'success',
-        message: `Recommended agents synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${payload.total_templates} defaults.`,
+        message: `Pilot lineup synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${payload.total_templates} role profiles.`,
       })
     } catch (error) {
       setAgentFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not seed recommended assistant agents.',
+        message: error instanceof Error ? error.message : 'Could not sync the pilot assistant lineup.',
       })
     } finally {
       setSeedingRecommendedAgents(false)
@@ -1456,98 +1447,6 @@ export function AgentManagementPanel({
     }
   }
 
-  function handleEditAgentEval(record: AssistantAgentEval) {
-    setAgentFlash(null)
-    setSelectedEvalId(record.eval_id)
-    setAgentEvalForm(toAgentEvalForm(record))
-  }
-
-  function handleResetAgentEvalForm() {
-    setAgentFlash(null)
-    setSelectedEvalId(null)
-    setAgentEvalForm(createEmptyAgentEvalForm(selectedAgent))
-  }
-
-  async function handleSaveAgentEval() {
-    if (!selectedAgent || !agentEvalReady) {
-      setAgentFlash({
-        tone: 'error',
-        message: 'Eval cases need a name and a prompt before they can be saved.',
-      })
-      return
-    }
-
-    setSavingAgentEval(true)
-    setAgentFlash(null)
-
-    try {
-      const payload = normalizeAgentEvalPayload(selectedAgent.agent_id, agentEvalForm)
-      const saved = selectedEvalId
-        ? await updateAssistantAgentEval(
-            appConfig.apiBase,
-            selectedEvalId,
-            {
-              name: payload.name,
-              workspace: payload.workspace,
-              prompt: payload.prompt,
-              context: payload.context,
-              use_live_tools: payload.use_live_tools,
-              expected_substrings: payload.expected_substrings,
-              expected_tool_names: payload.expected_tool_names,
-              expected_action_types: payload.expected_action_types,
-            } satisfies UpdateAssistantAgentEvalInput,
-          )
-        : await createAssistantAgentEval(
-            appConfig.apiBase,
-            payload satisfies CreateAssistantAgentEvalInput,
-          )
-
-      await refreshAgents(selectedAgent.agent_id)
-      setSelectedEvalId(saved.eval_id)
-      setAgentEvalForm(toAgentEvalForm(saved))
-      setAgentFlash({
-        tone: 'success',
-        message: `${saved.name} eval case ${selectedEvalId ? 'updated' : 'created'}.`,
-      })
-    } catch (error) {
-      setAgentFlash({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not save the eval case.',
-      })
-    } finally {
-      setSavingAgentEval(false)
-    }
-  }
-
-  async function handleDeleteAgentEval(record: AssistantAgentEval) {
-    if (!selectedAgent) {
-      return
-    }
-
-    setDeletingAgentEvalId(record.eval_id)
-    setAgentFlash(null)
-
-    try {
-      await deleteAssistantAgentEval(appConfig.apiBase, record.eval_id)
-      await refreshAgents(selectedAgent.agent_id)
-      if (selectedEvalId === record.eval_id) {
-        setSelectedEvalId(null)
-        setAgentEvalForm(createEmptyAgentEvalForm(selectedAgent))
-      }
-      setAgentFlash({
-        tone: 'success',
-        message: `${record.name} eval case deleted.`,
-      })
-    } catch (error) {
-      setAgentFlash({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not delete the eval case.',
-      })
-    } finally {
-      setDeletingAgentEvalId(null)
-    }
-  }
-
   async function handleRunPolicySimulation() {
     if (!selectedAgent) {
       return
@@ -1599,6 +1498,33 @@ export function AgentManagementPanel({
     } finally {
       setAutonomyReviewLoading(false)
     }
+  }
+
+  async function handleGenerateAgentHealthReview() {
+    setAgentHealthReviewLoading(true)
+    setAgentHealthReviewError('')
+
+    try {
+      const result = await getAdminAssistantAgentHealthReview(appConfig.apiBase)
+      setAgentHealthReview(result)
+    } catch (error) {
+      setAgentHealthReviewError(
+        error instanceof Error ? error.message : 'Could not generate the agent health review.',
+      )
+    } finally {
+      setAgentHealthReviewLoading(false)
+    }
+  }
+
+  function handleEditAgentEval(record: AssistantAgentEval) {
+    setSelectedAgentEvalId(record.eval_id)
+    setAgentEvalForm(toAgentEvalForm(record))
+    setAgentEvalRuns([])
+    setAgentEvalError('')
+  }
+
+  function handleResetAgentEvalForm() {
+    handleCreateNewEvalCase()
   }
 
   function handleCreateNewEvalCase() {
@@ -1762,7 +1688,7 @@ export function AgentManagementPanel({
               onClick={() => void handleSeedRecommendedAgents()}
               disabled={seedingRecommendedAgents}
             >
-              {seedingRecommendedAgents ? 'Seeding Recommended Agents...' : 'Seed Recommended Agents'}
+              {seedingRecommendedAgents ? 'Syncing Pilot Lineup...' : 'Sync Pilot Lineup'}
             </button>
           </div>
 
@@ -1803,6 +1729,75 @@ export function AgentManagementPanel({
               <strong>{roleDerivedAgentCount}</strong>
               <p>Managed agents currently tied to curated or role-derived catalog entries.</p>
             </article>
+          </div>
+
+          <div className="assistant-profile-request-panel">
+            <div className="assistant-admin-section-head">
+              <div>
+                <span className="eyebrow">Health Review</span>
+                <h4>Agent Work Packages</h4>
+              </div>
+              <span>
+                {agentHealthReview
+                  ? `${agentHealthReview.work_package_count} candidate package${agentHealthReview.work_package_count === 1 ? '' : 's'} · ${agentHealthReview.pause_count} pause signal${agentHealthReview.pause_count === 1 ? '' : 's'}`
+                  : 'Generate from autonomy briefs'}
+              </span>
+            </div>
+
+            <div className="toolbar settings-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => void handleGenerateAgentHealthReview()}
+                disabled={agentHealthReviewLoading}
+              >
+                {agentHealthReviewLoading ? 'Generating Health Review...' : 'Generate Health Review'}
+              </button>
+            </div>
+
+            {agentHealthReviewError ? (
+              <div className="feedback-banner feedback-banner-error">{agentHealthReviewError}</div>
+            ) : null}
+
+            {agentHealthReview ? (
+              <div className="assistant-builder-preview-grid">
+                <div className="assistant-sidebar-block">
+                  <strong>Review coverage</strong>
+                  <p>{agentHealthReview.agent_count} agents</p>
+                  <small>
+                    {agentHealthReview.bounded_review_candidate_count} bounded candidate
+                    {agentHealthReview.bounded_review_candidate_count === 1 ? '' : 's'} ·{' '}
+                    {agentHealthReview.keep_staged_count} staged
+                  </small>
+                </div>
+                {agentHealthReview.work_packages.slice(0, 3).map((workPackage) => (
+                  <div key={workPackage.work_package_id} className="assistant-sidebar-block">
+                    <strong>
+                      {healthReviewPriorityLabel(workPackage.priority)} · {workPackage.package_type}
+                    </strong>
+                    <p>{workPackage.title}</p>
+                    <small>
+                      {workPackage.source_agent_names.join(' · ')}
+                      {workPackage.recommended_owner_role
+                        ? ` · owner ${workPackage.recommended_owner_role}`
+                        : ''}
+                    </small>
+                    <div className="toolbar settings-actions">
+                      {workPackage.source_agent_ids.slice(0, 2).map((agentId) => (
+                        <button
+                          key={`${workPackage.work_package_id}-${agentId}`}
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => setSelectedAgentId(agentId)}
+                        >
+                          Open {agentId}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {agentsLoading ? <div className="feedback-banner feedback-banner-success">Loading assistant agents from Admin...</div> : null}
@@ -2241,7 +2236,7 @@ export function AgentManagementPanel({
                   <span className="eyebrow">Create</span>
                   <h4>Builder Draft</h4>
                 </div>
-                <span>Start from a role template or shape one from scratch</span>
+                <span>Start from a role preset or shape one from scratch</span>
               </div>
 
               <div className="assistant-role-catalog-shell">
@@ -2307,7 +2302,7 @@ export function AgentManagementPanel({
                       </div>
                       <div className="assistant-sidebar-block">
                         <strong>Actions</strong>
-                        <p>{actionSummary(selectedCreateRole.maximum_action_types)}</p>
+                        <p>{actionSummary(selectedCreateRole.maximum_action_types, actionDefinitionsByName)}</p>
                         <small>{selectedCreateRole.approval_rules.join(' ')}</small>
                       </div>
                       <div className="assistant-sidebar-block">
@@ -2401,7 +2396,9 @@ export function AgentManagementPanel({
                           <small>
                             {createForm.allowed_action_types.length > 0
                               ? createForm.allowed_action_types
-                                  .map((actionType) => ACTION_TYPE_LABELS[actionType])
+                                  .map((actionType) =>
+                                    formatAssistantActionTypeLabel(actionType, actionDefinitionsByName),
+                                  )
                                   .join(' · ')
                               : createCanStageActions
                                 ? 'Explicit action selection required'
@@ -2422,7 +2419,7 @@ export function AgentManagementPanel({
                     <div className="empty-state">
                       <strong>Choose a starting point</strong>
                       <p>
-                        Template cards seed the draft with workspace access, governed tool defaults,
+                        Role presets seed the draft with workspace access, governed tool defaults,
                         action guardrails, and a starter system prompt you can still edit line by line.
                       </p>
                     </div>
@@ -2852,7 +2849,7 @@ export function AgentManagementPanel({
                     <strong>Allowed actions</strong>
                     <p>{createActionSummary}</p>
                     <div className="chip-row">
-                      {ACTION_TYPE_OPTIONS.map((actionType) => (
+                      {actionTypeOptions.map((actionType) => (
                         <button
                           key={actionType}
                           type="button"
@@ -2868,7 +2865,7 @@ export function AgentManagementPanel({
                             }))
                           }
                         >
-                          {ACTION_TYPE_LABELS[actionType]}
+                          {formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)}
                         </button>
                       ))}
                     </div>
@@ -2886,7 +2883,7 @@ export function AgentManagementPanel({
                   />
                   <small className="form-note">
                     {selectedCreateTemplate
-                      ? 'The template added a starter prompt. Edit it freely before publishing.'
+                      ? 'The role preset added a starter prompt. Edit it freely before publishing.'
                       : 'Keep instructions specific to the role, the evidence it should rely on, and the boundaries it should respect.'}
                   </small>
                 </label>
@@ -3016,7 +3013,7 @@ export function AgentManagementPanel({
                               type="button"
                               className="button button-ghost"
                               disabled={deletingAgentEvalId === record.eval_id}
-                              onClick={() => void handleDeleteAgentEval(record)}
+                              onClick={() => void handleDeleteAgentEval(record.eval_id)}
                             >
                               {deletingAgentEvalId === record.eval_id ? 'Deleting...' : 'Delete'}
                             </button>
@@ -3146,7 +3143,7 @@ export function AgentManagementPanel({
                       <strong>Expected governed actions</strong>
                       <p>Select actions the case should stage or exercise when relevant.</p>
                       <div className="chip-row">
-                        {ACTION_TYPE_OPTIONS.map((actionType) => (
+                        {actionTypeOptions.map((actionType) => (
                           <button
                             key={actionType}
                             type="button"
@@ -3161,7 +3158,7 @@ export function AgentManagementPanel({
                               }))
                             }
                           >
-                            {ACTION_TYPE_LABELS[actionType]}
+                            {formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)}
                           </button>
                         ))}
                       </div>
@@ -3177,7 +3174,7 @@ export function AgentManagementPanel({
                     >
                       {savingAgentEval
                         ? 'Saving Eval...'
-                        : selectedEvalId
+                        : selectedAgentEval
                           ? 'Update Eval Case'
                           : 'Create Eval Case'}
                     </button>
@@ -3347,7 +3344,7 @@ export function AgentManagementPanel({
                   <div className="assistant-admin-option-group">
                     <strong>Expected action types</strong>
                     <div className="chip-row">
-                      {ACTION_TYPE_OPTIONS.map((actionType) => (
+                      {actionTypeOptions.map((actionType) => (
                         <button
                           key={actionType}
                           type="button"
@@ -3359,7 +3356,7 @@ export function AgentManagementPanel({
                             }))
                           }
                         >
-                          {ACTION_TYPE_LABELS[actionType]}
+                          {formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)}
                         </button>
                       ))}
                     </div>
@@ -3613,7 +3610,11 @@ export function AgentManagementPanel({
                           <strong>Allowed tools</strong>
                           <p>{policySimulation.allowed_tools.length}</p>
                           <small>
-                            {policyDecisionSummary(policySimulation.allowed_tools, 'No live tools allowed')}
+                            {policyDecisionSummary(
+                              policySimulation.allowed_tools,
+                              'No live tools allowed',
+                              actionDefinitionsByName,
+                            )}
                           </small>
                         </div>
                         <div className="assistant-sidebar-block">
@@ -3625,7 +3626,11 @@ export function AgentManagementPanel({
                           <strong>Allowed actions</strong>
                           <p>{policySimulation.allowed_actions.length}</p>
                           <small>
-                            {policyDecisionSummary(policySimulation.allowed_actions, 'No actions allowed')}
+                            {policyDecisionSummary(
+                              policySimulation.allowed_actions,
+                              'No actions allowed',
+                              actionDefinitionsByName,
+                            )}
                           </small>
                         </div>
                         <div className="assistant-sidebar-block">
@@ -3648,7 +3653,7 @@ export function AgentManagementPanel({
                               key={`${proposal.action_type}-${proposal.summary}`}
                               className="assistant-sidebar-block"
                             >
-                              <strong>{policyResourceLabel(proposal.action_type)}</strong>
+                              <strong>{policyResourceLabel(proposal.action_type, actionDefinitionsByName)}</strong>
                               <p>{proposal.summary}</p>
                               <small>
                                 {proposal.decision.allowed
@@ -4033,7 +4038,7 @@ export function AgentManagementPanel({
                     <strong>Allowed actions</strong>
                     <p>{editActionSummary}</p>
                     <div className="chip-row">
-                      {ACTION_TYPE_OPTIONS.map((actionType) => (
+                      {actionTypeOptions.map((actionType) => (
                         <button
                           key={actionType}
                           type="button"
@@ -4049,7 +4054,7 @@ export function AgentManagementPanel({
                             }))
                           }
                         >
-                          {ACTION_TYPE_LABELS[actionType]}
+                          {formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)}
                         </button>
                       ))}
                     </div>

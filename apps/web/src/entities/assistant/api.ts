@@ -14,13 +14,11 @@ import type {
   AssistantActionType,
   AssistantAdminAgent,
   AssistantAgent,
+  AssistantAgentHealthReview,
   AssistantAgentEval,
   AssistantAgentEvalRun,
   AssistantAutonomyReviewBrief,
   AssistantActionReviewOutcome,
-  AssistantAdminAgent,
-  AssistantAgent,
-  AssistantAgentEval,
   AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
   AssistantConversation,
@@ -87,20 +85,6 @@ export type DecideAssistantAgentProfileRequestInput = {
   approval_notes?: string
   rejection_reason?: string
 }
-
-export type CreateAssistantAgentEvalInput = {
-  agent_id: string
-  name: string
-  workspace: AssistantAgentEval['workspace']
-  prompt: string
-  context?: string | null
-  use_live_tools: boolean
-  expected_substrings: string[]
-  expected_tool_names: string[]
-  expected_action_types: AssistantAgentEval['expected_action_types']
-}
-
-export type UpdateAssistantAgentEvalInput = Omit<CreateAssistantAgentEvalInput, 'agent_id'>
 
 export type BuildAssistantAgentDraftInput = {
   brief: string
@@ -614,6 +598,21 @@ export async function getAdminAssistantOutcomeMetrics(
 ): Promise<AssistantOutcomeMetrics> {
   return fetchJson<AssistantOutcomeMetrics>(
     `${apiBase}/admin/assistant/outcome-metrics${outcomeMetricsQuery(init)}`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function getAdminAssistantAgentHealthReview(
+  apiBase: string,
+  init?: {
+    createdAfter?: string
+    createdBefore?: string
+  },
+): Promise<AssistantAgentHealthReview> {
+  return fetchJson<AssistantAgentHealthReview>(
+    `${apiBase}/admin/assistant/agent-health-review${outcomeMetricsQuery(init)}`,
     {
       headers: assistantMutationHeaders(),
     },

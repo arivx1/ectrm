@@ -1940,6 +1940,12 @@ export type AssistantToolDefinition = {
   description: string
 }
 
+export type AssistantActionDefinition = {
+  name: AssistantActionType
+  label: string
+  description: string
+}
+
 export type AssistantPolicyDecision = {
   resource_type: 'tool' | 'action'
   resource_id: string
@@ -1969,23 +1975,6 @@ export type AssistantAgentEvalGate = {
   missing_cases: string[]
   custom_case_count: number
   notes: string[]
-}
-
-export type AssistantAgentEval = {
-  eval_id: number
-  agent_id: string
-  name: string
-  workspace: ViewKey
-  prompt: string
-  context: string | null
-  use_live_tools: boolean
-  expected_substrings: string[]
-  expected_tool_names: string[]
-  expected_action_types: AssistantActionType[]
-  created_at: string
-  created_by: string
-  updated_at: string
-  updated_by: string
 }
 
 export type AssistantPolicySimulationPhase = 'stage' | 'execute'
@@ -2021,6 +2010,7 @@ export type AssistantRuntimeSettings = {
   configured_provider_count: number
   providers: AssistantProviderStatus[]
   available_tools: AssistantToolDefinition[]
+  available_action_types: AssistantActionDefinition[]
 }
 
 export type AssistantMessage = {
@@ -2446,6 +2436,62 @@ export type AssistantAutonomyReviewBrief = {
   knowledge_base_entries: AssistantAutonomyKnowledgeEntry[]
   deterministic_algorithm_candidates: string[]
   review_checklist: string[]
+}
+
+export type AssistantAgentHealthWorkPackageType =
+  | 'POLICY'
+  | 'SERVICE'
+  | 'EVAL'
+  | 'KNOWLEDGE_BASE'
+
+export type AssistantAgentHealthWorkPackagePriority = 'P1' | 'P2' | 'P3' | 'P4'
+
+export type AssistantAgentHealthWorkPackageStatus = 'CANDIDATE'
+
+export type AssistantAgentHealthReviewItem = {
+  agent_id: string
+  agent_name: string
+  current_status: AssistantAgentStatus
+  current_authority?: AssistantAgentAuthorityLevel | null
+  recommended_next_authority: AssistantAutonomyReviewRecommendationAction
+  recommendation_reasons: string[]
+  eval_status: AssistantAutonomyReviewEvalStatus
+  decided_action_count: number
+  pending_action_count: number
+  failed_action_count: number
+  deterministic_candidate_count: number
+  stop_condition_count: number
+  work_package_ids: string[]
+}
+
+export type AssistantAgentHealthWorkPackage = {
+  work_package_id: string
+  title: string
+  package_type: AssistantAgentHealthWorkPackageType
+  priority: AssistantAgentHealthWorkPackagePriority
+  status: AssistantAgentHealthWorkPackageStatus
+  source_agent_ids: string[]
+  source_agent_names: string[]
+  source_recommendations: AssistantAutonomyReviewRecommendationAction[]
+  source_candidates: string[]
+  recommended_owner_role?: string | null
+  rationale: string
+  acceptance_checks: string[]
+  knowledge_base_titles: string[]
+}
+
+export type AssistantAgentHealthReview = {
+  generated_at: string
+  outcome_window_created_after?: string | null
+  outcome_window_created_before?: string | null
+  agent_count: number
+  pause_count: number
+  narrow_count: number
+  bounded_review_candidate_count: number
+  keep_staged_count: number
+  work_package_count: number
+  review_items: AssistantAgentHealthReviewItem[]
+  work_packages: AssistantAgentHealthWorkPackage[]
 }
 
 export type AssistantPromptResponse = {

@@ -39,6 +39,7 @@ import {
   createAssistantAgentEval,
   createAssistantAgentProfileRequest,
   deleteAssistantAgentEval,
+  getAdminAssistantAgentHealthReview,
   getAdminAssistantAutonomyReview,
   getAdminAssistantOutcomeMetrics,
   getAdminAssistantRunAuditTrace,
@@ -249,6 +250,69 @@ test('getAdminAssistantAutonomyReview owns the typed review brief URL and admin 
   assert.equal(
     url,
     'http://api.test/admin/assistant/agents/ops-governor/autonomy-review?created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
+  )
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('getAdminAssistantAgentHealthReview owns the workflow URL and admin auth', async () => {
+  const expected = {
+    generated_at: '2026-04-11T09:00:00Z',
+    outcome_window_created_after: '2026-04-01T00:00:00',
+    outcome_window_created_before: '2026-04-30T23:59:59',
+    agent_count: 2,
+    pause_count: 0,
+    narrow_count: 0,
+    bounded_review_candidate_count: 1,
+    keep_staged_count: 1,
+    work_package_count: 1,
+    review_items: [
+      {
+        agent_id: 'ops-governor',
+        agent_name: 'Ops Governor',
+        current_status: 'ACTIVE',
+        current_authority: 'STAGE',
+        recommended_next_authority: 'KEEP_STAGED',
+        recommendation_reasons: ['Collect more outcomes.'],
+        eval_status: 'DECLARED',
+        decided_action_count: 4,
+        pending_action_count: 0,
+        failed_action_count: 0,
+        deterministic_candidate_count: 1,
+        stop_condition_count: 2,
+        work_package_ids: ['policy-review-update-trade-workflow-item-12345678'],
+      },
+    ],
+    work_packages: [
+      {
+        work_package_id: 'policy-review-update-trade-workflow-item-12345678',
+        title: 'Policy: Review workflow blockers',
+        package_type: 'POLICY',
+        priority: 'P2',
+        status: 'CANDIDATE',
+        source_agent_ids: ['ops-governor'],
+        source_agent_names: ['Ops Governor'],
+        source_recommendations: ['KEEP_STAGED'],
+        source_candidates: ['Review workflow blockers and promote recurring reviewer decisions.'],
+        recommended_owner_role: 'Operations Lead',
+        rationale: 'Autonomy review surfaced a recurring deterministic candidate.',
+        acceptance_checks: ['Run policy simulation for every affected action type before rollout.'],
+        knowledge_base_titles: [],
+      },
+    ],
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await getAdminAssistantAgentHealthReview('http://api.test', {
+    createdAfter: '2026-04-01T00:00:00',
+    createdBefore: '2026-04-30T23:59:59',
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/agent-health-review?created_after=2026-04-01T00%3A00%3A00&created_before=2026-04-30T23%3A59%3A59',
   )
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')

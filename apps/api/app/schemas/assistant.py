@@ -83,6 +83,9 @@ AssistantAutonomyReviewEvalStatus = Literal[
     "DECLARED",
     "ACTIONABLE",
 ]
+AssistantAgentHealthWorkPackageType = Literal["POLICY", "SERVICE", "EVAL", "KNOWLEDGE_BASE"]
+AssistantAgentHealthWorkPackagePriority = Literal["P1", "P2", "P3", "P4"]
+AssistantAgentHealthWorkPackageStatus = Literal["CANDIDATE"]
 AssistantRunStatus = Literal["COMPLETED", "FAILED"]
 AssistantRunFeedbackRating = Literal["HELPFUL", "NEEDS_WORK"]
 ALL_ASSISTANT_ACTION_TYPES: tuple[str, ...] = get_args(AssistantActionType)
@@ -544,6 +547,52 @@ class AssistantAutonomyReviewBriefOut(BaseModel):
     knowledge_base_entries: list[AssistantAutonomyKnowledgeEntryOut] = Field(default_factory=list)
     deterministic_algorithm_candidates: list[str] = Field(default_factory=list)
     review_checklist: list[str] = Field(default_factory=list)
+
+
+class AssistantAgentHealthReviewItemOut(BaseModel):
+    agent_id: str
+    agent_name: str
+    current_status: AssistantAgentStatus
+    current_authority: Optional[AssistantAgentAuthorityLevel] = None
+    recommended_next_authority: AssistantAutonomyReviewRecommendationAction
+    recommendation_reasons: list[str] = Field(default_factory=list)
+    eval_status: AssistantAutonomyReviewEvalStatus
+    decided_action_count: int
+    pending_action_count: int
+    failed_action_count: int
+    deterministic_candidate_count: int
+    stop_condition_count: int
+    work_package_ids: list[str] = Field(default_factory=list)
+
+
+class AssistantAgentHealthWorkPackageOut(BaseModel):
+    work_package_id: str
+    title: str
+    package_type: AssistantAgentHealthWorkPackageType
+    priority: AssistantAgentHealthWorkPackagePriority
+    status: AssistantAgentHealthWorkPackageStatus
+    source_agent_ids: list[str] = Field(default_factory=list)
+    source_agent_names: list[str] = Field(default_factory=list)
+    source_recommendations: list[AssistantAutonomyReviewRecommendationAction] = Field(default_factory=list)
+    source_candidates: list[str] = Field(default_factory=list)
+    recommended_owner_role: Optional[str] = None
+    rationale: str
+    acceptance_checks: list[str] = Field(default_factory=list)
+    knowledge_base_titles: list[str] = Field(default_factory=list)
+
+
+class AssistantAgentHealthReviewOut(BaseModel):
+    generated_at: datetime
+    outcome_window_created_after: Optional[datetime] = None
+    outcome_window_created_before: Optional[datetime] = None
+    agent_count: int
+    pause_count: int
+    narrow_count: int
+    bounded_review_candidate_count: int
+    keep_staged_count: int
+    work_package_count: int
+    review_items: list[AssistantAgentHealthReviewItemOut] = Field(default_factory=list)
+    work_packages: list[AssistantAgentHealthWorkPackageOut] = Field(default_factory=list)
 
 
 class AssistantPromptResponse(BaseModel):

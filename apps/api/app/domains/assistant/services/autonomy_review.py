@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 from typing import Iterable
 
@@ -15,7 +16,7 @@ from apps.api.app.domains.assistant.services.outcome_metrics import (
     AssistantAgentOutcomeMetricRow,
     summarize_assistant_outcome_metrics,
 )
-from apps.api.app.domains.assistant.services.registry import get_agent_record
+from apps.api.app.domains.assistant.services.registry import get_agent_record, list_admin_agent_records
 from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
@@ -77,6 +78,55 @@ class AssistantAutonomyReviewBrief:
     review_checklist: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class AssistantAgentHealthReviewItem:
+    agent_id: str
+    agent_name: str
+    current_status: str
+    current_authority: str | None
+    recommended_next_authority: str
+    recommendation_reasons: tuple[str, ...]
+    eval_status: str
+    decided_action_count: int
+    pending_action_count: int
+    failed_action_count: int
+    deterministic_candidate_count: int
+    stop_condition_count: int
+    work_package_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AssistantAgentHealthWorkPackage:
+    work_package_id: str
+    title: str
+    package_type: str
+    priority: str
+    status: str
+    source_agent_ids: tuple[str, ...]
+    source_agent_names: tuple[str, ...]
+    source_recommendations: tuple[str, ...]
+    source_candidates: tuple[str, ...]
+    recommended_owner_role: str | None
+    rationale: str
+    acceptance_checks: tuple[str, ...]
+    knowledge_base_titles: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AssistantAgentHealthReviewSnapshot:
+    generated_at: datetime
+    outcome_window_created_after: datetime | None
+    outcome_window_created_before: datetime | None
+    agent_count: int
+    pause_count: int
+    narrow_count: int
+    bounded_review_candidate_count: int
+    keep_staged_count: int
+    work_package_count: int
+    review_items: tuple[AssistantAgentHealthReviewItem, ...]
+    work_packages: tuple[AssistantAgentHealthWorkPackage, ...]
+
+
 def build_assistant_autonomy_review_brief(
     db: Session,
     *,
@@ -135,6 +185,63 @@ def build_assistant_autonomy_review_brief(
         knowledge_base_entries=knowledge_entries,
         deterministic_algorithm_candidates=candidates,
         review_checklist=_review_checklist(record),
+    )
+
+
+def build_assistant_agent_health_review(
+    db: Session,
+    *,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    now: datetime | None = None,
+) -> AssistantAgentHealthReviewSnapshot:
+    generated_at = now or datetime.now(timezone.utc)
+    briefs = tuple(
+        build_assistant_autonomy_review_brief(
+            db,
+            agent_id=record.agent_id,
+            created_after=created_after,
+            created_before=created_before,
+            now=generated_at,
+        )
+        for record in list_admin_agent_records(db)
+    )
+    work_packages = _health_review_work_packages(briefs)
+    work_package_ids_by_agent = _work_package_ids_by_agent(work_packages)
+    review_items = tuple(
+        _health_review_item(brief, work_package_ids=work_package_ids_by_agent.get(brief.agent_id, ()))
+        for brief in briefs
+    )
+
+    return AssistantAgentHealthReviewSnapshot(
+        generated_at=generated_at,
+        outcome_window_created_after=created_after,
+        outcome_window_created_before=created_before,
+        agent_count=len(review_items),
+        pause_count=sum(
+            1
+            for item in review_items
+            if item.recommended_next_authority == AUTONOMY_RECOMMENDATION_PAUSE
+        ),
+        narrow_count=sum(
+            1
+            for item in review_items
+            if item.recommended_next_authority == AUTONOMY_RECOMMENDATION_NARROW
+        ),
+        bounded_review_candidate_count=sum(
+            1
+            for item in review_items
+            if item.recommended_next_authority
+            == AUTONOMY_RECOMMENDATION_ELIGIBLE_FOR_BOUNDED_REVIEW
+        ),
+        keep_staged_count=sum(
+            1
+            for item in review_items
+            if item.recommended_next_authority == AUTONOMY_RECOMMENDATION_KEEP_STAGED
+        ),
+        work_package_count=len(work_packages),
+        review_items=review_items,
+        work_packages=work_packages,
     )
 
 
@@ -303,6 +410,211 @@ def _deterministic_candidates(
                 f"Review {row.action_type} blockers and promote recurring reviewer decisions into typed policy or service logic."
             )
     return tuple(_dedupe(candidates))
+
+
+def _health_review_item(
+    brief: AssistantAutonomyReviewBrief,
+    *,
+    work_package_ids: tuple[str, ...],
+) -> AssistantAgentHealthReviewItem:
+    metrics = brief.outcome_metrics
+    return AssistantAgentHealthReviewItem(
+        agent_id=brief.agent_id,
+        agent_name=brief.agent_name,
+        current_status=brief.current_status,
+        current_authority=brief.current_authority,
+        recommended_next_authority=brief.recommended_next_authority,
+        recommendation_reasons=brief.recommendation_reasons,
+        eval_status=brief.eval_signal.status,
+        decided_action_count=metrics.decided_action_count if metrics else 0,
+        pending_action_count=metrics.pending_action_count if metrics else 0,
+        failed_action_count=metrics.failed_action_count if metrics else 0,
+        deterministic_candidate_count=len(brief.deterministic_algorithm_candidates),
+        stop_condition_count=len(brief.stop_conditions),
+        work_package_ids=work_package_ids,
+    )
+
+
+def _health_review_work_packages(
+    briefs: tuple[AssistantAutonomyReviewBrief, ...],
+) -> tuple[AssistantAgentHealthWorkPackage, ...]:
+    grouped: dict[str, list[AssistantAutonomyReviewBrief]] = {}
+    candidate_text_by_key: dict[str, str] = {}
+    for brief in briefs:
+        for candidate in brief.deterministic_algorithm_candidates:
+            normalized_candidate = " ".join(candidate.split())
+            if not normalized_candidate:
+                continue
+            key = normalized_candidate.lower()
+            grouped.setdefault(key, []).append(brief)
+            candidate_text_by_key[key] = normalized_candidate
+
+    packages = [
+        _health_review_work_package(candidate_text_by_key[key], source_briefs=source_briefs)
+        for key, source_briefs in grouped.items()
+    ]
+    return tuple(
+        sorted(
+            packages,
+            key=lambda package: (
+                _priority_sort_key(package.priority),
+                package.work_package_id,
+            ),
+        )
+    )
+
+
+def _health_review_work_package(
+    candidate: str,
+    *,
+    source_briefs: list[AssistantAutonomyReviewBrief],
+) -> AssistantAgentHealthWorkPackage:
+    package_type = _classify_work_package(candidate)
+    package_id = f"{package_type.lower()}-{_stable_candidate_id(candidate)}"
+    source_agent_ids = tuple(_dedupe(brief.agent_id for brief in source_briefs))
+    source_agent_names = tuple(_dedupe(brief.agent_name for brief in source_briefs))
+    source_recommendations = tuple(
+        _dedupe(brief.recommended_next_authority for brief in source_briefs)
+    )
+    repeated = len(source_agent_ids) > 1
+    priority = _work_package_priority(source_briefs=source_briefs, repeated=repeated)
+    owner_role = _recommended_owner_role(source_briefs)
+    knowledge_titles = tuple(
+        _dedupe(
+            entry.title
+            for brief in source_briefs
+            for entry in brief.knowledge_base_entries
+            if entry.deterministic_opportunity and entry.deterministic_opportunity in candidate
+        )
+    )
+
+    return AssistantAgentHealthWorkPackage(
+        work_package_id=package_id,
+        title=_work_package_title(package_type, candidate),
+        package_type=package_type,
+        priority=priority,
+        status="CANDIDATE",
+        source_agent_ids=source_agent_ids,
+        source_agent_names=source_agent_names,
+        source_recommendations=source_recommendations,
+        source_candidates=(candidate,),
+        recommended_owner_role=owner_role,
+        rationale=_work_package_rationale(candidate, source_agent_ids=source_agent_ids),
+        acceptance_checks=_work_package_acceptance_checks(package_type, source_agent_ids=source_agent_ids),
+        knowledge_base_titles=knowledge_titles,
+    )
+
+
+def _work_package_ids_by_agent(
+    work_packages: tuple[AssistantAgentHealthWorkPackage, ...],
+) -> dict[str, tuple[str, ...]]:
+    ids_by_agent: dict[str, list[str]] = {}
+    for package in work_packages:
+        for agent_id in package.source_agent_ids:
+            ids_by_agent.setdefault(agent_id, []).append(package.work_package_id)
+    return {agent_id: tuple(ids) for agent_id, ids in ids_by_agent.items()}
+
+
+def _classify_work_package(candidate: str) -> str:
+    normalized = candidate.lower()
+    if any(token in normalized for token in ("policy", "approval", "allowed action", "reviewer")):
+        return "POLICY"
+    if any(token in normalized for token in ("eval", "test", "coverage", "case")):
+        return "EVAL"
+    if any(token in normalized for token in ("service", "typed", "endpoint", "workflow", "record")):
+        return "SERVICE"
+    return "KNOWLEDGE_BASE"
+
+
+def _stable_candidate_id(candidate: str) -> str:
+    digest = hashlib.sha1(candidate.lower().encode("utf-8")).hexdigest()[:8]
+    slug = _slug(candidate)
+    return f"{slug[:40].strip('-')}-{digest}" if slug else digest
+
+
+def _slug(value: str) -> str:
+    characters: list[str] = []
+    previous_dash = False
+    for character in value.lower():
+        if character.isalnum():
+            characters.append(character)
+            previous_dash = False
+        elif not previous_dash:
+            characters.append("-")
+            previous_dash = True
+    return "".join(characters).strip("-")
+
+
+def _work_package_priority(
+    *,
+    source_briefs: list[AssistantAutonomyReviewBrief],
+    repeated: bool,
+) -> str:
+    recommendations = {brief.recommended_next_authority for brief in source_briefs}
+    if AUTONOMY_RECOMMENDATION_PAUSE in recommendations:
+        return "P1"
+    if AUTONOMY_RECOMMENDATION_NARROW in recommendations or repeated:
+        return "P2"
+    if AUTONOMY_RECOMMENDATION_ELIGIBLE_FOR_BOUNDED_REVIEW in recommendations:
+        return "P3"
+    return "P4"
+
+
+def _priority_sort_key(priority: str) -> int:
+    return {"P1": 1, "P2": 2, "P3": 3, "P4": 4}.get(priority, 99)
+
+
+def _recommended_owner_role(source_briefs: list[AssistantAutonomyReviewBrief]) -> str | None:
+    owner_roles = _dedupe(
+        brief.human_owner_role
+        for brief in source_briefs
+        if brief.human_owner_role
+    )
+    if not owner_roles:
+        return None
+    if len(owner_roles) == 1:
+        return owner_roles[0]
+    return "Platform Owner"
+
+
+def _work_package_title(package_type: str, candidate: str) -> str:
+    label = {
+        "POLICY": "Policy",
+        "SERVICE": "Service",
+        "EVAL": "Eval",
+        "KNOWLEDGE_BASE": "Knowledge Base",
+    }.get(package_type, "Deterministic")
+    summary = candidate.rstrip(".")
+    if len(summary) > 96:
+        summary = f"{summary[:93].rstrip()}..."
+    return f"{label}: {summary}"
+
+
+def _work_package_rationale(candidate: str, *, source_agent_ids: tuple[str, ...]) -> str:
+    agent_label = ", ".join(source_agent_ids)
+    return (
+        f"Autonomy review surfaced a recurring deterministic candidate for {agent_label}: "
+        f"{candidate}"
+    )
+
+
+def _work_package_acceptance_checks(
+    package_type: str,
+    *,
+    source_agent_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    checks = [
+        f"Define the deterministic decision contract and affected agents: {', '.join(source_agent_ids)}.",
+        "Add focused backend coverage for the governed behavior.",
+        "Record the implemented lesson in the agent knowledge base.",
+    ]
+    if package_type == "POLICY":
+        checks.insert(1, "Run policy simulation for every affected action type before rollout.")
+    elif package_type == "SERVICE":
+        checks.insert(1, "Expose the behavior through typed service or API code instead of prompt-only judgment.")
+    elif package_type == "EVAL":
+        checks.insert(1, "Persist eval cases that fail before the deterministic guard and pass after it.")
+    return tuple(checks)
 
 
 def _relevant_knowledge_entries(
