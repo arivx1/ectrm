@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Iterable
 
 from pydantic import ValidationError
@@ -12,8 +13,12 @@ from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationCheckOut,
     PreTradeRecommendationResultOut,
     PreTradeRecommendationRunOut,
+    PreTradeRecommendationSourceAdapterOut,
+    PreTradeRecommendationSourceProvenance,
+    PreTradeRecommendationSourceQuality,
     PreTradeRecommendationSourceSnapshot,
     PreTradeRecommendationStance,
+    PreTradeRecommendationSourceType,
     PreTradeReviewRecommendationSummary,
     PreTradeScenarioDraft,
 )
@@ -26,6 +31,99 @@ STANCE_ORDER: tuple[PreTradeRecommendationStance, ...] = (
     "ESCALATE",
     "WAIT_FOR_DATA",
 )
+
+QUALITY_SCORE_BY_STATUS: dict[PreTradeRecommendationSourceQuality, int] = {
+    "OK": 100,
+    "STALE": 65,
+    "DEGRADED": 45,
+    "MISSING": 0,
+}
+
+
+@dataclass(frozen=True)
+class SourceAdapterDefinition:
+    adapter_key: str
+    label: str
+    source_type: PreTradeRecommendationSourceType
+    description: str
+    freshness_sla_hours: int | None
+    required_for_recommendation: bool
+    payload_keys: tuple[str, ...]
+    missing_if_false_keys: tuple[str, ...] = ()
+    provenance_dataset: str = ""
+
+
+SOURCE_ADAPTERS: tuple[SourceAdapterDefinition, ...] = (
+    SourceAdapterDefinition(
+        adapter_key="desk-context",
+        label="Desk exposure context",
+        source_type="INTERNAL",
+        description="Internal active trades and net position used to assess concentration.",
+        freshness_sla_hours=24,
+        required_for_recommendation=True,
+        payload_keys=("related_active_trade_count", "current_net_position", "current_counterparty_exposure"),
+        provenance_dataset="active-trades-and-positions",
+    ),
+    SourceAdapterDefinition(
+        adapter_key="counterparty-credit",
+        label="Counterparty credit profile",
+        source_type="INTERNAL",
+        description="Internal credit coverage, limits, breach action, and external rating context.",
+        freshness_sla_hours=168,
+        required_for_recommendation=True,
+        payload_keys=("has_credit_profile", "credit_limit_amount", "breach_action", "credit_rating"),
+        missing_if_false_keys=("has_credit_profile",),
+        provenance_dataset="counterparty-credit-profiles",
+    ),
+    SourceAdapterDefinition(
+        adapter_key="latest-mark",
+        label="Latest price-index mark",
+        source_type="EXTERNAL",
+        description="External mark used to compare target economics against market context.",
+        freshness_sla_hours=48,
+        required_for_recommendation=True,
+        payload_keys=("latest_mark", "price_index_code", "observation_date"),
+        provenance_dataset="price-index-observations",
+    ),
+    SourceAdapterDefinition(
+        adapter_key="market-context",
+        label="Market context",
+        source_type="EXTERNAL",
+        description="External market drivers and macro/fundamental freshness context.",
+        freshness_sla_hours=24,
+        required_for_recommendation=False,
+        payload_keys=("market_freshness_issue_count", "fundamental_count", "macro_count"),
+        provenance_dataset="market-context",
+    ),
+    SourceAdapterDefinition(
+        adapter_key="weather-intelligence",
+        label="Weather intelligence",
+        source_type="EXTERNAL",
+        description="External weather signal summary used to flag regional demand, supply, or storm risk.",
+        freshness_sla_hours=24,
+        required_for_recommendation=False,
+        payload_keys=("weather_high_risk_count", "live_weather_location_count"),
+        provenance_dataset="weather-intelligence",
+    ),
+)
+
+SOURCE_ADAPTER_BY_KEY = {adapter.adapter_key: adapter for adapter in SOURCE_ADAPTERS}
+
+
+def list_pretrade_source_adapters() -> list[PreTradeRecommendationSourceAdapterOut]:
+    return [
+        PreTradeRecommendationSourceAdapterOut(
+            adapter_key=adapter.adapter_key,
+            label=adapter.label,
+            source_type=adapter.source_type,
+            description=adapter.description,
+            freshness_sla_hours=adapter.freshness_sla_hours,
+            required_for_recommendation=adapter.required_for_recommendation,
+            payload_keys=list(adapter.payload_keys),
+            provenance_dataset=adapter.provenance_dataset,
+        )
+        for adapter in SOURCE_ADAPTERS
+    ]
 
 
 def pretrade_recommendation_run_records_stmt(actor_id: str):
@@ -60,6 +158,160 @@ def _safe_divide(numerator: float, denominator: float) -> float | None:
     if not denominator:
         return None
     return (numerator / denominator) * 100
+
+
+def _source_age_hours(snapshot: PreTradeRecommendationSourceSnapshot, as_of: datetime) -> float | None:
+    observed_at = snapshot.provenance.observed_at or snapshot.captured_at or snapshot.provenance.ingested_at
+    if observed_at is None:
+        return None
+    if observed_at.tzinfo is None and as_of.tzinfo is not None:
+        observed_at = observed_at.replace(tzinfo=as_of.tzinfo)
+    if observed_at.tzinfo is not None and as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=observed_at.tzinfo)
+    return max(0.0, (as_of - observed_at).total_seconds() / 3600)
+
+
+def _payload_has_value(payload: dict[str, object], keys: Iterable[str]) -> bool:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return True
+    return False
+
+
+def _source_quality_status(
+    *,
+    adapter: SourceAdapterDefinition,
+    snapshot: PreTradeRecommendationSourceSnapshot,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceQuality:
+    if not snapshot.source_available:
+        return "MISSING"
+    if any(snapshot.payload.get(key) is False for key in adapter.missing_if_false_keys):
+        return "MISSING"
+    if adapter.payload_keys and not _payload_has_value(snapshot.payload, adapter.payload_keys):
+        return "MISSING"
+    if snapshot.freshness == "DEGRADED":
+        return "DEGRADED"
+    if snapshot.freshness == "STALE":
+        return "STALE"
+
+    source_age_hours = _source_age_hours(snapshot, as_of)
+    if adapter.freshness_sla_hours is not None and source_age_hours is not None and source_age_hours > adapter.freshness_sla_hours:
+        return "STALE"
+    return "OK"
+
+
+def _provenance_from_snapshot(
+    *,
+    adapter: SourceAdapterDefinition,
+    snapshot: PreTradeRecommendationSourceSnapshot,
+    actor_id: str | None,
+) -> PreTradeRecommendationSourceProvenance:
+    payload = snapshot.payload
+    provider = snapshot.provenance.provider
+    if provider is None:
+        raw_provider = payload.get("source_provider") or payload.get("provider")
+        provider = raw_provider if isinstance(raw_provider, str) and raw_provider.strip() else adapter.label
+
+    record_id = snapshot.provenance.record_id
+    if record_id is None:
+        for key in ("record_id", "source_series_id", "price_index_code", "counterparty_code", "observation_date"):
+            raw_value = payload.get(key)
+            if isinstance(raw_value, str) and raw_value.strip():
+                record_id = raw_value.strip()
+                break
+
+    return PreTradeRecommendationSourceProvenance(
+        provider=provider,
+        dataset=snapshot.provenance.dataset or adapter.provenance_dataset,
+        record_id=record_id,
+        observed_at=snapshot.provenance.observed_at or snapshot.captured_at,
+        ingested_at=snapshot.provenance.ingested_at or snapshot.captured_at,
+        captured_by=snapshot.provenance.captured_by or actor_id,
+    )
+
+
+def _missing_source_snapshot(adapter: SourceAdapterDefinition, *, actor_id: str | None) -> PreTradeRecommendationSourceSnapshot:
+    return PreTradeRecommendationSourceSnapshot(
+        source_key=adapter.adapter_key,
+        adapter_key=adapter.adapter_key,
+        adapter_label=adapter.label,
+        source_type=adapter.source_type,
+        source_available=False,
+        freshness="UNKNOWN",
+        quality_status="MISSING",
+        quality_score=QUALITY_SCORE_BY_STATUS["MISSING"],
+        summary=f"No {adapter.label.lower()} snapshot was captured.",
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider=adapter.label,
+            dataset=adapter.provenance_dataset,
+            captured_by=actor_id,
+        ),
+        payload={},
+    )
+
+
+def normalize_recommendation_input_snapshots(
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    *,
+    as_of: datetime,
+    actor_id: str | None = None,
+) -> list[PreTradeRecommendationSourceSnapshot]:
+    snapshots_by_key = {
+        (snapshot.adapter_key or snapshot.source_key): snapshot
+        for snapshot in input_snapshots
+        if (snapshot.adapter_key or snapshot.source_key)
+    }
+    normalized: list[PreTradeRecommendationSourceSnapshot] = []
+
+    for adapter in SOURCE_ADAPTERS:
+        snapshot = snapshots_by_key.get(adapter.adapter_key)
+        if snapshot is None:
+            normalized.append(_missing_source_snapshot(adapter, actor_id=actor_id))
+            continue
+
+        quality_status = _source_quality_status(adapter=adapter, snapshot=snapshot, as_of=as_of)
+        normalized.append(
+            snapshot.model_copy(
+                update={
+                    "adapter_key": adapter.adapter_key,
+                    "adapter_label": adapter.label,
+                    "source_type": adapter.source_type,
+                    "quality_status": quality_status,
+                    "quality_score": QUALITY_SCORE_BY_STATUS[quality_status],
+                    "provenance": _provenance_from_snapshot(
+                        adapter=adapter,
+                        snapshot=snapshot,
+                        actor_id=actor_id,
+                    ),
+                }
+            )
+        )
+
+    known_adapter_keys = {adapter.adapter_key for adapter in SOURCE_ADAPTERS}
+    for snapshot in input_snapshots:
+        adapter_key = snapshot.adapter_key or snapshot.source_key
+        if adapter_key in known_adapter_keys:
+            continue
+        quality_status: PreTradeRecommendationSourceQuality = (
+            "MISSING" if not snapshot.source_available else "DEGRADED" if snapshot.freshness == "DEGRADED" else "STALE" if snapshot.freshness == "STALE" else "OK"
+        )
+        normalized.append(
+            snapshot.model_copy(
+                update={
+                    "adapter_key": adapter_key,
+                    "adapter_label": snapshot.adapter_label or snapshot.source_key,
+                    "quality_status": quality_status,
+                    "quality_score": QUALITY_SCORE_BY_STATUS[quality_status],
+                }
+            )
+        )
+
+    return normalized
 
 
 def _max_stance(
@@ -143,9 +395,62 @@ def build_pretrade_recommendation_result(
     *,
     draft: PreTradeScenarioDraft,
     input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    as_of: datetime | None = None,
 ) -> PreTradeRecommendationResultOut:
+    input_snapshots = normalize_recommendation_input_snapshots(
+        input_snapshots,
+        as_of=as_of or datetime.now(timezone.utc),
+    )
     checks: list[PreTradeRecommendationCheckOut] = []
     stance: PreTradeRecommendationStance = "PROCEED"
+    required_adapter_keys = {
+        adapter.adapter_key
+        for adapter in SOURCE_ADAPTERS
+        if adapter.required_for_recommendation and (adapter.adapter_key != "latest-mark" or draft.pricing_type.upper() != "FIXED")
+    }
+    missing_required_sources = [
+        snapshot.adapter_label or snapshot.source_key
+        for snapshot in input_snapshots
+        if (snapshot.adapter_key or snapshot.source_key) in required_adapter_keys
+        and snapshot.quality_status == "MISSING"
+        and not snapshot.source_available
+    ]
+    impaired_sources = [
+        snapshot.adapter_label or snapshot.source_key
+        for snapshot in input_snapshots
+        if snapshot.quality_status in {"STALE", "DEGRADED", "MISSING"}
+        and snapshot.source_available
+    ]
+
+    if missing_required_sources:
+        stance = _max_stance(stance, "WAIT_FOR_DATA")
+        checks.append(
+            _build_check(
+                key="source-quality",
+                label="Source adapter quality",
+                status="block",
+                detail=f"Required source adapters did not capture evidence: {', '.join(missing_required_sources[:3])}.",
+            )
+        )
+    elif impaired_sources:
+        stance = _max_stance(stance, "PROCEED_WITH_CARE")
+        checks.append(
+            _build_check(
+                key="source-quality",
+                label="Source adapter quality",
+                status="watch",
+                detail=f"Some source evidence is stale, degraded, or incomplete: {', '.join(impaired_sources[:3])}.",
+            )
+        )
+    else:
+        checks.append(
+            _build_check(
+                key="source-quality",
+                label="Source adapter quality",
+                status="good",
+                detail="Required source adapters captured clean evidence within their freshness windows.",
+            )
+        )
 
     estimated_notional = (
         abs(draft.target_price * draft.target_volume)
@@ -454,7 +759,11 @@ def recommendation_run_input_snapshots(record: ReportPreset) -> list[PreTradeRec
 def to_recommendation_run_out(record: ReportPreset, *, actor_id: str) -> PreTradeRecommendationRunOut:
     payload = recommendation_run_payload(record)
     draft = PreTradeScenarioDraft.model_validate(payload.get("draft") or {})
-    input_snapshots = recommendation_run_input_snapshots(record)
+    input_snapshots = normalize_recommendation_input_snapshots(
+        recommendation_run_input_snapshots(record),
+        as_of=record.created_at,
+        actor_id=record.created_by,
+    )
     raw_recommendation = payload.get("recommendation")
     try:
         recommendation = PreTradeRecommendationResultOut.model_validate(raw_recommendation)

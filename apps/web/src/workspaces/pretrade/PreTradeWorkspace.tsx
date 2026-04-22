@@ -254,6 +254,44 @@ function countHighWeatherRisks(weatherOverview: WeatherIntelligenceOverviewRecor
   )
 }
 
+function sourceQualityScore(status: PreTradeRecommendationSourceSnapshotRecord['quality_status']): number {
+  switch (status) {
+    case 'OK':
+      return 100
+    case 'STALE':
+      return 65
+    case 'DEGRADED':
+      return 45
+    case 'MISSING':
+      return 0
+  }
+}
+
+function sourceProvenance(args: {
+  provider: string | null
+  dataset: string
+  recordId?: string | null
+  observedAt?: string | null
+  ingestedAt?: string | null
+}): PreTradeRecommendationSourceSnapshotRecord['provenance'] {
+  return {
+    provider: args.provider,
+    dataset: args.dataset,
+    record_id: args.recordId ?? null,
+    observed_at: args.observedAt ?? null,
+    ingested_at: args.ingestedAt ?? args.observedAt ?? null,
+    captured_by: 'pretrade-workspace',
+  }
+}
+
+function sourceQualitySummary(snapshots: PreTradeRecommendationSourceSnapshotRecord[]): string {
+  const impaired = snapshots.filter((snapshot) => snapshot.quality_status !== 'OK')
+  if (impaired.length === 0) {
+    return 'all sources clean'
+  }
+  return `${impaired.length} source${impaired.length === 1 ? '' : 's'} need attention`
+}
+
 export function PreTradeWorkspace({
   authSession,
   activeBooks,
@@ -487,10 +525,20 @@ export function PreTradeWorkspace({
     () => [
       {
         source_key: 'desk-context',
+        adapter_key: 'desk-context',
+        adapter_label: 'Desk exposure context',
         source_type: 'INTERNAL',
+        source_available: true,
         captured_at: null,
         freshness: 'FRESH',
+        quality_status: 'OK',
+        quality_score: sourceQualityScore('OK'),
         summary: `${relatedTrades.length} active trade${relatedTrades.length === 1 ? '' : 's'} match the selected book and commodity.`,
+        provenance: sourceProvenance({
+          provider: 'ECTRM',
+          dataset: 'active-trades-and-positions',
+          recordId: `${draft.book}:${draft.commodity}`,
+        }),
         payload: {
           related_active_trade_count: relatedTrades.length,
           current_net_position: currentNetPosition,
@@ -499,12 +547,23 @@ export function PreTradeWorkspace({
       },
       {
         source_key: 'counterparty-credit',
+        adapter_key: 'counterparty-credit',
+        adapter_label: 'Counterparty credit profile',
         source_type: 'INTERNAL',
+        source_available: true,
         captured_at: selectedCounterpartyProfile?.updated_at ?? null,
         freshness: selectedCounterpartyProfile ? 'FRESH' : 'UNKNOWN',
+        quality_status: selectedCounterpartyProfile ? 'OK' : 'MISSING',
+        quality_score: sourceQualityScore(selectedCounterpartyProfile ? 'OK' : 'MISSING'),
         summary: selectedCounterpartyProfile
           ? `Internal credit profile captured for ${selectedCounterpartyProfile.counterparty_code}.`
           : 'No internal credit profile was captured for the selected counterparty.',
+        provenance: sourceProvenance({
+          provider: 'ECTRM Credit',
+          dataset: 'counterparty-credit-profiles',
+          recordId: selectedCounterpartyProfile?.counterparty_code ?? draft.counterparty,
+          observedAt: selectedCounterpartyProfile?.updated_at ?? null,
+        }),
         payload: {
           has_credit_profile: Boolean(selectedCounterpartyProfile),
           credit_limit_amount: selectedCounterpartyProfile?.limit_amount ?? null,
@@ -516,26 +575,51 @@ export function PreTradeWorkspace({
       },
       {
         source_key: 'latest-mark',
+        adapter_key: 'latest-mark',
+        adapter_label: 'Latest price-index mark',
         source_type: 'EXTERNAL',
+        source_available: true,
         captured_at: latestMark?.downloaded_at ?? null,
         freshness: latestMark ? 'FRESH' : 'UNKNOWN',
+        quality_status: latestMark ? 'OK' : 'MISSING',
+        quality_score: sourceQualityScore(latestMark ? 'OK' : 'MISSING'),
         summary: latestMark
           ? `${latestMark.price_index_code} mark captured for ${latestMark.observation_date}.`
           : 'No compatible latest mark was captured for the selected price index.',
+        provenance: sourceProvenance({
+          provider: latestMark?.source_provider ?? 'Price index marks',
+          dataset: 'price-index-observations',
+          recordId: latestMark ? `${latestMark.price_index_code}:${latestMark.observation_date}` : draft.price_index_code,
+          observedAt: latestMark?.source_published_at ?? latestMark?.downloaded_at ?? null,
+          ingestedAt: latestMark?.downloaded_at ?? null,
+        }),
         payload: {
           latest_mark: latestMark?.value ?? null,
           price_index_code: latestMark?.price_index_code ?? draft.price_index_code,
           observation_date: latestMark?.observation_date ?? null,
+          source_provider: latestMark?.source_provider ?? null,
+          source_series_id: latestMark?.source_series_id ?? null,
         },
       },
       {
         source_key: 'market-context',
+        adapter_key: 'market-context',
+        adapter_label: 'Market context',
         source_type: 'EXTERNAL',
+        source_available: marketContext !== null,
         captured_at: marketContext?.generated_at ?? null,
         freshness: !marketContext ? 'UNKNOWN' : countMarketFreshnessIssues(marketContext) > 0 ? 'DEGRADED' : 'FRESH',
+        quality_status: !marketContext ? 'MISSING' : countMarketFreshnessIssues(marketContext) > 0 ? 'DEGRADED' : 'OK',
+        quality_score: sourceQualityScore(!marketContext ? 'MISSING' : countMarketFreshnessIssues(marketContext) > 0 ? 'DEGRADED' : 'OK'),
         summary: marketContext
           ? `Captured ${marketContext.fundamentals.length + marketContext.macro.length} market driver row${marketContext.fundamentals.length + marketContext.macro.length === 1 ? '' : 's'}.`
           : 'No market context snapshot was captured.',
+        provenance: sourceProvenance({
+          provider: 'ECTRM Market Context',
+          dataset: 'market-context',
+          recordId: draft.commodity,
+          observedAt: marketContext?.generated_at ?? null,
+        }),
         payload: {
           market_freshness_issue_count: countMarketFreshnessIssues(marketContext),
           fundamental_count: marketContext?.fundamentals.length ?? 0,
@@ -544,10 +628,21 @@ export function PreTradeWorkspace({
       },
       {
         source_key: 'weather-intelligence',
+        adapter_key: 'weather-intelligence',
+        adapter_label: 'Weather intelligence',
         source_type: 'EXTERNAL',
+        source_available: weatherOverview !== null,
         captured_at: weatherOverview?.latest_weather_update_at ?? null,
         freshness: weatherOverview ? 'FRESH' : 'UNKNOWN',
+        quality_status: weatherOverview ? 'OK' : 'MISSING',
+        quality_score: sourceQualityScore(weatherOverview ? 'OK' : 'MISSING'),
         summary: weatherOverview?.headline ?? 'No weather intelligence snapshot was captured.',
+        provenance: sourceProvenance({
+          provider: 'Weather Intelligence',
+          dataset: 'weather-intelligence',
+          recordId: draft.commodity_class,
+          observedAt: weatherOverview?.latest_weather_update_at ?? null,
+        }),
         payload: {
           weather_high_risk_count: countHighWeatherRisks(weatherOverview),
           live_weather_location_count: weatherOverview?.live_weather_location_count ?? 0,
@@ -557,6 +652,10 @@ export function PreTradeWorkspace({
     [
       currentCounterpartyExposure,
       currentNetPosition,
+      draft.book,
+      draft.commodity,
+      draft.commodity_class,
+      draft.counterparty,
       draft.price_index_code,
       latestMark,
       marketContext,
@@ -1191,7 +1290,7 @@ export function PreTradeWorkspace({
                       <span>{run.recommendation.headline}</span>
                     </div>
                     <small>
-                      {run.recommendation.stance.replaceAll('_', ' ')} | score {run.recommendation.score} | {run.input_snapshots.length} sources | saved {formatDate(run.created_at)}
+                      {run.recommendation.stance.replaceAll('_', ' ')} | score {run.recommendation.score} | {run.input_snapshots.length} sources | {sourceQualitySummary(run.input_snapshots)} | saved {formatDate(run.created_at)}
                     </small>
                   </article>
                 ))}

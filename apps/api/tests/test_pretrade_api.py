@@ -473,13 +473,26 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(run["source_scenario_id"], scenario["scenario_id"])
         self.assertIsNone(run["source_review_id"])
         self.assertEqual(run["draft"]["commodity"], "HENRY_HUB")
-        self.assertEqual(len(run["input_snapshots"]), 4)
+        self.assertEqual(len(run["input_snapshots"]), 5)
+        self.assertEqual(run["input_snapshots"][0]["adapter_key"], "desk-context")
+        self.assertEqual(run["input_snapshots"][0]["quality_status"], "OK")
+        self.assertEqual(run["input_snapshots"][0]["provenance"]["dataset"], "active-trades-and-positions")
         self.assertEqual(run["recommendation"]["stance"], "PROCEED")
         self.assertEqual(run["recommendation"]["confidence"], "HIGH")
         self.assertEqual(run["recommendation"]["score"], 100)
+        self.assertEqual(run["recommendation"]["checks"][0]["key"], "source-quality")
+        self.assertEqual(run["recommendation"]["checks"][0]["status"], "good")
         self.assertEqual(run["recommendation"]["estimated_notional"], 71000)
         self.assertEqual(run["recommendation"]["related_active_trade_count"], 1)
         self.assertTrue(run["run_key"])
+
+        adapters_response = self.client.get(
+            "/pretrade/recommendations/source-adapters",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(adapters_response.status_code, 200)
+        self.assertEqual(adapters_response.json()[1]["adapter_key"], "counterparty-credit")
+        self.assertTrue(adapters_response.json()[1]["required_for_recommendation"])
 
         list_response = self.client.get(
             f"/pretrade/recommendations/runs?source_scenario_id={scenario['scenario_id']}",
@@ -490,6 +503,7 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(len(listed_runs), 1)
         self.assertEqual(listed_runs[0]["run_id"], run["run_id"])
         self.assertEqual(listed_runs[0]["input_snapshots"][1]["source_key"], "counterparty-credit")
+        self.assertEqual(listed_runs[0]["input_snapshots"][3]["quality_status"], "MISSING")
 
         missing_scenario_response = self.client.post(
             "/pretrade/recommendations/runs",
@@ -540,7 +554,7 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(review_payload["recommendation_run_id"], recommendation_run_id)
         self.assertEqual(review_payload["recommendation_summary"]["run_id"], recommendation_run_id)
         self.assertEqual(review_payload["recommendation_summary"]["stance"], "ESCALATE")
-        self.assertEqual(review_payload["recommendation_summary"]["input_snapshot_count"], 4)
+        self.assertEqual(review_payload["recommendation_summary"]["input_snapshot_count"], 5)
 
         visible_attached_run = self.client.get(
             f"/pretrade/recommendations/runs/{recommendation_run_id}",

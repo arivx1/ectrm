@@ -15,6 +15,7 @@ PreTradeRecommendationConfidence = Literal["LOW", "MEDIUM", "HIGH"]
 PreTradeRecommendationCheckStatus = Literal["good", "watch", "block"]
 PreTradeRecommendationSourceType = Literal["USER_INPUT", "INTERNAL", "EXTERNAL", "DERIVED"]
 PreTradeRecommendationFreshness = Literal["FRESH", "STALE", "DEGRADED", "UNKNOWN"]
+PreTradeRecommendationSourceQuality = Literal["OK", "STALE", "DEGRADED", "MISSING"]
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -242,21 +243,58 @@ class PreTradeRecommendationSourceSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_key: str = Field(..., min_length=1, max_length=120)
+    adapter_key: str | None = Field(default=None, max_length=120)
+    adapter_label: str | None = Field(default=None, max_length=120)
     source_type: PreTradeRecommendationSourceType
+    source_available: bool = True
     captured_at: datetime | None = None
     freshness: PreTradeRecommendationFreshness = "UNKNOWN"
+    quality_status: PreTradeRecommendationSourceQuality = "MISSING"
+    quality_score: int = Field(default=0, ge=0, le=100)
     summary: str | None = Field(default=None, max_length=1000)
+    provenance: "PreTradeRecommendationSourceProvenance" = Field(default_factory=lambda: PreTradeRecommendationSourceProvenance())
     payload: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("source_key")
+    @field_validator("source_key", "adapter_key", "adapter_label")
     @classmethod
-    def normalize_source_key(cls, value: str) -> str:
-        return normalize_required_text(value, field_name="source_key")
+    def normalize_source_keys(cls, value: str | None, info) -> str | None:
+        if info.field_name == "source_key":
+            if value is None:
+                raise ValueError("source_key is required")
+            return normalize_required_text(value, field_name=info.field_name)
+        return _normalize_optional_text(value, field_name=info.field_name)
 
     @field_validator("summary")
     @classmethod
     def normalize_summary(cls, value: str | None) -> str | None:
         return _normalize_optional_text(value, field_name="summary")
+
+
+class PreTradeRecommendationSourceProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = Field(default=None, max_length=120)
+    dataset: str | None = Field(default=None, max_length=120)
+    record_id: str | None = Field(default=None, max_length=160)
+    observed_at: datetime | None = None
+    ingested_at: datetime | None = None
+    captured_by: str | None = Field(default=None, max_length=120)
+
+    @field_validator("provider", "dataset", "record_id", "captured_by")
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeRecommendationSourceAdapterOut(BaseModel):
+    adapter_key: str
+    label: str
+    source_type: PreTradeRecommendationSourceType
+    description: str
+    freshness_sla_hours: int | None = Field(default=None, ge=1)
+    required_for_recommendation: bool
+    payload_keys: list[str] = Field(default_factory=list)
+    provenance_dataset: str
 
 
 class PreTradeRecommendationCheckOut(BaseModel):

@@ -1381,6 +1381,7 @@ export type PreTradeRecommendationConfidence = 'LOW' | 'MEDIUM' | 'HIGH'
 export type PreTradeRecommendationCheckStatus = 'good' | 'watch' | 'block'
 export type PreTradeRecommendationSourceType = 'USER_INPUT' | 'INTERNAL' | 'EXTERNAL' | 'DERIVED'
 export type PreTradeRecommendationFreshness = 'FRESH' | 'STALE' | 'DEGRADED' | 'UNKNOWN'
+export type PreTradeRecommendationSourceQuality = 'OK' | 'STALE' | 'DEGRADED' | 'MISSING'
 
 export type PreTradeReviewActivityRecord = {
   activity_id: string
@@ -1436,11 +1437,37 @@ export type PreTradeReviewItemRecord = {
 
 export type PreTradeRecommendationSourceSnapshotRecord = {
   source_key: string
+  adapter_key: string | null
+  adapter_label: string | null
   source_type: PreTradeRecommendationSourceType
+  source_available: boolean
   captured_at: string | null
   freshness: PreTradeRecommendationFreshness
+  quality_status: PreTradeRecommendationSourceQuality
+  quality_score: number
   summary: string | null
+  provenance: PreTradeRecommendationSourceProvenanceRecord
   payload: Record<string, unknown>
+}
+
+export type PreTradeRecommendationSourceProvenanceRecord = {
+  provider: string | null
+  dataset: string | null
+  record_id: string | null
+  observed_at: string | null
+  ingested_at: string | null
+  captured_by: string | null
+}
+
+export type PreTradeRecommendationSourceAdapterRecord = {
+  adapter_key: string
+  label: string
+  source_type: PreTradeRecommendationSourceType
+  description: string
+  freshness_sla_hours: number | null
+  required_for_recommendation: boolean
+  payload_keys: string[]
+  provenance_dataset: string
 }
 
 export type PreTradeRecommendationCheckRecord = {

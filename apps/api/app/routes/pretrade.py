@@ -31,6 +31,8 @@ from apps.api.app.domains.reports.services.pretrade_recommendations import (
     build_pretrade_recommendation_result,
     build_recommendation_run_payload,
     build_recommendation_summary_lookup,
+    list_pretrade_source_adapters,
+    normalize_recommendation_input_snapshots,
     pretrade_recommendation_run_records_stmt,
     pretrade_recommendation_run_record_stmt,
     recommendation_run_source_review_id,
@@ -41,6 +43,7 @@ from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationRunCreate,
     PreTradeRecommendationRunOut,
+    PreTradeRecommendationSourceAdapterOut,
     PreTradeReviewActivityAction,
     PreTradeReviewActivityCreate,
     PreTradeReviewItemCreate,
@@ -330,6 +333,14 @@ def delete_pretrade_scenario(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/recommendations/source-adapters", response_model=list[PreTradeRecommendationSourceAdapterOut])
+def get_pretrade_recommendation_source_adapters(
+    request: Request,
+) -> list[PreTradeRecommendationSourceAdapterOut]:
+    require_authenticated_actor(request)
+    return list_pretrade_source_adapters()
+
+
 @router.get("/recommendations/runs", response_model=list[PreTradeRecommendationRunOut])
 def get_pretrade_recommendation_runs(
     request: Request,
@@ -422,15 +433,21 @@ def create_pretrade_recommendation_run(
     if thesis is None and source_scenario_record is not None:
         thesis = _scenario_thesis(source_scenario_record)
 
+    now = datetime.now(timezone.utc)
+    input_snapshots = normalize_recommendation_input_snapshots(
+        payload.input_snapshots,
+        as_of=now,
+        actor_id=actor_id,
+    )
     recommendation = build_pretrade_recommendation_result(
         draft=draft,
-        input_snapshots=payload.input_snapshots,
+        input_snapshots=input_snapshots,
+        as_of=now,
     )
     name = (
         payload.name
         or f"{draft.book or 'Desk'} {draft.commodity or 'trade'} recommendation"
     )[:120]
-    now = datetime.now(timezone.utc)
     record = ReportPreset(
         preset_key=PRETRADE_RECOMMENDATION_RUN_PRESET_KEY,
         scope="SHARED" if payload.source_review_id is not None else "PERSONAL",
@@ -442,7 +459,7 @@ def create_pretrade_recommendation_run(
             draft=draft,
             source_scenario_id=source_scenario_id,
             source_review_id=payload.source_review_id,
-            input_snapshots=payload.input_snapshots,
+            input_snapshots=input_snapshots,
             recommendation=recommendation,
         ),
         created_at=now,
