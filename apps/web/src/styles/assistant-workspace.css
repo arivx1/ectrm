@@ -254,6 +254,9 @@
 .assistant-message {
   display: grid;
   gap: 0.55rem;
+  align-content: start;
+  min-height: min-content;
+  overflow: visible;
   padding: 1rem 1.05rem;
   border-radius: 1rem;
   border: 1px solid rgba(126, 154, 184, 0.16);
@@ -287,6 +290,8 @@
 .assistant-message p {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
   line-height: 1.6;
   color: var(--terminal-text);
 }

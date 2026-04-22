@@ -27,3 +27,20 @@ test('terminal-theme mobile overrides keep the app shell in a single column', ()
     /\.app-shell\s*\{\s*grid-template-columns:\s*1fr;\s*\}/,
   )
 })
+
+test('assistant message cards keep long prompt text visible', () => {
+  const assistantCss = readFileSync(new URL('../src/styles/assistant-workspace.css', import.meta.url), 'utf8')
+  const messageBlock = assistantCss.slice(
+    assistantCss.indexOf('.assistant-message {'),
+    assistantCss.indexOf('.assistant-message-user {'),
+  )
+  const paragraphBlock = assistantCss.slice(
+    assistantCss.indexOf('.assistant-message p {'),
+    assistantCss.indexOf('.assistant-feedback {'),
+  )
+
+  assert.match(messageBlock, /overflow:\s*visible;/)
+  assert.match(messageBlock, /min-height:\s*min-content;/)
+  assert.match(paragraphBlock, /white-space:\s*pre-wrap;/)
+  assert.match(paragraphBlock, /overflow-wrap:\s*anywhere;/)
+})
