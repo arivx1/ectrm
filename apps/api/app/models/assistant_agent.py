@@ -25,6 +25,7 @@ class AssistantAgent(Base):
     human_owner_role: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     authority_ceiling: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     activation_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    profile_request_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     allowed_workspaces: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     allowed_tools: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)

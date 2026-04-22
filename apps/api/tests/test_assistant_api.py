@@ -28,12 +28,14 @@ from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.event import Event
+from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
@@ -138,6 +140,8 @@ class AssistantApiTests(unittest.TestCase):
             session.query(AssistantRun).delete()
             session.query(AssistantConversation).delete()
             session.query(AssistantAgent).delete()
+            session.query(AssistantAgentProfileRequest).delete()
+            session.query(MutationProvenanceRecord).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
             session.query(UserAccount).delete()
@@ -252,6 +256,153 @@ class AssistantApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "Assistant agent role archetype not found")
+
+    def test_admin_profile_request_approval_gates_custom_agent_activation(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+
+        request_response = self.client.post(
+            "/admin/assistant/profile-requests",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "requested_agent_id": "weather-dispatch-analyst",
+                "business_problem": "Dispatchers need weather-driven exception triage during volatile delivery windows.",
+                "proposed_mission": "Explain weather exposure, summarize affected workflow items, and stage narrow follow-up when evidence supports it.",
+                "human_owner_role": "Operations Lead",
+                "requested_workspaces": ["assistant", "operations"],
+                "work_objects": ["workflow item", "delivery window", "weather alert"],
+                "requested_inputs_tools": ["list_workflow_items", "get_workspace_summary"],
+                "expected_outputs": ["Exception summary", "Follow-up checklist"],
+                "requested_authority_ceiling": "STAGE",
+                "stop_conditions": ["Weather evidence or workflow ownership is ambiguous."],
+                "success_metrics": ["Reduce manual weather exception triage time."],
+                "proposed_eval_cases": ["Denied workflow update when weather evidence is stale."],
+                "requested_by": "ops_user",
+            },
+        )
+
+        self.assertEqual(request_response.status_code, 201)
+        profile_request = request_response.json()
+        self.assertEqual(profile_request["status"], "REQUESTED")
+        self.assertEqual(profile_request["requested_agent_id"], "weather-dispatch-analyst")
+
+        approve_response = self.client.post(
+            f"/admin/assistant/profile-requests/{profile_request['request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "reviewed_by": "platform-owner",
+                "approval_notes": "Owner and eval case reviewed for a narrow custom rollout.",
+            },
+        )
+
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["status"], "APPROVED")
+
+        create_response = self.client.post(
+            "/admin/assistant/agents",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "agent_id": "weather-dispatch-analyst",
+                "name": "Weather Dispatch Analyst",
+                "description": "Draft custom profile for weather-driven operations triage.",
+                "status": "DRAFT",
+                "scope": "TEAM",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "profile_kind": "CUSTOM",
+                "specialization_summary": "Weather-sensitive operations exception triage.",
+                "human_owner_role": "Operations Lead",
+                "authority_ceiling": "STAGE",
+                "activation_notes": "Approved custom profile request will gate activation.",
+                "profile_request_id": profile_request["request_id"],
+                "allowed_workspaces": ["assistant", "operations"],
+                "capabilities": ["READ", "EXPLAIN", "ACTION"],
+                "allowed_tools": ["list_workflow_items", "get_workspace_summary"],
+                "allowed_action_types": ["update_trade_workflow_item"],
+                "system_prompt": "Explain weather-sensitive operational blockers and stage narrow follow-up only when evidence is current.",
+                "created_by": "assistant_user",
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.json()["status"], "DRAFT")
+        self.assertEqual(create_response.json()["profile_request_id"], profile_request["request_id"])
+
+        update_response = self.client.put(
+            "/admin/assistant/agents/weather-dispatch-analyst",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "name": "Weather Dispatch Analyst",
+                "description": "Custom profile for weather-driven operations triage.",
+                "status": "ACTIVE",
+                "scope": "TEAM",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "profile_kind": "CUSTOM",
+                "specialization_summary": "Weather-sensitive operations exception triage.",
+                "human_owner_role": "Operations Lead",
+                "authority_ceiling": "STAGE",
+                "activation_notes": "Approved by platform owner after owner, eval, and prompt review.",
+                "profile_request_id": profile_request["request_id"],
+                "allowed_workspaces": ["assistant", "operations"],
+                "capabilities": ["READ", "EXPLAIN", "ACTION"],
+                "allowed_tools": ["list_workflow_items", "get_workspace_summary"],
+                "allowed_action_types": ["update_trade_workflow_item"],
+                "system_prompt": "Explain weather-sensitive operational blockers and stage narrow follow-up only when evidence is current.",
+                "updated_by": "assistant_user",
+            },
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["status"], "ACTIVE")
+
+        request_listing = self.client.get(
+            "/admin/assistant/profile-requests",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(request_listing.status_code, 200)
+        self.assertEqual(request_listing.json()[0]["status"], "ACTIVATED")
+        self.assertEqual(request_listing.json()[0]["linked_agent_id"], "weather-dispatch-analyst")
+
+        with self.SessionLocal() as session:
+            operation_keys = {
+                row.operation_key
+                for row in session.query(MutationProvenanceRecord).all()
+            }
+        self.assertIn("assistant_agent_profile_request.requested", operation_keys)
+        self.assertIn("assistant_agent_profile_request.approved", operation_keys)
+        self.assertIn("assistant_agent_profile_request.activated", operation_keys)
+        self.assertIn("assistant_agent.activated", operation_keys)
+
+    def test_admin_custom_agent_activation_requires_approved_profile_request(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+
+        response = self.client.post(
+            "/admin/assistant/agents",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "agent_id": "ungoverned-custom-agent",
+                "name": "Ungoverned Custom Agent",
+                "description": "Attempts to activate without an approved custom profile request.",
+                "status": "ACTIVE",
+                "scope": "TEAM",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "profile_kind": "CUSTOM",
+                "specialization_summary": "Ungoverned custom activation.",
+                "human_owner_role": "Operations Lead",
+                "authority_ceiling": "DRAFT",
+                "activation_notes": "Reviewed prompt preview.",
+                "allowed_workspaces": ["assistant"],
+                "capabilities": ["READ", "EXPLAIN"],
+                "allowed_tools": [],
+                "allowed_action_types": [],
+                "system_prompt": "Summarize custom workflow context.",
+                "created_by": "assistant_user",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("custom profiles need an approved profile request", response.json()["detail"])
 
     def test_assistant_prompt_requires_authentication(self) -> None:
         response = self.client.post(
@@ -976,6 +1127,96 @@ class AssistantApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             self.assertEqual(session.query(AssistantActionRequest).count(), 0)
+
+    def test_admin_policy_simulation_stages_actions_without_persisting_requests(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+        self._create_trade_with_event(trade_id="T-1022")
+        self._create_agent(
+            agent_id="sim-governor",
+            name="Simulation Governor",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN", "ACTION"],
+            allowed_tools=["get_trade_by_id"],
+            allowed_action_types=["cancel_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+
+        response = self.client.post(
+            "/admin/assistant/agents/sim-governor/policy-simulation",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workspace": "assistant",
+                "phase": "stage",
+                "actor_role": "OPS_ADMIN",
+                "context": "Selected trade:\n- trade_id: T-1022\n- commodity: WTI",
+                "prompt": "Cancel the selected trade.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent_id"], "sim-governor")
+        self.assertEqual(payload["workspace"], "assistant")
+        self.assertEqual(payload["phase"], "stage")
+        self.assertEqual(payload["actor_role"], "OPS_ADMIN")
+        self.assertEqual(
+            [decision["resource_id"] for decision in payload["allowed_tools"]],
+            ["get_trade_by_id"],
+        )
+        self.assertEqual(
+            [decision["resource_id"] for decision in payload["allowed_actions"]],
+            ["cancel_trade"],
+        )
+        self.assertEqual(len(payload["staged_action_proposals"]), 1)
+        self.assertEqual(payload["staged_action_proposals"][0]["action_type"], "cancel_trade")
+        self.assertTrue(payload["staged_action_proposals"][0]["decision"]["allowed"])
+        self.assertEqual(payload["staging_warnings"], [])
+        self.assertIn("Simulation is read-only", payload["simulation_notes"][0])
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(AssistantActionRequest).count(), 0)
+
+    def test_admin_policy_simulation_rechecks_execute_actor_role(self) -> None:
+        admin_token = self._create_session_token(role="OPS_ADMIN")
+        trader_token = self._create_session_token(user_id="desk_trader", role="TRADER")
+        self._create_agent(
+            agent_id="sim-executor",
+            name="Simulation Executor",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION"],
+            allowed_action_types=["cancel_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+
+        response = self.client.post(
+            "/admin/assistant/agents/sim-executor/policy-simulation",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "workspace": "assistant",
+                "phase": "execute",
+                "actor_role": "TRADER",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        cancel_decision = next(
+            decision
+            for decision in payload["blocked_actions"]
+            if decision["resource_id"] == "cancel_trade"
+        )
+        self.assertEqual(cancel_decision["reason"], "TRADER cannot execute cancel_trade.")
+
+        non_admin_response = self.client.post(
+            "/admin/assistant/agents/sim-executor/policy-simulation",
+            headers={"Authorization": f"Bearer {trader_token}"},
+            json={"workspace": "assistant", "phase": "stage"},
+        )
+        self.assertEqual(non_admin_response.status_code, 403)
 
     def test_assistant_prompt_extracts_workflow_owner_and_due_date_from_message(self) -> None:
         token = self._create_session_token()

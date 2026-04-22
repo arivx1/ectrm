@@ -17,6 +17,7 @@ from apps.api.app.domains.assistant.services.agent_admin import (
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.schemas.assistant import AssistantAgentCreate, AssistantAgentUpdate
 
@@ -41,6 +42,7 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(MutationProvenanceRecord).delete()
             session.query(AssistantAgent).delete()
+            session.query(AssistantAgentProfileRequest).delete()
             session.commit()
 
     def test_create_admin_assistant_agent_inherits_role_tool_defaults_and_requires_explicit_actions(self) -> None:
@@ -158,7 +160,7 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
             provider=None,
             model=None,
             role_key="settlement-copilot",
-            profile_kind="CUSTOM",
+            profile_kind="CURATED",
             specialization_summary="Explains settlement posture and next steps.",
             human_owner_role="Settlement lead",
             authority_ceiling="STAGE",
@@ -262,7 +264,7 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
                         agent_id="governance-coach",
                         name="Governance Coach",
                         description="Explains agent guardrails.",
-                        status="ACTIVE",
+                        status="DRAFT",
                         scope="TEAM",
                         provider="openai",
                         model="gpt-5-mini",

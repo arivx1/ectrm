@@ -13,6 +13,7 @@ from apps.api.app.domains.assistant.services.policies import (
     resolve_agent_profile_policy_defaults,
     validate_agent_profile_definition,
 )
+from apps.api.app.domains.assistant.services.profile_requests import validate_agent_activation_requirements
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.schemas.assistant import (
     AssistantAgentCreate,
@@ -40,6 +41,7 @@ class AssistantAgentMutationInput:
     human_owner_role: str | None = None
     authority_ceiling: str | None = None
     activation_notes: str | None = None
+    profile_request_id: int | None = None
     daily_token_allocation: int | None = None
 
 
@@ -97,7 +99,7 @@ def upsert_admin_assistant_agent(
     commit: bool,
     record_provenance: bool = False,
 ) -> AssistantAgentMutationResult:
-    _validate_agent_definition(definition)
+    _validate_agent_definition(db, definition)
     now = datetime.now(timezone.utc)
     record = db.get(AssistantAgent, definition.agent_id)
     if record is None:
@@ -117,6 +119,7 @@ def upsert_admin_assistant_agent(
             human_owner_role=definition.human_owner_role,
             authority_ceiling=definition.authority_ceiling,
             activation_notes=definition.activation_notes,
+            profile_request_id=definition.profile_request_id,
             allowed_workspaces=list(definition.allowed_workspaces),
             capabilities=list(definition.capabilities),
             allowed_tools=list(definition.allowed_tools),
@@ -144,6 +147,7 @@ def upsert_admin_assistant_agent(
             detail=f"Assistant agent '{definition.agent_id}' already exists.",
         )
 
+    old_status = record.status
     changed = _apply_agent_definition(record, definition=definition)
     if changed or touch_existing:
         record.updated_at = now
@@ -151,7 +155,12 @@ def upsert_admin_assistant_agent(
         record.version += 1
         db.flush()
         if record_provenance:
-            _record_agent_provenance(db, record=record, operation_key="assistant_agent.updated", action="updated")
+            _record_agent_provenance(
+                db,
+                record=record,
+                operation_key=_agent_status_operation_key(old_status=old_status, new_status=record.status),
+                action=record.status.lower() if old_status != record.status else "updated",
+            )
         if commit:
             db.commit()
             db.refresh(record)
@@ -187,6 +196,7 @@ def _definition_from_create(payload: AssistantAgentCreate) -> AssistantAgentMuta
         human_owner_role=payload.human_owner_role,
         authority_ceiling=payload.authority_ceiling,
         activation_notes=payload.activation_notes,
+        profile_request_id=payload.profile_request_id,
         allowed_workspaces=tuple(payload.allowed_workspaces),
         capabilities=capabilities,
         allowed_tools=defaults.allowed_tools,
@@ -223,6 +233,7 @@ def _definition_from_update(
         human_owner_role=payload.human_owner_role,
         authority_ceiling=payload.authority_ceiling,
         activation_notes=payload.activation_notes,
+        profile_request_id=payload.profile_request_id,
         allowed_workspaces=tuple(payload.allowed_workspaces),
         capabilities=capabilities,
         allowed_tools=defaults.allowed_tools,
@@ -232,7 +243,7 @@ def _definition_from_update(
     )
 
 
-def _validate_agent_definition(definition: AssistantAgentMutationInput) -> None:
+def _validate_agent_definition(db: Session, definition: AssistantAgentMutationInput) -> None:
     try:
         validate_agent_profile_definition(
             agent_name=definition.name,
@@ -250,6 +261,20 @@ def _validate_agent_definition(definition: AssistantAgentMutationInput) -> None:
             status_code=422,
             detail=str(exc),
         ) from exc
+    validate_agent_activation_requirements(
+        db,
+        agent_id=definition.agent_id,
+        agent_name=definition.name,
+        status=definition.status,
+        profile_kind=definition.profile_kind,
+        role_key=definition.role_key,
+        profile_request_id=definition.profile_request_id,
+        human_owner_role=definition.human_owner_role,
+        authority_ceiling=definition.authority_ceiling,
+        activation_notes=definition.activation_notes,
+        capabilities=definition.capabilities,
+        allowed_action_types=definition.allowed_action_types,
+    )
     if definition.daily_token_allocation is not None and definition.daily_token_allocation < 0:
         raise AssistantServiceError(
             status_code=422,
@@ -275,6 +300,7 @@ def _apply_agent_definition(
         "human_owner_role": definition.human_owner_role,
         "authority_ceiling": definition.authority_ceiling,
         "activation_notes": definition.activation_notes,
+        "profile_request_id": definition.profile_request_id,
         "allowed_workspaces": list(definition.allowed_workspaces),
         "capabilities": list(definition.capabilities),
         "allowed_tools": list(definition.allowed_tools),
@@ -313,9 +339,21 @@ def _record_agent_provenance(
             "agent_id": record.agent_id,
             "role_key": record.role_key,
             "profile_kind": record.profile_kind,
+            "profile_request_id": record.profile_request_id,
             "workspace_count": len(record.allowed_workspaces or []),
             "capability_count": len(record.capabilities or []),
             "tool_count": len(record.allowed_tools or []),
             "action_type_count": len(record.allowed_action_types or []),
         },
     )
+
+
+def _agent_status_operation_key(*, old_status: str, new_status: str) -> str:
+    if old_status != new_status:
+        if new_status == "ACTIVE":
+            return "assistant_agent.activated"
+        if new_status == "PAUSED":
+            return "assistant_agent.paused"
+        if new_status == "RETIRED":
+            return "assistant_agent.retired"
+    return "assistant_agent.updated"

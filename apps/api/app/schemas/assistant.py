@@ -47,6 +47,7 @@ AssistantAgentTokenBudgetStatus = Literal["GREEN", "AMBER", "RED"]
 AssistantAgentTokenAllocationSource = Literal["AGENT", "DEFAULT"]
 AssistantAgentRoleCatalogStatus = Literal["SEEDED", "TEMPLATE", "PHASE_1", "PHASE_2_PLUS"]
 AssistantAgentProfileKind = Literal["CURATED", "ROLE_DERIVED", "CUSTOM"]
+AssistantAgentProfileRequestStatus = Literal["REQUESTED", "APPROVED", "REJECTED", "ACTIVATED"]
 AssistantAgentAuthorityLevel = Literal["OBSERVE", "EXPLAIN", "DRAFT", "STAGE", "EXECUTE", "EXTERNAL_COMMIT"]
 AssistantPolicyResourceType = Literal["tool", "action"]
 AssistantPolicyRiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -481,6 +482,7 @@ class AssistantAgentBase(BaseModel):
     human_owner_role: Optional[str] = Field(default=None, max_length=128)
     authority_ceiling: Optional[AssistantAgentAuthorityLevel] = None
     activation_notes: Optional[str] = Field(default=None, max_length=2_000)
+    profile_request_id: Optional[int] = Field(default=None, ge=1)
     allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
     capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
     allowed_tools: list[str] = Field(default_factory=list, max_length=16)
@@ -594,6 +596,166 @@ class AssistantAgentUpdate(AssistantAgentBase):
         return normalize_required_text(value, field_name="updated_by")
 
 
+def _normalize_text_list(
+    value: list[str],
+    *,
+    field_name: str,
+    lowercase: bool = False,
+) -> list[str]:
+    normalized = [
+        normalize_required_text(entry, field_name=field_name, lowercase=lowercase)
+        for entry in value
+    ]
+    return _ensure_distinct_values(normalized, field_name=field_name)
+
+
+class AssistantAgentProfileRequestCreate(BaseModel):
+    requested_agent_id: Optional[str] = Field(default=None, max_length=64)
+    business_problem: str = Field(..., min_length=1, max_length=4_000)
+    proposed_mission: str = Field(..., min_length=1, max_length=4_000)
+    human_owner_role: str = Field(..., min_length=1, max_length=128)
+    requested_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
+    work_objects: list[str] = Field(..., min_length=1, max_length=16)
+    requested_inputs_tools: list[str] = Field(default_factory=list, max_length=16)
+    expected_outputs: list[str] = Field(..., min_length=1, max_length=16)
+    requested_authority_ceiling: AssistantAgentAuthorityLevel = "DRAFT"
+    stop_conditions: list[str] = Field(..., min_length=1, max_length=16)
+    success_metrics: list[str] = Field(..., min_length=1, max_length=16)
+    proposed_eval_cases: list[str] = Field(..., min_length=1, max_length=24)
+    requested_by: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("requested_agent_id")
+    @classmethod
+    def normalize_requested_agent_id(cls, value: Optional[str]) -> Optional[str]:
+        normalized = normalize_optional_text(value, field_name="requested_agent_id", lowercase=True)
+        if normalized is None:
+            return None
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("requested_agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("business_problem")
+    @classmethod
+    def normalize_business_problem(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="business_problem")
+
+    @field_validator("proposed_mission")
+    @classmethod
+    def normalize_proposed_mission(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="proposed_mission")
+
+    @field_validator("human_owner_role")
+    @classmethod
+    def normalize_profile_request_owner(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="human_owner_role")
+
+    @field_validator("requested_workspaces")
+    @classmethod
+    def validate_requested_workspaces(cls, value: list[AssistantWorkspace]) -> list[AssistantWorkspace]:
+        return _ensure_distinct_values(value, field_name="requested_workspaces")
+
+    @field_validator("work_objects")
+    @classmethod
+    def normalize_work_objects(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="work_objects")
+
+    @field_validator("requested_inputs_tools")
+    @classmethod
+    def normalize_requested_inputs_tools(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="requested_inputs_tools", lowercase=True)
+
+    @field_validator("expected_outputs")
+    @classmethod
+    def normalize_expected_outputs(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="expected_outputs")
+
+    @field_validator("stop_conditions")
+    @classmethod
+    def normalize_request_stop_conditions(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="stop_conditions")
+
+    @field_validator("success_metrics")
+    @classmethod
+    def normalize_request_success_metrics(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="success_metrics")
+
+    @field_validator("proposed_eval_cases")
+    @classmethod
+    def normalize_proposed_eval_cases(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="proposed_eval_cases")
+
+    @field_validator("requested_by")
+    @classmethod
+    def normalize_profile_request_requested_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="requested_by")
+
+
+class AssistantAgentProfileRequestDecision(BaseModel):
+    reviewed_by: str = Field(..., min_length=1, max_length=128)
+    approval_notes: Optional[str] = Field(default=None, max_length=4_000)
+    rejection_reason: Optional[str] = Field(default=None, max_length=4_000)
+
+    @field_validator("reviewed_by")
+    @classmethod
+    def normalize_reviewed_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="reviewed_by")
+
+    @field_validator("approval_notes")
+    @classmethod
+    def normalize_approval_notes(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="approval_notes")
+
+    @field_validator("rejection_reason")
+    @classmethod
+    def normalize_rejection_reason(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="rejection_reason")
+
+
+class AssistantAgentProfileRequestActivation(BaseModel):
+    activated_by: str = Field(..., min_length=1, max_length=128)
+    linked_agent_id: str = Field(..., min_length=2, max_length=64)
+
+    @field_validator("activated_by")
+    @classmethod
+    def normalize_activated_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="activated_by")
+
+    @field_validator("linked_agent_id")
+    @classmethod
+    def normalize_linked_agent_id(cls, value: str) -> str:
+        normalized = normalize_required_text(value, field_name="linked_agent_id", lowercase=True)
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("linked_agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+
+class AssistantAgentProfileRequestOut(BaseModel):
+    request_id: int
+    status: AssistantAgentProfileRequestStatus
+    requested_agent_id: Optional[str]
+    business_problem: str
+    proposed_mission: str
+    human_owner_role: str
+    requested_workspaces: list[AssistantWorkspace]
+    work_objects: list[str]
+    requested_inputs_tools: list[str]
+    expected_outputs: list[str]
+    requested_authority_ceiling: AssistantAgentAuthorityLevel
+    stop_conditions: list[str]
+    success_metrics: list[str]
+    proposed_eval_cases: list[str]
+    approval_notes: Optional[str]
+    rejection_reason: Optional[str]
+    linked_agent_id: Optional[str]
+    requested_at: datetime
+    requested_by: str
+    reviewed_at: Optional[datetime]
+    reviewed_by: Optional[str]
+    activated_at: Optional[datetime]
+    activated_by: Optional[str]
+    updated_at: datetime
+
+
 class AssistantAgentTokenBudgetOut(BaseModel):
     status: AssistantAgentTokenBudgetStatus
     allocated_tokens: int
@@ -620,6 +782,7 @@ class AssistantAgentOut(BaseModel):
     human_owner_role: Optional[str]
     authority_ceiling: Optional[AssistantAgentAuthorityLevel]
     activation_notes: Optional[str]
+    profile_request_id: Optional[int]
     allowed_workspaces: list[AssistantWorkspace]
     capabilities: list[AssistantAgentCapability]
     allowed_tools: list[str]
