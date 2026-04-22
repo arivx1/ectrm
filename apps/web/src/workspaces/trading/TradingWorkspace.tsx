@@ -1593,9 +1593,12 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                             <article key={snapshot.source_key} className="pretrade-record-card pretrade-record-static">
                               <div>
                                 <strong>{snapshot.source_key.replaceAll('-', ' ')}</strong>
-                                <span>{snapshot.source_type} | {snapshot.freshness}</span>
+                                <span>{snapshot.source_type} | {snapshot.freshness} | {snapshot.quality_status}</span>
                               </div>
-                              <small>{snapshot.summary ?? 'No source summary captured.'}</small>
+                              <small>
+                                {snapshot.summary ?? 'No source summary captured.'}
+                                {snapshot.provenance.provider ? ` | ${snapshot.provenance.provider}` : ''}
+                              </small>
                             </article>
                           ))}
                         </div>
