@@ -283,17 +283,19 @@ proposal form until a human owner approves the domain rule.
   the candidate, source agents, recommended owner, checks, lifecycle status,
   actor, timestamps, and notes so the work can move from autonomy review into
   implementation without relying on an ephemeral generated snapshot.
-- Deterministic opportunity: future lifecycle transitions should turn accepted
-  policy, service, eval, or knowledge-base packages into concrete PRs, eval
-  cases, or docs entries, then mark the package implemented when verification
-  evidence exists.
+- Deterministic opportunity: lifecycle transitions should turn accepted policy,
+  service, eval, or knowledge-base packages into concrete PRs, eval cases, or
+  docs entries, then mark the package implemented only with verification
+  evidence.
 - Agent autonomy impact: agents may propose and group deterministic candidates,
   but accepted backlog records are the review gate before changing product
   behavior or agent authority.
 - Tests or evidence: service and API coverage verifies candidate acceptance,
-  idempotent persistence, admin auth, and frontend API ownership.
-- Follow-up: add lifecycle update endpoints when the backlog needs in-progress,
-  implemented, or dismissed state changes from the UI.
+  idempotent persistence, valid and invalid lifecycle transitions, admin auth,
+  implementation evidence notes, and frontend API ownership.
+- Follow-up: when a package is marked implemented, add or update the focused
+  `algorithm-added`, eval, or policy lesson that explains the actual shipped
+  behavior.
 
 ### 2026-04-22 - Freeform Output Must Not Mutate Records
 
@@ -938,3 +940,34 @@ proposal form until a human owner approves the domain rule.
   settlement read agent can call the candidate tool for pending invoices.
 - Follow-up: if finance users need sorting or prioritization beyond oldest open
   execution, promote that rule as a named settlement queue policy.
+
+### 2026-04-22 - Action Specs Own Staging Planner Order
+
+- Type: algorithm-added
+- Domain: assistant action governance
+- Applies to: action request staging, policy simulation, action catalog,
+  assistant agent work packages
+- Status: implemented
+- Source:
+  [`action_specs.py`](../../apps/api/app/domains/assistant/services/action_specs.py),
+  [`action_runtime.py`](../../apps/api/app/domains/assistant/services/action_runtime.py),
+  and
+  [`agent_work_packages.py`](../../apps/api/app/domains/assistant/services/agent_work_packages.py)
+- Lesson: every approval-gated action must bind its catalog entry, execution
+  handler, and deterministic planner in one typed action spec. Prompt staging
+  and policy simulation should evaluate plans by catalog `planner_priority`
+  instead of relying on a separate freeform planner list.
+- Deterministic opportunity: action catalog metadata is the durable source for
+  planner order, policy ownership, preview requirements, and coverage checks.
+  When a new action is added, the spec registry should fail fast until the
+  catalog, planner, handler, policy, and tests all agree.
+- Agent autonomy impact: the model can still explain and draft action intent,
+  but staging remains deterministic and policy-gated. Agent work packages move
+  through explicit lifecycle states, and implementation requires evidence notes
+  before a package can be marked implemented.
+- Tests or evidence: API tests cover planner/spec coverage, policy simulation
+  staging, admin work-package transition errors, and the implementation
+  evidence gate. Web API tests cover the lifecycle PATCH client contract.
+- Follow-up: wire the admin work-package lifecycle controls into the control
+  tower once the UX can show transition history without obscuring manual
+  approval responsibility.

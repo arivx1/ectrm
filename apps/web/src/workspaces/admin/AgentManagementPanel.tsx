@@ -21,6 +21,7 @@ import {
   runAssistantAgentEval,
   runAssistantAgentEvalSuite,
   simulateAssistantAgentPolicy,
+  updateAdminAssistantAgentWorkPackage,
   updateAssistantAgentEval,
   updateAssistantAgent,
   type CreateAssistantAgentInput,
@@ -58,6 +59,7 @@ import type {
   AssistantAgentEvalRunStatus,
   AssistantAgentHealthReview,
   AssistantAgentWorkPackage,
+  AssistantAgentWorkPackageStatus,
   AssistantAutonomyReviewBrief,
   AssistantAgentCapability,
   AssistantAgentEvalGateStatus,
@@ -603,6 +605,34 @@ function healthReviewPriorityLabel(priority: string): string {
   return 'Watch'
 }
 
+function agentWorkPackageStatusLabel(status: AssistantAgentWorkPackageStatus): string {
+  if (status === 'IN_PROGRESS') {
+    return 'In progress'
+  }
+  if (status === 'IMPLEMENTED') {
+    return 'Implemented'
+  }
+  if (status === 'DISMISSED') {
+    return 'Dismissed'
+  }
+  if (status === 'ACCEPTED') {
+    return 'Accepted'
+  }
+  return 'Candidate'
+}
+
+function agentWorkPackageNextStatuses(
+  status: AssistantAgentWorkPackageStatus,
+): AssistantAgentWorkPackageStatus[] {
+  if (status === 'ACCEPTED') {
+    return ['IN_PROGRESS', 'DISMISSED']
+  }
+  if (status === 'IN_PROGRESS') {
+    return ['IMPLEMENTED', 'DISMISSED']
+  }
+  return []
+}
+
 function PromptProfilePreview({
   form,
   role,
@@ -717,6 +747,8 @@ export function AgentManagementPanel({
   const [agentWorkPackagesLoading, setAgentWorkPackagesLoading] = useState(false)
   const [agentWorkPackageError, setAgentWorkPackageError] = useState('')
   const [acceptingWorkPackageId, setAcceptingWorkPackageId] = useState<string | null>(null)
+  const [transitioningWorkPackageId, setTransitioningWorkPackageId] = useState<string | null>(null)
+  const [workPackageTransitionNotes, setWorkPackageTransitionNotes] = useState<Record<string, string>>({})
   const [selectedAgentEvalId, setSelectedAgentEvalId] = useState<number | null>(null)
   const [agentEvalForm, setAgentEvalForm] = useState<AgentEvalForm>(() => createEmptyAgentEvalForm())
   const [agentEvalRuns, setAgentEvalRuns] = useState<AssistantAgentEvalRun[]>([])
@@ -969,6 +1001,8 @@ export function AgentManagementPanel({
       setAgentWorkPackageError('')
       setAgentWorkPackagesLoading(false)
       setAcceptingWorkPackageId(null)
+      setTransitioningWorkPackageId(null)
+      setWorkPackageTransitionNotes({})
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -1587,6 +1621,49 @@ export function AgentManagementPanel({
     }
   }
 
+  async function handleUpdateAgentWorkPackageStatus(
+    workPackage: AssistantAgentWorkPackage,
+    status: AssistantAgentWorkPackageStatus,
+  ) {
+    const notes = workPackageTransitionNotes[workPackage.work_package_id]?.trim()
+    if (status === 'IMPLEMENTED' && !notes) {
+      setAgentWorkPackageError('Add an implementation evidence note before marking the package implemented.')
+      return
+    }
+
+    setTransitioningWorkPackageId(workPackage.work_package_id)
+    setAgentWorkPackageError('')
+    setAgentFlash(null)
+
+    try {
+      const updated = await updateAdminAssistantAgentWorkPackage(
+        appConfig.apiBase,
+        workPackage.work_package_id,
+        {
+          status,
+          updatedBy: authSession?.user.user_id,
+          notes: notes || undefined,
+        },
+      )
+      await loadAgentWorkPackages()
+      setWorkPackageTransitionNotes((current) => {
+        const next = { ...current }
+        delete next[workPackage.work_package_id]
+        return next
+      })
+      setAgentFlash({
+        tone: 'success',
+        message: `${updated.title} moved to ${agentWorkPackageStatusLabel(updated.status).toLowerCase()}.`,
+      })
+    } catch (error) {
+      setAgentWorkPackageError(
+        error instanceof Error ? error.message : 'Could not update the agent work package.',
+      )
+    } finally {
+      setTransitioningWorkPackageId(null)
+    }
+  }
+
   function handleEditAgentEval(record: AssistantAgentEval) {
     setSelectedAgentEvalId(record.eval_id)
     setAgentEvalForm(toAgentEvalForm(record))
@@ -1896,18 +1973,59 @@ export function AgentManagementPanel({
 
             {agentWorkPackages.length > 0 ? (
               <div className="assistant-builder-preview-grid">
-                {agentWorkPackages.slice(0, 3).map((workPackage) => (
-                  <div key={`tracked-${workPackage.work_package_id}`} className="assistant-sidebar-block">
-                    <strong>
-                      {workPackage.status} · {healthReviewPriorityLabel(workPackage.priority)}
-                    </strong>
-                    <p>{workPackage.title}</p>
-                    <small>
-                      {workPackage.source_agent_names.join(' · ')}
-                      {workPackage.accepted_by ? ` · accepted by ${workPackage.accepted_by}` : ''}
-                    </small>
-                  </div>
-                ))}
+                {agentWorkPackages.slice(0, 3).map((workPackage) => {
+                  const nextStatuses = agentWorkPackageNextStatuses(workPackage.status)
+                  const transitionNote = workPackageTransitionNotes[workPackage.work_package_id] ?? ''
+                  const isTransitioning = transitioningWorkPackageId === workPackage.work_package_id
+                  return (
+                    <div key={`tracked-${workPackage.work_package_id}`} className="assistant-sidebar-block">
+                      <strong>
+                        {agentWorkPackageStatusLabel(workPackage.status)} · {healthReviewPriorityLabel(workPackage.priority)}
+                      </strong>
+                      <p>{workPackage.title}</p>
+                      <small>
+                        {workPackage.source_agent_names.join(' · ')}
+                        {workPackage.accepted_by ? ` · accepted by ${workPackage.accepted_by}` : ''}
+                      </small>
+                      {workPackage.notes ? <small>{workPackage.notes}</small> : null}
+                      {nextStatuses.length > 0 ? (
+                        <div className="assistant-profile-request-decision-grid">
+                          <label className="field">
+                            <span>Evidence Or Decision Note</span>
+                            <textarea
+                              className="control"
+                              value={transitionNote}
+                              onChange={(event) =>
+                                setWorkPackageTransitionNotes((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: event.target.value,
+                                }))
+                              }
+                              placeholder="What changed, why it closed, or what proves the implementation."
+                            />
+                          </label>
+                          <div className="toolbar settings-actions">
+                            {nextStatuses.map((status) => (
+                              <button
+                                key={`${workPackage.work_package_id}-${status}`}
+                                type="button"
+                                className={status === 'DISMISSED' ? 'button button-ghost' : 'button button-secondary'}
+                                disabled={isTransitioning || (status === 'IMPLEMENTED' && !transitionNote.trim())}
+                                onClick={() => void handleUpdateAgentWorkPackageStatus(workPackage, status)}
+                              >
+                                {status === 'IN_PROGRESS'
+                                  ? 'Start Work'
+                                  : status === 'IMPLEMENTED'
+                                    ? 'Mark Implemented'
+                                    : 'Dismiss'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             ) : null}
           </div>

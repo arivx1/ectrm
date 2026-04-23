@@ -13,6 +13,7 @@ from apps.api.app.domains.assistant.services.autonomy_review import (
 from apps.api.app.domains.assistant.services.agent_work_packages import (
     accept_generated_agent_work_package,
     list_agent_work_packages,
+    update_agent_work_package,
 )
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
@@ -203,6 +204,69 @@ class AssistantAgentHealthReviewTests(unittest.TestCase):
             self.assertEqual(accepted_again.status, "ACCEPTED")
             self.assertEqual(accepted_again.accepted_by, "ops_reviewer")
             self.assertEqual(session.query(AssistantAgentWorkPackage).count(), 1)
+
+    def test_updates_work_package_lifecycle_with_evidence_gate(self) -> None:
+        now = datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            self._seed_repeated_workflow_candidates(session, now=now)
+            snapshot = build_assistant_agent_health_review(session, now=now)
+            package = next(
+                work_package
+                for work_package in snapshot.work_packages
+                if any("update_trade_workflow_item" in candidate for candidate in work_package.source_candidates)
+            )
+            accepted = accept_generated_agent_work_package(
+                session,
+                work_package_id=package.work_package_id,
+                accepted_by="ops_admin",
+                notes="Promote into the policy backlog.",
+                now=now,
+            )
+
+            in_progress = update_agent_work_package(
+                session,
+                work_package_id=accepted.work_package_id,
+                status="IN_PROGRESS",
+                updated_by="ops_admin",
+                notes="Policy implementation started.",
+                now=now + timedelta(minutes=5),
+            )
+
+            self.assertEqual(in_progress.id, accepted.id)
+            self.assertEqual(in_progress.status, "IN_PROGRESS")
+            self.assertEqual(in_progress.notes, "Policy implementation started.")
+
+            with self.assertRaisesRegex(Exception, "Implementation evidence note is required"):
+                update_agent_work_package(
+                    session,
+                    work_package_id=accepted.work_package_id,
+                    status="IMPLEMENTED",
+                    updated_by="ops_admin",
+                    now=now + timedelta(minutes=10),
+                )
+
+            implemented = update_agent_work_package(
+                session,
+                work_package_id=accepted.work_package_id,
+                status="IMPLEMENTED",
+                updated_by="ops_admin",
+                notes="Implemented policy checks and passing tests.",
+                now=now + timedelta(minutes=15),
+            )
+
+            self.assertEqual(implemented.status, "IMPLEMENTED")
+            self.assertEqual(implemented.notes, "Implemented policy checks and passing tests.")
+
+            with self.assertRaisesRegex(Exception, "Cannot move assistant agent work package"):
+                update_agent_work_package(
+                    session,
+                    work_package_id=accepted.work_package_id,
+                    status="DISMISSED",
+                    updated_by="ops_admin",
+                    notes="Changed our mind.",
+                    now=now + timedelta(minutes=20),
+                )
 
 
 if __name__ == "__main__":

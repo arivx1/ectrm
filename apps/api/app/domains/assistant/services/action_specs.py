@@ -46,9 +46,40 @@ class AssistantActionHandler(Protocol):
 
 
 @dataclass(frozen=True)
+class AssistantActionProposal:
+    action_type: str
+    summary: str
+    description: str
+    payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class AssistantActionPlanningCandidate:
+    proposal: AssistantActionProposal | None = None
+    warning: str | None = None
+
+
+@dataclass(frozen=True)
+class AssistantActionPlanningContext:
+    message: str
+    message_lower: str
+    context: str | None
+    context_fields: dict[str, str]
+    db: Session
+
+
+class AssistantActionPlanner(Protocol):
+    action_type: str
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        ...
+
+
+@dataclass(frozen=True)
 class AssistantActionSpec:
     catalog_entry: AssistantActionCatalogEntry
     handler: AssistantActionHandler
+    planner: AssistantActionPlanner
     requires_ready_preview: bool = False
 
     @property
@@ -57,6 +88,9 @@ class AssistantActionSpec:
 
     def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
         return self.handler.execute(context)
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return self.planner.plan(context)
 
     def current_stale_state(
         self,
@@ -84,6 +118,11 @@ def build_assistant_action_spec_registry(
             raise ValueError(
                 "Assistant action spec handler/catalog mismatch: "
                 f"{spec.handler.action_type!r} != {spec.catalog_entry.name!r}."
+            )
+        if spec.planner.action_type != spec.catalog_entry.name:
+            raise ValueError(
+                "Assistant action spec planner/catalog mismatch: "
+                f"{spec.planner.action_type!r} != {spec.catalog_entry.name!r}."
             )
         if spec.action_type in registry:
             raise ValueError(f"Duplicate assistant action spec for {spec.action_type!r}.")

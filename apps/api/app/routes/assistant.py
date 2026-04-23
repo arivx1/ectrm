@@ -42,6 +42,7 @@ from apps.api.app.domains.assistant.services.agent_work_packages import (
     accept_generated_agent_work_package,
     list_agent_work_packages,
     to_agent_work_package_out,
+    update_agent_work_package,
 )
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
@@ -130,6 +131,7 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentHealthReviewOut,
     AssistantAgentWorkPackageAcceptRequest,
     AssistantAgentWorkPackageOut,
+    AssistantAgentWorkPackageUpdateRequest,
     AssistantAutonomyReviewBriefOut,
     AssistantAgentBuildRequest,
     AssistantAgentBuildSuggestionOut,
@@ -828,6 +830,33 @@ def list_admin_assistant_agent_work_packages(
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return [to_agent_work_package_out(record) for record in records]
+
+
+@admin_router.patch("/agent-work-packages/{work_package_id}", response_model=AssistantAgentWorkPackageOut)
+def update_admin_assistant_agent_work_package(
+    work_package_id: str,
+    payload: AssistantAgentWorkPackageUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantAgentWorkPackageOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        record = update_agent_work_package(
+            db,
+            work_package_id=work_package_id,
+            status=payload.status,
+            updated_by=payload.updated_by if payload.updated_by else user.user_id,
+            notes=payload.notes,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_agent_work_package_out(record)
 
 
 @admin_router.post(

@@ -343,6 +343,7 @@ class AssistantApiTests(unittest.TestCase):
             action_spec = ACTION_SPECS[entry.name]
             self.assertIs(action_spec.catalog_entry, entry)
             self.assertEqual(action_spec.handler.action_type, entry.name)
+            self.assertEqual(action_spec.planner.action_type, entry.name)
 
         self.assertTrue(ACTION_SPECS["issue_trade_invoice"].requires_ready_preview)
         self.assertFalse(ACTION_SPECS["cancel_trade"].requires_ready_preview)
@@ -352,6 +353,13 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(set(ACTION_PLANNERS), {planner.action_type for planner in ACTION_PLANNER_SEQUENCE})
         self.assertEqual(len(ACTION_PLANNER_SEQUENCE), len(ACTION_PLANNERS))
         self.assertEqual(set(ACTION_PLANNERS), set(ACTION_SPECS))
+        self.assertEqual(
+            tuple(
+                spec.planner
+                for spec in sorted(ACTION_SPECS.values(), key=lambda spec: spec.catalog_entry.planner_priority)
+            ),
+            ACTION_PLANNER_SEQUENCE,
+        )
         self.assertEqual(
             tuple(planner.action_type for planner in ACTION_PLANNER_SEQUENCE),
             (
@@ -3354,8 +3362,39 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(accepted_package["accepted_by"], "assistant_user")
         self.assertEqual(accepted_package["notes"], "Promote into the policy backlog.")
 
+        start_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "IN_PROGRESS", "notes": "Implementation started."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(start_response.status_code, 200)
+        self.assertEqual(start_response.json()["status"], "IN_PROGRESS")
+        self.assertEqual(start_response.json()["notes"], "Implementation started.")
+
+        missing_evidence_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "IMPLEMENTED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(missing_evidence_response.status_code, 400)
+
+        implemented_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "IMPLEMENTED", "notes": "Implemented checks with passing coverage."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(implemented_response.status_code, 200)
+        self.assertEqual(implemented_response.json()["status"], "IMPLEMENTED")
+
+        invalid_transition_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "DISMISSED", "notes": "Close anyway."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(invalid_transition_response.status_code, 409)
+
         list_response = self.client.get(
-            "/admin/assistant/agent-work-packages?status=ACCEPTED",
+            "/admin/assistant/agent-work-packages?status=IMPLEMENTED",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(list_response.status_code, 200)
@@ -3394,6 +3433,13 @@ class AssistantApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         self.assertEqual(accept_response.status_code, 403)
+
+        update_response = self.client.patch(
+            "/admin/assistant/agent-work-packages/missing",
+            json={"status": "IN_PROGRESS", "notes": "Nope."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(update_response.status_code, 403)
 
     def test_admin_accepts_agent_health_work_package_into_persisted_backlog(self) -> None:
         admin_token = self._create_session_token()

@@ -10,10 +10,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.assistant.services.action_catalog import ASSISTANT_ACTION_CATALOG_BY_NAME
-from apps.api.app.domains.assistant.services.action_runtime import AssistantActionProposal
+from apps.api.app.domains.assistant.services.action_runtime import ACTION_PLANNERS
 from apps.api.app.domains.assistant.services.action_specs import (
     AssistantActionExecutionContext,
     AssistantActionHandler,
+    AssistantActionProposal,
     AssistantActionSpec,
     build_assistant_action_spec_registry,
 )
@@ -374,6 +375,7 @@ def _action_spec(
     return AssistantActionSpec(
         catalog_entry=ASSISTANT_ACTION_CATALOG_BY_NAME[handler.action_type],
         handler=handler,
+        planner=ACTION_PLANNERS[handler.action_type],
         requires_ready_preview=requires_ready_preview,
     )
 

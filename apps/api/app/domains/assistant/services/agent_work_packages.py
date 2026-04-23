@@ -29,6 +29,13 @@ WORK_PACKAGE_STATUSES = {
     WORK_PACKAGE_STATUS_DISMISSED,
 }
 
+WORK_PACKAGE_STATUS_TRANSITIONS = {
+    WORK_PACKAGE_STATUS_ACCEPTED: {WORK_PACKAGE_STATUS_IN_PROGRESS, WORK_PACKAGE_STATUS_DISMISSED},
+    WORK_PACKAGE_STATUS_IN_PROGRESS: {WORK_PACKAGE_STATUS_IMPLEMENTED, WORK_PACKAGE_STATUS_DISMISSED},
+    WORK_PACKAGE_STATUS_IMPLEMENTED: set(),
+    WORK_PACKAGE_STATUS_DISMISSED: set(),
+}
+
 
 def list_agent_work_packages(
     db: Session,
@@ -135,6 +142,64 @@ def accept_generated_agent_work_package(
             else "assistant_agent_work_package.accepted_candidate_refreshed"
         ),
         action="accepted" if created else "refreshed",
+    )
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def update_agent_work_package(
+    db: Session,
+    *,
+    work_package_id: str,
+    status: str,
+    updated_by: str,
+    notes: str | None = None,
+    now: datetime | None = None,
+) -> AssistantAgentWorkPackage:
+    normalized_work_package_id = work_package_id.strip()
+    if not normalized_work_package_id:
+        raise AssistantServiceError(status_code=400, detail="Assistant agent work package id is required")
+
+    normalized_status = status.strip().upper()
+    if normalized_status not in WORK_PACKAGE_STATUSES or normalized_status == WORK_PACKAGE_STATUS_CANDIDATE:
+        raise AssistantServiceError(status_code=400, detail="Unsupported assistant agent work package status")
+
+    record = db.scalar(
+        select(AssistantAgentWorkPackage).where(
+            AssistantAgentWorkPackage.work_package_id == normalized_work_package_id
+        )
+    )
+    if record is None:
+        raise AssistantServiceError(status_code=404, detail="Assistant agent work package not found")
+
+    normalized_actor = updated_by.strip() or "system"
+    normalized_notes = notes.strip() if notes and notes.strip() else None
+
+    if normalized_status != record.status:
+        allowed_targets = WORK_PACKAGE_STATUS_TRANSITIONS.get(record.status, set())
+        if normalized_status not in allowed_targets:
+            raise AssistantServiceError(
+                status_code=409,
+                detail=f"Cannot move assistant agent work package from {record.status} to {normalized_status}",
+            )
+        if normalized_status == WORK_PACKAGE_STATUS_IMPLEMENTED and normalized_notes is None:
+            raise AssistantServiceError(
+                status_code=400,
+                detail="Implementation evidence note is required before marking a work package implemented",
+            )
+        record.status = normalized_status
+
+    if normalized_notes is not None:
+        record.notes = normalized_notes
+    record.updated_at = now or datetime.now(timezone.utc)
+    record.updated_by = normalized_actor
+    db.flush()
+    _record_agent_work_package_provenance(
+        db,
+        record=record,
+        operation_key="assistant_agent_work_package.status_updated",
+        action=record.status.lower(),
     )
     db.commit()
     db.refresh(record)
