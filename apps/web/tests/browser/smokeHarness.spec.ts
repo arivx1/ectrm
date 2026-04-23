@@ -51,6 +51,11 @@ async function signInFromPromptHome(page: Page): Promise<void> {
   await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
 }
 
+async function expandPromptHomeLiveContext(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Show live context' }).click()
+  await expect(page.getByRole('button', { name: 'Hide live context' })).toBeVisible()
+}
+
 test('dashboard smoke boots against the seeded browser harness', async ({ page }) => {
   const harness = await startSmokeHarness()
 
@@ -131,6 +136,8 @@ test('single-user smoke signs into the prompt home when one-click access is enab
     await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
     await expect(page.getByRole('button', { name: /Assistant Console/ })).toBeVisible()
     await expect(page.getByRole('button', { name: /Recent blocker triage/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Show live context' })).toBeVisible()
+    await expect(page.locator('.prompt-home-starter').filter({ hasText: 'Clear operations blockers' })).toBeHidden()
 
     assertNoHarnessRequestFailures(harness)
   } finally {
@@ -180,6 +187,7 @@ test('prompt home contextual starter asks from live context and hands off to ope
     })
 
     await signInFromPromptHome(page)
+    await expandPromptHomeLiveContext(page)
 
     const operationsStarter = page.locator('.prompt-home-starter').filter({ hasText: 'Clear operations blockers' })
     await expect(operationsStarter).toBeVisible()
@@ -210,6 +218,8 @@ test('prompt home contextual starter can open the old workspace directly', async
     await page.goto(harness.origin, {
       waitUntil: 'domcontentloaded',
     })
+
+    await expandPromptHomeLiveContext(page)
 
     const settlementStarter = page.locator('.prompt-home-starter').filter({ hasText: 'Review invoices and payments' })
     await expect(settlementStarter).toBeVisible()

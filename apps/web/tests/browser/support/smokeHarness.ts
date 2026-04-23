@@ -530,6 +530,103 @@ async function startMockApiServer(
     }
   }
 
+  function buildAssistantControlTowerSummary() {
+    const oldestPendingAction = assistantActionRequestRows
+      .filter((requestRow) => requestRow.status === 'PENDING')
+      .sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at))[0]
+
+    return {
+      generated_at: '2026-04-11T09:10:00Z',
+      created_after: null,
+      created_before: null,
+      roster: {
+        total_count: assistantAdminAgents.length,
+        active_count: assistantAdminAgents.filter((agent) => agent.status === 'ACTIVE').length,
+        draft_count: assistantAdminAgents.filter((agent) => agent.status === 'DRAFT').length,
+        paused_count: assistantAdminAgents.filter((agent) => agent.status === 'PAUSED').length,
+        retired_count: assistantAdminAgents.filter((agent) => agent.status === 'RETIRED').length,
+        action_capable_count: assistantAdminAgents.filter((agent) => agent.capabilities.includes('ACTION')).length,
+        missing_eval_coverage_count: 0,
+        policy_warning_count: 0,
+      },
+      runs: {
+        total_count: 12,
+        completed_count: 11,
+        failed_count: 1,
+        warning_count: 1,
+        tool_call_count: 15,
+        latest_run_at: assistantRunRecordedAt,
+      },
+      actions: {
+        total_count: assistantActionRequestRows.length,
+        pending_count: assistantActionRequestRows.filter((requestRow) => requestRow.status === 'PENDING').length,
+        failed_count: assistantActionRequestRows.filter((requestRow) => requestRow.status === 'FAILED').length,
+        rejected_count: assistantActionRequestRows.filter((requestRow) => requestRow.status === 'REJECTED').length,
+        executed_count: assistantActionRequestRows.filter((requestRow) => requestRow.status === 'EXECUTED').length,
+        preview_blocked_count: 0,
+        oldest_pending_action: oldestPendingAction
+          ? {
+              action_request_id: oldestPendingAction.action_request_id,
+              action_type: oldestPendingAction.action_type,
+              summary: oldestPendingAction.summary,
+              agent_id: oldestPendingAction.agent_id,
+              agent_name: oldestPendingAction.agent_name,
+              user_id: oldestPendingAction.user_id,
+              created_at: oldestPendingAction.created_at,
+              age_seconds: 1500,
+            }
+          : null,
+      },
+      trust_signals: oldestPendingAction
+        ? [
+            {
+              agent_id: oldestPendingAction.agent_id ?? 'ops-governor',
+              agent_name: oldestPendingAction.agent_name ?? 'Ops Governor',
+              status: 'ACTIVE',
+              role_key: 'trade-ops-copilot',
+              profile_kind: 'ROLE_DERIVED',
+              signal_type: 'ACTION_BACKLOG',
+              severity: 'warning',
+              summary: 'One staged action is waiting for human review.',
+              details: ['Approve or reject the oldest pending action before considering broader autonomy.'],
+              pending_action_count: 1,
+              failed_action_count: 0,
+              warning_run_count: 1,
+              eval_status: 'PASS',
+            },
+          ]
+        : [],
+    }
+  }
+
+  function buildAssistantAgentWorkPackages() {
+    return [
+      {
+        id: 1,
+        work_package_id: 'wp-smoke-eval-coverage',
+        title: 'Add assistant approval eval coverage',
+        package_type: 'EVAL',
+        priority: 'P2',
+        status: 'ACCEPTED',
+        source_agent_ids: ['ops-governor'],
+        source_agent_names: ['Ops Governor'],
+        source_recommendations: ['KEEP_STAGED'],
+        source_candidates: ['Approval inbox smoke coverage'],
+        recommended_owner_role: 'Platform Owner',
+        rationale: 'Keep approval-gated action behavior covered by deterministic smoke and eval checks.',
+        acceptance_checks: ['Run browser smoke for the approval inbox.', 'Run assistant evals before promotion.'],
+        knowledge_base_titles: ['Prompt Navigation Is A UI Intent'],
+        accepted_at: '2026-04-11T09:00:00Z',
+        accepted_by: 'ops_admin',
+        notes: 'Smoke fixture backlog item.',
+        created_at: '2026-04-11T08:55:00Z',
+        created_by: 'ops_admin',
+        updated_at: '2026-04-11T09:00:00Z',
+        updated_by: 'ops_admin',
+      },
+    ]
+  }
+
   const server = createHttpServer(async (request, response) => {
     const method = request.method ?? 'GET'
     const url = new URL(request.url ?? '/', 'http://127.0.0.1')
@@ -868,6 +965,24 @@ async function startMockApiServer(
       }
 
       writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/control-tower/summary' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, buildAssistantControlTowerSummary())
+      return
+    }
+
+    if (url.pathname === '/admin/assistant/agent-work-packages' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, buildAssistantAgentWorkPackages())
       return
     }
 

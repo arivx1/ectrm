@@ -83,6 +83,30 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-04-23 - Action Specs Own Approval Preconditions
+
+- Type: lesson
+- Domain: assistant action governance
+- Applies to: approval-gated action requests, action preview requirements, stale-state and idempotency execution checks
+- Status: implemented
+- Source: `apps/api/app/domains/assistant/services/action_specs.py` and
+  `apps/api/app/domains/assistant/services/action_requests.py`
+- Lesson: per-action execution requirements should be declared in the typed
+  action spec registry instead of scattered through approval helpers. The
+  deterministic executor remains the source of business mutation behavior, but
+  reusable governance metadata such as `requires_ready_preview` belongs beside
+  the published catalog entry and handler.
+- Deterministic opportunity: add new approval preconditions as typed spec
+  fields when they apply to a named action type, then enforce them through the
+  shared approval gateway.
+- Agent autonomy impact: action-specific gates stay reviewable and testable
+  without granting broader autonomy or allowing freeform model output to bypass
+  policy checks.
+- Tests or evidence: registry coverage in `apps/api/tests/test_assistant_api.py`
+  and assistant eval coverage through `make api-assistant-evals`.
+- Follow-up: promote future repeated approval checks into action spec fields
+  before adding one-off conditional logic.
+
 ### 2026-04-22 - Persona Stories Need Productized Algorithms
 
 - Type: algorithm-candidate

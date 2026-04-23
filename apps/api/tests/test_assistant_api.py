@@ -25,7 +25,7 @@ from apps.api.app.domains.assistant.services.action_catalog import (
     ASSISTANT_ACTION_CATALOG,
 )
 from apps.api.app.domains.assistant.services.action_runtime import ACTION_PLANNER_SEQUENCE, ACTION_PLANNERS
-from apps.api.app.domains.assistant.services.action_requests import ACTION_HANDLERS
+from apps.api.app.domains.assistant.services.action_requests import ACTION_HANDLERS, ACTION_SPECS
 from apps.api.app.domains.assistant.services.chat import ASSISTANT_ACTION_DEFINITIONS
 from apps.api.app.domains.assistant.services.policies import POLICY_RULES
 from apps.api.app.domains.assistant.services.role_archetypes import validate_role_archetype_registry
@@ -310,12 +310,15 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("outcome review", document_agent["activation_notes"])
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
+        self.assertEqual(set(ACTION_SPECS), set(ALL_ASSISTANT_ACTION_TYPES))
         self.assertEqual(set(ACTION_HANDLERS), set(ALL_ASSISTANT_ACTION_TYPES))
+        self.assertEqual(set(ACTION_HANDLERS), set(ACTION_SPECS))
 
     def test_action_catalog_drives_backend_action_surfaces(self) -> None:
         catalog_names = tuple(entry.name for entry in ASSISTANT_ACTION_CATALOG)
         self.assertEqual(catalog_names, ALL_CATALOG_ACTION_TYPES)
         self.assertEqual(catalog_names, ALL_ASSISTANT_ACTION_TYPES)
+        self.assertEqual(tuple(ACTION_SPECS), catalog_names)
         self.assertEqual(set(catalog_names), set(ACTION_HANDLERS))
         self.assertEqual(
             tuple(definition.name for definition in ASSISTANT_ACTION_DEFINITIONS),
@@ -337,11 +340,18 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(rule.workspaces, entry.workspaces)
             self.assertEqual(rule.approval_required, entry.approval_required)
 
+            action_spec = ACTION_SPECS[entry.name]
+            self.assertIs(action_spec.catalog_entry, entry)
+            self.assertEqual(action_spec.handler.action_type, entry.name)
+
+        self.assertTrue(ACTION_SPECS["issue_trade_invoice"].requires_ready_preview)
+        self.assertFalse(ACTION_SPECS["cancel_trade"].requires_ready_preview)
+
     def test_action_planner_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_PLANNERS), set(ALL_ASSISTANT_ACTION_TYPES))
         self.assertEqual(set(ACTION_PLANNERS), {planner.action_type for planner in ACTION_PLANNER_SEQUENCE})
         self.assertEqual(len(ACTION_PLANNER_SEQUENCE), len(ACTION_PLANNERS))
-        self.assertEqual(set(ACTION_PLANNERS), set(ACTION_HANDLERS))
+        self.assertEqual(set(ACTION_PLANNERS), set(ACTION_SPECS))
         self.assertEqual(
             tuple(planner.action_type for planner in ACTION_PLANNER_SEQUENCE),
             (
