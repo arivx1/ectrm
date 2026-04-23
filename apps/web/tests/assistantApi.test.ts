@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 import type { AssistantPromptRequest } from '../src/shared/models.ts'
 
-const { fetchJsonMock, postJsonMock, putJsonMock, requestOkMock } = vi.hoisted(() => ({
+const { fetchJsonMock, patchJsonMock, postJsonMock, putJsonMock, requestOkMock } = vi.hoisted(() => ({
   fetchJsonMock: vi.fn(),
+  patchJsonMock: vi.fn(),
   postJsonMock: vi.fn(),
   putJsonMock: vi.fn(),
   requestOkMock: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('../src/shared/api.ts', () => ({
     Object.assign(new Error(message), init),
   fetchJson: fetchJsonMock,
   getResponseCorrelationId: (response: Pick<Response, 'headers'>) => response.headers.get('x-correlation-id'),
+  patchJson: patchJsonMock,
   postJson: postJsonMock,
   putJson: putJsonMock,
   requestOk: requestOkMock,
@@ -61,11 +63,13 @@ import {
   runAssistantAgentEvalSuite,
   simulateAssistantAgentPolicy,
   streamAssistantResponse,
+  updateAdminAssistantAgentWorkPackage,
   updateAssistantAgentEval,
 } from '../src/entities/assistant/api.ts'
 
 beforeEach(() => {
   fetchJsonMock.mockReset()
+  patchJsonMock.mockReset()
   postJsonMock.mockReset()
   putJsonMock.mockReset()
   requestOkMock.mockReset()
@@ -484,6 +488,57 @@ test('acceptAdminAssistantAgentHealthWorkPackage posts accepted candidate metada
   assert.deepEqual(body, {
     accepted_by: 'ops_admin',
     notes: 'Promote into policy backlog.',
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('updateAdminAssistantAgentWorkPackage patches lifecycle transition metadata', async () => {
+  const expected = {
+    id: 11,
+    work_package_id: 'policy-review-update-trade-workflow-item-12345678',
+    title: 'Policy: Review workflow blockers',
+    package_type: 'POLICY',
+    priority: 'P2',
+    status: 'IMPLEMENTED',
+    source_agent_ids: ['ops-governor'],
+    source_agent_names: ['Ops Governor'],
+    source_recommendations: ['KEEP_STAGED'],
+    source_candidates: ['Review workflow blockers and promote recurring reviewer decisions.'],
+    recommended_owner_role: 'Operations Lead',
+    rationale: 'Autonomy review surfaced a recurring deterministic candidate.',
+    acceptance_checks: ['Run policy simulation for every affected action type before rollout.'],
+    knowledge_base_titles: [],
+    accepted_at: '2026-04-22T18:00:00Z',
+    accepted_by: 'ops_admin',
+    notes: 'Implemented checks with passing coverage.',
+    created_at: '2026-04-22T18:00:00Z',
+    created_by: 'ops_admin',
+    updated_at: '2026-04-22T19:00:00Z',
+    updated_by: 'ops_admin',
+  }
+  patchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await updateAdminAssistantAgentWorkPackage(
+    'http://api.test',
+    ' policy-review-update-trade-workflow-item-12345678 ',
+    {
+      status: 'IMPLEMENTED',
+      updatedBy: ' ops_admin ',
+      notes: ' Implemented checks with passing coverage. ',
+    },
+  )
+
+  assert.equal(payload, expected)
+  const [url, body, init] = patchJsonMock.mock.calls[0]
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/agent-work-packages/policy-review-update-trade-workflow-item-12345678',
+  )
+  assert.deepEqual(body, {
+    status: 'IMPLEMENTED',
+    updated_by: 'ops_admin',
+    notes: 'Implemented checks with passing coverage.',
   })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')

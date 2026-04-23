@@ -3,13 +3,21 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Protocol, Sequence
+from typing import Iterable, Sequence
 
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from apps.api.app.domains.assistant.services.action_runtime import AssistantActionProposal
+from apps.api.app.domains.assistant.services.action_catalog import ASSISTANT_ACTION_CATALOG_BY_NAME
+from apps.api.app.domains.assistant.services.action_runtime import ACTION_PLANNERS
+from apps.api.app.domains.assistant.services.action_specs import (
+    AssistantActionExecutionContext,
+    AssistantActionHandler,
+    AssistantActionProposal,
+    AssistantActionSpec,
+    build_assistant_action_spec_registry,
+)
 from apps.api.app.domains.assistant.services.policies import evaluate_action_policy
 from apps.api.app.domains.assistant.services.registry import get_agent_record, to_managed_agent
 from apps.api.app.domains.documents.services.ingestion import reprocess_document_ingestion
@@ -78,38 +86,6 @@ class AssistantActionRequestPage:
     @property
     def has_more(self) -> bool:
         return self.offset + len(self.records) < self.total_count
-
-
-@dataclass(frozen=True)
-class AssistantActionExecutionContext:
-    db: Session
-    record: AssistantActionRequest
-    actor_id: str
-    actor_role: str | None
-    decided_at: datetime
-
-
-class AssistantActionHandler(Protocol):
-    action_type: str
-
-    def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
-        ...
-
-    def current_stale_state(
-        self,
-        *,
-        db: Session,
-        record: AssistantActionRequest,
-    ) -> dict[str, object | None]:
-        ...
-
-    def is_idempotent_retry(
-        self,
-        *,
-        db: Session,
-        record: AssistantActionRequest,
-    ) -> bool:
-        ...
 
 
 class NonIdempotentActionHandler:
@@ -391,17 +367,32 @@ class ReprocessDocumentIngestionActionHandler(NonIdempotentActionHandler):
         }
 
 
-ACTION_HANDLERS: dict[str, AssistantActionHandler] = {
-    handler.action_type: handler
-    for handler in (
-        CancelTradeActionHandler(),
-        IssueTradeConfirmationActionHandler(),
-        RecordTradeConfirmationResponseActionHandler(),
-        UpdateTradeWorkflowItemActionHandler(),
-        IssueTradeInvoiceActionHandler(),
-        CreateTradePaymentActionHandler(),
-        ReprocessDocumentIngestionActionHandler(),
+def _action_spec(
+    handler: AssistantActionHandler,
+    *,
+    requires_ready_preview: bool = False,
+) -> AssistantActionSpec:
+    return AssistantActionSpec(
+        catalog_entry=ASSISTANT_ACTION_CATALOG_BY_NAME[handler.action_type],
+        handler=handler,
+        planner=ACTION_PLANNERS[handler.action_type],
+        requires_ready_preview=requires_ready_preview,
     )
+
+
+ACTION_SPECS: dict[str, AssistantActionSpec] = build_assistant_action_spec_registry(
+    (
+        _action_spec(CancelTradeActionHandler()),
+        _action_spec(IssueTradeConfirmationActionHandler()),
+        _action_spec(RecordTradeConfirmationResponseActionHandler()),
+        _action_spec(UpdateTradeWorkflowItemActionHandler()),
+        _action_spec(IssueTradeInvoiceActionHandler(), requires_ready_preview=True),
+        _action_spec(CreateTradePaymentActionHandler()),
+        _action_spec(ReprocessDocumentIngestionActionHandler()),
+    )
+)
+ACTION_HANDLERS: dict[str, AssistantActionHandler] = {
+    action_type: spec.handler for action_type, spec in ACTION_SPECS.items()
 }
 
 
@@ -1045,7 +1036,7 @@ def _execute_action(
     actor_role: str | None,
     decided_at: datetime,
 ) -> dict[str, object]:
-    return _action_handler_for(record).execute(
+    return _action_spec_for(record).execute(
         AssistantActionExecutionContext(
             db=db,
             record=record,
@@ -1115,13 +1106,14 @@ def _validate_action_preview_contract(
     record: AssistantActionRequest,
     review_context: dict[str, object],
 ) -> dict[str, object]:
-    if record.action_type != "issue_trade_invoice":
+    action_spec = _action_spec_for(record)
+    if not action_spec.requires_ready_preview:
         return {"approval_checks": []}
 
     action_preview = review_context.get("action_preview")
     if not isinstance(action_preview, dict):
         raise AssistantActionRequestError(
-            "Assistant action approval requires a ready issue_trade_invoice preview before execution."
+            f"Assistant action approval requires a ready {record.action_type} preview before execution."
         )
 
     preview_status = _action_preview_status(review_context)
@@ -1131,7 +1123,7 @@ def _validate_action_preview_contract(
         if isinstance(blocking_reasons, list) and blocking_reasons:
             reason_text = " " + "; ".join(str(reason) for reason in blocking_reasons)
         raise AssistantActionRequestError(
-            "Assistant action approval blocked because the issue_trade_invoice preview is not ready."
+            f"Assistant action approval blocked because the {record.action_type} preview is not ready."
             + reason_text
         )
 
@@ -1253,7 +1245,7 @@ def _current_stale_state_for_action(
     db: Session,
     record: AssistantActionRequest,
 ) -> dict[str, object | None]:
-    return _action_handler_for(record).current_stale_state(db=db, record=record)
+    return _action_spec_for(record).current_stale_state(db=db, record=record)
 
 
 def _invoice_state_token(invoices: list[TradeInvoice]) -> list[dict[str, object | None]]:
@@ -1285,14 +1277,14 @@ def _payment_state_token(payments: list[TradePayment]) -> list[dict[str, object 
 
 
 def _action_payload_is_idempotent_retry(*, db: Session, record: AssistantActionRequest) -> bool:
-    return _action_handler_for(record).is_idempotent_retry(db=db, record=record)
+    return _action_spec_for(record).is_idempotent_retry(db=db, record=record)
 
 
-def _action_handler_for(record: AssistantActionRequest) -> AssistantActionHandler:
-    handler = ACTION_HANDLERS.get(record.action_type)
-    if handler is None:
+def _action_spec_for(record: AssistantActionRequest) -> AssistantActionSpec:
+    action_spec = ACTION_SPECS.get(record.action_type)
+    if action_spec is None:
         raise AssistantActionRequestError(f"Unsupported assistant action type '{record.action_type}'.")
-    return handler
+    return action_spec
 
 
 def _execute_cancel_trade_action(

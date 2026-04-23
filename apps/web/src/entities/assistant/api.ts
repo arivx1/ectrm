@@ -2,6 +2,7 @@ import {
   createApiError,
   fetchJson,
   getResponseCorrelationId,
+  patchJson,
   postJson,
   putJson,
   requestOk,
@@ -159,6 +160,12 @@ export type AcceptAssistantAgentWorkPackageInput = {
   notes?: string
   createdAfter?: string
   createdBefore?: string
+}
+
+export type UpdateAssistantAgentWorkPackageInput = {
+  status: AssistantAgentWorkPackageStatus
+  updatedBy?: string
+  notes?: string
 }
 
 function assistantMutationHeaders(): Headers {
@@ -682,6 +689,29 @@ export async function acceptAdminAssistantAgentHealthWorkPackage(
   }
   return postJson<AssistantAgentWorkPackage>(
     `${apiBase}/admin/assistant/agent-health-review/work-packages/${encodeURIComponent(workPackageId.trim())}/accept${outcomeMetricsQuery(payload)}`,
+    body,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function updateAdminAssistantAgentWorkPackage(
+  apiBase: string,
+  workPackageId: string,
+  payload: UpdateAssistantAgentWorkPackageInput,
+): Promise<AssistantAgentWorkPackage> {
+  const body: Record<string, unknown> = {
+    status: payload.status,
+  }
+  if (payload.updatedBy?.trim()) {
+    body.updated_by = payload.updatedBy.trim()
+  }
+  if (payload.notes?.trim()) {
+    body.notes = payload.notes.trim()
+  }
+  return patchJson<AssistantAgentWorkPackage>(
+    `${apiBase}/admin/assistant/agent-work-packages/${encodeURIComponent(workPackageId.trim())}`,
     body,
     {
       headers: assistantMutationHeaders(),

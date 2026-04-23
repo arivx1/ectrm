@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_admin_role, resolve_session_principal
 from apps.api.app.domains.assistant.services.action_requests import (
+    ACTION_SPECS,
     AssistantActionDecision,
     AssistantActionRequestError,
     approve_action_request,
@@ -272,6 +273,7 @@ def prepare_assistant_execution(
         payload=payload,
         db=db,
         agent_definition=agent_definition,
+        action_specs=ACTION_SPECS,
     )
     prompt_context = _apply_prompt_enrichment(
         prompt_context,

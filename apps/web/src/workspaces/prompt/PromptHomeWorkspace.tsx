@@ -100,6 +100,8 @@ const NAVIGATION_INTENTS: PromptNavigationIntent[] = [
   },
 ]
 
+const PROMPT_HOME_LIVE_CONTEXT_PANEL_ID = 'prompt-home-live-context-panel'
+
 function createPromptMessageId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
@@ -198,6 +200,7 @@ export function PromptHomeWorkspace({
   const [conversationHistoryError, setConversationHistoryError] = useState('')
   const [conversationDetailLoading, setConversationDetailLoading] = useState(false)
   const [conversationDetailError, setConversationDetailError] = useState('')
+  const [liveContextExpanded, setLiveContextExpanded] = useState(false)
   const promptResumeIntent = useSyncExternalStore(
     subscribePromptResumeIntent,
     getPromptResumeIntent,
@@ -482,17 +485,33 @@ export function PromptHomeWorkspace({
   return (
     <div className="prompt-home">
       <section className="surface prompt-home-composer-panel">
-        <div className="prompt-home-heading">
-          <span className="eyebrow">Prompt Home</span>
-          <h3>Start with the job in front of you</h3>
-          <p>
-            Ask for the next best workspace, a grounded summary, or a safe path into
-            the old console when a form, report, queue, or approval surface is the
-            right place to continue.
-          </p>
+        <div className="prompt-home-heading-row">
+          <div className="prompt-home-heading">
+            <span className="eyebrow">Prompt Home</span>
+            <h3>Start with the job in front of you</h3>
+            <p>
+              Ask for the next best workspace, a grounded summary, or a safe path into
+              the old console when a form, report, queue, or approval surface is the
+              right place to continue.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="button button-secondary prompt-home-live-context-toggle"
+            aria-expanded={liveContextExpanded}
+            aria-controls={PROMPT_HOME_LIVE_CONTEXT_PANEL_ID}
+            onClick={() => setLiveContextExpanded((expanded) => !expanded)}
+          >
+            {liveContextExpanded ? 'Hide live context' : 'Show live context'}
+          </button>
         </div>
 
-        <section className="prompt-home-starters" aria-label="Contextual starting points">
+        <section
+          id={PROMPT_HOME_LIVE_CONTEXT_PANEL_ID}
+          className="prompt-home-starters"
+          aria-label="Contextual starting points"
+          hidden={!liveContextExpanded}
+        >
           <div className="section-head">
             <div>
               <span className="eyebrow">Live Context</span>

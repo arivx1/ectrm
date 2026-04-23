@@ -25,7 +25,7 @@ from apps.api.app.domains.assistant.services.action_catalog import (
     ASSISTANT_ACTION_CATALOG,
 )
 from apps.api.app.domains.assistant.services.action_runtime import ACTION_PLANNER_SEQUENCE, ACTION_PLANNERS
-from apps.api.app.domains.assistant.services.action_requests import ACTION_HANDLERS
+from apps.api.app.domains.assistant.services.action_requests import ACTION_HANDLERS, ACTION_SPECS
 from apps.api.app.domains.assistant.services.chat import ASSISTANT_ACTION_DEFINITIONS
 from apps.api.app.domains.assistant.services.policies import POLICY_RULES
 from apps.api.app.domains.assistant.services.role_archetypes import validate_role_archetype_registry
@@ -310,12 +310,15 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("outcome review", document_agent["activation_notes"])
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
+        self.assertEqual(set(ACTION_SPECS), set(ALL_ASSISTANT_ACTION_TYPES))
         self.assertEqual(set(ACTION_HANDLERS), set(ALL_ASSISTANT_ACTION_TYPES))
+        self.assertEqual(set(ACTION_HANDLERS), set(ACTION_SPECS))
 
     def test_action_catalog_drives_backend_action_surfaces(self) -> None:
         catalog_names = tuple(entry.name for entry in ASSISTANT_ACTION_CATALOG)
         self.assertEqual(catalog_names, ALL_CATALOG_ACTION_TYPES)
         self.assertEqual(catalog_names, ALL_ASSISTANT_ACTION_TYPES)
+        self.assertEqual(tuple(ACTION_SPECS), catalog_names)
         self.assertEqual(set(catalog_names), set(ACTION_HANDLERS))
         self.assertEqual(
             tuple(definition.name for definition in ASSISTANT_ACTION_DEFINITIONS),
@@ -337,11 +340,26 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(rule.workspaces, entry.workspaces)
             self.assertEqual(rule.approval_required, entry.approval_required)
 
+            action_spec = ACTION_SPECS[entry.name]
+            self.assertIs(action_spec.catalog_entry, entry)
+            self.assertEqual(action_spec.handler.action_type, entry.name)
+            self.assertEqual(action_spec.planner.action_type, entry.name)
+
+        self.assertTrue(ACTION_SPECS["issue_trade_invoice"].requires_ready_preview)
+        self.assertFalse(ACTION_SPECS["cancel_trade"].requires_ready_preview)
+
     def test_action_planner_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_PLANNERS), set(ALL_ASSISTANT_ACTION_TYPES))
         self.assertEqual(set(ACTION_PLANNERS), {planner.action_type for planner in ACTION_PLANNER_SEQUENCE})
         self.assertEqual(len(ACTION_PLANNER_SEQUENCE), len(ACTION_PLANNERS))
-        self.assertEqual(set(ACTION_PLANNERS), set(ACTION_HANDLERS))
+        self.assertEqual(set(ACTION_PLANNERS), set(ACTION_SPECS))
+        self.assertEqual(
+            tuple(
+                spec.planner
+                for spec in sorted(ACTION_SPECS.values(), key=lambda spec: spec.catalog_entry.planner_priority)
+            ),
+            ACTION_PLANNER_SEQUENCE,
+        )
         self.assertEqual(
             tuple(planner.action_type for planner in ACTION_PLANNER_SEQUENCE),
             (
@@ -3344,8 +3362,39 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(accepted_package["accepted_by"], "assistant_user")
         self.assertEqual(accepted_package["notes"], "Promote into the policy backlog.")
 
+        start_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "IN_PROGRESS", "notes": "Implementation started."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(start_response.status_code, 200)
+        self.assertEqual(start_response.json()["status"], "IN_PROGRESS")
+        self.assertEqual(start_response.json()["notes"], "Implementation started.")
+
+        missing_evidence_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "IMPLEMENTED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(missing_evidence_response.status_code, 400)
+
+        implemented_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "IMPLEMENTED", "notes": "Implemented checks with passing coverage."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(implemented_response.status_code, 200)
+        self.assertEqual(implemented_response.json()["status"], "IMPLEMENTED")
+
+        invalid_transition_response = self.client.patch(
+            f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
+            json={"status": "DISMISSED", "notes": "Close anyway."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(invalid_transition_response.status_code, 409)
+
         list_response = self.client.get(
-            "/admin/assistant/agent-work-packages?status=ACCEPTED",
+            "/admin/assistant/agent-work-packages?status=IMPLEMENTED",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(list_response.status_code, 200)
@@ -3384,6 +3433,13 @@ class AssistantApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         self.assertEqual(accept_response.status_code, 403)
+
+        update_response = self.client.patch(
+            "/admin/assistant/agent-work-packages/missing",
+            json={"status": "IN_PROGRESS", "notes": "Nope."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(update_response.status_code, 403)
 
     def test_admin_accepts_agent_health_work_package_into_persisted_backlog(self) -> None:
         admin_token = self._create_session_token()

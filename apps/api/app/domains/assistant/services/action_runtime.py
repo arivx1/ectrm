@@ -3,12 +3,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
 
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.assistant.services.action_specs import (
+    AssistantActionPlanner,
+    AssistantActionPlanningCandidate as _ActionPlanningCandidate,
+    AssistantActionPlanningContext,
+    AssistantActionProposal,
+    AssistantActionSpec,
+)
 from apps.api.app.domains.assistant.services.policies import evaluate_action_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptSection
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
@@ -32,40 +38,10 @@ DOCUMENT_ID_PATTERN = re.compile(
 
 
 @dataclass(frozen=True)
-class _ActionPlanningCandidate:
-    proposal: AssistantActionProposal | None = None
-    warning: str | None = None
-
-
-@dataclass(frozen=True)
-class AssistantActionProposal:
-    action_type: str
-    summary: str
-    description: str
-    payload: dict[str, object]
-
-
-@dataclass(frozen=True)
 class AssistantActionRuntimeResult:
     sections: tuple[AssistantPromptSection, ...]
     proposals: tuple[AssistantActionProposal, ...]
     warnings: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class AssistantActionPlanningContext:
-    message: str
-    message_lower: str
-    context: str | None
-    context_fields: dict[str, str]
-    db: Session
-
-
-class AssistantActionPlanner(Protocol):
-    action_type: str
-
-    def plan(self, context: AssistantActionPlanningContext) -> _ActionPlanningCandidate | None:
-        ...
 
 
 def _object_ref(record_type: str, record_id: object, label: str | None = None) -> dict[str, object]:
@@ -259,6 +235,7 @@ def plan_action_requests(
     payload: AssistantPromptRequest,
     db: Session,
     agent_definition: ManagedAssistantAgent | None,
+    action_specs: dict[str, AssistantActionSpec],
 ) -> AssistantActionRuntimeResult:
     if agent_definition is None:
         return AssistantActionRuntimeResult(sections=(), proposals=())
@@ -278,7 +255,7 @@ def plan_action_requests(
         context_fields=context_fields,
         db=db,
     )
-    planning_candidate = _first_matching_action_plan(planning_context)
+    planning_candidate = _first_matching_action_plan(planning_context, action_specs=action_specs)
     if planning_candidate is None:
         return AssistantActionRuntimeResult(sections=(), proposals=())
     if planning_candidate.warning:
@@ -306,12 +283,20 @@ def plan_action_requests(
 
 def _first_matching_action_plan(
     planning_context: AssistantActionPlanningContext,
+    *,
+    action_specs: dict[str, AssistantActionSpec],
 ) -> _ActionPlanningCandidate | None:
-    for planner in ACTION_PLANNER_SEQUENCE:
-        planning_candidate = planner.plan(planning_context)
+    for action_spec in _action_planning_sequence(action_specs):
+        planning_candidate = action_spec.plan(planning_context)
         if planning_candidate is not None:
             return planning_candidate
     return None
+
+
+def _action_planning_sequence(
+    action_specs: dict[str, AssistantActionSpec],
+) -> tuple[AssistantActionSpec, ...]:
+    return tuple(sorted(action_specs.values(), key=lambda spec: spec.catalog_entry.planner_priority))
 
 
 def _latest_user_message(payload: AssistantPromptRequest) -> str | None:

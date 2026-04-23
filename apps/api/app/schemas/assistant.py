@@ -732,6 +732,17 @@ class AssistantAgentWorkPackageAcceptRequest(BaseModel):
         return normalize_optional_text(value, field_name=info.field_name)
 
 
+class AssistantAgentWorkPackageUpdateRequest(BaseModel):
+    status: AssistantAgentWorkPackageStatus
+    updated_by: Optional[str] = None
+    notes: Optional[str] = None
+
+    @field_validator("updated_by", "notes")
+    @classmethod
+    def normalize_optional_update_text(cls, value: Optional[str], info) -> Optional[str]:
+        return normalize_optional_text(value, field_name=info.field_name)
+
+
 class AssistantPromptResponse(BaseModel):
     conversation_id: Optional[int] = None
     conversation_updated_at: Optional[datetime] = None
