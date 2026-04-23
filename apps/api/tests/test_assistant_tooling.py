@@ -969,6 +969,105 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trace.tool_name, "list_invoice_issue_candidates")
         self.assertIn("invoice issue candidate", trace.summary)
 
+    def test_tool_service_lists_trade_attention_candidates_without_child_rows(self) -> None:
+        now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                Trade(
+                    trade_id="T-NO-CNF",
+                    external_trade_id="EXT-NO-CNF",
+                    source_system="ops",
+                    created_at=now,
+                    updated_at=now,
+                    execution_timestamp=datetime(2026, 3, 18, 10, 0, tzinfo=timezone.utc),
+                    trade_date=now.date(),
+                    trade_currency_code="USD",
+                    location_code="HENRY",
+                    delivery_start=now.date(),
+                    delivery_end=now.date(),
+                    unit_of_measure="MMBTU",
+                    price_unit_code="USD_MMBTU",
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="GAS-US",
+                    portfolio="NORTH",
+                    counterparty="ACME",
+                    commodity_class="GAS",
+                    commodity="HH",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    price_index_code=None,
+                    price=4.25,
+                    volume=2000,
+                    confirmation_status="PENDING",
+                    nomination_status="SCHEDULED",
+                    allocation_status="PENDING",
+                    actualization_status="PENDING",
+                    invoice_status="PENDING",
+                    payment_status="PENDING",
+                    settlement_status="PENDING",
+                    trader_user="trader_1",
+                    status="ACTIVE",
+                    last_event_id="evt-no-cnf",
+                )
+            )
+            session.commit()
+
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_trade_attention_candidates",
+                {"candidate_type": "confirmation_backlog", "limit": 10},
+            )
+
+        rows_by_trade_id = {row["trade_id"]: row for row in result.output["items"]}
+        self.assertIn("T-NO-CNF", rows_by_trade_id)
+        candidate = rows_by_trade_id["T-NO-CNF"]
+        self.assertEqual(candidate["candidate_types"], ["confirmation_backlog"])
+        self.assertIn("dashboard.attention.confirmation_backlog_count", candidate["source_count_keys"])
+        self.assertEqual(candidate["supporting_records"]["confirmation_count"], 0)
+        self.assertIn("No persisted confirmation ledger row exists", candidate["blocking_reasons"][0])
+        self.assertEqual(candidate["suggested_next_tool"], "list_trade_confirmations")
+        self.assertEqual(trace.tool_name, "list_trade_attention_candidates")
+        self.assertIn("confirmation backlog", trace.summary)
+
+    def test_tool_service_lists_payment_due_attention_candidates(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool(
+                "list_trade_attention_candidates",
+                {"candidate_type": "payment_due", "limit": 10},
+            )
+
+        rows_by_trade_id = {row["trade_id"]: row for row in result.output["items"]}
+        self.assertIn("T-1001", rows_by_trade_id)
+        candidate = rows_by_trade_id["T-1001"]
+        self.assertEqual(candidate["source_count_keys"], ["settlement.payment_due_count"])
+        self.assertEqual(candidate["supporting_records"]["invoice_count"], 1)
+        self.assertEqual(candidate["supporting_records"]["payment_count"], 1)
+        self.assertEqual(candidate["supporting_records"]["candidate_invoice_id"], 1)
+        self.assertEqual(
+            candidate["recommended_action"],
+            {
+                "action_type": "create_trade_payment",
+                "requires_approval": True,
+                "payload": {"invoice_id": 1},
+                "basis": "open_invoice_balance",
+            },
+        )
+        self.assertEqual(trace.tool_name, "list_trade_attention_candidates")
+        self.assertIn("settlement.payment_due_count", trace.summary)
+
+    def test_tool_service_payment_list_points_to_attention_candidates(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("list_trade_payments", {"limit": 10})
+
+        self.assertEqual(result.output["count"], 1)
+        self.assertEqual(result.output["payment_due_candidate_count"], 1)
+        self.assertEqual(result.output["suggested_next_tool"], "list_trade_attention_candidates")
+        self.assertIn("payment status", trace.summary)
+
     def test_tool_service_builds_trade_settlement_summary(self) -> None:
         with self.SessionLocal() as session:
             service = AssistantToolService(session)

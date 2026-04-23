@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -11,6 +11,11 @@ from apps.api.app.domains.operations.services.workflow_items import (
 )
 from apps.api.app.domains.operations.services.settlement_invoices import (
     count_invoice_issue_candidates,
+)
+from apps.api.app.domains.operations.services.trade_attention_candidates import (
+    DASHBOARD_ATTENTION_CANDIDATE_TYPE_NAMES,
+    count_trade_attention_candidates,
+    count_trade_attention_candidates_for_types,
 )
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.option_exposure import OptionExposure
@@ -106,82 +111,19 @@ def _build_dashboard_position_summary(db: Session) -> dict[str, object]:
 
 
 def _build_dashboard_attention_summary(db: Session, *, now: datetime) -> dict[str, int]:
-    today = now.date()
-    confirmation_backlog_condition = and_(
-        Trade.execution_timestamp.is_not(None),
-        Trade.execution_timestamp <= now - timedelta(days=1),
-        Trade.confirmation_status != "CONFIRMED",
-    )
-    nomination_backlog_condition = and_(
-        Trade.trade_nature == "PHYSICAL",
-        Trade.delivery_start.is_not(None),
-        Trade.delivery_start <= today + timedelta(days=3),
-        Trade.nomination_status.notin_(("NOT_REQUIRED", "SCHEDULED", "NOMINATED", "COMPLETED")),
-    )
-    allocation_backlog_condition = and_(
-        Trade.trade_nature == "PHYSICAL",
-        Trade.nomination_status.in_(("NOMINATED", "COMPLETED")),
-        Trade.allocation_status.notin_(("NOT_REQUIRED", "ALLOCATED", "COMPLETED")),
-    )
-    invoice_backlog_condition = and_(
-        Trade.trade_nature == "PHYSICAL",
-        Trade.execution_timestamp.is_not(None),
-        Trade.execution_timestamp <= now - timedelta(days=5),
-        Trade.invoice_status.notin_(("NOT_REQUIRED", "ISSUED", "APPROVED")),
-    )
-    overdue_payment_condition = or_(
-        Trade.payment_status == "OVERDUE",
-        and_(
-            Trade.execution_timestamp.is_not(None),
-            Trade.execution_timestamp <= now - timedelta(days=10),
-            or_(
-                Trade.invoice_status.in_(("ISSUED", "APPROVED")),
-                Trade.settlement_status.in_(("INVOICED", "PARTIALLY_SETTLED")),
-            ),
-            Trade.payment_status.notin_(("NOT_REQUIRED", "PAID")),
-        ),
-    )
-    stale_pricing_condition = and_(
-        Trade.execution_timestamp.is_not(None),
-        Trade.execution_timestamp <= now - timedelta(days=2),
-        Trade.pricing_status.in_(("PENDING", "PARTIALLY_PRICED")),
-    )
-    incomplete_ops_data_condition = or_(
-        Trade.execution_timestamp.is_(None),
-        Trade.external_trade_id.is_(None),
-        Trade.counterparty.is_(None),
-        Trade.unit_of_measure.is_(None),
-        and_(
-            Trade.trade_nature == "PHYSICAL",
-            or_(
-                Trade.location_code.is_(None),
-                Trade.delivery_start.is_(None),
-                Trade.delivery_end.is_(None),
-                Trade.price_unit_code.is_(None),
-            ),
-        ),
-    )
-
     counts = {
-        "confirmation_backlog_count": _count_trades(db, confirmation_backlog_condition),
-        "nomination_backlog_count": _count_trades(db, nomination_backlog_condition),
-        "allocation_backlog_count": _count_trades(db, allocation_backlog_condition),
-        "invoice_backlog_count": _count_trades(db, invoice_backlog_condition),
-        "overdue_payment_count": _count_trades(db, overdue_payment_condition),
-        "stale_pricing_count": _count_trades(db, stale_pricing_condition),
-        "incomplete_ops_data_count": _count_trades(db, incomplete_ops_data_condition),
+        "confirmation_backlog_count": count_trade_attention_candidates(db, "confirmation_backlog", now=now),
+        "nomination_backlog_count": count_trade_attention_candidates(db, "nomination_backlog", now=now),
+        "allocation_backlog_count": count_trade_attention_candidates(db, "allocation_backlog", now=now),
+        "invoice_backlog_count": count_trade_attention_candidates(db, "invoice_backlog", now=now),
+        "overdue_payment_count": count_trade_attention_candidates(db, "overdue_payment", now=now),
+        "stale_pricing_count": count_trade_attention_candidates(db, "stale_pricing", now=now),
+        "incomplete_ops_data_count": count_trade_attention_candidates(db, "incomplete_ops_data", now=now),
     }
-    counts["total_count"] = _count_trades(
+    counts["total_count"] = count_trade_attention_candidates_for_types(
         db,
-        or_(
-            confirmation_backlog_condition,
-            nomination_backlog_condition,
-            allocation_backlog_condition,
-            invoice_backlog_condition,
-            overdue_payment_condition,
-            stale_pricing_condition,
-            incomplete_ops_data_condition,
-        ),
+        DASHBOARD_ATTENTION_CANDIDATE_TYPE_NAMES,
+        now=now,
     )
     return counts
 
@@ -219,20 +161,13 @@ def _build_settlement_summary(db: Session, *, now: datetime) -> dict[str, object
             ).scalar_one()
         ),
         "invoice_pending_count": count_invoice_issue_candidates(db),
-        "payment_due_count": _count_trades(db, Trade.payment_status.in_(("DUE", "OVERDUE"))),
+        "payment_due_count": count_trade_attention_candidates(db, "payment_due", now=now),
         "settled_count": _count_trades(
             db,
             Trade.settlement_status == "SETTLED",
             Trade.payment_status.in_(("PAID", "NOT_REQUIRED")),
         ),
-        "trade_exception_count": _count_trades(
-            db,
-            or_(
-                Trade.settlement_status == "DISPUTED",
-                Trade.invoice_status == "DISPUTED",
-                Trade.payment_status == "OVERDUE",
-            ),
-        ),
+        "trade_exception_count": count_trade_attention_candidates(db, "settlement_exception", now=now),
         "workflow_exception_count": int(
             db.execute(
                 select(func.count())
@@ -283,16 +218,7 @@ def build_workspace_bootstrap_summary(db: Session) -> dict[str, object]:
             )
         ).scalar_one()
     )
-    pending_settlement_count = int(
-        db.execute(
-            select(func.count())
-            .select_from(Trade)
-            .where(
-                Trade.status == ACTIVE_TRADE_STATUS,
-                Trade.settlement_status != "SETTLED",
-            )
-        ).scalar_one()
-    )
+    pending_settlement_count = count_trade_attention_candidates(db, "pending_settlement", now=now)
     tracked_book_count = int(
         db.execute(
             select(func.count(func.distinct(Trade.book)))

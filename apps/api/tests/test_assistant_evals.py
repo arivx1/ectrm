@@ -182,6 +182,74 @@ MANAGED_AGENT_EVAL_CASES = (
         ),
     ),
     AssistantEvalCase(
+        name="managed-read-agent-lists-trade-attention-candidates",
+        agent=AssistantEvalAgentFixture(
+            agent_id="attention-candidate-reader",
+            name="Attention Candidate Reader",
+            capabilities=("READ", "EXPLAIN"),
+            allowed_workspaces=("assistant", "dashboard", "settlement"),
+            allowed_tools=("list_trade_attention_candidates",),
+            system_prompt=(
+                "Use live trade attention candidate reads when workspace summary counts represent trade-state work."
+            ),
+        ),
+        trades=(AssistantEvalTradeFixture(trade_id="T-2001P"),),
+        request_payload={
+            "agent_id": "attention-candidate-reader",
+            "workspace": "dashboard",
+            "context": "Workspace summary:\n- trades.pending_settlement_count: 1",
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Which pending settlement trade explains this count?"},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-attention-candidates-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_attention_candidates_1",
+                        "call_id": "call_eval_attention_candidates_1",
+                        "name": "list_trade_attention_candidates",
+                        "arguments": '{"candidate_type":"pending_settlement","limit":10}',
+                    }
+                ],
+                "usage": {"input_tokens": 18, "output_tokens": 7},
+            },
+            {
+                "id": "eval-attention-candidates-2",
+                "output_text": "The live attention read ties the pending settlement count to trade T-2001P; review settlement evidence before treating it as a ledger row.",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "The live attention read ties the pending settlement count to trade T-2001P; review settlement evidence before treating it as a ledger row.",
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": 23},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="attention-candidate-reader",
+            agent_name="Attention Candidate Reader",
+            message_contains=("pending settlement", "trade T-2001P", "ledger row"),
+            warning_count=0,
+            tool_names=("list_trade_attention_candidates",),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_tool_names=("list_trade_attention_candidates",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
         name="managed-read-agent-prefers-live-evidence-over-stale-context",
         agent=AssistantEvalAgentFixture(
             agent_id="trade-reader-live-evidence",

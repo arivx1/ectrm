@@ -58,6 +58,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         default_tools=(
             "get_trade_workbench",
             "list_workflow_items",
+            "list_trade_attention_candidates",
             "list_trade_confirmations",
             "list_deliveries",
             "list_documents",
@@ -106,6 +107,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         default_tools=(
             "list_trade_invoices",
             "list_invoice_issue_candidates",
+            "list_trade_attention_candidates",
             "list_trade_payments",
             "get_trade_settlement_summary",
             "list_workflow_items",
@@ -209,6 +211,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
         default_tools=(
             "list_workflow_items",
+            "list_trade_attention_candidates",
             "list_deliveries",
             "list_trade_confirmations",
             "get_trade_workbench",
@@ -237,6 +240,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         default_tools=(
             "list_trade_invoices",
             "list_invoice_issue_candidates",
+            "list_trade_attention_candidates",
             "list_trade_payments",
             "get_trade_settlement_summary",
             "list_workflow_items",
@@ -416,6 +420,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_positions",
             "list_trade_invoices",
             "list_invoice_issue_candidates",
+            "list_trade_attention_candidates",
             "list_trade_payments",
             "get_market_context",
             "list_workflow_items",
@@ -439,7 +444,13 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "shipments", "scheduling", "operations"),
         work_objects=("delivery obligation", "scheduling commitment", "delivery event", "workflow item"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
-        default_tools=("list_deliveries", "list_workflow_items", "get_trade_workbench", "get_workspace_summary"),
+        default_tools=(
+            "list_deliveries",
+            "list_workflow_items",
+            "list_trade_attention_candidates",
+            "get_trade_workbench",
+            "get_workspace_summary",
+        ),
         maximum_action_types=(),
         authority_ceiling="DRAFT",
         approval_rules=("Operations Lead owns scheduling and actualization decisions.",),
@@ -462,6 +473,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "get_trade_settlement_summary",
             "list_trade_invoices",
             "list_invoice_issue_candidates",
+            "list_trade_attention_candidates",
             "list_trade_payments",
             "get_workspace_summary",
         ),
@@ -486,6 +498,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         default_tools=(
             "get_trade_workbench",
             "list_workflow_items",
+            "list_trade_attention_candidates",
             "list_trade_confirmations",
             "get_trade_settlement_summary",
         ),

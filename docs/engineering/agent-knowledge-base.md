@@ -971,3 +971,34 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: wire the admin work-package lifecycle controls into the control
   tower once the UX can show transition history without obscuring manual
   approval responsibility.
+
+### 2026-04-23 - Attention Counts Need Candidate Reads
+
+- Type: algorithm-added
+- Domain: assistant workflow and operations summaries
+- Applies to: dashboard attention counts, settlement counts, confirmation
+  backlogs, nomination and allocation backlogs, payment due work, pending
+  settlement, exception summaries
+- Status: implemented
+- Source:
+  [`trade_attention_candidates.py`](../../apps/api/app/domains/operations/services/trade_attention_candidates.py),
+  [`workspace_bootstrap_summary.py`](../../apps/api/app/domains/operations/services/workspace_bootstrap_summary.py),
+  and
+  [`tools.py`](../../apps/api/app/domains/assistant/services/tools.py)
+- Lesson: workspace counts often represent trade-state work, not persisted
+  child records. Agents should use deterministic trade attention candidates to
+  explain summary counts before assuming ledger, delivery, confirmation,
+  invoice, or payment rows already exist.
+- Deterministic opportunity: the same typed candidate conditions should power
+  both summary counts and assistant candidate reads. Candidate payloads should
+  include supporting child-record counts, suggested read tools, blockers, and
+  only approval-gated recommended actions where the durable record link exists.
+- Agent autonomy impact: candidate reads improve triage and explanation while
+  preserving manual fallback. Confirmation issue and payment creation remain
+  approval-gated, and missing ledger records are blockers rather than hidden
+  mutations.
+- Tests or evidence: assistant tooling tests cover child-row gaps and payment
+  due candidates; assistant eval coverage verifies a managed read agent uses
+  the candidate tool for trade-state counts.
+- Follow-up: promote prioritization rules for these candidate categories only
+  after operations or settlement owners approve queue policy.

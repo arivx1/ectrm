@@ -286,6 +286,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
     recommended_tools: [
       'list_workflow_items',
+      'list_trade_attention_candidates',
       'list_deliveries',
       'list_trade_confirmations',
       'get_trade_workbench',
@@ -331,6 +332,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     recommended_tools: [
       'list_trade_invoices',
       'list_invoice_issue_candidates',
+      'list_trade_attention_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
       'list_workflow_items',
@@ -461,6 +463,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     recommended_tools: [
       'get_trade_workbench',
       'list_workflow_items',
+      'list_trade_attention_candidates',
       'list_trade_confirmations',
       'list_deliveries',
       'list_documents',
@@ -510,6 +513,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     recommended_tools: [
       'list_trade_invoices',
       'list_invoice_issue_candidates',
+      'list_trade_attention_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
       'list_workflow_items',

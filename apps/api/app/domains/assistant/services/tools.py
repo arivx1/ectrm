@@ -28,6 +28,12 @@ from apps.api.app.domains.operations.services.settlement_invoices import (
 from apps.api.app.domains.operations.services.settlement_payments import (
     list_trade_payments as load_trade_payments,
 )
+from apps.api.app.domains.operations.services.trade_attention_candidates import (
+    TRADE_ATTENTION_CANDIDATE_TYPE_NAMES,
+    count_trade_attention_candidates as load_trade_attention_candidate_count,
+    get_trade_attention_candidate_definition,
+    list_trade_attention_candidates as load_trade_attention_candidates,
+)
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
 from apps.api.app.domains.reference_data.services.records import list_reference_records, normalize_code
 from apps.api.app.models.delivery_event import DeliveryEvent
@@ -431,9 +437,10 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
         AssistantToolDefinition(
             name="list_trade_confirmations",
             description=(
-                "Load trade confirmation ledger records for active trades. Use this when the user asks "
+                "Load persisted trade confirmation ledger records for active trades. Use this when the user asks "
                 "whether a trade has been sent, confirmed, disputed, or is still awaiting counterparty "
-                "response. The tool can focus on only current confirmation versions or include history."
+                "response. The tool can focus on only current confirmation versions or include history. For "
+                "confirmation backlog counts that may not have ledger rows yet, use list_trade_attention_candidates."
             ),
             parameters={
                 "type": "object",
@@ -462,6 +469,35 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
                 "additionalProperties": False,
             },
             executor=_list_trade_confirmations,
+        ),
+        AssistantToolDefinition(
+            name="list_trade_attention_candidates",
+            description=(
+                "Load active trades that explain workspace attention and settlement status counts even when no "
+                "child ledger row exists yet. Use this when a summary count such as confirmation_backlog_count, "
+                "nomination_backlog_count, payment_due_count, pending_settlement_count, or trade_exception_count "
+                "does not line up with persisted confirmation, delivery, invoice, or payment rows."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "candidate_type": {
+                        "type": "string",
+                        "enum": list(TRADE_ATTENTION_CANDIDATE_TYPE_NAMES),
+                        "description": (
+                            "Optional attention category to list. Examples: confirmation_backlog, "
+                            "nomination_backlog, allocation_backlog, payment_due, pending_settlement, "
+                            "settlement_exception. Defaults to all candidate categories."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of rows to return. Defaults to 10 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_list_trade_attention_candidates,
         ),
         AssistantToolDefinition(
             name="get_trade_workbench",
@@ -550,8 +586,9 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
         AssistantToolDefinition(
             name="list_trade_payments",
             description=(
-                "Load settlement payment records with invoice balance context. Use this when the user asks "
-                "what cash is due, what has been paid, or which payments are overdue for a trade or invoice."
+                "Load persisted settlement payment records with invoice balance context. Use this when the user asks "
+                "what cash is due, what has been paid, or which existing payments are overdue for a trade or invoice. "
+                "For due or overdue payment counts that may not have payment rows yet, use list_trade_attention_candidates."
             ),
             parameters={
                 "type": "object",
@@ -605,7 +642,8 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
             description=(
                 "Load delivery obligations with execution and actualization context. Use this when the user "
                 "asks about shipment scheduling, execution progress, delivery ownership, or physical follow-up "
-                "for one or more trades."
+                "for one or more trades. For nomination or allocation backlog counts that may not have delivery "
+                "rows yet, use list_trade_attention_candidates."
             ),
             parameters={
                 "type": "object",
@@ -1127,6 +1165,47 @@ def _list_trade_confirmations(db: Session, arguments: dict[str, Any]) -> Assista
         summary = f"Returned {len(items)} {row_label} for trade {trade_id}."
     if attention_count:
         summary += f" {attention_count} row(s) need follow-up."
+    if trade_id is None and status is None and receipt_status is None:
+        candidate_count = load_trade_attention_candidate_count(db, "confirmation_backlog")
+        if candidate_count:
+            payload["confirmation_backlog_candidate_count"] = candidate_count
+            payload["suggested_next_tool"] = "list_trade_attention_candidates"
+            summary += (
+                f" {candidate_count} active trade(s) are in confirmation backlog; "
+                "use list_trade_attention_candidates with candidate_type confirmation_backlog to inspect rows "
+                "that may not have confirmation ledger records yet."
+            )
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
+
+
+def _list_trade_attention_candidates(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    candidate_type = _normalize_optional_trade_attention_candidate_type(arguments.get("candidate_type"))
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+
+    rows = load_trade_attention_candidates(db, candidate_type=candidate_type, limit=limit)
+    items = [_dump_trade_attention_candidate(row) for row in rows]
+    type_counts: dict[str, int] = {}
+    for row in rows:
+        for row_candidate_type in row.candidate_types:
+            type_counts[row_candidate_type] = type_counts.get(row_candidate_type, 0) + 1
+
+    payload: dict[str, Any] = {
+        "count": len(items),
+        "items": items,
+        "candidate_type_counts": type_counts,
+    }
+    if candidate_type is not None:
+        definition = get_trade_attention_candidate_definition(candidate_type)
+        payload["candidate_type"] = definition.candidate_type
+        payload["source_count_key"] = definition.source_count_key
+        payload["description"] = definition.description
+        summary = (
+            f"Returned {len(items)} {definition.label.lower()} trade attention candidate(s) "
+            f"for {definition.source_count_key}."
+        )
+    else:
+        payload["candidate_types"] = list(TRADE_ATTENTION_CANDIDATE_TYPE_NAMES)
+        summary = f"Returned {len(items)} trade attention candidate(s) across workspace count categories."
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
 
 
@@ -1321,6 +1400,20 @@ def _list_trade_payments(db: Session, arguments: dict[str, Any]) -> AssistantToo
         summary = f"Returned {len(items)} trade payment row(s) for invoice {invoice_id}."
     if overdue_count:
         summary += f" {overdue_count} payment(s) are overdue."
+    if trade_id is None and invoice_id is None and not status and not overdue_only:
+        candidate_count = load_trade_attention_candidate_count(db, "payment_due")
+        if candidate_count:
+            payload["payment_due_candidate_count"] = candidate_count
+            payload["suggested_next_tool"] = "list_trade_attention_candidates"
+            candidate_summary = (
+                f"{candidate_count} active trade(s) have due or overdue payment status; "
+                "use list_trade_attention_candidates with candidate_type payment_due to inspect rows "
+                "that may not have payment ledger records yet."
+            )
+            if items:
+                summary += f" Separately, {candidate_summary}"
+            else:
+                summary += f" {candidate_summary}"
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
 
 
@@ -1441,6 +1534,18 @@ def _list_deliveries(db: Session, arguments: dict[str, Any]) -> AssistantToolExe
     summary = f"Returned {len(items)} delivery row(s)."
     if trade_id:
         summary = f"Returned {len(items)} delivery row(s) for trade {trade_id}."
+    if trade_id is None and not execution_status and not operations_owner and not commodity:
+        nomination_candidate_count = load_trade_attention_candidate_count(db, "nomination_backlog")
+        allocation_candidate_count = load_trade_attention_candidate_count(db, "allocation_backlog")
+        if nomination_candidate_count or allocation_candidate_count:
+            payload["nomination_backlog_candidate_count"] = nomination_candidate_count
+            payload["allocation_backlog_candidate_count"] = allocation_candidate_count
+            payload["suggested_next_tool"] = "list_trade_attention_candidates"
+            summary += (
+                f" {nomination_candidate_count} nomination and {allocation_candidate_count} allocation "
+                "candidate trade(s) may require attention outside persisted delivery rows; use "
+                "list_trade_attention_candidates to inspect them."
+            )
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
 
 
@@ -1496,6 +1601,52 @@ def _get_workspace_summary(db: Session, _arguments: dict[str, Any]) -> Assistant
     payload = {
         "generated_at": _json_default(datetime.now(timezone.utc)),
         **build_workspace_bootstrap_summary(db),
+    }
+    payload["candidate_read_hints"] = {
+        "dashboard.attention.confirmation_backlog_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "confirmation_backlog"},
+        },
+        "dashboard.attention.nomination_backlog_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "nomination_backlog"},
+        },
+        "dashboard.attention.allocation_backlog_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "allocation_backlog"},
+        },
+        "dashboard.attention.invoice_backlog_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "invoice_backlog"},
+        },
+        "dashboard.attention.overdue_payment_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "overdue_payment"},
+        },
+        "dashboard.attention.stale_pricing_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "stale_pricing"},
+        },
+        "dashboard.attention.incomplete_ops_data_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "incomplete_ops_data"},
+        },
+        "settlement.invoice_pending_count": {
+            "tool": "list_invoice_issue_candidates",
+            "arguments": {},
+        },
+        "settlement.payment_due_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "payment_due"},
+        },
+        "settlement.trade_exception_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "settlement_exception"},
+        },
+        "trades.pending_settlement_count": {
+            "tool": "list_trade_attention_candidates",
+            "arguments": {"candidate_type": "pending_settlement"},
+        },
     }
     summary = (
         f"Workspace summary loaded: {payload['trades']['total_count']} trades, "
@@ -1863,6 +2014,17 @@ def _normalize_optional_confirmation_receipt_status(value: Any) -> str | None:
     return normalized
 
 
+def _normalize_optional_trade_attention_candidate_type(value: Any) -> str | None:
+    normalized = _optional_text(value)
+    if normalized is None:
+        return None
+    candidate_type = normalized.lower().replace("-", "_")
+    if candidate_type not in TRADE_ATTENTION_CANDIDATE_TYPE_NAMES:
+        allowed = ", ".join(TRADE_ATTENTION_CANDIDATE_TYPE_NAMES)
+        raise AssistantToolServiceError(f"candidate_type must be one of {allowed}.")
+    return candidate_type
+
+
 def _normalize_optional_int(value: Any, *, field_name: str) -> int | None:
     if value is None:
         return None
@@ -1966,6 +2128,47 @@ def _dump_invoice_issue_candidate(value: Any) -> dict[str, Any]:
         "preview_summary": value.preview_summary,
         "blocking_reasons": list(value.blocking_reasons),
         "assumptions": list(value.assumptions),
+        "recommended_action": value.recommended_action,
+    }
+
+
+def _dump_trade_attention_candidate(value: Any) -> dict[str, Any]:
+    supporting_records = dict(value.supporting_records or {})
+    supporting_records["open_workflow_items"] = [
+        {
+            **item,
+            "due_at": _json_default(item.get("due_at")),
+        }
+        for item in supporting_records.get("open_workflow_items", [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "trade_id": value.trade_id,
+        "candidate_types": list(value.candidate_types),
+        "source_count_keys": list(value.source_count_keys),
+        "trade_nature": value.trade_nature,
+        "book": value.book,
+        "portfolio": value.portfolio,
+        "counterparty": value.counterparty,
+        "commodity_class": value.commodity_class,
+        "commodity": value.commodity,
+        "trader_user": value.trader_user,
+        "trade_date": _json_default(value.trade_date),
+        "execution_timestamp": _json_default(value.execution_timestamp),
+        "delivery_start": _json_default(value.delivery_start),
+        "delivery_end": _json_default(value.delivery_end),
+        "confirmation_status": value.confirmation_status,
+        "nomination_status": value.nomination_status,
+        "allocation_status": value.allocation_status,
+        "pricing_status": value.pricing_status,
+        "invoice_status": value.invoice_status,
+        "payment_status": value.payment_status,
+        "settlement_status": value.settlement_status,
+        "age_days": value.age_days,
+        "supporting_records": supporting_records,
+        "suggested_next_tool": value.suggested_next_tool,
+        "next_steps": list(value.next_steps),
+        "blocking_reasons": list(value.blocking_reasons),
         "recommended_action": value.recommended_action,
     }
 
