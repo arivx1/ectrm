@@ -1058,6 +1058,225 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trace.tool_name, "list_trade_attention_candidates")
         self.assertIn("settlement.payment_due_count", trace.summary)
 
+    def test_tool_service_payment_due_candidate_points_to_invoices_when_no_payment_rows_exist(self) -> None:
+        now = datetime(2026, 3, 24, 12, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                Event(
+                    event_id="evt-pmt-no-row",
+                    aggregate_type="trade",
+                    aggregate_id="T-PMT-NO-ROW",
+                    event_type="TradeCreated",
+                    occurred_at=now,
+                    recorded_at=now,
+                    actor_id="trader_2",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={"trade_id": "T-PMT-NO-ROW"},
+                )
+            )
+            session.add(
+                Trade(
+                    trade_id="T-PMT-NO-ROW",
+                    external_trade_id="EXT-PMT-NO-ROW",
+                    source_system="ops",
+                    created_at=now,
+                    updated_at=now,
+                    execution_timestamp=datetime(2026, 3, 20, 9, 0, tzinfo=timezone.utc),
+                    trade_date=now.date(),
+                    trade_currency_code="USD",
+                    location_code="HENRY",
+                    delivery_start=now.date(),
+                    delivery_end=now.date(),
+                    unit_of_measure="MMBTU",
+                    price_unit_code="USD_MMBTU",
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="GAS-US",
+                    portfolio="NORTH",
+                    counterparty="ACME",
+                    commodity_class="GAS",
+                    commodity="HH",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    price_index_code=None,
+                    price=4.0,
+                    volume=1500,
+                    confirmation_status="CONFIRMED",
+                    nomination_status="SCHEDULED",
+                    allocation_status="PENDING",
+                    actualization_status="PENDING",
+                    invoice_status="ISSUED",
+                    payment_status="DUE",
+                    settlement_status="INVOICED",
+                    trader_user="trader_2",
+                    status="ACTIVE",
+                    last_event_id="evt-pmt-no-row",
+                )
+            )
+            session.add(
+                TradeInvoice(
+                    id=2,
+                    trade_id="T-PMT-NO-ROW",
+                    delivery_id="DEL-PMT-NO-ROW",
+                    leg_no=None,
+                    invoice_number="INV-PMT-NO-ROW",
+                    invoice_currency_code="USD",
+                    billed_quantity=1500,
+                    quantity_unit_code="MMBTU",
+                    invoice_amount=1500,
+                    status="ISSUED",
+                    issued_at=now,
+                    due_at=datetime(2026, 3, 26, 12, 0, tzinfo=timezone.utc),
+                    dispute_reason=None,
+                    notes="Payment not yet recorded.",
+                    created_at=now,
+                    created_by="system",
+                    updated_at=now,
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            service = AssistantToolService(session)
+            result, _trace = service.execute_tool(
+                "list_trade_attention_candidates",
+                {"candidate_type": "payment_due", "limit": 10},
+            )
+
+        rows_by_trade_id = {row["trade_id"]: row for row in result.output["items"]}
+        candidate = rows_by_trade_id["T-PMT-NO-ROW"]
+        self.assertEqual(candidate["supporting_records"]["payment_count"], 0)
+        self.assertEqual(candidate["suggested_next_tool"], "list_trade_invoices")
+        self.assertEqual(
+            candidate["recommended_action"],
+            {
+                "action_type": "create_trade_payment",
+                "requires_approval": True,
+                "payload": {"invoice_id": 2},
+                "basis": "open_invoice_balance",
+            },
+        )
+
+    def test_tool_service_payment_due_candidate_skips_create_action_when_balance_is_reserved(self) -> None:
+        now = datetime(2026, 3, 24, 12, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                Event(
+                    event_id="evt-pmt-reserved",
+                    aggregate_type="trade",
+                    aggregate_id="T-PMT-RESERVED",
+                    event_type="TradeCreated",
+                    occurred_at=now,
+                    recorded_at=now,
+                    actor_id="trader_3",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={"trade_id": "T-PMT-RESERVED"},
+                )
+            )
+            session.add(
+                Trade(
+                    trade_id="T-PMT-RESERVED",
+                    external_trade_id="EXT-PMT-RESERVED",
+                    source_system="ops",
+                    created_at=now,
+                    updated_at=now,
+                    execution_timestamp=datetime(2026, 3, 20, 10, 0, tzinfo=timezone.utc),
+                    trade_date=now.date(),
+                    trade_currency_code="USD",
+                    location_code="HENRY",
+                    delivery_start=now.date(),
+                    delivery_end=now.date(),
+                    unit_of_measure="MMBTU",
+                    price_unit_code="USD_MMBTU",
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="GAS-US",
+                    portfolio="NORTH",
+                    counterparty="ACME",
+                    commodity_class="GAS",
+                    commodity="HH",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    price_index_code=None,
+                    price=4.1,
+                    volume=1200,
+                    confirmation_status="CONFIRMED",
+                    nomination_status="SCHEDULED",
+                    allocation_status="PENDING",
+                    actualization_status="PENDING",
+                    invoice_status="ISSUED",
+                    payment_status="DUE",
+                    settlement_status="INVOICED",
+                    trader_user="trader_3",
+                    status="ACTIVE",
+                    last_event_id="evt-pmt-reserved",
+                )
+            )
+            session.add(
+                TradeInvoice(
+                    id=3,
+                    trade_id="T-PMT-RESERVED",
+                    delivery_id="DEL-PMT-RESERVED",
+                    leg_no=None,
+                    invoice_number="INV-PMT-RESERVED",
+                    invoice_currency_code="USD",
+                    billed_quantity=1200,
+                    quantity_unit_code="MMBTU",
+                    invoice_amount=1200,
+                    status="ISSUED",
+                    issued_at=now,
+                    due_at=datetime(2026, 3, 26, 12, 0, tzinfo=timezone.utc),
+                    dispute_reason=None,
+                    notes="Open payment row already reserves the full amount.",
+                    created_at=now,
+                    created_by="system",
+                    updated_at=now,
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                TradePayment(
+                    id=2,
+                    trade_id="T-PMT-RESERVED",
+                    invoice_id=3,
+                    payment_reference="PAY-PMT-RESERVED-1",
+                    payment_currency_code="USD",
+                    payment_amount=1200,
+                    status="DUE",
+                    due_at=datetime(2026, 3, 26, 12, 0, tzinfo=timezone.utc),
+                    received_at=None,
+                    notes="Unpaid row still reserves the invoice balance.",
+                    created_at=now,
+                    created_by="system",
+                    updated_at=now,
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            service = AssistantToolService(session)
+            result, _trace = service.execute_tool(
+                "list_trade_attention_candidates",
+                {"candidate_type": "payment_due", "limit": 10},
+            )
+
+        rows_by_trade_id = {row["trade_id"]: row for row in result.output["items"]}
+        candidate = rows_by_trade_id["T-PMT-RESERVED"]
+        self.assertEqual(candidate["suggested_next_tool"], "list_trade_payments")
+        self.assertEqual(candidate["supporting_records"]["candidate_invoice_open_amount"], 1200.0)
+        self.assertEqual(candidate["supporting_records"]["candidate_invoice_unreserved_amount"], 0.0)
+        self.assertIsNone(candidate["recommended_action"])
+        self.assertIn("reserve the remaining invoice balance", candidate["blocking_reasons"][0])
+
     def test_tool_service_payment_list_points_to_attention_candidates(self) -> None:
         with self.SessionLocal() as session:
             service = AssistantToolService(session)

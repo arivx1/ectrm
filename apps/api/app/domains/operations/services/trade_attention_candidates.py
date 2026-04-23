@@ -541,32 +541,66 @@ def _serialize_open_workflow_items(items: list[TradeWorkflowItem]) -> list[dict[
     ]
 
 
+def _payment_reserves_invoice_balance(payment: TradePayment, *, invoice: TradeInvoice) -> bool:
+    payment_currency_code = str(payment.payment_currency_code or "").strip().upper()
+    invoice_currency_code = str(invoice.invoice_currency_code or "").strip().upper()
+    return (
+        payment.status != PaymentStatus.NOT_REQUIRED.value
+        and bool(payment_currency_code)
+        and payment_currency_code == invoice_currency_code
+    )
+
+
+def _remaining_invoice_reservable_balance(
+    *,
+    invoice: TradeInvoice,
+    payments: list[TradePayment],
+) -> Decimal:
+    reserved_amount = sum(
+        (
+            Decimal(str(payment.payment_amount))
+            for payment in payments
+            if _payment_reserves_invoice_balance(payment, invoice=invoice)
+        ),
+        start=ZERO,
+    )
+    return max(Decimal(str(invoice.invoice_amount)) - reserved_amount, ZERO)
+
+
 def _select_payment_invoice_candidate(
     *,
     invoices: list[TradeInvoice],
     payments_by_invoice_id: dict[int, list[TradePayment]],
     reference_time: datetime,
-) -> tuple[TradeInvoice | None, Decimal]:
+) -> tuple[TradeInvoice | None, Decimal, Decimal]:
     best_invoice: TradeInvoice | None = None
     best_outstanding = ZERO
+    best_unreserved = ZERO
     for invoice in invoices:
+        invoice_payments = payments_by_invoice_id.get(invoice.id, [])
         projection = derive_invoice_payment_projection(
             invoice=invoice,
-            payments=payments_by_invoice_id.get(invoice.id, []),
+            payments=invoice_payments,
             now=reference_time,
         )
         if projection.outstanding_amount <= ZERO:
             continue
+        remaining_reservable_balance = _remaining_invoice_reservable_balance(
+            invoice=invoice,
+            payments=invoice_payments,
+        )
         if best_invoice is None:
             best_invoice = invoice
             best_outstanding = projection.outstanding_amount
+            best_unreserved = remaining_reservable_balance
             continue
         best_due_at = _coerce_utc(best_invoice.due_at) or reference_time
         invoice_due_at = _coerce_utc(invoice.due_at) or reference_time
         if (invoice_due_at, invoice.id) < (best_due_at, best_invoice.id):
             best_invoice = invoice
             best_outstanding = projection.outstanding_amount
-    return best_invoice, best_outstanding
+            best_unreserved = remaining_reservable_balance
+    return best_invoice, best_outstanding, best_unreserved
 
 
 def _candidate_next_steps(
@@ -578,6 +612,7 @@ def _candidate_next_steps(
     payments: list[TradePayment],
     open_workflow_items: list[TradeWorkflowItem],
     payment_invoice: TradeInvoice | None,
+    payment_invoice_unreserved_amount: Decimal,
 ) -> tuple[tuple[str, ...], str | None, tuple[str, ...], dict[str, object] | None]:
     next_steps: list[str] = []
     blocking_reasons: list[str] = []
@@ -620,8 +655,12 @@ def _candidate_next_steps(
             next_steps.append("Use invoice issue candidates to inspect deterministic invoice readiness.")
 
     if "payment_due" in candidate_types or "overdue_payment" in candidate_types:
-        suggested_tool = suggested_tool or ("list_trade_payments" if payments else "list_trade_attention_candidates")
-        if payment_invoice is not None:
+        suggested_tool = suggested_tool or (
+            "list_trade_payments"
+            if payments
+            else ("list_trade_invoices" if invoices else "get_trade_settlement_summary")
+        )
+        if payment_invoice is not None and payment_invoice_unreserved_amount > ZERO:
             next_steps.append("Review the open invoice balance and stage a payment record only with approval.")
             recommended_action = recommended_action or {
                 "action_type": "create_trade_payment",
@@ -629,6 +668,9 @@ def _candidate_next_steps(
                 "payload": {"invoice_id": payment_invoice.id},
                 "basis": "open_invoice_balance",
             }
+        elif payment_invoice is not None and payments:
+            blocking_reasons.append("Existing payment rows already reserve the remaining invoice balance.")
+            next_steps.append("Review the existing payment rows before staging another payment record.")
         elif invoices:
             next_steps.append("Review invoice balances before creating another payment record.")
         else:
@@ -668,7 +710,7 @@ def _to_trade_attention_candidate(
     payments_by_invoice_id: dict[int, list[TradePayment]],
     open_workflow_items: list[TradeWorkflowItem],
 ) -> TradeAttentionCandidate:
-    payment_invoice, open_payment_amount = _select_payment_invoice_candidate(
+    payment_invoice, open_payment_amount, unreserved_payment_amount = _select_payment_invoice_candidate(
         invoices=invoices,
         payments_by_invoice_id=payments_by_invoice_id,
         reference_time=reference_time,
@@ -681,6 +723,7 @@ def _to_trade_attention_candidate(
         payments=payments,
         open_workflow_items=open_workflow_items,
         payment_invoice=payment_invoice,
+        payment_invoice_unreserved_amount=unreserved_payment_amount,
     )
     source_count_keys = tuple(_DEFINITIONS_BY_TYPE[candidate_type].source_count_key for candidate_type in candidate_types)
     supporting_records = {
@@ -697,6 +740,7 @@ def _to_trade_attention_candidate(
         "candidate_invoice_id": payment_invoice.id if payment_invoice is not None else None,
         "candidate_invoice_number": payment_invoice.invoice_number if payment_invoice is not None else None,
         "candidate_invoice_open_amount": float(open_payment_amount) if payment_invoice is not None else None,
+        "candidate_invoice_unreserved_amount": float(unreserved_payment_amount) if payment_invoice is not None else None,
     }
     return TradeAttentionCandidate(
         trade_id=trade.trade_id,
