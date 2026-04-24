@@ -33,6 +33,8 @@ from apps.api.app.shared.enums import (
 )
 
 ZERO = Decimal("0")
+MAX_DATETIME = datetime.max.replace(tzinfo=timezone.utc)
+MAX_DATE = date.max
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ class TradeAttentionCandidate:
     trade_id: str
     candidate_types: tuple[str, ...]
     source_count_keys: tuple[str, ...]
+    priority_reason: str
     trade_nature: str
     book: str
     portfolio: str | None
@@ -192,6 +195,253 @@ def _trade_age_days(trade: Trade, *, reference_time: datetime) -> int | None:
     if trade.trade_date is not None:
         return max(0, (reference_time.date() - trade.trade_date).days)
     return None
+
+
+def _priority_age_sort_key(age_days: int | None) -> tuple[int, int]:
+    if age_days is None:
+        return (1, 0)
+    return (0, -age_days)
+
+
+def _priority_date_sort_key(value: date | None) -> tuple[int, date]:
+    if value is None:
+        return (1, MAX_DATE)
+    return (0, value)
+
+
+def _priority_datetime_sort_key(value: datetime | None) -> tuple[int, datetime]:
+    coerced = _coerce_utc(value)
+    if coerced is None:
+        return (1, MAX_DATETIME)
+    return (0, coerced)
+
+
+def _days_until(reference_time: datetime, value: date | None) -> int | None:
+    if value is None:
+        return None
+    return (value - reference_time.date()).days
+
+
+def _delivery_window_priority(reference_time: datetime, value: date | None) -> int:
+    days_until = _days_until(reference_time, value)
+    if days_until is None:
+        return 3
+    if days_until <= 0:
+        return 0
+    if days_until <= 1:
+        return 1
+    if days_until <= 3:
+        return 2
+    return 3
+
+
+def _is_trade_disputed(candidate: TradeAttentionCandidate) -> bool:
+    return (
+        candidate.settlement_status == SettlementStatus.DISPUTED.value
+        or candidate.invoice_status == InvoiceStatus.DISPUTED.value
+    )
+
+
+def _trade_attention_candidate_sort_key(
+    candidate: TradeAttentionCandidate,
+    *,
+    requested_types: tuple[str, ...],
+    reference_time: datetime,
+) -> tuple[object, ...]:
+    primary_type = _primary_candidate_type(candidate.candidate_types, requested_types=requested_types)
+    type_rank = requested_types.index(primary_type)
+    execution_sort = _priority_datetime_sort_key(candidate.execution_timestamp)
+    delivery_sort = _priority_date_sort_key(candidate.delivery_start)
+    trade_date_sort = _priority_date_sort_key(candidate.trade_date)
+    age_sort = _priority_age_sort_key(candidate.age_days)
+    trade_id_sort = candidate.trade_id
+
+    if primary_type == "confirmation_backlog":
+        return (
+            type_rank,
+            age_sort,
+            execution_sort,
+            trade_date_sort,
+            trade_id_sort,
+        )
+
+    if primary_type in {"nomination_backlog", "allocation_backlog"}:
+        return (
+            type_rank,
+            _delivery_window_priority(reference_time, candidate.delivery_start),
+            delivery_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    if primary_type == "invoice_backlog":
+        return (
+            type_rank,
+            age_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    if primary_type == "overdue_payment":
+        return (
+            type_rank,
+            0 if _is_trade_disputed(candidate) else 1,
+            0 if candidate.payment_status == PaymentStatus.OVERDUE.value else 1,
+            age_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    if primary_type == "payment_due":
+        payment_rank = 2
+        if candidate.payment_status == PaymentStatus.OVERDUE.value:
+            payment_rank = 0
+        elif candidate.payment_status == PaymentStatus.DUE.value:
+            payment_rank = 1
+        return (
+            type_rank,
+            0 if _is_trade_disputed(candidate) else 1,
+            payment_rank,
+            age_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    if primary_type == "settlement_exception":
+        return (
+            type_rank,
+            0 if _is_trade_disputed(candidate) else 1,
+            0 if candidate.payment_status == PaymentStatus.OVERDUE.value else 1,
+            age_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    if primary_type == "pending_settlement":
+        settlement_rank = 4
+        if _is_trade_disputed(candidate):
+            settlement_rank = 0
+        elif candidate.payment_status == PaymentStatus.OVERDUE.value:
+            settlement_rank = 1
+        elif candidate.payment_status == PaymentStatus.DUE.value:
+            settlement_rank = 2
+        elif candidate.settlement_status in {
+            SettlementStatus.INVOICED.value,
+            SettlementStatus.PARTIALLY_SETTLED.value,
+        }:
+            settlement_rank = 3
+        return (
+            type_rank,
+            settlement_rank,
+            age_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    if primary_type == "stale_pricing":
+        return (
+            type_rank,
+            age_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    if primary_type == "incomplete_ops_data":
+        physical_delivery_rank = (
+            _delivery_window_priority(reference_time, candidate.delivery_start)
+            if candidate.trade_nature == TradeNature.PHYSICAL.value
+            else 3
+        )
+        return (
+            type_rank,
+            physical_delivery_rank,
+            age_sort,
+            execution_sort,
+            trade_id_sort,
+        )
+
+    return (
+        type_rank,
+        execution_sort,
+        trade_date_sort,
+        trade_id_sort,
+    )
+
+
+def _primary_candidate_type(
+    candidate_types: tuple[str, ...],
+    *,
+    requested_types: tuple[str, ...],
+) -> str:
+    return next(
+        (candidate_type for candidate_type in requested_types if candidate_type in candidate_types),
+        candidate_types[0],
+    )
+
+
+def _trade_attention_candidate_priority_reason(
+    candidate: TradeAttentionCandidate,
+    *,
+    requested_types: tuple[str, ...],
+) -> str:
+    primary_type = _primary_candidate_type(candidate.candidate_types, requested_types=requested_types)
+
+    if primary_type == "confirmation_backlog":
+        return "Older unconfirmed trades rise first in the confirmation queue."
+
+    if primary_type == "nomination_backlog":
+        return "Delivery-near trades rise first in the nomination queue."
+
+    if primary_type == "allocation_backlog":
+        return "Delivery-near nominated trades rise first in the allocation queue."
+
+    if primary_type == "invoice_backlog":
+        return "Older uninvoiced trades rise first in the invoice backlog."
+
+    if primary_type == "overdue_payment":
+        if _is_trade_disputed(candidate):
+            return "Disputed settlement items rise ahead of other overdue cash follow-through."
+        return "Overdue cash rises ahead of less urgent payment follow-through."
+
+    if primary_type == "payment_due":
+        if _is_trade_disputed(candidate):
+            return "Disputed settlement items rise ahead of ordinary payment follow-through."
+        if candidate.payment_status == PaymentStatus.OVERDUE.value:
+            return "Overdue cash rises ahead of merely due payments."
+        if candidate.payment_status == PaymentStatus.DUE.value:
+            return "Due cash follows overdue items, then older trades."
+        return "Older payment follow-through rises once urgent cash states are exhausted."
+
+    if primary_type == "settlement_exception":
+        if _is_trade_disputed(candidate):
+            return "Disputed settlement exceptions rise first."
+        if candidate.payment_status == PaymentStatus.OVERDUE.value:
+            return "Overdue cash exceptions rise after disputed items."
+        return "Older settlement exceptions rise once disputes and overdue cash are clear."
+
+    if primary_type == "pending_settlement":
+        if _is_trade_disputed(candidate):
+            return "Disputed settlement items rise first in the pending settlement queue."
+        if candidate.payment_status == PaymentStatus.OVERDUE.value:
+            return "Overdue cash rises ahead of other pending settlement work."
+        if candidate.payment_status == PaymentStatus.DUE.value:
+            return "Due cash rises once overdue items are handled."
+        if candidate.settlement_status in {
+            SettlementStatus.INVOICED.value,
+            SettlementStatus.PARTIALLY_SETTLED.value,
+        }:
+            return "Invoiced settlement follow-through rises ahead of earlier settlement stages."
+        return "Older pending settlement work rises once urgent cash states are clear."
+
+    if primary_type == "stale_pricing":
+        return "Older unresolved pricing work rises first."
+
+    if primary_type == "incomplete_ops_data":
+        if candidate.trade_nature == TradeNature.PHYSICAL.value and candidate.delivery_start is not None:
+            return "Delivery-near physical trades rise ahead of longer-dated data cleanup."
+        return "Older missing-ops-data items rise first."
+
+    return "Older operational candidates rise first."
 
 
 def _trade_attention_condition(candidate_type: str, *, reference_time: datetime) -> object:
@@ -702,6 +952,7 @@ def _to_trade_attention_candidate(
     *,
     trade: Trade,
     candidate_types: tuple[str, ...],
+    requested_types: tuple[str, ...],
     reference_time: datetime,
     confirmation_count: int,
     current_confirmation: TradeConfirmation | None,
@@ -742,10 +993,11 @@ def _to_trade_attention_candidate(
         "candidate_invoice_open_amount": float(open_payment_amount) if payment_invoice is not None else None,
         "candidate_invoice_unreserved_amount": float(unreserved_payment_amount) if payment_invoice is not None else None,
     }
-    return TradeAttentionCandidate(
+    candidate = TradeAttentionCandidate(
         trade_id=trade.trade_id,
         candidate_types=candidate_types,
         source_count_keys=source_count_keys,
+        priority_reason="",
         trade_nature=trade.trade_nature,
         book=trade.book,
         portfolio=trade.portfolio,
@@ -770,6 +1022,15 @@ def _to_trade_attention_candidate(
         next_steps=next_steps,
         blocking_reasons=blocking_reasons,
         recommended_action=recommended_action,
+    )
+    return TradeAttentionCandidate(
+        **{
+            **candidate.__dict__,
+            "priority_reason": _trade_attention_candidate_priority_reason(
+                candidate,
+                requested_types=requested_types,
+            ),
+        }
     )
 
 
@@ -804,10 +1065,6 @@ def list_trade_attention_candidates(
             Trade.trade_id.asc(),
         )
     )
-    if offset:
-        stmt = stmt.offset(offset)
-    if limit is not None:
-        stmt = stmt.limit(limit)
 
     trades = db.execute(stmt).scalars().all()
     trade_ids = [trade.trade_id for trade in trades]
@@ -830,6 +1087,7 @@ def list_trade_attention_candidates(
             _to_trade_attention_candidate(
                 trade=trade,
                 candidate_types=matching_types,
+                requested_types=requested_types,
                 reference_time=reference_time,
                 confirmation_count=confirmation_counts.get(trade.trade_id, 0),
                 current_confirmation=current_confirmations.get(trade.trade_id),
@@ -839,4 +1097,15 @@ def list_trade_attention_candidates(
                 open_workflow_items=open_workflow_items_by_trade_id.get(trade.trade_id, []),
             )
         )
+    candidates.sort(
+        key=lambda candidate: _trade_attention_candidate_sort_key(
+            candidate,
+            requested_types=requested_types,
+            reference_time=reference_time,
+        )
+    )
+    if offset:
+        candidates = candidates[offset:]
+    if limit is not None:
+        candidates = candidates[:limit]
     return candidates
