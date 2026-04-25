@@ -58,10 +58,13 @@ import {
 } from '../../shared/mutation'
 import { buildFallbackTradeMetadata, type TradeMetadata } from '../../shared/tradeMetadata'
 import {
+  DEFAULT_ASSET_STANDARDS,
   DEFAULT_COUNTERPARTY_STANDARDS,
   DEFAULT_LOCATION_STANDARDS,
 } from '../../shared/models'
 import type {
+  AssetRecord,
+  AssetStandards,
   CounterpartyCreditProfileRecord,
   CounterpartyCreditReportRow,
   CounterpartyExternalCreditSnapshotRecord,
@@ -178,6 +181,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [units, setUnits] = useState<UnitRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
   const [locationStandards, setLocationStandards] = useState<LocationStandards>(DEFAULT_LOCATION_STANDARDS)
+  const [assets, setAssets] = useState<AssetRecord[]>([])
+  const [assetStandards, setAssetStandards] = useState<AssetStandards>(DEFAULT_ASSET_STANDARDS)
   const [counterpartyStandards, setCounterpartyStandards] = useState<CounterpartyStandards>(
     DEFAULT_COUNTERPARTY_STANDARDS,
   )
@@ -302,6 +307,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setUnits([])
     setLocations([])
     setLocationStandards(DEFAULT_LOCATION_STANDARDS)
+    setAssets([])
+    setAssetStandards(DEFAULT_ASSET_STANDARDS)
     setCounterparties([])
     setCounterpartyCreditProfiles([])
     setCounterpartyExternalCreditSnapshots([])
@@ -432,6 +439,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setUnits(payload.units as UnitRecord[])
         setLocations(payload.locations as LocationRecord[])
         setLocationStandards(payload.locationStandards as LocationStandards)
+        setAssets(payload.assets as AssetRecord[])
+        setAssetStandards(payload.assetStandards as AssetStandards)
         setCounterparties(payload.counterparties as CounterpartyRecord[])
         setCounterpartyCreditProfiles(payload.counterpartyCreditProfiles as CounterpartyCreditProfileRecord[])
         setCounterpartyExternalCreditSnapshots(
@@ -981,6 +990,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     authInterruptionReason,
     authSession,
     appLoading,
+    assetStandards,
+    assets,
     books,
     collectionErrors,
     collectionLoadingMore,

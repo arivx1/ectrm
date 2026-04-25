@@ -8,6 +8,7 @@ import {
   createAssistantAgent,
   createAssistantAgentEval,
   deleteAssistantAgentEval,
+  generateAssistantAgentSelfUpdateDraft,
   getAdminAssistantAgentHealthReview,
   getAdminAssistantAutonomyReview,
   listAdminAssistantAgentEvalRuns,
@@ -58,6 +59,7 @@ import type {
   AssistantAgentEvalRun,
   AssistantAgentEvalRunStatus,
   AssistantAgentHealthReview,
+  AssistantAgentSelfUpdateDraft,
   AssistantAgentWorkPackage,
   AssistantAgentWorkPackageStatus,
   AssistantAutonomyReviewBrief,
@@ -87,20 +89,50 @@ import {
   getAgentBuilderTemplate,
   suggestAgentBuilderAgentId,
   type AgentBuilderDraft,
+  type AgentBuilderTemplateAvailability,
   type AgentBuilderTemplateKey,
   type AgentRoleProfileFit,
   type AgentRoleProfileFitStatus,
 } from './assistantAgentBuilder'
+import {
+  applyControlTowerSupervisionDraft,
+  controlTowerSignalTypeLabel,
+  controlTowerSupervisionModeLabel,
+  type AssistantControlTowerAgentSupervisionIntent,
+  type AssistantControlTowerSupervisionIntent,
+} from './assistantSupervisionDraft'
 
 type AgentManagementPanelProps = {
   authSession: StoredAuthSession | null
   formatDate: (value: string | null | undefined) => string
   onOpenSettings: () => void
+  controlTowerIntent?: AssistantControlTowerSupervisionIntent | null
 }
 
 type FlashMessage = {
   tone: 'success' | 'error'
   message: string
+}
+
+type AgentWorkPackageDraft = {
+  notes: string
+  prUrl: string
+  commitSha: string
+  evalIds: string
+  testNames: string
+  docPaths: string
+  owner: string
+}
+
+type AgentWorkPackageFilters = {
+  status: '' | AssistantAgentWorkPackageStatus
+  sourceAgentId: string
+  staleOnly: boolean
+  hasPr: boolean
+  hasCommit: boolean
+  hasEval: boolean
+  hasTests: boolean
+  hasDocs: boolean
 }
 
 type AgentForm = AgentBuilderDraft
@@ -145,6 +177,20 @@ const AUTHORITY_OPTIONS: AssistantAgentAuthorityLevel[] = [
   'EXECUTE',
   'EXTERNAL_COMMIT',
 ]
+const DEFAULT_AGENT_WORK_PACKAGE_FILTERS: AgentWorkPackageFilters = {
+  status: '',
+  sourceAgentId: '',
+  staleOnly: false,
+  hasPr: false,
+  hasCommit: false,
+  hasEval: false,
+  hasTests: false,
+  hasDocs: false,
+}
+
+const STALE_WORK_PACKAGE_THRESHOLD_HOURS = 72
+const STALE_WORK_PACKAGE_THRESHOLD_MS = STALE_WORK_PACKAGE_THRESHOLD_HOURS * 60 * 60 * 1000
+
 function createEmptyProfileRequestForm(): ProfileRequestForm {
   return {
     requested_agent_id: '',
@@ -257,6 +303,34 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
         ? ''
         : String(agent.daily_token_allocation),
     system_prompt: agent.system_prompt,
+  }
+}
+
+function toAgentFormFromSelfUpdateDraft(draft: AssistantAgentSelfUpdateDraft): AgentForm {
+  return {
+    agent_id: draft.agent_id,
+    name: draft.name,
+    description: draft.description,
+    status: draft.status,
+    scope: draft.scope,
+    provider: draft.provider ?? '',
+    model: draft.model ?? '',
+    role_key: draft.role_key ?? '',
+    profile_kind: draft.profile_kind ?? 'CUSTOM',
+    specialization_summary: draft.specialization_summary ?? '',
+    human_owner_role: draft.human_owner_role ?? '',
+    authority_ceiling: draft.authority_ceiling ?? '',
+    activation_notes: draft.activation_notes ?? '',
+    profile_request_id: draft.profile_request_id ?? null,
+    allowed_workspaces: [...draft.allowed_workspaces],
+    capabilities: [...draft.capabilities],
+    allowed_tools: [...draft.allowed_tools],
+    allowed_action_types: [...draft.allowed_action_types],
+    daily_token_allocation:
+      draft.daily_token_allocation === null || draft.daily_token_allocation === undefined
+        ? ''
+        : String(draft.daily_token_allocation),
+    system_prompt: draft.system_prompt,
   }
 }
 
@@ -520,6 +594,27 @@ function roleCatalogStatusLabel(role: AssistantAgentRoleArchetype): string {
   return 'Future'
 }
 
+function roleCatalogSyncSummary(role: AssistantAgentRoleArchetype): string {
+  if (role.current_profile_ids.length > 0) {
+    return `Synced defaults: ${role.current_profile_ids.join(' · ')}`
+  }
+  if (role.catalog_status === 'PHASE_1') {
+    return 'Pilot blueprint only until a human saves a role-derived profile.'
+  }
+  if (role.catalog_status === 'TEMPLATE') {
+    return 'Role preset only; not auto-synchronized into the managed roster.'
+  }
+  return 'No synchronized default profile.'
+}
+
+function templateAvailabilityLabel(availability: AgentBuilderTemplateAvailability): string {
+  return availability === 'SEEDED_DEFAULT' ? 'Seeded default' : 'Template only'
+}
+
+function templateAvailabilityTone(availability: AgentBuilderTemplateAvailability): 'active' | 'planned' {
+  return availability === 'SEEDED_DEFAULT' ? 'active' : 'planned'
+}
+
 function listSummary(values: readonly string[], emptyLabel: string): string {
   return values.length > 0 ? values.join(' · ') : emptyLabel
 }
@@ -633,6 +728,98 @@ function agentWorkPackageNextStatuses(
   return []
 }
 
+function workPackageDraftFromRecord(workPackage: AssistantAgentWorkPackage): AgentWorkPackageDraft {
+  return {
+    notes: workPackage.notes ?? '',
+    prUrl: workPackage.implementation_evidence.pr_url ?? '',
+    commitSha: workPackage.implementation_evidence.commit_sha ?? '',
+    evalIds: workPackage.implementation_evidence.eval_ids.join(', '),
+    testNames: workPackage.implementation_evidence.test_names.join('\n'),
+    docPaths: workPackage.implementation_evidence.doc_paths.join('\n'),
+    owner: workPackage.implementation_evidence.owner ?? '',
+  }
+}
+
+function splitDraftLines(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/\r?\n|,/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
+function parseDraftEvalIds(value: string): number[] {
+  const ids: number[] = []
+  const seen = new Set<number>()
+  for (const entry of splitDraftLines(value)) {
+    const resolved = Number.parseInt(entry, 10)
+    if (!Number.isFinite(resolved) || resolved <= 0 || seen.has(resolved)) {
+      continue
+    }
+    ids.push(resolved)
+    seen.add(resolved)
+  }
+  return ids
+}
+
+function workPackageHasImplementationEvidence(workPackage: AssistantAgentWorkPackage): boolean {
+  return Boolean(
+    workPackage.implementation_evidence.pr_url ||
+      workPackage.implementation_evidence.commit_sha ||
+      workPackage.implementation_evidence.eval_ids.length > 0 ||
+      workPackage.implementation_evidence.test_names.length > 0 ||
+      workPackage.implementation_evidence.doc_paths.length > 0,
+  )
+}
+
+function isStaleOpenWorkPackage(workPackage: AssistantAgentWorkPackage, now = Date.now()): boolean {
+  if (workPackage.status !== 'ACCEPTED' && workPackage.status !== 'IN_PROGRESS') {
+    return false
+  }
+  if (workPackageHasImplementationEvidence(workPackage)) {
+    return false
+  }
+
+  const updatedAt = Date.parse(workPackage.updated_at)
+  if (!Number.isFinite(updatedAt)) {
+    return false
+  }
+
+  return now - updatedAt >= STALE_WORK_PACKAGE_THRESHOLD_MS
+}
+
+function applyLocalWorkPackageFilters(
+  workPackages: AssistantAgentWorkPackage[],
+  filters: AgentWorkPackageFilters,
+): AssistantAgentWorkPackage[] {
+  const now = Date.now()
+  return workPackages.filter((workPackage) => {
+    if (filters.sourceAgentId && !workPackage.source_agent_ids.includes(filters.sourceAgentId)) {
+      return false
+    }
+    if (filters.staleOnly && !isStaleOpenWorkPackage(workPackage, now)) {
+      return false
+    }
+    return true
+  })
+}
+
+function hasActiveWorkPackageFilters(filters: AgentWorkPackageFilters): boolean {
+  return Boolean(
+    filters.status ||
+      filters.sourceAgentId ||
+      filters.staleOnly ||
+      filters.hasPr ||
+      filters.hasCommit ||
+      filters.hasEval ||
+      filters.hasTests ||
+      filters.hasDocs,
+  )
+}
+
 function PromptProfilePreview({
   form,
   role,
@@ -690,12 +877,32 @@ function RoleProfileFitSummary({ fit }: { fit: AgentRoleProfileFit }) {
   )
 }
 
+function describeChangedValue(current: string, next: string): string {
+  return current === next ? next : `${current} -> ${next}`
+}
+
+function summarizeCapabilitySelection(values: readonly AssistantAgentCapability[]): string {
+  return values.length > 0 ? values.join(' · ') : 'No capabilities selected'
+}
+
+function summarizeToolSelection(values: readonly string[]): string {
+  return values.length > 0 ? `${values.length} explicit tool${values.length === 1 ? '' : 's'}` : 'No explicit tool subset'
+}
+
+function summarizeActionSelection(values: readonly AssistantActionType[]): string {
+  return values.length > 0
+    ? `${values.length} governed action${values.length === 1 ? '' : 's'}`
+    : 'No explicit governed actions'
+}
+
 export function AgentManagementPanel({
   authSession,
   formatDate,
   onOpenSettings,
+  controlTowerIntent = null,
 }: AgentManagementPanelProps) {
   const requestSequenceRef = useRef(0)
+  const appliedSupervisionIntentIdRef = useRef<number | null>(null)
   const adminEnabled = hasAdministrativeAccess(authSession)
 
   const [agentRecords, setAgentRecords] = useState<AssistantAdminAgent[]>([])
@@ -740,15 +947,22 @@ export function AgentManagementPanel({
   const [autonomyReview, setAutonomyReview] = useState<AssistantAutonomyReviewBrief | null>(null)
   const [autonomyReviewLoading, setAutonomyReviewLoading] = useState(false)
   const [autonomyReviewError, setAutonomyReviewError] = useState('')
+  const [selfUpdateBrief, setSelfUpdateBrief] = useState('')
+  const [selfUpdateDraft, setSelfUpdateDraft] = useState<AssistantAgentSelfUpdateDraft | null>(null)
+  const [selfUpdateLoading, setSelfUpdateLoading] = useState(false)
+  const [selfUpdateError, setSelfUpdateError] = useState('')
   const [agentHealthReview, setAgentHealthReview] = useState<AssistantAgentHealthReview | null>(null)
   const [agentHealthReviewLoading, setAgentHealthReviewLoading] = useState(false)
   const [agentHealthReviewError, setAgentHealthReviewError] = useState('')
   const [agentWorkPackages, setAgentWorkPackages] = useState<AssistantAgentWorkPackage[]>([])
+  const [trackedWorkPackageKeys, setTrackedWorkPackageKeys] = useState<string[]>([])
   const [agentWorkPackagesLoading, setAgentWorkPackagesLoading] = useState(false)
   const [agentWorkPackageError, setAgentWorkPackageError] = useState('')
   const [acceptingWorkPackageId, setAcceptingWorkPackageId] = useState<string | null>(null)
   const [transitioningWorkPackageId, setTransitioningWorkPackageId] = useState<string | null>(null)
-  const [workPackageTransitionNotes, setWorkPackageTransitionNotes] = useState<Record<string, string>>({})
+  const [agentWorkPackageFilters, setAgentWorkPackageFilters] =
+    useState<AgentWorkPackageFilters>(DEFAULT_AGENT_WORK_PACKAGE_FILTERS)
+  const [workPackageDrafts, setWorkPackageDrafts] = useState<Record<string, AgentWorkPackageDraft>>({})
   const [selectedAgentEvalId, setSelectedAgentEvalId] = useState<number | null>(null)
   const [agentEvalForm, setAgentEvalForm] = useState<AgentEvalForm>(() => createEmptyAgentEvalForm())
   const [agentEvalRuns, setAgentEvalRuns] = useState<AssistantAgentEvalRun[]>([])
@@ -758,6 +972,8 @@ export function AgentManagementPanel({
   const [deletingAgentEvalId, setDeletingAgentEvalId] = useState<number | null>(null)
   const [runningAgentEvalId, setRunningAgentEvalId] = useState<number | null>(null)
   const [runningAgentEvalSuite, setRunningAgentEvalSuite] = useState(false)
+  const [activeSupervisionIntent, setActiveSupervisionIntent] =
+    useState<AssistantControlTowerAgentSupervisionIntent | null>(null)
 
   const selectedAgent = useMemo(
     () => agentRecords.find((agent) => agent.agent_id === selectedAgentId) ?? null,
@@ -845,13 +1061,36 @@ export function AgentManagementPanel({
   const createLiveToolSummary = describeLiveToolPlan(createForm, availableTools)
   const createActionSummary = describeActionPlan(createForm)
   const editActionSummary = describeActionPlan(editForm)
+  const supervisionPolicyMessages = useMemo(
+    () =>
+      activeSupervisionIntent
+        ? [...editProfileFit.errors.slice(0, 1), ...editProfileFit.warnings.slice(0, 2)]
+        : [],
+    [activeSupervisionIntent, editProfileFit],
+  )
   const openAiBuilderReady = Boolean(openAiProviderStatus?.configured)
   const createBlockedByProfilePolicy = createProfileFit.errors.length > 0
   const editBlockedByProfilePolicy = editProfileFit.errors.length > 0
   const pendingProfileRequestCount = profileRequests.filter((request) => request.status === 'REQUESTED').length
   const trackedWorkPackageIds = useMemo(
-    () => new Set(agentWorkPackages.map((workPackage) => workPackage.work_package_id)),
-    [agentWorkPackages],
+    () => new Set(trackedWorkPackageKeys),
+    [trackedWorkPackageKeys],
+  )
+  const workPackageSourceAgentOptions = useMemo(() => {
+    const options = agentRecords.map((agent) => ({
+      agent_id: agent.agent_id,
+      name: agent.name,
+    }))
+    if (!agentWorkPackageFilters.sourceAgentId) {
+      return options
+    }
+    return options.some((agent) => agent.agent_id === agentWorkPackageFilters.sourceAgentId)
+      ? options
+      : [...options, { agent_id: agentWorkPackageFilters.sourceAgentId, name: agentWorkPackageFilters.sourceAgentId }]
+  }, [agentRecords, agentWorkPackageFilters.sourceAgentId])
+  const workPackageFiltersActive = useMemo(
+    () => hasActiveWorkPackageFilters(agentWorkPackageFilters),
+    [agentWorkPackageFilters],
   )
   const profileRequestReady = Boolean(
     profileRequestForm.business_problem.trim() &&
@@ -936,6 +1175,7 @@ export function AgentManagementPanel({
   const loadAgentWorkPackages = useCallback(async () => {
     if (!adminEnabled) {
       setAgentWorkPackages([])
+      setTrackedWorkPackageKeys([])
       setAgentWorkPackageError('')
       setAgentWorkPackagesLoading(false)
       return
@@ -944,23 +1184,39 @@ export function AgentManagementPanel({
     setAgentWorkPackagesLoading(true)
     setAgentWorkPackageError('')
     try {
-      const records = await listAdminAssistantAgentWorkPackages(appConfig.apiBase)
-      setAgentWorkPackages(records)
+      const records = await listAdminAssistantAgentWorkPackages(appConfig.apiBase, {
+        status: agentWorkPackageFilters.status || undefined,
+        hasPr: agentWorkPackageFilters.hasPr || undefined,
+        hasCommit: agentWorkPackageFilters.hasCommit || undefined,
+        hasEval: agentWorkPackageFilters.hasEval || undefined,
+        hasTests: agentWorkPackageFilters.hasTests || undefined,
+        hasDocs: agentWorkPackageFilters.hasDocs || undefined,
+      })
+      const filteredRecords = applyLocalWorkPackageFilters(records, agentWorkPackageFilters)
+      setAgentWorkPackages(filteredRecords)
+      if (hasActiveWorkPackageFilters(agentWorkPackageFilters)) {
+        const allRecords = await listAdminAssistantAgentWorkPackages(appConfig.apiBase)
+        setTrackedWorkPackageKeys(allRecords.map((workPackage) => workPackage.work_package_id))
+      } else {
+        setTrackedWorkPackageKeys(filteredRecords.map((workPackage) => workPackage.work_package_id))
+      }
     } catch (error) {
       setAgentWorkPackages([])
+      setTrackedWorkPackageKeys([])
       setAgentWorkPackageError(
         error instanceof Error ? error.message : 'Could not load tracked agent work packages.',
       )
     } finally {
       setAgentWorkPackagesLoading(false)
     }
-  }, [adminEnabled])
+  }, [adminEnabled, agentWorkPackageFilters])
 
   useEffect(() => {
     requestSequenceRef.current += 1
     setAgentFlash(null)
 
     if (!adminEnabled) {
+      appliedSupervisionIntentIdRef.current = null
       setAgentRecords([])
       setProfileRequests([])
       setAgentEvalRecords([])
@@ -994,15 +1250,21 @@ export function AgentManagementPanel({
       setAutonomyReview(null)
       setAutonomyReviewError('')
       setAutonomyReviewLoading(false)
+      setSelfUpdateBrief('')
+      setSelfUpdateDraft(null)
+      setSelfUpdateError('')
+      setSelfUpdateLoading(false)
       setAgentHealthReview(null)
       setAgentHealthReviewError('')
       setAgentHealthReviewLoading(false)
       setAgentWorkPackages([])
+      setTrackedWorkPackageKeys([])
       setAgentWorkPackageError('')
       setAgentWorkPackagesLoading(false)
       setAcceptingWorkPackageId(null)
       setTransitioningWorkPackageId(null)
-      setWorkPackageTransitionNotes({})
+      setAgentWorkPackageFilters(DEFAULT_AGENT_WORK_PACKAGE_FILTERS)
+      setWorkPackageDrafts({})
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -1012,6 +1274,7 @@ export function AgentManagementPanel({
       setDeletingAgentEvalId(null)
       setRunningAgentEvalId(null)
       setRunningAgentEvalSuite(false)
+      setActiveSupervisionIntent(null)
       setSimulationPrompt('')
       setSimulationContext('')
       setSimulationWorkspace('assistant')
@@ -1040,6 +1303,10 @@ export function AgentManagementPanel({
       setAutonomyReview(null)
       setAutonomyReviewError('')
       setAutonomyReviewLoading(false)
+      setSelfUpdateBrief('')
+      setSelfUpdateDraft(null)
+      setSelfUpdateError('')
+      setSelfUpdateLoading(false)
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -1058,6 +1325,10 @@ export function AgentManagementPanel({
     setAutonomyReview(null)
     setAutonomyReviewError('')
     setAutonomyReviewLoading(false)
+    setSelfUpdateBrief('')
+    setSelfUpdateDraft(null)
+    setSelfUpdateError('')
+    setSelfUpdateLoading(false)
     setAgentEvalRuns([])
     setAgentEvalRunsLoading(false)
     setAgentEvalError('')
@@ -1073,6 +1344,85 @@ export function AgentManagementPanel({
         : selectedAgent.allowed_workspaces[0] ?? 'assistant',
     )
   }, [selectedAgent, selectedAgentEvalRecords])
+
+  useEffect(() => {
+    if (!controlTowerIntent) {
+      return
+    }
+    if (appliedSupervisionIntentIdRef.current === controlTowerIntent.intent_id) {
+      return
+    }
+    if (
+      controlTowerIntent.kind === 'agent_supervision' &&
+      activeSupervisionIntent?.intent_id === controlTowerIntent.intent_id
+    ) {
+      return
+    }
+    setAgentFlash(null)
+
+    if (controlTowerIntent.kind === 'work_package_review') {
+      setActiveSupervisionIntent(null)
+      setAgentWorkPackageFilters({
+        ...DEFAULT_AGENT_WORK_PACKAGE_FILTERS,
+        sourceAgentId:
+          controlTowerIntent.work_package_filters.source_agent_id ?? controlTowerIntent.agent_id,
+        status: controlTowerIntent.work_package_filters.status ?? '',
+        staleOnly: controlTowerIntent.work_package_filters.stale_only ?? false,
+      })
+      if (selectedAgentId !== controlTowerIntent.agent_id) {
+        setSelectedAgentId(controlTowerIntent.agent_id)
+      }
+      setAgentFlash({
+        tone: 'success',
+        message: `Filtered the work package backlog to ${controlTowerSignalTypeLabel(controlTowerIntent.signal_type).toLowerCase()} follow-up for ${controlTowerIntent.agent_name ?? controlTowerIntent.agent_id}.`,
+      })
+      appliedSupervisionIntentIdRef.current = controlTowerIntent.intent_id
+      return
+    }
+
+    setActiveSupervisionIntent(controlTowerIntent)
+    if (selectedAgentId !== controlTowerIntent.agent_id) {
+      setSelectedAgentId(controlTowerIntent.agent_id)
+    }
+  }, [activeSupervisionIntent?.intent_id, controlTowerIntent, selectedAgentId])
+
+  useEffect(() => {
+    if (!activeSupervisionIntent || !selectedAgent) {
+      return
+    }
+    if (selectedAgent.agent_id !== activeSupervisionIntent.agent_id) {
+      return
+    }
+    if (appliedSupervisionIntentIdRef.current === activeSupervisionIntent.intent_id) {
+      return
+    }
+
+    const preparedOn = new Date().toISOString().slice(0, 10)
+    setEditForm(
+      applyControlTowerSupervisionDraft(
+        toAgentForm(selectedAgent),
+        activeSupervisionIntent,
+        preparedOn,
+      ),
+    )
+    setAgentFlash({
+      tone: 'success',
+      message: `${controlTowerSupervisionModeLabel(activeSupervisionIntent.mode)} draft loaded for ${selectedAgent.name}. Review the scope below, then save when ready.`,
+    })
+    appliedSupervisionIntentIdRef.current = activeSupervisionIntent.intent_id
+  }, [activeSupervisionIntent, selectedAgent])
+
+  useEffect(() => {
+    if (!activeSupervisionIntent) {
+      return
+    }
+    if (selectedAgentId === activeSupervisionIntent.agent_id || agentsLoading) {
+      return
+    }
+    if (!selectedAgent || selectedAgent.agent_id !== activeSupervisionIntent.agent_id) {
+      setActiveSupervisionIntent(null)
+    }
+  }, [activeSupervisionIntent, agentsLoading, selectedAgent, selectedAgentId])
 
   useEffect(() => {
     if (selectedAgentEval) {
@@ -1171,6 +1521,35 @@ export function AgentManagementPanel({
     })
   }
 
+  function handleLoadSupervisionDraft(mode: AssistantControlTowerAgentSupervisionIntent['mode']) {
+    if (!selectedAgent) {
+      return
+    }
+
+    const nextIntent: AssistantControlTowerAgentSupervisionIntent = {
+      intent_id: Date.now(),
+      agent_id: selectedAgent.agent_id,
+      agent_name: selectedAgent.name,
+      signal_type: activeSupervisionIntent?.signal_type ?? 'POLICY_WARNING',
+      kind: 'agent_supervision',
+      mode,
+    }
+
+    appliedSupervisionIntentIdRef.current = null
+    setActiveSupervisionIntent(nextIntent)
+    setAgentFlash(null)
+  }
+
+  function handleClearSupervisionDraft() {
+    if (!selectedAgent) {
+      return
+    }
+
+    setEditForm(toAgentForm(selectedAgent))
+    setActiveSupervisionIntent(null)
+    setAgentFlash(null)
+  }
+
   async function handleGenerateDraftWithOpenAi() {
     if (!builderBrief.trim()) {
       return
@@ -1246,7 +1625,7 @@ export function AgentManagementPanel({
       const totalProfiles = payload.total_profiles ?? payload.total_templates
       setAgentFlash({
         tone: 'success',
-        message: `Pilot lineup synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${totalProfiles} role profiles.`,
+        message: `Pilot lineup synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${totalProfiles} seeded defaults.`,
       })
     } catch (error) {
       setAgentFlash({
@@ -1513,6 +1892,7 @@ export function AgentManagementPanel({
         } satisfies UpdateAssistantAgentInput,
       )
       await refreshAgents(updated.agent_id)
+      setActiveSupervisionIntent(null)
       setAgentFlash({
         tone: 'success',
         message: `${updated.name} saved as version ${updated.version}.`,
@@ -1580,6 +1960,41 @@ export function AgentManagementPanel({
     }
   }
 
+  async function handleGenerateSelfUpdateDraft() {
+    if (!selectedAgent) {
+      return
+    }
+
+    setSelfUpdateLoading(true)
+    setSelfUpdateError('')
+    setSelfUpdateDraft(null)
+
+    try {
+      const draft = await generateAssistantAgentSelfUpdateDraft(appConfig.apiBase, selectedAgent.agent_id, {
+        brief: selfUpdateBrief,
+      })
+      setSelfUpdateDraft(draft)
+    } catch (error) {
+      setSelfUpdateError(
+        error instanceof Error ? error.message : 'Could not generate the self-update draft.',
+      )
+    } finally {
+      setSelfUpdateLoading(false)
+    }
+  }
+
+  function handleApplySelfUpdateDraft() {
+    if (!selfUpdateDraft) {
+      return
+    }
+
+    setEditForm(toAgentFormFromSelfUpdateDraft(selfUpdateDraft))
+    setAgentFlash({
+      tone: 'success',
+      message: `${selfUpdateDraft.name} self-update draft loaded into the editor. Review the narrowed scope and prompt before saving.`,
+    })
+  }
+
   async function handleGenerateAgentHealthReview() {
     setAgentHealthReviewLoading(true)
     setAgentHealthReviewError('')
@@ -1625,9 +2040,25 @@ export function AgentManagementPanel({
     workPackage: AssistantAgentWorkPackage,
     status: AssistantAgentWorkPackageStatus,
   ) {
-    const notes = workPackageTransitionNotes[workPackage.work_package_id]?.trim()
-    if (status === 'IMPLEMENTED' && !notes) {
-      setAgentWorkPackageError('Add an implementation evidence note before marking the package implemented.')
+    const draft = workPackageDrafts[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)
+    const notes = draft.notes.trim()
+    const implementationEvidence = {
+      prUrl: draft.prUrl.trim() || undefined,
+      commitSha: draft.commitSha.trim() || undefined,
+      evalIds: parseDraftEvalIds(draft.evalIds),
+      testNames: splitDraftLines(draft.testNames),
+      docPaths: splitDraftLines(draft.docPaths),
+      owner: draft.owner.trim() || undefined,
+    }
+    const hasEvidenceArtifact = Boolean(
+      implementationEvidence.prUrl ||
+        implementationEvidence.commitSha ||
+        implementationEvidence.evalIds.length > 0 ||
+        implementationEvidence.testNames.length > 0 ||
+        implementationEvidence.docPaths.length > 0,
+    )
+    if (status === 'IMPLEMENTED' && !hasEvidenceArtifact) {
+      setAgentWorkPackageError('Add a PR, commit, eval, test, or doc artifact before marking the package implemented.')
       return
     }
 
@@ -1643,10 +2074,11 @@ export function AgentManagementPanel({
           status,
           updatedBy: authSession?.user.user_id,
           notes: notes || undefined,
+          implementationEvidence,
         },
       )
       await loadAgentWorkPackages()
-      setWorkPackageTransitionNotes((current) => {
+      setWorkPackageDrafts((current) => {
         const next = { ...current }
         delete next[workPackage.work_package_id]
         return next
@@ -1879,7 +2311,7 @@ export function AgentManagementPanel({
             </article>
           </div>
 
-          <div className="assistant-profile-request-panel">
+          <div id="assistant-agent-work-packages" className="assistant-profile-request-panel">
             <div className="assistant-admin-section-head">
               <div>
                 <span className="eyebrow">Health Review</span>
@@ -1889,7 +2321,9 @@ export function AgentManagementPanel({
                 {agentHealthReview
                   ? `${agentHealthReview.work_package_count} candidate package${agentHealthReview.work_package_count === 1 ? '' : 's'} · ${agentHealthReview.pause_count} pause signal${agentHealthReview.pause_count === 1 ? '' : 's'}`
                   : 'Generate from autonomy briefs'}
-                {` · ${agentWorkPackages.length} tracked`}
+                {workPackageFiltersActive
+                  ? ` · ${agentWorkPackages.length} shown of ${trackedWorkPackageKeys.length} tracked`
+                  : ` · ${agentWorkPackages.length} tracked`}
               </span>
             </div>
 
@@ -1910,6 +2344,86 @@ export function AgentManagementPanel({
               >
                 {agentWorkPackagesLoading ? 'Refreshing Backlog...' : 'Refresh Backlog'}
               </button>
+            </div>
+
+            <div className="assistant-work-package-filter-grid">
+              <label className="field">
+                <span>Status</span>
+                <select
+                  className="control"
+                  value={agentWorkPackageFilters.status}
+                  onChange={(event) =>
+                    setAgentWorkPackageFilters((current) => ({
+                      ...current,
+                      status: event.target.value as AgentWorkPackageFilters['status'],
+                    }))
+                  }
+                >
+                  <option value="">All tracked statuses</option>
+                  <option value="ACCEPTED">Accepted</option>
+                  <option value="IN_PROGRESS">In Progress</option>
+                  <option value="IMPLEMENTED">Implemented</option>
+                  <option value="DISMISSED">Dismissed</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Source Agent</span>
+                <select
+                  className="control"
+                  value={agentWorkPackageFilters.sourceAgentId}
+                  onChange={(event) =>
+                    setAgentWorkPackageFilters((current) => ({
+                      ...current,
+                      sourceAgentId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">All source agents</option>
+                  {workPackageSourceAgentOptions.map((agent) => (
+                    <option key={agent.agent_id} value={agent.agent_id}>
+                      {agent.name} ({agent.agent_id})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="field">
+                <span>Backlog Filters</span>
+                <div className="toolbar settings-actions assistant-work-package-filter-pills">
+                  {([
+                    ['staleOnly', `Stale ${STALE_WORK_PACKAGE_THRESHOLD_HOURS}h+`],
+                    ['hasPr', 'PR'],
+                    ['hasCommit', 'Commit'],
+                    ['hasEval', 'Eval'],
+                    ['hasTests', 'Tests'],
+                    ['hasDocs', 'Docs'],
+                  ] as const).map(([filterKey, label]) => {
+                    const active = agentWorkPackageFilters[filterKey]
+                    return (
+                      <button
+                        key={filterKey}
+                        type="button"
+                        className={active ? 'button button-secondary' : 'button button-ghost'}
+                        onClick={() =>
+                          setAgentWorkPackageFilters((current) => ({
+                            ...current,
+                            [filterKey]: !current[filterKey],
+                          }))
+                        }
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => setAgentWorkPackageFilters(DEFAULT_AGENT_WORK_PACKAGE_FILTERS)}
+                    disabled={!workPackageFiltersActive}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              </div>
             </div>
 
             {agentHealthReviewError ? (
@@ -1975,7 +2489,7 @@ export function AgentManagementPanel({
               <div className="assistant-builder-preview-grid">
                 {agentWorkPackages.slice(0, 3).map((workPackage) => {
                   const nextStatuses = agentWorkPackageNextStatuses(workPackage.status)
-                  const transitionNote = workPackageTransitionNotes[workPackage.work_package_id] ?? ''
+                  const draft = workPackageDrafts[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)
                   const isTransitioning = transitioningWorkPackageId === workPackage.work_package_id
                   return (
                     <div key={`tracked-${workPackage.work_package_id}`} className="assistant-sidebar-block">
@@ -1988,20 +2502,178 @@ export function AgentManagementPanel({
                         {workPackage.accepted_by ? ` · accepted by ${workPackage.accepted_by}` : ''}
                       </small>
                       {workPackage.notes ? <small>{workPackage.notes}</small> : null}
+                      {workPackage.implemented_by || workPackage.implemented_at ? (
+                        <small>
+                          {workPackage.implemented_by ? `implemented by ${workPackage.implemented_by}` : 'implemented'}
+                          {workPackage.implemented_at ? ` · ${formatDate(workPackage.implemented_at)}` : ''}
+                        </small>
+                      ) : null}
+                      {(workPackage.implementation_evidence.pr_url ||
+                        workPackage.implementation_evidence.commit_sha ||
+                        workPackage.implementation_evidence.eval_ids.length > 0 ||
+                        workPackage.implementation_evidence.test_names.length > 0 ||
+                        workPackage.implementation_evidence.doc_paths.length > 0 ||
+                        workPackage.implementation_evidence.owner) ? (
+                        <small>
+                          {workPackage.implementation_evidence.owner
+                            ? `owner ${workPackage.implementation_evidence.owner}`
+                            : 'evidence ready'}
+                          {workPackage.implementation_evidence.pr_url ? ' · PR linked' : ''}
+                          {workPackage.implementation_evidence.commit_sha ? ' · commit linked' : ''}
+                          {workPackage.implementation_evidence.eval_ids.length > 0
+                            ? ` · ${workPackage.implementation_evidence.eval_ids.length} eval${workPackage.implementation_evidence.eval_ids.length === 1 ? '' : 's'}`
+                            : ''}
+                          {workPackage.implementation_evidence.test_names.length > 0
+                            ? ` · ${workPackage.implementation_evidence.test_names.length} test${workPackage.implementation_evidence.test_names.length === 1 ? '' : 's'}`
+                            : ''}
+                          {workPackage.implementation_evidence.doc_paths.length > 0
+                            ? ` · ${workPackage.implementation_evidence.doc_paths.length} doc${workPackage.implementation_evidence.doc_paths.length === 1 ? '' : 's'}`
+                            : ''}
+                        </small>
+                      ) : null}
+                      {workPackage.implementation_evidence.pr_url ? (
+                        <small>
+                          PR:{' '}
+                          <a
+                            href={workPackage.implementation_evidence.pr_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open linked pull request
+                          </a>
+                        </small>
+                      ) : null}
+                      {workPackage.implementation_evidence.commit_sha ? (
+                        <small>Commit: {workPackage.implementation_evidence.commit_sha}</small>
+                      ) : null}
+                      {workPackage.implementation_evidence.eval_ids.length > 0 ? (
+                        <small>Eval IDs: {workPackage.implementation_evidence.eval_ids.join(', ')}</small>
+                      ) : null}
+                      {workPackage.implementation_evidence.test_names.length > 0 ? (
+                        <small>Tests: {workPackage.implementation_evidence.test_names.join(', ')}</small>
+                      ) : null}
+                      {workPackage.implementation_evidence.doc_paths.length > 0 ? (
+                        <small>Docs: {workPackage.implementation_evidence.doc_paths.join(', ')}</small>
+                      ) : null}
                       {nextStatuses.length > 0 ? (
                         <div className="assistant-profile-request-decision-grid">
                           <label className="field">
-                            <span>Evidence Or Decision Note</span>
+                            <span>Decision Note</span>
                             <textarea
                               className="control"
-                              value={transitionNote}
+                              value={draft.notes}
                               onChange={(event) =>
-                                setWorkPackageTransitionNotes((current) => ({
+                                setWorkPackageDrafts((current) => ({
                                   ...current,
-                                  [workPackage.work_package_id]: event.target.value,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    notes: event.target.value,
+                                  },
                                 }))
                               }
-                              placeholder="What changed, why it closed, or what proves the implementation."
+                              placeholder="What changed, why this moved, or any helpful handoff context."
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Implementation Owner</span>
+                            <input
+                              className="control"
+                              value={draft.owner}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    owner: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Owner or reviewer shepherding the implementation."
+                            />
+                          </label>
+                          <label className="field">
+                            <span>PR URL</span>
+                            <input
+                              className="control"
+                              value={draft.prUrl}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    prUrl: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="https://github.com/org/repo/pull/123"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Commit SHA</span>
+                            <input
+                              className="control"
+                              value={draft.commitSha}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    commitSha: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="abc123def456"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Eval IDs</span>
+                            <input
+                              className="control"
+                              value={draft.evalIds}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    evalIds: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="12, 18, 25"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Test Names</span>
+                            <textarea
+                              className="control"
+                              value={draft.testNames}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    testNames: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="apps.api.tests.test_assistant_api&#10;npm test -- assistantApi.test.ts"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Doc Paths</span>
+                            <textarea
+                              className="control"
+                              value={draft.docPaths}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    docPaths: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="docs/engineering/agent-knowledge-base.md"
                             />
                           </label>
                           <div className="toolbar settings-actions">
@@ -2010,7 +2682,7 @@ export function AgentManagementPanel({
                                 key={`${workPackage.work_package_id}-${status}`}
                                 type="button"
                                 className={status === 'DISMISSED' ? 'button button-ghost' : 'button button-secondary'}
-                                disabled={isTransitioning || (status === 'IMPLEMENTED' && !transitionNote.trim())}
+                                disabled={isTransitioning}
                                 onClick={() => void handleUpdateAgentWorkPackageStatus(workPackage, status)}
                               >
                                 {status === 'IN_PROGRESS'
@@ -2466,7 +3138,7 @@ export function AgentManagementPanel({
                   <span className="eyebrow">Create</span>
                   <h4>Builder Draft</h4>
                 </div>
-                <span>Start from a role preset or shape one from scratch</span>
+                <span>Start from a Phase 1 pilot blueprint, browse the full role catalog, or shape one from scratch</span>
               </div>
 
               <div className="assistant-role-catalog-shell">
@@ -2505,6 +3177,7 @@ export function AgentManagementPanel({
                         <small>
                           {role.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
                         </small>
+                        <small>{roleCatalogSyncSummary(role)}</small>
                       </button>
                     ))}
                   </div>
@@ -2544,6 +3217,11 @@ export function AgentManagementPanel({
                             : selectedCreateRole.required_eval_coverage.join(' · ')}
                         </small>
                       </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Availability</strong>
+                        <p>{roleCatalogSyncSummary(selectedCreateRole)}</p>
+                        <small>{roleCatalogStatusLabel(selectedCreateRole)}</small>
+                      </div>
                     </div>
                     <div className="toolbar settings-actions">
                       <button
@@ -2571,9 +3249,12 @@ export function AgentManagementPanel({
                     >
                       <div className="assistant-provider-head">
                         <strong>{template.name}</strong>
-                        <span className="status-pill status-pill-planned">{template.scope}</span>
+                        <span className={`status-pill status-pill-${templateAvailabilityTone(template.availability)}`}>
+                          {templateAvailabilityLabel(template.availability)}
+                        </span>
                       </div>
                       <p>{template.summary}</p>
+                      <small>{template.scope} scope</small>
                       <small>
                         {template.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
                       </small>
@@ -2589,7 +3270,7 @@ export function AgentManagementPanel({
                     </div>
                     <span>
                       {selectedCreateTemplate
-                        ? selectedCreateTemplate.best_for
+                        ? templateAvailabilityLabel(selectedCreateTemplate.availability)
                         : 'Use the controls below to assemble a custom managed agent.'}
                     </span>
                   </div>
@@ -2601,6 +3282,11 @@ export function AgentManagementPanel({
                           <strong>Focus areas</strong>
                           <p>{selectedCreateTemplate.focus_areas.join(' · ')}</p>
                           <small>{selectedCreateTemplate.description}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Availability</strong>
+                          <p>{selectedCreateTemplate.best_for}</p>
+                          <small>{selectedCreateTemplate.availability_note}</small>
                         </div>
                         <div className="assistant-sidebar-block">
                           <strong>Workspace coverage</strong>
@@ -2649,8 +3335,8 @@ export function AgentManagementPanel({
                     <div className="empty-state">
                       <strong>Choose a starting point</strong>
                       <p>
-                        Role presets seed the draft with workspace access, governed tool defaults,
-                        action guardrails, and a starter system prompt you can still edit line by line.
+                        Pilot blueprints seed the draft with governed workspaces, tool defaults,
+                        authority boundaries, and a starter system prompt you can still edit line by line.
                       </p>
                     </div>
                   )}
@@ -3195,6 +3881,141 @@ export function AgentManagementPanel({
                     </small>
                   ) : null}
                 </div>
+
+                {activeSupervisionIntent && activeSupervisionIntent.agent_id === selectedAgent.agent_id ? (
+                  <div className={`assistant-supervision-banner is-${activeSupervisionIntent.mode}`}>
+                    <div className="assistant-admin-section-head">
+                      <div>
+                        <span className="eyebrow">Supervision Draft</span>
+                        <h4>{controlTowerSupervisionModeLabel(activeSupervisionIntent.mode)}</h4>
+                      </div>
+                      <span>{controlTowerSignalTypeLabel(activeSupervisionIntent.signal_type)}</span>
+                    </div>
+                    <p>
+                      Prepared from the Control Tower for {selectedAgent.name}. Existing policy and eval guardrails
+                      still apply, and nothing changes until this form is saved by a human supervisor.
+                    </p>
+
+                    <div className="assistant-supervision-summary-grid">
+                      <div className="assistant-sidebar-block">
+                        <strong>Status</strong>
+                        <p>{describeChangedValue(selectedAgent.status, editForm.status)}</p>
+                        <small>
+                          {activeSupervisionIntent.mode === 'pause'
+                            ? 'Pause uses the existing typed status update path.'
+                            : 'Narrowing keeps the status unchanged until you decide otherwise.'}
+                        </small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Capabilities</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeCapabilitySelection(selectedAgent.capabilities),
+                            summarizeCapabilitySelection(editForm.capabilities),
+                          )}
+                        </p>
+                        <small>{summarizeCapabilitySelection(editForm.capabilities)}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Live tools</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeToolSelection(selectedAgent.allowed_tools),
+                            summarizeToolSelection(editForm.allowed_tools),
+                          )}
+                        </p>
+                        <small>{listSummary(editForm.allowed_tools, 'No explicit live tool subset yet')}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Governed actions</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeActionSelection(selectedAgent.allowed_action_types),
+                            summarizeActionSelection(editForm.allowed_action_types),
+                          )}
+                        </p>
+                        <small>{actionSummary(editForm.allowed_action_types, actionDefinitionsByName)}</small>
+                      </div>
+                    </div>
+
+                    {supervisionPolicyMessages.length > 0 ? (
+                      <div
+                        className={`assistant-profile-fit-messages ${
+                          editProfileFit.errors.length > 0 ? 'is-error' : 'is-warning'
+                        }`}
+                      >
+                        {supervisionPolicyMessages.map((message) => (
+                          <small key={message}>{message}</small>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="assistant-control-tower-actions assistant-supervision-actions">
+                      <button
+                        type="button"
+                        className={
+                          activeSupervisionIntent.mode === 'pause'
+                            ? 'button button-primary'
+                            : 'button button-secondary'
+                        }
+                        onClick={() => handleLoadSupervisionDraft('pause')}
+                      >
+                        Load Pause Draft
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          activeSupervisionIntent.mode === 'narrow'
+                            ? 'button button-primary'
+                            : 'button button-secondary'
+                        }
+                        onClick={() => handleLoadSupervisionDraft('narrow')}
+                      >
+                        Load Narrowing Draft
+                      </button>
+                      {editForm.capabilities.includes('ACTION') ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => setEditForm((current) => toggleCapability(current, 'ACTION'))}
+                        >
+                          Disable ACTION
+                        </button>
+                      ) : null}
+                      {editCanStageActions && editForm.allowed_action_types.length > 0 ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() =>
+                            setEditForm((current) => ({
+                              ...current,
+                              allowed_action_types: [],
+                            }))
+                          }
+                        >
+                          Clear Actions
+                        </button>
+                      ) : null}
+                      {editCanUseLiveTools && editForm.allowed_tools.length > 0 ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() =>
+                            setEditForm((current) => ({
+                              ...current,
+                              allowed_tools: [],
+                            }))
+                          }
+                        >
+                          Clear Tool Picks
+                        </button>
+                      ) : null}
+                      <button type="button" className="button button-ghost" onClick={handleClearSupervisionDraft}>
+                        Clear Draft
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="assistant-builder-preview assistant-agent-eval-catalog">
                   <div className="assistant-admin-section-head">
@@ -3900,6 +4721,98 @@ export function AgentManagementPanel({
                       ) : null}
 
                       <small className="form-note">{policySimulation.simulation_notes.join(' ')}</small>
+                    </>
+                  ) : null}
+                </div>
+
+                <div className="assistant-builder-preview assistant-policy-simulator">
+                  <div className="assistant-admin-section-head">
+                    <div>
+                      <span className="eyebrow">Self-Update</span>
+                      <h4>Learning Draft</h4>
+                    </div>
+                    <span>Turn feedback and failing evals into a reviewable prompt/config draft</span>
+                  </div>
+
+                  <label className="field">
+                    <span>Optional focus</span>
+                    <textarea
+                      className="control"
+                      value={selfUpdateBrief}
+                      onChange={(event) => setSelfUpdateBrief(event.target.value)}
+                      placeholder="Focus on repeated unsupported workflow staging or missing evidence language."
+                    />
+                    <small className="form-note">
+                      Leave blank to let the server build the draft from recent mistakes and governance signals.
+                    </small>
+                  </label>
+
+                  <div className="toolbar settings-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleGenerateSelfUpdateDraft()}
+                      disabled={selfUpdateLoading}
+                    >
+                      {selfUpdateLoading ? 'Generating Draft...' : 'Generate Self-Update Draft'}
+                    </button>
+                    {selfUpdateDraft ? (
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        onClick={() => handleApplySelfUpdateDraft()}
+                      >
+                        Apply To Editor
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {selfUpdateError ? (
+                    <div className="feedback-banner feedback-banner-error">{selfUpdateError}</div>
+                  ) : null}
+
+                  {selfUpdateDraft ? (
+                    <>
+                      <div className="assistant-builder-preview-grid">
+                        <div className="assistant-sidebar-block">
+                          <strong>Suggested changes</strong>
+                          <p>{selfUpdateDraft.change_summary.length}</p>
+                          <small>{selfUpdateDraft.change_summary[0] ?? 'No change summary returned.'}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Needs-work feedback</strong>
+                          <p>{selfUpdateDraft.evidence.recent_needs_work_feedback.length}</p>
+                          <small>{selfUpdateDraft.evidence.recent_needs_work_feedback[0] ?? 'No comments captured.'}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Failing evals</strong>
+                          <p>{selfUpdateDraft.evidence.failing_eval_cases.length}</p>
+                          <small>{selfUpdateDraft.evidence.failing_eval_cases[0] ?? 'No failing evals captured.'}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Builder</strong>
+                          <p>{selfUpdateDraft.builder_model}</p>
+                          <small>{selfUpdateDraft.builder_provider.toUpperCase()} generated this review draft.</small>
+                        </div>
+                      </div>
+
+                      <div className="assistant-builder-warning-list">
+                        {selfUpdateDraft.change_summary.map((summary) => (
+                          <small key={summary} className="form-note">
+                            {summary}
+                          </small>
+                        ))}
+                      </div>
+
+                      {selfUpdateDraft.warnings.length > 0 ? (
+                        <div className="assistant-builder-warning-list">
+                          {selfUpdateDraft.warnings.map((warning) => (
+                            <small key={warning} className="form-note">
+                              {warning}
+                            </small>
+                          ))}
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
                 </div>

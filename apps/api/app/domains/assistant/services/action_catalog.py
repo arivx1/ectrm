@@ -75,6 +75,20 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         planner_priority=30,
     ),
     AssistantActionCatalogEntry(
+        name="record_trade_actualization",
+        label="Record trade actualization",
+        description=(
+            "Record or update executed physical-delivery actualization quantities when the user is reflecting "
+            "real-world movement completion in the system of record."
+        ),
+        policy_key="assistant.actions.trade_actualization.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "operations", "shipments", "admin"),
+        planner_priority=35,
+    ),
+    AssistantActionCatalogEntry(
         name="issue_trade_invoice",
         label="Issue invoice",
         description=(

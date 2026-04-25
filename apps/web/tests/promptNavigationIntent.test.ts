@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildPromptNavigationIntentKey,
   buildPromptNavigationRouteHandoff,
   normalizePromptNavigationIntent,
   parsePromptNavigationIntentsFromAssistantContent,
@@ -63,6 +64,24 @@ describe('prompt navigation intents', () => {
     expect(promptNavigationIntentDetail(intent!)).toBe('Open Work Queue focused on TRD-1001.')
   })
 
+  it('builds a deterministic key for prompt handoff outcome tracking', () => {
+    const intent = normalizePromptNavigationIntent({
+      kind: 'open_workspace',
+      targetView: 'operations',
+      label: 'Open Work Queue',
+      focus: {
+        type: 'trade',
+        id: 'TRD-1001',
+        label: 'TRD-1001',
+      },
+    })
+
+    expect(intent).not.toBeNull()
+    expect(buildPromptNavigationIntentKey(intent!)).toBe(
+      'open_workspace|operations|trade|TRD-1001|||Open Work Queue',
+    )
+  })
+
   it('extracts assistant navigation intent blocks without showing control JSON', () => {
     const parsed = parsePromptNavigationIntentsFromAssistantContent(
       [
@@ -107,6 +126,7 @@ describe('prompt navigation intents', () => {
         sourceActionRequestId: undefined,
       },
     ])
+    expect(parsed.warnings).toEqual([])
   })
 
   it('builds assistant route handoff metadata from focused intents', () => {
@@ -142,5 +162,26 @@ describe('prompt navigation intents', () => {
       sourceConversationId: null,
       sourceActionRequestId: null,
     })
+  })
+
+  it('fails closed for invalid navigation_intent blocks and raises a warning', () => {
+    const parsed = parsePromptNavigationIntentsFromAssistantContent(
+      [
+        'Stay in Prompt Home for now while we confirm the route.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          target_view: 'not-a-real-workspace',
+          label: 'Broken Handoff',
+        }),
+        '```',
+      ].join('\n'),
+    )
+
+    expect(parsed.content).toBe('Stay in Prompt Home for now while we confirm the route.')
+    expect(parsed.intents).toEqual([])
+    expect(parsed.warnings).toEqual([
+      'A workspace handoff suggestion could not be applied and was ignored.',
+    ])
   })
 })

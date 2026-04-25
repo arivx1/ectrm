@@ -1,6 +1,10 @@
 import type { ReferenceTab } from '../../shared/models'
 import type { ReferenceDataTabDefinition } from './referenceDataTabShared'
 import {
+  ReferenceDataAssetsDirectory,
+  ReferenceDataAssetsEditor,
+} from './tabs/ReferenceDataAssetsTab'
+import {
   ReferenceDataBooksDirectory,
   ReferenceDataBooksEditor,
   ReferenceDataBooksToolbar,
@@ -42,6 +46,13 @@ export const REFERENCE_TAB_DEFINITIONS: Record<ReferenceTab, ReferenceDataTabDef
     Directory: ReferenceDataBooksDirectory,
     Editor: ReferenceDataBooksEditor,
     Toolbar: ReferenceDataBooksToolbar,
+  },
+  assets: {
+    label: 'Assets',
+    tooltip: 'Assets track physical infrastructure and facilities that shape exposure, production, and operational planning.',
+    editorTitle: 'Asset Editor',
+    Directory: ReferenceDataAssetsDirectory,
+    Editor: ReferenceDataAssetsEditor,
   },
   commodities: {
     label: 'Commodities',

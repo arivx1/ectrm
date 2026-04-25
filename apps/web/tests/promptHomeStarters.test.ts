@@ -30,8 +30,23 @@ test('prompt home contextual starters project live counts into prompt-first acti
       { key: 'trade-capture', metric: '18', targetView: 'trades' },
     ],
   )
-  assert.match(starters[0]?.prompt ?? '', /operations queue/i)
+  assert.match(starters[0]?.detail ?? '', /Older unconfirmed and uninvoiced trades rise first/i)
+  assert.match(starters[0]?.prompt ?? '', /why the lead item is first/i)
   assert.equal(starters[0]?.askLabel, 'Ask about operations blockers')
+  assert.deepEqual(starters[0]?.summaryTargets, [
+    'dashboard.attention.confirmation_backlog_count',
+    'dashboard.attention.nomination_backlog_count',
+    'dashboard.attention.allocation_backlog_count',
+    'dashboard.attention.invoice_backlog_count',
+  ])
+  assert.match(starters[1]?.detail ?? '', /Ready invoice work rises before blocked previews/i)
+  assert.match(starters[1]?.prompt ?? '', /why the lead item is first/i)
+  assert.deepEqual(starters[1]?.summaryTargets, [
+    'settlement.invoice_pending_count',
+    'settlement.payment_due_count',
+    'settlement.trade_exception_count',
+  ])
+  assert.match(starters[2]?.detail ?? '', /Older unresolved pricing work rises first/i)
 })
 
 test('prompt home contextual starters preserve unknown metrics', () => {
@@ -53,4 +68,5 @@ test('prompt home contextual starters preserve unknown metrics', () => {
   assert.equal(starters[1]?.metric, 'n/a')
   assert.equal(starters[2]?.metric, 'n/a')
   assert.equal(starters[3]?.metric, 'n/a')
+  assert.equal(starters[3]?.summaryTargets, undefined)
 })

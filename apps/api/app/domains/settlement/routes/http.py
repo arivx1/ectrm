@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_settlement_role
@@ -10,14 +11,19 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.routes.framework import build_role_mutation_spec
 from apps.api.app.domains.operations.routes.framework import execute_operational_mutation
 from apps.api.app.domains.operations.routes.framework import execute_operational_patch_mutation
+from apps.api.app.domains.operations.routes.framework import execute_operational_query
 from apps.api.app.domains.operations.routes.framework import execute_operational_query_spec
 from apps.api.app.domains.operations.routes.framework import OperationalQuerySpec
+from apps.api.app.domains.operations.services.settlement_invoices import count_invoice_issue_candidates
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
+from apps.api.app.domains.operations.services.settlement_invoices import list_invoice_issue_candidates
 from apps.api.app.domains.operations.services.settlement_invoices import list_trade_invoices
 from apps.api.app.domains.operations.services.settlement_invoices import update_trade_invoice
 from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
 from apps.api.app.domains.operations.services.settlement_payments import list_trade_payments
 from apps.api.app.domains.operations.services.settlement_payments import update_trade_payment
+from apps.api.app.schemas.settlement import InvoiceIssueCandidateListOut
+from apps.api.app.schemas.settlement import InvoiceIssueCandidateOut
 from apps.api.app.schemas.settlement import TradeInvoiceCreate
 from apps.api.app.schemas.settlement import TradeInvoiceOut
 from apps.api.app.schemas.settlement import TradeInvoiceUpdate
@@ -50,6 +56,59 @@ def get_trade_invoices(
         limit=limit,
         offset=offset,
     )
+
+
+def _to_invoice_issue_candidate_out(candidate) -> InvoiceIssueCandidateOut:
+    return InvoiceIssueCandidateOut(
+        trade_id=candidate.trade_id,
+        trade_nature=candidate.trade_nature,
+        book=candidate.book,
+        portfolio=candidate.portfolio,
+        counterparty=candidate.counterparty,
+        commodity_class=candidate.commodity_class,
+        commodity=candidate.commodity,
+        trader_user=candidate.trader_user,
+        trade_date=candidate.trade_date,
+        execution_timestamp=candidate.execution_timestamp,
+        delivery_start=candidate.delivery_start,
+        delivery_end=candidate.delivery_end,
+        trade_currency_code=candidate.trade_currency_code,
+        invoice_status=candidate.invoice_status,
+        payment_status=candidate.payment_status,
+        settlement_status=candidate.settlement_status,
+        notional_amount=float(candidate.notional_amount) if candidate.notional_amount is not None else None,
+        age_days=candidate.age_days,
+        readiness_status=candidate.readiness_status,
+        priority_reason=candidate.priority_reason,
+        preview_summary=candidate.preview_summary,
+        blocking_reasons=list(candidate.blocking_reasons),
+        assumptions=list(candidate.assumptions),
+        recommended_action=jsonable_encoder(candidate.recommended_action),
+    )
+
+
+@router.get("/invoice-issue-candidates", response_model=InvoiceIssueCandidateListOut)
+def get_invoice_issue_candidates(
+    ready_only: bool = Query(default=False),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    db: Session = Depends(get_db),
+) -> InvoiceIssueCandidateListOut:
+    def _load() -> InvoiceIssueCandidateListOut:
+        rows = list_invoice_issue_candidates(db, limit=None)
+        if ready_only:
+            rows = [row for row in rows if row.readiness_status == "READY"]
+        rows = rows[:limit]
+        ready_count = sum(1 for row in rows if row.readiness_status == "READY")
+        blocked_count = sum(1 for row in rows if row.readiness_status == "BLOCKED")
+        return InvoiceIssueCandidateListOut(
+            count=len(rows),
+            total_count=count_invoice_issue_candidates(db),
+            ready_count=ready_count,
+            blocked_count=blocked_count,
+            items=[_to_invoice_issue_candidate_out(row) for row in rows],
+        )
+
+    return execute_operational_query(db, _load)
 
 
 @router.post("/invoices", response_model=TradeInvoiceOut, status_code=status.HTTP_201_CREATED)

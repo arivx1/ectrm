@@ -1,15 +1,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Iterable
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
-from apps.api.app.domains.reports.services.pretrade_reviews import PRETRADE_SHARED_OWNER_KEY
+from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
+from apps.api.app.domains.reports.services.pretrade_reviews import (
+    PRETRADE_REVIEW_PRESET_KEY,
+    PRETRADE_SHARED_OWNER_KEY,
+    review_recommendation_run_id,
+)
+from apps.api.app.domains.weather.services import build_weather_intelligence_overview
+from apps.api.app.models.option_exposure import OptionExposure
+from apps.api.app.models.position import Position
+from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.report_preset import ReportPreset
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
+from apps.api.app.models.reference_counterparty_external_credit_snapshot import (
+    ReferenceCounterpartyExternalCreditSnapshot,
+)
+from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.pretrade import (
+    PreTradeRecommendationDraftAnalysisOut,
     PreTradeRecommendationCheckOut,
     PreTradeRecommendationConfidence,
     PreTradeRecommendationEvidenceRefOut,
@@ -66,6 +83,12 @@ class SourceAdapterDefinition:
     payload_keys: tuple[str, ...]
     missing_if_false_keys: tuple[str, ...] = ()
     provenance_dataset: str = ""
+
+
+@dataclass(frozen=True)
+class PreparedPreTradeRecommendationEvaluation:
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot]
+    recommendation: PreTradeRecommendationResultOut
 
 
 SOURCE_ADAPTERS: tuple[SourceAdapterDefinition, ...] = (
@@ -337,6 +360,476 @@ def normalize_recommendation_input_snapshots(
         )
 
     return normalized
+
+
+def _to_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, Decimal):
+        return float(value)
+    return None
+
+
+def _observed_age_hours(observed_at: datetime | None, as_of: datetime) -> float | None:
+    if observed_at is None:
+        return None
+    if observed_at.tzinfo is None and as_of.tzinfo is not None:
+        observed_at = observed_at.replace(tzinfo=as_of.tzinfo)
+    if observed_at.tzinfo is not None and as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=observed_at.tzinfo)
+    return max(0.0, (as_of - observed_at).total_seconds() / 3600)
+
+
+def _freshness_from_observed_at(
+    observed_at: datetime | None,
+    *,
+    as_of: datetime,
+    stale_after_hours: int,
+) -> str:
+    age_hours = _observed_age_hours(observed_at, as_of)
+    if age_hours is None:
+        return "UNKNOWN"
+    return "STALE" if age_hours > stale_after_hours else "FRESH"
+
+
+def _latest_datetime(*values: datetime | None) -> datetime | None:
+    candidates = [value for value in values if value is not None]
+    if not candidates:
+        return None
+    return max(candidates)
+
+
+def _market_freshness_issue_count(payload: dict[str, object]) -> int:
+    freshness_rows = payload.get("freshness")
+    if not isinstance(freshness_rows, list):
+        return 0
+
+    issue_count = 0
+    for row in freshness_rows:
+        if not isinstance(row, dict):
+            continue
+        health_status = str(row.get("health_status") or "").strip().upper()
+        observation_age_hours = _to_float(row.get("observation_age_hours"))
+        if health_status != "HEALTHY" or (observation_age_hours is not None and observation_age_hours > 24):
+            issue_count += 1
+    return issue_count
+
+
+def _weather_high_risk_count(payload: dict[str, object]) -> int:
+    regional_signals = payload.get("regional_signals")
+    if not isinstance(regional_signals, list):
+        return 0
+
+    high_risk_count = 0
+    for signal in regional_signals:
+        if not isinstance(signal, dict):
+            continue
+        risk_values = [
+            str(signal.get(key) or "").strip().upper()
+            for key in ("demand_risk", "supply_risk", "storm_risk")
+        ]
+        if any(value == "HIGH" for value in risk_values):
+            high_risk_count += 1
+    return high_risk_count
+
+
+def _signed_volume(trade_side: str | None, value: object) -> float | None:
+    numeric_value = _to_float(value)
+    if numeric_value is None:
+        return None
+    return -numeric_value if (trade_side or "").strip().upper() == "SELL" else numeric_value
+
+
+def _collect_desk_context_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    related_trades = db.execute(
+        select(Trade).where(
+            Trade.status == "ACTIVE",
+            Trade.book == draft.book,
+            Trade.commodity_class == draft.commodity_class,
+            Trade.commodity == draft.commodity,
+        )
+    ).scalars().all()
+    counterparty_trades = (
+        db.execute(
+            select(Trade).where(
+                Trade.status == "ACTIVE",
+                Trade.counterparty == draft.counterparty,
+            )
+        ).scalars().all()
+        if not _is_blank(draft.counterparty)
+        else []
+    )
+    position = db.get(Position, draft.commodity) if not _is_blank(draft.commodity) else None
+    current_counterparty_exposure = sum(
+        abs((_to_float(trade.price) or 0) * (_to_float(trade.volume) or 0))
+        for trade in counterparty_trades
+    )
+    latest_observed_at = _latest_datetime(
+        position.updated_at if position is not None else None,
+        *(trade.updated_at for trade in related_trades),
+        *(trade.updated_at for trade in counterparty_trades),
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="desk-context",
+        adapter_key="desk-context",
+        adapter_label="Desk exposure context",
+        source_type="INTERNAL",
+        source_available=True,
+        captured_at=latest_observed_at,
+        freshness=_freshness_from_observed_at(latest_observed_at, as_of=as_of, stale_after_hours=24),
+        summary=(
+            f"{len(related_trades)} active trade{'s' if len(related_trades) != 1 else ''} "
+            "match the selected book and commodity."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="ECTRM",
+            dataset="active-trades-and-positions",
+            record_id=f"{draft.book}:{draft.commodity}",
+            observed_at=latest_observed_at,
+            ingested_at=latest_observed_at,
+            captured_by=actor_id,
+        ),
+        payload={
+            "related_active_trade_count": len(related_trades),
+            "current_net_position": _to_float(position.net_volume) if position is not None else None,
+            "current_counterparty_exposure": current_counterparty_exposure,
+        },
+    )
+
+
+def _collect_counterparty_credit_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    profile = (
+        db.get(ReferenceCounterpartyCreditProfile, draft.counterparty)
+        if not _is_blank(draft.counterparty)
+        else None
+    )
+    external_snapshot = (
+        db.execute(
+            select(ReferenceCounterpartyExternalCreditSnapshot)
+            .where(ReferenceCounterpartyExternalCreditSnapshot.counterparty_code == draft.counterparty)
+            .order_by(
+                ReferenceCounterpartyExternalCreditSnapshot.as_of_date.desc(),
+                ReferenceCounterpartyExternalCreditSnapshot.downloaded_at.desc(),
+                ReferenceCounterpartyExternalCreditSnapshot.id.desc(),
+            )
+        ).scalars().first()
+        if not _is_blank(draft.counterparty)
+        else None
+    )
+    observed_at = _latest_datetime(
+        profile.updated_at if profile is not None else None,
+        external_snapshot.downloaded_at if external_snapshot is not None else None,
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="counterparty-credit",
+        adapter_key="counterparty-credit",
+        adapter_label="Counterparty credit profile",
+        source_type="INTERNAL",
+        source_available=True,
+        captured_at=observed_at,
+        freshness=_freshness_from_observed_at(observed_at, as_of=as_of, stale_after_hours=168),
+        summary=(
+            f"Internal credit profile captured for {profile.counterparty_code}."
+            if profile is not None
+            else "No internal credit profile was captured for the selected counterparty."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider=external_snapshot.provider if external_snapshot is not None else "ECTRM Credit",
+            dataset="counterparty-credit-profiles",
+            record_id=draft.counterparty,
+            observed_at=observed_at,
+            ingested_at=external_snapshot.downloaded_at if external_snapshot is not None else observed_at,
+            captured_by=actor_id,
+        ),
+        payload={
+            "has_credit_profile": profile is not None,
+            "credit_limit_amount": _to_float(profile.limit_amount) if profile is not None else None,
+            "breach_action": profile.breach_action if profile is not None else None,
+            "credit_rating": profile.credit_rating if profile is not None else None,
+            "external_rating_value": external_snapshot.rating_value if external_snapshot is not None else None,
+            "recommended_limit_amount": (
+                _to_float(external_snapshot.recommended_limit_amount)
+                if external_snapshot is not None
+                else None
+            ),
+        },
+    )
+
+
+def _collect_latest_mark_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    observation = (
+        db.execute(
+            select(PriceIndexObservation)
+            .where(PriceIndexObservation.price_index_code == draft.price_index_code)
+            .order_by(
+                PriceIndexObservation.observation_date.desc(),
+                PriceIndexObservation.downloaded_at.desc(),
+                PriceIndexObservation.id.desc(),
+            )
+        ).scalars().first()
+        if not _is_blank(draft.price_index_code)
+        else None
+    )
+    observed_at = (
+        observation.source_published_at
+        if observation is not None and observation.source_published_at is not None
+        else observation.downloaded_at if observation is not None else None
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="latest-mark",
+        adapter_key="latest-mark",
+        adapter_label="Latest price-index mark",
+        source_type="EXTERNAL",
+        source_available=True,
+        captured_at=observation.downloaded_at if observation is not None else None,
+        freshness=_freshness_from_observed_at(observed_at, as_of=as_of, stale_after_hours=48),
+        summary=(
+            f"{observation.price_index_code} mark captured for {observation.observation_date.isoformat()}."
+            if observation is not None
+            else "No compatible latest mark was captured for the selected price index."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider=observation.source_provider if observation is not None else "Price index marks",
+            dataset="price-index-observations",
+            record_id=(
+                f"{observation.price_index_code}:{observation.observation_date.isoformat()}"
+                if observation is not None
+                else draft.price_index_code
+            ),
+            observed_at=observed_at,
+            ingested_at=observation.downloaded_at if observation is not None else None,
+            captured_by=actor_id,
+        ),
+        payload={
+            "latest_mark": _to_float(observation.value) if observation is not None else None,
+            "price_index_code": observation.price_index_code if observation is not None else draft.price_index_code,
+            "observation_date": (
+                observation.observation_date.isoformat()
+                if observation is not None
+                else None
+            ),
+            "source_provider": observation.source_provider if observation is not None else None,
+            "source_series_id": observation.source_series_id if observation is not None else None,
+        },
+    )
+
+
+def _collect_market_context_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+) -> PreTradeRecommendationSourceSnapshot:
+    market_context = build_market_context(db, commodity=draft.commodity, limit=6)
+    generated_at = market_context.get("generated_at")
+    generated_at_value = generated_at if isinstance(generated_at, datetime) else None
+    issue_count = _market_freshness_issue_count(market_context)
+    fundamentals = market_context.get("fundamentals")
+    macro = market_context.get("macro")
+    fundamental_count = len(fundamentals) if isinstance(fundamentals, list) else 0
+    macro_count = len(macro) if isinstance(macro, list) else 0
+    freshness = "DEGRADED" if issue_count > 0 else "FRESH"
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="market-context",
+        adapter_key="market-context",
+        adapter_label="Market context",
+        source_type="EXTERNAL",
+        source_available=True,
+        captured_at=generated_at_value,
+        freshness=freshness,  # type: ignore[arg-type]
+        summary=(
+            f"Captured {fundamental_count + macro_count} market driver row"
+            f"{'' if fundamental_count + macro_count == 1 else 's'}."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="ECTRM Market Context",
+            dataset="market-context",
+            record_id=draft.commodity,
+            observed_at=generated_at_value,
+            ingested_at=generated_at_value,
+            captured_by=actor_id,
+        ),
+        payload={
+            "market_freshness_issue_count": issue_count,
+            "fundamental_count": fundamental_count,
+            "macro_count": macro_count,
+            "stale_source_count": issue_count,
+        },
+    )
+
+
+def _collect_weather_intelligence_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    weather_overview = build_weather_intelligence_overview(
+        db,
+        commodity_class=draft.commodity_class or None,
+    )
+    latest_weather_update_at = weather_overview.get("latest_weather_update_at")
+    latest_weather_update_value = (
+        latest_weather_update_at if isinstance(latest_weather_update_at, datetime) else None
+    )
+    freshness = _freshness_from_observed_at(
+        latest_weather_update_value,
+        as_of=as_of,
+        stale_after_hours=24,
+    )
+    if freshness == "UNKNOWN":
+        freshness = "FRESH"
+    live_weather_location_count = _to_float(weather_overview.get("live_weather_location_count")) or 0
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="weather-intelligence",
+        adapter_key="weather-intelligence",
+        adapter_label="Weather intelligence",
+        source_type="EXTERNAL",
+        source_available=True,
+        captured_at=latest_weather_update_value,
+        freshness=freshness,  # type: ignore[arg-type]
+        summary=str(weather_overview.get("headline") or "No weather intelligence snapshot was captured."),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="Weather Intelligence",
+            dataset="weather-intelligence",
+            record_id=draft.commodity_class,
+            observed_at=latest_weather_update_value,
+            ingested_at=latest_weather_update_value,
+            captured_by=actor_id,
+        ),
+        payload={
+            "weather_high_risk_count": _weather_high_risk_count(weather_overview),
+            "live_weather_location_count": int(live_weather_location_count),
+        },
+    )
+
+
+def _collect_option_exposure_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    stmt = select(OptionExposure).where(
+        OptionExposure.book == draft.book,
+        OptionExposure.commodity_class == draft.commodity_class,
+        OptionExposure.commodity == draft.commodity,
+    )
+    if not _is_blank(draft.portfolio):
+        stmt = stmt.where(OptionExposure.portfolio == draft.portfolio)
+    rows = db.execute(
+        stmt.order_by(
+            OptionExposure.updated_at.desc(),
+            OptionExposure.trade_id.asc(),
+        )
+    ).scalars().all()
+    latest_updated_at = _latest_datetime(*(row.updated_at for row in rows))
+    option_delta = sum(
+        signed_volume
+        for signed_volume in (
+            _signed_volume(row.trade_side, row.underlying_equivalent_volume)
+            for row in rows
+        )
+        if signed_volume is not None
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="option-exposure",
+        adapter_key="option-exposure",
+        adapter_label="Option exposure",
+        source_type="DERIVED",
+        source_available=True,
+        captured_at=latest_updated_at,
+        freshness=_freshness_from_observed_at(latest_updated_at, as_of=as_of, stale_after_hours=24),
+        summary=(
+            f"{len(rows)} option exposure row{'s' if len(rows) != 1 else ''} match the selected desk context."
+            if rows
+            else "No matching option exposure rows were found for the selected desk context."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="ECTRM Risk",
+            dataset="option-exposures",
+            record_id=f"{draft.book}:{draft.portfolio or 'ALL'}:{draft.commodity}",
+            observed_at=latest_updated_at,
+            ingested_at=latest_updated_at,
+            captured_by=actor_id,
+        ),
+        payload={
+            "has_option_exposure": bool(rows),
+            "option_delta": option_delta if rows else None,
+            "option_gamma": None,
+            "option_vega": None,
+            "option_trade_count": len(rows),
+        },
+    )
+
+
+def collect_live_pretrade_recommendation_input_snapshots(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+) -> list[PreTradeRecommendationSourceSnapshot]:
+    effective_as_of = as_of or datetime.now(timezone.utc)
+    return [
+        _collect_desk_context_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_counterparty_credit_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_latest_mark_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_market_context_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+        ),
+        _collect_weather_intelligence_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_option_exposure_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+    ]
 
 
 def _max_stance(
@@ -1120,6 +1613,50 @@ def build_pretrade_recommendation_result(
     )
 
 
+def prepare_pretrade_recommendation_evaluation(
+    *,
+    draft: PreTradeScenarioDraft,
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+) -> PreparedPreTradeRecommendationEvaluation:
+    effective_as_of = as_of or datetime.now(timezone.utc)
+    normalized_input_snapshots = normalize_recommendation_input_snapshots(
+        input_snapshots,
+        as_of=effective_as_of,
+        actor_id=actor_id,
+    )
+    recommendation = build_pretrade_recommendation_result(
+        draft=draft,
+        input_snapshots=normalized_input_snapshots,
+        as_of=effective_as_of,
+    )
+    return PreparedPreTradeRecommendationEvaluation(
+        input_snapshots=normalized_input_snapshots,
+        recommendation=recommendation,
+    )
+
+
+def resolve_pretrade_recommendation_input_snapshots(
+    *,
+    db: Session | None,
+    draft: PreTradeScenarioDraft,
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+) -> list[PreTradeRecommendationSourceSnapshot]:
+    if input_snapshots:
+        return input_snapshots
+    if db is None:
+        return input_snapshots
+    return collect_live_pretrade_recommendation_input_snapshots(
+        db,
+        draft=draft,
+        as_of=as_of,
+        actor_id=actor_id,
+    )
+
+
 def build_recommendation_run_payload(
     *,
     thesis: str | None,
@@ -1137,6 +1674,73 @@ def build_recommendation_run_payload(
         "input_snapshots": [snapshot.model_dump(mode="json", exclude_none=True) for snapshot in input_snapshots],
         "recommendation": recommendation.model_dump(mode="json", exclude_none=True),
     }
+
+
+def build_pretrade_recommendation_draft_analysis(
+    *,
+    thesis: str | None,
+    draft: PreTradeScenarioDraft,
+    source_scenario_id: int | None,
+    source_review_id: int | None,
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    db: Session | None = None,
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+    previous_record: ReportPreset | None = None,
+) -> PreTradeRecommendationDraftAnalysisOut:
+    effective_as_of = as_of or datetime.now(timezone.utc)
+    resolved_input_snapshots = resolve_pretrade_recommendation_input_snapshots(
+        db=db,
+        draft=draft,
+        input_snapshots=input_snapshots,
+        as_of=effective_as_of,
+        actor_id=actor_id,
+    )
+    evaluation = prepare_pretrade_recommendation_evaluation(
+        draft=draft,
+        input_snapshots=resolved_input_snapshots,
+        as_of=effective_as_of,
+        actor_id=actor_id,
+    )
+
+    comparison = None
+    if previous_record is not None:
+        previous_run = _to_recommendation_run_out_base(
+            previous_record,
+            actor_id=actor_id or previous_record.created_by,
+        )
+        current_run = PreTradeRecommendationRunOut(
+            run_id=0,
+            run_key="draft-analysis",
+            name="Draft analysis",
+            thesis=thesis,
+            draft=draft,
+            source_scenario_id=source_scenario_id,
+            source_review_id=source_review_id,
+            input_snapshots=evaluation.input_snapshots,
+            recommendation=evaluation.recommendation,
+            created_at=effective_as_of,
+            created_by=actor_id or "system",
+            updated_at=effective_as_of,
+            updated_by=actor_id or "system",
+            version=0,
+            can_edit=actor_id is not None,
+        )
+        comparison = build_recommendation_run_comparison(
+            current=current_run,
+            previous=previous_run,
+        )
+
+    return PreTradeRecommendationDraftAnalysisOut(
+        thesis=thesis,
+        draft=draft,
+        source_scenario_id=source_scenario_id,
+        source_review_id=source_review_id,
+        input_snapshots=evaluation.input_snapshots,
+        recommendation=evaluation.recommendation,
+        comparison=comparison,
+        evaluated_at=effective_as_of,
+    )
 
 
 def recommendation_run_source_scenario_id(record: ReportPreset) -> int | None:
@@ -1189,6 +1793,113 @@ def _ordered_text_delta(current: list[str], previous: list[str]) -> tuple[list[s
         [item for item in current if item not in previous_set],
         [item for item in previous if item not in current_set],
     )
+
+
+def same_recommendation_comparison_group(left: ReportPreset, right: ReportPreset) -> bool:
+    left_review_id = recommendation_run_source_review_id(left)
+    right_review_id = recommendation_run_source_review_id(right)
+    if left_review_id is not None or right_review_id is not None:
+        return left_review_id is not None and left_review_id == right_review_id
+
+    left_scenario_id = recommendation_run_source_scenario_id(left)
+    right_scenario_id = recommendation_run_source_scenario_id(right)
+    return left_scenario_id is not None and left_scenario_id == right_scenario_id
+
+
+def previous_recommendation_run_record(
+    records: list[ReportPreset],
+    current_record: ReportPreset,
+) -> ReportPreset | None:
+    matching_older_records = [
+        record
+        for record in records
+        if record.id != current_record.id
+        and same_recommendation_comparison_group(current_record, record)
+        and (record.created_at, record.id) < (current_record.created_at, current_record.id)
+    ]
+    return max(matching_older_records, key=lambda record: (record.created_at, record.id), default=None)
+
+
+def recommendation_run_attached_to_shared_review(db, recommendation_run_id: int) -> bool:
+    review_records = db.execute(
+        select(ReportPreset).where(
+            ReportPreset.preset_key == PRETRADE_REVIEW_PRESET_KEY,
+            ReportPreset.scope_owner_key == PRETRADE_SHARED_OWNER_KEY,
+        )
+    ).scalars().all()
+    return any(review_recommendation_run_id(record) == recommendation_run_id for record in review_records)
+
+
+def get_accessible_recommendation_run_record(
+    db,
+    *,
+    recommendation_run_id: int,
+    actor_id: str,
+) -> ReportPreset | None:
+    record = db.execute(pretrade_recommendation_run_record_stmt(recommendation_run_id)).scalars().first()
+    if record is None:
+        return None
+    if record.scope_owner_key in {actor_id, PRETRADE_SHARED_OWNER_KEY} or recommendation_run_attached_to_shared_review(db, recommendation_run_id):
+        return record
+    return None
+
+
+def accessible_recommendation_run_records(
+    db,
+    *,
+    actor_id: str,
+) -> list[ReportPreset]:
+    records_by_id = {
+        record.id: record
+        for record in db.execute(pretrade_recommendation_run_records_stmt(actor_id)).scalars().all()
+    }
+    review_records = db.execute(
+        select(ReportPreset).where(
+            ReportPreset.preset_key == PRETRADE_REVIEW_PRESET_KEY,
+            ReportPreset.scope_owner_key == PRETRADE_SHARED_OWNER_KEY,
+        )
+    ).scalars().all()
+    attached_run_ids = sorted(
+        {
+            recommendation_run_id
+            for recommendation_run_id in (review_recommendation_run_id(record) for record in review_records)
+            if recommendation_run_id is not None and recommendation_run_id not in records_by_id
+        }
+    )
+    if attached_run_ids:
+        attached_records = db.execute(
+            select(ReportPreset).where(
+                ReportPreset.preset_key == PRETRADE_RECOMMENDATION_RUN_PRESET_KEY,
+                ReportPreset.id.in_(attached_run_ids),
+            )
+        ).scalars().all()
+        records_by_id.update({record.id: record for record in attached_records})
+    return sorted(records_by_id.values(), key=lambda record: (record.created_at, record.id), reverse=True)
+
+
+def latest_accessible_recommendation_run_record(
+    db,
+    *,
+    actor_id: str,
+    source_scenario_id: int | None = None,
+    source_review_id: int | None = None,
+) -> ReportPreset | None:
+    if source_scenario_id is None and source_review_id is None:
+        return None
+
+    matching_records = [
+        record
+        for record in accessible_recommendation_run_records(db, actor_id=actor_id)
+        if (
+            source_review_id is not None and recommendation_run_source_review_id(record) == source_review_id
+        )
+        or (
+            source_review_id is None
+            and source_scenario_id is not None
+            and recommendation_run_source_scenario_id(record) == source_scenario_id
+        )
+    ]
+    return max(matching_records, key=lambda record: (record.created_at, record.id), default=None)
 
 
 def build_recommendation_run_comparison(

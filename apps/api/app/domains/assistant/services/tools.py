@@ -6,9 +6,19 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
+from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.accruals.services.accruals import (
+    build_accrual_reconciliation_report as load_accrual_reconciliation_report,
+)
+from apps.api.app.domains.accruals.services.accruals import (
+    list_accrual_entries as load_accrual_entries,
+)
+from apps.api.app.domains.accruals.services.accruals import (
+    list_accrual_lots as load_accrual_lots,
+)
 from apps.api.app.domains.documents.services.ingestion import (
     get_document_ingestion as load_document_ingestion,
 )
@@ -34,6 +44,14 @@ from apps.api.app.domains.operations.services.trade_attention_candidates import 
     get_trade_attention_candidate_definition,
     list_trade_attention_candidates as load_trade_attention_candidates,
 )
+from apps.api.app.domains.reports.services.pretrade_recommendations import (
+    accessible_recommendation_run_records,
+    build_pretrade_recommendation_draft_analysis,
+    get_accessible_recommendation_run_record,
+    latest_accessible_recommendation_run_record,
+    previous_recommendation_run_record,
+    to_recommendation_run_out,
+)
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
 from apps.api.app.domains.reference_data.services.records import list_reference_records, normalize_code
 from apps.api.app.models.delivery_event import DeliveryEvent
@@ -55,6 +73,7 @@ from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.trade import Trade, trade_recency_order
 from apps.api.app.schemas.assistant import AssistantToolCallOut, AssistantToolDefinitionOut
+from apps.api.app.schemas.pretrade import PreTradeRecommendationDraftAnalysisCreate
 from apps.api.app.shared.enums import (
     ActualizationStatus,
     AllocationStatus,
@@ -176,9 +195,9 @@ class AssistantToolServiceError(Exception):
 
 
 class AssistantToolService:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, *, actor_id: str | None = None) -> None:
         self._db = db
-        self._tools = {tool.name: tool for tool in build_tool_definitions()}
+        self._tools = {tool.name: tool for tool in build_tool_definitions(actor_id=actor_id)}
 
     def list_tools(self) -> list[AssistantToolDefinition]:
         return list(self._tools.values())
@@ -204,7 +223,7 @@ class AssistantToolService:
         return result, trace
 
 
-def build_tool_definitions() -> list[AssistantToolDefinition]:
+def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantToolDefinition]:
     return [
         AssistantToolDefinition(
             name="get_trade_by_id",
@@ -389,6 +408,94 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
                 "additionalProperties": False,
             },
             executor=_get_market_context,
+        ),
+        AssistantToolDefinition(
+            name="analyze_pretrade_scenario_draft",
+            description=(
+                "Analyze an in-progress pre-trade scenario draft with the deterministic recommendation engine. "
+                "Use this when the user is editing a draft and wants the current opportunity, residual exposure, "
+                "hedge suggestion, missing evidence, or a comparison against the latest visible saved run. This "
+                "is read-only and does not persist a recommendation run, book a trade, approve a review, or "
+                "execute a hedge."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "thesis": {
+                        "type": "string",
+                        "description": "Optional working thesis for the in-progress draft.",
+                    },
+                    "draft": {
+                        "type": "object",
+                        "description": (
+                            "Required PreTradeScenarioDraft-compatible object containing the current in-progress "
+                            "scenario fields such as book, commodity, trade_side, pricing_type, counterparty, "
+                            "target_price, target_volume, and delivery window."
+                        ),
+                    },
+                    "source_scenario_id": {
+                        "type": "integer",
+                        "description": (
+                            "Optional saved pre-trade scenario identifier used only to compare the draft with the "
+                            "latest visible saved recommendation run."
+                        ),
+                    },
+                    "source_review_id": {
+                        "type": "integer",
+                        "description": (
+                            "Optional pre-trade review identifier used only to compare the draft with the latest "
+                            "visible saved recommendation run attached to that review."
+                        ),
+                    },
+                    "input_snapshots": {
+                        "type": "array",
+                        "description": (
+                            "Optional structured evidence snapshots already gathered for the draft. Each item "
+                            "should follow the PreTradeRecommendationSourceSnapshot contract."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                },
+                "required": ["draft"],
+                "additionalProperties": False,
+            },
+            executor=lambda db, arguments: _analyze_pretrade_scenario_draft(
+                db,
+                arguments,
+                actor_id=actor_id,
+            ),
+        ),
+        AssistantToolDefinition(
+            name="get_pretrade_recommendation_run",
+            description=(
+                "Load one saved pre-trade recommendation run, or the latest visible run for a scenario or review. "
+                "Use this when the user asks what opportunity the platform identified, what residual exposure and "
+                "hedge draft were suggested, or which evidence is missing. This is read-only and does not book "
+                "trades, approve reviews, or execute hedges."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "integer",
+                        "description": "Optional exact recommendation run identifier.",
+                    },
+                    "source_scenario_id": {
+                        "type": "integer",
+                        "description": "Optional pre-trade scenario identifier. Returns the latest visible run for that scenario.",
+                    },
+                    "source_review_id": {
+                        "type": "integer",
+                        "description": "Optional pre-trade review identifier. Returns the latest visible run attached to that review.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=lambda db, arguments: _get_pretrade_recommendation_run(
+                db,
+                arguments,
+                actor_id=actor_id,
+            ),
         ),
         AssistantToolDefinition(
             name="list_workflow_items",
@@ -672,6 +779,123 @@ def build_tool_definitions() -> list[AssistantToolDefinition]:
                 "additionalProperties": False,
             },
             executor=_list_deliveries,
+        ),
+        AssistantToolDefinition(
+            name="list_accrual_lots",
+            description=(
+                "Load live trade accrual lots with unbilled, billed, collected, and disputed balances. Use "
+                "this when the user asks about delivered-but-unbilled exposure, fee or accrual posture, or "
+                "trade-level reconciliation gaps."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "trade_id": {
+                        "type": "string",
+                        "description": "Optional exact trade identifier filter.",
+                    },
+                    "delivery_id": {
+                        "type": "string",
+                        "description": "Optional exact delivery identifier filter.",
+                    },
+                    "book": {
+                        "type": "string",
+                        "description": "Optional exact book filter.",
+                    },
+                    "portfolio": {
+                        "type": "string",
+                        "description": "Optional exact portfolio filter.",
+                    },
+                    "counterparty": {
+                        "type": "string",
+                        "description": "Optional exact counterparty filter.",
+                    },
+                    "commodity_class": {
+                        "type": "string",
+                        "description": "Optional exact commodity class filter.",
+                    },
+                    "accrual_currency_code": {
+                        "type": "string",
+                        "description": "Optional exact accrual currency filter.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional exact accrual lot status filter.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of rows to return. Defaults to 10 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_list_accrual_lots,
+        ),
+        AssistantToolDefinition(
+            name="list_accrual_entries",
+            description=(
+                "Load detailed accrual ledger entries for one accrual lot. Use this when the user needs the "
+                "effective-date entry trail behind a lot's accrued, billed, collected, or disputed balances."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "accrual_lot_id": {
+                        "type": "string",
+                        "description": "Exact accrual lot identifier.",
+                    }
+                },
+                "required": ["accrual_lot_id"],
+                "additionalProperties": False,
+            },
+            executor=_list_accrual_entries,
+        ),
+        AssistantToolDefinition(
+            name="get_accrual_reconciliation",
+            description=(
+                "Build an accrual reconciliation summary grouped by book, portfolio, counterparty, commodity "
+                "class, and currency. Use this for controller-style open-accrual or billed-versus-collected "
+                "analysis across a filtered slice."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "trade_id": {
+                        "type": "string",
+                        "description": "Optional exact trade identifier filter.",
+                    },
+                    "delivery_id": {
+                        "type": "string",
+                        "description": "Optional exact delivery identifier filter.",
+                    },
+                    "book": {
+                        "type": "string",
+                        "description": "Optional exact book filter.",
+                    },
+                    "portfolio": {
+                        "type": "string",
+                        "description": "Optional exact portfolio filter.",
+                    },
+                    "counterparty": {
+                        "type": "string",
+                        "description": "Optional exact counterparty filter.",
+                    },
+                    "commodity_class": {
+                        "type": "string",
+                        "description": "Optional exact commodity class filter.",
+                    },
+                    "accrual_currency_code": {
+                        "type": "string",
+                        "description": "Optional exact accrual currency filter.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional exact accrual lot status filter.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_get_accrual_reconciliation,
         ),
         AssistantToolDefinition(
             name="list_documents",
@@ -1037,6 +1261,156 @@ def _get_market_context(db: Session, arguments: dict[str, Any]) -> AssistantTool
     )
 
 
+def _analyze_pretrade_scenario_draft(
+    db: Session,
+    arguments: dict[str, Any],
+    *,
+    actor_id: str | None,
+) -> AssistantToolExecutionResult:
+    if actor_id is None:
+        raise AssistantToolServiceError(
+            "Authenticated actor context is required to analyze pre-trade scenario drafts."
+        )
+
+    try:
+        payload = PreTradeRecommendationDraftAnalysisCreate.model_validate(arguments)
+    except ValidationError as exc:
+        error = exc.errors(include_url=False)[0]
+        field_path = ".".join(str(part) for part in error.get("loc", ()))
+        detail = error.get("msg", "Invalid pre-trade draft analysis arguments.")
+        if field_path:
+            detail = f"{field_path}: {detail}"
+        raise AssistantToolServiceError(detail) from exc
+
+    previous_record = latest_accessible_recommendation_run_record(
+        db,
+        actor_id=actor_id,
+        source_scenario_id=payload.source_scenario_id,
+        source_review_id=payload.source_review_id,
+    )
+    analysis = build_pretrade_recommendation_draft_analysis(
+        thesis=payload.thesis,
+        draft=payload.draft,
+        source_scenario_id=payload.source_scenario_id,
+        source_review_id=payload.source_review_id,
+        input_snapshots=payload.input_snapshots,
+        db=db,
+        as_of=datetime.now(timezone.utc),
+        actor_id=actor_id,
+        previous_record=previous_record,
+    )
+    anchor = "draft"
+    if payload.source_review_id is not None:
+        anchor = f"review {payload.source_review_id} draft"
+    elif payload.source_scenario_id is not None:
+        anchor = f"scenario {payload.source_scenario_id} draft"
+    comparison_summary = ""
+    if analysis.comparison is not None:
+        comparison_summary = f" Compared with saved run {analysis.comparison.previous_run_id}."
+    summary = (
+        f"Analyzed {anchor}: {analysis.recommendation.stance.replace('_', ' ').lower()} stance"
+        f" with {len(analysis.recommendation.missing_evidence)} missing evidence item(s)."
+        f"{comparison_summary}"
+    )
+    return AssistantToolExecutionResult(
+        output={"analysis": analysis.model_dump(mode="json", exclude_none=True)},
+        summary=summary,
+        record_count=1,
+    )
+
+
+def _get_pretrade_recommendation_run(
+    db: Session,
+    arguments: dict[str, Any],
+    *,
+    actor_id: str | None,
+) -> AssistantToolExecutionResult:
+    if actor_id is None:
+        raise AssistantToolServiceError(
+            "Authenticated actor context is required to load pre-trade recommendation runs."
+        )
+
+    run_id = _normalize_optional_positive_int(arguments.get("run_id"), field_name="run_id")
+    source_scenario_id = _normalize_optional_positive_int(
+        arguments.get("source_scenario_id"),
+        field_name="source_scenario_id",
+    )
+    source_review_id = _normalize_optional_positive_int(
+        arguments.get("source_review_id"),
+        field_name="source_review_id",
+    )
+    provided_lookup_count = sum(
+        1
+        for value in (run_id, source_scenario_id, source_review_id)
+        if value is not None
+    )
+    if provided_lookup_count != 1:
+        raise AssistantToolServiceError(
+            "Provide exactly one of run_id, source_scenario_id, or source_review_id."
+        )
+
+    if run_id is not None:
+        record = get_accessible_recommendation_run_record(
+            db,
+            recommendation_run_id=run_id,
+            actor_id=actor_id,
+        )
+        lookup_summary = f"run_id {run_id}"
+    else:
+        record = latest_accessible_recommendation_run_record(
+            db,
+            actor_id=actor_id,
+            source_scenario_id=source_scenario_id,
+            source_review_id=source_review_id,
+        )
+        if source_scenario_id is not None:
+            lookup_summary = f"latest run for scenario {source_scenario_id}"
+        else:
+            lookup_summary = f"latest run for review {source_review_id}"
+
+    if record is None:
+        return AssistantToolExecutionResult(
+            output={
+                "found": False,
+                "lookup": {
+                    "run_id": run_id,
+                    "source_scenario_id": source_scenario_id,
+                    "source_review_id": source_review_id,
+                },
+            },
+            summary=f"No visible pre-trade recommendation run matched {lookup_summary}.",
+            record_count=0,
+        )
+
+    accessible_records = accessible_recommendation_run_records(db, actor_id=actor_id)
+    run = to_recommendation_run_out(
+        record,
+        actor_id=actor_id,
+        previous_record=previous_recommendation_run_record(accessible_records, record),
+    )
+    missing_evidence_count = len(run.recommendation.missing_evidence)
+    summary = (
+        f"Loaded pre-trade recommendation run {run.run_id} in stance "
+        f"{run.recommendation.stance} for {lookup_summary}."
+    )
+    if missing_evidence_count:
+        summary += f" Missing or impaired evidence flagged on {missing_evidence_count} section(s)."
+
+    return AssistantToolExecutionResult(
+        output={
+            "found": True,
+            "lookup": {
+                "run_id": run_id,
+                "source_scenario_id": source_scenario_id,
+                "source_review_id": source_review_id,
+            },
+            "run": run.model_dump(mode="json", exclude_none=True),
+        },
+        summary=summary,
+        record_count=1,
+    )
+
+
 def _list_workflow_items(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
     limit = _normalize_limit(arguments.get("limit"), default=10)
     trade_id = _optional_text(arguments.get("trade_id"))
@@ -1206,6 +1580,8 @@ def _list_trade_attention_candidates(db: Session, arguments: dict[str, Any]) -> 
     else:
         payload["candidate_types"] = list(TRADE_ATTENTION_CANDIDATE_TYPE_NAMES)
         summary = f"Returned {len(items)} trade attention candidate(s) across workspace count categories."
+    if rows:
+        summary += f" Top priority is {rows[0].trade_id} because {rows[0].priority_reason}"
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
 
 
@@ -1369,6 +1745,8 @@ def _list_invoice_issue_candidates(db: Session, arguments: dict[str, Any]) -> As
         f"Returned {len(items)} invoice issue candidate trade(s): "
         f"{ready_count} ready and {blocked_count} blocked by deterministic preview checks."
     )
+    if rows:
+        summary += f" Top priority is {rows[0].trade_id} because {rows[0].priority_reason}"
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
 
 
@@ -1547,6 +1925,68 @@ def _list_deliveries(db: Session, arguments: dict[str, Any]) -> AssistantToolExe
                 "list_trade_attention_candidates to inspect them."
             )
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
+
+
+def _list_accrual_lots(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+    rows = load_accrual_lots(
+        db,
+        trade_id=_optional_text(arguments.get("trade_id")),
+        delivery_id=_optional_text(arguments.get("delivery_id")),
+        book=_optional_upper(arguments.get("book")),
+        portfolio=_optional_upper(arguments.get("portfolio")),
+        counterparty=_optional_upper(arguments.get("counterparty")),
+        commodity_class=_optional_upper(arguments.get("commodity_class")),
+        accrual_currency_code=_optional_upper(arguments.get("accrual_currency_code")),
+        status_filter=_optional_upper(arguments.get("status")),
+        limit=limit,
+        offset=0,
+    )
+    payload = {"count": len(rows), "items": rows}
+    summary = f"Returned {len(rows)} accrual lot row(s)."
+    trade_id = _optional_text(arguments.get("trade_id"))
+    if trade_id:
+        summary = f"Returned {len(rows)} accrual lot row(s) for trade {trade_id}."
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(rows))
+
+
+def _list_accrual_entries(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    accrual_lot_id = _require_text(arguments.get("accrual_lot_id"), field_name="accrual_lot_id")
+    try:
+        rows = load_accrual_entries(db, accrual_lot_id=accrual_lot_id)
+    except LookupError:
+        return AssistantToolExecutionResult(
+            output={"found": False, "accrual_lot_id": accrual_lot_id},
+            summary=f"Accrual lot {accrual_lot_id} was not found.",
+            record_count=0,
+        )
+
+    payload = {"found": True, "count": len(rows), "items": rows}
+    summary = f"Returned {len(rows)} accrual entry row(s) for lot {accrual_lot_id}."
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(rows))
+
+
+def _get_accrual_reconciliation(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    payload = load_accrual_reconciliation_report(
+        db,
+        trade_id=_optional_text(arguments.get("trade_id")),
+        delivery_id=_optional_text(arguments.get("delivery_id")),
+        book=_optional_upper(arguments.get("book")),
+        portfolio=_optional_upper(arguments.get("portfolio")),
+        counterparty=_optional_upper(arguments.get("counterparty")),
+        commodity_class=_optional_upper(arguments.get("commodity_class")),
+        accrual_currency_code=_optional_upper(arguments.get("accrual_currency_code")),
+        status_filter=_optional_upper(arguments.get("status")),
+    )
+    summary = (
+        f"Accrual reconciliation returned {payload['row_count']} grouped row(s) across "
+        f"{payload['lot_count']} accrual lot(s)."
+    )
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=int(payload["row_count"]),
+    )
 
 
 def _list_documents(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
@@ -2034,6 +2474,15 @@ def _normalize_optional_int(value: Any, *, field_name: str) -> int | None:
         raise AssistantToolServiceError(f"{field_name} must be a whole number.") from exc
 
 
+def _normalize_optional_positive_int(value: Any, *, field_name: str) -> int | None:
+    normalized = _normalize_optional_int(value, field_name=field_name)
+    if normalized is None:
+        return None
+    if normalized < 1:
+        raise AssistantToolServiceError(f"{field_name} must be greater than zero.")
+    return normalized
+
+
 def _require_text(value: Any, *, field_name: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -2125,6 +2574,7 @@ def _dump_invoice_issue_candidate(value: Any) -> dict[str, Any]:
         "notional_amount": _json_default(value.notional_amount),
         "age_days": value.age_days,
         "readiness_status": value.readiness_status,
+        "priority_reason": value.priority_reason,
         "preview_summary": value.preview_summary,
         "blocking_reasons": list(value.blocking_reasons),
         "assumptions": list(value.assumptions),
@@ -2146,6 +2596,7 @@ def _dump_trade_attention_candidate(value: Any) -> dict[str, Any]:
         "trade_id": value.trade_id,
         "candidate_types": list(value.candidate_types),
         "source_count_keys": list(value.source_count_keys),
+        "priority_reason": value.priority_reason,
         "trade_nature": value.trade_nature,
         "book": value.book,
         "portfolio": value.portfolio,

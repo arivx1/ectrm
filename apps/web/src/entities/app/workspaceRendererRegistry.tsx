@@ -343,6 +343,9 @@ function buildTradeCaptureFormProps(context: WorkspaceViewRenderContext) {
     setTraderUserInput: captureForm.setTraderUserInput,
     duplicateSourceTradeId: captureForm.duplicateSourceTradeId,
     preTradeReviewContext: captureForm.preTradeReviewContext,
+    preTradeReviewDrift: tradeActions.preTradeReviewDrift,
+    preTradeReviewDriftLoading: tradeActions.preTradeReviewDriftLoading,
+    preTradeReviewDriftError: tradeActions.preTradeReviewDriftError,
     createLegs: captureForm.createLegs,
     activeCommodities: summary.activeCommodities,
     addDraftLeg: captureForm.addDraftLeg,
@@ -965,6 +968,7 @@ export const WORKSPACE_RENDERERS: Record<
             context.workspaceData.workspaceBootstrapSummary?.trades.pending_settlement_count ?? null,
         }}
         onOpenView={context.navigateToView}
+        onRefreshData={context.workspaceData.loadData}
       />
     ),
   },
@@ -985,6 +989,7 @@ export const WORKSPACE_RENDERERS: Record<
         authSession={context.workspaceData.authSession}
         globalFilter={context.shell.globalFilter}
         onOpenView={context.navigateToView}
+        onOpenTrade={context.navigateToTrade}
         appLoading={context.workspaceData.appLoading}
         activeTrades={context.summary.activeTrades}
         dashboardSummary={context.workspaceData.workspaceBootstrapSummary?.dashboard ?? null}
@@ -1380,6 +1385,7 @@ export const WORKSPACE_RENDERERS: Record<
         paymentMutationError={context.workspaceData.paymentMutationError}
         paymentMutationPendingKey={context.workspaceData.paymentMutationPendingKey}
         onClearHandoff={() => context.replaceView('settlement')}
+        onOpenView={context.navigateToView}
         onOpenTrade={context.navigateToTrade}
         onIssueInvoice={context.workspaceData.handleIssueTradeInvoice}
         onSaveInvoice={context.workspaceData.handleUpdateTradeInvoice}

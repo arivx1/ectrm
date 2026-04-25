@@ -44,6 +44,9 @@ from apps.api.app.domains.assistant.services.agent_work_packages import (
     to_agent_work_package_out,
     update_agent_work_package,
 )
+from apps.api.app.domains.assistant.services.agent_self_updates import (
+    generate_assistant_agent_self_update_draft,
+)
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
     AssistantServiceError,
@@ -61,6 +64,14 @@ from apps.api.app.domains.assistant.services.control_tower import (
 from apps.api.app.domains.assistant.services.feedback import (
     to_assistant_run_feedback_out,
     upsert_assistant_run_feedback,
+)
+from apps.api.app.domains.assistant.services.prompt_navigation_outcomes import (
+    create_prompt_home_navigation_outcome,
+    to_assistant_prompt_navigation_outcome_out,
+    upsert_assistant_prompt_navigation_outcome,
+)
+from apps.api.app.domains.assistant.services.prompt_route_recommendations import (
+    list_prompt_route_recommendations,
 )
 from apps.api.app.domains.assistant.services.eval_gates import (
     build_agent_eval_gate,
@@ -147,6 +158,8 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentProfileRequestDecision,
     AssistantAgentProfileRequestOut,
     AssistantAgentRoleArchetypeOut,
+    AssistantAgentSelfUpdateDraftOut,
+    AssistantAgentSelfUpdateRequest,
     AssistantConversationOut,
     AssistantConversationSummaryOut,
     AssistantAgentUpdate,
@@ -156,6 +169,9 @@ from apps.api.app.schemas.assistant import (
     AssistantPromptContextOut,
     AssistantPromptContextRequest,
     AssistantPromptSectionOut,
+    AssistantPromptNavigationOutcomeCreate,
+    AssistantPromptNavigationOutcomeOut,
+    AssistantPromptRouteRecommendationOut,
     AssistantPromptRequest,
     AssistantPromptResponse,
     AssistantRunFeedbackCreate,
@@ -181,8 +197,8 @@ def _action_decision_from_payload(payload: AssistantActionDecisionRequest | None
     )
 
 
-def get_assistant_service(db: Session) -> AssistantService:
-    return AssistantService(db)
+def get_assistant_service(db: Session, *, actor_id: str | None = None) -> AssistantService:
+    return AssistantService(db, actor_id=actor_id)
 
 
 @router.get("/settings", response_model=AssistantRuntimeSettingsOut)
@@ -297,6 +313,68 @@ def submit_current_user_assistant_run_feedback(
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return to_assistant_run_feedback_out(feedback)
+
+
+@router.post("/runs/{run_id}/prompt-navigation-outcomes", response_model=AssistantPromptNavigationOutcomeOut)
+def submit_current_user_assistant_prompt_navigation_outcome(
+    run_id: int,
+    payload: AssistantPromptNavigationOutcomeCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantPromptNavigationOutcomeOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        record = resolve_accessible_assistant_run(
+            db=db,
+            run_id=run_id,
+            user=user,
+        )
+        outcome = upsert_assistant_prompt_navigation_outcome(
+            db,
+            run=record,
+            user=user,
+            payload=payload,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_assistant_prompt_navigation_outcome_out(outcome)
+
+
+@router.post("/prompt-navigation-outcomes", response_model=AssistantPromptNavigationOutcomeOut)
+def submit_current_user_prompt_home_navigation_outcome(
+    payload: AssistantPromptNavigationOutcomeCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantPromptNavigationOutcomeOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        outcome = create_prompt_home_navigation_outcome(
+            db,
+            user=user,
+            payload=payload,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_assistant_prompt_navigation_outcome_out(outcome)
+
+
+@router.get("/prompt-route-recommendations", response_model=list[AssistantPromptRouteRecommendationOut])
+def list_current_user_prompt_route_recommendations(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[AssistantPromptRouteRecommendationOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    return [
+        AssistantPromptRouteRecommendationOut.model_validate(asdict(recommendation))
+        for recommendation in list_prompt_route_recommendations(
+            db,
+            user_role=user.role,
+        )
+    ]
 
 
 @router.get("/action-requests/{action_request_id}", response_model=AssistantActionRequestOut)
@@ -428,7 +506,7 @@ async def respond_with_assistant(
             authorization_header=request.headers.get("authorization"),
         )
         response, _ = await execute_assistant_execution(
-            assistant_service=get_assistant_service(db),
+            assistant_service=get_assistant_service(db, actor_id=prepared.user.user_id),
             payload=payload,
             db=db,
             prepared=prepared,
@@ -464,7 +542,7 @@ async def stream_assistant_response(
         yield _encode_sse("status", {"phase": "running"})
         try:
             response, conversation = await execute_assistant_execution(
-                assistant_service=get_assistant_service(db),
+                assistant_service=get_assistant_service(db, actor_id=prepared.user.user_id),
                 payload=payload,
                 db=db,
                 prepared=prepared,
@@ -718,6 +796,31 @@ async def build_admin_assistant_agent(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@admin_router.post("/agents/{agent_id}/self-update-draft", response_model=AssistantAgentSelfUpdateDraftOut)
+async def build_admin_assistant_agent_self_update_draft(
+    agent_id: str,
+    request: Request,
+    payload: AssistantAgentSelfUpdateRequest | None = None,
+    db: Session = Depends(get_db),
+) -> AssistantAgentSelfUpdateDraftOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        return await generate_assistant_agent_self_update_draft(
+            db,
+            agent_id=agent_id,
+            payload=payload,
+            assistant_service=get_assistant_service(db),
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @admin_router.get("/runs", response_model=list[AssistantRunSummaryOut])
 def list_admin_assistant_runs(
     role_key: str | None = None,
@@ -816,6 +919,11 @@ def get_admin_assistant_agent_health_review(
 def list_admin_assistant_agent_work_packages(
     request: Request,
     status: str | None = None,
+    has_pr: bool | None = None,
+    has_commit: bool | None = None,
+    has_eval: bool | None = None,
+    has_tests: bool | None = None,
+    has_docs: bool | None = None,
     db: Session = Depends(get_db),
 ) -> list[AssistantAgentWorkPackageOut]:
     try:
@@ -826,7 +934,15 @@ def list_admin_assistant_agent_work_packages(
         raise HTTPException(status_code=403, detail="Administrative access is required")
 
     try:
-        records = list_agent_work_packages(db, status=status)
+        records = list_agent_work_packages(
+            db,
+            status=status,
+            has_pr=has_pr,
+            has_commit=has_commit,
+            has_eval=has_eval,
+            has_tests=has_tests,
+            has_docs=has_docs,
+        )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return [to_agent_work_package_out(record) for record in records]
@@ -853,6 +969,11 @@ def update_admin_assistant_agent_work_package(
             status=payload.status,
             updated_by=payload.updated_by if payload.updated_by else user.user_id,
             notes=payload.notes,
+            implementation_evidence=(
+                payload.implementation_evidence.model_dump(exclude_none=True)
+                if payload.implementation_evidence is not None
+                else None
+            ),
         )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

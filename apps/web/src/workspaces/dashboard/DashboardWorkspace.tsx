@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
-import type { WorkspaceDashboardSummary } from '../../entities/app/api'
+import {
+  loadTradeAttentionCandidates,
+  type TradeAttentionCandidateList,
+  type TradeAttentionCandidateType,
+  type WorkspaceDashboardSummary,
+} from '../../entities/app/api'
+import { buildTradeAttentionCandidateWorkflowHandoff } from '../../entities/app/candidateWorkflowHandoffs'
+import { sessionHeaders } from '../../entities/app/workspaceDataShared'
+import { appConfig } from '../../shared/config'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord, ViewKey } from '../../shared/models'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
@@ -50,7 +59,8 @@ type PriceIndexRecord = {
 type DashboardWorkspaceProps = {
   authSession: StoredAuthSession | null
   globalFilter: string
-  onOpenView: (view: ViewKey) => void
+  onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
+  onOpenTrade: (tradeId: string) => void
   appLoading: boolean
   activeTrades: TradeRecord[]
   dashboardSummary: WorkspaceDashboardSummary | null
@@ -62,6 +72,17 @@ type DashboardWorkspaceProps = {
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
 }
+
+type DashboardIssueRow = {
+  label: string
+  count: number
+  detail: string
+  tone: 'active' | 'blocked'
+  candidateType: TradeAttentionCandidateType
+  destinationView: ViewKey
+}
+
+const DASHBOARD_CANDIDATE_LIMIT = 8
 
 function ageInDays(value: string | null | undefined): number | null {
   if (!value) {
@@ -215,6 +236,26 @@ function formatSignedMoney(value: number, formatMoney: (value: number | null) =>
 
 function countLabel(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`
+}
+
+function summarizeCandidateStatuses(candidate: {
+  confirmation_status: string
+  nomination_status: string
+  allocation_status: string
+  pricing_status: string
+  invoice_status: string
+  payment_status: string
+  settlement_status: string
+}): string {
+  return [
+    `Confirmation ${candidate.confirmation_status}`,
+    `Nomination ${candidate.nomination_status}`,
+    `Allocation ${candidate.allocation_status}`,
+    `Pricing ${candidate.pricing_status}`,
+    `Invoice ${candidate.invoice_status}`,
+    `Payment ${candidate.payment_status}`,
+    `Settlement ${candidate.settlement_status}`,
+  ].join(' • ')
 }
 
 function formatDateInputValue(value: Date): string {
@@ -552,6 +593,7 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     authSession,
     globalFilter,
     onOpenView,
+    onOpenTrade,
     appLoading,
     activeTrades,
     dashboardSummary,
@@ -571,6 +613,10 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const [dateFromFilter, setDateFromFilter] = useState('')
   const [dateToFilter, setDateToFilter] = useState('')
   const [screenFilter, setScreenFilter] = useState('')
+  const [activeAttentionIssue, setActiveAttentionIssue] = useState<DashboardIssueRow | null>(null)
+  const [attentionCandidates, setAttentionCandidates] = useState<TradeAttentionCandidateList | null>(null)
+  const [attentionCandidatesLoading, setAttentionCandidatesLoading] = useState(false)
+  const [attentionCandidatesError, setAttentionCandidatesError] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const hasScreenFilter = effectiveScreenFilter.trim().length > 0
 
@@ -757,6 +803,69 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     pnlFilterError,
   ])
 
+  useEffect(() => {
+    if (hasScreenFilter) {
+      setActiveAttentionIssue(null)
+      setAttentionCandidates(null)
+      setAttentionCandidatesError('')
+      setAttentionCandidatesLoading(false)
+    }
+  }, [hasScreenFilter])
+
+  useEffect(() => {
+    const currentAttentionIssue = activeAttentionIssue
+    const currentAuthSession = authSession
+
+    if (!currentAttentionIssue || hasScreenFilter) {
+      return
+    }
+    if (!currentAuthSession) {
+      setAttentionCandidates(null)
+      setAttentionCandidatesError('Sign in to load live candidate reads.')
+      setAttentionCandidatesLoading(false)
+      return
+    }
+    const selectedAttentionIssue: DashboardIssueRow = currentAttentionIssue
+    const authorizedSession: StoredAuthSession = currentAuthSession
+
+    let cancelled = false
+    setAttentionCandidatesLoading(true)
+    setAttentionCandidatesError('')
+
+    async function loadCandidates() {
+      try {
+        const nextCandidates = await loadTradeAttentionCandidates(
+          appConfig.apiBase,
+          {
+            candidateType: selectedAttentionIssue.candidateType,
+            limit: DASHBOARD_CANDIDATE_LIMIT,
+          },
+          { readHeaders: sessionHeaders(authorizedSession) },
+        )
+        if (!cancelled) {
+          setAttentionCandidates(nextCandidates)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAttentionCandidates(null)
+          setAttentionCandidatesError(
+            error instanceof Error ? error.message : 'Unable to load trade attention candidates.',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setAttentionCandidatesLoading(false)
+        }
+      }
+    }
+
+    void loadCandidates()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeAttentionIssue, authSession, hasScreenFilter])
+
   const unitLabelByCommodity = useMemo(() => buildUnitLabelByCommodity(activeTrades), [activeTrades])
   const canUseDashboardSummary = !hasScreenFilter && dashboardSummary !== null
 
@@ -908,44 +1017,58 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             count: attention.confirmation_backlog_count,
             detail: 'Trades executed 1+ day ago that still are not confirmed.',
             tone: attention.confirmation_backlog_count > 0 ? 'blocked' : 'active',
+            candidateType: 'confirmation_backlog',
+            destinationView: 'operations',
           },
           {
             label: 'Nomination backlog',
             count: attention.nomination_backlog_count,
             detail: 'Physical trades nearing delivery that still need nomination or scheduling completion.',
             tone: attention.nomination_backlog_count > 0 ? 'blocked' : 'active',
+            candidateType: 'nomination_backlog',
+            destinationView: 'scheduling',
           },
           {
             label: 'Allocation backlog',
             count: attention.allocation_backlog_count,
             detail: 'Nominated flows that have not reached an allocated or completed state yet.',
             tone: attention.allocation_backlog_count > 0 ? 'blocked' : 'active',
+            candidateType: 'allocation_backlog',
+            destinationView: 'scheduling',
           },
           {
             label: 'Invoice backlog',
             count: attention.invoice_backlog_count,
             detail: 'Physical trades aging 5+ days without an issued or approved invoice workflow state.',
             tone: attention.invoice_backlog_count > 0 ? 'blocked' : 'active',
+            candidateType: 'invoice_backlog',
+            destinationView: 'settlement',
           },
           {
             label: 'Overdue payments',
             count: attention.overdue_payment_count,
             detail: 'Trades with overdue payment state or aging invoices that still are not paid.',
             tone: attention.overdue_payment_count > 0 ? 'blocked' : 'active',
+            candidateType: 'overdue_payment',
+            destinationView: 'settlement',
           },
           {
             label: 'Stale pricing',
             count: attention.stale_pricing_count,
             detail: 'Trades still marked pending or partial pricing 2+ days after execution.',
             tone: attention.stale_pricing_count > 0 ? 'blocked' : 'active',
+            candidateType: 'stale_pricing',
+            destinationView: 'trades',
           },
           {
             label: 'Incomplete ops data',
             count: attention.incomplete_ops_data_count,
             detail: 'Active trades missing core execution, counterparty, quantity, or physical delivery attributes.',
             tone: attention.incomplete_ops_data_count > 0 ? 'blocked' : 'active',
+            candidateType: 'incomplete_ops_data',
+            destinationView: 'trades',
           },
-        ] as Array<{ label: string; count: number; detail: string; tone: 'active' | 'blocked' }>,
+        ] as DashboardIssueRow[],
       }
     }
 
@@ -1027,46 +1150,63 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           count: confirmationBacklog.length,
           detail: 'Trades executed 1+ day ago that still are not confirmed.',
           tone: confirmationBacklog.length > 0 ? 'blocked' : 'active',
+          candidateType: 'confirmation_backlog',
+          destinationView: 'operations',
         },
         {
           label: 'Nomination backlog',
           count: nominationBacklog.length,
           detail: 'Physical trades nearing delivery that still need nomination or scheduling completion.',
           tone: nominationBacklog.length > 0 ? 'blocked' : 'active',
+          candidateType: 'nomination_backlog',
+          destinationView: 'scheduling',
         },
         {
           label: 'Allocation backlog',
           count: allocationBacklog.length,
           detail: 'Nominated flows that have not reached an allocated or completed state yet.',
           tone: allocationBacklog.length > 0 ? 'blocked' : 'active',
+          candidateType: 'allocation_backlog',
+          destinationView: 'scheduling',
         },
         {
           label: 'Invoice backlog',
           count: invoiceBacklog.length,
           detail: 'Physical trades aging 5+ days without an issued or approved invoice workflow state.',
           tone: invoiceBacklog.length > 0 ? 'blocked' : 'active',
+          candidateType: 'invoice_backlog',
+          destinationView: 'settlement',
         },
         {
           label: 'Overdue payments',
           count: overduePayments.length,
           detail: 'Trades with overdue payment state or aging invoices that still are not paid.',
           tone: overduePayments.length > 0 ? 'blocked' : 'active',
+          candidateType: 'overdue_payment',
+          destinationView: 'settlement',
         },
         {
           label: 'Stale pricing',
           count: stalePricing.length,
           detail: 'Trades still marked pending or partial pricing 2+ days after execution.',
           tone: stalePricing.length > 0 ? 'blocked' : 'active',
+          candidateType: 'stale_pricing',
+          destinationView: 'trades',
         },
         {
           label: 'Incomplete ops data',
           count: incompleteOperationalData.length,
           detail: 'Active trades missing core execution, counterparty, quantity, or physical delivery attributes.',
           tone: incompleteOperationalData.length > 0 ? 'blocked' : 'active',
+          candidateType: 'incomplete_ops_data',
+          destinationView: 'trades',
         },
-      ] as Array<{ label: string; count: number; detail: string; tone: 'active' | 'blocked' }>,
+      ] as DashboardIssueRow[],
     }
   }, [canUseDashboardSummary, dashboardSummary, visibleActiveTrades])
+  const activeAttentionSummary = activeAttentionIssue && attentionCandidates
+    ? `${formatNumber(attentionCandidates.count, 0)} of ${formatNumber(attentionCandidates.total_count, 0)} candidate trades loaded.`
+    : null
   const quickStartActions = [
     {
       title: 'Capture a trade',
@@ -1513,17 +1653,141 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             </div>
           ) : dashboardIssues.rows.some((row) => row.count > 0) ? (
             <div className="dashboard-issue-list">
-              {dashboardIssues.rows.map((row) => (
-                <article key={row.label} className="dashboard-issue-row">
-                  <div>
-                    <strong>{row.label}</strong>
-                    <p>{row.detail}</p>
+              {dashboardIssues.rows.map((row) => {
+                const isActiveRow = activeAttentionIssue?.candidateType === row.candidateType
+                return (
+                  <article key={row.label} className="dashboard-issue-row">
+                    <div>
+                      <strong>{row.label}</strong>
+                      <p>{row.detail}</p>
+                    </div>
+                    <div className="dashboard-issue-meta">
+                      <span className={`status-pill status-pill-${row.tone}`}>{row.count} open</span>
+                      {!hasScreenFilter ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => {
+                            setActiveAttentionIssue((current) =>
+                              current?.candidateType === row.candidateType ? null : row,
+                            )
+                            setAttentionCandidates(null)
+                            setAttentionCandidatesError('')
+                          }}
+                        >
+                          {isActiveRow ? 'Hide candidates' : 'Open candidates'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                )
+              })}
+              {!hasScreenFilter && activeAttentionIssue ? (
+                <article className="position-card position-card-drilldown">
+                  <div className="position-card-head">
+                    <div className="position-card-copy">
+                      <strong>{activeAttentionIssue.label}</strong>
+                      <p>{activeAttentionIssue.detail}</p>
+                    </div>
+                    <div className="position-card-actions">
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => onOpenView(activeAttentionIssue.destinationView)}
+                      >
+                        Open {activeAttentionIssue.destinationView}
+                      </button>
+                    </div>
                   </div>
-                  <div className="dashboard-issue-meta">
-                    <span className={`status-pill status-pill-${row.tone}`}>{row.count} open</span>
-                  </div>
+                  {attentionCandidatesLoading ? (
+                    <div className="skeleton-stack">
+                      <div className="skeleton-block" />
+                    </div>
+                  ) : attentionCandidatesError ? (
+                    <div className="empty-state">
+                      <strong>Candidate read unavailable</strong>
+                      <p>{attentionCandidatesError}</p>
+                    </div>
+                  ) : attentionCandidates && attentionCandidates.items.length > 0 ? (
+                    <div className="position-list">
+                      <div className="position-card-copy">
+                        <p>{activeAttentionSummary}</p>
+                      </div>
+                      {attentionCandidates.items.map((candidate) => {
+                        const workflowHandoff = buildTradeAttentionCandidateWorkflowHandoff(candidate)
+                        return (
+                          <article key={candidate.trade_id} className="position-card position-card-drilldown">
+                          <div className="position-card-head">
+                            <div className="position-card-copy">
+                              <strong>{candidate.trade_id}</strong>
+                              <span>
+                                {candidate.commodity} • {candidate.counterparty ?? 'Counterparty TBD'}
+                              </span>
+                            </div>
+                            <span
+                              className={`status-pill status-pill-${
+                                candidate.blocking_reasons.length > 0 ? 'blocked' : 'active'
+                              }`}
+                            >
+                              {candidate.age_days !== null ? `${candidate.age_days}d old` : 'Active'}
+                            </span>
+                          </div>
+                          <div className="shipment-card-meta">
+                            {candidate.candidate_types.map((candidateType) => (
+                              <span key={candidateType} className="entity-chip entity-chip-soft">
+                                {candidateType.replaceAll('_', ' ')}
+                              </span>
+                            ))}
+                            <span className="entity-chip entity-chip-soft">
+                              {formatCommodityClass(candidate.commodity_class)}
+                            </span>
+                            <span className="entity-chip entity-chip-soft">{candidate.book}</span>
+                          </div>
+                          <div className="position-card-copy">
+                            <p>{summarizeCandidateStatuses(candidate)}</p>
+                            <p>Priority: {candidate.priority_reason}</p>
+                            <p>
+                              {candidate.next_steps.length > 0
+                                ? candidate.next_steps.join(' • ')
+                                : `Execution ${formatDate(candidate.execution_timestamp)}`}
+                            </p>
+                            {candidate.blocking_reasons.length > 0 ? (
+                              <p>{candidate.blocking_reasons.join(' • ')}</p>
+                            ) : null}
+                          </div>
+                          <div className="position-card-actions">
+                            <span>
+                              Delivery {formatDate(candidate.delivery_start)} to {formatDate(candidate.delivery_end)}
+                            </span>
+                            <div className="workflow-item-button-row">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={() => onOpenView(workflowHandoff.view, workflowHandoff.handoff)}
+                              >
+                                {workflowHandoff.label}
+                              </button>
+                              <button
+                                type="button"
+                                className="button button-ghost"
+                                onClick={() => onOpenTrade(candidate.trade_id)}
+                              >
+                                Open Trade
+                              </button>
+                            </div>
+                          </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  ) : attentionCandidates ? (
+                    <div className="empty-state">
+                      <strong>No candidate trades</strong>
+                      <p>The deterministic candidate read is clear for this attention bucket right now.</p>
+                    </div>
+                  ) : null}
                 </article>
-              ))}
+              ) : null}
             </div>
           ) : (
             <div className="empty-state">

@@ -42,6 +42,7 @@ import {
   createAssistantAgentEval,
   createAssistantAgentProfileRequest,
   deleteAssistantAgentEval,
+  generateAssistantAgentSelfUpdateDraft,
   getAdminAssistantAgentHealthReview,
   getAdminAssistantAutonomyReview,
   getAdminAssistantControlTowerSummary,
@@ -56,6 +57,7 @@ import {
   listAdminAssistantRoleArchetypes,
   listAssistantActionRequests,
   listAssistantConversations,
+  listAssistantPromptRouteRecommendations,
   previewAssistantPromptContext,
   rejectAssistantActionRequest,
   rejectAssistantAgentProfileRequest,
@@ -63,6 +65,7 @@ import {
   runAssistantAgentEvalSuite,
   simulateAssistantAgentPolicy,
   streamAssistantResponse,
+  submitAssistantPromptNavigationOutcome,
   updateAdminAssistantAgentWorkPackage,
   updateAssistantAgentEval,
 } from '../src/entities/assistant/api.ts'
@@ -201,6 +204,17 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
     by_workspace: [],
     by_action_type: [],
     recent_feedback: [],
+    prompt_navigation_summary: {
+      total_outcome_count: 0,
+      accepted_count: 0,
+      dismissed_count: 0,
+      failed_count: 0,
+      acceptance_rate: null,
+      dismiss_rate: null,
+      failure_rate: null,
+    },
+    by_prompt_target: [],
+    recent_prompt_navigation_outcomes: [],
   }
   fetchJsonMock.mockResolvedValueOnce(expected)
 
@@ -221,6 +235,158 @@ test('getAdminAssistantOutcomeMetrics includes advisory filters and admin auth',
   )
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('submitAssistantPromptNavigationOutcome centralizes prompt handoff telemetry payloads', async () => {
+  const expected = {
+    outcome_id: 44,
+    run_id: 8801,
+    conversation_id: 601,
+    user_id: 'ops_admin',
+    user_role: 'OPS_ADMIN',
+    surface: 'PROMPT_HOME',
+    outcome: 'ACCEPTED',
+    intent_key: 'open_workspace|operations|trade|T-AMEND-100|||Open Work Queue',
+    target_view: 'operations',
+    target_label: 'Open Work Queue',
+    target_rationale: 'Review the blocker in operations.',
+    focus_type: 'trade',
+    focus_id: 'T-AMEND-100',
+    focus_label: 'T-AMEND-100',
+    detail: null,
+    created_at: '2026-04-23T22:00:00Z',
+    updated_at: '2026-04-23T22:00:00Z',
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await submitAssistantPromptNavigationOutcome(
+    'http://api.test',
+    8801,
+    {
+      outcome: 'ACCEPTED',
+      intentKey: 'open_workspace|operations|trade|T-AMEND-100|||Open Work Queue',
+      targetView: 'operations',
+      targetLabel: ' Open Work Queue ',
+      targetRationale: ' Review the blocker in operations. ',
+      focusType: 'trade',
+      focusId: ' T-AMEND-100 ',
+      focusLabel: ' T-AMEND-100 ',
+    },
+    { accessToken: 'prompt-token' },
+  )
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/runs/8801/prompt-navigation-outcomes')
+  assert.deepEqual(body, {
+    surface: 'PROMPT_HOME',
+    outcome: 'ACCEPTED',
+    intent_key: 'open_workspace|operations|trade|T-AMEND-100|||Open Work Queue',
+    target_view: 'operations',
+    target_label: 'Open Work Queue',
+    target_rationale: 'Review the blocker in operations.',
+    focus_type: 'trade',
+    focus_id: 'T-AMEND-100',
+    focus_label: 'T-AMEND-100',
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer prompt-token')
+})
+
+test('submitAssistantPromptNavigationOutcome records prompt-home route telemetry without requiring a run id', async () => {
+  const expected = {
+    outcome_id: 45,
+    run_id: null,
+    conversation_id: null,
+    user_id: 'ops_admin',
+    user_role: 'OPS_ADMIN',
+    surface: 'PROMPT_HOME',
+    outcome: 'ACCEPTED',
+    intent_key: 'open_workspace|operations|trade|T-AMEND-100|41||Open confirmation',
+    target_view: 'operations',
+    target_label: 'Open confirmation',
+    target_rationale: 'Review the confirmation blocker with the operations owner.',
+    focus_type: 'trade',
+    focus_id: 'T-AMEND-100',
+    focus_label: 'T-AMEND-100',
+    detail: null,
+    created_at: '2026-04-25T10:00:00Z',
+    updated_at: '2026-04-25T10:00:00Z',
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await submitAssistantPromptNavigationOutcome(
+    'http://api.test',
+    undefined,
+    {
+      outcome: 'ACCEPTED',
+      intentKey: 'open_workspace|operations|trade|T-AMEND-100|41||Open confirmation',
+      targetView: 'operations',
+      targetLabel: ' Open confirmation ',
+      targetRationale: ' Review the confirmation blocker with the operations owner. ',
+      focusType: 'trade',
+      focusId: ' T-AMEND-100 ',
+      focusLabel: ' T-AMEND-100 ',
+    },
+    { accessToken: 'prompt-token' },
+  )
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls.at(-1) ?? []
+  assert.equal(url, 'http://api.test/assistant/prompt-navigation-outcomes')
+  assert.deepEqual(body, {
+    surface: 'PROMPT_HOME',
+    outcome: 'ACCEPTED',
+    intent_key: 'open_workspace|operations|trade|T-AMEND-100|41||Open confirmation',
+    target_view: 'operations',
+    target_label: 'Open confirmation',
+    target_rationale: 'Review the confirmation blocker with the operations owner.',
+    focus_type: 'trade',
+    focus_id: 'T-AMEND-100',
+    focus_label: 'T-AMEND-100',
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer prompt-token')
+})
+
+test('listAssistantPromptRouteRecommendations loads current-user promoted prompt routes', async () => {
+  const expected = [
+    {
+      target_view: 'operations',
+      target_label: 'Open Work Queue',
+      target_rationale: 'Use operations for confirmation blockers and handoffs.',
+      accepted_count: 4,
+      outcome_count: 5,
+      acceptance_rate: 0.8,
+      signal: 'CANDIDATE_FOR_RULE',
+      signal_reasons: ['Repeated accepted handoffs make this destination a strong deterministic rule candidate.'],
+    },
+  ]
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await listAssistantPromptRouteRecommendations('http://api.test', {
+    accessToken: 'prompt-routes-token',
+  })
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/prompt-route-recommendations')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer prompt-routes-token')
+})
+
+test('listAssistantPromptRouteRecommendations falls back to an empty list when the API does not expose the endpoint yet', async () => {
+  fetchJsonMock.mockRejectedValueOnce(Object.assign(new Error('Not Found'), { status: 404 }))
+
+  const payload = await listAssistantPromptRouteRecommendations('http://api.test', {
+    accessToken: 'prompt-routes-token',
+  })
+
+  assert.deepEqual(payload, [])
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/prompt-route-recommendations')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer prompt-routes-token')
 })
 
 test('getAdminAssistantControlTowerSummary owns the summary URL and admin auth', async () => {
@@ -263,6 +429,22 @@ test('getAdminAssistantControlTowerSummary owns the summary URL and admin auth',
         created_at: '2026-04-11T04:30:00Z',
         age_seconds: 18000,
       },
+    },
+    work_packages: {
+      total_count: 4,
+      accepted_count: 1,
+      in_progress_count: 1,
+      implemented_count: 2,
+      dismissed_count: 0,
+      stale_count: 1,
+      stale_accepted_count: 1,
+      stale_in_progress_count: 0,
+      implemented_with_pr_count: 1,
+      implemented_with_commit_count: 1,
+      implemented_with_eval_count: 1,
+      implemented_with_tests_count: 2,
+      implemented_with_docs_count: 1,
+      implemented_missing_evidence_count: 0,
     },
     trust_signals: [
       {
@@ -420,8 +602,15 @@ test('listAdminAssistantAgentWorkPackages owns the persisted work package URL an
       rationale: 'Autonomy review surfaced a recurring deterministic candidate.',
       acceptance_checks: ['Run policy simulation for every affected action type before rollout.'],
       knowledge_base_titles: [],
+      implementation_evidence: {
+        eval_ids: [],
+        test_names: [],
+        doc_paths: [],
+      },
       accepted_at: '2026-04-22T18:00:00Z',
       accepted_by: 'ops_admin',
+      implemented_at: null,
+      implemented_by: null,
       notes: null,
       created_at: '2026-04-22T18:00:00Z',
       created_by: 'ops_admin',
@@ -432,12 +621,18 @@ test('listAdminAssistantAgentWorkPackages owns the persisted work package URL an
   fetchJsonMock.mockResolvedValueOnce(expected)
 
   const payload = await listAdminAssistantAgentWorkPackages('http://api.test', {
-    status: 'ACCEPTED',
+    status: 'IMPLEMENTED',
+    hasPr: true,
+    hasEval: true,
+    hasTests: true,
   })
 
   assert.equal(payload, expected)
   const [url, init] = fetchJsonMock.mock.calls[0]
-  assert.equal(url, 'http://api.test/admin/assistant/agent-work-packages?status=ACCEPTED')
+  assert.equal(
+    url,
+    'http://api.test/admin/assistant/agent-work-packages?status=IMPLEMENTED&has_pr=true&has_eval=true&has_tests=true',
+  )
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })
@@ -458,8 +653,15 @@ test('acceptAdminAssistantAgentHealthWorkPackage posts accepted candidate metada
     rationale: 'Autonomy review surfaced a recurring deterministic candidate.',
     acceptance_checks: ['Run policy simulation for every affected action type before rollout.'],
     knowledge_base_titles: [],
+    implementation_evidence: {
+      eval_ids: [],
+      test_names: [],
+      doc_paths: [],
+    },
     accepted_at: '2026-04-22T18:00:00Z',
     accepted_by: 'ops_admin',
+    implemented_at: null,
+    implemented_by: null,
     notes: 'Promote into policy backlog.',
     created_at: '2026-04-22T18:00:00Z',
     created_by: 'ops_admin',
@@ -509,8 +711,18 @@ test('updateAdminAssistantAgentWorkPackage patches lifecycle transition metadata
     rationale: 'Autonomy review surfaced a recurring deterministic candidate.',
     acceptance_checks: ['Run policy simulation for every affected action type before rollout.'],
     knowledge_base_titles: [],
+    implementation_evidence: {
+      pr_url: 'https://github.com/org/repo/pull/123',
+      commit_sha: 'abc123def456',
+      eval_ids: [12, 18],
+      test_names: ['apps.api.tests.test_assistant_api', 'npm test -- assistantApi.test.ts'],
+      doc_paths: ['docs/engineering/agent-knowledge-base.md'],
+      owner: 'Operations Lead',
+    },
     accepted_at: '2026-04-22T18:00:00Z',
     accepted_by: 'ops_admin',
+    implemented_at: '2026-04-22T19:00:00Z',
+    implemented_by: 'ops_admin',
     notes: 'Implemented checks with passing coverage.',
     created_at: '2026-04-22T18:00:00Z',
     created_by: 'ops_admin',
@@ -526,6 +738,14 @@ test('updateAdminAssistantAgentWorkPackage patches lifecycle transition metadata
       status: 'IMPLEMENTED',
       updatedBy: ' ops_admin ',
       notes: ' Implemented checks with passing coverage. ',
+      implementationEvidence: {
+        prUrl: ' https://github.com/org/repo/pull/123 ',
+        commitSha: ' ABC123DEF456 ',
+        evalIds: [12, 18],
+        testNames: ['apps.api.tests.test_assistant_api', 'npm test -- assistantApi.test.ts'],
+        docPaths: ['docs/engineering/agent-knowledge-base.md'],
+        owner: ' Operations Lead ',
+      },
     },
   )
 
@@ -539,6 +759,14 @@ test('updateAdminAssistantAgentWorkPackage patches lifecycle transition metadata
     status: 'IMPLEMENTED',
     updated_by: 'ops_admin',
     notes: 'Implemented checks with passing coverage.',
+    implementation_evidence: {
+      pr_url: 'https://github.com/org/repo/pull/123',
+      commit_sha: 'ABC123DEF456',
+      eval_ids: [12, 18],
+      test_names: ['apps.api.tests.test_assistant_api', 'npm test -- assistantApi.test.ts'],
+      doc_paths: ['docs/engineering/agent-knowledge-base.md'],
+      owner: 'Operations Lead',
+    },
   })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
@@ -1027,6 +1255,57 @@ test('buildAssistantAgentDraft posts the normalized current draft to the admin b
       allowed_action_types: [],
       system_prompt: 'Summarize the queue.',
     },
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('generateAssistantAgentSelfUpdateDraft posts an optional normalized focus brief to the admin route', async () => {
+  const expected = {
+    agent_id: 'ops-briefing',
+    name: 'Ops Briefing',
+    description: 'Summarizes queue pressure with stricter evidence language.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: 'openai',
+    model: 'gpt-5-mini',
+    role_key: 'trade-ops-copilot',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Workflow triage specialist.',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'STAGE',
+    activation_notes: 'Prompt reviewed.',
+    profile_request_id: null,
+    allowed_workspaces: ['assistant', 'operations'],
+    capabilities: ['READ', 'EXPLAIN'],
+    allowed_tools: ['list_workflow_items'],
+    allowed_action_types: [],
+    daily_token_allocation: null,
+    system_prompt: 'Name the owner and stop when evidence is missing.',
+    source_brief: 'Revise the agent after recent mistakes.',
+    change_summary: ['Removed ACTION until evidence quality improves.'],
+    warnings: [],
+    builder_provider: 'openai',
+    builder_model: 'gpt-5',
+    evidence: {
+      recommendation_reasons: ['High correction rate.'],
+      recent_needs_work_feedback: ['Surface the queue owner before staging workflow updates.'],
+      failing_eval_cases: ['Queue owner coverage: Did not identify the owner.'],
+      knowledge_base_titles: ['Action Specs Own Approval Preconditions'],
+      stop_conditions: ['Stop when evidence is ambiguous.'],
+    },
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await generateAssistantAgentSelfUpdateDraft('http://api.test', 'ops-briefing', {
+    brief: '  Focus on unsupported staging and missing owner evidence.  ',
+  })
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agents/ops-briefing/self-update-draft')
+  assert.deepEqual(body, {
+    brief: 'Focus on unsupported staging and missing owner evidence.',
   })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')

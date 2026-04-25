@@ -83,6 +83,8 @@ def build_prompt_context(
         sections.append(_build_agent_section(agent_definition))
     if payload.workspace is not None:
         sections.append(_build_workspace_section(payload.workspace))
+    if payload.summary_targets:
+        sections.append(_build_workspace_summary_focus_section(payload.summary_targets))
     if payload.context:
         sections.append(
             AssistantPromptSection(
@@ -269,6 +271,20 @@ def _build_workspace_section(workspace: str) -> AssistantPromptSection:
         title="Current Workspace",
         source="workspace",
         content=f"The current workspace is {workspace}. Tailor explanations and next steps to that surface.",
+    )
+
+
+def _build_workspace_summary_focus_section(summary_targets: list[str]) -> AssistantPromptSection:
+    lines = [
+        "The current request is explicitly anchored to these workspace summary counts:",
+        *[f"- {target}" for target in summary_targets],
+        "Prefer the matching candidate reads before inferring missing ledger rows from those summary counts.",
+    ]
+    return AssistantPromptSection(
+        key="workspace-summary-focus",
+        title="Requested Workspace Summary Focus",
+        source="application",
+        content="\n".join(lines),
     )
 
 

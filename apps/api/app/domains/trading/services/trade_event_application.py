@@ -7,6 +7,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.reports.services.pretrade_governance import (
+    build_pretrade_governance_audit_export,
+)
+from apps.api.app.domains.reports.services.pretrade_review_drift import (
+    ensure_pretrade_review_booking_alignment,
+)
 from apps.api.app.domains.operations.services.trade_confirmations import (
     build_trade_confirmation_revision_snapshot,
 )
@@ -23,8 +29,10 @@ from apps.api.app.domains.operations.services.trade_credit_hold import get_trade
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
 from apps.api.app.domains.reports.services.pretrade_reviews import (
+    REVIEW_BOOKING_GOVERNANCE_SNAPSHOT_KEY,
     link_approved_pretrade_review_to_trade,
     parse_pretrade_review_id,
+    persist_review_governance_snapshot,
 )
 from apps.api.app.domains.accruals.services import synchronize_trade_accruals
 from apps.api.app.domains.reports.services.counterparty_credit import (
@@ -397,12 +405,28 @@ def _apply_trade_created(
     )
     if pretrade_review_id is not None:
         try:
-            link_approved_pretrade_review_to_trade(
+            ensure_pretrade_review_booking_alignment(
+                context.db,
+                review_id=pretrade_review_id,
+                actor_id=workflow_actor_id,
+                checked_at=context.recorded_at,
+            )
+            linked_review = link_approved_pretrade_review_to_trade(
                 context.db,
                 review_id=pretrade_review_id,
                 trade_id=trade.trade_id,
                 actor_id=workflow_actor_id,
                 booked_at=context.recorded_at,
+            )
+            persist_review_governance_snapshot(
+                linked_review,
+                snapshot=build_pretrade_governance_audit_export(
+                    context.db,
+                    actor_id=workflow_actor_id,
+                    generated_at=context.recorded_at,
+                ),
+                snapshot_key=REVIEW_BOOKING_GOVERNANCE_SNAPSHOT_KEY,
+                activity_action="BOOKED",
             )
         except LookupError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

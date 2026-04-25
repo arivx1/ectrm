@@ -3,6 +3,8 @@ import { bootstrapQueryLimits } from '../../shared/config'
 import type { TradeMetadata } from '../../shared/tradeMetadata'
 import { loadWeatherLocations } from '../weather/api'
 import type {
+  AssetRecord,
+  AssetStandards,
   AssistantRuntimeSettings,
   CounterpartyRecord,
   CounterpartyCreditProfileRecord,
@@ -101,6 +103,95 @@ export type WorkspaceSettlementSummary = {
   trade_exception_count: number
   workflow_exception_count: number
   breakdown: WorkspaceSettlementBreakdownSummaryRow[]
+}
+
+export type TradeAttentionCandidateType =
+  | 'confirmation_backlog'
+  | 'nomination_backlog'
+  | 'allocation_backlog'
+  | 'invoice_backlog'
+  | 'overdue_payment'
+  | 'stale_pricing'
+  | 'incomplete_ops_data'
+  | 'payment_due'
+  | 'pending_settlement'
+  | 'settlement_exception'
+
+export type TradeAttentionCandidateRecord = {
+  trade_id: string
+  candidate_types: string[]
+  source_count_keys: string[]
+  priority_reason: string
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  execution_timestamp: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  confirmation_status: string
+  nomination_status: string
+  allocation_status: string
+  pricing_status: string
+  invoice_status: string
+  payment_status: string
+  settlement_status: string
+  age_days: number | null
+  supporting_records: Record<string, unknown>
+  suggested_next_tool: string | null
+  next_steps: string[]
+  blocking_reasons: string[]
+  recommended_action: Record<string, unknown> | null
+}
+
+export type TradeAttentionCandidateList = {
+  count: number
+  total_count: number
+  items: TradeAttentionCandidateRecord[]
+  candidate_type_counts: Record<string, number>
+  candidate_type?: TradeAttentionCandidateType | null
+  source_count_key?: string | null
+  description?: string | null
+  candidate_types: TradeAttentionCandidateType[]
+}
+
+export type InvoiceIssueCandidateRecord = {
+  trade_id: string
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  execution_timestamp: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  trade_currency_code: string | null
+  invoice_status: string
+  payment_status: string
+  settlement_status: string
+  notional_amount: number | null
+  age_days: number | null
+  readiness_status: string
+  priority_reason: string
+  preview_summary: string
+  blocking_reasons: string[]
+  assumptions: string[]
+  recommended_action: Record<string, unknown>
+}
+
+export type InvoiceIssueCandidateList = {
+  count: number
+  total_count: number
+  ready_count: number
+  blocked_count: number
+  items: InvoiceIssueCandidateRecord[]
 }
 
 export type OperationalResourceKey =
@@ -228,6 +319,8 @@ export type ReferenceWorkspaceBootstrap = {
   units: UnitRecord[]
   locations: LocationRecord[]
   locationStandards: LocationStandards
+  assets: AssetRecord[]
+  assetStandards: AssetStandards
   counterparties: CounterpartyRecord[]
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
   counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
@@ -338,6 +431,24 @@ function withOffset(path: string, offset: number): string {
 
 function withQueue(path: string, queue: WorkflowQueue): string {
   return `${path}${path.includes('?') ? '&' : '?'}queue=${queue}`
+}
+
+function withQueryString(
+  path: string,
+  params: Record<string, string | number | boolean | null | undefined>,
+): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') {
+      continue
+    }
+    query.set(key, String(value))
+  }
+  const queryString = query.toString()
+  if (!queryString) {
+    return path
+  }
+  return `${path}${path.includes('?') ? '&' : '?'}${queryString}`
 }
 
 function withReadHeaders(
@@ -502,6 +613,42 @@ export async function loadTradePaymentsWindow(
     options,
     { cache: 'no-store' },
     windowSize,
+  )
+}
+
+export async function loadTradeAttentionCandidates(
+  apiBase: string,
+  args?: {
+    candidateType?: TradeAttentionCandidateType | null
+    limit?: number
+  },
+  options?: ReadWorkspaceOptions,
+): Promise<TradeAttentionCandidateList> {
+  const path = withQueryString('/operations/trade-attention-candidates', {
+    candidate_type: args?.candidateType ?? null,
+    limit: args?.limit ?? null,
+  })
+  return fetchJson<TradeAttentionCandidateList>(
+    `${apiBase}${path}`,
+    withReadHeaders({ cache: 'no-store' }, options),
+  )
+}
+
+export async function loadInvoiceIssueCandidates(
+  apiBase: string,
+  args?: {
+    readyOnly?: boolean
+    limit?: number
+  },
+  options?: ReadWorkspaceOptions,
+): Promise<InvoiceIssueCandidateList> {
+  const path = withQueryString('/settlement/invoice-issue-candidates', {
+    ready_only: args?.readyOnly ?? null,
+    limit: args?.limit ?? null,
+  })
+  return fetchJson<InvoiceIssueCandidateList>(
+    `${apiBase}${path}`,
+    withReadHeaders({ cache: 'no-store' }, options),
   )
 }
 
@@ -671,6 +818,8 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    assets,
+    assetStandards,
     counterparties,
     counterpartyStandards,
     portfolios,
@@ -701,6 +850,14 @@ export async function loadReferenceWorkspaceBootstrap(
     ),
     fetchJson<LocationStandards>(
       `${apiBase}/reference/locations/standards`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<AssetRecord[]>(
+      `${apiBase}${withLimit('/reference/assets', bootstrapQueryLimits.referenceData)}`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<AssetStandards>(
+      `${apiBase}/reference/assets/standards`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<CounterpartyRecord[]>(
@@ -747,6 +904,8 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    assets,
+    assetStandards,
     counterparties,
     counterpartyCreditProfiles,
     counterpartyExternalCreditSnapshots,

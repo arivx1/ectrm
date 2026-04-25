@@ -1,4 +1,7 @@
 import type {
+  AssetForm,
+  AssetRecord,
+  AssetStandards,
   BookForm,
   CommodityForm,
   CounterpartyCreditProfileForm,
@@ -17,6 +20,85 @@ import type {
   UnitRecord,
 } from '../../shared/models'
 import { buildCounterpartyCreditProfileForm, sameText } from './referenceDataHelpers'
+
+export function buildAssetFieldErrors(
+  assetForm: AssetForm,
+  assetFormMode: 'create' | 'edit',
+  assets: AssetRecord[],
+  assetStandards: AssetStandards,
+): Partial<
+  Record<
+    | 'code'
+    | 'name'
+    | 'asset_class'
+    | 'asset_type'
+    | 'asset_reality'
+    | 'operating_status'
+    | 'capacity'
+    | 'capacity_unit_code',
+    string
+  >
+> {
+  const errors: Partial<
+    Record<
+      | 'code'
+      | 'name'
+      | 'asset_class'
+      | 'asset_type'
+      | 'asset_reality'
+      | 'operating_status'
+      | 'capacity'
+      | 'capacity_unit_code',
+      string
+    >
+  > = {}
+  const normalizedAssetClass = assetForm.asset_class.trim().toUpperCase()
+  const normalizedAssetType = assetForm.asset_type.trim().toUpperCase()
+  const normalizedAssetReality = assetForm.asset_reality.trim().toUpperCase()
+  const normalizedOperatingStatus = assetForm.operating_status.trim().toUpperCase()
+  const allowedAssetTypes = assetStandards.asset_types_by_class[normalizedAssetClass] ?? []
+
+  if (!assetForm.code.trim()) {
+    errors.code = 'Code is required.'
+  } else if (
+    assetFormMode === 'create' &&
+    assets.some((asset) => asset.code === assetForm.code.trim().toUpperCase())
+  ) {
+    errors.code = 'Code already exists.'
+  }
+  if (!assetForm.name.trim()) errors.name = 'Name is required.'
+  if (!normalizedAssetClass) {
+    errors.asset_class = 'Asset class is required.'
+  } else if (!assetStandards.asset_classes.includes(normalizedAssetClass)) {
+    errors.asset_class = 'Asset class is invalid.'
+  }
+  if (!normalizedAssetType) {
+    errors.asset_type = 'Asset type is required.'
+  } else if (allowedAssetTypes.length > 0 && !allowedAssetTypes.includes(normalizedAssetType)) {
+    errors.asset_type = `Asset type must be one of ${allowedAssetTypes.join(', ')}.`
+  }
+  if (!normalizedAssetReality) {
+    errors.asset_reality = 'Asset reality is required.'
+  } else if (!assetStandards.asset_realities.includes(normalizedAssetReality)) {
+    errors.asset_reality = 'Asset reality is invalid.'
+  }
+  if (!normalizedOperatingStatus) {
+    errors.operating_status = 'Operating status is required.'
+  } else if (!assetStandards.operating_statuses.includes(normalizedOperatingStatus)) {
+    errors.operating_status = 'Operating status is invalid.'
+  }
+
+  const hasCapacityValue = assetForm.capacity_value.trim().length > 0
+  const hasCapacityUnitCode = assetForm.capacity_unit_code.trim().length > 0
+  if (hasCapacityValue !== hasCapacityUnitCode) {
+    errors.capacity = 'Capacity value and unit must be provided together.'
+    errors.capacity_unit_code = 'Capacity value and unit must be provided together.'
+  } else if (hasCapacityValue && Number.isNaN(Number(assetForm.capacity_value.trim()))) {
+    errors.capacity = 'Capacity must be numeric.'
+  }
+
+  return errors
+}
 
 export function buildBookFieldErrors(
   bookForm: BookForm,
@@ -204,6 +286,55 @@ export function isBookFormDirty(
     !sameText(bookForm.code, selectedBook.code) ||
     !sameText(bookForm.name, selectedBook.name) ||
     !sameText(bookForm.description, selectedBook.description)
+  )
+}
+
+export function isAssetFormDirty(
+  assetForm: AssetForm,
+  assetFormMode: 'create' | 'edit',
+  selectedAsset: AssetRecord | null,
+  assetStandards: AssetStandards,
+): boolean {
+  const defaultAssetClass = assetStandards.default_asset_class
+  const defaultAssetType =
+    assetStandards.default_asset_type_by_class[defaultAssetClass] ??
+    assetStandards.asset_types_by_class[defaultAssetClass]?.[0] ??
+    ''
+
+  if (assetFormMode === 'create') {
+    return (
+      !sameText(assetForm.code, '') ||
+      !sameText(assetForm.name, '') ||
+      !sameText(assetForm.asset_class, defaultAssetClass) ||
+      !sameText(assetForm.asset_type, defaultAssetType) ||
+      !sameText(assetForm.asset_reality, assetStandards.default_asset_reality) ||
+      !sameText(assetForm.commodity_code, '') ||
+      !sameText(assetForm.location_code, '') ||
+      !sameText(assetForm.capacity_value, '') ||
+      !sameText(assetForm.capacity_unit_code, '') ||
+      !sameText(assetForm.operator_name, '') ||
+      !sameText(assetForm.operating_status, assetStandards.default_operating_status) ||
+      !sameText(assetForm.description, '')
+    )
+  }
+
+  if (!selectedAsset) {
+    return false
+  }
+
+  return (
+    !sameText(assetForm.code, selectedAsset.code) ||
+    !sameText(assetForm.name, selectedAsset.name) ||
+    !sameText(assetForm.asset_class, selectedAsset.asset_class) ||
+    !sameText(assetForm.asset_type, selectedAsset.asset_type) ||
+    !sameText(assetForm.asset_reality, selectedAsset.asset_reality) ||
+    !sameText(assetForm.commodity_code, selectedAsset.commodity_code) ||
+    !sameText(assetForm.location_code, selectedAsset.location_code) ||
+    !sameText(assetForm.capacity_value, selectedAsset.capacity_value?.toString()) ||
+    !sameText(assetForm.capacity_unit_code, selectedAsset.capacity_unit_code) ||
+    !sameText(assetForm.operator_name, selectedAsset.operator_name) ||
+    !sameText(assetForm.operating_status, selectedAsset.operating_status) ||
+    !sameText(assetForm.description, selectedAsset.description)
   )
 }
 

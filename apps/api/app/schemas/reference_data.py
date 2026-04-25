@@ -60,6 +60,57 @@ class BookOut(ReferenceDataOut):
     pass
 
 
+class AssetCreate(ReferenceDataCreate):
+    asset_class: str = Field(..., min_length=1, max_length=40)
+    asset_type: str = Field(..., min_length=1, max_length=60)
+    asset_reality: str = Field(..., min_length=1, max_length=20)
+    commodity_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    capacity_value: Optional[float] = Field(None, ge=0)
+    capacity_unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    operator_name: Optional[str] = Field(None, min_length=1, max_length=120)
+    operating_status: str = Field(..., min_length=1, max_length=32)
+
+
+class AssetUpdate(ReferenceDataUpdate):
+    asset_class: Optional[str] = Field(None, min_length=1, max_length=40)
+    asset_type: Optional[str] = Field(None, min_length=1, max_length=60)
+    asset_reality: Optional[str] = Field(None, min_length=1, max_length=20)
+    commodity_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    capacity_value: Optional[float] = Field(None, ge=0)
+    capacity_unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
+    operator_name: Optional[str] = Field(None, min_length=1, max_length=120)
+    operating_status: Optional[str] = Field(None, min_length=1, max_length=32)
+
+
+class AssetStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class AssetOut(ReferenceDataOut):
+    asset_class: str
+    asset_type: str
+    asset_reality: str
+    commodity_code: Optional[str]
+    location_code: Optional[str]
+    capacity_value: Optional[float]
+    capacity_unit_code: Optional[str]
+    operator_name: Optional[str]
+    operating_status: str
+
+
+class AssetStandardsOut(BaseModel):
+    default_asset_class: str
+    default_asset_type_by_class: dict[str, str]
+    asset_classes: list[str]
+    asset_types_by_class: dict[str, list[str]]
+    default_asset_reality: str
+    asset_realities: list[str]
+    default_operating_status: str
+    operating_statuses: list[str]
+
+
 class CommodityCreate(ReferenceDataCreate):
     commodity_class: str = Field(..., min_length=1, max_length=50)
 

@@ -17,6 +17,7 @@ from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.event import Base
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
+from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
@@ -70,6 +71,7 @@ class AdminSeedApiTests(unittest.TestCase):
             session.query(ReferencePriceIndexSource).delete()
             session.query(ReferencePriceIndex).delete()
             session.query(ReferencePortfolio).delete()
+            session.query(ReferenceAsset).delete()
             session.query(ReferenceCounterparty).delete()
             session.query(ReferenceLocation).delete()
             session.query(ReferenceUnit).delete()
@@ -85,9 +87,9 @@ class AdminSeedApiTests(unittest.TestCase):
                 db=session,
             )
 
-            self.assertEqual(first.total_profiles, 13)
-            self.assertEqual(first.total_templates, 13)
-            self.assertEqual(first.created_count, 13)
+            self.assertEqual(first.total_profiles, 15)
+            self.assertEqual(first.total_templates, 15)
+            self.assertEqual(first.created_count, 15)
             self.assertEqual(first.updated_count, 0)
             self.assertEqual(
                 first.agent_ids,
@@ -95,16 +97,18 @@ class AdminSeedApiTests(unittest.TestCase):
                     "trade-ops-copilot",
                     "settlement-copilot",
                     "trade-governor",
-                    "trade-explainer",
-                    "ops-coordinator",
-                    "settlement-analyst",
-                    "document-triage",
-                    "desk-briefing",
+                    "trade-capture-agent",
+                    "movement-controller-agent",
+                    "accrual-controller-agent",
+                    "accounting-posting-agent",
+                    "counterparty-state-sync-agent",
                     "market-research-agent",
                     "pre-trade-structuring-agent",
-                    "document-agent",
                     "risk-sentinel",
+                    "document-agent",
                     "reporting-reconciliation-agent",
+                    "logistics-coordinator",
+                    "fee-accrual-agent",
                 ],
             )
 
@@ -116,7 +120,7 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(governor.role_key, "trade-governor")
             self.assertEqual(governor.profile_kind, "ROLE_DERIVED")
             self.assertEqual(governor.human_owner_role, "Trader, Desk Lead, or Admin")
-            self.assertEqual(governor.authority_ceiling, "STAGE")
+            self.assertEqual(governor.authority_ceiling, "EXECUTE")
             self.assertEqual(
                 governor.specialization_summary,
                 "Role-derived pilot profile for the Trade Governor role archetype.",
@@ -130,16 +134,14 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(governor.created_by, "ops-admin")
             self.assertEqual(governor.version, 1)
 
-            document_agent = session.get(AssistantAgent, "document-agent")
-            self.assertIsNotNone(document_agent)
-            assert document_agent is not None
-            self.assertEqual(document_agent.status, "DRAFT")
-            self.assertEqual(document_agent.role_key, "document-agent")
-            self.assertEqual(document_agent.profile_kind, "ROLE_DERIVED")
-            self.assertEqual(document_agent.authority_ceiling, "DRAFT")
-            self.assertNotIn("ACTION", document_agent.capabilities)
-            self.assertEqual(document_agent.allowed_action_types, [])
-            self.assertIn("outcome review", document_agent.activation_notes)
+            self.assertEqual(session.get(AssistantAgent, "document-agent").status, "ACTIVE")
+            self.assertEqual(session.get(AssistantAgent, "pre-trade-structuring-agent").status, "ACTIVE")
+            self.assertEqual(session.get(AssistantAgent, "market-research-agent").status, "ACTIVE")
+            self.assertEqual(session.get(AssistantAgent, "movement-controller-agent").authority_ceiling, "EXECUTE")
+            self.assertEqual(session.get(AssistantAgent, "movement-controller-agent").allowed_action_types, ["record_trade_actualization", "update_trade_workflow_item"])
+            self.assertEqual(session.get(AssistantAgent, "accounting-posting-agent").status, "ACTIVE")
+            self.assertEqual(session.get(AssistantAgent, "accounting-posting-agent").authority_ceiling, "DRAFT")
+            self.assertEqual(session.get(AssistantAgent, "accounting-posting-agent").allowed_action_types, [])
 
             governor.description = "Outdated scope"
             governor.role_key = None
@@ -166,12 +168,12 @@ class AdminSeedApiTests(unittest.TestCase):
             assert refreshed_governor is not None
             self.assertEqual(
                 refreshed_governor.description,
-                "Reviews high-sensitivity cancellation requests with a constrained cancel-only action scope.",
+                "Executes high-sensitivity trade cancellation with a constrained cancel-only action scope.",
             )
             self.assertEqual(refreshed_governor.role_key, "trade-governor")
             self.assertEqual(refreshed_governor.profile_kind, "ROLE_DERIVED")
             self.assertEqual(refreshed_governor.human_owner_role, "Trader, Desk Lead, or Admin")
-            self.assertEqual(refreshed_governor.authority_ceiling, "STAGE")
+            self.assertEqual(refreshed_governor.authority_ceiling, "EXECUTE")
             self.assertEqual(
                 refreshed_governor.activation_notes,
                 "Pilot profile synchronized from the Trade Governor role catalog entry.",
@@ -190,9 +192,33 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
             self.assertEqual(payload.entity_counts["commodities"], 11)
             self.assertEqual(payload.entity_counts["locations"], 514)
+            self.assertEqual(payload.entity_counts["assets"], 8)
             self.assertEqual(payload.entity_counts["counterparties"], 1516)
             self.assertEqual(payload.entity_counts["price_indices"], 7)
             self.assertEqual(payload.entity_counts["price_index_sources"], 6)
+            self.assertEqual(
+                {
+                    row.code
+                    for row in session.query(ReferenceAsset).all()
+                },
+                {
+                    "SIM_WAHA_GATHERING",
+                    "SIM_ERCOT_CCGT",
+                    "SIM_USGC_REFINERY",
+                    "SIM_MIDLAND_FIELD",
+                    "SIM_HSC_LNG_EXPORT",
+                    "SIM_HENRY_CAVERN",
+                    "SIM_USGC_TERMINAL",
+                    "SIM_PJM_DATA_CENTER",
+                },
+            )
+            self.assertEqual(
+                {
+                    row.asset_reality
+                    for row in session.query(ReferenceAsset).all()
+                },
+                {"SIMULATED"},
+            )
             self.assertEqual(
                 {
                     row.code
@@ -238,6 +264,13 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertAlmostEqual(cushing.latitude or 0.0, 35.9853)
             self.assertEqual(usgc.location_kind, "REGION")
             self.assertEqual(usgc.city, "New Orleans")
+            sim_refinery = session.get(ReferenceAsset, "SIM_USGC_REFINERY")
+            self.assertIsNotNone(sim_refinery)
+            assert sim_refinery is not None
+            self.assertEqual(sim_refinery.asset_class, "REFINERY")
+            self.assertEqual(sim_refinery.asset_type, "CONVERSION")
+            self.assertEqual(sim_refinery.asset_reality, "SIMULATED")
+            self.assertEqual(sim_refinery.location_code, "USGC")
             self.assertEqual(usgc.continent_code, "NA")
             country_us = session.get(ReferenceLocation, "COUNTRY_US")
             subdivision_us_tx = session.get(ReferenceLocation, "SUBDIVISION_US_TX")

@@ -4,15 +4,21 @@ import { test } from 'vitest'
 import type {
   AssistantActionTypeOutcomeMetricRow,
   AssistantAgentOutcomeMetricRow,
+  AssistantPromptNavigationOutcomeInsight,
+  AssistantPromptNavigationTargetMetricRow,
   AssistantProfileOutcomeMetricRow,
   AssistantRoleOutcomeMetricRow,
   AssistantWorkspaceFeedbackMetricRow,
 } from '../src/shared/models'
 import {
+  assistantPromptNavigationSignalLabel,
+  assistantPromptNavigationSignalTone,
   assistantOutcomeRecommendationLabel,
   assistantOutcomeRecommendationTone,
   buildAssistantActionTypeOutcomeRows,
   buildAssistantAgentOutcomeRows,
+  buildAssistantPromptNavigationOutcomeRows,
+  buildAssistantPromptNavigationTargetRows,
   buildAssistantProfileOutcomeRows,
   buildAssistantRoleOutcomeRows,
   buildAssistantWorkspaceFeedbackRows,
@@ -230,4 +236,132 @@ test('assistant workspace feedback rows put needs-work workspaces first', () => 
   )
   assert.equal(secondRow?.key, 'trades')
   assert.equal(secondRow?.tone, 'success')
+})
+
+test('assistant prompt navigation target rows surface deterministic rule and narrowing signals', () => {
+  const rows: AssistantPromptNavigationTargetMetricRow[] = [
+    {
+      target_view: 'operations',
+      focus_type: 'workflow_item',
+      outcome_count: 4,
+      accepted_count: 4,
+      dismissed_count: 0,
+      failed_count: 0,
+      acceptance_rate: 1,
+      dismiss_rate: 0,
+      failure_rate: 0,
+      signal: 'CANDIDATE_FOR_RULE',
+      signal_reasons: ['Repeated accepted handoffs make this destination a strong deterministic rule candidate.'],
+      recent_prompt_examples: ['Where should I clear the confirmation blocker?'],
+    },
+    {
+      target_view: 'settlement',
+      focus_type: 'invoice',
+      outcome_count: 3,
+      accepted_count: 0,
+      dismissed_count: 2,
+      failed_count: 1,
+      acceptance_rate: 0,
+      dismiss_rate: 0.6667,
+      failure_rate: 0.3333,
+      signal: 'NARROW',
+      signal_reasons: ['Users dismiss this destination often enough that the routing rule should narrow or ask for confirmation.'],
+      recent_prompt_examples: [],
+    },
+  ]
+
+  assert.equal(assistantPromptNavigationSignalLabel('CANDIDATE_FOR_RULE'), 'Rule candidate')
+  assert.equal(assistantPromptNavigationSignalTone('RETIRE'), 'danger')
+
+  const displayRows = buildAssistantPromptNavigationTargetRows(rows)
+  const operationsRow = displayRows.find((row) => row.title === 'Work Queue')
+  const settlementRow = displayRows.find((row) => row.title === 'Settlement')
+
+  assert.equal(operationsRow?.recommendationLabel, 'Rule candidate')
+  assert.deepEqual(
+    operationsRow?.metrics.find((metric) => metric.label === 'Accepted'),
+    { label: 'Accepted', value: '4 (100%)' },
+  )
+  assert.equal(settlementRow?.recommendationLabel, 'Narrow route')
+})
+
+test('assistant prompt navigation target rows prefer the promoted route label when present', () => {
+  const displayRows = buildAssistantPromptNavigationTargetRows([
+    {
+      target_view: 'operations',
+      target_label: 'Open confirmation',
+      focus_type: 'trade',
+      outcome_count: 3,
+      accepted_count: 3,
+      dismissed_count: 0,
+      failed_count: 0,
+      acceptance_rate: 1,
+      dismiss_rate: 0,
+      failure_rate: 0,
+      signal: 'CANDIDATE_FOR_RULE',
+      signal_reasons: ['Repeated accepted handoffs make this destination a strong deterministic rule candidate.'],
+      recent_prompt_examples: ['Where should I handle the confirmation blocker?'],
+    },
+  ])
+
+  assert.equal(displayRows[0]?.title, 'Open confirmation')
+  assert.match(displayRows[0]?.subtitle ?? '', /trade focus/)
+  assert.match(displayRows[0]?.subtitle ?? '', /Work Queue/)
+})
+
+test('assistant prompt navigation outcome rows distinguish accepted and failed handoffs', () => {
+  const rows: AssistantPromptNavigationOutcomeInsight[] = [
+    {
+      outcome_id: 10,
+      run_id: 8801,
+      conversation_id: 601,
+      agent_id: null,
+      agent_name: null,
+      source_workspace: 'assistant',
+      user_id: 'ops_admin',
+      user_role: 'OPS_ADMIN',
+      surface: 'PROMPT_HOME',
+      outcome: 'FAILED',
+      target_view: null,
+      target_label: null,
+      focus_type: null,
+      focus_id: null,
+      focus_label: null,
+      detail: 'A workspace handoff suggestion could not be applied and was ignored.',
+      latest_user_message: 'Give me a broken handoff.',
+      created_at: '2026-04-23T22:10:00Z',
+      updated_at: '2026-04-23T22:10:00Z',
+    },
+    {
+      outcome_id: 11,
+      run_id: null,
+      conversation_id: null,
+      agent_id: null,
+      agent_name: null,
+      source_workspace: null,
+      user_id: 'ops_admin',
+      user_role: 'OPS_ADMIN',
+      surface: 'PROMPT_HOME',
+      outcome: 'ACCEPTED',
+      target_view: 'operations',
+      target_label: 'Open Work Queue',
+      focus_type: 'trade',
+      focus_id: 'T-AMEND-100',
+      focus_label: 'T-AMEND-100',
+      detail: null,
+      latest_user_message: 'Where should I handle the confirmation blocker?',
+      created_at: '2026-04-23T22:12:00Z',
+      updated_at: '2026-04-23T22:12:00Z',
+    },
+  ]
+
+  const [failedRow, acceptedRow] = buildAssistantPromptNavigationOutcomeRows(rows)
+
+  assert.equal(failedRow?.title, 'Failed handoff')
+  assert.equal(failedRow?.subtitle, 'Invalid handoff payload')
+  assert.equal(failedRow?.tone, 'danger')
+  assert.equal(acceptedRow?.title, 'Accepted handoff')
+  assert.equal(acceptedRow?.subtitle, 'Open Work Queue')
+  assert.equal(acceptedRow?.tone, 'success')
+  assert.equal(acceptedRow?.meta[0], 'Prompt Home route')
 })

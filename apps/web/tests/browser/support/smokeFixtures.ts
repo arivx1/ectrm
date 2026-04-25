@@ -88,6 +88,157 @@ export const assistantRuntimeSettings = {
   ],
 } as const
 
+export const tradeAttentionCandidates = [
+  {
+    trade_id: 'T-AMEND-100',
+    candidate_types: ['confirmation_backlog'],
+    source_count_keys: ['dashboard.attention.confirmation_backlog_count'],
+    priority_reason: 'Older unconfirmed trades rise first in the confirmation queue.',
+    trade_nature: 'PHYSICAL',
+    book: 'GULF_GAS',
+    portfolio: 'GULF_PROMPT',
+    counterparty: 'ALPHA_MKT',
+    commodity_class: 'NATURAL_GAS',
+    commodity: 'HENRY_HUB_GAS',
+    trader_user: 'trader.alpha',
+    trade_date: '2026-04-10',
+    execution_timestamp: '2026-04-10T16:00:00Z',
+    delivery_start: '2026-04-12',
+    delivery_end: '2026-04-12',
+    confirmation_status: 'PENDING',
+    nomination_status: 'PENDING',
+    allocation_status: 'PENDING',
+    pricing_status: 'PENDING',
+    invoice_status: 'PENDING',
+    payment_status: 'PENDING',
+    settlement_status: 'PENDING',
+    age_days: 3,
+    supporting_records: {
+      current_confirmation_id: 41,
+    },
+    suggested_next_tool: 'get_trade_confirmation_by_id',
+    next_steps: ['Review the confirmation blocker with the operations owner.'],
+    blocking_reasons: ['Counterparty acknowledgement is still missing.'],
+    recommended_action: {
+      action_type: 'issue_trade_confirmation',
+      requires_approval: true,
+      payload: {
+        trade_id: 'T-AMEND-100',
+        confirmation_id: 41,
+      },
+    },
+  },
+  {
+    trade_id: 'T-AMEND-100',
+    candidate_types: ['payment_due', 'overdue_payment'],
+    source_count_keys: [
+      'settlement.payment_due_count',
+      'dashboard.attention.overdue_payment_count',
+    ],
+    priority_reason: 'Overdue cash rises ahead of merely due payments.',
+    trade_nature: 'PHYSICAL',
+    book: 'GULF_GAS',
+    portfolio: 'GULF_PROMPT',
+    counterparty: 'ALPHA_MKT',
+    commodity_class: 'NATURAL_GAS',
+    commodity: 'HENRY_HUB_GAS',
+    trader_user: 'trader.alpha',
+    trade_date: '2026-04-10',
+    execution_timestamp: '2026-04-10T16:00:00Z',
+    delivery_start: '2026-04-12',
+    delivery_end: '2026-04-12',
+    confirmation_status: 'CONFIRMED',
+    nomination_status: 'COMPLETED',
+    allocation_status: 'COMPLETED',
+    pricing_status: 'PRICED',
+    invoice_status: 'ISSUED',
+    payment_status: 'OVERDUE',
+    settlement_status: 'INVOICED',
+    age_days: 3,
+    supporting_records: {
+      candidate_invoice_id: 501,
+      candidate_invoice_number: 'INV-501',
+    },
+    suggested_next_tool: 'get_trade_payment_by_id',
+    next_steps: ['Collect overdue cash against invoice INV-501.'],
+    blocking_reasons: ['Cash collection is past the scheduled due date.'],
+    recommended_action: {
+      action_type: 'create_trade_payment',
+      requires_approval: true,
+      payload: {
+        trade_id: 'T-AMEND-100',
+        invoice_id: 501,
+      },
+    },
+  },
+  {
+    trade_id: 'T-AMEND-100',
+    candidate_types: ['stale_pricing'],
+    source_count_keys: ['dashboard.attention.stale_pricing_count'],
+    priority_reason: 'Older unresolved pricing work rises first.',
+    trade_nature: 'PHYSICAL',
+    book: 'GULF_GAS',
+    portfolio: 'GULF_PROMPT',
+    counterparty: 'ALPHA_MKT',
+    commodity_class: 'NATURAL_GAS',
+    commodity: 'HENRY_HUB_GAS',
+    trader_user: 'trader.alpha',
+    trade_date: '2026-04-10',
+    execution_timestamp: '2026-04-10T16:00:00Z',
+    delivery_start: '2026-04-12',
+    delivery_end: '2026-04-12',
+    confirmation_status: 'CONFIRMED',
+    nomination_status: 'COMPLETED',
+    allocation_status: 'COMPLETED',
+    pricing_status: 'PENDING',
+    invoice_status: 'PENDING',
+    payment_status: 'PENDING',
+    settlement_status: 'PENDING',
+    age_days: 3,
+    supporting_records: {},
+    suggested_next_tool: 'get_trade_by_id',
+    next_steps: ['Finish pricing follow-through in Trade Capture.'],
+    blocking_reasons: [],
+    recommended_action: null,
+  },
+] as const
+
+export const invoiceIssueCandidates = [
+  {
+    trade_id: 'T-AMEND-100',
+    trade_nature: 'PHYSICAL',
+    book: 'GULF_GAS',
+    portfolio: 'GULF_PROMPT',
+    counterparty: 'ALPHA_MKT',
+    commodity_class: 'NATURAL_GAS',
+    commodity: 'HENRY_HUB_GAS',
+    trader_user: 'trader.alpha',
+    trade_date: '2026-04-10',
+    execution_timestamp: '2026-04-10T16:00:00Z',
+    delivery_start: '2026-04-12',
+    delivery_end: '2026-04-12',
+    trade_currency_code: 'USD',
+    invoice_status: 'PENDING',
+    payment_status: 'PENDING',
+    settlement_status: 'PENDING',
+    notional_amount: 78750,
+    age_days: 3,
+    readiness_status: 'READY',
+    priority_reason: 'Ready-to-issue invoice candidates rise before blocked previews.',
+    preview_summary: 'Ready to issue the first invoice from settlement.',
+    blocking_reasons: [],
+    assumptions: ['Delivery quantities have been finalized for invoicing.'],
+    recommended_action: {
+      action_type: 'issue_trade_invoice',
+      requires_approval: true,
+      payload: {
+        trade_id: 'T-AMEND-100',
+      },
+      preview_status: 'READY',
+    },
+  },
+] as const
+
 const smokeTokenBudget = {
   status: 'GREEN',
   allocated_tokens: 50000,
@@ -242,7 +393,7 @@ export const assistantRoleArchetypes = [
     success_metrics: ['High approval rate.', 'Low stale action rate.'],
     required_eval_coverage: ['Allowed action staging.', 'Denied overreach.'],
     base_prompt_guidance: ['Lead with the blocker.', 'Show evidence before staging.'],
-    current_profile_ids: ['ops-governor'],
+    current_profile_ids: ['trade-ops-copilot'],
   },
   {
     role_key: 'pre-trade-structuring-agent',
@@ -271,7 +422,7 @@ export const assistantRoleArchetypes = [
       notes: ['Draft-only profile does not require activation evals yet.'],
     },
     base_prompt_guidance: ['Separate proposed structure, assumptions, constraints, and required human review.'],
-    current_profile_ids: ['pre-trade-structuring-agent'],
+    current_profile_ids: [],
   },
 ] as const
 
@@ -291,6 +442,79 @@ export const assistantActionRequests = [
     payload: {
       trade_id: 'T-AMEND-100',
       reason: 'Counterparty unwind requested before confirmation.',
+    },
+    review_context: {
+      owning_work_object: {
+        type: 'trade',
+        id: 'T-AMEND-100',
+        label: 'Trade T-AMEND-100',
+      },
+      required_reviewer_role: 'OPS_ADMIN',
+      business_rationale:
+        'The counterparty requested a same-day unwind before confirmation, so the trade cancellation needs reviewer confirmation before any typed mutation runs.',
+      proposed_mutation: {
+        operation: 'cancel_trade',
+        trade_id: 'T-AMEND-100',
+        target_status: 'CANCELLED',
+      },
+      supporting_records: [
+        {
+          type: 'trade',
+          id: 'T-AMEND-100',
+          label: 'Trade T-AMEND-100',
+          summary: 'ACTIVE physical trade awaiting confirmation.',
+        },
+        {
+          type: 'workflow_item',
+          id: 'OPS-CONF-100',
+          label: 'Confirmation blocker',
+          summary: 'Counterparty unwind note is recorded against the open confirmation item.',
+        },
+      ],
+      assumptions: ['The unwind request applies to the latest confirmed economics for T-AMEND-100.'],
+      missing_evidence: ['Signed unwind confirmation has not been uploaded yet.'],
+      expected_downstream_effects: [
+        'Trade status will move to CANCELLED.',
+        'The open confirmation blocker will no longer need follow-through.',
+      ],
+      stale_state_basis: {
+        trade_status: 'ACTIVE',
+        confirmation_status: 'PENDING',
+        last_event_id: 'evt-trade-amend-100',
+      },
+      idempotency_key: 'assistant-action:cancel_trade:T-AMEND-100:counterparty-unwind',
+      action_preview: {
+        preview_type: 'cancel_trade',
+        status: 'READY',
+        summary: 'Approval will cancel trade T-AMEND-100 and close the confirmation blocker.',
+        affected_records: [
+          {
+            type: 'trade',
+            id: 'T-AMEND-100',
+            label: 'Trade T-AMEND-100',
+            summary: 'ACTIVE trade record.',
+          },
+        ],
+        field_changes: [
+          {
+            field: 'status',
+            current_value: 'ACTIVE',
+            proposed_value: 'CANCELLED',
+          },
+          {
+            field: 'confirmation_status',
+            current_value: 'PENDING',
+            proposed_value: 'NOT_REQUIRED',
+          },
+        ],
+        expected_side_effects: [
+          'Record a TradeCancelled event.',
+          'Clear the pending confirmation blocker.',
+        ],
+        warnings: ['Signed unwind confirmation still needs to be attached to the record.'],
+        blocking_reasons: [],
+        assumptions: ['No downstream invoice has been issued for this trade.'],
+      },
     },
     lifecycle: {
       stage: 'AWAITING_REVIEW',
@@ -525,7 +749,32 @@ export const assistantOutcomeMetrics = {
       updated_at: '2026-04-11T08:30:00Z',
     },
   ],
+  prompt_navigation_summary: {
+    total_outcome_count: 0,
+    accepted_count: 0,
+    dismissed_count: 0,
+    failed_count: 0,
+    acceptance_rate: null,
+    dismiss_rate: null,
+    failure_rate: null,
+  },
+  by_prompt_target: [],
+  recent_prompt_navigation_outcomes: [],
 } as const
+
+export const assistantPromptRouteRecommendations = [
+  {
+    target_view: 'operations',
+    target_label: 'Open confirmation',
+    target_rationale: 'Review the confirmation blocker with the operations owner.',
+    focus_type: 'trade',
+    accepted_count: 4,
+    outcome_count: 5,
+    acceptance_rate: 0.8,
+    signal: 'CANDIDATE_FOR_RULE',
+    signal_reasons: ['Repeated accepted handoffs make this destination a strong deterministic rule candidate.'],
+  },
+] as const
 
 export const codexTaskSettings = {
   enabled: true,
@@ -801,6 +1050,38 @@ export const locations = [
   },
 ]
 
+export const assets = [
+  {
+    code: 'GULF_PIPELINE',
+    name: 'Gulf Pipeline',
+    asset_class: 'PIPELINE',
+    asset_type: 'TRANSMISSION',
+    asset_reality: 'REAL',
+    commodity_code: 'HENRY_HUB_GAS',
+    location_code: 'HENRY_HUB',
+    capacity_value: 120000,
+    capacity_unit_code: 'MMBTU',
+    operator_name: 'Gulf Midstream',
+    operating_status: 'OPERATING',
+    is_active: true,
+  },
+]
+
+export const assetStandards = {
+  default_asset_class: 'PIPELINE',
+  default_asset_type_by_class: {
+    PIPELINE: 'TRANSMISSION',
+  },
+  asset_classes: ['PIPELINE'],
+  asset_types_by_class: {
+    PIPELINE: ['TRANSMISSION'],
+  },
+  default_asset_reality: 'REAL',
+  asset_realities: ['REAL', 'SIMULATED'],
+  default_operating_status: 'OPERATING',
+  operating_statuses: ['OPERATING'],
+} as const
+
 export const counterparties = [
   {
     code: 'ALPHA_MKT',
@@ -971,6 +1252,19 @@ function buildTradeWorkspaceSummary(tradeRows = trades) {
 
 export function buildWorkspaceSummary(tradeRows = trades) {
   const tradeSummary = buildTradeWorkspaceSummary(tradeRows)
+  const confirmationBacklogCount = tradeAttentionCandidates.filter((candidate) =>
+    candidate.candidate_types.includes('confirmation_backlog'),
+  ).length
+  const overduePaymentCount = tradeAttentionCandidates.filter((candidate) =>
+    candidate.candidate_types.includes('overdue_payment'),
+  ).length
+  const stalePricingCount = tradeAttentionCandidates.filter((candidate) =>
+    candidate.candidate_types.includes('stale_pricing'),
+  ).length
+  const paymentDueCount = tradeAttentionCandidates.filter((candidate) =>
+    candidate.candidate_types.includes('payment_due'),
+  ).length
+  const invoicePendingCount = invoiceIssueCandidates.length
 
   return {
     generated_at: '2026-04-11T00:00:00Z',
@@ -1007,20 +1301,20 @@ export function buildWorkspaceSummary(tradeRows = trades) {
         },
       },
       attention: {
-        total_count: tradeSummary.pending_pricing_count,
-        confirmation_backlog_count: 0,
+        total_count: confirmationBacklogCount + overduePaymentCount + stalePricingCount,
+        confirmation_backlog_count: confirmationBacklogCount,
         nomination_backlog_count: 0,
         allocation_backlog_count: 0,
         invoice_backlog_count: 0,
-        overdue_payment_count: 0,
-        stale_pricing_count: tradeSummary.pending_pricing_count,
+        overdue_payment_count: overduePaymentCount,
+        stale_pricing_count: stalePricingCount,
         incomplete_ops_data_count: 0,
       },
     },
     settlement: {
       open_work_item_count: 0,
-      invoice_pending_count: 0,
-      payment_due_count: 0,
+      invoice_pending_count: invoicePendingCount,
+      payment_due_count: paymentDueCount,
       settled_count: 0,
       trade_exception_count: 0,
       workflow_exception_count: 0,

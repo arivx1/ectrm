@@ -15,6 +15,7 @@ from apps.api.app.domains.assistant.services.policies import (
 from apps.api.app.domains.assistant.services.registry import list_admin_agent_records
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
 from apps.api.app.models.assistant_run import AssistantRun
 
 
@@ -23,6 +24,9 @@ TRUST_SIGNAL_POLICY_WARNING = "POLICY_WARNING"
 TRUST_SIGNAL_RUN_WARNING = "RUN_WARNING"
 TRUST_SIGNAL_ACTION_BACKLOG = "ACTION_BACKLOG"
 TRUST_SIGNAL_FAILED_ACTIONS = "FAILED_ACTIONS"
+TRUST_SIGNAL_STALE_WORK_PACKAGE = "STALE_WORK_PACKAGE"
+
+STALE_WORK_PACKAGE_HOURS = 72.0
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,24 @@ class AssistantControlTowerActionSummary:
 
 
 @dataclass(frozen=True)
+class AssistantControlTowerWorkPackageSummary:
+    total_count: int
+    accepted_count: int
+    in_progress_count: int
+    implemented_count: int
+    dismissed_count: int
+    stale_count: int
+    stale_accepted_count: int
+    stale_in_progress_count: int
+    implemented_with_pr_count: int
+    implemented_with_commit_count: int
+    implemented_with_eval_count: int
+    implemented_with_tests_count: int
+    implemented_with_docs_count: int
+    implemented_missing_evidence_count: int
+
+
+@dataclass(frozen=True)
 class AssistantControlTowerAgentTrustSignal:
     agent_id: str
     agent_name: str
@@ -95,6 +117,7 @@ class AssistantControlTowerSummary:
     roster: AssistantControlTowerAgentRosterSummary
     runs: AssistantControlTowerRunSummary
     actions: AssistantControlTowerActionSummary
+    work_packages: AssistantControlTowerWorkPackageSummary
     trust_signals: tuple[AssistantControlTowerAgentTrustSignal, ...]
 
 
@@ -103,6 +126,14 @@ class _AgentActivityCounters:
     pending_action_count: int = 0
     failed_action_count: int = 0
     warning_run_count: int = 0
+
+
+@dataclass(frozen=True)
+class _StaleWorkPackageReminder:
+    work_package_id: str
+    title: str
+    status: str
+    age_hours: float
 
 
 def build_assistant_control_tower_summary(
@@ -116,7 +147,9 @@ def build_assistant_control_tower_summary(
     agents = list_admin_agent_records(db)
     runs = _load_runs(db, created_after=created_after, created_before=created_before)
     actions = _load_action_requests(db, created_after=created_after, created_before=created_before)
+    work_packages = _load_work_packages(db)
     activity_by_agent = _activity_by_agent(runs=runs, actions=actions)
+    stale_work_packages_by_agent = _stale_work_packages_by_agent(work_packages, now=generated_at)
 
     missing_eval_agent_ids: set[str] = set()
     policy_warning_agent_ids: set[str] = set()
@@ -190,6 +223,25 @@ def build_assistant_control_tower_summary(
                     eval_status=eval_gate.status,
                 )
             )
+        stale_work_packages = stale_work_packages_by_agent.get(agent.agent_id, ())
+        if stale_work_packages:
+            stale_in_progress_count = sum(
+                1 for reminder in stale_work_packages if reminder.status == "IN_PROGRESS"
+            )
+            severity = "danger" if stale_in_progress_count else "warning"
+            trust_signals.append(
+                _agent_signal(
+                    agent,
+                    signal_type=TRUST_SIGNAL_STALE_WORK_PACKAGE,
+                    severity=severity,
+                    summary=(
+                        f"{len(stale_work_packages)} work package(s) have gone stale without shipped evidence."
+                    ),
+                    details=_stale_work_package_details(stale_work_packages),
+                    counters=counters,
+                    eval_status=eval_gate.status,
+                )
+            )
 
     roster = _summarize_roster(
         agents,
@@ -203,6 +255,7 @@ def build_assistant_control_tower_summary(
         roster=roster,
         runs=_summarize_runs(runs),
         actions=_summarize_actions(actions, now=generated_at),
+        work_packages=_summarize_work_packages(work_packages, now=generated_at),
         trust_signals=tuple(sorted(trust_signals, key=_trust_signal_sort_key)),
     )
 
@@ -324,6 +377,84 @@ def _summarize_actions(
     )
 
 
+def _load_work_packages(db: Session) -> list[AssistantAgentWorkPackage]:
+    stmt = select(AssistantAgentWorkPackage).order_by(
+        AssistantAgentWorkPackage.updated_at.desc(),
+        AssistantAgentWorkPackage.id.desc(),
+    )
+    return list(db.scalars(stmt).all())
+
+
+def _summarize_work_packages(
+    work_packages: Iterable[AssistantAgentWorkPackage],
+    *,
+    now: datetime,
+) -> AssistantControlTowerWorkPackageSummary:
+    total_count = 0
+    accepted_count = 0
+    in_progress_count = 0
+    implemented_count = 0
+    dismissed_count = 0
+    stale_count = 0
+    stale_accepted_count = 0
+    stale_in_progress_count = 0
+    implemented_with_pr_count = 0
+    implemented_with_commit_count = 0
+    implemented_with_eval_count = 0
+    implemented_with_tests_count = 0
+    implemented_with_docs_count = 0
+    implemented_missing_evidence_count = 0
+
+    for record in work_packages:
+        total_count += 1
+        status = (record.status or "").strip().upper()
+        if status == "ACCEPTED":
+            accepted_count += 1
+        elif status == "IN_PROGRESS":
+            in_progress_count += 1
+        elif status == "IMPLEMENTED":
+            implemented_count += 1
+        elif status == "DISMISSED":
+            dismissed_count += 1
+
+        if _is_stale_open_work_package(record, now=now):
+            stale_count += 1
+            if status == "ACCEPTED":
+                stale_accepted_count += 1
+            elif status == "IN_PROGRESS":
+                stale_in_progress_count += 1
+
+        if status != "IMPLEMENTED":
+            continue
+
+        has_pr, has_commit, has_eval, has_tests, has_docs = _work_package_evidence_flags(record)
+
+        implemented_with_pr_count += int(has_pr)
+        implemented_with_commit_count += int(has_commit)
+        implemented_with_eval_count += int(has_eval)
+        implemented_with_tests_count += int(has_tests)
+        implemented_with_docs_count += int(has_docs)
+        if not any((has_pr, has_commit, has_eval, has_tests, has_docs)):
+            implemented_missing_evidence_count += 1
+
+    return AssistantControlTowerWorkPackageSummary(
+        total_count=total_count,
+        accepted_count=accepted_count,
+        in_progress_count=in_progress_count,
+        implemented_count=implemented_count,
+        dismissed_count=dismissed_count,
+        stale_count=stale_count,
+        stale_accepted_count=stale_accepted_count,
+        stale_in_progress_count=stale_in_progress_count,
+        implemented_with_pr_count=implemented_with_pr_count,
+        implemented_with_commit_count=implemented_with_commit_count,
+        implemented_with_eval_count=implemented_with_eval_count,
+        implemented_with_tests_count=implemented_with_tests_count,
+        implemented_with_docs_count=implemented_with_docs_count,
+        implemented_missing_evidence_count=implemented_missing_evidence_count,
+    )
+
+
 def _activity_by_agent(
     *,
     runs: Iterable[AssistantRun],
@@ -345,6 +476,82 @@ def _activity_by_agent(
         elif action.status == "FAILED":
             counters.failed_action_count += 1
     return activity
+
+
+def _stale_work_packages_by_agent(
+    work_packages: Iterable[AssistantAgentWorkPackage],
+    *,
+    now: datetime,
+) -> dict[str, tuple[_StaleWorkPackageReminder, ...]]:
+    reminders: dict[str, list[_StaleWorkPackageReminder]] = {}
+    for record in work_packages:
+        if not _is_stale_open_work_package(record, now=now):
+            continue
+        age_hours = _work_package_age_hours(record, now=now)
+        reminder = _StaleWorkPackageReminder(
+            work_package_id=record.work_package_id,
+            title=record.title,
+            status=(record.status or "").strip().upper(),
+            age_hours=age_hours,
+        )
+        for agent_id in _distinct(record.source_agent_ids or []):
+            reminders.setdefault(agent_id, []).append(reminder)
+    return {
+        agent_id: tuple(
+            sorted(rows, key=lambda reminder: (-reminder.age_hours, reminder.work_package_id))
+        )
+        for agent_id, rows in reminders.items()
+    }
+
+
+def _stale_work_package_details(
+    reminders: Iterable[_StaleWorkPackageReminder],
+) -> tuple[str, ...]:
+    details = [
+        f"{reminder.status.title().replace('_', ' ')} · {reminder.title} · {int(round(reminder.age_hours))}h since last update"
+        for reminder in reminders
+    ]
+    return _distinct(details)
+
+
+def _is_stale_open_work_package(
+    record: AssistantAgentWorkPackage,
+    *,
+    now: datetime,
+) -> bool:
+    status = (record.status or "").strip().upper()
+    if status not in {"ACCEPTED", "IN_PROGRESS"}:
+        return False
+    if _work_package_has_shipped_evidence(record):
+        return False
+    return _work_package_age_hours(record, now=now) >= STALE_WORK_PACKAGE_HOURS
+
+
+def _work_package_age_hours(
+    record: AssistantAgentWorkPackage,
+    *,
+    now: datetime,
+) -> float:
+    updated_at = _coerce_aware_datetime(record.updated_at)
+    if updated_at is None:
+        return 0.0
+    return max((now - updated_at).total_seconds() / 3600, 0.0)
+
+
+def _work_package_has_shipped_evidence(record: AssistantAgentWorkPackage) -> bool:
+    return any(_work_package_evidence_flags(record))
+
+
+def _work_package_evidence_flags(
+    record: AssistantAgentWorkPackage,
+) -> tuple[bool, bool, bool, bool, bool]:
+    evidence = record.implementation_evidence if isinstance(record.implementation_evidence, dict) else {}
+    has_pr = bool(str(evidence.get("pr_url")).strip()) if evidence.get("pr_url") else False
+    has_commit = bool(str(evidence.get("commit_sha")).strip()) if evidence.get("commit_sha") else False
+    has_eval = bool(evidence.get("eval_ids")) if isinstance(evidence.get("eval_ids"), list) else False
+    has_tests = bool(evidence.get("test_names")) if isinstance(evidence.get("test_names"), list) else False
+    has_docs = bool(evidence.get("doc_paths")) if isinstance(evidence.get("doc_paths"), list) else False
+    return has_pr, has_commit, has_eval, has_tests, has_docs
 
 
 def _agent_signal(

@@ -48,6 +48,10 @@ export type Trade = {
   credit_approval_status?: string
   credit_hold_active?: boolean
   credit_hold_reason?: string | null
+  pretrade_review_id?: number | null
+  pretrade_recommendation_run_id?: number | null
+  pretrade_approval_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
+  pretrade_booking_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
 }
 
 export type TradeLegDraft = {
@@ -799,6 +803,18 @@ export type ReferenceRecord = {
   commodity_class?: string
 }
 
+export type AssetRecord = ReferenceRecord & {
+  asset_class: string
+  asset_type: string
+  asset_reality: string
+  commodity_code?: string | null
+  location_code?: string | null
+  capacity_value?: number | null
+  capacity_unit_code?: string | null
+  operator_name?: string | null
+  operating_status: string
+}
+
 export type PriceIndexRecord = ReferenceRecord & {
   commodity_code: string
   currency_code: string
@@ -858,6 +874,55 @@ export const DEFAULT_LOCATION_STANDARDS: LocationStandards = {
   },
   market_codes: ['CAISO', 'CME', 'EEX', 'ERCOT', 'ICE', 'ICE_EUROPE', 'ISO_NE', 'JKM', 'MISO', 'NBP', 'NGX', 'NYISO', 'NYMEX', 'PHYSICAL', 'PJM', 'SPP', 'TTF'],
   continent_codes: ['AF', 'AN', 'AS', 'EU', 'NA', 'OC', 'SA'],
+}
+
+export type AssetStandards = {
+  default_asset_class: string
+  default_asset_type_by_class: Record<string, string>
+  asset_classes: string[]
+  asset_types_by_class: Record<string, string[]>
+  default_asset_reality: string
+  asset_realities: string[]
+  default_operating_status: string
+  operating_statuses: string[]
+}
+
+export const DEFAULT_ASSET_STANDARDS: AssetStandards = {
+  default_asset_class: 'PIPELINE',
+  default_asset_type_by_class: {
+    PIPELINE: 'TRANSMISSION',
+    GENERATION: 'THERMAL',
+    REFINERY: 'CONVERSION',
+    UPSTREAM_PRODUCTION: 'OIL_FIELD',
+    PROCESSING: 'GAS_PLANT',
+    STORAGE: 'TANK_FARM',
+    TERMINAL: 'MARINE',
+    CONSUMPTION: 'INDUSTRIAL',
+  },
+  asset_classes: [
+    'CONSUMPTION',
+    'GENERATION',
+    'PIPELINE',
+    'PROCESSING',
+    'REFINERY',
+    'STORAGE',
+    'TERMINAL',
+    'UPSTREAM_PRODUCTION',
+  ],
+  asset_types_by_class: {
+    PIPELINE: ['DISTRIBUTION', 'GATHERING', 'TRANSMISSION'],
+    GENERATION: ['HYDRO', 'NUCLEAR', 'RENEWABLE', 'STORAGE', 'THERMAL'],
+    REFINERY: ['CONVERSION', 'HYDROSKIMMING', 'INTEGRATED', 'TOPPING'],
+    UPSTREAM_PRODUCTION: ['GAS_FIELD', 'LNG_PROJECT', 'OFFSHORE', 'OIL_FIELD'],
+    PROCESSING: ['FRACTIONATOR', 'GAS_PLANT', 'LNG_EXPORT', 'LNG_IMPORT', 'PETROCHEMICAL'],
+    STORAGE: ['BATTERY', 'CAVERN', 'RESERVOIR', 'TANK_FARM'],
+    TERMINAL: ['LNG', 'MARINE', 'PIPELINE', 'RAIL', 'TRUCK'],
+    CONSUMPTION: ['DATACENTER', 'INDUSTRIAL', 'POWER_LOAD', 'RESIDENTIAL'],
+  },
+  default_asset_reality: 'REAL',
+  asset_realities: ['REAL', 'SIMULATED'],
+  default_operating_status: 'OPERATING',
+  operating_statuses: ['IDLED', 'MAINTENANCE', 'OPERATING', 'PLANNED', 'RETIRED', 'UNDER_CONSTRUCTION'],
 }
 
 export type CounterpartyRecord = ReferenceRecord & {
@@ -1402,6 +1467,14 @@ export type PreTradeGovernanceAuditCategory =
   | 'OVERRIDE'
   | 'BOOKED_WITH_OVERRIDE'
   | 'STALE_EVIDENCE'
+export type PreTradeReviewDriftStatus = 'ALIGNED' | 'REAPPROVAL_REQUIRED' | 'NOT_APPROVED'
+export type PreTradeReviewDriftReasonCode =
+  | 'MISSING_APPROVAL_SNAPSHOT'
+  | 'MISSING_APPROVAL_BASELINE'
+  | 'RECOMMENDATION_CHANGED'
+  | 'NEWER_RECOMMENDATION_AVAILABLE'
+  | 'SOURCE_IMPAIRMENT_APPEARED'
+  | 'OVERRIDE_CHANGED'
 
 export type PreTradeReviewActivityRecord = {
   activity_id: string
@@ -1447,6 +1520,8 @@ export type PreTradeReviewItemRecord = {
   linked_trade_status: string | null
   booked_at: string | null
   booked_by: string | null
+  approval_governance_snapshot: PreTradeGovernanceAuditExportRecord | null
+  booking_governance_snapshot: PreTradeGovernanceAuditExportRecord | null
   activity: PreTradeReviewActivityRecord[]
   created_at: string
   created_by: string
@@ -1454,6 +1529,35 @@ export type PreTradeReviewItemRecord = {
   updated_by: string
   version: number
   can_edit: boolean
+}
+
+export type PreTradeReviewDriftReasonRecord = {
+  code: PreTradeReviewDriftReasonCode
+  summary: string
+  detail: string
+}
+
+export type PreTradeReviewDriftRecord = {
+  review_id: number
+  checked_at: string
+  review_status: PreTradeReviewStatus
+  alignment_status: PreTradeReviewDriftStatus
+  requires_reapproval: boolean
+  approval_snapshot_generated_at: string | null
+  approval_snapshot_exported_by: string | null
+  approved_by: string | null
+  approved_at: string | null
+  approved_recommendation_run_id: number | null
+  approved_recommendation_stance: PreTradeRecommendationStance | null
+  approved_recommendation_score: number | null
+  current_recommendation_run_id: number | null
+  current_recommendation_stance: PreTradeRecommendationStance | null
+  current_recommendation_score: number | null
+  latest_recommendation_run_id: number | null
+  latest_recommendation_stance: PreTradeRecommendationStance | null
+  latest_recommendation_score: number | null
+  current_impaired_sources: string[]
+  reasons: PreTradeReviewDriftReasonRecord[]
 }
 
 export type PreTradeGovernanceSummaryRecord = {
@@ -1640,6 +1744,17 @@ export type PreTradeRecommendationRunComparisonRecord = {
   source_quality_changes: PreTradeRecommendationSourceQualityDeltaRecord[]
   input_snapshot_changes: PreTradeRecommendationInputDeltaRecord[]
   summary: string
+}
+
+export type PreTradeRecommendationDraftAnalysisRecord = {
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  source_scenario_id: number | null
+  source_review_id: number | null
+  input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+  recommendation: PreTradeRecommendationResultRecord
+  comparison: PreTradeRecommendationRunComparisonRecord | null
+  evaluated_at: string
 }
 
 export type PreTradeRecommendationRunRecord = {
@@ -2050,6 +2165,7 @@ export const ASSISTANT_ACTION_TYPES = [
   'issue_trade_confirmation',
   'record_trade_confirmation_response',
   'update_trade_workflow_item',
+  'record_trade_actualization',
   'issue_trade_invoice',
   'create_trade_payment',
   'reprocess_document_ingestion',
@@ -2069,6 +2185,7 @@ export type AssistantControlTowerTrustSignalType =
   | 'RUN_WARNING'
   | 'ACTION_BACKLOG'
   | 'FAILED_ACTIONS'
+  | 'STALE_WORK_PACKAGE'
 export type AssistantControlTowerTrustSignalSeverity = 'info' | 'warning' | 'danger'
 
 export type AssistantProviderStatus = {
@@ -2214,6 +2331,43 @@ export type AssistantAdminAgent = AssistantAgent & {
   version: number
 }
 
+export type AssistantAgentSelfUpdateEvidence = {
+  recommendation_reasons: string[]
+  recent_needs_work_feedback: string[]
+  failing_eval_cases: string[]
+  knowledge_base_titles: string[]
+  stop_conditions: string[]
+}
+
+export type AssistantAgentSelfUpdateDraft = {
+  agent_id: string
+  name: string
+  description: string
+  status: AssistantAgentStatus
+  scope: AssistantAgentScope
+  provider: AssistantProvider | null
+  model: string | null
+  role_key?: string | null
+  profile_kind: AssistantAgentProfileKind
+  specialization_summary?: string | null
+  human_owner_role?: string | null
+  authority_ceiling?: AssistantAgentAuthorityLevel | null
+  activation_notes?: string | null
+  profile_request_id?: number | null
+  allowed_workspaces: ViewKey[]
+  capabilities: AssistantAgentCapability[]
+  allowed_tools: string[]
+  allowed_action_types: AssistantActionType[]
+  daily_token_allocation?: number | null
+  system_prompt: string
+  source_brief: string
+  change_summary: string[]
+  warnings: string[]
+  builder_provider: AssistantProvider
+  builder_model: string
+  evidence: AssistantAgentSelfUpdateEvidence
+}
+
 export type AssistantAgentRoleArchetype = {
   role_key: string
   name: string
@@ -2304,6 +2458,7 @@ export type AssistantPromptRequest = {
   provider?: AssistantProvider
   workspace?: ViewKey
   context?: string
+  summary_targets?: AssistantWorkspaceSummaryTarget[]
   use_live_tools?: boolean
   messages: AssistantMessage[]
 }
@@ -2420,6 +2575,18 @@ export type AssistantOutcomeMetricRecommendationAction =
   | 'ELIGIBLE_FOR_BOUNDED_REVIEW'
   | 'RECOMMEND_PAUSE'
 
+export type AssistantPromptNavigationOutcomeStatus = 'ACCEPTED' | 'DISMISSED' | 'FAILED'
+export type AssistantPromptNavigationSurface = 'PROMPT_HOME'
+export type AssistantPromptNavigationFocusType =
+  | 'trade'
+  | 'workflow_item'
+  | 'document'
+  | 'invoice'
+  | 'payment'
+  | 'reference_record'
+  | 'report'
+export type AssistantPromptNavigationSignal = 'OBSERVE' | 'CANDIDATE_FOR_RULE' | 'NARROW' | 'RETIRE'
+
 export type AssistantOutcomeMetricThresholds = {
   min_decided_actions_for_promotion: number
   max_rejection_rate_for_promotion: number
@@ -2533,6 +2700,86 @@ export type AssistantRunFeedbackInsight = {
   updated_at: string
 }
 
+export type AssistantPromptNavigationSummary = {
+  total_outcome_count: number
+  accepted_count: number
+  dismissed_count: number
+  failed_count: number
+  acceptance_rate?: number | null
+  dismiss_rate?: number | null
+  failure_rate?: number | null
+}
+
+export type AssistantPromptNavigationTargetMetricRow = {
+  target_view?: ViewKey | null
+  target_label?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  outcome_count: number
+  accepted_count: number
+  dismissed_count: number
+  failed_count: number
+  acceptance_rate?: number | null
+  dismiss_rate?: number | null
+  failure_rate?: number | null
+  signal: AssistantPromptNavigationSignal
+  signal_reasons: string[]
+  recent_prompt_examples: string[]
+}
+
+export type AssistantPromptNavigationOutcomeInsight = {
+  outcome_id: number
+  run_id?: number | null
+  conversation_id?: number | null
+  agent_id?: string | null
+  agent_name?: string | null
+  source_workspace?: ViewKey | null
+  user_id: string
+  user_role: string
+  surface: AssistantPromptNavigationSurface
+  outcome: AssistantPromptNavigationOutcomeStatus
+  target_view?: ViewKey | null
+  target_label?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  focus_id?: string | null
+  focus_label?: string | null
+  detail?: string | null
+  latest_user_message?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type AssistantPromptNavigationOutcome = {
+  outcome_id: number
+  run_id?: number | null
+  conversation_id?: number | null
+  user_id: string
+  user_role: string
+  surface: AssistantPromptNavigationSurface
+  outcome: AssistantPromptNavigationOutcomeStatus
+  intent_key: string
+  target_view?: ViewKey | null
+  target_label?: string | null
+  target_rationale?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  focus_id?: string | null
+  focus_label?: string | null
+  detail?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type AssistantPromptRouteRecommendation = {
+  target_view: ViewKey
+  target_label?: string | null
+  target_rationale?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  accepted_count: number
+  outcome_count: number
+  acceptance_rate?: number | null
+  signal: AssistantPromptNavigationSignal
+  signal_reasons: string[]
+}
+
 export type AssistantActionTypeOutcomeMetricRow = AssistantOutcomeMetricCounters & {
   action_type: AssistantActionType
   recommendation: AssistantOutcomeMetricRecommendation
@@ -2553,6 +2800,9 @@ export type AssistantOutcomeMetrics = {
   by_workspace: AssistantWorkspaceFeedbackMetricRow[]
   by_action_type: AssistantActionTypeOutcomeMetricRow[]
   recent_feedback: AssistantRunFeedbackInsight[]
+  prompt_navigation_summary: AssistantPromptNavigationSummary
+  by_prompt_target: AssistantPromptNavigationTargetMetricRow[]
+  recent_prompt_navigation_outcomes: AssistantPromptNavigationOutcomeInsight[]
 }
 
 export type AssistantControlTowerAgentRosterSummary = {
@@ -2596,6 +2846,23 @@ export type AssistantControlTowerActionSummary = {
   oldest_pending_action?: AssistantControlTowerOldestPendingAction | null
 }
 
+export type AssistantControlTowerWorkPackageSummary = {
+  total_count: number
+  accepted_count: number
+  in_progress_count: number
+  implemented_count: number
+  dismissed_count: number
+  stale_count: number
+  stale_accepted_count: number
+  stale_in_progress_count: number
+  implemented_with_pr_count: number
+  implemented_with_commit_count: number
+  implemented_with_eval_count: number
+  implemented_with_tests_count: number
+  implemented_with_docs_count: number
+  implemented_missing_evidence_count: number
+}
+
 export type AssistantControlTowerAgentTrustSignal = {
   agent_id: string
   agent_name: string
@@ -2619,6 +2886,7 @@ export type AssistantControlTowerSummary = {
   roster: AssistantControlTowerAgentRosterSummary
   runs: AssistantControlTowerRunSummary
   actions: AssistantControlTowerActionSummary
+  work_packages: AssistantControlTowerWorkPackageSummary
   trust_signals: AssistantControlTowerAgentTrustSignal[]
 }
 
@@ -2750,8 +3018,18 @@ export type AssistantAgentWorkPackage = {
   rationale: string
   acceptance_checks: string[]
   knowledge_base_titles: string[]
+  implementation_evidence: {
+    pr_url?: string | null
+    commit_sha?: string | null
+    eval_ids: number[]
+    test_names: string[]
+    doc_paths: string[]
+    owner?: string | null
+  }
   accepted_at?: string | null
   accepted_by?: string | null
+  implemented_at?: string | null
+  implemented_by?: string | null
   notes?: string | null
   created_at: string
   created_by: string
@@ -2788,8 +3066,22 @@ export type AssistantPromptContextRequest = {
   provider?: AssistantProvider
   workspace?: ViewKey
   context?: string
+  summary_targets?: AssistantWorkspaceSummaryTarget[]
   use_live_tools?: boolean
 }
+
+export type AssistantWorkspaceSummaryTarget =
+  | 'dashboard.attention.confirmation_backlog_count'
+  | 'dashboard.attention.nomination_backlog_count'
+  | 'dashboard.attention.allocation_backlog_count'
+  | 'dashboard.attention.invoice_backlog_count'
+  | 'dashboard.attention.overdue_payment_count'
+  | 'dashboard.attention.stale_pricing_count'
+  | 'dashboard.attention.incomplete_ops_data_count'
+  | 'settlement.invoice_pending_count'
+  | 'settlement.payment_due_count'
+  | 'settlement.trade_exception_count'
+  | 'trades.pending_settlement_count'
 
 export type AssistantPromptSectionSource =
   | 'system'
@@ -2968,6 +3260,7 @@ export type ReferenceTab =
   | 'currencies'
   | 'units'
   | 'locations'
+  | 'assets'
   | 'counterparties'
   | 'portfolios'
 
@@ -3030,6 +3323,21 @@ export type LocationForm = {
   longitude: string
   region: string
   timezone: string
+  description: string
+}
+
+export type AssetForm = {
+  code: string
+  name: string
+  asset_class: string
+  asset_type: string
+  asset_reality: string
+  commodity_code: string
+  location_code: string
+  capacity_value: string
+  capacity_unit_code: string
+  operator_name: string
+  operating_status: string
   description: string
 }
 

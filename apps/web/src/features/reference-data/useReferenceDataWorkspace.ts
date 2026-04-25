@@ -3,6 +3,9 @@ import { useMemo, useState } from 'react'
 import { combineTextFilters } from '../../shared/filtering'
 import { classForCommodity } from '../../shared/reference'
 import type {
+  AssetForm,
+  AssetRecord,
+  AssetStandards,
   BookForm,
   CommodityForm,
   CounterpartyForm,
@@ -23,6 +26,7 @@ import type {
   UnitRecord,
 } from '../../shared/models'
 import {
+  DEFAULT_ASSET_STANDARDS as defaultAssetStandards,
   DEFAULT_COUNTERPARTY_STANDARDS as defaultCounterpartyStandards,
   DEFAULT_LOCATION_STANDARDS as defaultLocationStandards,
 } from '../../shared/models'
@@ -33,6 +37,28 @@ export function emptyBookForm(): BookForm {
 
 export function emptyCommodityForm(defaultClass: string): CommodityForm {
   return { code: '', name: '', description: '', commodity_class: defaultClass }
+}
+
+export function emptyAssetForm(assetStandards: AssetStandards = defaultAssetStandards): AssetForm {
+  const defaultAssetClass = assetStandards.default_asset_class
+  const defaultAssetType =
+    assetStandards.default_asset_type_by_class[defaultAssetClass] ??
+    assetStandards.asset_types_by_class[defaultAssetClass]?.[0] ??
+    ''
+  return {
+    code: '',
+    name: '',
+    asset_class: defaultAssetClass,
+    asset_type: defaultAssetType,
+    asset_reality: assetStandards.default_asset_reality,
+    commodity_code: '',
+    location_code: '',
+    capacity_value: '',
+    capacity_unit_code: '',
+    operator_name: '',
+    operating_status: assetStandards.default_operating_status,
+    description: '',
+  }
 }
 
 export function emptyPriceIndexForm(defaultCommodityCode = ''): PriceIndexForm {
@@ -135,11 +161,13 @@ export function resolveSelectedCode<T extends { code: string }>(
 
 type UseReferenceDataWorkspaceArgs = {
   books: ReferenceRecord[]
+  assets: AssetRecord[]
   commodities: ReferenceRecord[]
   priceIndices: PriceIndexRecord[]
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  assetStandards: AssetStandards
   counterparties: CounterpartyRecord[]
   portfolios: PortfolioRecord[]
   activeBooks: ReferenceRecord[]
@@ -155,11 +183,13 @@ type UseReferenceDataWorkspaceArgs = {
 
 export function useReferenceDataWorkspace({
   books,
+  assets,
   commodities,
   priceIndices,
   currencies,
   units,
   locations,
+  assetStandards,
   counterparties,
   portfolios,
   activeBooks,
@@ -175,6 +205,7 @@ export function useReferenceDataWorkspace({
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>('books')
   const [referenceSearch, setReferenceSearch] = useState('')
   const [selectedBookCode, setSelectedBookCode] = useState<string | null>(null)
+  const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(null)
   const [selectedCommodityCode, setSelectedCommodityCode] = useState<string | null>(null)
   const [selectedPriceIndexCode, setSelectedPriceIndexCode] = useState<string | null>(null)
   const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<string | null>(null)
@@ -184,6 +215,7 @@ export function useReferenceDataWorkspace({
   const [selectedPortfolioCode, setSelectedPortfolioCode] = useState<string | null>(null)
 
   const [bookForm, setBookForm] = useState(emptyBookForm())
+  const [assetForm, setAssetForm] = useState(emptyAssetForm(assetStandards))
   const [commodityForm, setCommodityForm] = useState(emptyCommodityForm(commodityClassOrder[0]))
   const [priceIndexForm, setPriceIndexForm] = useState(emptyPriceIndexForm())
   const [currencyForm, setCurrencyForm] = useState(emptyCurrencyForm())
@@ -193,6 +225,7 @@ export function useReferenceDataWorkspace({
   const [portfolioForm, setPortfolioForm] = useState(emptyPortfolioForm())
 
   const [bookFormMode, setBookFormMode] = useState<'create' | 'edit'>('create')
+  const [assetFormMode, setAssetFormMode] = useState<'create' | 'edit'>('create')
   const [commodityFormMode, setCommodityFormMode] = useState<'create' | 'edit'>('create')
   const [priceIndexFormMode, setPriceIndexFormMode] = useState<'create' | 'edit'>('create')
   const [currencyFormMode, setCurrencyFormMode] = useState<'create' | 'edit'>('create')
@@ -203,6 +236,7 @@ export function useReferenceDataWorkspace({
   const effectiveReferenceSearch = combineTextFilters(referenceSearch, externalReferenceSearch)
 
   const resolvedSelectedBookCode = resolveSelectedCode(selectedBookCode, books, { preserveMissingSelection: true })
+  const resolvedSelectedAssetCode = resolveSelectedCode(selectedAssetCode, assets)
   const resolvedSelectedCommodityCode = resolveSelectedCode(selectedCommodityCode, commodities)
   const resolvedSelectedPriceIndexCode = resolveSelectedCode(selectedPriceIndexCode, priceIndices)
   const resolvedSelectedCurrencyCode = resolveSelectedCode(selectedCurrencyCode, currencies)
@@ -214,6 +248,10 @@ export function useReferenceDataWorkspace({
   const selectedBook = useMemo(
     () => books.find((book) => book.code === resolvedSelectedBookCode) ?? null,
     [books, resolvedSelectedBookCode],
+  )
+  const selectedAsset = useMemo(
+    () => assets.find((asset) => asset.code === resolvedSelectedAssetCode) ?? null,
+    [assets, resolvedSelectedAssetCode],
   )
   const selectedCommodity = useMemo(
     () => commodities.find((commodity) => commodity.code === resolvedSelectedCommodityCode) ?? null,
@@ -255,6 +293,26 @@ export function useReferenceDataWorkspace({
       )
     })
   }, [books, effectiveReferenceSearch])
+
+  const filteredAssets = useMemo(() => {
+    const query = effectiveReferenceSearch.trim().toLowerCase()
+    return assets.filter((asset) => {
+      if (!query) return true
+      return (
+        asset.code.toLowerCase().includes(query) ||
+        asset.name.toLowerCase().includes(query) ||
+        asset.asset_class.toLowerCase().includes(query) ||
+        asset.asset_type.toLowerCase().includes(query) ||
+        asset.asset_reality.toLowerCase().includes(query) ||
+        asset.operating_status.toLowerCase().includes(query) ||
+        (asset.commodity_code ?? '').toLowerCase().includes(query) ||
+        (asset.location_code ?? '').toLowerCase().includes(query) ||
+        (asset.capacity_unit_code ?? '').toLowerCase().includes(query) ||
+        (asset.operator_name ?? '').toLowerCase().includes(query) ||
+        (asset.description ?? '').toLowerCase().includes(query)
+      )
+    })
+  }, [assets, effectiveReferenceSearch])
 
   const referenceCommodityGroups = useMemo(
     () =>
@@ -419,6 +477,11 @@ export function useReferenceDataWorkspace({
     setBookForm(emptyBookForm())
   }
 
+  function startCreateAsset() {
+    setAssetFormMode('create')
+    setAssetForm(emptyAssetForm(assetStandards))
+  }
+
   function startEditBook(code: string) {
     const record = books.find((book) => book.code === code)
     if (!record) {
@@ -427,6 +490,29 @@ export function useReferenceDataWorkspace({
     setSelectedBookCode(code)
     setBookFormMode('edit')
     setBookForm({ code: record.code, name: record.name, description: record.description ?? '' })
+  }
+
+  function startEditAsset(code: string) {
+    const record = assets.find((asset) => asset.code === code)
+    if (!record) {
+      return
+    }
+    setSelectedAssetCode(code)
+    setAssetFormMode('edit')
+    setAssetForm({
+      code: record.code,
+      name: record.name,
+      asset_class: record.asset_class,
+      asset_type: record.asset_type,
+      asset_reality: record.asset_reality,
+      commodity_code: record.commodity_code ?? '',
+      location_code: record.location_code ?? '',
+      capacity_value: record.capacity_value?.toString() ?? '',
+      capacity_unit_code: record.capacity_unit_code ?? '',
+      operator_name: record.operator_name ?? '',
+      operating_status: record.operating_status,
+      description: record.description ?? '',
+    })
   }
 
   function startCreateCommodity() {
@@ -604,8 +690,12 @@ export function useReferenceDataWorkspace({
     setReferenceTab,
     referenceSearch,
     setReferenceSearch,
+    assets,
+    locations,
     selectedBookCode: resolvedSelectedBookCode,
     setSelectedBookCode,
+    selectedAssetCode: resolvedSelectedAssetCode,
+    setSelectedAssetCode,
     selectedCommodityCode: resolvedSelectedCommodityCode,
     setSelectedCommodityCode,
     selectedPriceIndexCode: resolvedSelectedPriceIndexCode,
@@ -622,6 +712,8 @@ export function useReferenceDataWorkspace({
     setSelectedPortfolioCode,
     bookForm,
     setBookForm,
+    assetForm,
+    setAssetForm,
     commodityForm,
     setCommodityForm,
     priceIndexForm: resolvedPriceIndexForm,
@@ -638,6 +730,8 @@ export function useReferenceDataWorkspace({
     setPortfolioForm,
     bookFormMode,
     setBookFormMode,
+    assetFormMode,
+    setAssetFormMode,
     commodityFormMode,
     setCommodityFormMode,
     priceIndexFormMode,
@@ -653,6 +747,7 @@ export function useReferenceDataWorkspace({
     portfolioFormMode,
     setPortfolioFormMode,
     selectedBook,
+    selectedAsset,
     selectedCommodity,
     selectedPriceIndex,
     selectedCurrency,
@@ -661,6 +756,7 @@ export function useReferenceDataWorkspace({
     selectedCounterparty,
     selectedPortfolio,
     filteredBooks,
+    filteredAssets,
     referenceCommodityGroups,
     filteredPriceIndices,
     filteredCurrencies,
@@ -671,6 +767,8 @@ export function useReferenceDataWorkspace({
     selectablePriceIndexUnits,
     startCreateBook,
     startEditBook,
+    startCreateAsset,
+    startEditAsset,
     startCreateCommodity,
     startEditCommodity,
     startCreatePriceIndex,

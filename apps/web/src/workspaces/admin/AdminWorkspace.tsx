@@ -20,6 +20,7 @@ import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
 import { WeatherOperationsPanel } from './WeatherOperationsPanel'
+import type { AssistantControlTowerSupervisionIntent } from './assistantSupervisionDraft'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 
 type Trade = {
@@ -568,6 +569,8 @@ export function AdminWorkspace({
   formatNumber,
   formatCommodityClass,
 }: AdminWorkspaceProps) {
+  const [assistantSupervisionIntent, setAssistantSupervisionIntent] =
+    useState<AssistantControlTowerSupervisionIntent | null>(null)
   const [selectedSchemaEntity, setSelectedSchemaEntity] = useState<SchemaEntityKey>('events')
   const [screenFilter, setScreenFilter] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
@@ -1631,6 +1634,7 @@ export function AdminWorkspace({
         authSession={authSession}
         formatDate={formatDate}
         onOpenSettings={onOpenSettings}
+        onStartSupervisionIntent={setAssistantSupervisionIntent}
       />
 
       <div id="assistant-agent-management">
@@ -1638,6 +1642,7 @@ export function AdminWorkspace({
           authSession={authSession}
           formatDate={formatDate}
           onOpenSettings={onOpenSettings}
+          controlTowerIntent={assistantSupervisionIntent}
         />
       </div>
 

@@ -13,33 +13,35 @@ test('renders the global workspace filter controls when expanded', () => {
       onChange: () => undefined,
       totalCount: 17,
       matchedCount: 17,
-      collapsed: false,
-      onToggleCollapsed: () => undefined,
+      defaultCollapsed: false,
     }),
   )
 
   assert.match(html, /Global Workspace Filter/)
+  assert.match(html, /Hide filter/)
   assert.match(html, /aria-expanded="true"/)
+  assert.match(html, /Narrow the left nav and the current workspace with one shared text filter\./)
   assert.match(html, /Search all workspaces/)
   assert.match(html, /Search across 17 workspaces and the current screen/)
   assert.match(html, /<div class="nav-global-filter-summary" hidden="">/)
 })
 
-test('renders a compact status summary when collapsed', () => {
+test('defaults to a compact status summary when collapsed', () => {
   const html = renderToStaticMarkup(
     createElement(GlobalWorkspaceFilterCard, {
       value: 'T-AMEND-100',
       onChange: () => undefined,
       totalCount: 17,
       matchedCount: 1,
-      collapsed: true,
-      onToggleCollapsed: () => undefined,
     }),
   )
 
   assert.match(html, /aria-expanded="false"/)
+  assert.match(html, /Show filter/)
   assert.match(html, /id="global-workspace-filter-panel" class="workspace-local-filter-controls" hidden=""/)
+  assert.doesNotMatch(html, /<span>Search<\/span>/)
   assert.match(html, /1 of 17 workspaces match/)
-  assert.match(html, /Current filter: &quot;T-AMEND-100&quot;/)
+  assert.match(html, /Current filter/)
+  assert.match(html, /&quot;T-AMEND-100&quot;/)
   assert.match(html, /Clear Global/)
 })

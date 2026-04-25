@@ -16,6 +16,7 @@ import type {
   AssistantAdminAgent,
   AssistantAgent,
   AssistantAgentHealthReview,
+  AssistantAgentSelfUpdateDraft,
   AssistantAgentWorkPackage,
   AssistantAgentWorkPackageStatus,
   AssistantAgentEval,
@@ -30,6 +31,10 @@ import type {
   AssistantOutcomeMetrics,
   AssistantPolicySimulation,
   AssistantPolicySimulationPhase,
+  AssistantPromptNavigationOutcome,
+  AssistantPromptNavigationOutcomeStatus,
+  AssistantPromptRouteRecommendation,
+  AssistantPromptNavigationSurface,
   AssistantPromptContext,
   AssistantPromptContextRequest,
   AssistantPromptRequest,
@@ -116,6 +121,10 @@ export type BuildAssistantAgentDraftResult = Omit<CreateAssistantAgentInput, 'pr
   warnings: string[]
 }
 
+export type GenerateAssistantAgentSelfUpdateDraftInput = {
+  brief?: string
+}
+
 export type AssistantStreamEvent = {
   event: string
   data: Record<string, unknown>
@@ -124,6 +133,19 @@ export type AssistantStreamEvent = {
 export type SubmitAssistantRunFeedbackInput = {
   rating: AssistantRunFeedbackRating
   comment?: string
+}
+
+export type SubmitAssistantPromptNavigationOutcomeInput = {
+  surface?: AssistantPromptNavigationSurface
+  outcome: AssistantPromptNavigationOutcomeStatus
+  intentKey: string
+  targetView?: ViewKey
+  targetLabel?: string
+  targetRationale?: string
+  focusType?: 'trade' | 'workflow_item' | 'document' | 'invoice' | 'payment' | 'reference_record' | 'report'
+  focusId?: string
+  focusLabel?: string
+  detail?: string
 }
 
 export type AssistantActionDecisionInput = {
@@ -166,6 +188,14 @@ export type UpdateAssistantAgentWorkPackageInput = {
   status: AssistantAgentWorkPackageStatus
   updatedBy?: string
   notes?: string
+  implementationEvidence?: {
+    prUrl?: string
+    commitSha?: string
+    evalIds?: number[]
+    testNames?: string[]
+    docPaths?: string[]
+    owner?: string
+  }
 }
 
 function assistantMutationHeaders(): Headers {
@@ -275,10 +305,30 @@ function outcomeMetricsQuery(init?: {
 
 function agentWorkPackageQuery(init?: {
   status?: AssistantAgentWorkPackageStatus
+  hasPr?: boolean
+  hasCommit?: boolean
+  hasEval?: boolean
+  hasTests?: boolean
+  hasDocs?: boolean
 }): string {
   const params = new URLSearchParams()
   if (init?.status) {
     params.set('status', init.status)
+  }
+  if (typeof init?.hasPr === 'boolean') {
+    params.set('has_pr', String(init.hasPr))
+  }
+  if (typeof init?.hasCommit === 'boolean') {
+    params.set('has_commit', String(init.hasCommit))
+  }
+  if (typeof init?.hasEval === 'boolean') {
+    params.set('has_eval', String(init.hasEval))
+  }
+  if (typeof init?.hasTests === 'boolean') {
+    params.set('has_tests', String(init.hasTests))
+  }
+  if (typeof init?.hasDocs === 'boolean') {
+    params.set('has_docs', String(init.hasDocs))
   }
   return params.size > 0 ? `?${params.toString()}` : ''
 }
@@ -392,6 +442,39 @@ export async function submitAssistantRunFeedback(
     {
       rating: payload.rating,
       ...(normalizedComment ? { comment: normalizedComment } : {}),
+    },
+    { headers: assistantReadHeaders(init?.accessToken) },
+  )
+}
+
+export async function submitAssistantPromptNavigationOutcome(
+  apiBase: string,
+  runId: number | null | undefined,
+  payload: SubmitAssistantPromptNavigationOutcomeInput,
+  init?: { accessToken?: string },
+): Promise<AssistantPromptNavigationOutcome> {
+  const normalizedTargetLabel = payload.targetLabel?.trim()
+  const normalizedTargetRationale = payload.targetRationale?.trim()
+  const normalizedFocusId = payload.focusId?.trim()
+  const normalizedFocusLabel = payload.focusLabel?.trim()
+  const normalizedDetail = payload.detail?.trim()
+  const endpoint =
+    typeof runId === 'number' && Number.isFinite(runId)
+      ? `${apiBase}/assistant/runs/${encodeURIComponent(String(runId))}/prompt-navigation-outcomes`
+      : `${apiBase}/assistant/prompt-navigation-outcomes`
+  return postJson<AssistantPromptNavigationOutcome>(
+    endpoint,
+    {
+      surface: payload.surface ?? 'PROMPT_HOME',
+      outcome: payload.outcome,
+      intent_key: payload.intentKey.trim(),
+      ...(payload.targetView ? { target_view: payload.targetView } : {}),
+      ...(normalizedTargetLabel ? { target_label: normalizedTargetLabel } : {}),
+      ...(normalizedTargetRationale ? { target_rationale: normalizedTargetRationale } : {}),
+      ...(payload.focusType ? { focus_type: payload.focusType } : {}),
+      ...(normalizedFocusId ? { focus_id: normalizedFocusId } : {}),
+      ...(normalizedFocusLabel ? { focus_label: normalizedFocusLabel } : {}),
+      ...(normalizedDetail ? { detail: normalizedDetail } : {}),
     },
     { headers: assistantReadHeaders(init?.accessToken) },
   )
@@ -522,6 +605,27 @@ export async function previewAssistantPromptContext(
   )
 }
 
+export async function listAssistantPromptRouteRecommendations(
+  apiBase: string,
+  init?: { accessToken?: string },
+): Promise<AssistantPromptRouteRecommendation[]> {
+  try {
+    return await fetchJson<AssistantPromptRouteRecommendation[]>(
+      `${apiBase}/assistant/prompt-route-recommendations`,
+      {
+        headers: assistantReadHeaders(init?.accessToken),
+      },
+    )
+  } catch (error) {
+    // Prompt Home should degrade gracefully while an older API worker is still
+    // running without the promoted-route endpoint.
+    if (isNotFoundApiError(error)) {
+      return []
+    }
+    throw error
+  }
+}
+
 function parseAssistantStreamEvent(rawEvent: string): AssistantStreamEvent | null {
   const trimmedEvent = rawEvent.trim()
   if (!trimmedEvent) {
@@ -555,6 +659,15 @@ function parseAssistantStreamEvent(rawEvent: string): AssistantStreamEvent | nul
       data: { raw: dataLines.join('\n') },
     }
   }
+}
+
+function isNotFoundApiError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const status = (error as { status?: unknown }).status
+  return typeof status === 'number' && status === 404
 }
 
 export async function approveAssistantActionRequest(
@@ -665,6 +778,11 @@ export async function listAdminAssistantAgentWorkPackages(
   apiBase: string,
   init?: {
     status?: AssistantAgentWorkPackageStatus
+    hasPr?: boolean
+    hasCommit?: boolean
+    hasEval?: boolean
+    hasTests?: boolean
+    hasDocs?: boolean
   },
 ): Promise<AssistantAgentWorkPackage[]> {
   return fetchJson<AssistantAgentWorkPackage[]>(
@@ -709,6 +827,31 @@ export async function updateAdminAssistantAgentWorkPackage(
   }
   if (payload.notes?.trim()) {
     body.notes = payload.notes.trim()
+  }
+  const evidence = payload.implementationEvidence
+  if (evidence) {
+    const evidencePayload: Record<string, unknown> = {}
+    if (evidence.prUrl?.trim()) {
+      evidencePayload.pr_url = evidence.prUrl.trim()
+    }
+    if (evidence.commitSha?.trim()) {
+      evidencePayload.commit_sha = evidence.commitSha.trim()
+    }
+    if (typeof evidence.owner === 'string' && evidence.owner.trim()) {
+      evidencePayload.owner = evidence.owner.trim()
+    }
+    if (Array.isArray(evidence.evalIds)) {
+      evidencePayload.eval_ids = evidence.evalIds
+    }
+    if (Array.isArray(evidence.testNames)) {
+      evidencePayload.test_names = evidence.testNames
+    }
+    if (Array.isArray(evidence.docPaths)) {
+      evidencePayload.doc_paths = evidence.docPaths
+    }
+    if (Object.keys(evidencePayload).length > 0) {
+      body.implementation_evidence = evidencePayload
+    }
   }
   return patchJson<AssistantAgentWorkPackage>(
     `${apiBase}/admin/assistant/agent-work-packages/${encodeURIComponent(workPackageId.trim())}`,
@@ -1009,6 +1152,21 @@ export async function buildAssistantAgentDraft(
       brief: payload.brief.trim(),
       ...(normalizedDraft ? { current_draft: normalizedDraft } : {}),
     },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function generateAssistantAgentSelfUpdateDraft(
+  apiBase: string,
+  agentId: string,
+  payload?: GenerateAssistantAgentSelfUpdateDraftInput,
+): Promise<AssistantAgentSelfUpdateDraft> {
+  const normalizedBrief = payload?.brief?.trim()
+  return postJson<AssistantAgentSelfUpdateDraft>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/self-update-draft`,
+    normalizedBrief ? { brief: normalizedBrief } : {},
     {
       headers: assistantMutationHeaders(),
     },

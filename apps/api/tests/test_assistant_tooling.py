@@ -18,7 +18,11 @@ from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.chat import AssistantService
-from apps.api.app.domains.assistant.services.tools import AssistantToolService
+from apps.api.app.domains.reports.services.pretrade_recommendations import (
+    build_recommendation_run_payload,
+    prepare_pretrade_recommendation_evaluation,
+)
+from apps.api.app.domains.assistant.services.tools import AssistantToolService, AssistantToolServiceError
 from apps.api.app.models import Base
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
@@ -28,14 +32,26 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
+from apps.api.app.models.option_exposure import OptionExposure
+from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
+from apps.api.app.models.reference_counterparty_external_credit_snapshot import (
+    ReferenceCounterpartyExternalCreditSnapshot,
+)
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.schemas.pretrade import (
+    PreTradeRecommendationSourceProvenance,
+    PreTradeRecommendationSourceSnapshot,
+    PreTradeScenarioDraft,
+)
 from apps.api.app.schemas.assistant import AssistantPromptRequest
 
 
@@ -69,7 +85,11 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         with self.SessionLocal() as session:
             session.query(ExternalSeriesObservation).delete()
             session.query(ExternalSeriesDefinition).delete()
+            session.query(OptionExposure).delete()
+            session.query(Position).delete()
             session.query(PriceIndexObservation).delete()
+            session.query(ReferenceCounterpartyExternalCreditSnapshot).delete()
+            session.query(ReferenceCounterpartyCreditProfile).delete()
             session.query(ReferencePriceIndex).delete()
             session.query(ExternalDataRun).delete()
             session.query(DocumentIngestionPage).delete()
@@ -81,6 +101,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
             session.query(TradeWorkflowItem).delete()
+            session.query(ReportPreset).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
             session.add(
@@ -680,6 +701,150 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         for key, value in self._previous_settings.items():
             setattr(settings, key, value)
 
+    def _build_pretrade_recommendation_inputs(
+        self,
+        *,
+        actor_id: str,
+        source_scenario_id: int,
+        created_at: datetime,
+        current_net_position: float,
+        target_volume: float,
+        trade_side: str = "BUY",
+        latest_mark_freshness: str = "FRESH",
+        latest_mark: float = 3.05,
+    ) -> tuple[PreTradeScenarioDraft, list[PreTradeRecommendationSourceSnapshot]]:
+        draft = PreTradeScenarioDraft(
+            book="GAS-US",
+            portfolio="PROMPT",
+            counterparty="ACME",
+            commodity_class="NATURAL_GAS",
+            commodity="HENRY_HUB",
+            trade_side=trade_side,
+            pricing_type="FLOATING",
+            price_index_code="HH",
+            target_price=3.18,
+            target_volume=target_volume,
+            trade_currency_code="USD",
+            unit_of_measure="MMBTU",
+            price_unit_code="USD_MMBTU",
+            location_code="HENRY_HUB",
+        )
+        snapshots = [
+            PreTradeRecommendationSourceSnapshot(
+                source_key="desk-context",
+                source_type="INTERNAL",
+                source_available=True,
+                freshness="FRESH",
+                summary="Desk context loaded.",
+                provenance=PreTradeRecommendationSourceProvenance(
+                    provider="Desk Exposure Service",
+                    dataset="active-trades-and-positions",
+                    record_id=f"desk-{source_scenario_id}",
+                    observed_at=created_at,
+                    ingested_at=created_at,
+                    captured_by=actor_id,
+                ),
+                payload={
+                    "related_active_trade_count": 2,
+                    "current_net_position": current_net_position,
+                    "current_counterparty_exposure": 125000,
+                },
+            ),
+            PreTradeRecommendationSourceSnapshot(
+                source_key="counterparty-credit",
+                source_type="INTERNAL",
+                source_available=True,
+                freshness="FRESH",
+                summary="Counterparty credit loaded.",
+                provenance=PreTradeRecommendationSourceProvenance(
+                    provider="Credit Service",
+                    dataset="counterparty-credit-profiles",
+                    record_id="ACME",
+                    observed_at=created_at,
+                    ingested_at=created_at,
+                    captured_by=actor_id,
+                ),
+                payload={
+                    "has_credit_profile": True,
+                    "credit_limit_amount": 500000,
+                    "breach_action": "MONITOR",
+                    "credit_rating": "BBB",
+                },
+            ),
+            PreTradeRecommendationSourceSnapshot(
+                source_key="latest-mark",
+                source_type="EXTERNAL",
+                source_available=True,
+                freshness=latest_mark_freshness,
+                summary="Latest Henry Hub mark loaded.",
+                provenance=PreTradeRecommendationSourceProvenance(
+                    provider="Price Service",
+                    dataset="price-index-observations",
+                    record_id="HH",
+                    observed_at=created_at,
+                    ingested_at=created_at,
+                    captured_by=actor_id,
+                ),
+                payload={
+                    "latest_mark": latest_mark,
+                    "price_index_code": "HH",
+                    "observation_date": created_at.date().isoformat(),
+                },
+            ),
+        ]
+        return draft, snapshots
+
+    def _seed_pretrade_recommendation_run(
+        self,
+        *,
+        actor_id: str,
+        source_scenario_id: int,
+        created_at: datetime,
+        current_net_position: float,
+        target_volume: float,
+        trade_side: str = "BUY",
+        scope_owner_key: str | None = None,
+    ) -> int:
+        draft, snapshots = self._build_pretrade_recommendation_inputs(
+            actor_id=actor_id,
+            source_scenario_id=source_scenario_id,
+            created_at=created_at,
+            current_net_position=current_net_position,
+            target_volume=target_volume,
+            trade_side=trade_side,
+        )
+        evaluation = prepare_pretrade_recommendation_evaluation(
+            draft=draft,
+            input_snapshots=snapshots,
+            as_of=created_at,
+            actor_id=actor_id,
+        )
+
+        with self.SessionLocal() as session:
+            record = ReportPreset(
+                preset_key="pretrade_recommendation_run",
+                scope="PERSONAL",
+                scope_owner_key=scope_owner_key or actor_id,
+                name=f"Scenario {source_scenario_id} recommendation",
+                name_key=f"pretrade-run-{actor_id}-{source_scenario_id}-{int(created_at.timestamp())}",
+                filters_json=build_recommendation_run_payload(
+                    thesis="Desk hedging review.",
+                    draft=draft,
+                    source_scenario_id=source_scenario_id,
+                    source_review_id=None,
+                    input_snapshots=evaluation.input_snapshots,
+                    recommendation=evaluation.recommendation,
+                ),
+                created_at=created_at,
+                created_by=actor_id,
+                updated_at=created_at,
+                updated_by=actor_id,
+                version=1,
+            )
+            session.add(record)
+            session.commit()
+            return record.id
+
     def test_tool_service_returns_trade_projection(self) -> None:
         with self.SessionLocal() as session:
             service = AssistantToolService(session)
@@ -828,6 +993,300 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["macro"][0]["series_code"], "FRED_DGS10")
         self.assertEqual(result.output["positioning"][0]["series_code"], "CFTC_WTI_MM_NET")
 
+    def test_tool_service_analyzes_pretrade_draft_against_latest_visible_saved_run(self) -> None:
+        previous_run_id = self._seed_pretrade_recommendation_run(
+            actor_id="trader_one",
+            source_scenario_id=17,
+            created_at=datetime(2026, 4, 20, 9, 0, tzinfo=timezone.utc),
+            current_net_position=25000,
+            target_volume=5000,
+        )
+        draft, snapshots = self._build_pretrade_recommendation_inputs(
+            actor_id="trader_one",
+            source_scenario_id=17,
+            created_at=datetime(2026, 4, 20, 10, 0, tzinfo=timezone.utc),
+            current_net_position=25000,
+            target_volume=8000,
+            latest_mark_freshness="STALE",
+            latest_mark=2.2,
+        )
+
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session, actor_id="trader_one")
+            result, trace = service.execute_tool(
+                "analyze_pretrade_scenario_draft",
+                {
+                    "thesis": "Refresh the working hedge draft against a weaker mark.",
+                    "draft": draft.model_dump(mode="json", exclude_none=True),
+                    "source_scenario_id": 17,
+                    "input_snapshots": [
+                        snapshot.model_dump(mode="json", exclude_none=True)
+                        for snapshot in snapshots
+                    ],
+                },
+            )
+
+        analysis = result.output["analysis"]
+        self.assertEqual(analysis["comparison"]["previous_run_id"], previous_run_id)
+        self.assertEqual(analysis["recommendation"]["stance"], "ESCALATE")
+        self.assertEqual(analysis["recommendation"]["opportunity_summary"]["category"], "MARK_GAP")
+        self.assertEqual(analysis["recommendation"]["hedge_recommendation"]["instrument_type"], "SWAP")
+        self.assertEqual(trace.tool_name, "analyze_pretrade_scenario_draft")
+        self.assertEqual(trace.record_count, 1)
+        self.assertIn("scenario 17 draft", trace.summary)
+        self.assertIn("saved run", trace.summary)
+
+    def test_tool_service_analyzes_pretrade_draft_with_live_snapshot_collection(self) -> None:
+        seed_now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                Trade(
+                    trade_id="PT-1001",
+                    external_trade_id=None,
+                    source_system="seed",
+                    created_at=seed_now,
+                    updated_at=seed_now,
+                    execution_timestamp=seed_now,
+                    trade_date=seed_now.date(),
+                    trade_currency_code="USD",
+                    location_code="HENRY_HUB",
+                    delivery_start=seed_now.date(),
+                    delivery_end=seed_now.date(),
+                    unit_of_measure="MMBTU",
+                    price_unit_code="USD_MMBTU",
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="GAS-US",
+                    portfolio="PROMPT",
+                    counterparty="ACME",
+                    commodity_class="NATURAL_GAS",
+                    commodity="HENRY_HUB",
+                    pricing_type="FLOATING",
+                    pricing_status="PENDING",
+                    price_index_code="HH",
+                    price=3.1,
+                    volume=6000,
+                    confirmation_status="PENDING",
+                    nomination_status="PENDING",
+                    allocation_status="PENDING",
+                    actualization_status="PENDING",
+                    invoice_status="PENDING",
+                    payment_status="PENDING",
+                    settlement_status="PENDING",
+                    trader_user="trader_one",
+                    status="ACTIVE",
+                    last_event_id="evt-pt-1001",
+                )
+            )
+            session.add(
+                Position(
+                    commodity="HENRY_HUB",
+                    net_volume=18000,
+                    updated_at=seed_now,
+                )
+            )
+            session.add(
+                ReferenceCounterpartyCreditProfile(
+                    counterparty_code="ACME",
+                    credit_rating="BBB",
+                    review_due_at=seed_now.date(),
+                    limit_currency_code="USD",
+                    limit_amount=500000,
+                    breach_action="MONITOR",
+                    notes=None,
+                    created_at=seed_now,
+                    created_by="seed",
+                    updated_at=seed_now,
+                    updated_by="seed",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceCounterpartyExternalCreditSnapshot(
+                    counterparty_code="ACME",
+                    provider="S&P",
+                    source_entity_id="acme",
+                    source_entity_name="Acme",
+                    match_basis=None,
+                    matched_identifier_value=None,
+                    as_of_date=seed_now.date(),
+                    rating_scale="issuer",
+                    rating_value="BBB",
+                    rating_outlook="Stable",
+                    credit_score=None,
+                    probability_of_default=None,
+                    recommended_limit_currency_code="USD",
+                    recommended_limit_amount=450000,
+                    commentary=None,
+                    downloaded_at=seed_now,
+                    run_id=1,
+                    raw_payload={},
+                    created_at=seed_now,
+                    updated_at=seed_now,
+                    version=1,
+                )
+            )
+            session.add(
+                PriceIndexObservation(
+                    id=44,
+                    price_index_code="HH",
+                    observation_date=seed_now.date(),
+                    value=3.05,
+                    unit_code="USD_MMBTU",
+                    currency_code="USD",
+                    source_provider="ICE",
+                    source_series_id="HH",
+                    source_frequency="DAILY",
+                    source_published_at=seed_now,
+                    source_revision=None,
+                    downloaded_at=seed_now,
+                    run_id=1,
+                    raw_payload={},
+                    created_at=seed_now,
+                    updated_at=seed_now,
+                )
+            )
+            session.add(
+                OptionExposure(
+                    trade_id="OPT-HH-1",
+                    book="GAS-US",
+                    portfolio="PROMPT",
+                    counterparty="ACME",
+                    commodity_class="NATURAL_GAS",
+                    commodity="HENRY_HUB",
+                    trade_side="BUY",
+                    option_type="CALL",
+                    option_style="EUROPEAN",
+                    option_strike_price=3.2,
+                    option_expiration_date=seed_now.date(),
+                    contract_volume=3000,
+                    premium_price=0.12,
+                    premium_cashflow=360,
+                    underlying_equivalent_volume=2500,
+                    trade_currency_code="USD",
+                    price_unit_code="USD_MMBTU",
+                    updated_at=seed_now,
+                )
+            )
+            session.commit()
+
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session, actor_id="trader_one")
+            result, trace = service.execute_tool(
+                "analyze_pretrade_scenario_draft",
+                {
+                    "thesis": "Use live evidence for the current gas setup.",
+                    "draft": {
+                        "book": "GAS-US",
+                        "portfolio": "PROMPT",
+                        "counterparty": "ACME",
+                        "commodity_class": "NATURAL_GAS",
+                        "commodity": "HENRY_HUB",
+                        "trade_side": "BUY",
+                        "pricing_type": "FLOATING",
+                        "price_index_code": "HH",
+                        "target_price": 3.18,
+                        "target_volume": 8000,
+                        "trade_currency_code": "USD",
+                        "unit_of_measure": "MMBTU",
+                        "price_unit_code": "USD_MMBTU",
+                        "location_code": "HENRY_HUB",
+                    },
+                },
+            )
+
+        analysis = result.output["analysis"]
+        snapshots_by_key = {
+            snapshot["adapter_key"]: snapshot
+            for snapshot in analysis["input_snapshots"]
+        }
+        self.assertEqual(snapshots_by_key["desk-context"]["payload"]["current_net_position"], 18000)
+        self.assertEqual(snapshots_by_key["latest-mark"]["payload"]["latest_mark"], 3.05)
+        self.assertEqual(snapshots_by_key["option-exposure"]["payload"]["option_delta"], 2500)
+        self.assertEqual(analysis["recommendation"]["stance"], "PROCEED_WITH_CARE")
+        self.assertEqual(analysis["recommendation"]["hedge_recommendation"]["instrument_type"], "OPTIONS")
+        self.assertIn("missing evidence item", trace.summary)
+
+    def test_tool_service_requires_valid_pretrade_draft_analysis_arguments(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session, actor_id="trader_one")
+            with self.assertRaisesRegex(
+                AssistantToolServiceError,
+                "draft: Field required",
+            ):
+                service.execute_tool(
+                    "analyze_pretrade_scenario_draft",
+                    {"source_scenario_id": 17},
+                )
+
+    def test_tool_service_loads_latest_visible_pretrade_recommendation_run(self) -> None:
+        older_run_id = self._seed_pretrade_recommendation_run(
+            actor_id="trader_one",
+            source_scenario_id=17,
+            created_at=datetime(2026, 4, 20, 9, 0, tzinfo=timezone.utc),
+            current_net_position=25000,
+            target_volume=5000,
+        )
+        newer_run_id = self._seed_pretrade_recommendation_run(
+            actor_id="trader_one",
+            source_scenario_id=17,
+            created_at=datetime(2026, 4, 20, 10, 0, tzinfo=timezone.utc),
+            current_net_position=25000,
+            target_volume=7000,
+        )
+
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session, actor_id="trader_one")
+            result, trace = service.execute_tool(
+                "get_pretrade_recommendation_run",
+                {"source_scenario_id": 17},
+            )
+
+        self.assertTrue(result.output["found"])
+        self.assertEqual(result.output["run"]["run_id"], newer_run_id)
+        self.assertEqual(result.output["run"]["comparison"]["previous_run_id"], older_run_id)
+        self.assertEqual(result.output["run"]["recommendation"]["opportunity_summary"]["category"], "RISK_INCREASE")
+        self.assertEqual(result.output["run"]["recommendation"]["hedge_recommendation"]["instrument_type"], "SWAP")
+        self.assertEqual(trace.tool_name, "get_pretrade_recommendation_run")
+        self.assertEqual(trace.record_count, 1)
+        self.assertIn("scenario 17", trace.summary)
+
+    def test_tool_service_hides_other_users_personal_pretrade_recommendation_runs(self) -> None:
+        hidden_run_id = self._seed_pretrade_recommendation_run(
+            actor_id="trader_two",
+            source_scenario_id=22,
+            created_at=datetime(2026, 4, 21, 9, 0, tzinfo=timezone.utc),
+            current_net_position=12000,
+            target_volume=4000,
+            scope_owner_key="trader_two",
+        )
+
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session, actor_id="trader_one")
+            result, trace = service.execute_tool(
+                "get_pretrade_recommendation_run",
+                {"run_id": hidden_run_id},
+            )
+
+        self.assertFalse(result.output["found"])
+        self.assertEqual(result.output["lookup"]["run_id"], hidden_run_id)
+        self.assertEqual(trace.tool_name, "get_pretrade_recommendation_run")
+        self.assertEqual(trace.record_count, 0)
+        self.assertIn("No visible pre-trade recommendation run matched", trace.summary)
+
+    def test_tool_service_requires_one_pretrade_recommendation_lookup_selector(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session, actor_id="trader_one")
+            with self.assertRaisesRegex(
+                AssistantToolServiceError,
+                "Provide exactly one of run_id, source_scenario_id, or source_review_id",
+            ):
+                service.execute_tool(
+                    "get_pretrade_recommendation_run",
+                    {"run_id": 1, "source_scenario_id": 2},
+                )
+
     def test_tool_service_lists_open_workflow_items_for_requested_queue(self) -> None:
         with self.SessionLocal() as session:
             service = AssistantToolService(session)
@@ -958,6 +1417,10 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(candidate["readiness_status"], "READY")
         self.assertEqual(candidate["notional_amount"], 8500.0)
         self.assertEqual(
+            candidate["priority_reason"],
+            "Ready-to-issue invoice candidates rise before blocked previews.",
+        )
+        self.assertEqual(
             candidate["recommended_action"],
             {
                 "action_type": "issue_trade_invoice",
@@ -968,6 +1431,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(trace.tool_name, "list_invoice_issue_candidates")
         self.assertIn("invoice issue candidate", trace.summary)
+        self.assertIn("Top priority is T-OPEN-INVOICE because", trace.summary)
 
     def test_tool_service_lists_trade_attention_candidates_without_child_rows(self) -> None:
         now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
@@ -1025,11 +1489,100 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         candidate = rows_by_trade_id["T-NO-CNF"]
         self.assertEqual(candidate["candidate_types"], ["confirmation_backlog"])
         self.assertIn("dashboard.attention.confirmation_backlog_count", candidate["source_count_keys"])
+        self.assertEqual(
+            candidate["priority_reason"],
+            "Older unconfirmed trades rise first in the confirmation queue.",
+        )
         self.assertEqual(candidate["supporting_records"]["confirmation_count"], 0)
         self.assertIn("No persisted confirmation ledger row exists", candidate["blocking_reasons"][0])
         self.assertEqual(candidate["suggested_next_tool"], "list_trade_confirmations")
         self.assertEqual(trace.tool_name, "list_trade_attention_candidates")
         self.assertIn("confirmation backlog", trace.summary)
+        self.assertIn("Top priority is", trace.summary)
+        self.assertIn("Older unconfirmed trades rise first in the confirmation queue.", trace.summary)
+
+    def test_tool_service_prioritizes_payment_due_candidates_by_cash_urgency(self) -> None:
+        now = datetime(2026, 3, 24, 12, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            for trade_id, payment_status in (("T-PMT-ORDER-OVERDUE", "OVERDUE"), ("T-PMT-ORDER-DUE", "DUE")):
+                session.add(
+                    Event(
+                        event_id=f"evt-{trade_id.lower()}",
+                        aggregate_type="trade",
+                        aggregate_id=trade_id,
+                        event_type="TradeCreated",
+                        occurred_at=now,
+                        recorded_at=now,
+                        actor_id="trader_4",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={"trade_id": trade_id},
+                    )
+                )
+                session.add(
+                    Trade(
+                        trade_id=trade_id,
+                        external_trade_id=f"EXT-{trade_id}",
+                        source_system="ops",
+                        created_at=now,
+                        updated_at=now,
+                        execution_timestamp=datetime(2026, 3, 20, 9, 0, tzinfo=timezone.utc),
+                        trade_date=now.date(),
+                        trade_currency_code="USD",
+                        location_code="HENRY",
+                        delivery_start=now.date(),
+                        delivery_end=now.date(),
+                        unit_of_measure="MMBTU",
+                        price_unit_code="USD_MMBTU",
+                        trade_nature="PHYSICAL",
+                        trade_structure="SINGLE",
+                        trade_side="BUY",
+                        book="GAS-US",
+                        portfolio="NORTH",
+                        counterparty="ACME",
+                        commodity_class="GAS",
+                        commodity="HH",
+                        pricing_type="FIXED",
+                        pricing_status="PRICED",
+                        price_index_code=None,
+                        price=4.0,
+                        volume=1500,
+                        confirmation_status="CONFIRMED",
+                        nomination_status="SCHEDULED",
+                        allocation_status="PENDING",
+                        actualization_status="PENDING",
+                        invoice_status="ISSUED",
+                        payment_status=payment_status,
+                        settlement_status="INVOICED",
+                        trader_user="trader_4",
+                        status="ACTIVE",
+                        last_event_id=f"evt-{trade_id.lower()}",
+                    )
+                )
+            session.commit()
+
+            service = AssistantToolService(session)
+            result, _trace = service.execute_tool(
+                "list_trade_attention_candidates",
+                {"candidate_type": "payment_due", "limit": 10},
+            )
+
+        returned_trade_ids = [row["trade_id"] for row in result.output["items"]]
+        self.assertLess(
+            returned_trade_ids.index("T-PMT-ORDER-OVERDUE"),
+            returned_trade_ids.index("T-PMT-ORDER-DUE"),
+        )
+        self.assertIn("Top priority is T-PMT-ORDER-OVERDUE because", _trace.summary)
+        rows_by_trade_id = {row["trade_id"]: row for row in result.output["items"]}
+        self.assertEqual(
+            rows_by_trade_id["T-PMT-ORDER-OVERDUE"]["priority_reason"],
+            "Overdue cash rises ahead of merely due payments.",
+        )
+        self.assertEqual(
+            rows_by_trade_id["T-PMT-ORDER-DUE"]["priority_reason"],
+            "Due cash follows overdue items, then older trades.",
+        )
 
     def test_tool_service_lists_payment_due_attention_candidates(self) -> None:
         with self.SessionLocal() as session:
@@ -1043,6 +1596,10 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("T-1001", rows_by_trade_id)
         candidate = rows_by_trade_id["T-1001"]
         self.assertEqual(candidate["source_count_keys"], ["settlement.payment_due_count"])
+        self.assertEqual(
+            candidate["priority_reason"],
+            "Due cash follows overdue items, then older trades.",
+        )
         self.assertEqual(candidate["supporting_records"]["invoice_count"], 1)
         self.assertEqual(candidate["supporting_records"]["payment_count"], 1)
         self.assertEqual(candidate["supporting_records"]["candidate_invoice_id"], 1)

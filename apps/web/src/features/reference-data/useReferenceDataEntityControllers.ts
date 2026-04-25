@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 
 import type {
+  AssetRecord,
+  AssetStandards,
   CurrencyRecord,
   LocationRecord,
   LocationStandards,
@@ -11,11 +13,13 @@ import type {
 } from '../../shared/models'
 import { type useReferenceDataWorkspace } from './useReferenceDataWorkspace'
 import {
+  buildAssetFieldErrors,
   buildCommodityFieldErrors,
   buildCurrencyFieldErrors,
   buildLocationFieldErrors,
   buildPriceIndexFieldErrors,
   buildUnitFieldErrors,
+  isAssetFormDirty,
   isCommodityFormDirty,
   isCurrencyFormDirty,
   isLocationFormDirty,
@@ -38,6 +42,126 @@ type EntityControllerActions = {
   submitReference: SubmitReference
   setReferenceActionError: (message: string) => void
   setReferenceActionSuccess: (message: string) => void
+}
+
+export function useReferenceDataAssetController({
+  workspace,
+  assets,
+  assetStandards,
+  beginReferenceAction,
+  currentActorId,
+  submitReference,
+  setReferenceActionError,
+}: {
+  workspace: Pick<
+    ReferenceDataWorkspaceState,
+    | 'assetForm'
+    | 'assetFormMode'
+    | 'selectedAsset'
+    | 'startCreateAsset'
+    | 'startEditAsset'
+  >
+  assets: AssetRecord[]
+  assetStandards: AssetStandards
+} & Pick<
+  EntityControllerActions,
+  'beginReferenceAction' | 'currentActorId' | 'submitReference' | 'setReferenceActionError'
+>) {
+  const {
+    assetForm,
+    assetFormMode,
+    selectedAsset,
+    startCreateAsset: startCreateAssetBase,
+    startEditAsset: startEditAssetBase,
+  } = workspace
+
+  const assetFieldErrors = useMemo(
+    () => buildAssetFieldErrors(assetForm, assetFormMode, assets, assetStandards),
+    [assetForm, assetFormMode, assetStandards, assets],
+  )
+
+  const assetFormDirty = useMemo(
+    () => isAssetFormDirty(assetForm, assetFormMode, selectedAsset, assetStandards),
+    [assetForm, assetFormMode, assetStandards, selectedAsset],
+  )
+
+  function startCreateAsset() {
+    beginReferenceAction(startCreateAssetBase)
+  }
+
+  function startEditAsset(code: string) {
+    beginReferenceAction(() => startEditAssetBase(code))
+  }
+
+  async function handleSaveAsset(e: React.FormEvent) {
+    e.preventDefault()
+    if (
+      !assetForm.code.trim() ||
+      !assetForm.name.trim() ||
+      !assetForm.asset_class.trim() ||
+      !assetForm.asset_type.trim() ||
+      !assetForm.asset_reality.trim() ||
+      !assetForm.operating_status.trim()
+    ) {
+      setReferenceActionError('Asset code, name, class, type, reality, and operating status are required.')
+      return
+    }
+
+    const capacityValue = assetForm.capacity_value.trim() ? Number(assetForm.capacity_value.trim()) : null
+    if (assetForm.capacity_value.trim() && Number.isNaN(capacityValue)) {
+      setReferenceActionError('Capacity must be numeric.')
+      return
+    }
+    if ((capacityValue === null) !== !assetForm.capacity_unit_code.trim()) {
+      setReferenceActionError('Capacity value and unit must be provided together.')
+      return
+    }
+
+    const payload = {
+      code: assetForm.code.trim().toUpperCase(),
+      name: assetForm.name.trim(),
+      asset_class: assetForm.asset_class.trim().toUpperCase(),
+      asset_type: assetForm.asset_type.trim().toUpperCase(),
+      asset_reality: assetForm.asset_reality.trim().toUpperCase(),
+      commodity_code: assetForm.commodity_code.trim().toUpperCase() || null,
+      location_code: assetForm.location_code.trim().toUpperCase() || null,
+      capacity_value: capacityValue,
+      capacity_unit_code: assetForm.capacity_unit_code.trim().toUpperCase() || null,
+      operator_name: assetForm.operator_name.trim() || null,
+      operating_status: assetForm.operating_status.trim().toUpperCase(),
+      description: assetForm.description.trim() || null,
+    }
+
+    if (assetFormMode === 'create') {
+      await submitReference('/reference/assets', 'POST', { ...payload, created_by: currentActorId() }, `Asset ${payload.code} created.`)
+      startEditAssetBase(payload.code)
+    } else if (selectedAsset) {
+      await submitReference(
+        `/reference/assets/${selectedAsset.code}`,
+        'PUT',
+        { ...payload, updated_by: currentActorId() },
+        `Asset ${selectedAsset.code} updated.`,
+      )
+    }
+  }
+
+  async function handleToggleAsset(record: AssetRecord) {
+    await submitReference(
+      `/reference/assets/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
+      'POST',
+      { updated_by: currentActorId() },
+      `Asset ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
+    )
+  }
+
+  return {
+    assetFieldErrors,
+    assetFormDirty,
+    startCreateAsset,
+    startEditAsset,
+    handleSaveAsset,
+    handleToggleAsset,
+  }
 }
 
 export function useReferenceDataCommodityController({

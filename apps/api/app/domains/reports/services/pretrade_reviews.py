@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.pretrade import (
+    PreTradeGovernanceAuditExportOut,
     PreTradeReviewActivityAction,
     PreTradeReviewActivityOut,
     PreTradeReviewItemOut,
@@ -20,6 +21,8 @@ from apps.api.app.schemas.pretrade import (
 
 PRETRADE_REVIEW_PRESET_KEY = "pretrade_review"
 PRETRADE_SHARED_OWNER_KEY = "__shared__"
+REVIEW_APPROVAL_GOVERNANCE_SNAPSHOT_KEY = "approval_governance_snapshot"
+REVIEW_BOOKING_GOVERNANCE_SNAPSHOT_KEY = "booking_governance_snapshot"
 
 
 def pretrade_review_record_stmt():
@@ -111,6 +114,28 @@ def review_booked_by(record: ReportPreset) -> str | None:
     return booked_by if isinstance(booked_by, str) and booked_by.strip() else None
 
 
+def _review_governance_snapshot(
+    record: ReportPreset,
+    *,
+    snapshot_key: str,
+) -> PreTradeGovernanceAuditExportOut | None:
+    raw_snapshot = review_record_payload(record).get(snapshot_key)
+    if not isinstance(raw_snapshot, dict):
+        return None
+    try:
+        return PreTradeGovernanceAuditExportOut.model_validate(raw_snapshot)
+    except ValidationError:
+        return None
+
+
+def review_approval_governance_snapshot(record: ReportPreset) -> PreTradeGovernanceAuditExportOut | None:
+    return _review_governance_snapshot(record, snapshot_key=REVIEW_APPROVAL_GOVERNANCE_SNAPSHOT_KEY)
+
+
+def review_booking_governance_snapshot(record: ReportPreset) -> PreTradeGovernanceAuditExportOut | None:
+    return _review_governance_snapshot(record, snapshot_key=REVIEW_BOOKING_GOVERNANCE_SNAPSHOT_KEY)
+
+
 def build_review_activity_entry(
     *,
     action: PreTradeReviewActivityAction,
@@ -175,6 +200,33 @@ def append_review_activity(
     record.filters_json = next_payload
 
 
+def persist_review_governance_snapshot(
+    record: ReportPreset,
+    *,
+    snapshot: PreTradeGovernanceAuditExportOut,
+    snapshot_key: str,
+    activity_action: PreTradeReviewActivityAction | None = None,
+) -> None:
+    next_payload = review_record_payload(record)
+    next_payload[snapshot_key] = snapshot.model_dump(mode="json")
+
+    if activity_action is not None:
+        activity = review_activity_payloads(record)
+        for entry in reversed(activity):
+            if entry.get("action") != activity_action:
+                continue
+            payload = entry.get("payload")
+            if not isinstance(payload, dict):
+                payload = {}
+                entry["payload"] = payload
+            payload["governance_snapshot_generated_at"] = snapshot.generated_at.isoformat()
+            payload["governance_snapshot_format_version"] = snapshot.format_version
+            break
+        next_payload["activity"] = activity
+
+    record.filters_json = next_payload
+
+
 def build_linked_trade_status_lookup(db: Session, linked_trade_ids: Iterable[str]) -> dict[str, str]:
     normalized_ids = sorted({trade_id.strip() for trade_id in linked_trade_ids if trade_id and trade_id.strip()})
     if not normalized_ids:
@@ -215,6 +267,8 @@ def to_review_out(
         linked_trade_status=linked_trade_status_by_id.get(linked_trade_id) if linked_trade_id and linked_trade_status_by_id else None,
         booked_at=review_booked_at(record),
         booked_by=review_booked_by(record),
+        approval_governance_snapshot=review_approval_governance_snapshot(record),
+        booking_governance_snapshot=review_booking_governance_snapshot(record),
         activity=review_activity(record),
         created_at=record.created_at,
         created_by=record.created_by,

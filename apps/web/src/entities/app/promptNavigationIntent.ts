@@ -205,17 +205,42 @@ function parseNavigationIntentBlock(
   }
 }
 
+export const INVALID_PROMPT_NAVIGATION_WARNING =
+  'A workspace handoff suggestion could not be applied and was ignored.'
+
+export function buildPromptNavigationIntentKey(intent: Pick<
+  PromptNavigationIntent,
+  'targetView' | 'focus' | 'filter' | 'inspectorTab' | 'label'
+>): string {
+  return [
+    'open_workspace',
+    intent.targetView,
+    intent.focus?.type ?? 'workspace',
+    intent.focus?.id ?? 'workspace',
+    intent.filter ?? '',
+    intent.inspectorTab ?? '',
+    intent.label ?? '',
+  ].join('|')
+}
+
 export function parsePromptNavigationIntentsFromAssistantContent(
   content: string,
   defaults: PromptNavigationIntentDefaults = {},
-): { content: string; intents: PromptNavigationIntent[] } {
+): { content: string; intents: PromptNavigationIntent[]; warnings: string[] } {
   const intents: PromptNavigationIntent[] = []
+  const warnings: string[] = []
   const strippedContent = content.replace(
-    /```(?:navigation_intent|navigation_intents|json)\s*([\s\S]*?)```/gi,
-    (block, rawBlock: string) => {
+    /```(navigation_intent|navigation_intents|json)\s*([\s\S]*?)```/gi,
+    (block, fenceType: string, rawBlock: string) => {
       const parsedIntents = parseNavigationIntentBlock(rawBlock, defaults)
       if (parsedIntents.length === 0) {
-        return block
+        if (fenceType.toLowerCase() === 'json') {
+          return block
+        }
+        if (!warnings.includes(INVALID_PROMPT_NAVIGATION_WARNING)) {
+          warnings.push(INVALID_PROMPT_NAVIGATION_WARNING)
+        }
+        return ''
       }
       intents.push(...parsedIntents)
       return ''
@@ -225,6 +250,7 @@ export function parsePromptNavigationIntentsFromAssistantContent(
   return {
     content: strippedContent.trim(),
     intents,
+    warnings,
   }
 }
 

@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.domains.reference_data.services.records import normalize_code
+from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
@@ -20,6 +21,7 @@ from apps.api.app.models.trade import Trade
 ModelT = TypeVar(
     "ModelT",
     ReferenceBook,
+    ReferenceAsset,
     ReferenceCommodity,
     ReferenceCounterparty,
     ReferenceCurrency,
@@ -152,6 +154,16 @@ def to_out(record: ModelT, schema_cls):
     )
     if isinstance(record, ReferenceCommodity):
         payload["commodity_class"] = record.commodity_class
+    if isinstance(record, ReferenceAsset):
+        payload["asset_class"] = record.asset_class
+        payload["asset_type"] = record.asset_type
+        payload["asset_reality"] = record.asset_reality
+        payload["commodity_code"] = record.commodity_code
+        payload["location_code"] = record.location_code
+        payload["capacity_value"] = record.capacity_value
+        payload["capacity_unit_code"] = record.capacity_unit_code
+        payload["operator_name"] = record.operator_name
+        payload["operating_status"] = record.operating_status
     if isinstance(record, ReferenceCounterparty):
         payload["short_name"] = record.short_name
         payload["legal_entity_name"] = record.legal_entity_name

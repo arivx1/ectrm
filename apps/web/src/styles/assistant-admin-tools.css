@@ -7,6 +7,7 @@
 .assistant-admin-summary-grid,
 .assistant-control-tower-grid,
 .assistant-control-tower-signal-list,
+.assistant-supervision-summary-grid,
 .assistant-admin-grid,
 .assistant-admin-option-grid,
 .assistant-outcome-grid,
@@ -23,6 +24,7 @@
 
 .assistant-builder-shell,
 .assistant-builder-preview,
+.assistant-supervision-banner,
 .assistant-builder-template-grid,
 .assistant-role-catalog-shell,
 .assistant-role-catalog-grid,
@@ -48,6 +50,18 @@
 .assistant-admin-summary-grid {
   margin-top: 1.2rem;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.assistant-work-package-filter-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  align-items: end;
+}
+
+.assistant-work-package-filter-pills {
+  min-height: 2.75rem;
 }
 
 .assistant-control-tower-banner {
@@ -136,6 +150,33 @@
   display: grid;
   gap: 1rem;
   margin-top: 1.2rem;
+}
+
+.assistant-supervision-banner {
+  margin-top: 0.25rem;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background:
+    radial-gradient(circle at top left, rgba(18, 124, 108, 0.08), transparent 40%),
+    rgba(246, 245, 240, 0.88);
+  box-shadow: inset 4px 0 0 rgba(37, 107, 141, 0.34);
+}
+
+.assistant-supervision-banner.is-pause {
+  box-shadow: inset 4px 0 0 rgba(178, 73, 60, 0.68);
+}
+
+.assistant-supervision-banner.is-narrow {
+  box-shadow: inset 4px 0 0 rgba(198, 147, 46, 0.66);
+}
+
+.assistant-supervision-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.assistant-supervision-actions {
+  margin-top: 0.25rem;
 }
 
 .assistant-control-tower-signal-list {

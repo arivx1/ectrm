@@ -212,6 +212,39 @@ At minimum:
 - note the eval case added, updated, or intentionally not needed in the change
   notes or PR description
 
+For prompt-first UX work, pair this lane with the matching web lane from
+[Local Development](./local-development.md): use `make web-test` for prompt
+parsing or component behavior, and `make web-smoke-test` for landing, auth
+resume, prompt submission, or workspace handoff flows.
+
+## Agent Self-Update Drafts
+
+Agents can now turn recent mistakes into a reviewable self-update draft from
+the admin surface through:
+
+- `POST /admin/assistant/agents/{agent_id}/self-update-draft`
+
+This is a supervised learning loop, not silent self-modification. The server
+builds the draft from current agent configuration plus:
+
+- recent `NEEDS_WORK` feedback comments
+- latest failing eval cases
+- autonomy-review recommendation reasons
+- matched knowledge-base lessons and stop conditions
+
+The generated draft is intentionally constrained:
+
+- it preserves identity and governance metadata such as `agent_id`, provider,
+  model, scope, role mapping, owner role, authority ceiling, and token budget
+- it may preserve or narrow allowed workspaces, capabilities, live tools, and
+  governed action types
+- it may not widen authority from observed mistakes
+
+Admins review the returned draft in the existing agent editor before saving any
+change. If the learning signal points to durable product behavior instead of a
+prompt boundary, prefer the deterministic algorithm loop and knowledge-base
+update instead of relying on prompt-only correction.
+
 ## Codex Task Dispatch
 
 The admin workspace can now record and dispatch Codex engineering tasks through

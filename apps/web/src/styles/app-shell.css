@@ -62,6 +62,14 @@
   backdrop-filter: blur(16px);
 }
 
+.side-rail-prompt {
+  gap: 0.95rem;
+}
+
+.side-rail-prompt .brand-lockup p {
+  display: none;
+}
+
 .brand-lockup h1,
 .hero h2,
 .section-head h3 {
@@ -313,3 +321,55 @@
   padding: 2rem 2.4rem 2.4rem;
 }
 
+.main-stage-prompt {
+  padding-top: 1.4rem;
+}
+
+.workspace-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.workspace-topbar-prompt {
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.workspace-topbar-copy {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.workspace-topbar-copy strong {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: inherit;
+}
+
+.workspace-topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.workspace-topbar-session,
+.workspace-topbar-error {
+  color: var(--color-copy-muted, currentColor);
+  line-height: 1.4;
+}
+
+.workspace-topbar-error {
+  color: #9a4338;
+}
+
+.workspace-topbar-signout {
+  white-space: nowrap;
+}

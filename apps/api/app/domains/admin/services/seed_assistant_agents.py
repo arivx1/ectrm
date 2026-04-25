@@ -72,7 +72,11 @@ def _build_role_system_prompt(*, role_key: str, name: str) -> str:
         mission=role.mission,
         workflow=(
             *role.base_prompt_guidance,
-            "Use only the governed workspaces, tools, and authority boundary defined by the role profile.",
+            "Use the governed workspaces, tools, and authority boundary defined by the role profile as your default lane.",
+            (
+                "If current evidence shows the platform record is behind real-world state and your authority ceiling is EXECUTE, "
+                "prefer correcting the record through governed actions instead of asking for approval."
+            ),
         ),
         response_style=(
             "Lead with the operational conclusion, then show the supporting evidence.",
@@ -80,7 +84,7 @@ def _build_role_system_prompt(*, role_key: str, name: str) -> str:
         ),
         guardrails=(
             *role.stop_conditions,
-            "Do not expand authority beyond this role-derived profile.",
+            "If you act outside your delegated action scope, explain why so the override can be logged.",
         ),
     )
 
@@ -122,48 +126,26 @@ def _seed_definition_from_role(
     )
 
 
-CURRENT_ROLE_DERIVED_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
+SEEDED_PILOT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
     _seed_definition_from_role("trade-ops-copilot", status="ACTIVE"),
     _seed_definition_from_role("settlement-copilot", status="ACTIVE"),
     _seed_definition_from_role("trade-governor", status="ACTIVE", scope="ORGANIZATION"),
-    _seed_definition_from_role("trade-explainer"),
-    _seed_definition_from_role("ops-coordinator"),
-    _seed_definition_from_role("settlement-analyst"),
-    _seed_definition_from_role("document-triage"),
-    _seed_definition_from_role("desk-briefing", scope="ORGANIZATION"),
-)
-
-PHASE_1_PILOT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
-    _seed_definition_from_role(
-        "market-research-agent",
-        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
-    ),
-    _seed_definition_from_role(
-        "pre-trade-structuring-agent",
-        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
-    ),
-    _seed_definition_from_role(
-        "document-agent",
-        capabilities=("READ", "EXPLAIN", "DRAFT"),
-        allowed_action_types=(),
-        authority_ceiling="DRAFT",
-        activation_notes=(
-            "Phase 1 pilot draft. Reprocessing authority requires eval coverage and outcome review before STAGE."
-        ),
-    ),
-    _seed_definition_from_role(
-        "risk-sentinel",
-        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
-    ),
-    _seed_definition_from_role(
-        "reporting-reconciliation-agent",
-        activation_notes="Phase 1 pilot draft. Requires outcome review before activation.",
-    ),
+    _seed_definition_from_role("trade-capture-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("movement-controller-agent", status="ACTIVE"),
+    _seed_definition_from_role("accrual-controller-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("accounting-posting-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("counterparty-state-sync-agent", status="ACTIVE"),
+    _seed_definition_from_role("market-research-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("pre-trade-structuring-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("risk-sentinel", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("document-agent", status="ACTIVE"),
+    _seed_definition_from_role("reporting-reconciliation-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("logistics-coordinator", status="ACTIVE"),
+    _seed_definition_from_role("fee-accrual-agent", status="ACTIVE", scope="ORGANIZATION"),
 )
 
 PILOT_ASSISTANT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
-    *CURRENT_ROLE_DERIVED_AGENT_DEFINITIONS,
-    *PHASE_1_PILOT_AGENT_DEFINITIONS,
+    *SEEDED_PILOT_AGENT_DEFINITIONS,
 )
 
 

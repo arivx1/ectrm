@@ -40,6 +40,19 @@ AssistantWorkspace = Literal[
     "settings",
     "assistant",
 ]
+AssistantWorkspaceSummaryTarget = Literal[
+    "dashboard.attention.confirmation_backlog_count",
+    "dashboard.attention.nomination_backlog_count",
+    "dashboard.attention.allocation_backlog_count",
+    "dashboard.attention.invoice_backlog_count",
+    "dashboard.attention.overdue_payment_count",
+    "dashboard.attention.stale_pricing_count",
+    "dashboard.attention.incomplete_ops_data_count",
+    "settlement.invoice_pending_count",
+    "settlement.payment_due_count",
+    "settlement.trade_exception_count",
+    "trades.pending_settlement_count",
+]
 AssistantAgentStatus = Literal["DRAFT", "ACTIVE", "PAUSED", "RETIRED"]
 AssistantAgentScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
 AssistantAgentCapability = Literal["READ", "EXPLAIN", "DRAFT", "ACTION"]
@@ -58,6 +71,7 @@ AssistantActionType = Literal[
     "issue_trade_confirmation",
     "record_trade_confirmation_response",
     "update_trade_workflow_item",
+    "record_trade_actualization",
     "issue_trade_invoice",
     "create_trade_payment",
     "reprocess_document_ingestion",
@@ -89,12 +103,25 @@ AssistantAgentHealthWorkPackageStatus = Literal["CANDIDATE"]
 AssistantAgentWorkPackageStatus = Literal["CANDIDATE", "ACCEPTED", "IN_PROGRESS", "IMPLEMENTED", "DISMISSED"]
 AssistantRunStatus = Literal["COMPLETED", "FAILED"]
 AssistantRunFeedbackRating = Literal["HELPFUL", "NEEDS_WORK"]
+AssistantPromptNavigationOutcomeStatus = Literal["ACCEPTED", "DISMISSED", "FAILED"]
+AssistantPromptNavigationSurface = Literal["PROMPT_HOME"]
+AssistantPromptNavigationFocusType = Literal[
+    "trade",
+    "workflow_item",
+    "document",
+    "invoice",
+    "payment",
+    "reference_record",
+    "report",
+]
+AssistantPromptNavigationSignal = Literal["OBSERVE", "CANDIDATE_FOR_RULE", "NARROW", "RETIRE"]
 AssistantControlTowerTrustSignalType = Literal[
     "MISSING_EVAL_COVERAGE",
     "POLICY_WARNING",
     "RUN_WARNING",
     "ACTION_BACKLOG",
     "FAILED_ACTIONS",
+    "STALE_WORK_PACKAGE",
 ]
 AssistantControlTowerTrustSignalSeverity = Literal["info", "warning", "danger"]
 ALL_ASSISTANT_ACTION_TYPES: tuple[str, ...] = get_args(AssistantActionType)
@@ -223,6 +250,7 @@ class AssistantPromptContextRequest(BaseModel):
     provider: Optional[AssistantProvider] = None
     workspace: Optional[AssistantWorkspace] = None
     context: Optional[str] = Field(default=None, max_length=20_000)
+    summary_targets: list[AssistantWorkspaceSummaryTarget] = Field(default_factory=list, max_length=12)
     use_live_tools: bool = True
 
     @field_validator("agent_id")
@@ -239,6 +267,18 @@ class AssistantPromptContextRequest(BaseModel):
     @classmethod
     def normalize_context(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="context")
+
+    @field_validator("summary_targets")
+    @classmethod
+    def normalize_summary_targets(
+        cls,
+        value: list[AssistantWorkspaceSummaryTarget],
+    ) -> list[AssistantWorkspaceSummaryTarget]:
+        normalized = [
+            normalize_required_text(target, field_name="summary_targets")
+            for target in value
+        ]
+        return _ensure_distinct_values(normalized, field_name="summary_targets")
 
 
 class AssistantPromptRequest(AssistantPromptContextRequest):
@@ -276,6 +316,69 @@ class AssistantRunFeedbackOut(BaseModel):
     user_role: str
     rating: AssistantRunFeedbackRating
     comment: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantPromptNavigationOutcomeCreate(BaseModel):
+    surface: AssistantPromptNavigationSurface = "PROMPT_HOME"
+    outcome: AssistantPromptNavigationOutcomeStatus
+    intent_key: str = Field(..., min_length=1, max_length=255)
+    target_view: Optional[AssistantWorkspace] = None
+    target_label: Optional[str] = Field(default=None, max_length=160)
+    target_rationale: Optional[str] = Field(default=None, max_length=4_000)
+    focus_type: Optional[AssistantPromptNavigationFocusType] = None
+    focus_id: Optional[str] = Field(default=None, max_length=128)
+    focus_label: Optional[str] = Field(default=None, max_length=160)
+    detail: Optional[str] = Field(default=None, max_length=2_000)
+
+    @field_validator("intent_key")
+    @classmethod
+    def normalize_intent_key(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="intent_key")
+
+    @field_validator("target_label")
+    @classmethod
+    def normalize_target_label(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="target_label")
+
+    @field_validator("target_rationale")
+    @classmethod
+    def normalize_target_rationale(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="target_rationale")
+
+    @field_validator("focus_id")
+    @classmethod
+    def normalize_focus_id(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="focus_id")
+
+    @field_validator("focus_label")
+    @classmethod
+    def normalize_focus_label(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="focus_label")
+
+    @field_validator("detail")
+    @classmethod
+    def normalize_detail(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="detail")
+
+
+class AssistantPromptNavigationOutcomeOut(BaseModel):
+    outcome_id: int
+    run_id: Optional[int] = None
+    conversation_id: Optional[int] = None
+    user_id: str
+    user_role: str
+    surface: AssistantPromptNavigationSurface
+    outcome: AssistantPromptNavigationOutcomeStatus
+    intent_key: str
+    target_view: Optional[AssistantWorkspace] = None
+    target_label: Optional[str] = None
+    target_rationale: Optional[str] = None
+    focus_type: Optional[AssistantPromptNavigationFocusType] = None
+    focus_id: Optional[str] = None
+    focus_label: Optional[str] = None
+    detail: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -320,6 +423,9 @@ class AssistantActionReviewContextOut(BaseModel):
     expected_downstream_effects: list[str] = Field(default_factory=list)
     stale_state_basis: dict[str, object] = Field(default_factory=dict)
     idempotency_key: Optional[str] = None
+    execution_mode: Optional[str] = None
+    autonomous_execution_reason: Optional[str] = None
+    delegated_ability_override_reason: Optional[str] = None
     action_preview: Optional[AssistantActionPreviewOut] = None
 
     @model_serializer(mode="wrap")
@@ -327,6 +433,10 @@ class AssistantActionReviewContextOut(BaseModel):
         payload = handler(self)
         if payload.get("action_preview") is None:
             payload.pop("action_preview", None)
+        if payload.get("autonomous_execution_reason") is None:
+            payload.pop("autonomous_execution_reason", None)
+        if payload.get("delegated_ability_override_reason") is None:
+            payload.pop("delegated_ability_override_reason", None)
         return payload
 
 
@@ -524,6 +634,66 @@ class AssistantRunFeedbackInsightOut(BaseModel):
     updated_at: datetime
 
 
+class AssistantPromptNavigationSummaryOut(BaseModel):
+    total_outcome_count: int = 0
+    accepted_count: int = 0
+    dismissed_count: int = 0
+    failed_count: int = 0
+    acceptance_rate: Optional[float] = None
+    dismiss_rate: Optional[float] = None
+    failure_rate: Optional[float] = None
+
+
+class AssistantPromptNavigationTargetMetricRowOut(BaseModel):
+    target_view: Optional[AssistantWorkspace] = None
+    target_label: Optional[str] = None
+    focus_type: Optional[AssistantPromptNavigationFocusType] = None
+    outcome_count: int
+    accepted_count: int
+    dismissed_count: int
+    failed_count: int
+    acceptance_rate: Optional[float] = None
+    dismiss_rate: Optional[float] = None
+    failure_rate: Optional[float] = None
+    signal: AssistantPromptNavigationSignal
+    signal_reasons: list[str] = Field(default_factory=list)
+    recent_prompt_examples: list[str] = Field(default_factory=list)
+
+
+class AssistantPromptNavigationOutcomeInsightOut(BaseModel):
+    outcome_id: int
+    run_id: Optional[int] = None
+    conversation_id: Optional[int] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    source_workspace: Optional[AssistantWorkspace] = None
+    user_id: str
+    user_role: str
+    surface: AssistantPromptNavigationSurface
+    outcome: AssistantPromptNavigationOutcomeStatus
+    target_view: Optional[AssistantWorkspace] = None
+    target_label: Optional[str] = None
+    focus_type: Optional[AssistantPromptNavigationFocusType] = None
+    focus_id: Optional[str] = None
+    focus_label: Optional[str] = None
+    detail: Optional[str] = None
+    latest_user_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantPromptRouteRecommendationOut(BaseModel):
+    target_view: AssistantWorkspace
+    target_label: Optional[str] = None
+    target_rationale: Optional[str] = None
+    focus_type: Optional[AssistantPromptNavigationFocusType] = None
+    accepted_count: int
+    outcome_count: int
+    acceptance_rate: Optional[float] = None
+    signal: AssistantPromptNavigationSignal
+    signal_reasons: list[str] = Field(default_factory=list)
+
+
 class AssistantActionTypeOutcomeMetricRowOut(AssistantOutcomeMetricCountersOut):
     action_type: AssistantActionType
     recommendation: AssistantOutcomeMetricRecommendationOut
@@ -544,6 +714,13 @@ class AssistantOutcomeMetricsOut(BaseModel):
     by_workspace: list[AssistantWorkspaceFeedbackMetricRowOut] = Field(default_factory=list)
     by_action_type: list[AssistantActionTypeOutcomeMetricRowOut] = Field(default_factory=list)
     recent_feedback: list[AssistantRunFeedbackInsightOut] = Field(default_factory=list)
+    prompt_navigation_summary: AssistantPromptNavigationSummaryOut = Field(
+        default_factory=AssistantPromptNavigationSummaryOut
+    )
+    by_prompt_target: list[AssistantPromptNavigationTargetMetricRowOut] = Field(default_factory=list)
+    recent_prompt_navigation_outcomes: list[AssistantPromptNavigationOutcomeInsightOut] = Field(
+        default_factory=list
+    )
 
 
 class AssistantControlTowerAgentRosterSummaryOut(BaseModel):
@@ -587,6 +764,23 @@ class AssistantControlTowerActionSummaryOut(BaseModel):
     oldest_pending_action: Optional[AssistantControlTowerOldestPendingActionOut] = None
 
 
+class AssistantControlTowerWorkPackageSummaryOut(BaseModel):
+    total_count: int = 0
+    accepted_count: int = 0
+    in_progress_count: int = 0
+    implemented_count: int = 0
+    dismissed_count: int = 0
+    stale_count: int = 0
+    stale_accepted_count: int = 0
+    stale_in_progress_count: int = 0
+    implemented_with_pr_count: int = 0
+    implemented_with_commit_count: int = 0
+    implemented_with_eval_count: int = 0
+    implemented_with_tests_count: int = 0
+    implemented_with_docs_count: int = 0
+    implemented_missing_evidence_count: int = 0
+
+
 class AssistantControlTowerAgentTrustSignalOut(BaseModel):
     agent_id: str
     agent_name: str
@@ -610,6 +804,7 @@ class AssistantControlTowerSummaryOut(BaseModel):
     roster: AssistantControlTowerAgentRosterSummaryOut
     runs: AssistantControlTowerRunSummaryOut
     actions: AssistantControlTowerActionSummaryOut
+    work_packages: AssistantControlTowerWorkPackageSummaryOut
     trust_signals: list[AssistantControlTowerAgentTrustSignalOut] = Field(default_factory=list)
 
 
@@ -713,13 +908,27 @@ class AssistantAgentWorkPackageOut(BaseModel):
     rationale: str
     acceptance_checks: list[str] = Field(default_factory=list)
     knowledge_base_titles: list[str] = Field(default_factory=list)
+    implementation_evidence: "AssistantAgentWorkPackageImplementationEvidenceOut" = Field(
+        default_factory=lambda: AssistantAgentWorkPackageImplementationEvidenceOut()
+    )
     accepted_at: Optional[datetime] = None
     accepted_by: Optional[str] = None
+    implemented_at: Optional[datetime] = None
+    implemented_by: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
     created_by: str
     updated_at: datetime
     updated_by: str
+
+
+class AssistantAgentWorkPackageImplementationEvidenceOut(BaseModel):
+    pr_url: Optional[str] = None
+    commit_sha: Optional[str] = None
+    eval_ids: list[int] = Field(default_factory=list)
+    test_names: list[str] = Field(default_factory=list)
+    doc_paths: list[str] = Field(default_factory=list)
+    owner: Optional[str] = None
 
 
 class AssistantAgentWorkPackageAcceptRequest(BaseModel):
@@ -736,11 +945,56 @@ class AssistantAgentWorkPackageUpdateRequest(BaseModel):
     status: AssistantAgentWorkPackageStatus
     updated_by: Optional[str] = None
     notes: Optional[str] = None
+    implementation_evidence: Optional["AssistantAgentWorkPackageImplementationEvidenceUpdate"] = None
 
     @field_validator("updated_by", "notes")
     @classmethod
     def normalize_optional_update_text(cls, value: Optional[str], info) -> Optional[str]:
         return normalize_optional_text(value, field_name=info.field_name)
+
+
+class AssistantAgentWorkPackageImplementationEvidenceUpdate(BaseModel):
+    pr_url: Optional[str] = None
+    commit_sha: Optional[str] = None
+    eval_ids: Optional[list[int]] = None
+    test_names: Optional[list[str]] = None
+    doc_paths: Optional[list[str]] = None
+    owner: Optional[str] = None
+
+    @field_validator("pr_url", "commit_sha", "owner")
+    @classmethod
+    def normalize_optional_evidence_text(cls, value: Optional[str], info) -> Optional[str]:
+        lowercase = info.field_name == "commit_sha"
+        return normalize_optional_text(value, field_name=info.field_name, lowercase=lowercase)
+
+    @field_validator("eval_ids")
+    @classmethod
+    def normalize_eval_ids(cls, value: Optional[list[int]]) -> Optional[list[int]]:
+        if value is None:
+            return None
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for item in value:
+            resolved = int(item)
+            if resolved <= 0 or resolved in seen:
+                continue
+            normalized.append(resolved)
+            seen.add(resolved)
+        return normalized
+
+    @field_validator("test_names")
+    @classmethod
+    def normalize_test_names(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        if value is None:
+            return None
+        return _normalize_text_list(value, field_name="test_names")
+
+    @field_validator("doc_paths")
+    @classmethod
+    def normalize_doc_paths(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        if value is None:
+            return None
+        return _normalize_text_list(value, field_name="doc_paths")
 
 
 class AssistantPromptResponse(BaseModel):
@@ -1337,6 +1591,15 @@ class AssistantAgentBuildRequest(BaseModel):
         return normalize_required_text(value, field_name="brief")
 
 
+class AssistantAgentSelfUpdateRequest(BaseModel):
+    brief: Optional[str] = Field(default=None, max_length=4_000)
+
+    @field_validator("brief")
+    @classmethod
+    def normalize_self_update_brief(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="brief")
+
+
 class AssistantAgentBuildSuggestionOut(BaseModel):
     agent_id: str = Field(..., min_length=2, max_length=64)
     name: str = Field(..., min_length=1, max_length=160)
@@ -1407,6 +1670,105 @@ class AssistantAgentBuildSuggestionOut(BaseModel):
         ]
         return _ensure_distinct_values(normalized, field_name="allowed_action_types")
 
+
+class AssistantAgentSelfUpdateSuggestionOut(BaseModel):
+    description: str = Field(..., min_length=1, max_length=500)
+    allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
+    capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=16)
+    allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
+    system_prompt: str = Field(..., min_length=1, max_length=20_000)
+    change_summary: list[str] = Field(..., min_length=1, max_length=6)
+    builder_provider: AssistantProvider
+    builder_model: str = Field(..., min_length=1, max_length=160)
+    warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_self_update_description(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="description")
+
+    @field_validator("allowed_workspaces")
+    @classmethod
+    def validate_self_update_allowed_workspaces(cls, value: list[AssistantWorkspace]) -> list[AssistantWorkspace]:
+        return _ensure_distinct_values(value, field_name="allowed_workspaces")
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_self_update_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
+        return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def normalize_self_update_allowed_tools(cls, value: list[str]) -> list[str]:
+        normalized = [normalize_required_text(tool_name, field_name="allowed_tools").lower() for tool_name in value]
+        return _ensure_distinct_values(normalized, field_name="allowed_tools")
+
+    @field_validator("allowed_action_types")
+    @classmethod
+    def normalize_self_update_allowed_action_types(cls, value: list[AssistantActionType]) -> list[AssistantActionType]:
+        normalized = [
+            normalize_required_text(action_type, field_name="allowed_action_types", lowercase=True)
+            for action_type in value
+        ]
+        return _ensure_distinct_values(normalized, field_name="allowed_action_types")
+
+    @field_validator("system_prompt")
+    @classmethod
+    def normalize_self_update_system_prompt(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="system_prompt")
+
+    @field_validator("change_summary")
+    @classmethod
+    def normalize_self_update_change_summary(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="change_summary")
+
+    @field_validator("builder_model")
+    @classmethod
+    def normalize_self_update_builder_model(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="builder_model")
+
+    @field_validator("warnings")
+    @classmethod
+    def normalize_self_update_warnings(cls, value: list[str]) -> list[str]:
+        return _normalize_text_list(value, field_name="warnings")
+
+
+class AssistantAgentSelfUpdateEvidenceOut(BaseModel):
+    recommendation_reasons: list[str] = Field(default_factory=list)
+    recent_needs_work_feedback: list[str] = Field(default_factory=list)
+    failing_eval_cases: list[str] = Field(default_factory=list)
+    knowledge_base_titles: list[str] = Field(default_factory=list)
+    stop_conditions: list[str] = Field(default_factory=list)
+
+
+class AssistantAgentSelfUpdateDraftOut(BaseModel):
+    agent_id: str
+    name: str
+    description: str
+    status: AssistantAgentStatus
+    scope: AssistantAgentScope
+    provider: Optional[AssistantProvider]
+    model: Optional[str]
+    role_key: Optional[str] = None
+    profile_kind: AssistantAgentProfileKind
+    specialization_summary: Optional[str] = None
+    human_owner_role: Optional[str] = None
+    authority_ceiling: Optional[AssistantAgentAuthorityLevel] = None
+    activation_notes: Optional[str] = None
+    profile_request_id: Optional[int] = None
+    allowed_workspaces: list[AssistantWorkspace] = Field(default_factory=list)
+    capabilities: list[AssistantAgentCapability] = Field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_action_types: list[AssistantActionType] = Field(default_factory=list)
+    daily_token_allocation: Optional[int] = None
+    system_prompt: str
+    source_brief: str
+    change_summary: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    builder_provider: AssistantProvider
+    builder_model: str
+    evidence: AssistantAgentSelfUpdateEvidenceOut
 
 class AssistantRunSummaryOut(BaseModel):
     conversation_id: Optional[int] = None

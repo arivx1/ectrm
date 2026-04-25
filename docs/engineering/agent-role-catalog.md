@@ -86,6 +86,14 @@ Phase 1 should prioritize agents that can create value while the authority model
 is still conservative. These agents should operate in read, draft, shadow, or
 approval-gated modes before any broad autonomous execution.
 
+Current rollout posture:
+
+- Trade Ops Copilot, Settlement Copilot, and Trade Governor are the synchronized
+  seeded defaults.
+- Market Research Agent, Pre-Trade Structuring Agent, and Document Agent are
+  Phase 1 pilot blueprints in Admin, but stay template-only until their
+  dedicated workflows land.
+
 ### 1. Market Research Agent
 
 Objective:

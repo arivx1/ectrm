@@ -5,6 +5,7 @@ from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
 from apps.api.app.models.assistant_conversation import AssistantConversation
+from apps.api.app.models.assistant_prompt_navigation_outcome import AssistantPromptNavigationOutcome
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
 from apps.api.app.models.codex_task_request import CodexTaskRequest
@@ -30,6 +31,7 @@ from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.roadmap_document import RoadmapDocument
 from apps.api.app.models.roadmap_document_revision import RoadmapDocumentRevision
+from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
@@ -69,6 +71,7 @@ __all__ = [
     "AssistantAgentProfileRequest",
     "AssistantAgentWorkPackage",
     "AssistantConversation",
+    "AssistantPromptNavigationOutcome",
     "AssistantRun",
     "AssistantRunFeedback",
     "Base",
@@ -95,6 +98,7 @@ __all__ = [
     "ReportPreset",
     "RoadmapDocument",
     "RoadmapDocumentRevision",
+    "ReferenceAsset",
     "ReferenceBook",
     "ReferenceCommodity",
     "ReferenceCounterparty",

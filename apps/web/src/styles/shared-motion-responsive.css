@@ -90,6 +90,7 @@
   .assistant-admin-summary-grid,
   .assistant-control-tower-grid,
   .assistant-control-tower-signal-list,
+  .assistant-supervision-summary-grid,
   .assistant-outcome-grid,
   .assistant-outcome-feedback-grid,
   .projection-integrity-grid,
@@ -140,6 +141,25 @@
 @media (max-width: 960px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+
+  .asset-map-head,
+  .asset-map-summary-grid {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .asset-map-stats {
+    justify-content: flex-start;
+  }
+
+  .workspace-topbar {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .workspace-topbar-actions {
+    justify-content: flex-start;
   }
 
   .trade-form-overview-head,
@@ -285,6 +305,7 @@
   .assistant-admin-summary-grid,
   .assistant-control-tower-grid,
   .assistant-control-tower-signal-list,
+  .assistant-supervision-summary-grid,
   .projection-integrity-summary-grid,
   .projection-integrity-toggle-grid,
   .projection-integrity-channel-grid,

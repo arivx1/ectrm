@@ -2,6 +2,8 @@ import { useState } from 'react'
 
 import { submitReferenceMutation } from '../../entities/reference-data/api'
 import type {
+  AssetRecord,
+  AssetStandards,
   CounterpartyCreditProfileRecord,
   CounterpartyCreditReportRow,
   CounterpartyExternalCreditSnapshotRecord,
@@ -19,6 +21,7 @@ import type {
 import { getMutationContext } from '../../shared/mutation'
 import { useReferenceDataDerivedState } from './referenceDataDerived'
 import {
+  useReferenceDataAssetController,
   useReferenceDataCommodityController,
   useReferenceDataCurrencyController,
   useReferenceDataLocationController,
@@ -48,11 +51,13 @@ type UseReferenceDataControllerArgs = {
   reloadData: () => Promise<void>
   trades: Trade[]
   books: ReferenceRecord[]
+  assets: AssetRecord[]
   commodities: ReferenceRecord[]
   priceIndices: PriceIndexRecord[]
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  assetStandards: AssetStandards
   counterparties: CounterpartyRecord[]
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
   counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
@@ -74,11 +79,13 @@ export function useReferenceDataController({
   reloadData,
   trades,
   books,
+  assets,
   commodities,
   priceIndices,
   currencies,
   units,
   locations,
+  assetStandards,
   counterparties,
   counterpartyCreditProfiles,
   counterpartyExternalCreditSnapshots,
@@ -100,11 +107,13 @@ export function useReferenceDataController({
 
   const workspace = useReferenceDataWorkspace({
     books,
+    assets,
     commodities,
     priceIndices,
     currencies,
     units,
     locations,
+    assetStandards,
     counterparties,
     portfolios,
     activeBooks,
@@ -173,6 +182,16 @@ export function useReferenceDataController({
     setReferenceActionSuccess,
     setSavingReference,
     submitReference,
+  })
+
+  const assetController = useReferenceDataAssetController({
+    workspace,
+    assets,
+    assetStandards,
+    beginReferenceAction,
+    currentActorId,
+    submitReference,
+    setReferenceActionError,
   })
 
   const commodityController = useReferenceDataCommodityController({
@@ -265,7 +284,9 @@ export function useReferenceDataController({
     activeBooks,
     activeCommodities,
     activeCurrencies,
+    activeUnits,
     activeLocations,
+    assetStandards,
     locationStandards,
     counterpartyStandards,
     commodityClassOrder,
@@ -275,6 +296,7 @@ export function useReferenceDataController({
     selectedBookUsage,
     counterpartyCreditReportByCode: derived.counterpartyCreditReportByCode,
     ...bookController,
+    ...assetController,
     ...commodityController,
     ...priceIndexController,
     ...currencyController,

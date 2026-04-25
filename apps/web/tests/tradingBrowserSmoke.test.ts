@@ -47,7 +47,9 @@ const smokeAccessToken = 'smoke-access-token'
 const smokeSession = {
   sessionId: 'smoke-session-1',
   accessToken: smokeAccessToken,
-  expiresAt: '2026-04-20T18:00:00Z',
+  // Keep this comfortably in the future so the browser harness does not
+  // accidentally boot into a signed-out state as wall-clock time moves on.
+  expiresAt: '2099-01-01T00:00:00Z',
   user: {
     user_id: 'ops_admin',
     email: 'ops@example.com',
@@ -574,6 +576,22 @@ async function startMockApiServer(
         return
       }
       writeNoContent(response)
+      return
+    }
+
+    if (url.pathname === '/assistant/action-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/assistant/prompt-route-recommendations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, [])
       return
     }
 
@@ -1315,6 +1333,11 @@ async function waitForGlobalWorkspaceFilter(page: Page, value: string): Promise<
   }, value)
 }
 
+async function waitForCollapsedGlobalWorkspaceFilter(page: Page, value: string): Promise<void> {
+  await page.getByRole('button', { name: 'Show filter' }).waitFor()
+  await page.locator('.nav-global-filter-summary-value', { hasText: `"${value}"` }).waitFor()
+}
+
 async function triggerSessionExpiry(page: Page, mockApi: MockApiServer): Promise<void> {
   const previousHeartbeatCount = mockApi.heartbeatRequests.length
   mockApi.expireSession()
@@ -1679,7 +1702,7 @@ test(
       await page.goto(`${appServer.origin}/?section=trading`, {
         waitUntil: 'domcontentloaded',
       })
-      await dismissStartHereOverlay(page)
+      await dismissStartHereOverlayIfPresent(page)
 
       await page.getByRole('heading', { name: 'Capture trades and understand exposure' }).waitFor()
       await page.getByText('Pick the job you are doing first').waitFor()
@@ -1697,6 +1720,7 @@ test(
       await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
+      await dismissStartHereOverlayIfPresent(page)
 
       await page.getByText('Common Starting Points').waitFor()
       await page
@@ -1839,14 +1863,17 @@ test(
       await page.waitForFunction(() => window.location.search.includes('view=operations'))
       await page.getByRole('heading', { name: 'Clear post-trade blockers and handoffs' }).waitFor()
       await page.getByText('Opened from Activity Feed for T-AMEND-100').waitFor()
-      await page.getByText('Start with amendment follow-through for T-AMEND-100').waitFor()
+      await page
+        .getByText('This workspace started focused on that trade so you can clear the matching queue items before widening back to the full book.')
+        .waitFor()
       await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
+      await waitForCollapsedGlobalWorkspaceFilter(page, 'T-AMEND-100')
 
       assert.match(page.url(), /\bview=operations\b/)
       assert.match(page.url(), /\bhandoff=events\b/)
       assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
       assert.match(page.url(), /\beventType=TradeAmended\b/)
-      assert.equal(await page.getByLabel('Search all workspaces').inputValue(), 'T-AMEND-100')
+      assert.equal((await page.locator('.nav-global-filter-summary-value').textContent())?.trim(), '"T-AMEND-100"')
 
       assert.equal(
         mockApi.unexpectedRequests.length,
@@ -1905,14 +1932,17 @@ test(
       await page.waitForFunction(() => window.location.search.includes('view=settlement'))
       await page.getByRole('heading', { name: 'Issue invoices, track cash, and clear disputes' }).waitFor()
       await page.getByText('Opened from Activity Feed for T-AMEND-100').waitFor()
-      await page.getByText('Start with invoice follow-through for T-AMEND-100').waitFor()
+      await page
+        .getByText('This workspace started focused on that trade so invoice, payment, and dispute follow-through stay anchored to the same issue.')
+        .waitFor()
       await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
+      await waitForCollapsedGlobalWorkspaceFilter(page, 'T-AMEND-100')
 
       assert.match(page.url(), /\bview=settlement\b/)
       assert.match(page.url(), /\bhandoff=events\b/)
       assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
       assert.match(page.url(), /\beventType=TradeInvoiceUpdated\b/)
-      assert.equal(await page.getByLabel('Search all workspaces').inputValue(), 'T-AMEND-100')
+      assert.equal((await page.locator('.nav-global-filter-summary-value').textContent())?.trim(), '"T-AMEND-100"')
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,

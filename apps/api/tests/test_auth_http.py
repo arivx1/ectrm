@@ -450,6 +450,22 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(authenticated_workspace_summary.status_code, 200)
         self.assertIn("trades", authenticated_workspace_summary.json())
 
+        unauthenticated_trade_attention_candidates = self.client.get("/operations/trade-attention-candidates")
+        self.assertEqual(unauthenticated_trade_attention_candidates.status_code, 401)
+        authenticated_trade_attention_candidates = self.client.get(
+            "/operations/trade-attention-candidates",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(authenticated_trade_attention_candidates.status_code, 200)
+
+        unauthenticated_invoice_issue_candidates = self.client.get("/settlement/invoice-issue-candidates")
+        self.assertEqual(unauthenticated_invoice_issue_candidates.status_code, 401)
+        authenticated_invoice_issue_candidates = self.client.get(
+            "/settlement/invoice-issue-candidates",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(authenticated_invoice_issue_candidates.status_code, 200)
+
     def test_successful_requests_emit_completion_logs(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()
         try:

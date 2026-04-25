@@ -124,3 +124,23 @@ frontend verification contract matches the repo-level Make targets.
 The first browser smoke CI path is a manual `Browser Smoke` workflow. It uses
 `make web-install`, `make web-smoke-install-ci`, and `make web-smoke-test` so
 the Playwright startup path matches the local seeded harness contract.
+
+## Prompt-First Verification Lane
+
+Prompt-led UX spans assistant behavior, React rendering, and browser routing,
+so use the narrowest lane that matches the change:
+
+- run `make api-assistant-evals` when a prompt-first change affects assistant
+  instructions, mutation authority boundaries, staged action behavior, or the
+  expected split between navigation, explanation, and manual fallback
+- run `make web-test` when a change affects prompt-intent parsing, Prompt Home
+  rendering, contextual starters, handoff controls, or client-side fail-closed
+  behavior
+- run `make web-smoke-test` when a change affects first landing, sign-in
+  resume, prompt submission, assistant-to-workspace handoff, or other
+  end-to-end prompt-first flows
+
+For prompt-first packages, it is common to need more than one lane. A routing
+or authority change usually needs `make api-assistant-evals` plus either
+`make web-test` or `make web-smoke-test`, depending on whether the behavior is
+component-local or browser-level.

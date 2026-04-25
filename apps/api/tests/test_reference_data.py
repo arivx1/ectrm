@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.models.event import Base, Event
+from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
@@ -31,6 +32,9 @@ from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.routes.events import append_event
 from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
 from apps.api.app.routes.reference_data import (
+    AssetCreate,
+    AssetStatusUpdate,
+    AssetUpdate,
     BookCreate,
     BookStatusUpdate,
     BookUpdate,
@@ -50,7 +54,9 @@ from apps.api.app.routes.reference_data import (
     PortfolioUpdate,
     UnitCreate,
     UnitStatusUpdate,
+    activate_asset,
     activate_book,
+    create_asset,
     activate_counterparty,
     activate_location,
     create_commodity,
@@ -61,12 +67,15 @@ from apps.api.app.routes.reference_data import (
     create_portfolio,
     create_price_index,
     create_unit,
+    deactivate_asset,
     deactivate_book,
     deactivate_counterparty,
     list_counterparties,
     list_counterparty_standards,
     get_book,
     list_books,
+    list_asset_standards,
+    list_assets,
     deactivate_currency,
     deactivate_commodity,
     deactivate_location,
@@ -76,6 +85,7 @@ from apps.api.app.routes.reference_data import (
     list_locations,
     list_price_indices,
     update_book,
+    update_asset,
     update_counterparty,
     update_location,
     update_price_index,
@@ -109,6 +119,7 @@ class ReferenceDataApiTests(unittest.TestCase):
     def setUp(self) -> None:
         with self.SessionLocal() as session:
             session.query(Event).delete()
+            session.query(ReferenceAsset).delete()
             session.query(ReferencePriceIndex).delete()
             session.query(ReferencePortfolio).delete()
             session.query(ReferenceLocation).delete()
@@ -1567,6 +1578,176 @@ class ReferenceDataApiTests(unittest.TestCase):
 
         self.assertEqual(updated.trader_persona, "Risk Manager")
         self.assertEqual(updated.risk_archetype, "RISK_REDUCTION")
+
+    def test_asset_crud_supports_governed_facility_records(self) -> None:
+        self._create_commodity("NATURAL_GAS")
+        self._create_unit("MMBTU", dimension="ENERGY")
+        self._create_location("PERMIAN", location_kind="REGION", location_type="BASIN")
+
+        with self.SessionLocal() as session:
+            created = create_asset(
+                AssetCreate(
+                    code=" waha_pipe ",
+                    name=" Waha Pipe ",
+                    asset_class=" pipeline ",
+                    asset_type=" transmission ",
+                    asset_reality=" real ",
+                    commodity_code=" natural_gas ",
+                    location_code=" permian ",
+                    capacity_value=2400.5,
+                    capacity_unit_code=" mmbtu ",
+                    operator_name=" Midstream Ops ",
+                    operating_status=" operating ",
+                    description="test asset",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(created.code, "WAHA_PIPE")
+        self.assertEqual(created.asset_class, "PIPELINE")
+        self.assertEqual(created.asset_type, "TRANSMISSION")
+        self.assertEqual(created.asset_reality, "REAL")
+        self.assertEqual(created.commodity_code, "NATURAL_GAS")
+        self.assertEqual(created.location_code, "PERMIAN")
+        self.assertEqual(created.capacity_unit_code, "MMBTU")
+        self.assertEqual(created.operator_name, "Midstream Ops")
+        self.assertEqual(created.operating_status, "OPERATING")
+
+        standards = list_asset_standards()
+        self.assertEqual(standards.default_asset_class, "PIPELINE")
+        self.assertIn("GENERATION", standards.asset_classes)
+        self.assertEqual(standards.default_asset_reality, "REAL")
+        self.assertIn("SIMULATED", standards.asset_realities)
+
+        with self.SessionLocal() as session:
+            listed = list_assets(
+                asset_class="pipeline",
+                asset_type="transmission",
+                asset_reality="real",
+                operating_status="operating",
+                commodity_code="natural_gas",
+                location_code="permian",
+                is_active=True,
+                limit=50,
+                offset=0,
+                db=session,
+            )
+            updated = update_asset(
+                "waha_pipe",
+                AssetUpdate(
+                    asset_class="processing",
+                    asset_type="gas plant",
+                    asset_reality="simulated",
+                    commodity_code=None,
+                    location_code=None,
+                    capacity_value=None,
+                    capacity_unit_code=None,
+                    operator_name=" Plant Ops ",
+                    operating_status="idled",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+            deactivated = deactivate_asset(
+                "WAHA_PIPE",
+                AssetStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+            reactivated = activate_asset(
+                "WAHA_PIPE",
+                AssetStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+
+        self.assertEqual([asset.code for asset in listed], ["WAHA_PIPE"])
+        self.assertEqual(updated.asset_class, "PROCESSING")
+        self.assertEqual(updated.asset_type, "GAS_PLANT")
+        self.assertEqual(updated.asset_reality, "SIMULATED")
+        self.assertIsNone(updated.commodity_code)
+        self.assertIsNone(updated.location_code)
+        self.assertIsNone(updated.capacity_value)
+        self.assertIsNone(updated.capacity_unit_code)
+        self.assertEqual(updated.operator_name, "Plant Ops")
+        self.assertEqual(updated.operating_status, "IDLED")
+        self.assertFalse(deactivated.is_active)
+        self.assertTrue(reactivated.is_active)
+
+    def test_asset_creation_rejects_invalid_types_inactive_references_and_partial_capacity(self) -> None:
+        self._create_commodity("ACTIVE_GAS")
+        self._create_commodity("INACTIVE_GAS", is_active=False)
+        self._create_unit("MMBTU", dimension="ENERGY")
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "asset_type 'THERMAL' is invalid for PIPELINE"):
+                create_asset(
+                    AssetCreate(
+                        code="BAD_TYPE",
+                        name="Bad Type",
+                        asset_class="PIPELINE",
+                        asset_type="THERMAL",
+                        asset_reality="REAL",
+                        commodity_code="ACTIVE_GAS",
+                        capacity_value=100.0,
+                        capacity_unit_code="MMBTU",
+                        operating_status="OPERATING",
+                        description="bad type",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Commodity 'INACTIVE_GAS' is not active in reference data"):
+                create_asset(
+                    AssetCreate(
+                        code="BAD_COMMODITY",
+                        name="Bad Commodity",
+                        asset_class="GENERATION",
+                        asset_type="THERMAL",
+                        asset_reality="REAL",
+                        commodity_code="INACTIVE_GAS",
+                        operating_status="OPERATING",
+                        description="bad commodity",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "capacity_value and capacity_unit_code must be provided together"):
+                create_asset(
+                    AssetCreate(
+                        code="BAD_CAPACITY",
+                        name="Bad Capacity",
+                        asset_class="GENERATION",
+                        asset_type="THERMAL",
+                        asset_reality="REAL",
+                        commodity_code="ACTIVE_GAS",
+                        capacity_value=100.0,
+                        operating_status="OPERATING",
+                        description="bad capacity",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "asset_reality 'FAKE' is invalid"):
+                create_asset(
+                    AssetCreate(
+                        code="BAD_REALITY",
+                        name="Bad Reality",
+                        asset_class="GENERATION",
+                        asset_type="THERMAL",
+                        asset_reality="FAKE",
+                        commodity_code="ACTIVE_GAS",
+                        operating_status="OPERATING",
+                        description="bad reality",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
 
 
 if __name__ == "__main__":

@@ -20,12 +20,12 @@ const tradeOpsRole: AssistantAgentRoleArchetype = {
   work_objects: ['trade', 'workflow item'],
   capability_ceiling: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
   default_tools: ['get_trade_workbench', 'list_workflow_items', 'list_documents'],
-  maximum_action_types: ['issue_trade_confirmation', 'update_trade_workflow_item'],
-  authority_ceiling: 'STAGE',
-  approval_rules: ['Operations Lead reviews staged actions.'],
+  maximum_action_types: ['issue_trade_confirmation', 'update_trade_workflow_item', 'record_trade_actualization'],
+  authority_ceiling: 'EXECUTE',
+  approval_rules: ['Operations Lead audits executed actions.'],
   stop_conditions: ['Evidence is ambiguous.'],
   success_metrics: ['Higher approval hit rate.'],
-  required_eval_coverage: ['Allowed action staging.', 'Denied overreach.'],
+  required_eval_coverage: ['Allowed action execution.', 'Denied overreach.'],
   base_prompt_guidance: ['Lead with the blocker.', 'Show evidence before staging.'],
   current_profile_ids: ['trade-ops-copilot'],
 }
@@ -37,44 +37,50 @@ describe('assistant agent builder helpers', () => {
   })
 
   it('builds role preset drafts with only the currently published tool subset', () => {
-    const draft = buildAgentBuilderDraft('ops-coordinator', [
-      'list_workflow_items',
-      'list_deliveries',
-      'list_trade_confirmations',
+    const draft = buildAgentBuilderDraft('market-research-agent', [
+      'get_market_context',
+      'analyze_pretrade_scenario_draft',
       'unused_tool',
     ])
 
-    expect(draft.agent_id).toBe('ops-coordinator')
-    expect(draft.role_key).toBe('ops-coordinator')
+    expect(draft.agent_id).toBe('market-research-agent')
+    expect(draft.role_key).toBe('market-research-agent')
     expect(draft.profile_kind).toBe('ROLE_DERIVED')
-    expect(draft.human_owner_role).toBe('Operations Lead')
+    expect(draft.human_owner_role).toBe('Desk Lead')
     expect(draft.authority_ceiling).toBe('DRAFT')
-    expect(draft.scope).toBe('TEAM')
+    expect(draft.scope).toBe('ORGANIZATION')
     expect(draft.allowed_workspaces).toEqual([
       'assistant',
-      'shipments',
-      'scheduling',
-      'operations',
-      'settlement',
+      'dashboard',
+      'risk',
+      'positions',
+      'reports',
     ])
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT'])
     expect(draft.allowed_tools).toEqual([
-      'list_workflow_items',
-      'list_deliveries',
-      'list_trade_confirmations',
+      'get_market_context',
+      'analyze_pretrade_scenario_draft',
     ])
-    expect(draft.system_prompt).toContain('Ops Coordinator')
+    expect(draft.system_prompt).toContain('Market Research Agent')
     expect(draft.system_prompt).toContain('Guardrails')
     expect(draft.allowed_action_types).toEqual([])
+    expect(draft.activation_notes).toContain('platform role catalog')
   })
 
   it('falls back to an empty tool subset when runtime settings are not loaded yet', () => {
-    const draft = buildAgentBuilderDraft('desk-briefing', [])
+    const draft = buildAgentBuilderDraft('pre-trade-structuring-agent', [])
 
     expect(draft.allowed_tools).toEqual([])
     expect(draft.allowed_action_types).toEqual([])
-    expect(draft.allowed_workspaces).toEqual(['assistant', 'dashboard', 'risk', 'positions', 'reports'])
-    expect(draft.role_key).toBe('desk-briefing')
+    expect(draft.allowed_workspaces).toEqual([
+      'assistant',
+      'trades',
+      'risk',
+      'positions',
+      'reports',
+      'reference',
+    ])
+    expect(draft.role_key).toBe('pre-trade-structuring-agent')
   })
 
   it('includes governed action types for action-scoped role presets', () => {
@@ -83,14 +89,60 @@ describe('assistant agent builder helpers', () => {
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
     expect(draft.role_key).toBe('trade-ops-copilot')
     expect(draft.profile_kind).toBe('ROLE_DERIVED')
-    expect(draft.authority_ceiling).toBe('STAGE')
+    expect(draft.authority_ceiling).toBe('EXECUTE')
     expect(draft.allowed_tools).toEqual(['get_trade_workbench', 'list_documents'])
     expect(draft.allowed_action_types).toEqual([
       'issue_trade_confirmation',
       'record_trade_confirmation_response',
       'update_trade_workflow_item',
+      'record_trade_actualization',
       'reprocess_document_ingestion',
     ])
+  })
+
+  it('includes governed reprocessing authority for the seeded document role', () => {
+    const draft = buildAgentBuilderDraft('document-agent', ['list_documents', 'get_document_ingestion'])
+
+    expect(draft.role_key).toBe('document-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.allowed_tools).toEqual(['list_documents', 'get_document_ingestion'])
+    expect(draft.allowed_action_types).toEqual(['reprocess_document_ingestion'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.activation_notes).toContain('platform role catalog')
+  })
+
+  it('includes bounded movement execution authority for the movement controller preset', () => {
+    const draft = buildAgentBuilderDraft('movement-controller-agent', [
+      'list_deliveries',
+      'get_document_ingestion',
+      'get_workspace_summary',
+    ])
+
+    expect(draft.role_key).toBe('movement-controller-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.allowed_tools).toEqual([
+      'list_deliveries',
+      'get_document_ingestion',
+      'get_workspace_summary',
+    ])
+    expect(draft.allowed_action_types).toEqual([
+      'record_trade_actualization',
+      'update_trade_workflow_item',
+    ])
+  })
+
+  it('keeps accounting posting presets draft-only until ledger actions exist', () => {
+    const draft = buildAgentBuilderDraft('accounting-posting-agent', [
+      'list_trade_invoices',
+      'list_accrual_entries',
+    ])
+
+    expect(draft.role_key).toBe('accounting-posting-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT'])
+    expect(draft.authority_ceiling).toBe('DRAFT')
+    expect(draft.allowed_tools).toEqual(['list_trade_invoices', 'list_accrual_entries'])
+    expect(draft.allowed_action_types).toEqual([])
   })
 
   it('returns a fresh empty draft each time', () => {
@@ -117,13 +169,14 @@ describe('assistant agent builder helpers', () => {
     expect(draft.role_key).toBe('trade-ops-copilot')
     expect(draft.profile_kind).toBe('ROLE_DERIVED')
     expect(draft.human_owner_role).toBe('Operations Lead')
-    expect(draft.authority_ceiling).toBe('STAGE')
+    expect(draft.authority_ceiling).toBe('EXECUTE')
     expect(draft.allowed_workspaces).toEqual(['assistant', 'trades', 'operations'])
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
     expect(draft.allowed_tools).toEqual(['get_trade_workbench', 'list_workflow_items'])
     expect(draft.allowed_action_types).toEqual([
       'issue_trade_confirmation',
       'update_trade_workflow_item',
+      'record_trade_actualization',
     ])
     expect(draft.system_prompt).toContain('Role mission')
     expect(draft.system_prompt).toContain('Stop conditions')
@@ -152,7 +205,7 @@ describe('assistant agent builder helpers', () => {
       ...buildAgentBuilderDraftFromRole(tradeOpsRole, tradeOpsRole.default_tools),
       allowed_workspaces: ['assistant', 'settlement'],
       allowed_tools: ['list_trade_invoices'],
-      authority_ceiling: 'EXECUTE',
+      authority_ceiling: 'EXTERNAL_COMMIT',
     }
 
     const fit = evaluateAgentRoleProfileFit(draft, [tradeOpsRole])

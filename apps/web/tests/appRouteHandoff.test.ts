@@ -7,6 +7,7 @@ import {
   getAppRouteHandoffKey,
   getAppRouteHandoffTradeId,
   readAppRouteHandoff,
+  viewAppliesAppRouteHandoffFilter,
   writeAppRouteHandoff,
 } from '../src/shared/appRouteHandoff.ts'
 
@@ -157,4 +158,12 @@ test('assistant route handoffs round-trip focused workspace context', () => {
     title: 'Open Work Queue',
     detail: 'The assistant found a late confirmation item that needs owner review.',
   })
+})
+
+test('route handoff filters apply to queue-style workspaces only', () => {
+  assert.equal(viewAppliesAppRouteHandoffFilter('operations'), true)
+  assert.equal(viewAppliesAppRouteHandoffFilter('settlement'), true)
+  assert.equal(viewAppliesAppRouteHandoffFilter('shipments'), true)
+  assert.equal(viewAppliesAppRouteHandoffFilter('scheduling'), true)
+  assert.equal(viewAppliesAppRouteHandoffFilter('trades'), false)
 })

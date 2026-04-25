@@ -38,6 +38,15 @@ PreTradeGovernanceAuditCategory = Literal[
     "BOOKED_WITH_OVERRIDE",
     "STALE_EVIDENCE",
 ]
+PreTradeReviewDriftStatus = Literal["ALIGNED", "REAPPROVAL_REQUIRED", "NOT_APPROVED"]
+PreTradeReviewDriftReasonCode = Literal[
+    "MISSING_APPROVAL_SNAPSHOT",
+    "MISSING_APPROVAL_BASELINE",
+    "RECOMMENDATION_CHANGED",
+    "NEWER_RECOMMENDATION_AVAILABLE",
+    "SOURCE_IMPAIRMENT_APPEARED",
+    "OVERRIDE_CHANGED",
+]
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str) -> str | None:
@@ -253,6 +262,8 @@ class PreTradeReviewItemOut(BaseModel):
     linked_trade_status: str | None = None
     booked_at: datetime | None = None
     booked_by: str | None = None
+    approval_governance_snapshot: PreTradeGovernanceAuditExportOut | None = None
+    booking_governance_snapshot: PreTradeGovernanceAuditExportOut | None = None
     activity: list[PreTradeReviewActivityOut] = Field(default_factory=list)
     created_at: datetime
     created_by: str
@@ -260,6 +271,35 @@ class PreTradeReviewItemOut(BaseModel):
     updated_by: str
     version: int
     can_edit: bool
+
+
+class PreTradeReviewDriftReasonOut(BaseModel):
+    code: PreTradeReviewDriftReasonCode
+    summary: str
+    detail: str
+
+
+class PreTradeReviewDriftOut(BaseModel):
+    review_id: int
+    checked_at: datetime
+    review_status: PreTradeReviewStatus
+    alignment_status: PreTradeReviewDriftStatus
+    requires_reapproval: bool = False
+    approval_snapshot_generated_at: datetime | None = None
+    approval_snapshot_exported_by: str | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    approved_recommendation_run_id: int | None = None
+    approved_recommendation_stance: PreTradeRecommendationStance | None = None
+    approved_recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    current_recommendation_run_id: int | None = None
+    current_recommendation_stance: PreTradeRecommendationStance | None = None
+    current_recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    latest_recommendation_run_id: int | None = None
+    latest_recommendation_stance: PreTradeRecommendationStance | None = None
+    latest_recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    current_impaired_sources: list[str] = Field(default_factory=list)
+    reasons: list[PreTradeReviewDriftReasonOut] = Field(default_factory=list)
 
 
 class PreTradeGovernanceSummaryOut(BaseModel):
@@ -483,6 +523,32 @@ class PreTradeRecommendationRunComparisonOut(BaseModel):
     source_quality_changes: list[PreTradeRecommendationSourceQualityDeltaOut] = Field(default_factory=list)
     input_snapshot_changes: list[PreTradeRecommendationInputDeltaOut] = Field(default_factory=list)
     summary: str
+
+
+class PreTradeRecommendationDraftAnalysisCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    thesis: str | None = Field(default=None, max_length=2000)
+    draft: PreTradeScenarioDraft
+    source_scenario_id: int | None = Field(default=None, ge=1)
+    source_review_id: int | None = Field(default=None, ge=1)
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot] = Field(default_factory=list, max_length=20)
+
+    @field_validator("thesis")
+    @classmethod
+    def normalize_thesis(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="thesis")
+
+
+class PreTradeRecommendationDraftAnalysisOut(BaseModel):
+    thesis: str | None
+    draft: PreTradeScenarioDraft
+    source_scenario_id: int | None = None
+    source_review_id: int | None = None
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot]
+    recommendation: PreTradeRecommendationResultOut
+    comparison: PreTradeRecommendationRunComparisonOut | None = None
+    evaluated_at: datetime
 
 
 class PreTradeRecommendationRunCreate(BaseModel):

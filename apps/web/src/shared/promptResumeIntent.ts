@@ -1,5 +1,8 @@
+import type { AssistantWorkspaceSummaryTarget } from './models'
+
 export type PromptResumeIntent = {
   draft: string
+  summaryTargets?: AssistantWorkspaceSummaryTarget[]
   submitAfterSignIn: boolean
   createdAt: string
 }
@@ -43,6 +46,18 @@ function normalizeCreatedAt(value: unknown): string {
   return normalizedValue ?? new Date(0).toISOString()
 }
 
+function normalizeSummaryTargets(value: unknown): AssistantWorkspaceSummaryTarget[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const normalizedTargets = value
+    .map((target) => normalizeOptionalText(target))
+    .filter((target): target is AssistantWorkspaceSummaryTarget => target !== null)
+
+  return normalizedTargets.length > 0 ? Array.from(new Set(normalizedTargets)) : undefined
+}
+
 export function normalizePromptResumeIntent(
   value: Partial<PromptResumeIntent> | null | undefined,
 ): PromptResumeIntent | null {
@@ -53,6 +68,7 @@ export function normalizePromptResumeIntent(
 
   return {
     draft: draft.slice(0, MAX_PROMPT_RESUME_DRAFT_LENGTH),
+    summaryTargets: normalizeSummaryTargets(value?.summaryTargets),
     submitAfterSignIn: value?.submitAfterSignIn === true,
     createdAt: normalizeCreatedAt(value?.createdAt),
   }
@@ -90,6 +106,7 @@ export function savePromptResumeIntent(
 ): PromptResumeIntent | null {
   const normalizedIntent = normalizePromptResumeIntent({
     draft: intent.draft,
+    summaryTargets: intent.summaryTargets,
     submitAfterSignIn: intent.submitAfterSignIn,
     createdAt: intent.createdAt ?? new Date().toISOString(),
   })

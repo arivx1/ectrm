@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
+from apps.api.app.models.assistant_prompt_navigation_outcome import AssistantPromptNavigationOutcome
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
 
@@ -32,6 +33,17 @@ RECOMMENDATION_INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 RECOMMENDATION_KEEP_STAGED = "KEEP_STAGED"
 RECOMMENDATION_ELIGIBLE_FOR_BOUNDED_REVIEW = "ELIGIBLE_FOR_BOUNDED_REVIEW"
 RECOMMENDATION_RECOMMEND_PAUSE = "RECOMMEND_PAUSE"
+
+PROMPT_NAVIGATION_SIGNAL_OBSERVE = "OBSERVE"
+PROMPT_NAVIGATION_SIGNAL_CANDIDATE_FOR_RULE = "CANDIDATE_FOR_RULE"
+PROMPT_NAVIGATION_SIGNAL_NARROW = "NARROW"
+PROMPT_NAVIGATION_SIGNAL_RETIRE = "RETIRE"
+PROMPT_NAVIGATION_RULE_CANDIDATE_MIN_ACCEPTED = 3
+PROMPT_NAVIGATION_RULE_CANDIDATE_MIN_ACCEPTANCE_RATE = 0.75
+PROMPT_NAVIGATION_NARROW_MIN_DISMISSED = 2
+PROMPT_NAVIGATION_NARROW_MIN_DISMISS_RATE = 0.5
+PROMPT_NAVIGATION_RETIRE_MIN_FAILED = 2
+PROMPT_NAVIGATION_RETIRE_MIN_FAILURE_RATE = 0.5
 
 
 @dataclass(frozen=True)
@@ -156,6 +168,57 @@ class AssistantRunFeedbackInsightRow:
 
 
 @dataclass(frozen=True)
+class AssistantPromptNavigationSummaryRow:
+    total_outcome_count: int
+    accepted_count: int
+    dismissed_count: int
+    failed_count: int
+    acceptance_rate: float | None
+    dismiss_rate: float | None
+    failure_rate: float | None
+
+
+@dataclass(frozen=True)
+class AssistantPromptNavigationTargetMetricRow:
+    target_view: str | None
+    target_label: str | None
+    focus_type: str | None
+    outcome_count: int
+    accepted_count: int
+    dismissed_count: int
+    failed_count: int
+    acceptance_rate: float | None
+    dismiss_rate: float | None
+    failure_rate: float | None
+    signal: str
+    signal_reasons: tuple[str, ...]
+    recent_prompt_examples: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AssistantPromptNavigationOutcomeInsightRow:
+    outcome_id: int
+    run_id: int | None
+    conversation_id: int | None
+    agent_id: str | None
+    agent_name: str | None
+    source_workspace: str | None
+    user_id: str
+    user_role: str
+    surface: str
+    outcome: str
+    target_view: str | None
+    target_label: str | None
+    focus_type: str | None
+    focus_id: str | None
+    focus_label: str | None
+    detail: str | None
+    latest_user_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class AssistantActionTypeOutcomeMetricRow(AssistantOutcomeMetricCounters):
     action_type: str
     recommendation: AssistantOutcomeMetricRecommendation
@@ -177,6 +240,9 @@ class AssistantOutcomeMetricsSnapshot:
     by_workspace: tuple[AssistantWorkspaceFeedbackMetricRow, ...]
     by_action_type: tuple[AssistantActionTypeOutcomeMetricRow, ...]
     recent_feedback: tuple[AssistantRunFeedbackInsightRow, ...]
+    prompt_navigation_summary: AssistantPromptNavigationSummaryRow
+    by_prompt_target: tuple[AssistantPromptNavigationTargetMetricRow, ...]
+    recent_prompt_navigation_outcomes: tuple[AssistantPromptNavigationOutcomeInsightRow, ...]
 
 
 @dataclass
@@ -227,6 +293,17 @@ class _WorkspaceFeedbackAccumulator:
     run_count: int = 0
     helpful_feedback_count: int = 0
     needs_work_feedback_count: int = 0
+
+
+@dataclass
+class _PromptNavigationTargetAccumulator:
+    target_view: str | None = None
+    target_label: str | None = None
+    focus_type: str | None = None
+    accepted_count: int = 0
+    dismissed_count: int = 0
+    failed_count: int = 0
+    recent_prompt_examples: list[tuple[datetime | None, str]] = field(default_factory=list)
 
 
 def summarize_assistant_outcome_metrics(
@@ -340,6 +417,40 @@ def summarize_assistant_outcome_metrics(
             _accumulate_action_request(profile_accumulator, record=record, generated_at=generated_at)
         _accumulate_action_request(action_accumulator, record=record, generated_at=generated_at)
 
+    prompt_navigation_outcomes = _load_prompt_navigation_outcomes(
+        db,
+        created_after=created_after,
+        created_before=created_before,
+        agent_id=normalized_agent_id,
+        role_key=normalized_role_key,
+        profile_kind=normalized_profile_kind,
+    )
+    run_by_id.update(
+        {
+            run.id: run
+            for run in _load_runs_by_ids(
+                db,
+                run_ids={
+                    record.run_id
+                    for record in prompt_navigation_outcomes
+                    if record.run_id not in run_by_id
+                },
+            )
+        }
+    )
+    prompt_navigation_target_accumulators: dict[str, _PromptNavigationTargetAccumulator] = {}
+    for record in prompt_navigation_outcomes:
+        run = run_by_id.get(record.run_id)
+        target_accumulator = _prompt_navigation_target_accumulator_for_record(
+            prompt_navigation_target_accumulators,
+            record,
+        )
+        _accumulate_prompt_navigation_outcome(
+            target_accumulator,
+            record=record,
+            run=run,
+        )
+
     by_agent = tuple(
         _build_agent_row(accumulator, thresholds=thresholds)
         for _, accumulator in sorted(agent_accumulators.items(), key=lambda item: item[0])
@@ -377,6 +488,29 @@ def summarize_assistant_outcome_metrics(
         )[:10]
         if feedback.run_id in run_by_id
     )
+    prompt_navigation_summary = _build_prompt_navigation_summary(prompt_navigation_outcomes)
+    by_prompt_target = tuple(
+        _build_prompt_navigation_target_row(accumulator)
+        for _, accumulator in sorted(
+            prompt_navigation_target_accumulators.items(),
+            key=lambda item: (
+                item[1].target_view or "",
+                item[1].target_label or "",
+                item[1].focus_type or "",
+            ),
+        )
+    )
+    recent_prompt_navigation_outcomes = tuple(
+        _build_prompt_navigation_outcome_insight_row(record, run_by_id.get(record.run_id))
+        for record in sorted(
+            prompt_navigation_outcomes,
+            key=lambda outcome: (
+                _coerce_aware_datetime(outcome.updated_at)
+                or datetime.min.replace(tzinfo=timezone.utc)
+            ),
+            reverse=True,
+        )[:10]
+    )
     return AssistantOutcomeMetricsSnapshot(
         generated_at=generated_at,
         created_after=created_after,
@@ -392,6 +526,9 @@ def summarize_assistant_outcome_metrics(
         by_workspace=by_workspace,
         by_action_type=by_action_type,
         recent_feedback=recent_feedback,
+        prompt_navigation_summary=prompt_navigation_summary,
+        by_prompt_target=by_prompt_target,
+        recent_prompt_navigation_outcomes=recent_prompt_navigation_outcomes,
     )
 
 
@@ -431,6 +568,35 @@ def _load_feedback_for_runs(
         select(AssistantRunFeedback)
         .where(AssistantRunFeedback.run_id.in_(normalized_run_ids))
         .order_by(AssistantRunFeedback.updated_at.desc(), AssistantRunFeedback.id.desc())
+    )
+    return list(db.execute(stmt).scalars().all())
+
+
+def _load_prompt_navigation_outcomes(
+    db: Session,
+    *,
+    created_after: datetime | None,
+    created_before: datetime | None,
+    agent_id: str | None,
+    role_key: str | None,
+    profile_kind: str | None,
+) -> list[AssistantPromptNavigationOutcome]:
+    stmt = select(AssistantPromptNavigationOutcome)
+    if agent_id is not None or role_key is not None or profile_kind is not None:
+        stmt = stmt.join(AssistantRun, AssistantRun.id == AssistantPromptNavigationOutcome.run_id)
+    if created_after is not None:
+        stmt = stmt.where(AssistantPromptNavigationOutcome.created_at >= created_after)
+    if created_before is not None:
+        stmt = stmt.where(AssistantPromptNavigationOutcome.created_at <= created_before)
+    if agent_id is not None:
+        stmt = stmt.where(AssistantRun.agent_id == agent_id)
+    if role_key is not None:
+        stmt = stmt.where(AssistantRun.agent_role_key == role_key)
+    if profile_kind is not None:
+        stmt = stmt.where(AssistantRun.agent_profile_kind == profile_kind)
+    stmt = stmt.order_by(
+        AssistantPromptNavigationOutcome.updated_at.desc(),
+        AssistantPromptNavigationOutcome.id.desc(),
     )
     return list(db.execute(stmt).scalars().all())
 
@@ -520,6 +686,31 @@ def _workspace_accumulator_for_run(
     return accumulator
 
 
+def _prompt_navigation_target_accumulator_for_record(
+    accumulators: dict[str, _PromptNavigationTargetAccumulator],
+    record: AssistantPromptNavigationOutcome,
+) -> _PromptNavigationTargetAccumulator:
+    key = "::".join(
+        [
+            record.target_view or "__unknown__",
+            record.target_label or "__unlabeled__",
+            record.focus_type or "__none__",
+        ]
+    )
+    accumulator = accumulators.setdefault(
+        key,
+        _PromptNavigationTargetAccumulator(
+            target_view=record.target_view,
+            target_label=record.target_label,
+            focus_type=record.focus_type,
+        ),
+    )
+    accumulator.target_view = accumulator.target_view or record.target_view
+    accumulator.target_label = accumulator.target_label or record.target_label
+    accumulator.focus_type = accumulator.focus_type or record.focus_type
+    return accumulator
+
+
 def _group_accumulator_for_key(
     accumulators: dict[str, _GroupAccumulator],
     group_key: str | None,
@@ -603,6 +794,28 @@ def _accumulate_action_request(
         accumulator.unsupported_attempt_count += 1
     if _action_request_has_policy_drift(record):
         accumulator.policy_drift_count += 1
+
+
+def _accumulate_prompt_navigation_outcome(
+    accumulator: _PromptNavigationTargetAccumulator,
+    *,
+    record: AssistantPromptNavigationOutcome,
+    run: AssistantRun | None,
+) -> None:
+    outcome = str(record.outcome or "").upper()
+    if outcome == "ACCEPTED":
+        accumulator.accepted_count += 1
+    elif outcome == "DISMISSED":
+        accumulator.dismissed_count += 1
+    elif outcome == "FAILED":
+        accumulator.failed_count += 1
+
+    prompt_example = _normalize_optional_text(run.latest_user_message if run is not None else None)
+    if prompt_example is None:
+        return
+
+    updated_at = _coerce_aware_datetime(record.updated_at)
+    accumulator.recent_prompt_examples.append((updated_at, prompt_example))
 
 
 def _build_agent_row(
@@ -723,6 +936,93 @@ def _build_feedback_insight_row(
     )
 
 
+def _build_prompt_navigation_summary(
+    records: Iterable[AssistantPromptNavigationOutcome],
+) -> AssistantPromptNavigationSummaryRow:
+    record_list = list(records)
+    accepted_count = sum(1 for record in record_list if str(record.outcome or "").upper() == "ACCEPTED")
+    dismissed_count = sum(1 for record in record_list if str(record.outcome or "").upper() == "DISMISSED")
+    failed_count = sum(1 for record in record_list if str(record.outcome or "").upper() == "FAILED")
+    total_outcome_count = accepted_count + dismissed_count + failed_count
+    return AssistantPromptNavigationSummaryRow(
+        total_outcome_count=total_outcome_count,
+        accepted_count=accepted_count,
+        dismissed_count=dismissed_count,
+        failed_count=failed_count,
+        acceptance_rate=_safe_ratio(accepted_count, total_outcome_count),
+        dismiss_rate=_safe_ratio(dismissed_count, total_outcome_count),
+        failure_rate=_safe_ratio(failed_count, total_outcome_count),
+    )
+
+
+def _build_prompt_navigation_target_row(
+    accumulator: _PromptNavigationTargetAccumulator,
+) -> AssistantPromptNavigationTargetMetricRow:
+    outcome_count = accumulator.accepted_count + accumulator.dismissed_count + accumulator.failed_count
+    signal, signal_reasons = _prompt_navigation_signal(accumulator, outcome_count=outcome_count)
+    recent_prompt_examples = tuple(
+        prompt
+        for _, prompt in sorted(
+            accumulator.recent_prompt_examples,
+            key=lambda item: item[0] or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        if prompt
+    )
+    deduped_examples: list[str] = []
+    seen_examples: set[str] = set()
+    for prompt in recent_prompt_examples:
+        if prompt in seen_examples:
+            continue
+        deduped_examples.append(prompt)
+        seen_examples.add(prompt)
+        if len(deduped_examples) >= 3:
+            break
+
+    return AssistantPromptNavigationTargetMetricRow(
+        target_view=accumulator.target_view,
+        target_label=accumulator.target_label,
+        focus_type=accumulator.focus_type,
+        outcome_count=outcome_count,
+        accepted_count=accumulator.accepted_count,
+        dismissed_count=accumulator.dismissed_count,
+        failed_count=accumulator.failed_count,
+        acceptance_rate=_safe_ratio(accumulator.accepted_count, outcome_count),
+        dismiss_rate=_safe_ratio(accumulator.dismissed_count, outcome_count),
+        failure_rate=_safe_ratio(accumulator.failed_count, outcome_count),
+        signal=signal,
+        signal_reasons=tuple(signal_reasons),
+        recent_prompt_examples=tuple(deduped_examples),
+    )
+
+
+def _build_prompt_navigation_outcome_insight_row(
+    record: AssistantPromptNavigationOutcome,
+    run: AssistantRun | None,
+) -> AssistantPromptNavigationOutcomeInsightRow:
+    return AssistantPromptNavigationOutcomeInsightRow(
+        outcome_id=record.id,
+        run_id=record.run_id,
+        conversation_id=record.conversation_id,
+        agent_id=run.agent_id if run is not None else None,
+        agent_name=run.agent_name if run is not None else None,
+        source_workspace=run.workspace if run is not None else None,
+        user_id=record.user_id,
+        user_role=record.user_role,
+        surface=record.surface,
+        outcome=record.outcome,
+        target_view=record.target_view,
+        target_label=record.target_label,
+        focus_type=record.focus_type,
+        focus_id=record.focus_id,
+        focus_label=record.focus_label,
+        detail=record.detail,
+        latest_user_message=run.latest_user_message if run is not None else None,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
 def _build_action_counters(accumulator: _ActionAccumulator) -> AssistantOutcomeMetricCounters:
     decided_action_count = (
         accumulator.executed_action_count
@@ -793,6 +1093,61 @@ def _recommend_action(
             "A human owner must still approve any bounded execution policy change.",
         ),
     )
+
+
+def _prompt_navigation_signal(
+    accumulator: _PromptNavigationTargetAccumulator,
+    *,
+    outcome_count: int,
+) -> tuple[str, list[str]]:
+    acceptance_rate = _safe_ratio(accumulator.accepted_count, outcome_count) or 0.0
+    dismiss_rate = _safe_ratio(accumulator.dismissed_count, outcome_count) or 0.0
+    failure_rate = _safe_ratio(accumulator.failed_count, outcome_count) or 0.0
+
+    if (
+        accumulator.failed_count >= PROMPT_NAVIGATION_RETIRE_MIN_FAILED
+        and failure_rate >= PROMPT_NAVIGATION_RETIRE_MIN_FAILURE_RATE
+    ):
+        return (
+            PROMPT_NAVIGATION_SIGNAL_RETIRE,
+            [
+                "Repeated failed handoff payloads suggest this route should be paused or rebuilt.",
+            ],
+        )
+
+    if (
+        accumulator.dismissed_count >= PROMPT_NAVIGATION_NARROW_MIN_DISMISSED
+        and dismiss_rate >= PROMPT_NAVIGATION_NARROW_MIN_DISMISS_RATE
+    ):
+        return (
+            PROMPT_NAVIGATION_SIGNAL_NARROW,
+            [
+                "Users dismiss this destination often enough that the routing rule should narrow or ask for confirmation.",
+            ],
+        )
+
+    if (
+        accumulator.accepted_count >= PROMPT_NAVIGATION_RULE_CANDIDATE_MIN_ACCEPTED
+        and acceptance_rate >= PROMPT_NAVIGATION_RULE_CANDIDATE_MIN_ACCEPTANCE_RATE
+        and accumulator.failed_count == 0
+    ):
+        return (
+            PROMPT_NAVIGATION_SIGNAL_CANDIDATE_FOR_RULE,
+            [
+                "Repeated accepted handoffs make this destination a strong deterministic rule candidate.",
+            ],
+        )
+
+    reasons: list[str] = []
+    if outcome_count == 0:
+        reasons.append("No prompt-first handoff outcomes were recorded for this destination.")
+    elif accumulator.failed_count > 0:
+        reasons.append("Keep observing until failed handoffs stop appearing for this destination.")
+    elif accumulator.dismissed_count > 0:
+        reasons.append("Keep observing whether users accept or dismiss this route more consistently.")
+    else:
+        reasons.append("Keep observing until the route has enough repeated outcomes to justify product logic.")
+    return (PROMPT_NAVIGATION_SIGNAL_OBSERVE, reasons)
 
 
 def _pause_reasons(

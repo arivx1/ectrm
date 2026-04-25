@@ -19,14 +19,23 @@ from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.external_data_run import ExternalDataRun
+from apps.api.app.models.option_exposure import OptionExposure
+from apps.api.app.models.position import Position
+from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
+from apps.api.app.models.reference_counterparty_external_credit_snapshot import (
+    ReferenceCounterpartyExternalCreditSnapshot,
+)
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_unit import ReferenceUnit
+from apps.api.app.models.trade import Trade
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 
@@ -323,6 +332,171 @@ class PreTradeApiTests(unittest.TestCase):
         }
         return snapshots
 
+    def _stale_recommendation_input_snapshots(self) -> list[dict[str, object]]:
+        snapshots = self._escalating_recommendation_input_snapshots()
+        snapshots[2]["freshness"] = "STALE"
+        snapshots[2]["summary"] = "Latest price-index mark is stale and needs refresh."
+        snapshots[2]["payload"] = {"latest_mark": 2.91}
+        return snapshots
+
+    def _seed_live_recommendation_context(self) -> None:
+        seed_now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                ExternalDataRun(
+                    id=1,
+                    provider="ICE",
+                    job_name="sync_price_marks",
+                    status="SUCCEEDED",
+                    started_at=seed_now,
+                    finished_at=seed_now,
+                    requested_by="seed",
+                    series_count=1,
+                    observation_count=1,
+                    error_summary=None,
+                    created_at=seed_now,
+                )
+            )
+            session.add(
+                Trade(
+                    trade_id="TRD-LIVE-1",
+                    originating_option_trade_id=None,
+                    external_trade_id=None,
+                    source_system="seed",
+                    created_at=seed_now,
+                    updated_at=seed_now,
+                    execution_timestamp=seed_now,
+                    trade_date=seed_now.date(),
+                    effective_start_date=None,
+                    effective_end_date=None,
+                    quality_spec=None,
+                    unit_of_measure="MMBTU",
+                    trade_currency_code="USD",
+                    location_code="HENRY_HUB",
+                    delivery_start=seed_now.date(),
+                    delivery_end=seed_now.date(),
+                    price_unit_code="MMBTU",
+                    instrument_type="LINEAR",
+                    option_type=None,
+                    option_style=None,
+                    option_strike_price=None,
+                    option_expiration_date=None,
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="GAS_PHYS",
+                    portfolio="PROMPT",
+                    counterparty="SHELL_TRADING",
+                    commodity_class="NATURAL_GAS",
+                    commodity="HENRY_HUB",
+                    pricing_type="FLOATING",
+                    pricing_status="PENDING",
+                    confirmation_status="PENDING",
+                    nomination_status="PENDING",
+                    allocation_status="PENDING",
+                    actualization_status="PENDING",
+                    price_index_code="NG_HH_PROMPT",
+                    price=2.8,
+                    volume=10000,
+                    invoice_status="PENDING",
+                    payment_status="PENDING",
+                    settlement_status="PENDING",
+                    trader_user="trader_one",
+                    status="ACTIVE",
+                    last_event_id="evt-live-1",
+                )
+            )
+            session.add(
+                Position(
+                    commodity="HENRY_HUB",
+                    net_volume=1000,
+                    updated_at=seed_now,
+                )
+            )
+            session.add(
+                ReferenceCounterpartyCreditProfile(
+                    counterparty_code="SHELL_TRADING",
+                    credit_rating="A",
+                    review_due_at=seed_now.date(),
+                    limit_currency_code="USD",
+                    limit_amount=500000,
+                    breach_action="WARN",
+                    notes=None,
+                    created_at=seed_now,
+                    created_by="seed",
+                    updated_at=seed_now,
+                    updated_by="seed",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceCounterpartyExternalCreditSnapshot(
+                    counterparty_code="SHELL_TRADING",
+                    provider="S&P",
+                    source_entity_id="shell-trading",
+                    source_entity_name="Shell Trading",
+                    match_basis=None,
+                    matched_identifier_value=None,
+                    as_of_date=seed_now.date(),
+                    rating_scale="issuer",
+                    rating_value="A-",
+                    rating_outlook="Stable",
+                    credit_score=None,
+                    probability_of_default=None,
+                    recommended_limit_currency_code="USD",
+                    recommended_limit_amount=450000,
+                    commentary=None,
+                    downloaded_at=seed_now,
+                    run_id=1,
+                    raw_payload={},
+                    created_at=seed_now,
+                    updated_at=seed_now,
+                    version=1,
+                )
+            )
+            session.add(
+                PriceIndexObservation(
+                    price_index_code="NG_HH_PROMPT",
+                    observation_date=seed_now.date(),
+                    value=2.83,
+                    unit_code="MMBTU",
+                    currency_code="USD",
+                    source_provider="ICE",
+                    source_series_id="NG_HH_PROMPT",
+                    source_frequency="DAILY",
+                    source_published_at=seed_now,
+                    source_revision=None,
+                    downloaded_at=seed_now,
+                    run_id=1,
+                    raw_payload={},
+                    created_at=seed_now,
+                    updated_at=seed_now,
+                )
+            )
+            session.add(
+                OptionExposure(
+                    trade_id="OPT-1",
+                    book="GAS_PHYS",
+                    portfolio="PROMPT",
+                    counterparty="SHELL_TRADING",
+                    commodity_class="NATURAL_GAS",
+                    commodity="HENRY_HUB",
+                    trade_side="BUY",
+                    option_type="CALL",
+                    option_style="EUROPEAN",
+                    option_strike_price=3.0,
+                    option_expiration_date=seed_now.date(),
+                    contract_volume=5000,
+                    premium_price=0.1,
+                    premium_cashflow=500,
+                    underlying_equivalent_volume=4000,
+                    trade_currency_code="USD",
+                    price_unit_code="MMBTU",
+                    updated_at=seed_now,
+                )
+            )
+            session.commit()
+
     def test_scenarios_require_authentication(self) -> None:
         response = self.client.get("/pretrade/scenarios")
         self.assertEqual(response.status_code, 401)
@@ -336,7 +510,19 @@ class PreTradeApiTests(unittest.TestCase):
         response = self.client.get("/pretrade/governance/export")
         self.assertEqual(response.status_code, 401)
 
+        response = self.client.get("/pretrade/reviews/1/drift")
+        self.assertEqual(response.status_code, 401)
+
         response = self.client.post("/pretrade/scenarios", json=self._scenario_payload())
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.post(
+            "/pretrade/recommendations/draft-analysis",
+            json={
+                "draft": self._scenario_payload()["draft"],
+                "input_snapshots": self._recommendation_input_snapshots(),
+            },
+        )
         self.assertEqual(response.status_code, 401)
 
     def test_scenarios_are_personal_and_support_crud(self) -> None:
@@ -458,6 +644,16 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(updated_review["activity"][-1]["comment"], "Approved for capture with current sizing.")
         self.assertEqual(updated_review["activity"][-1]["payload"]["from_status"], "OPEN")
         self.assertEqual(updated_review["activity"][-1]["payload"]["to_status"], "APPROVED")
+        self.assertEqual(
+            updated_review["activity"][-1]["payload"]["governance_snapshot_format_version"],
+            "pretrade-governance-audit.v1",
+        )
+        self.assertIsNotNone(updated_review["approval_governance_snapshot"])
+        self.assertIsNone(updated_review["booking_governance_snapshot"])
+        self.assertEqual(updated_review["approval_governance_snapshot"]["exported_by"], "trader_two")
+        self.assertEqual(updated_review["approval_governance_snapshot"]["summary"]["approved_review_count"], 1)
+        self.assertEqual(updated_review["approval_governance_snapshot"]["summary"]["pending_review_count"], 0)
+        self.assertEqual(updated_review["approval_governance_snapshot"]["audit_rows"], [])
 
     def test_recommendation_runs_persist_inputs_scores_and_source_links(self) -> None:
         scenario_response = self.client.post(
@@ -604,6 +800,122 @@ class PreTradeApiTests(unittest.TestCase):
             headers=self.trader_two_headers,
         )
         self.assertEqual(missing_scenario_response.status_code, 404)
+
+    def test_draft_analysis_uses_shared_recommendation_contract_without_persisting_run(self) -> None:
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=self._scenario_payload(),
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario = scenario_response.json()
+
+        saved_run_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "May gas hedge recommendation",
+                "source_scenario_id": scenario["scenario_id"],
+                "input_snapshots": self._recommendation_input_snapshots(),
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(saved_run_response.status_code, 201)
+        saved_run = saved_run_response.json()
+
+        escalating_snapshots = self._escalating_recommendation_input_snapshots()
+        escalating_snapshots[2]["freshness"] = "STALE"
+        escalating_snapshots[2]["payload"] = {"latest_mark": 2.2}
+        draft_analysis_response = self.client.post(
+            "/pretrade/recommendations/draft-analysis",
+            json={
+                "thesis": "Re-check the long draft against a weaker stale mark.",
+                "draft": {
+                    **self._scenario_payload()["draft"],
+                    "target_volume": 28000,
+                },
+                "source_scenario_id": scenario["scenario_id"],
+                "input_snapshots": escalating_snapshots,
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(draft_analysis_response.status_code, 200)
+        analysis = draft_analysis_response.json()
+        self.assertEqual(analysis["source_scenario_id"], scenario["scenario_id"])
+        self.assertEqual(analysis["draft"]["target_volume"], 28000)
+        self.assertEqual(analysis["recommendation"]["stance"], "ESCALATE")
+        self.assertEqual(analysis["recommendation"]["opportunity_summary"]["category"], "MARK_GAP")
+        self.assertEqual(analysis["comparison"]["previous_run_id"], saved_run["run_id"])
+        self.assertTrue(analysis["comparison"]["stance_changed"])
+        self.assertIn("Stance changed", analysis["comparison"]["summary"])
+
+        listed_runs_response = self.client.get(
+            f"/pretrade/recommendations/runs?source_scenario_id={scenario['scenario_id']}",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(listed_runs_response.status_code, 200)
+        listed_runs = listed_runs_response.json()
+        self.assertEqual(len(listed_runs), 1)
+        self.assertEqual(listed_runs[0]["run_id"], saved_run["run_id"])
+
+    def test_draft_analysis_collects_live_source_snapshots_when_input_snapshots_are_omitted(self) -> None:
+        self._seed_trade_reference_data()
+        self._seed_live_recommendation_context()
+
+        response = self.client.post(
+            "/pretrade/recommendations/draft-analysis",
+            json={
+                "thesis": "Use current live desk evidence for the draft review.",
+                "draft": self._scenario_payload()["draft"],
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        analysis = response.json()
+        self.assertEqual(len(analysis["input_snapshots"]), 6)
+        snapshots_by_key = {
+            snapshot["adapter_key"]: snapshot
+            for snapshot in analysis["input_snapshots"]
+        }
+        self.assertEqual(snapshots_by_key["desk-context"]["payload"]["related_active_trade_count"], 1)
+        self.assertEqual(snapshots_by_key["desk-context"]["payload"]["current_net_position"], 1000)
+        self.assertEqual(snapshots_by_key["counterparty-credit"]["quality_status"], "OK")
+        self.assertEqual(snapshots_by_key["counterparty-credit"]["payload"]["external_rating_value"], "A-")
+        self.assertEqual(snapshots_by_key["latest-mark"]["payload"]["latest_mark"], 2.83)
+        self.assertEqual(snapshots_by_key["option-exposure"]["quality_status"], "OK")
+        self.assertEqual(snapshots_by_key["option-exposure"]["payload"]["option_delta"], 4000)
+        self.assertEqual(analysis["recommendation"]["stance"], "PROCEED_WITH_CARE")
+        self.assertEqual(analysis["recommendation"]["hedge_recommendation"]["instrument_type"], "OPTIONS")
+
+    def test_recommendation_runs_collect_live_source_snapshots_when_input_snapshots_are_omitted(self) -> None:
+        self._seed_trade_reference_data()
+        self._seed_live_recommendation_context()
+
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=self._scenario_payload(),
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario = scenario_response.json()
+
+        run_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "May gas hedge live recommendation",
+                "source_scenario_id": scenario["scenario_id"],
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(run_response.status_code, 201)
+        run = run_response.json()
+        snapshots_by_key = {
+            snapshot["adapter_key"]: snapshot
+            for snapshot in run["input_snapshots"]
+        }
+        self.assertEqual(len(run["input_snapshots"]), 6)
+        self.assertEqual(snapshots_by_key["latest-mark"]["payload"]["latest_mark"], 2.83)
+        self.assertEqual(snapshots_by_key["option-exposure"]["quality_status"], "OK")
+        self.assertEqual(run["recommendation"]["hedge_recommendation"]["instrument_type"], "OPTIONS")
 
     def test_legacy_recommendation_runs_without_structured_sections_still_load(self) -> None:
         scenario_response = self.client.post(
@@ -789,6 +1101,15 @@ class PreTradeApiTests(unittest.TestCase):
             approved_payload["activity"][-1]["payload"]["recommendation_override_reason"],
             "Credit approved the temporary utilization overage.",
         )
+        self.assertEqual(
+            approved_payload["activity"][-1]["payload"]["governance_snapshot_format_version"],
+            "pretrade-governance-audit.v1",
+        )
+        self.assertIsNotNone(approved_payload["approval_governance_snapshot"])
+        self.assertIsNone(approved_payload["booking_governance_snapshot"])
+        self.assertEqual(approved_payload["approval_governance_snapshot"]["exported_by"], "trader_two")
+        self.assertEqual(approved_payload["approval_governance_snapshot"]["summary"]["booked_review_count"], 0)
+        self.assertEqual(approved_payload["approval_governance_snapshot"]["summary"]["override_count"], 1)
 
         create_response = self.client.post(
             "/events",
@@ -847,6 +1168,38 @@ class PreTradeApiTests(unittest.TestCase):
         )
         self.assertEqual(linked_payload["activity"][-1]["payload"]["recommendation_override_by"], "trader_two")
         self.assertIsNotNone(linked_payload["activity"][-1]["payload"]["recommendation_override_at"])
+        self.assertEqual(
+            linked_payload["activity"][-1]["payload"]["governance_snapshot_format_version"],
+            "pretrade-governance-audit.v1",
+        )
+        self.assertEqual(linked_payload["approval_governance_snapshot"]["exported_by"], "trader_two")
+        self.assertIsNotNone(linked_payload["booking_governance_snapshot"])
+        self.assertEqual(linked_payload["booking_governance_snapshot"]["exported_by"], "trader_one")
+        self.assertEqual(linked_payload["booking_governance_snapshot"]["summary"]["booked_with_override_count"], 1)
+        self.assertEqual(
+            linked_payload["booking_governance_snapshot"]["items"]["booked_with_override_reviews"][0]["linked_trade_id"],
+            "TRD-21001",
+        )
+
+        trade_list_response = self.client.get("/trades", headers=self.trader_one_headers)
+        self.assertEqual(trade_list_response.status_code, 200)
+        trade_row = trade_list_response.json()[0]
+        self.assertEqual(trade_row["trade_id"], "TRD-21001")
+        self.assertEqual(trade_row["pretrade_review_id"], review_id)
+        self.assertEqual(trade_row["pretrade_recommendation_run_id"], recommendation_run_id)
+        self.assertEqual(trade_row["pretrade_approval_governance_snapshot"]["exported_by"], "trader_two")
+        self.assertEqual(trade_row["pretrade_booking_governance_snapshot"]["exported_by"], "trader_one")
+        self.assertEqual(trade_row["pretrade_booking_governance_snapshot"]["summary"]["booked_review_count"], 1)
+
+        trade_detail_response = self.client.get("/trades/TRD-21001", headers=self.trader_one_headers)
+        self.assertEqual(trade_detail_response.status_code, 200)
+        trade_detail = trade_detail_response.json()
+        self.assertEqual(trade_detail["pretrade_review_id"], review_id)
+        self.assertEqual(trade_detail["pretrade_recommendation_run_id"], recommendation_run_id)
+        self.assertEqual(
+            trade_detail["pretrade_booking_governance_snapshot"]["items"]["booked_with_override_reviews"][0]["linked_trade_id"],
+            "TRD-21001",
+        )
 
         governance_response = self.client.get(
             "/pretrade/governance/summary",
@@ -932,6 +1285,151 @@ class PreTradeApiTests(unittest.TestCase):
         )
         self.assertEqual(duplicate_response.status_code, 409)
         self.assertIn("already linked", duplicate_response.json()["detail"])
+
+    def test_review_drift_requires_reapproval_before_booking(self) -> None:
+        self._seed_trade_reference_data()
+        self._seed_live_recommendation_context()
+
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=self._scenario_payload(),
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario_id = scenario_response.json()["scenario_id"]
+
+        recommendation_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "Initial May gas hedge recommendation",
+                "source_scenario_id": scenario_id,
+                "input_snapshots": self._escalating_recommendation_input_snapshots(),
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(recommendation_response.status_code, 201)
+        initial_run_id = recommendation_response.json()["run_id"]
+
+        review_response = self.client.post(
+            "/pretrade/reviews",
+            json={
+                "name": "May gas hedge review",
+                "thesis": "Approve if the latest recommendation still holds.",
+                "source_scenario_id": scenario_id,
+                "recommendation_run_id": initial_run_id,
+                "review_notes": "Initial approval candidate.",
+                "draft": self._scenario_payload()["draft"],
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(review_response.status_code, 201)
+        review_id = review_response.json()["review_id"]
+
+        approve_response = self.client.patch(
+            f"/pretrade/reviews/{review_id}",
+            json={
+                "review_status": "APPROVED",
+                "activity_comment": "Approved against the current recommendation.",
+                "recommendation_override_reason": "Credit approved the temporary utilization overage.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(approve_response.status_code, 200)
+
+        aligned_drift_response = self.client.get(
+            f"/pretrade/reviews/{review_id}/drift",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(aligned_drift_response.status_code, 200)
+        aligned_drift = aligned_drift_response.json()
+        self.assertEqual(aligned_drift["alignment_status"], "ALIGNED")
+        self.assertFalse(aligned_drift["requires_reapproval"])
+        self.assertEqual(aligned_drift["approved_recommendation_run_id"], initial_run_id)
+        self.assertEqual(aligned_drift["current_recommendation_run_id"], initial_run_id)
+        self.assertEqual(aligned_drift["latest_recommendation_run_id"], initial_run_id)
+        self.assertEqual(aligned_drift["reasons"], [])
+
+        refreshed_recommendation_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "Refreshed May gas hedge recommendation",
+                "source_review_id": review_id,
+                "input_snapshots": self._stale_recommendation_input_snapshots(),
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(refreshed_recommendation_response.status_code, 201)
+        refreshed_run_id = refreshed_recommendation_response.json()["run_id"]
+
+        review_update_response = self.client.patch(
+            f"/pretrade/reviews/{review_id}",
+            json={
+                "recommendation_run_id": refreshed_run_id,
+                "recommendation_override_reason": "Updated credit approval after stale mark review.",
+                "activity_comment": "Attached the refreshed recommendation before booking.",
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(review_update_response.status_code, 200)
+
+        drift_response = self.client.get(
+            f"/pretrade/reviews/{review_id}/drift",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(drift_response.status_code, 200)
+        drift = drift_response.json()
+        self.assertEqual(drift["alignment_status"], "REAPPROVAL_REQUIRED")
+        self.assertTrue(drift["requires_reapproval"])
+        self.assertEqual(drift["approved_by"], "trader_two")
+        self.assertEqual(drift["approved_recommendation_run_id"], initial_run_id)
+        self.assertEqual(drift["current_recommendation_run_id"], refreshed_run_id)
+        self.assertEqual(drift["latest_recommendation_run_id"], refreshed_run_id)
+        self.assertIsNotNone(drift["approval_snapshot_generated_at"])
+        self.assertEqual(
+            {reason["code"] for reason in drift["reasons"]},
+            {
+                "RECOMMENDATION_CHANGED",
+                "NEWER_RECOMMENDATION_AVAILABLE",
+                "SOURCE_IMPAIRMENT_APPEARED",
+                "OVERRIDE_CHANGED",
+            },
+        )
+        self.assertTrue(drift["current_impaired_sources"])
+
+        blocked_response = self.client.post(
+            "/events",
+            json={
+                "aggregate_type": "trade",
+                "aggregate_id": "TRD-22001",
+                "event_type": "TradeCreated",
+                "occurred_at": self.now.isoformat(),
+                "payload": {
+                    "book": "GAS_PHYS",
+                    "commodity_class": "NATURAL_GAS",
+                    "commodity": "HENRY_HUB",
+                    "pricing_type": "FIXED",
+                    "trade_side": "BUY",
+                    "trade_nature": "PHYSICAL",
+                    "trade_structure": "SINGLE",
+                    "portfolio": "PROMPT",
+                    "counterparty": "SHELL_TRADING",
+                    "trade_currency_code": "USD",
+                    "price_unit_code": "MMBTU",
+                    "unit_of_measure": "MMBTU",
+                    "location_code": "HENRY_HUB",
+                    "trade_date": "2026-05-01",
+                    "delivery_start": "2026-05-01",
+                    "delivery_end": "2026-05-31",
+                    "price": 2.84,
+                    "volume": 25000,
+                    "pretrade_review_id": review_id,
+                },
+                "schema_version": 4,
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(blocked_response.status_code, 409)
+        self.assertIn("re-approved before booking", blocked_response.json()["detail"])
 
 
 if __name__ == "__main__":

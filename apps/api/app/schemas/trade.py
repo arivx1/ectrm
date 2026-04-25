@@ -5,6 +5,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from apps.api.app.schemas.pretrade import PreTradeGovernanceAuditExportOut
+
 
 class TradeOut(BaseModel):
     trade_id: str
@@ -52,6 +54,10 @@ class TradeOut(BaseModel):
     trader_user: Optional[str]
     status: str
     last_event_id: str
+    pretrade_review_id: Optional[int] = None
+    pretrade_recommendation_run_id: Optional[int] = None
+    pretrade_approval_governance_snapshot: PreTradeGovernanceAuditExportOut | None = None
+    pretrade_booking_governance_snapshot: PreTradeGovernanceAuditExportOut | None = None
 
 
 class TradeWorkflowStatusDefaultsOut(BaseModel):

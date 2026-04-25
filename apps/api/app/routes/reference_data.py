@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from apps.api.app.routes.reference_data_routes.assets import (
+    activate_asset,
+    create_asset,
+    deactivate_asset,
+    get_asset,
+    list_asset_standards,
+    list_assets,
+    router as assets_router,
+    update_asset,
+)
 from apps.api.app.routes.reference_data_routes.books import (
     activate_book,
     create_book,
@@ -95,6 +105,11 @@ from apps.api.app.routes.reference_data_routes.units import (
     update_unit,
 )
 from apps.api.app.schemas.reference_data import (
+    AssetCreate,
+    AssetOut,
+    AssetStandardsOut,
+    AssetStatusUpdate,
+    AssetUpdate,
     BookCreate,
     BookOut,
     BookStatusUpdate,
@@ -136,6 +151,7 @@ from apps.api.app.schemas.reference_data import (
 )
 
 router = APIRouter(prefix="/reference", tags=["reference-data"])
+router.include_router(assets_router)
 router.include_router(books_router)
 router.include_router(commodities_router)
 router.include_router(counterparties_router)

@@ -9,6 +9,7 @@ import {
   stageBooksFromPasteInput,
 } from '../src/features/reference-data/useReferenceDataController.ts'
 import {
+  emptyAssetForm,
   emptyCounterpartyForm,
   emptyLocationForm,
   resolveSelectedCode,
@@ -65,6 +66,49 @@ test('emptyLocationForm follows location standards and falls back to the first t
       continent_codes: [],
     }).location_type,
     'ISO',
+  )
+})
+
+test('emptyAssetForm follows asset standards and falls back to the first type when needed', () => {
+  assert.deepEqual(
+    emptyAssetForm({
+      default_asset_class: 'PIPELINE',
+      default_asset_type_by_class: { PIPELINE: 'TRANSMISSION' },
+      asset_classes: ['PIPELINE'],
+      asset_types_by_class: { PIPELINE: ['TRANSMISSION', 'GATHERING'] },
+      default_asset_reality: 'REAL',
+      asset_realities: ['REAL', 'SIMULATED'],
+      default_operating_status: 'OPERATING',
+      operating_statuses: ['OPERATING'],
+    }),
+    {
+      code: '',
+      name: '',
+      asset_class: 'PIPELINE',
+      asset_type: 'TRANSMISSION',
+      asset_reality: 'REAL',
+      commodity_code: '',
+      location_code: '',
+      capacity_value: '',
+      capacity_unit_code: '',
+      operator_name: '',
+      operating_status: 'OPERATING',
+      description: '',
+    },
+  )
+
+  assert.equal(
+    emptyAssetForm({
+      default_asset_class: 'GENERATION',
+      default_asset_type_by_class: {},
+      asset_classes: ['GENERATION'],
+      asset_types_by_class: { GENERATION: ['RENEWABLE', 'THERMAL'] },
+      default_asset_reality: 'SIMULATED',
+      asset_realities: ['REAL', 'SIMULATED'],
+      default_operating_status: 'PLANNED',
+      operating_statuses: ['PLANNED'],
+    }).asset_reality,
+    'SIMULATED',
   )
 })
 

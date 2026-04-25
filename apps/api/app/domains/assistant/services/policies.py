@@ -22,6 +22,7 @@ class PolicyAgent(Protocol):
     scope: str
     role_key: str | None
     profile_kind: str
+    authority_ceiling: str | None
     allowed_workspaces: tuple[str, ...]
     capabilities: tuple[str, ...]
     allowed_tools: tuple[str, ...]
@@ -227,7 +228,10 @@ def build_effective_policy_for_agent(agent: PolicyAgent) -> AssistantAgentEffect
         blocked_actions=[decision for decision in action_decisions if not decision.allowed],
         policy_notes=[
             "Tool/action allowlists are intersected with platform policy rules.",
-            "Approval-gated actions are rechecked at execution time, including reviewer role policy.",
+            (
+                "Execute-capable agents can self-execute governed actions through typed services; "
+                "other action-capable agents stay review-gated at execution time."
+            ),
         ],
     )
 
@@ -271,30 +275,49 @@ def evaluate_action_policy(
     workspace: str | None,
     actor_role: str | None = None,
     phase: str,
+    override_reason: str | None = None,
 ) -> AssistantPolicyDecisionOut:
     rule = _policy_for("action", action_type)
+    normalized_override_reason = _normalize_optional_reason(override_reason)
+    delegated_override_allowed = (
+        agent is not None
+        and authority_allows_execution(agent.authority_ceiling)
+        and normalized_override_reason is not None
+    )
     if agent is not None:
         capabilities = _normalized_set(agent.capabilities)
         if "ACTION" not in capabilities:
             return _decision(rule, action_type, allowed=False, reason=f"{agent.name} does not have ACTION capability.")
         if action_type not in set(agent.allowed_action_types):
-            return _decision(rule, action_type, allowed=False, reason=f"{agent.name} does not allow {action_type}.")
+            if not delegated_override_allowed:
+                return _decision(rule, action_type, allowed=False, reason=f"{agent.name} does not allow {action_type}.")
         role_decision = _evaluate_role_resource_policy(
             agent=agent,
             resource_type="action",
             resource_id=action_type,
             workspace=workspace,
         )
-        if role_decision is not None:
+        if role_decision is not None and not delegated_override_allowed:
             return role_decision
-    return _evaluate_rule(
+    decision = _evaluate_rule(
         rule=rule,
         resource_id=action_type,
         agent=agent,
         workspace=workspace,
         actor_role=actor_role,
-        enforce_role=phase == "execute",
+        enforce_role=phase == "execute" and not delegated_override_allowed and not _agent_can_self_execute(agent),
     )
+    if delegated_override_allowed and decision.allowed:
+        return _decision(
+            rule,
+            action_type,
+            allowed=True,
+            reason=(
+                f"Allowed by delegated-ability override for execute-capable agent {agent.name}. "
+                f"{normalized_override_reason}"
+            ),
+        )
+    return decision
 
 
 def _policy_for(resource_type: str, resource_id: str) -> AssistantCapabilityPolicy:
@@ -404,6 +427,24 @@ def _evaluate_role_resource_policy(
 
 def _normalized_set(values: tuple[str, ...]) -> set[str]:
     return {value.strip().upper() for value in values if value.strip()}
+
+
+def authority_allows_execution(authority_ceiling: str | None) -> bool:
+    normalized = (authority_ceiling or "").strip().upper()
+    return AUTHORITY_RANK.get(normalized, 0) >= AUTHORITY_RANK["EXECUTE"]
+
+
+def _agent_can_self_execute(agent: PolicyAgent | None) -> bool:
+    if agent is None:
+        return False
+    return authority_allows_execution(agent.authority_ceiling)
+
+
+def _normalize_optional_reason(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _scope_within(scope: str, max_scope: str) -> bool:

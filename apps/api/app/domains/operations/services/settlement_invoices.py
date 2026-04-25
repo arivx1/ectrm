@@ -115,10 +115,35 @@ class InvoiceIssueCandidate:
     notional_amount: Decimal | None
     age_days: int | None
     readiness_status: str
+    priority_reason: str
     preview_summary: str
     blocking_reasons: tuple[str, ...]
     assumptions: tuple[str, ...]
     recommended_action: dict[str, object]
+
+
+def _invoice_issue_candidate_sort_key(candidate: InvoiceIssueCandidate) -> tuple[object, ...]:
+    readiness_rank = 2
+    if candidate.readiness_status == "READY":
+        readiness_rank = 0
+    elif candidate.readiness_status == "BLOCKED":
+        readiness_rank = 1
+    execution_timestamp = _coerce_utc(candidate.execution_timestamp) or datetime.max.replace(tzinfo=timezone.utc)
+    age_sort = (1, 0) if candidate.age_days is None else (0, -candidate.age_days)
+    return (
+        readiness_rank,
+        age_sort,
+        execution_timestamp,
+        candidate.trade_id,
+    )
+
+
+def _invoice_issue_candidate_priority_reason(candidate: InvoiceIssueCandidate) -> str:
+    if candidate.readiness_status == "READY":
+        return "Ready-to-issue invoice candidates rise before blocked previews."
+    if candidate.readiness_status == "BLOCKED":
+        return "Blocked invoice previews follow ready rows; older blocked items rise first."
+    return "Older invoice issue candidates rise first once readiness is equal."
 
 
 def _audit_invoice_payload(invoice: TradeInvoiceOut) -> dict[str, object]:
@@ -889,7 +914,7 @@ def _to_invoice_issue_candidate(
         now=reference_time,
     )
     readiness_status = str(preview.get("status") or "UNKNOWN")
-    return InvoiceIssueCandidate(
+    candidate = InvoiceIssueCandidate(
         trade_id=trade.trade_id,
         trade_nature=trade.trade_nature,
         book=trade.book,
@@ -909,6 +934,7 @@ def _to_invoice_issue_candidate(
         notional_amount=_trade_notional_amount(trade),
         age_days=_trade_age_days(trade, reference_time=reference_time),
         readiness_status=readiness_status,
+        priority_reason="",
         preview_summary=str(preview.get("summary") or ""),
         blocking_reasons=tuple(str(reason) for reason in preview.get("blocking_reasons") or ()),
         assumptions=tuple(str(assumption) for assumption in preview.get("assumptions") or ()),
@@ -918,6 +944,12 @@ def _to_invoice_issue_candidate(
             "payload": {"trade_id": trade.trade_id},
             "preview_status": readiness_status,
         },
+    )
+    return InvoiceIssueCandidate(
+        **{
+            **candidate.__dict__,
+            "priority_reason": _invoice_issue_candidate_priority_reason(candidate),
+        }
     )
 
 
@@ -938,16 +970,18 @@ def list_invoice_issue_candidates(
             Trade.trade_id.asc(),
         )
     )
-    if offset:
-        stmt = stmt.offset(offset)
-    if limit is not None:
-        stmt = stmt.limit(limit)
 
     trades = db.execute(stmt).scalars().all()
-    return [
+    candidates = [
         _to_invoice_issue_candidate(db, trade=trade, reference_time=reference_time)
         for trade in trades
     ]
+    candidates.sort(key=_invoice_issue_candidate_sort_key)
+    if offset:
+        candidates = candidates[offset:]
+    if limit is not None:
+        candidates = candidates[:limit]
+    return candidates
 
 
 def _load_trade_invoice_rows(

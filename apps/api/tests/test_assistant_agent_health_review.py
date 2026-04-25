@@ -237,7 +237,7 @@ class AssistantAgentHealthReviewTests(unittest.TestCase):
             self.assertEqual(in_progress.status, "IN_PROGRESS")
             self.assertEqual(in_progress.notes, "Policy implementation started.")
 
-            with self.assertRaisesRegex(Exception, "Implementation evidence note is required"):
+            with self.assertRaisesRegex(Exception, "Implementation evidence is required"):
                 update_agent_work_package(
                     session,
                     work_package_id=accepted.work_package_id,
@@ -252,11 +252,21 @@ class AssistantAgentHealthReviewTests(unittest.TestCase):
                 status="IMPLEMENTED",
                 updated_by="ops_admin",
                 notes="Implemented policy checks and passing tests.",
+                implementation_evidence={"test_names": ["assistant_agent_health_review"]},
                 now=now + timedelta(minutes=15),
             )
 
             self.assertEqual(implemented.status, "IMPLEMENTED")
             self.assertEqual(implemented.notes, "Implemented policy checks and passing tests.")
+            self.assertEqual(
+                implemented.implementation_evidence,
+                {"test_names": ["assistant_agent_health_review"]},
+            )
+            self.assertEqual(implemented.implemented_by, "ops_admin")
+            self.assertEqual(
+                implemented.implemented_at,
+                (now + timedelta(minutes=15)).replace(tzinfo=None),
+            )
 
             with self.assertRaisesRegex(Exception, "Cannot move assistant agent work package"):
                 update_agent_work_package(

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+
 from apps.api.tests.assistant_eval_harness import (
     AssistantApiEvalHarness,
     AssistantEvalAgentFixture,
@@ -8,6 +11,7 @@ from apps.api.tests.assistant_eval_harness import (
     AssistantEvalExpectations,
     AssistantEvalFollowUpExpectations,
     AssistantEvalInvoiceFixture,
+    AssistantEvalPreTradeRecommendationFixture,
     AssistantEvalTradeFixture,
     AssistantEvalUserFixture,
 )
@@ -46,6 +50,43 @@ MANAGED_AGENT_EVAL_CASES = (
             provider_request_count=1,
             provider_tool_names=(),
             provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
+        name="summary-target-prefetch-includes-priority-reason",
+        trades=(AssistantEvalTradeFixture(trade_id="T-PREFETCH-2001"),),
+        request_payload={
+            "workspace": "assistant",
+            "summary_targets": ["settlement.invoice_pending_count"],
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Which invoice candidate should I handle first?"},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-prefetch-priority-1",
+                "output_text": "The prompt context already identifies the first invoice candidate to review.",
+                "usage": {"input_tokens": 12, "output_tokens": 10},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            message_contains=("first invoice candidate",),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=(
+                "workspace-summary-focus",
+                "tool-prefetch-workspace-summary",
+                "tool-prefetch-settlement-invoice-pending-count",
+            ),
+            prompt_section_absent_keys=("approval-gated-action",),
+            prompt_section_content_contains=(
+                ("tool-prefetch-settlement-invoice-pending-count", ("Top priority is T-PREFETCH-2001 because",)),
+            ),
+            provider_request_count=1,
+            provider_tools_key_present=True,
         ),
     ),
     AssistantEvalCase(
@@ -250,6 +291,399 @@ MANAGED_AGENT_EVAL_CASES = (
         ),
     ),
     AssistantEvalCase(
+        name="pretrade-structuring-agent-reads-pretrade-recommendation-without-overclaiming-execution",
+        agent=AssistantEvalAgentFixture(
+            agent_id="pretrade-reader",
+            name="Pre-Trade Reader",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "trades", "risk"),
+            allowed_tools=("get_pretrade_recommendation_run",),
+            system_prompt=(
+                "Use saved pre-trade recommendation evidence before drafting trade ideas, and never claim to book trades or execute hedges."
+            ),
+        ),
+        pretrade_recommendations=(
+            AssistantEvalPreTradeRecommendationFixture(
+                actor_id="assistant_user",
+                source_scenario_id=17,
+                current_net_position=18000,
+                target_volume=8000,
+                created_at=datetime(2026, 4, 20, 12, 5, tzinfo=timezone.utc),
+            ),
+        ),
+        request_payload={
+            "agent_id": "pretrade-reader",
+            "workspace": "assistant",
+            "context": "Selected pre-trade scenario:\n- source_scenario_id: 17\n- commodity: HENRY_HUB",
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "What does the latest pre-trade recommendation say, and what should I review next?"},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-pretrade-read-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_pretrade_read_1",
+                        "call_id": "call_eval_pretrade_read_1",
+                        "name": "get_pretrade_recommendation_run",
+                        "arguments": '{"source_scenario_id":17}',
+                    }
+                ],
+                "usage": {"input_tokens": 19, "output_tokens": 8},
+            },
+            {
+                "id": "eval-pretrade-read-2",
+                "output_text": (
+                    "The latest pre-trade recommendation for scenario 17 is a risk-increasing draft with a swap hedge review and missing evidence notes. "
+                    "Review the residual exposure and evidence gaps before capture. I have not booked a trade or executed a hedge."
+                ),
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "The latest pre-trade recommendation for scenario 17 is a risk-increasing draft with a swap hedge review and missing evidence notes. "
+                                    "Review the residual exposure and evidence gaps before capture. I have not booked a trade or executed a hedge."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 13, "output_tokens": 32},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="pretrade-reader",
+            agent_name="Pre-Trade Reader",
+            message_contains=(
+                "scenario 17",
+                "risk-increasing draft",
+                "not booked a trade",
+                "executed a hedge",
+            ),
+            warning_count=0,
+            tool_names=("get_pretrade_recommendation_run",),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_tool_names=("get_pretrade_recommendation_run",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="pretrade-structuring-agent-analyzes-unsaved-draft-without-claiming-persistence-or-execution",
+        agent=AssistantEvalAgentFixture(
+            agent_id="pretrade-draft-reader",
+            name="Pre-Trade Draft Reader",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "trades", "risk"),
+            allowed_tools=("analyze_pretrade_scenario_draft",),
+            system_prompt=(
+                "Use deterministic draft analysis for in-progress pre-trade edits, and never claim to persist a recommendation run, book trades, or execute hedges."
+            ),
+        ),
+        pretrade_recommendations=(
+            AssistantEvalPreTradeRecommendationFixture(
+                actor_id="assistant_user",
+                source_scenario_id=17,
+                current_net_position=18000,
+                target_volume=8000,
+            ),
+        ),
+        request_payload={
+            "agent_id": "pretrade-draft-reader",
+            "workspace": "assistant",
+            "context": (
+                "Selected pre-trade scenario draft:\n"
+                "- source_scenario_id: 17\n"
+                "- commodity: HENRY_HUB\n"
+                "- unsaved target_volume: 12000\n"
+                "- unsaved latest_mark: 2.2 (stale)"
+            ),
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Analyze the unsaved draft changes and tell me what I should review next."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-pretrade-draft-read-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_pretrade_draft_read_1",
+                        "call_id": "call_eval_pretrade_draft_read_1",
+                        "name": "analyze_pretrade_scenario_draft",
+                        "arguments": json.dumps(
+                            {
+                                "thesis": "Refresh the long setup against a weaker stale mark.",
+                                "source_scenario_id": 17,
+                                "draft": {
+                                    "book": "GAS-US",
+                                    "portfolio": "PROMPT",
+                                    "counterparty": "ACME",
+                                    "commodity_class": "NATURAL_GAS",
+                                    "commodity": "HENRY_HUB",
+                                    "trade_side": "BUY",
+                                    "pricing_type": "FLOATING",
+                                    "price_index_code": "HH",
+                                    "target_price": 3.18,
+                                    "target_volume": 12000,
+                                    "trade_currency_code": "USD",
+                                    "unit_of_measure": "MMBTU",
+                                    "price_unit_code": "USD_MMBTU",
+                                    "location_code": "HENRY_HUB",
+                                },
+                                "input_snapshots": [
+                                    {
+                                        "source_key": "desk-context",
+                                        "source_type": "INTERNAL",
+                                        "source_available": True,
+                                        "freshness": "FRESH",
+                                        "summary": "Desk context loaded.",
+                                        "payload": {
+                                            "related_active_trade_count": 2,
+                                            "current_net_position": 18000,
+                                            "current_counterparty_exposure": 125000,
+                                        },
+                                    },
+                                    {
+                                        "source_key": "counterparty-credit",
+                                        "source_type": "INTERNAL",
+                                        "source_available": True,
+                                        "freshness": "FRESH",
+                                        "summary": "Counterparty credit loaded.",
+                                        "payload": {
+                                            "has_credit_profile": True,
+                                            "credit_limit_amount": 500000,
+                                            "breach_action": "MONITOR",
+                                            "credit_rating": "BBB",
+                                        },
+                                    },
+                                    {
+                                        "source_key": "latest-mark",
+                                        "source_type": "EXTERNAL",
+                                        "source_available": True,
+                                        "freshness": "STALE",
+                                        "summary": "Latest Henry Hub mark loaded.",
+                                        "payload": {
+                                            "latest_mark": 2.2,
+                                            "price_index_code": "HH",
+                                            "observation_date": "2026-04-20",
+                                        },
+                                    },
+                                ],
+                            }
+                        ),
+                    }
+                ],
+                "usage": {"input_tokens": 26, "output_tokens": 11},
+            },
+            {
+                "id": "eval-pretrade-draft-read-2",
+                "output_text": (
+                    "The current scenario 17 draft now screens as escalate versus the last saved run because the latest mark is stale and the mark gap widened. "
+                    "Review the residual exposure, swap hedge draft, and missing evidence before any review handoff. I have not created a recommendation run, booked a trade, or executed a hedge."
+                ),
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "The current scenario 17 draft now screens as escalate versus the last saved run because the latest mark is stale and the mark gap widened. "
+                                    "Review the residual exposure, swap hedge draft, and missing evidence before any review handoff. I have not created a recommendation run, booked a trade, or executed a hedge."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 14, "output_tokens": 41},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="pretrade-draft-reader",
+            agent_name="Pre-Trade Draft Reader",
+            message_contains=(
+                "scenario 17",
+                "escalate",
+                "not created a recommendation run",
+                "booked a trade",
+                "executed a hedge",
+            ),
+            warning_count=0,
+            tool_names=("analyze_pretrade_scenario_draft",),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_tool_names=("analyze_pretrade_scenario_draft",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="pretrade-structuring-agent-drafts-review-ready-handoff-without-booking-claims",
+        agent=AssistantEvalAgentFixture(
+            agent_id="pretrade-review-drafter",
+            name="Pre-Trade Review Drafter",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "pretrade", "trades", "risk"),
+            allowed_tools=("analyze_pretrade_scenario_draft",),
+            system_prompt=(
+                "Draft review-ready pre-trade packets with thesis, assumptions, source context, and capture handoff fields. "
+                "Never claim to book trades, persist trade capture, or execute hedges."
+            ),
+        ),
+        pretrade_recommendations=(
+            AssistantEvalPreTradeRecommendationFixture(
+                actor_id="assistant_user",
+                source_scenario_id=29,
+                current_net_position=18000,
+                target_volume=25000,
+            ),
+        ),
+        request_payload={
+            "agent_id": "pretrade-review-drafter",
+            "workspace": "assistant",
+            "context": (
+                "Selected pre-trade scenario draft:\n"
+                "- source_scenario_id: 29\n"
+                "- commodity: HENRY_HUB\n"
+                "- counterparty: SHELL_TRADING\n"
+                "- target_volume: 25000\n"
+                "- pricing_type: FLOATING"
+            ),
+            "use_live_tools": True,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Draft the shared pre-trade review note for this scenario and list the trade capture handoff "
+                        "fields I should verify."
+                    ),
+                },
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-pretrade-review-draft-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_pretrade_review_draft_1",
+                        "call_id": "call_eval_pretrade_review_draft_1",
+                        "name": "analyze_pretrade_scenario_draft",
+                        "arguments": json.dumps(
+                            {
+                                "thesis": "Add prompt length while basis stays favorable.",
+                                "source_scenario_id": 29,
+                                "draft": {
+                                    "book": "GAS-US",
+                                    "portfolio": "PROMPT",
+                                    "counterparty": "SHELL_TRADING",
+                                    "commodity_class": "NATURAL_GAS",
+                                    "commodity": "HENRY_HUB",
+                                    "trade_side": "BUY",
+                                    "pricing_type": "FLOATING",
+                                    "price_index_code": "HH",
+                                    "target_price": 3.18,
+                                    "target_volume": 25000,
+                                    "trade_currency_code": "USD",
+                                    "unit_of_measure": "MMBTU",
+                                    "price_unit_code": "USD_MMBTU",
+                                    "location_code": "HENRY_HUB",
+                                },
+                                "input_snapshots": [
+                                    {
+                                        "source_key": "desk-context",
+                                        "source_type": "INTERNAL",
+                                        "source_available": True,
+                                        "freshness": "FRESH",
+                                        "summary": "Desk context loaded with long exposure.",
+                                        "payload": {
+                                            "related_active_trade_count": 2,
+                                            "current_net_position": 18000,
+                                        },
+                                    },
+                                    {
+                                        "source_key": "latest-mark",
+                                        "source_type": "EXTERNAL",
+                                        "source_available": True,
+                                        "freshness": "STALE",
+                                        "summary": "Latest Henry Hub mark loaded, but it is stale.",
+                                        "payload": {
+                                            "latest_mark": 2.81,
+                                            "price_index_code": "HH",
+                                            "observation_date": "2026-04-22",
+                                        },
+                                    },
+                                ],
+                            }
+                        ),
+                    }
+                ],
+                "usage": {"input_tokens": 29, "output_tokens": 12},
+            },
+            {
+                "id": "eval-pretrade-review-draft-2",
+                "output_text": (
+                    "Shared pre-trade review draft: thesis is to add prompt length while basis stays favorable, "
+                    "but the stale mark and residual exposure need desk review. Assumptions: long exposure is "
+                    "already on the book and the latest mark is stale. Trade capture handoff fields to verify are "
+                    "book, portfolio, counterparty, side, pricing basis, volume, location, and delivery window. "
+                    "This packet is review-ready only and does not book the trade, persist capture, or execute a hedge."
+                ),
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "Shared pre-trade review draft: thesis is to add prompt length while basis stays favorable, "
+                                    "but the stale mark and residual exposure need desk review. Assumptions: long exposure is "
+                                    "already on the book and the latest mark is stale. Trade capture handoff fields to verify are "
+                                    "book, portfolio, counterparty, side, pricing basis, volume, location, and delivery window. "
+                                    "This packet is review-ready only and does not book the trade, persist capture, or execute a hedge."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 17, "output_tokens": 52},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="pretrade-review-drafter",
+            agent_name="Pre-Trade Review Drafter",
+            message_contains=(
+                "Shared pre-trade review draft",
+                "Assumptions",
+                "Trade capture handoff fields",
+                "does not book the trade",
+                "persist capture",
+            ),
+            warning_count=0,
+            tool_names=("analyze_pretrade_scenario_draft",),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_tool_names=("analyze_pretrade_scenario_draft",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
         name="managed-read-agent-prefers-live-evidence-over-stale-context",
         agent=AssistantEvalAgentFixture(
             agent_id="trade-reader-live-evidence",
@@ -405,6 +839,127 @@ MANAGED_AGENT_EVAL_CASES = (
         ),
     ),
     AssistantEvalCase(
+        name="managed-explain-agent-can-recommend-a-workspace-handoff-without-staging-an-action",
+        agent=AssistantEvalAgentFixture(
+            agent_id="ops-router",
+            name="Ops Router",
+            capabilities=("READ", "EXPLAIN"),
+            system_prompt="Recommend the next workspace with a typed navigation_intent block when no governed action is needed.",
+        ),
+        trades=(AssistantEvalTradeFixture(trade_id="T-2002R"),),
+        request_payload={
+            "agent_id": "ops-router",
+            "workspace": "assistant",
+            "context": "Selected trade:\n- trade_id: T-2002R\n- commodity: WTI",
+            "use_live_tools": False,
+            "messages": [
+                {"role": "user", "content": "Where should I handle the confirmation blocker?"},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-router-1",
+                "output_text": (
+                    "Operations is the right place to continue.\n"
+                    "```navigation_intent\n"
+                    + json.dumps(
+                        {
+                            "kind": "open_workspace",
+                            "target_view": "operations",
+                            "label": "Open Work Queue",
+                            "rationale": "Review the confirmation blocker with the operations owner.",
+                            "focus": {"type": "trade", "id": "T-2002R", "label": "T-2002R"},
+                            "inspector_tab": "events",
+                        }
+                    )
+                    + "\n```"
+                ),
+                "usage": {"input_tokens": 18, "output_tokens": 24},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="ops-router",
+            agent_name="Ops Router",
+            message_contains=(
+                "Operations is the right place to continue",
+                "navigation_intent",
+                "Open Work Queue",
+                '"target_view": "operations"',
+            ),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=1,
+            provider_tool_names=(),
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
+        name="managed-action-agent-uses-manual-fallback-for-unsupported-mutation-requests",
+        agent=AssistantEvalAgentFixture(
+            agent_id="settlement-router",
+            name="Settlement Router",
+            capabilities=("ACTION", "EXPLAIN"),
+            allowed_action_types=("cancel_trade",),
+            system_prompt="Only stage supported governed actions. For unsupported mutation requests, explain the boundary and route the operator manually.",
+        ),
+        trades=(AssistantEvalTradeFixture(trade_id="T-2002S"),),
+        invoices=(
+            AssistantEvalInvoiceFixture(
+                trade_id="T-2002S",
+                invoice_id=1202,
+                invoice_number="INV-T-2002S",
+                invoice_amount=1800.0,
+            ),
+        ),
+        request_payload={
+            "agent_id": "settlement-router",
+            "workspace": "assistant",
+            "context": (
+                "Selected trade:\n"
+                "- trade_id: T-2002S\n"
+                "- invoice_number: INV-T-2002S\n"
+                "- invoice_amount: 1800\n"
+            ),
+            "use_live_tools": False,
+            "messages": [
+                {"role": "user", "content": "Mark invoice INV-T-2002S paid right now."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-unsupported-mutation-1",
+                "output_text": (
+                    "I cannot mark invoice INV-T-2002S paid from the prompt, and I did not stage an action request. "
+                    "Open Settlement and complete the payment review manually."
+                ),
+                "usage": {"input_tokens": 16, "output_tokens": 23},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="settlement-router",
+            agent_name="Settlement Router",
+            message_contains=(
+                "cannot mark invoice INV-T-2002S paid",
+                "did not stage an action request",
+                "Open Settlement",
+                "manually",
+            ),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=1,
+            provider_tool_names=(),
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
         name="managed-action-agent-stages-approval-gated-cancel-request",
         agent=AssistantEvalAgentFixture(
             agent_id="trade-captain",
@@ -468,6 +1023,7 @@ MANAGED_AGENT_EVAL_CASES = (
                     ],
                     "stale_state_basis": {"status": "ACTIVE", "last_event_id": "evt-t-2003"},
                     "idempotency_key": "assistant-action:cancel_trade:T-2003:evt-t-2003",
+                    "execution_mode": "REVIEW_REQUIRED",
                 },
             ),
             prompt_section_keys=("managed-agent", "workspace", "application-context", "approval-gated-action"),

@@ -76,6 +76,48 @@ test('dashboard smoke boots against the seeded browser harness', async ({ page }
   }
 })
 
+test('dashboard candidate drilldowns hand off into focused operations context', async ({ page }) => {
+  const harness = await startSmokeHarness()
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(`${harness.origin}/?view=dashboard`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+
+    const confirmationRow = page.locator('.dashboard-issue-row').filter({ hasText: 'Confirmation backlog' })
+    await expect(confirmationRow).toBeVisible()
+    await expect(confirmationRow.getByText('1 open')).toBeVisible()
+
+    await confirmationRow.getByRole('button', { name: 'Open candidates' }).click()
+    await expect(
+      page.getByText('Priority: Older unconfirmed trades rise first in the confirmation queue.'),
+    ).toBeVisible()
+    await expect(page.getByText('Review the confirmation blocker with the operations owner.')).toBeVisible()
+    await page.getByRole('button', { name: 'Open confirmation' }).click()
+
+    const handoffBanner = page.locator('.workspace-focus-banner')
+    await expect(page).toHaveURL(/view=operations/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page).toHaveURL(/focusTrade=T-AMEND-100/)
+    await expect(page).toHaveURL(/focusFilter=41/)
+    await expect(handoffBanner.getByText('Open confirmation')).toBeVisible()
+    await expect(
+      handoffBanner.getByText(
+        'This trade already has a confirmation row that needs issue or follow-through.',
+      ),
+    ).toBeVisible()
+    await expect(handoffBanner.getByText('Trade: T-AMEND-100')).toBeVisible()
+    await expect(handoffBanner.getByText('Filter: 41')).toBeVisible()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
 test('mobile shell keeps the main stage full-width and the nav drawer behaves like an overlay', async ({ page }) => {
   const harness = await startSmokeHarness()
 
@@ -119,6 +161,71 @@ test('mobile shell keeps the main stage full-width and the nav drawer behaves li
   }
 })
 
+test('settlement candidate drilldowns hand off into focused invoice and payment context', async ({ page }) => {
+  const harness = await startSmokeHarness()
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(`${harness.origin}/?view=settlement`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await dismissStartHereOverlay(page)
+
+    const invoiceTile = page.locator('.tile-section-card').filter({ hasText: 'Unissued Invoices' })
+    await expect(invoiceTile).toBeVisible()
+    await expect(invoiceTile.getByText('1')).toBeVisible()
+    await invoiceTile.getByRole('button', { name: 'Open candidates' }).click()
+    await expect(
+      page.getByText('Priority: Ready-to-issue invoice candidates rise before blocked previews.'),
+    ).toBeVisible()
+    await expect(page.getByText('Ready to issue the first invoice from settlement.')).toBeVisible()
+    await page.getByRole('button', { name: 'Open invoice ledger' }).click()
+
+    let handoffBanner = page.locator('.workspace-focus-banner')
+    await expect(page).toHaveURL(/view=settlement/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page).toHaveURL(/focusTrade=T-AMEND-100/)
+    await expect(handoffBanner.getByText('Open invoice ledger')).toBeVisible()
+    await expect(
+      handoffBanner.getByText('This trade is ready for invoice issuance in settlement.'),
+    ).toBeVisible()
+    await expect(handoffBanner.getByText('Trade: T-AMEND-100')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open Focused Trade' })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Show Full Settlement' }).click()
+    await expect(page).not.toHaveURL(/handoff=assistant/)
+    await expect(page.locator('.workspace-focus-banner')).toBeHidden()
+
+    const paymentTile = page.locator('.tile-section-card').filter({ hasText: 'Due / Overdue' })
+    await expect(paymentTile).toBeVisible()
+    await paymentTile.getByRole('button', { name: 'Open candidates' }).click()
+    await expect(
+      page.getByText('Priority: Overdue cash rises ahead of merely due payments.'),
+    ).toBeVisible()
+    await expect(page.getByText('Collect overdue cash against invoice INV-501.')).toBeVisible()
+    await page.getByRole('button', { name: 'Open payment queue' }).click()
+
+    handoffBanner = page.locator('.workspace-focus-banner')
+    await expect(page).toHaveURL(/view=settlement/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page).toHaveURL(/focusType=invoice/)
+    await expect(page).toHaveURL(/focusId=501/)
+    await expect(handoffBanner.getByText('Open payment queue')).toBeVisible()
+    await expect(
+      handoffBanner.getByText(
+        'This trade has overdue cash follow-through that belongs in the payment queue.',
+      ),
+    ).toBeVisible()
+    await expect(handoffBanner.getByText('Invoice: INV-501')).toBeVisible()
+    await expect(handoffBanner.getByText('Filter: 501')).toBeVisible()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
 test('single-user smoke signs into the prompt home when one-click access is enabled', async ({ page }) => {
   const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
 
@@ -128,13 +235,16 @@ test('single-user smoke signs into the prompt home when one-click access is enab
       waitUntil: 'domcontentloaded',
     })
 
+    await expect(page.locator('.workspace-topbar-prompt')).toBeVisible()
+    await expect(page.locator('.hero')).toHaveCount(0)
+    await expect(page.locator('.nav-global-filter')).toHaveCount(0)
     await expect(page.getByText('Start with the job in front of you')).toBeVisible()
     await expect(page.getByText('You can draft the prompt here. We will only send it after you sign in.')).toBeVisible()
     await signInFromPromptHome(page)
 
     await expect(page.getByText('Start with the job in front of you')).toBeVisible()
     await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
-    await expect(page.getByRole('button', { name: /Assistant Console/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Assistant Console', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: /Recent blocker triage/ })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Show live context' })).toBeVisible()
     await expect(page.locator('.prompt-home-starter').filter({ hasText: 'Clear operations blockers' })).toBeHidden()
@@ -234,6 +344,49 @@ test('prompt home contextual starter can open the old workspace directly', async
   }
 })
 
+test('prompt home opens a promoted deterministic route directly', async ({ page }) => {
+  const harness = await startSmokeHarness()
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const promotedRoutes = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Go straight to proven destinations' }) })
+      .first()
+    await expect(promotedRoutes).toBeVisible()
+    await expect(promotedRoutes.getByText('1 promoted route ready from repeated accepted Prompt Home handoffs.')).toBeVisible()
+    await expect(promotedRoutes.getByText('Trade: T-AMEND-100')).toBeVisible()
+    await expect(promotedRoutes.getByText('4/5 accepted')).toBeVisible()
+
+    await promotedRoutes.getByRole('button', { name: 'Open confirmation' }).click()
+
+    await expect(page).toHaveURL(/view=operations/)
+    await expect(page).toHaveURL(/handoff=assistant/)
+    await expect(page).toHaveURL(/focusTrade=T-AMEND-100/)
+    await expect(page).toHaveURL(/focusFilter=41/)
+    await expect(page.locator('.workspace-focus-banner').getByText('Open confirmation')).toBeVisible()
+    await expect(
+      page.locator('.workspace-focus-banner').getByText(
+        'This trade already has a confirmation row that needs issue or follow-through.',
+      ),
+    ).toBeVisible()
+
+    expect(harness.promptNavigationOutcomeRequests).toContainEqual({
+      method: 'POST',
+      path: '/assistant/prompt-navigation-outcomes',
+      search: '',
+    })
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
 test('prompt home accepts an assistant handoff into the old operations workspace', async ({ page }) => {
   const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
 
@@ -266,6 +419,59 @@ test('prompt home accepts an assistant handoff into the old operations workspace
     await expect(page).not.toHaveURL(/handoff=assistant/)
     await expect(page.getByText('Assistant run #8801')).toBeHidden()
 
+    await page.goto(`${harness.origin}/?view=admin`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const outcomeSection = page.locator('#assistant-outcome-metrics')
+    await expect(outcomeSection.getByRole('heading', { name: 'Recent Handoff Outcomes' })).toBeVisible()
+    await expect(outcomeSection.getByText('Accepted handoff')).toBeVisible()
+    await expect(outcomeSection.getByText('Open Work Queue').first()).toBeVisible()
+
+    expect(harness.promptNavigationOutcomeRequests).toContainEqual({
+      method: 'POST',
+      path: '/assistant/runs/8801/prompt-navigation-outcomes',
+      search: '',
+    })
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home dismisses an assistant handoff and records the dismissed route', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await signInFromPromptHome(page)
+
+    await page.getByLabel('Operator prompt').fill('Where should I handle the confirmation blocker?')
+    await page.getByRole('button', { name: 'Send Prompt' }).click()
+
+    const assistantMessage = page.locator('.assistant-message-assistant').last()
+    await assistantMessage.getByRole('button', { name: 'Dismiss Open Work Queue' }).click()
+
+    await expect(assistantMessage.locator('.prompt-home-handoff')).toHaveCount(0)
+
+    await page.goto(`${harness.origin}/?view=admin`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const outcomeSection = page.locator('#assistant-outcome-metrics')
+    await expect(outcomeSection.getByText('Dismissed handoff')).toBeVisible()
+    await expect(outcomeSection.getByText('Open Work Queue').first()).toBeVisible()
+
+    expect(harness.promptNavigationOutcomeRequests).toContainEqual({
+      method: 'POST',
+      path: '/assistant/runs/8801/prompt-navigation-outcomes',
+      search: '',
+    })
     assertNoHarnessRequestFailures(harness)
   } finally {
     await harness.close()
@@ -420,10 +626,7 @@ test('assistant feedback smoke persists response feedback through chat reload an
       waitUntil: 'domcontentloaded',
     })
 
-    const outcomeSection = page
-      .locator('section')
-      .filter({ has: page.getByRole('heading', { name: 'Outcome Metrics' }) })
-      .first()
+    const outcomeSection = page.locator('#assistant-outcome-metrics')
     const feedbackSummary = outcomeSection.locator('.assistant-run-summary-card').filter({ hasText: 'User feedback' })
 
     await expect(outcomeSection).toBeVisible()
@@ -472,7 +675,7 @@ test('admin smoke shows the role-derived pilot lineup and sync action', async ({
 
     await agentControl.getByRole('button', { name: 'Sync Pilot Lineup' }).click()
     await expect(
-      agentControl.getByText('Pilot lineup synchronized: 0 created, 2 updated across 13 role profiles.'),
+      agentControl.getByText('Pilot lineup synchronized: 0 created, 1 updated across 1 seeded defaults.'),
     ).toBeVisible()
 
     expect(
@@ -520,6 +723,116 @@ test('signed-out start-here routes trade capture intent into the auth gate', asy
     await expect(authGate.getByRole('button', { name: 'Enter Console' })).toBeVisible()
 
     assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home fails closed for invalid workspace handoff payloads', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await signInFromPromptHome(page)
+
+    await page.getByLabel('Operator prompt').fill('Give me a broken handoff.')
+    await page.getByRole('button', { name: 'Send Prompt' }).click()
+
+    const assistantMessage = page.locator('.assistant-message-assistant').last()
+    await expect(assistantMessage).toBeVisible()
+    await expect(assistantMessage).toContainText('Stay in Prompt Home for now while we confirm the route.')
+    await expect(assistantMessage).toContainText(
+      'A workspace handoff suggestion could not be applied and was ignored.',
+    )
+    await expect(assistantMessage).not.toContainText('```navigation_intent')
+    await expect(assistantMessage.locator('.prompt-home-handoff')).toHaveCount(0)
+
+    await expect(page).not.toHaveURL(/view=operations/)
+    await expect(page).not.toHaveURL(/view=trades/)
+
+    await page.goto(`${harness.origin}/?view=admin`, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const outcomeSection = page.locator('#assistant-outcome-metrics')
+    const failedOutcome = outcomeSection
+      .locator('.assistant-feedback-insight')
+      .filter({ hasText: 'Failed handoff' })
+      .filter({ hasText: 'Invalid handoff payload' })
+      .first()
+    await expect(failedOutcome).toBeVisible()
+
+    expect(harness.promptNavigationOutcomeRequests).toContainEqual({
+      method: 'POST',
+      path: '/assistant/runs/8801/prompt-navigation-outcomes',
+      search: '',
+    })
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home stages a governed action with inline review context and syncs after approval', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await signInFromPromptHome(page)
+
+    await page
+      .getByLabel('Operator prompt')
+      .fill('Cancel the selected trade and explain that approval is still required.')
+    await page.getByRole('button', { name: 'Send Prompt' }).click()
+
+    const assistantMessage = page.locator('.assistant-message-assistant').last()
+    const actionCard = assistantMessage.locator('.assistant-action-card').first()
+
+    await expect(
+      assistantMessage.getByText(
+        'I staged a governed cancellation request for T-AMEND-100. Review the evidence below before anything changes. Approval is still required.',
+      ),
+    ).toBeVisible()
+    await expect(actionCard).toContainText('Cancel trade T-AMEND-100')
+    await expect(actionCard).toContainText('Requester: trader.alpha')
+    await expect(actionCard).toContainText('Owning work object')
+    await expect(actionCard).toContainText('Trade T-AMEND-100')
+    await expect(actionCard).toContainText('Missing evidence')
+    await expect(actionCard).toContainText('Signed unwind confirmation has not been uploaded yet.')
+    await expect(actionCard).toContainText('Stale-state basis')
+    await expect(actionCard).toContainText('trade_status: ACTIVE')
+    await expect(actionCard).toContainText('Dry-run preview')
+    await expect(
+      assistantMessage.getByRole('button', { name: 'Open Assistant Console' }),
+    ).toBeVisible()
+
+    await actionCard.getByRole('button', { name: 'Approve' }).click()
+
+    await expect(actionCard).toContainText('Executed')
+    await expect(actionCard).toContainText('Review: Approved as-is')
+    await expect(actionCard).toContainText('trade_status: CANCELLED')
+    await expect(page.getByText('No governed action is waiting for review.')).toBeVisible()
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toHaveLength(0)
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: 'POST',
+        path: '/assistant/action-requests/7001/approve',
+        search: '',
+      },
+    ])
   } finally {
     await harness.close()
   }
@@ -625,7 +938,7 @@ test('admin smoke rejects a pending assistant approval from the governance inbox
     await expect(approvalsSection.getByText('Run #701')).toBeVisible()
 
     await approvalActionCard.getByRole('button', { name: 'Open trace' }).click()
-    await expect(approvalsSection.getByText('Audit trace for run #701')).toBeVisible()
+    await expect(approvalsSection.getByText('Audit trace for run #701', { exact: true })).toBeVisible()
     await expect(approvalsSection.getByText('Run started')).toBeVisible()
     await expect(approvalsSection.getByText('Tool call: get_trade_by_id')).toBeVisible()
     await approvalsSection.getByRole('button', { name: 'Close trace' }).click()

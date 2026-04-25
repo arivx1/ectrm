@@ -43,6 +43,7 @@ import {
   getAppRouteHandoffFilterValue,
   getAppRouteHandoffKey,
   getAppRouteHandoffTradeId,
+  viewAppliesAppRouteHandoffFilter,
   type AppRouteHandoff,
 } from './shared/appRouteHandoff'
 import { getAuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
@@ -56,6 +57,7 @@ import {
   subscribePromptSignInReturnIntent,
 } from './shared/promptResumeIntent'
 import { commodityClassOrder } from './shared/trading'
+import { GlobalWorkspaceFilterCard } from './shared/ui/GlobalWorkspaceFilterCard'
 
 function WorkspaceLoadState({
   title,
@@ -203,6 +205,7 @@ function AuthenticatedWorkspaceShell({
   }
 
   const tradeActions = useAppTradeActions({
+    authSession,
     captureForm,
     amendForm,
     counterpartyCreditProfiles: workspaceData.counterpartyCreditProfiles,
@@ -223,6 +226,7 @@ function AuthenticatedWorkspaceShell({
     reloadData: workspaceData.loadData,
     trades: workspaceData.trades,
     books: workspaceData.books,
+    assets: workspaceData.assets,
     commodities: workspaceData.commodities,
     priceIndices: workspaceData.priceIndices,
     currencies: workspaceData.currencies,
@@ -238,6 +242,7 @@ function AuthenticatedWorkspaceShell({
     activeCurrencies: summary.activeCurrencies,
     activeUnits: summary.activeUnits,
     activeLocations: summary.activeLocations,
+    assetStandards: workspaceData.assetStandards,
     locationStandards: workspaceData.locationStandards,
     counterpartyStandards: workspaceData.counterpartyStandards,
     commodityClassOrder,
@@ -262,12 +267,15 @@ function AuthenticatedWorkspaceShell({
   const showingNavigationSectionLanding = route.activeNavigationSectionKey !== null
   const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[currentView]
   const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[currentView]
+  const isPromptHomeView = !showingNavigationSectionLanding && currentView === 'prompt'
+  const showPromptHomeFilterCard = !isPromptHomeView || hasGlobalFilter
   const hasAuthenticationIssue =
     isAuthenticationRequiredMessage(workspaceData.error) ||
     Object.values(workspaceData.groupErrors).some((message) => isAuthenticationRequiredMessage(message))
   const effectiveSystemStateLabel = !authSession && hasAuthenticationIssue ? 'Needs sign-in' : systemStateLabel
   const effectiveSystemStateTone = !authSession && hasAuthenticationIssue ? 'active' : systemStateTone
   const selectedTrade = summary.selectedTrade
+  const currentWorkspaceLabel = APP_VIEWS.find((view) => view.key === route.currentView)?.label ?? workspaceLabel(route.currentView)
 
   return (
     <div className="app-shell">
@@ -313,7 +321,7 @@ function AuthenticatedWorkspaceShell({
 
       <aside
         id={MOBILE_NAVIGATION_PANEL_ID}
-        className={`side-rail ${shell.mobileNavOpen ? 'is-open' : ''}`}
+        className={`side-rail ${shell.mobileNavOpen ? 'is-open' : ''} ${isPromptHomeView ? 'side-rail-prompt' : ''}`}
         hidden={shell.mobileNavHidden}
         aria-hidden={shell.mobileNavHidden ? true : undefined}
       >
@@ -343,41 +351,14 @@ function AuthenticatedWorkspaceShell({
           </span>
         </button>
 
-        <section className="surface workspace-local-filter nav-global-filter">
-          <div className="workspace-local-filter-copy">
-            <div>
-              <span className="eyebrow">Search</span>
-              <h3>Global Workspace Filter</h3>
-            </div>
-            <p>Narrow the left nav and the current workspace with one shared text filter.</p>
-          </div>
-
-          <div className="workspace-local-filter-controls">
-            <label className="field workspace-local-filter-field">
-              <span>Search all workspaces</span>
-              <input
-                className="control"
-                type="search"
-                value={shell.globalFilter}
-                onChange={(event) => shell.setGlobalFilter(event.target.value)}
-                placeholder="Workspace, trade, delivery, counterparty, book, or provider"
-              />
-            </label>
-
-            <div className="workspace-local-filter-actions">
-              <span className="entity-chip entity-chip-soft">
-                {hasGlobalFilter
-                  ? `${filteredNavViewCount.toLocaleString()} of ${APP_VIEWS.length.toLocaleString()} workspaces match`
-                  : `Search across ${APP_VIEWS.length.toLocaleString()} workspaces and the current screen`}
-              </span>
-              {hasGlobalFilter ? (
-                <button type="button" className="button button-ghost" onClick={() => shell.setGlobalFilter('')}>
-                  Clear Global
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </section>
+        {showPromptHomeFilterCard ? (
+          <GlobalWorkspaceFilterCard
+            value={shell.globalFilter}
+            onChange={shell.setGlobalFilter}
+            totalCount={APP_VIEWS.length}
+            matchedCount={filteredNavViewCount}
+          />
+        ) : null}
 
         <nav className="nav-stack" aria-label="Primary">
           {filteredNavSections.map((section) => {
@@ -461,7 +442,7 @@ function AuthenticatedWorkspaceShell({
         ) : null}
       </aside>
 
-      <main className="main-stage">
+      <main className={`main-stage ${isPromptHomeView ? 'main-stage-prompt' : ''}`}>
         {showStartHereOverlay ? (
           <AppStartHereOverlay
             authSession={authSession}
@@ -470,52 +451,82 @@ function AuthenticatedWorkspaceShell({
           />
         ) : null}
 
-        <header className="hero">
-          <div className="hero-copy">
-            <div className="hero-heading-row">
-              <span className="eyebrow">Workspace</span>
+        {isPromptHomeView ? (
+          <header className="workspace-topbar workspace-topbar-prompt">
+            <div className="workspace-topbar-copy">
+              <span className="eyebrow">Prompt-First</span>
+              <strong>{currentWorkspaceLabel}</strong>
+            </div>
+            <div className="workspace-topbar-actions">
               <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
                 {effectiveSystemStateLabel}
               </span>
-            </div>
-            <h2>{heroTitle}</h2>
-            <p>{heroBody}</p>
-          </div>
-
-          <div className="hero-badge">
-            <span>Focus</span>
-            <strong>
-              {showingNavigationSectionLanding
-                ? activePrimarySection.label
-                : selectedTrade
-                ? selectedTrade.trade_id
-                : APP_VIEWS.find((view) => view.key === route.currentView)?.label}
-            </strong>
-            <small>
-              {showingNavigationSectionLanding
-                ? `${activePrimarySection.views.length} workspace${activePrimarySection.views.length === 1 ? '' : 's'} grouped in this section`
-                : selectedTrade
-                ? `${selectedTrade.commodity} • ${selectedTrade.book}`
-                : `${workspaceData.events.length} loaded events across the current session`}
-            </small>
-            {authSession ? (
-              <div className="hero-badge-actions">
-                <small className="hero-badge-session">
+              {authSession ? (
+                <small className="workspace-topbar-session">
                   Signed in as {authSession.user.display_name}
                 </small>
+              ) : null}
+              {authSession ? (
                 <button
                   type="button"
-                  className="button button-secondary"
+                  className="button button-ghost workspace-topbar-signout"
                   onClick={() => void onSignOut()}
                   disabled={signOutPending}
                 >
                   {signOutPending ? 'Signing Out...' : 'Sign Out'}
                 </button>
-                {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
+              ) : null}
+              {signOutError ? <small className="workspace-topbar-error">{signOutError}</small> : null}
+            </div>
+          </header>
+        ) : (
+          <header className="hero">
+            <div className="hero-copy">
+              <div className="hero-heading-row">
+                <span className="eyebrow">Workspace</span>
+                <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
+                  {effectiveSystemStateLabel}
+                </span>
               </div>
-            ) : null}
-          </div>
-        </header>
+              <h2>{heroTitle}</h2>
+              <p>{heroBody}</p>
+            </div>
+
+            <div className="hero-badge">
+              <span>Focus</span>
+              <strong>
+                {showingNavigationSectionLanding
+                  ? activePrimarySection.label
+                  : selectedTrade
+                  ? selectedTrade.trade_id
+                  : currentWorkspaceLabel}
+              </strong>
+              <small>
+                {showingNavigationSectionLanding
+                  ? `${activePrimarySection.views.length} workspace${activePrimarySection.views.length === 1 ? '' : 's'} grouped in this section`
+                  : selectedTrade
+                  ? `${selectedTrade.commodity} • ${selectedTrade.book}`
+                  : `${workspaceData.events.length} loaded events across the current session`}
+              </small>
+              {authSession ? (
+                <div className="hero-badge-actions">
+                  <small className="hero-badge-session">
+                    Signed in as {authSession.user.display_name}
+                  </small>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => void onSignOut()}
+                    disabled={signOutPending}
+                  >
+                    {signOutPending ? 'Signing Out...' : 'Sign Out'}
+                  </button>
+                  {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
+                </div>
+              ) : null}
+            </div>
+          </header>
+        )}
 
         {!showingNavigationSectionLanding && workspaceData.error ? (
           <div className="error-banner">{workspaceData.error}</div>
@@ -689,7 +700,7 @@ export default function App() {
 
   useEffect(() => {
     const nextHandoffFilter =
-      routeHandoff && (currentView === 'operations' || currentView === 'settlement')
+      routeHandoff && viewAppliesAppRouteHandoffFilter(currentView)
         ? getAppRouteHandoffFilterValue(routeHandoff)
         : null
     const routeHandoffTradeId = getAppRouteHandoffTradeId(routeHandoff)

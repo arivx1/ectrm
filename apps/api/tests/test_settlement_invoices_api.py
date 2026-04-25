@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 if not hasattr(enum, "StrEnum"):
     class _CompatStrEnum(str, enum.Enum):
@@ -275,6 +275,62 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             self.assertEqual(audit_event.actor_id, "settlement_admin")
             self.assertEqual(audit_event.payload["request"]["trade_id"], "T-INV-1")
             self.assertEqual(audit_event.payload["invoice"]["invoice_number"], "INV-1001")
+
+    def test_invoice_issue_candidates_endpoint_lists_unissued_trade_candidates(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-CANDIDATE")
+
+        response = self.client.get(
+            "/settlement/invoice-issue-candidates",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["total_count"], 1)
+        self.assertEqual(payload["count"], payload["ready_count"] + payload["blocked_count"])
+        self.assertEqual(payload["items"][0]["trade_id"], "T-INV-CANDIDATE")
+        self.assertIn(payload["items"][0]["readiness_status"], {"READY", "BLOCKED"})
+        self.assertIn("priority_reason", payload["items"][0])
+        self.assertEqual(payload["items"][0]["recommended_action"]["action_type"], "issue_trade_invoice")
+
+    def test_invoice_issue_candidates_prioritize_ready_rows_before_blocked_rows(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-READY")
+        self._seed_trade(trade_id="T-INV-BLOCKED")
+        self._actualize_trade(admin_token, trade_id="T-INV-READY", actual_quantity=1000)
+
+        with self.SessionLocal() as session:
+            ready_trade = session.query(Trade).filter(Trade.trade_id == "T-INV-READY").one()
+            blocked_trade = session.query(Trade).filter(Trade.trade_id == "T-INV-BLOCKED").one()
+            ready_trade.execution_timestamp = self.now - timedelta(days=2)
+            blocked_trade.execution_timestamp = self.now - timedelta(days=4)
+            blocked_trade.credit_hold_active = True
+            blocked_trade.credit_hold_reason = "Credit owner review still pending."
+            session.commit()
+
+        response = self.client.get(
+            "/settlement/invoice-issue-candidates",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item["trade_id"] for item in payload["items"]],
+            ["T-INV-READY", "T-INV-BLOCKED"],
+        )
+        self.assertEqual(payload["items"][0]["readiness_status"], "READY")
+        self.assertEqual(payload["items"][1]["readiness_status"], "BLOCKED")
+        self.assertEqual(
+            payload["items"][0]["priority_reason"],
+            "Ready-to-issue invoice candidates rise before blocked previews.",
+        )
+        self.assertEqual(
+            payload["items"][1]["priority_reason"],
+            "Blocked invoice previews follow ready rows; older blocked items rise first.",
+        )
 
     def test_accounting_role_can_issue_invoice(self) -> None:
         self._create_user(

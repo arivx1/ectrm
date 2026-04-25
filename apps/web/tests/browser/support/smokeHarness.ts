@@ -9,10 +9,13 @@ import { createServer as createViteServer, type ViteDevServer } from 'vite'
 
 import { buildFallbackTradeMetadata } from '../../../src/shared/tradeMetadata'
 import {
+  assets,
+  assetStandards,
   adminRoadmapDocument,
   assistantActionRequests,
   assistantAdminAgents,
   assistantOutcomeMetrics,
+  assistantPromptRouteRecommendations,
   assistantRoleArchetypes,
   assistantRuntimeSettings,
   books,
@@ -22,6 +25,7 @@ import {
   codexTasks,
   codexTaskSettings,
   currencies,
+  invoiceIssueCandidates,
   locations,
   portfolios,
   positions,
@@ -32,6 +36,7 @@ import {
   selectedTradeEvents,
   smokeAccessToken,
   smokeSession,
+  tradeAttentionCandidates,
   trades,
   userAccounts,
   units,
@@ -52,11 +57,32 @@ type SmokeAssistantFeedbackRow = {
   created_at: string
   updated_at: string
 }
+type SmokeAssistantPromptNavigationOutcomeStatus = 'ACCEPTED' | 'DISMISSED' | 'FAILED'
+type SmokeAssistantPromptNavigationOutcomeRow = {
+  outcome_id: number
+  run_id: number | null
+  conversation_id: number | null
+  user_id: string
+  user_role: string
+  surface: 'PROMPT_HOME'
+  outcome: SmokeAssistantPromptNavigationOutcomeStatus
+  intent_key: string
+  target_view: string | null
+  target_label: string | null
+  target_rationale: string | null
+  focus_type: string | null
+  focus_id: string | null
+  focus_label: string | null
+  detail: string | null
+  created_at: string
+  updated_at: string
+}
 
 type MockApiServer = {
   baseUrl: string
   expireSession: () => void
   mutationRequests: RecordedRequest[]
+  promptNavigationOutcomeRequests: RecordedRequest[]
   unexpectedRequests: RecordedRequest[]
   close: () => Promise<void>
 }
@@ -70,6 +96,7 @@ export type SmokeHarness = {
   apiBaseUrl: string
   expireSession: () => void
   mutationRequests: RecordedRequest[]
+  promptNavigationOutcomeRequests: RecordedRequest[]
   unexpectedRequests: RecordedRequest[]
   close: () => Promise<void>
 }
@@ -255,21 +282,120 @@ function normalizedCorrectionFields(value: unknown): string[] {
     : []
 }
 
+function buildTradeAttentionCandidateList(candidateType: string | null, limit: number) {
+  const matchingCandidates = tradeAttentionCandidates
+    .filter((candidate) => candidateType === null || candidate.candidate_types.includes(candidateType))
+    .slice(0, limit)
+  const candidateTypeCounts = Object.fromEntries(
+    Array.from(
+      matchingCandidates.reduce((counts, candidate) => {
+        for (const itemType of candidate.candidate_types) {
+          counts.set(itemType, (counts.get(itemType) ?? 0) + 1)
+        }
+        return counts
+      }, new Map<string, number>()),
+    ),
+  )
+
+  return {
+    count: matchingCandidates.length,
+    total_count: matchingCandidates.length,
+    items: matchingCandidates,
+    candidate_type_counts: candidateTypeCounts,
+    candidate_type: candidateType,
+    source_count_key:
+      candidateType === 'confirmation_backlog'
+        ? 'dashboard.attention.confirmation_backlog_count'
+        : candidateType === 'payment_due'
+          ? 'settlement.payment_due_count'
+          : candidateType === 'overdue_payment'
+            ? 'dashboard.attention.overdue_payment_count'
+            : candidateType === 'stale_pricing'
+              ? 'dashboard.attention.stale_pricing_count'
+              : null,
+    description:
+      candidateType === 'confirmation_backlog'
+        ? 'Trades executed 1+ day ago that still are not confirmed.'
+        : candidateType === 'payment_due'
+          ? 'Trades currently waiting on due or overdue payment collection/settlement.'
+          : candidateType === 'overdue_payment'
+            ? 'Trades with overdue payment state or aging invoices that still are not paid.'
+            : candidateType === 'stale_pricing'
+              ? 'Trades still marked pending or partial pricing 2+ days after execution.'
+              : null,
+    candidate_types: candidateType === null ? [] : [candidateType],
+  }
+}
+
+function buildInvoiceIssueCandidateList(limit: number) {
+  const items = invoiceIssueCandidates.slice(0, limit)
+  return {
+    count: items.length,
+    total_count: items.length,
+    ready_count: items.filter((candidate) => candidate.readiness_status === 'READY').length,
+    blocked_count: items.filter((candidate) => candidate.readiness_status !== 'READY').length,
+    items,
+  }
+}
+
 async function startMockApiServer(
   options: StartSmokeHarnessOptions = {},
 ): Promise<MockApiServer> {
   const mutationRequests: RecordedRequest[] = []
+  const promptNavigationOutcomeRequests: RecordedRequest[] = []
   const unexpectedRequests: RecordedRequest[] = []
   const tradeRows: SmokeTradeRow[] = trades.map((trade) => ({ ...trade }))
   const tradeEventsByAggregateId = new Map<string, SmokeEventRow[]>(
     [['T-AMEND-100', selectedTradeEvents.map((event) => ({ ...event }))]],
   )
-  const assistantActionRequestRows: SmokeAssistantActionRequestRow[] = assistantActionRequests.map((request) => ({
-    ...request,
-    payload: { ...request.payload },
-    result: request.result ? { ...request.result } : null,
-  }))
+  function cloneAssistantActionRequest(
+    request: SmokeAssistantActionRequestRow,
+  ): SmokeAssistantActionRequestRow {
+    return {
+      ...request,
+      payload: { ...request.payload },
+      review_context: request.review_context
+        ? {
+            ...request.review_context,
+            owning_work_object: { ...request.review_context.owning_work_object },
+            supporting_records: request.review_context.supporting_records.map((record) => ({
+              ...record,
+            })),
+            assumptions: [...request.review_context.assumptions],
+            missing_evidence: [...request.review_context.missing_evidence],
+            expected_downstream_effects: [...request.review_context.expected_downstream_effects],
+            stale_state_basis: { ...request.review_context.stale_state_basis },
+            action_preview: request.review_context.action_preview
+              ? {
+                  ...request.review_context.action_preview,
+                  affected_records: request.review_context.action_preview.affected_records.map(
+                    (record) => ({ ...record }),
+                  ),
+                  field_changes: request.review_context.action_preview.field_changes.map((change) => ({
+                    ...change,
+                  })),
+                  expected_side_effects: [...request.review_context.action_preview.expected_side_effects],
+                  warnings: [...request.review_context.action_preview.warnings],
+                  blocking_reasons: [...request.review_context.action_preview.blocking_reasons],
+                  assumptions: [...request.review_context.action_preview.assumptions],
+                }
+              : request.review_context.action_preview,
+          }
+        : request.review_context,
+      lifecycle: {
+        ...request.lifecycle,
+        review_risk_flags: [...request.lifecycle.review_risk_flags],
+      },
+      result: request.result ? { ...request.result } : null,
+      correction_fields: [...request.correction_fields],
+    }
+  }
+
+  const assistantActionRequestRows: SmokeAssistantActionRequestRow[] = assistantActionRequests.map(
+    cloneAssistantActionRequest,
+  )
   const assistantRunFeedbackByRunId = new Map<number, SmokeAssistantFeedbackRow>()
+  const assistantPromptNavigationOutcomeRows = new Map<string, SmokeAssistantPromptNavigationOutcomeRow>()
   const assistantConversationId = 902
   const assistantRunId = 8801
   const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
@@ -280,8 +406,36 @@ async function startMockApiServer(
     single_user_auth_enabled: options.singleUserAuthEnabled ?? publicRuntimeSettings.single_user_auth_enabled,
   }
 
+  function buildAssistantActionRequestsForPrompt(prompt: string): SmokeAssistantActionRequestRow[] {
+    const normalizedPrompt = prompt.toLowerCase()
+    if (normalizedPrompt.includes('cancel') || normalizedPrompt.includes('unwind')) {
+      return assistantActionRequestRows
+        .filter((request) => request.action_request_id === 7001)
+        .map(cloneAssistantActionRequest)
+    }
+
+    return []
+  }
+
   function buildAssistantResponseContentForPrompt(prompt: string): string {
     const normalizedPrompt = prompt.toLowerCase()
+    if (normalizedPrompt.includes('cancel') || normalizedPrompt.includes('unwind')) {
+      return 'I staged a governed cancellation request for T-AMEND-100. Review the evidence below before anything changes. Approval is still required.'
+    }
+
+    if (normalizedPrompt.includes('broken handoff') || normalizedPrompt.includes('invalid handoff')) {
+      return [
+        'Stay in Prompt Home for now while we confirm the route.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          target_view: 'not-a-real-workspace',
+          label: 'Broken Handoff',
+        }),
+        '```',
+      ].join('\n')
+    }
+
     if (normalizedPrompt.includes('settlement') || normalizedPrompt.includes('invoice')) {
       return [
         'Settlement is the right place to continue because the open item is invoice and payment follow-through.',
@@ -462,11 +616,14 @@ async function startMockApiServer(
     }
   }
 
-  function buildAssistantResponseMetadata() {
+  function buildAssistantResponseMetadata(prompt: string) {
+    const actionRequests = buildAssistantActionRequestsForPrompt(prompt)
+    const responseRunId = actionRequests[0]?.run_id ?? assistantRunId
+
     return {
       conversation_id: assistantConversationId,
       conversation_updated_at: assistantRunRecordedAt,
-      run_id: assistantRunId,
+      run_id: responseRunId,
       run_recorded_at: assistantRunRecordedAt,
       agent_id: null,
       agent_name: null,
@@ -480,13 +637,14 @@ async function startMockApiServer(
       },
       warnings: [],
       tool_calls: [],
-      action_requests: [],
+      action_requests: actionRequests,
     }
   }
 
   function buildAssistantOutcomeMetrics() {
     const feedbackRows = Array.from(assistantRunFeedbackByRunId.values())
-    if (feedbackRows.length === 0) {
+    const promptNavigationRows = Array.from(assistantPromptNavigationOutcomeRows.values())
+    if (feedbackRows.length === 0 && promptNavigationRows.length === 0) {
       return assistantOutcomeMetrics
     }
 
@@ -495,6 +653,78 @@ async function startMockApiServer(
     const totalFeedbackCount = assistantOutcomeMetrics.total_feedback_count + feedbackRows.length
     const helpfulFeedbackCount = assistantOutcomeMetrics.helpful_feedback_count + helpfulFeedbackDelta
     const needsWorkFeedbackCount = assistantOutcomeMetrics.needs_work_feedback_count + needsWorkFeedbackDelta
+    const acceptedPromptCount = promptNavigationRows.filter((row) => row.outcome === 'ACCEPTED').length
+    const dismissedPromptCount = promptNavigationRows.filter((row) => row.outcome === 'DISMISSED').length
+    const failedPromptCount = promptNavigationRows.filter((row) => row.outcome === 'FAILED').length
+    const totalPromptCount = acceptedPromptCount + dismissedPromptCount + failedPromptCount
+    const promptTargetGroups = new Map<
+      string,
+      {
+        target_view: string | null
+        target_label: string | null
+        focus_type: string | null
+        accepted_count: number
+        dismissed_count: number
+        failed_count: number
+        recent_prompt_examples: string[]
+      }
+    >()
+    for (const row of promptNavigationRows) {
+      const key = `${row.target_view ?? '__invalid__'}::${row.target_label ?? '__unlabeled__'}::${row.focus_type ?? '__workspace__'}`
+      const group = promptTargetGroups.get(key) ?? {
+        target_view: row.target_view,
+        target_label: row.target_label,
+        focus_type: row.focus_type,
+        accepted_count: 0,
+        dismissed_count: 0,
+        failed_count: 0,
+        recent_prompt_examples: [],
+      }
+      if (row.outcome === 'ACCEPTED') {
+        group.accepted_count += 1
+      } else if (row.outcome === 'DISMISSED') {
+        group.dismissed_count += 1
+      } else if (row.outcome === 'FAILED') {
+        group.failed_count += 1
+      }
+      if (!group.recent_prompt_examples.includes(assistantUserPrompt)) {
+        group.recent_prompt_examples.push(assistantUserPrompt)
+      }
+      promptTargetGroups.set(key, group)
+    }
+    const byPromptTarget = Array.from(promptTargetGroups.values()).map((group) => {
+      const outcomeCount = group.accepted_count + group.dismissed_count + group.failed_count
+      const acceptanceRate = outcomeCount > 0 ? group.accepted_count / outcomeCount : null
+      const dismissRate = outcomeCount > 0 ? group.dismissed_count / outcomeCount : null
+      const failureRate = outcomeCount > 0 ? group.failed_count / outcomeCount : null
+      let signal: 'OBSERVE' | 'CANDIDATE_FOR_RULE' | 'NARROW' | 'RETIRE' = 'OBSERVE'
+      let signalReason = 'Keep observing until the route has enough repeated outcomes to justify product logic.'
+      if (group.failed_count >= 2 && (failureRate ?? 0) >= 0.5) {
+        signal = 'RETIRE'
+        signalReason = 'Repeated failed handoff payloads suggest this route should be paused or rebuilt.'
+      } else if (group.dismissed_count >= 2 && (dismissRate ?? 0) >= 0.5) {
+        signal = 'NARROW'
+        signalReason = 'Users dismiss this destination often enough that the routing rule should narrow or ask for confirmation.'
+      } else if (group.accepted_count >= 3 && (acceptanceRate ?? 0) >= 0.75 && group.failed_count === 0) {
+        signal = 'CANDIDATE_FOR_RULE'
+        signalReason = 'Repeated accepted handoffs make this destination a strong deterministic rule candidate.'
+      }
+      return {
+        target_view: group.target_view,
+        target_label: group.target_label,
+        focus_type: group.focus_type,
+        outcome_count: outcomeCount,
+        accepted_count: group.accepted_count,
+        dismissed_count: group.dismissed_count,
+        failed_count: group.failed_count,
+        acceptance_rate: acceptanceRate,
+        dismiss_rate: dismissRate,
+        failure_rate: failureRate,
+        signal,
+        signal_reasons: [signalReason],
+        recent_prompt_examples: group.recent_prompt_examples.slice(0, 3),
+      }
+    })
 
     return {
       ...assistantOutcomeMetrics,
@@ -527,6 +757,23 @@ async function startMockApiServer(
         })),
         ...assistantOutcomeMetrics.recent_feedback,
       ],
+      prompt_navigation_summary: {
+        total_outcome_count: totalPromptCount,
+        accepted_count: acceptedPromptCount,
+        dismissed_count: dismissedPromptCount,
+        failed_count: failedPromptCount,
+        acceptance_rate: totalPromptCount > 0 ? acceptedPromptCount / totalPromptCount : null,
+        dismiss_rate: totalPromptCount > 0 ? dismissedPromptCount / totalPromptCount : null,
+        failure_rate: totalPromptCount > 0 ? failedPromptCount / totalPromptCount : null,
+      },
+      by_prompt_target: byPromptTarget,
+      recent_prompt_navigation_outcomes: promptNavigationRows.map((row) => ({
+        ...row,
+        agent_id: null,
+        agent_name: null,
+        source_workspace: row.run_id === null ? null : 'assistant',
+        latest_user_message: row.run_id === null ? null : assistantUserPrompt,
+      })),
     }
   }
 
@@ -534,6 +781,8 @@ async function startMockApiServer(
     const oldestPendingAction = assistantActionRequestRows
       .filter((requestRow) => requestRow.status === 'PENDING')
       .sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at))[0]
+    const trackedWorkPackages = buildAssistantAgentWorkPackages()
+    const implementedPackages = trackedWorkPackages.filter((workPackage) => workPackage.status === 'IMPLEMENTED')
 
     return {
       generated_at: '2026-04-11T09:10:00Z',
@@ -577,6 +826,29 @@ async function startMockApiServer(
             }
           : null,
       },
+      work_packages: {
+        total_count: trackedWorkPackages.length,
+        accepted_count: trackedWorkPackages.filter((workPackage) => workPackage.status === 'ACCEPTED').length,
+        in_progress_count: trackedWorkPackages.filter((workPackage) => workPackage.status === 'IN_PROGRESS').length,
+        implemented_count: implementedPackages.length,
+        dismissed_count: trackedWorkPackages.filter((workPackage) => workPackage.status === 'DISMISSED').length,
+        stale_count: 0,
+        stale_accepted_count: 0,
+        stale_in_progress_count: 0,
+        implemented_with_pr_count: implementedPackages.filter((workPackage) => Boolean(workPackage.implementation_evidence.pr_url)).length,
+        implemented_with_commit_count: implementedPackages.filter((workPackage) => Boolean(workPackage.implementation_evidence.commit_sha)).length,
+        implemented_with_eval_count: implementedPackages.filter((workPackage) => workPackage.implementation_evidence.eval_ids.length > 0).length,
+        implemented_with_tests_count: implementedPackages.filter((workPackage) => workPackage.implementation_evidence.test_names.length > 0).length,
+        implemented_with_docs_count: implementedPackages.filter((workPackage) => workPackage.implementation_evidence.doc_paths.length > 0).length,
+        implemented_missing_evidence_count: implementedPackages.filter(
+          (workPackage) =>
+            !workPackage.implementation_evidence.pr_url &&
+            !workPackage.implementation_evidence.commit_sha &&
+            workPackage.implementation_evidence.eval_ids.length === 0 &&
+            workPackage.implementation_evidence.test_names.length === 0 &&
+            workPackage.implementation_evidence.doc_paths.length === 0,
+        ).length,
+      },
       trust_signals: oldestPendingAction
         ? [
             {
@@ -616,8 +888,15 @@ async function startMockApiServer(
         rationale: 'Keep approval-gated action behavior covered by deterministic smoke and eval checks.',
         acceptance_checks: ['Run browser smoke for the approval inbox.', 'Run assistant evals before promotion.'],
         knowledge_base_titles: ['Prompt Navigation Is A UI Intent'],
+        implementation_evidence: {
+          eval_ids: [],
+          test_names: [],
+          doc_paths: [],
+        },
         accepted_at: '2026-04-11T09:00:00Z',
         accepted_by: 'ops_admin',
+        implemented_at: null,
+        implemented_by: null,
         notes: 'Smoke fixture backlog item.',
         created_at: '2026-04-11T08:55:00Z',
         created_by: 'ops_admin',
@@ -642,6 +921,8 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/auth/session') &&
       !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
       !(method === 'POST' && url.pathname === '/assistant/respond') &&
+      !(method === 'POST' && url.pathname === '/assistant/prompt-navigation-outcomes') &&
+      !(method === 'POST' && /\/assistant\/runs\/\d+\/prompt-navigation-outcomes$/.test(url.pathname)) &&
       !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
     ) {
       mutationRequests.push(record)
@@ -756,6 +1037,15 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/assistant/prompt-route-recommendations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, assistantPromptRouteRecommendations)
+      return
+    }
+
     const assistantRunMatch = url.pathname.match(/^\/assistant\/runs\/(\d+)$/)
     if (assistantRunMatch && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
@@ -814,6 +1104,139 @@ async function startMockApiServer(
       return
     }
 
+    const assistantPromptNavigationOutcomeMatch = url.pathname.match(
+      /^\/assistant\/runs\/(\d+)\/prompt-navigation-outcomes$/,
+    )
+    if (assistantPromptNavigationOutcomeMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      promptNavigationOutcomeRequests.push(record)
+
+      const runId = Number(assistantPromptNavigationOutcomeMatch[1])
+      if (runId !== assistantRunId) {
+        writeJson(response, { detail: 'Assistant run not found.' }, 404)
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      const outcomePayload = payload as {
+        outcome?: unknown
+        intent_key?: unknown
+        target_view?: unknown
+        target_label?: unknown
+        target_rationale?: unknown
+        focus_type?: unknown
+        focus_id?: unknown
+        focus_label?: unknown
+        detail?: unknown
+      }
+      if (
+        outcomePayload.outcome !== 'ACCEPTED' &&
+        outcomePayload.outcome !== 'DISMISSED' &&
+        outcomePayload.outcome !== 'FAILED'
+      ) {
+        writeJson(response, { detail: 'Unsupported prompt navigation outcome.' }, 422)
+        return
+      }
+
+      const intentKey = normalizeOptionalText(outcomePayload.intent_key)
+      if (!intentKey) {
+        writeJson(response, { detail: 'Prompt navigation intent key is required.' }, 422)
+        return
+      }
+
+      const outcomeMapKey = `${runId}:${outcomePayload.outcome}:${intentKey}`
+      const previousOutcome = assistantPromptNavigationOutcomeRows.get(outcomeMapKey)
+      const outcome: SmokeAssistantPromptNavigationOutcomeRow = {
+        outcome_id: previousOutcome?.outcome_id ?? 1200 + assistantPromptNavigationOutcomeRows.size + 1,
+        run_id: runId,
+        conversation_id: assistantConversationId,
+        user_id: smokeSession.user.user_id,
+        user_role: smokeSession.user.role,
+        surface: 'PROMPT_HOME',
+        outcome: outcomePayload.outcome,
+        intent_key: intentKey,
+        target_view: normalizeOptionalText(outcomePayload.target_view),
+        target_label: normalizeOptionalText(outcomePayload.target_label),
+        target_rationale: normalizeOptionalText(outcomePayload.target_rationale),
+        focus_type: normalizeOptionalText(outcomePayload.focus_type),
+        focus_id: normalizeOptionalText(outcomePayload.focus_id),
+        focus_label: normalizeOptionalText(outcomePayload.focus_label),
+        detail: normalizeOptionalText(outcomePayload.detail),
+        created_at: previousOutcome?.created_at ?? '2026-04-11T09:12:00Z',
+        updated_at: '2026-04-11T09:12:00Z',
+      }
+
+      assistantPromptNavigationOutcomeRows.set(outcomeMapKey, outcome)
+      writeJson(response, outcome)
+      return
+    }
+
+    if (url.pathname === '/assistant/prompt-navigation-outcomes' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      promptNavigationOutcomeRequests.push(record)
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+
+      const outcomePayload = payload as {
+        outcome?: unknown
+        intent_key?: unknown
+        target_view?: unknown
+        target_label?: unknown
+        target_rationale?: unknown
+        focus_type?: unknown
+        focus_id?: unknown
+        focus_label?: unknown
+        detail?: unknown
+      }
+      if (
+        outcomePayload.outcome !== 'ACCEPTED' &&
+        outcomePayload.outcome !== 'DISMISSED' &&
+        outcomePayload.outcome !== 'FAILED'
+      ) {
+        writeJson(response, { detail: 'Unsupported prompt navigation outcome.' }, 422)
+        return
+      }
+
+      const intentKey = normalizeOptionalText(outcomePayload.intent_key)
+      if (!intentKey) {
+        writeJson(response, { detail: 'Prompt navigation intent key is required.' }, 422)
+        return
+      }
+
+      const outcome: SmokeAssistantPromptNavigationOutcomeRow = {
+        outcome_id: 1200 + assistantPromptNavigationOutcomeRows.size + 1,
+        run_id: null,
+        conversation_id: null,
+        user_id: smokeSession.user.user_id,
+        user_role: smokeSession.user.role,
+        surface: 'PROMPT_HOME',
+        outcome: outcomePayload.outcome,
+        intent_key: intentKey,
+        target_view: normalizeOptionalText(outcomePayload.target_view),
+        target_label: normalizeOptionalText(outcomePayload.target_label),
+        target_rationale: normalizeOptionalText(outcomePayload.target_rationale),
+        focus_type: normalizeOptionalText(outcomePayload.focus_type),
+        focus_id: normalizeOptionalText(outcomePayload.focus_id),
+        focus_label: normalizeOptionalText(outcomePayload.focus_label),
+        detail: normalizeOptionalText(outcomePayload.detail),
+        created_at: '2026-04-11T09:12:00Z',
+        updated_at: '2026-04-11T09:12:00Z',
+      }
+
+      assistantPromptNavigationOutcomeRows.set(`standalone:${outcome.outcome_id}`, outcome)
+      writeJson(response, outcome)
+      return
+    }
+
     if (url.pathname === '/assistant/context' && method === 'POST') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -850,10 +1273,11 @@ async function startMockApiServer(
       }
       const payload = await readJsonBody(request)
       assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
-      const responseContent = buildAssistantResponseContentForPrompt(latestUserPromptFromPayload(payload))
+      const prompt = latestUserPromptFromPayload(payload)
+      const responseContent = buildAssistantResponseContentForPrompt(prompt)
 
       writeJson(response, {
-        ...buildAssistantResponseMetadata(),
+        ...buildAssistantResponseMetadata(prompt),
         message: {
           role: 'assistant',
           content: responseContent,
@@ -868,9 +1292,10 @@ async function startMockApiServer(
       }
       const payload = await readJsonBody(request)
       assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
-      const responseContent = buildAssistantResponseContentForPrompt(latestUserPromptFromPayload(payload))
+      const prompt = latestUserPromptFromPayload(payload)
+      const responseContent = buildAssistantResponseContentForPrompt(prompt)
 
-      const metadata = buildAssistantResponseMetadata()
+      const metadata = buildAssistantResponseMetadata(prompt)
       writeSse(response, [
         {
           event: 'conversation',
@@ -902,7 +1327,21 @@ async function startMockApiServer(
         return
       }
 
-      writeJson(response, [])
+      const requestedStatus = normalizeOptionalText(url.searchParams.get('status'))
+      const limitParam = Number(url.searchParams.get('limit') ?? '')
+      const offsetParam = Number(url.searchParams.get('offset') ?? '')
+      const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : assistantActionRequestRows.length
+
+      let filteredRequests = assistantActionRequestRows
+      if (requestedStatus) {
+        filteredRequests = filteredRequests.filter((requestRow) => requestRow.status === requestedStatus)
+      }
+
+      writeJson(
+        response,
+        filteredRequests.slice(offset, offset + limit).map(cloneAssistantActionRequest),
+      )
       return
     }
 
@@ -1301,13 +1740,14 @@ async function startMockApiServer(
         payload && typeof payload === 'object' && !Array.isArray(payload)
           ? normalizeOptionalText((payload as Record<string, unknown>).requested_by) ?? smokeSession.user.user_id
           : smokeSession.user.user_id
+      const seededAgentIds = assistantRoleArchetypes.flatMap((role) => role.current_profile_ids)
       writeJson(response, {
         requested_by: requestedBy,
-        total_profiles: 13,
-        total_templates: 13,
+        total_profiles: seededAgentIds.length,
+        total_templates: seededAgentIds.length,
         created_count: 0,
-        updated_count: assistantAdminAgents.length,
-        agent_ids: assistantAdminAgents.map((agent) => agent.agent_id),
+        updated_count: seededAgentIds.length,
+        agent_ids: seededAgentIds,
       })
       return
     }
@@ -1645,6 +2085,17 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/operations/trade-attention-candidates' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const candidateType = normalizeOptionalText(url.searchParams.get('candidate_type'))
+      const limit = Math.max(1, Number(url.searchParams.get('limit') ?? '8') || 8)
+      writeJson(response, buildTradeAttentionCandidateList(candidateType, limit))
+      return
+    }
+
     if (url.pathname === '/trades' && method === 'GET') {
       writeJson(response, tradeRows)
       return
@@ -1681,6 +2132,16 @@ async function startMockApiServer(
 
     if (url.pathname === '/settlement/payments' && method === 'GET') {
       writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/settlement/invoice-issue-candidates' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const limit = Math.max(1, Number(url.searchParams.get('limit') ?? '8') || 8)
+      writeJson(response, buildInvoiceIssueCandidateList(limit))
       return
     }
 
@@ -1739,6 +2200,16 @@ async function startMockApiServer(
         market_codes: ['PHYSICAL'],
         continent_codes: ['NA'],
       })
+      return
+    }
+
+    if (url.pathname === '/reference/assets' && method === 'GET') {
+      writeJson(response, assets)
+      return
+    }
+
+    if (url.pathname === '/reference/assets/standards' && method === 'GET') {
+      writeJson(response, assetStandards)
       return
     }
 
@@ -2043,6 +2514,7 @@ async function startMockApiServer(
       sessionExpired = true
     },
     mutationRequests,
+    promptNavigationOutcomeRequests,
     unexpectedRequests,
     close: () =>
       new Promise<void>((resolve, reject) => {
@@ -2101,6 +2573,7 @@ export async function startSmokeHarness(
     apiBaseUrl: mockApi.baseUrl,
     expireSession: mockApi.expireSession,
     mutationRequests: mockApi.mutationRequests,
+    promptNavigationOutcomeRequests: mockApi.promptNavigationOutcomeRequests,
     unexpectedRequests: mockApi.unexpectedRequests,
     close: async () => {
       const results = await Promise.allSettled([appServer.close(), mockApi.close()])

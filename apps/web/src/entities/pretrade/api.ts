@@ -2,10 +2,12 @@ import { fetchJson, patchJson, postJson, requestOk } from '../../shared/api'
 import type {
   PreTradeGovernanceAuditExportRecord,
   PreTradeGovernanceItemsRecord,
+  PreTradeRecommendationDraftAnalysisRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeRecommendationSourceAdapterRecord,
   PreTradeRecommendationRunRecord,
   PreTradeRecommendationSourceSnapshotRecord,
+  PreTradeReviewDriftRecord,
   PreTradeReviewItemRecord,
   PreTradeReviewStatus,
   PreTradeScenarioDraft,
@@ -60,6 +62,14 @@ export type CreatePreTradeRecommendationRunPayload = {
   name?: string | null
   thesis?: string | null
   draft?: PreTradeScenarioDraft | null
+  source_scenario_id?: number | null
+  source_review_id?: number | null
+  input_snapshots?: PreTradeRecommendationSourceSnapshotRecord[]
+}
+
+export type AnalyzePreTradeRecommendationDraftPayload = {
+  thesis?: string | null
+  draft: PreTradeScenarioDraft
   source_scenario_id?: number | null
   source_review_id?: number | null
   input_snapshots?: PreTradeRecommendationSourceSnapshotRecord[]
@@ -199,6 +209,31 @@ export async function loadPreTradeReviewItem(
     headers: authorizationHeaders(accessToken),
     cache: 'no-store',
   })
+}
+
+export async function loadPreTradeReviewDrift(
+  apiBase: string,
+  accessToken: string,
+  reviewId: number,
+): Promise<PreTradeReviewDriftRecord> {
+  return fetchJson<PreTradeReviewDriftRecord>(`${apiBase}/pretrade/reviews/${reviewId}/drift`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function analyzePreTradeRecommendationDraft(
+  apiBase: string,
+  accessToken: string,
+  payload: AnalyzePreTradeRecommendationDraftPayload,
+): Promise<PreTradeRecommendationDraftAnalysisRecord> {
+  return postJson<PreTradeRecommendationDraftAnalysisRecord>(
+    `${apiBase}/pretrade/recommendations/draft-analysis`,
+    payload,
+    {
+      headers: authorizationHeaders(accessToken),
+    },
+  )
 }
 
 export async function createPreTradeReviewItem(

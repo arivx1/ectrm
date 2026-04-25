@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 import type {
+  AssetRecord,
+  AssetStandards,
   CounterpartyRecord,
   CurrencyRecord,
   EventRow,
@@ -101,6 +103,32 @@ const bootstrapCommodity: ReferenceRecord = {
   name: 'Power',
   is_active: true,
   commodity_class: 'POWER',
+}
+
+const bootstrapAsset: AssetRecord = {
+  code: 'HSC_PIPE',
+  name: 'Houston Ship Channel Pipe',
+  is_active: true,
+  asset_class: 'PIPELINE',
+  asset_type: 'TRANSMISSION',
+  asset_reality: 'REAL',
+  commodity_code: 'POWER',
+  location_code: 'PJM-WEST',
+  capacity_value: 150000,
+  capacity_unit_code: 'MWH',
+  operator_name: 'Desk Ops',
+  operating_status: 'OPERATING',
+}
+
+const bootstrapAssetStandards: AssetStandards = {
+  default_asset_class: 'PIPELINE',
+  default_asset_type_by_class: { PIPELINE: 'TRANSMISSION' },
+  asset_classes: ['PIPELINE'],
+  asset_types_by_class: { PIPELINE: ['TRANSMISSION'] },
+  default_asset_reality: 'REAL',
+  asset_realities: ['REAL', 'SIMULATED'],
+  default_operating_status: 'OPERATING',
+  operating_statuses: ['OPERATING'],
 }
 
 const bootstrapPriceIndex: PriceIndexRecord = {
@@ -894,6 +922,8 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
       ['https://example.test/api/reference/units?limit=2000', [bootstrapUnit]],
       ['https://example.test/api/reference/locations?limit=2000', [bootstrapLocation]],
       ['https://example.test/api/reference/locations/standards', { location_kinds: ['HUB'] }],
+      ['https://example.test/api/reference/assets?limit=2000', [bootstrapAsset]],
+      ['https://example.test/api/reference/assets/standards', bootstrapAssetStandards],
       ['https://example.test/api/reference/counterparties?limit=2000', [bootstrapCounterparty]],
       ['https://example.test/api/reference/counterparties/standards', { credit_statuses: ['APPROVED'] }],
       ['https://example.test/api/reference/portfolios?limit=2000', [bootstrapPortfolio]],
@@ -911,6 +941,8 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.deepEqual(payload.books, [bootstrapBook])
   assert.deepEqual(payload.commodities, [bootstrapCommodity])
   assert.deepEqual(payload.locationStandards, { location_kinds: ['HUB'] })
+  assert.deepEqual(payload.assets, [bootstrapAsset])
+  assert.deepEqual(payload.assetStandards, bootstrapAssetStandards)
   assert.deepEqual(payload.counterpartyStandards, { credit_statuses: ['APPROVED'] })
   assert.deepEqual(payload.counterpartyCreditProfiles, [])
   assert.deepEqual(payload.counterpartyExternalCreditSnapshots, [])
@@ -920,6 +952,7 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   const firstCurrency: CurrencyRecord = payload.currencies[0]!
   const firstUnit: UnitRecord = payload.units[0]!
   const firstLocation: LocationRecord = payload.locations[0]!
+  const firstAsset: AssetRecord = payload.assets[0]!
   const firstCounterparty: CounterpartyRecord = payload.counterparties[0]!
   const firstPortfolio: PortfolioRecord = payload.portfolios[0]!
 
@@ -928,6 +961,8 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.equal(firstCurrency.code, 'USD')
   assert.equal(firstUnit.code, 'MWH')
   assert.equal(firstLocation.code, 'PJM-WEST')
+  assert.equal(firstAsset.code, 'HSC_PIPE')
+  assert.equal(firstAsset.asset_reality, 'REAL')
   assert.equal(firstCounterparty.code, 'CP-1')
   assert.equal(firstPortfolio.code, 'PTF-1')
 })

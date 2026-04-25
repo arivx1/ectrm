@@ -1,7 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
-import type { OperationalResourceDescriptor, WorkspaceSettlementSummary } from '../../entities/app/api'
+import {
+  loadInvoiceIssueCandidates,
+  loadTradeAttentionCandidates,
+  type InvoiceIssueCandidateList,
+  type OperationalResourceDescriptor,
+  type TradeAttentionCandidateList,
+  type TradeAttentionCandidateType,
+  type WorkspaceSettlementSummary,
+} from '../../entities/app/api'
+import {
+  buildInvoiceIssueCandidateWorkflowHandoff,
+  buildTradeAttentionCandidateWorkflowHandoff,
+} from '../../entities/app/candidateWorkflowHandoffs'
+import { sessionHeaders } from '../../entities/app/workspaceDataShared'
+import { appConfig } from '../../shared/config'
 import { normalizeAppRouteHandoff, type AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   CreateTradeInvoiceInput,
@@ -14,7 +28,13 @@ import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
 import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
-import type { Trade, TradeInvoiceRecord, TradePaymentRecord, TradeWorkflowItemRecord } from '../../shared/models'
+import type {
+  Trade,
+  TradeInvoiceRecord,
+  TradePaymentRecord,
+  TradeWorkflowItemRecord,
+  ViewKey,
+} from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalInlineBoard } from '../operations/operationalInlineBoardRegistry'
@@ -40,6 +60,7 @@ type SettlementWorkspaceProps = {
   paymentMutationError: string
   paymentMutationPendingKey: string | null
   onClearHandoff: () => void
+  onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
   onOpenTrade: (tradeId: string) => void
   onIssueInvoice: (tradeId: string, payload: CreateTradeInvoiceInput) => Promise<void>
   onSaveInvoice: (invoiceId: number, payload: UpdateTradeInvoiceInput) => Promise<void>
@@ -47,6 +68,21 @@ type SettlementWorkspaceProps = {
   onSavePayment: (paymentId: number, payload: UpdateTradePaymentInput) => Promise<void>
   onSaveWorkflowItem: (itemId: number, payload: UpdateTradeWorkflowItemInput) => Promise<void>
 }
+
+type SettlementCandidatePanel =
+  | {
+      key: 'invoice_pending'
+      label: string
+      mode: 'invoice'
+    }
+  | {
+      key: 'payment_due' | 'settlement_exception'
+      label: string
+      mode: 'trade'
+      candidateType: TradeAttentionCandidateType
+    }
+
+const SETTLEMENT_CANDIDATE_LIMIT = 8
 
 function ageInDays(value: string | null | undefined): number | null {
   if (!value) {
@@ -151,6 +187,18 @@ function matchesSettlementWorkflowFilter(item: TradeWorkflowItemRecord, query: s
   ])
 }
 
+function summarizeSettlementTradeCandidate(candidate: {
+  invoice_status: string
+  payment_status: string
+  settlement_status: string
+}): string {
+  return [
+    `Invoice ${candidate.invoice_status}`,
+    `Payment ${candidate.payment_status}`,
+    `Settlement ${candidate.settlement_status}`,
+  ].join(' • ')
+}
+
 export function SettlementWorkspace({
   authSession,
   routeHandoff,
@@ -171,6 +219,7 @@ export function SettlementWorkspace({
   paymentMutationError,
   paymentMutationPendingKey,
   onClearHandoff,
+  onOpenView,
   onOpenTrade,
   onIssueInvoice,
   onSaveInvoice,
@@ -178,6 +227,11 @@ export function SettlementWorkspace({
   onSavePayment,
 }: SettlementWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
+  const [activeCandidatePanel, setActiveCandidatePanel] = useState<SettlementCandidatePanel | null>(null)
+  const [invoiceIssueCandidates, setInvoiceIssueCandidates] = useState<InvoiceIssueCandidateList | null>(null)
+  const [tradeAttentionCandidates, setTradeAttentionCandidates] = useState<TradeAttentionCandidateList | null>(null)
+  const [candidatePanelLoading, setCandidatePanelLoading] = useState(false)
+  const [candidatePanelError, setCandidatePanelError] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const hasScreenFilter = effectiveScreenFilter.trim().length > 0
   const directlyMatchedTrades = useMemo(
@@ -272,6 +326,10 @@ export function SettlementWorkspace({
     !hasScreenFilter && settlementSummary?.payment_due_count !== undefined
       ? settlementSummary.payment_due_count
       : visibleActiveTrades.filter((trade) => ['DUE', 'OVERDUE'].includes(trade.payment_status)).length
+  const settlementExceptionCandidateCount =
+    !hasScreenFilter && settlementSummary?.trade_exception_count !== undefined
+      ? settlementSummary.trade_exception_count
+      : disputedTrades.length
   const settledCount =
     !hasScreenFilter && settlementSummary?.settled_count !== undefined
       ? settlementSummary.settled_count
@@ -316,6 +374,86 @@ export function SettlementWorkspace({
     setScreenFilter('')
     onClearHandoff()
   }
+
+  useEffect(() => {
+    if (hasScreenFilter) {
+      setActiveCandidatePanel(null)
+      setInvoiceIssueCandidates(null)
+      setTradeAttentionCandidates(null)
+      setCandidatePanelError('')
+      setCandidatePanelLoading(false)
+    }
+  }, [hasScreenFilter])
+
+  useEffect(() => {
+    const currentCandidatePanel = activeCandidatePanel
+    const currentAuthSession = authSession
+
+    if (!currentCandidatePanel || hasScreenFilter) {
+      return
+    }
+    if (!currentAuthSession) {
+      setInvoiceIssueCandidates(null)
+      setTradeAttentionCandidates(null)
+      setCandidatePanelError('Sign in to load live candidate reads.')
+      setCandidatePanelLoading(false)
+      return
+    }
+    const selectedCandidatePanel: SettlementCandidatePanel = currentCandidatePanel
+    const authorizedSession: StoredAuthSession = currentAuthSession
+
+    let cancelled = false
+    setCandidatePanelLoading(true)
+    setCandidatePanelError('')
+
+    async function loadCandidates() {
+      try {
+        if (selectedCandidatePanel.mode === 'invoice') {
+          const nextCandidates = await loadInvoiceIssueCandidates(
+            appConfig.apiBase,
+            { limit: SETTLEMENT_CANDIDATE_LIMIT },
+            { readHeaders: sessionHeaders(authorizedSession) },
+          )
+          if (!cancelled) {
+            setInvoiceIssueCandidates(nextCandidates)
+            setTradeAttentionCandidates(null)
+          }
+          return
+        }
+        const tradeCandidateType: TradeAttentionCandidateType = selectedCandidatePanel.candidateType
+
+        const nextCandidates = await loadTradeAttentionCandidates(
+          appConfig.apiBase,
+          {
+            candidateType: tradeCandidateType,
+            limit: SETTLEMENT_CANDIDATE_LIMIT,
+          },
+          { readHeaders: sessionHeaders(authorizedSession) },
+        )
+        if (!cancelled) {
+          setTradeAttentionCandidates(nextCandidates)
+          setInvoiceIssueCandidates(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setInvoiceIssueCandidates(null)
+          setTradeAttentionCandidates(null)
+          setCandidatePanelError(error instanceof Error ? error.message : 'Unable to load settlement candidates.')
+        }
+      } finally {
+        if (!cancelled) {
+          setCandidatePanelLoading(false)
+        }
+      }
+    }
+
+    void loadCandidates()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeCandidatePanel, authSession, hasScreenFilter])
+
   const settlementSummaryCards: TileSectionGridItem[] = [
     {
       id: 'open-settlement',
@@ -336,6 +474,24 @@ export function SettlementWorkspace({
           <span>Unissued Invoices</span>
           <strong>{formatNumber(invoicePendingCount, 0)}</strong>
           <p>Trades that still need their first settlement invoice record issued from the ledger.</p>
+          {!hasScreenFilter ? (
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => {
+                setActiveCandidatePanel((current) =>
+                  current?.key === 'invoice_pending'
+                    ? null
+                    : { key: 'invoice_pending', label: 'Unissued invoice candidates', mode: 'invoice' },
+                )
+                setInvoiceIssueCandidates(null)
+                setTradeAttentionCandidates(null)
+                setCandidatePanelError('')
+              }}
+            >
+              {activeCandidatePanel?.key === 'invoice_pending' ? 'Hide candidates' : 'Open candidates'}
+            </button>
+          ) : null}
         </>
       ),
     },
@@ -347,6 +503,29 @@ export function SettlementWorkspace({
           <span>Due / Overdue</span>
           <strong>{formatNumber(paymentDueCount, 0)}</strong>
           <p>Trades currently waiting on due or overdue payment collection/settlement.</p>
+          {!hasScreenFilter ? (
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => {
+                setActiveCandidatePanel((current) =>
+                  current?.key === 'payment_due'
+                    ? null
+                    : {
+                        key: 'payment_due',
+                        label: 'Due and overdue payment candidates',
+                        mode: 'trade',
+                        candidateType: 'payment_due',
+                      },
+                )
+                setInvoiceIssueCandidates(null)
+                setTradeAttentionCandidates(null)
+                setCandidatePanelError('')
+              }}
+            >
+              {activeCandidatePanel?.key === 'payment_due' ? 'Hide candidates' : 'Open candidates'}
+            </button>
+          ) : null}
         </>
       ),
     },
@@ -362,6 +541,12 @@ export function SettlementWorkspace({
       ),
     },
   ]
+  const activeInvoiceCandidateSummary = invoiceIssueCandidates
+    ? `${formatNumber(invoiceIssueCandidates.count, 0)} of ${formatNumber(invoiceIssueCandidates.total_count, 0)} invoice issue candidates loaded.`
+    : null
+  const activeTradeCandidateSummary = tradeAttentionCandidates
+    ? `${formatNumber(tradeAttentionCandidates.count, 0)} of ${formatNumber(tradeAttentionCandidates.total_count, 0)} settlement candidates loaded.`
+    : null
 
   return (
     <TileLayout
@@ -419,7 +604,178 @@ export function SettlementWorkspace({
           availableSpans: ['full', 'wide'],
           content:
             hasSettlementQueue ? (
-              <TileSectionGrid sectionId="settlement-summary-cards" items={settlementSummaryCards} />
+              <div className="position-list">
+                <TileSectionGrid sectionId="settlement-summary-cards" items={settlementSummaryCards} />
+                {!hasScreenFilter && activeCandidatePanel && ['invoice_pending', 'payment_due'].includes(activeCandidatePanel.key) ? (
+                  <article className="position-card position-card-drilldown">
+                    <div className="position-card-head">
+                      <div className="position-card-copy">
+                        <strong>{activeCandidatePanel.label}</strong>
+                        <p>
+                          {activeCandidatePanel.mode === 'invoice'
+                            ? activeInvoiceCandidateSummary
+                            : activeTradeCandidateSummary}
+                        </p>
+                      </div>
+                    </div>
+                    {candidatePanelLoading ? (
+                      <div className="skeleton-stack">
+                        <div className="skeleton-block" />
+                      </div>
+                    ) : candidatePanelError ? (
+                      <div className="empty-state">
+                        <strong>Candidate read unavailable</strong>
+                        <p>{candidatePanelError}</p>
+                      </div>
+                    ) : activeCandidatePanel.mode === 'invoice' && invoiceIssueCandidates ? (
+                      invoiceIssueCandidates.items.length > 0 ? (
+                        <div className="position-list">
+                          {invoiceIssueCandidates.items.map((candidate) => {
+                            const workflowHandoff = buildInvoiceIssueCandidateWorkflowHandoff(candidate)
+                            return (
+                              <article key={candidate.trade_id} className="position-card position-card-drilldown">
+                              <div className="position-card-head">
+                                <div className="position-card-copy">
+                                  <strong>{candidate.trade_id}</strong>
+                                  <span>
+                                    {candidate.commodity} • {candidate.counterparty ?? 'Counterparty TBD'}
+                                  </span>
+                                </div>
+                                <span
+                                  className={`status-pill status-pill-${
+                                    candidate.readiness_status === 'READY' ? 'active' : 'blocked'
+                                  }`}
+                                >
+                                  {candidate.readiness_status.replaceAll('_', ' ')}
+                                </span>
+                              </div>
+                              <div className="shipment-card-meta">
+                                <span className="entity-chip entity-chip-soft">{candidate.book}</span>
+                                <span className="entity-chip entity-chip-soft">
+                                  {formatCommodityClass(candidate.commodity_class)}
+                                </span>
+                                <span className="entity-chip entity-chip-soft">
+                                  {candidate.trade_currency_code ?? 'Currency TBD'}
+                                </span>
+                              </div>
+                              <div className="position-card-copy">
+                                <p>{candidate.preview_summary}</p>
+                                <p>Priority: {candidate.priority_reason}</p>
+                                {candidate.blocking_reasons.length > 0 ? (
+                                  <p>{candidate.blocking_reasons.join(' • ')}</p>
+                                ) : candidate.assumptions.length > 0 ? (
+                                  <p>{candidate.assumptions.join(' • ')}</p>
+                                ) : null}
+                              </div>
+                              <div className="position-card-actions">
+                                <span>
+                                  {candidate.age_days !== null ? `${candidate.age_days}d old` : 'Recent'} •{' '}
+                                  {summarizeSettlementTradeCandidate(candidate)}
+                                </span>
+                                <div className="workflow-item-button-row">
+                                  <button
+                                    type="button"
+                                    className="button button-secondary"
+                                    onClick={() => onOpenView(workflowHandoff.view, workflowHandoff.handoff)}
+                                  >
+                                    {workflowHandoff.label}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button button-ghost"
+                                    onClick={() => onOpenTrade(candidate.trade_id)}
+                                  >
+                                    Open Trade
+                                  </button>
+                                </div>
+                              </div>
+                              </article>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="empty-state">
+                          <strong>No invoice issue candidates</strong>
+                          <p>The deterministic invoice issue read is clear right now.</p>
+                        </div>
+                      )
+                    ) : activeCandidatePanel.mode === 'trade' && tradeAttentionCandidates ? (
+                      tradeAttentionCandidates.items.length > 0 ? (
+                        <div className="position-list">
+                          {tradeAttentionCandidates.items.map((candidate) => {
+                            const workflowHandoff = buildTradeAttentionCandidateWorkflowHandoff(candidate)
+                            return (
+                              <article key={candidate.trade_id} className="position-card position-card-drilldown">
+                              <div className="position-card-head">
+                                <div className="position-card-copy">
+                                  <strong>{candidate.trade_id}</strong>
+                                  <span>
+                                    {candidate.commodity} • {candidate.counterparty ?? 'Counterparty TBD'}
+                                  </span>
+                                </div>
+                                <span
+                                  className={`status-pill status-pill-${
+                                    candidate.blocking_reasons.length > 0 ? 'blocked' : 'active'
+                                  }`}
+                                >
+                                  {candidate.age_days !== null ? `${candidate.age_days}d old` : 'Active'}
+                                </span>
+                              </div>
+                              <div className="shipment-card-meta">
+                                {candidate.candidate_types.map((candidateType) => (
+                                  <span key={candidateType} className="entity-chip entity-chip-soft">
+                                    {candidateType.replaceAll('_', ' ')}
+                                  </span>
+                                ))}
+                                <span className="entity-chip entity-chip-soft">{candidate.book}</span>
+                              </div>
+                              <div className="position-card-copy">
+                                <p>{summarizeSettlementTradeCandidate(candidate)}</p>
+                                <p>Priority: {candidate.priority_reason}</p>
+                                <p>
+                                  {candidate.next_steps.length > 0
+                                    ? candidate.next_steps.join(' • ')
+                                    : `Execution ${formatDate(candidate.execution_timestamp)}`}
+                                </p>
+                                {candidate.blocking_reasons.length > 0 ? (
+                                  <p>{candidate.blocking_reasons.join(' • ')}</p>
+                                ) : null}
+                              </div>
+                              <div className="position-card-actions">
+                                <span>
+                                  Delivery {formatDateOnly(candidate.delivery_start)} to {formatDateOnly(candidate.delivery_end)}
+                                </span>
+                                <div className="workflow-item-button-row">
+                                  <button
+                                    type="button"
+                                    className="button button-secondary"
+                                    onClick={() => onOpenView(workflowHandoff.view, workflowHandoff.handoff)}
+                                  >
+                                    {workflowHandoff.label}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button button-ghost"
+                                    onClick={() => onOpenTrade(candidate.trade_id)}
+                                  >
+                                    Open Trade
+                                  </button>
+                                </div>
+                              </div>
+                              </article>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="empty-state">
+                          <strong>No settlement candidates</strong>
+                          <p>The deterministic due-payment candidate read is clear right now.</p>
+                        </div>
+                      )
+                    ) : null}
+                  </article>
+                ) : null}
+              </div>
             ) : (
               <div className="empty-state">
                 <strong>No settlement queue</strong>
@@ -457,40 +813,144 @@ export function SettlementWorkspace({
           description: 'Disputed, overdue, or otherwise late settlement tasks that usually need direct human escalation.',
           span: 'half',
           availableSpans: ['full', 'wide', 'half'],
-          content: settlementExceptionItems.length > 0 ? (
+          content: (
             <div className="position-list">
-              {settlementExceptionItems.map((item) => (
-                <article key={item.item_id} className="position-card shipment-card">
-                  <div className="shipment-card-head">
-                    <div className="shipment-card-copy">
-                      <strong>{item.trade_id}</strong>
-                      <span>
-                        {item.commodity} • {item.counterparty ?? 'Counterparty TBD'}
-                      </span>
-                    </div>
-                    <span className="status-pill status-pill-blocked">{item.status.replaceAll('_', ' ')}</span>
-                  </div>
-                  <div className="shipment-card-meta">
-                    <span className="entity-chip entity-chip-soft">{item.workflow_type.replaceAll('_', ' ')}</span>
-                    <span className="entity-chip entity-chip-soft">{formatCommodityClass(item.commodity_class)}</span>
-                    <span className="entity-chip entity-chip-soft">{item.owner ? `Owner ${item.owner}` : 'Unassigned'}</span>
-                  </div>
-                  <div className="shipment-card-copy">
-                    <p>{item.due_at ? `Due ${formatDateOnly(item.due_at)}` : 'No due date'} • Updated {formatDate(item.updated_at)}</p>
-                  </div>
-                  <div className="shipment-card-actions">
-                    <span>{item.notes ? item.notes : 'Awaiting operator follow-up.'}</span>
-                    <button type="button" className="button button-ghost" onClick={() => onOpenTrade(item.trade_id)}>
-                      Open Trade
+              {!hasScreenFilter && settlementExceptionCandidateCount > 0 ? (
+                <article className="position-card">
+                  <div className="position-card-actions">
+                    <span>
+                      {formatNumber(settlementExceptionCandidateCount, 0)} trade exceptions are flagged by the summary model.
+                    </span>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => {
+                        setActiveCandidatePanel((current) =>
+                          current?.key === 'settlement_exception'
+                            ? null
+                            : {
+                                key: 'settlement_exception',
+                                label: 'Settlement exception candidates',
+                                mode: 'trade',
+                                candidateType: 'settlement_exception',
+                              },
+                        )
+                        setInvoiceIssueCandidates(null)
+                        setTradeAttentionCandidates(null)
+                        setCandidatePanelError('')
+                      }}
+                    >
+                      {activeCandidatePanel?.key === 'settlement_exception' ? 'Hide candidates' : 'Open candidates'}
                     </button>
                   </div>
                 </article>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <strong>No escalations</strong>
-              <p>No active trade is currently disputed or overdue in the settlement pipeline.</p>
+              ) : null}
+              {settlementExceptionItems.length > 0 ? (
+                settlementExceptionItems.map((item) => (
+                  <article key={item.item_id} className="position-card shipment-card">
+                    <div className="shipment-card-head">
+                      <div className="shipment-card-copy">
+                        <strong>{item.trade_id}</strong>
+                        <span>
+                          {item.commodity} • {item.counterparty ?? 'Counterparty TBD'}
+                        </span>
+                      </div>
+                      <span className="status-pill status-pill-blocked">{item.status.replaceAll('_', ' ')}</span>
+                    </div>
+                    <div className="shipment-card-meta">
+                      <span className="entity-chip entity-chip-soft">{item.workflow_type.replaceAll('_', ' ')}</span>
+                      <span className="entity-chip entity-chip-soft">{formatCommodityClass(item.commodity_class)}</span>
+                      <span className="entity-chip entity-chip-soft">{item.owner ? `Owner ${item.owner}` : 'Unassigned'}</span>
+                    </div>
+                    <div className="shipment-card-copy">
+                      <p>{item.due_at ? `Due ${formatDateOnly(item.due_at)}` : 'No due date'} • Updated {formatDate(item.updated_at)}</p>
+                    </div>
+                    <div className="shipment-card-actions">
+                      <span>{item.notes ? item.notes : 'Awaiting operator follow-up.'}</span>
+                      <button type="button" className="button button-ghost" onClick={() => onOpenTrade(item.trade_id)}>
+                        Open Trade
+                      </button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state">
+                  <strong>No escalations</strong>
+                  <p>No active trade is currently disputed or overdue in the settlement pipeline.</p>
+                </div>
+              )}
+              {!hasScreenFilter &&
+              activeCandidatePanel?.key === 'settlement_exception' &&
+              activeCandidatePanel.mode === 'trade' ? (
+                <article className="position-card position-card-drilldown">
+                  <div className="position-card-head">
+                    <div className="position-card-copy">
+                      <strong>{activeCandidatePanel.label}</strong>
+                      <p>{activeTradeCandidateSummary}</p>
+                    </div>
+                  </div>
+                  {candidatePanelLoading ? (
+                    <div className="skeleton-stack">
+                      <div className="skeleton-block" />
+                    </div>
+                  ) : candidatePanelError ? (
+                    <div className="empty-state">
+                      <strong>Candidate read unavailable</strong>
+                      <p>{candidatePanelError}</p>
+                    </div>
+                  ) : tradeAttentionCandidates && tradeAttentionCandidates.items.length > 0 ? (
+                    <div className="position-list">
+                      {tradeAttentionCandidates.items.map((candidate) => (
+                        <article key={candidate.trade_id} className="position-card position-card-drilldown">
+                          <div className="position-card-head">
+                            <div className="position-card-copy">
+                              <strong>{candidate.trade_id}</strong>
+                              <span>
+                                {candidate.commodity} • {candidate.counterparty ?? 'Counterparty TBD'}
+                              </span>
+                            </div>
+                            <span className="status-pill status-pill-blocked">
+                              {candidate.payment_status === 'OVERDUE' ? 'OVERDUE' : candidate.settlement_status}
+                            </span>
+                          </div>
+                          <div className="shipment-card-meta">
+                            {candidate.candidate_types.map((candidateType) => (
+                              <span key={candidateType} className="entity-chip entity-chip-soft">
+                                {candidateType.replaceAll('_', ' ')}
+                              </span>
+                            ))}
+                            <span className="entity-chip entity-chip-soft">{candidate.book}</span>
+                          </div>
+                          <div className="position-card-copy">
+                            <p>{summarizeSettlementTradeCandidate(candidate)}</p>
+                            <p>Priority: {candidate.priority_reason}</p>
+                            {candidate.blocking_reasons.length > 0 ? (
+                              <p>{candidate.blocking_reasons.join(' • ')}</p>
+                            ) : candidate.next_steps.length > 0 ? (
+                              <p>{candidate.next_steps.join(' • ')}</p>
+                            ) : null}
+                          </div>
+                          <div className="position-card-actions">
+                            <span>{candidate.age_days !== null ? `${candidate.age_days}d old` : 'Active'}</span>
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              onClick={() => onOpenTrade(candidate.trade_id)}
+                            >
+                              Open Trade
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : tradeAttentionCandidates ? (
+                    <div className="empty-state">
+                      <strong>No settlement exceptions</strong>
+                      <p>The deterministic exception candidate read is clear right now.</p>
+                    </div>
+                  ) : null}
+                </article>
+              ) : null}
             </div>
           ),
         },

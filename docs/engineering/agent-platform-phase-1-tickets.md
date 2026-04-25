@@ -578,6 +578,10 @@ M
 Admins can respond to unsafe or noisy agent behavior by pausing an agent or
 narrowing its tools/actions without leaving the control tower flow.
 
+### Status
+
+Implemented on 2026-04-23.
+
 ### Scope
 
 - expose quick links or actions from control tower to agent edit
@@ -601,6 +605,17 @@ narrowing its tools/actions without leaving the control tower flow.
 - narrowing tools/actions cannot exceed role policy
 - changes remain visible in agent audit fields
 
+### Implementation notes
+
+- trust-signal cards now open the agent registry with a pause or narrowing
+  supervision draft
+- pause and narrowing drafts reuse the existing typed agent update flow instead
+  of introducing a parallel mutation path
+- supervision drafts stamp activation notes so the change remains visible in the
+  agent audit surface before save
+- role-fit validation warnings and errors are surfaced inside the supervision
+  review banner to keep policy boundaries visible while narrowing scope
+
 ## Lane E: Pilot Agent Rollout
 
 ## AP1-13: Phase 1 Pilot Agent Seed And Template Alignment
@@ -613,6 +628,10 @@ M
 
 Seeded agents, admin templates, and the role catalog agree on the Phase 1 pilot
 lineup.
+
+### Status
+
+Implemented on 2026-04-23.
 
 ### Scope
 
@@ -645,6 +664,25 @@ lineup.
 - seeded agents pass policy validation
 - template-only roles are clearly labeled as not automatically activated
 
+### Implementation notes
+
+- the synchronized seeded-default lineup is now limited to:
+  - Trade Ops Copilot
+  - Settlement Copilot
+  - Trade Governor
+- the Admin blueprint catalog now focuses on the six canonical Phase 1 pilot
+  roles:
+  - Market Research Agent
+  - Pre-Trade Structuring Agent
+  - Document Agent
+  - Trade Ops Copilot
+  - Settlement Copilot
+  - Trade Governor
+- Market Research Agent, Pre-Trade Structuring Agent, and Document Agent are
+  available as template-only blueprints until their dedicated workflows land
+- broader non-pilot helper roles still exist in the server role catalog, but
+  they are no longer represented as synchronized pilot defaults
+
 ## AP1-14: Pre-Trade Structuring Agent Draft And Review Flow
 
 ### Size
@@ -654,6 +692,10 @@ L
 ### Outcome
 
 The pre-trade pilot can draft review-ready scenarios without booking trades.
+
+### Status
+
+Implemented on 2026-04-23.
 
 ### Scope
 
@@ -680,6 +722,24 @@ The pre-trade pilot can draft review-ready scenarios without booking trades.
 - agent can draft a pre-trade scenario grounded in live context
 - the workflow does not book a trade directly
 - tests or evals verify no external-commitment or trade-booking overreach
+
+### Implementation notes
+
+- Pre-Trade now generates a deterministic structuring-agent packet from the
+  current scenario draft plus live recommendation analysis
+- the packet includes:
+  - thesis and proposed structure summary
+  - working assumptions
+  - source context and reviewer focus
+  - trade-capture handoff fields
+  - explicit no-booking guardrails
+- submitting a pre-trade draft for review now stages that packet into the
+  shared review queue through `review_notes`
+- the workflow still fails closed:
+  - opening Trade Capture only opens a manual draft form
+  - no autonomous trade booking or external commitment was added
+- assistant eval coverage now checks for review-ready draft language plus
+  explicit refusal to book or persist capture
 
 ## AP1-15: Document Agent Triage And Reprocess Flow
 

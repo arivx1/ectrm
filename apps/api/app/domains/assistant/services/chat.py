@@ -30,6 +30,7 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentBuildSuggestionOut,
     AssistantAgentCapability,
     AssistantAgentScope,
+    AssistantAgentSelfUpdateSuggestionOut,
     AssistantMessageIn,
     AssistantMessageOut,
     AssistantPromptContextRequest,
@@ -103,9 +104,9 @@ class AssistantServiceError(Exception):
 
 
 class AssistantService:
-    def __init__(self, db: Session | None = None) -> None:
+    def __init__(self, db: Session | None = None, *, actor_id: str | None = None) -> None:
         self._tool_definitions = build_tool_definitions()
-        self._tool_service = AssistantToolService(db) if db is not None else None
+        self._tool_service = AssistantToolService(db, actor_id=actor_id) if db is not None else None
 
     async def generate_response(
         self,
@@ -288,6 +289,110 @@ class AssistantService:
             warnings=warnings,
         )
         return suggestion
+
+    async def build_agent_self_update_draft_with_openai(
+        self,
+        *,
+        agent_definition: ManagedAssistantAgent,
+        brief: str,
+    ) -> AssistantAgentSelfUpdateSuggestionOut:
+        provider = resolve_provider_config("openai")
+        builder_model = settings.OPENAI_AGENT_BUILDER_MODEL.strip() or provider.model
+        published_tool_names = [tool.name for tool in self._tool_definitions]
+
+        response_payload = await _post_json(
+            url=f"{provider.base_url.rstrip('/')}/responses",
+            headers={
+                "Authorization": f"Bearer {provider.api_key}",
+                "Content-Type": "application/json",
+            },
+            payload={
+                "model": builder_model,
+                "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
+                "instructions": _build_openai_agent_self_update_instructions(),
+                "input": json_dumps(
+                    {
+                        "brief": brief,
+                        "current_agent": {
+                            "agent_id": agent_definition.agent_id,
+                            "name": agent_definition.name,
+                            "description": agent_definition.description,
+                            "status": agent_definition.status,
+                            "scope": agent_definition.scope,
+                            "provider": agent_definition.provider,
+                            "model": agent_definition.model,
+                            "role_key": agent_definition.role_key,
+                            "profile_kind": agent_definition.profile_kind,
+                            "human_owner_role": agent_definition.human_owner_role,
+                            "authority_ceiling": agent_definition.authority_ceiling,
+                            "allowed_workspaces": list(agent_definition.allowed_workspaces),
+                            "capabilities": list(agent_definition.capabilities),
+                            "allowed_tools": list(agent_definition.allowed_tools),
+                            "allowed_action_types": list(agent_definition.allowed_action_types),
+                            "system_prompt": agent_definition.system_prompt,
+                        },
+                        "tool_catalog": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                            }
+                            for tool in self._tool_definitions
+                        ],
+                    }
+                ),
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "assistant_agent_self_update_draft",
+                        "strict": True,
+                        "schema": _build_openai_agent_self_update_schema(agent_definition),
+                    }
+                },
+            },
+            provider_label="OpenAI Agent Self Update",
+        )
+
+        generated_payload = _parse_openai_agent_self_update_output(response_payload)
+        warnings: list[str] = []
+        allowed_tools = list(generated_payload.get("allowed_tools", []))
+        allowed_action_types = list(generated_payload.get("allowed_action_types", []))
+        capabilities = [str(capability) for capability in generated_payload.get("capabilities", [])]
+
+        if "READ" not in {capability.upper() for capability in capabilities}:
+            if allowed_tools:
+                warnings.append(
+                    "The self-update draft removed READ, so the live-tool allowlist was cleared."
+                )
+            allowed_tools = []
+        invalid_tool_names = [
+            tool_name for tool_name in allowed_tools if tool_name not in set(published_tool_names)
+        ]
+        if invalid_tool_names:
+            warnings.append(
+                f"Unpublished live tools ({', '.join(invalid_tool_names)}) were removed from the self-update draft."
+            )
+            allowed_tools = [
+                tool_name for tool_name in allowed_tools if tool_name in set(published_tool_names)
+            ]
+        if "ACTION" not in {capability.upper() for capability in capabilities}:
+            if allowed_action_types:
+                warnings.append(
+                    "The self-update draft removed ACTION, so the governed action allowlist was cleared."
+                )
+            allowed_action_types = []
+
+        return AssistantAgentSelfUpdateSuggestionOut(
+            description=str(generated_payload["description"]),
+            allowed_workspaces=generated_payload["allowed_workspaces"],
+            capabilities=capabilities,
+            allowed_tools=allowed_tools,
+            allowed_action_types=allowed_action_types,
+            system_prompt=str(generated_payload["system_prompt"]),
+            change_summary=generated_payload["change_summary"],
+            builder_provider="openai",
+            builder_model=builder_model,
+            warnings=warnings,
+        )
 
     async def _generate_openai(
         self,
@@ -1035,6 +1140,22 @@ def _build_openai_agent_builder_instructions() -> str:
     )
 
 
+def _build_openai_agent_self_update_instructions() -> str:
+    return "\n".join(
+        [
+            "You are revising a managed assistant agent for the ECTRM operator console after it learned from mistakes.",
+            "Return only JSON that matches the requested schema.",
+            "Preserve or narrow the current agent scope. Never expand workspaces, capabilities, live tools, or governed actions.",
+            "Focus on safer behavior: clearer evidence standards, stronger stop conditions, narrower permissions, and better reviewer context.",
+            "Do not change immutable identity or governance metadata such as agent_id, provider, model, scope, role ownership, or authority ceiling.",
+            "If recent mistakes involve unsupported or low-quality actions, prefer narrowing ACTION scope or removing ACTION entirely.",
+            "If recent mistakes involve weak evidence, strengthen the system_prompt so the agent distinguishes facts, assumptions, and stop conditions.",
+            "Keep the revised description concise and aligned with the narrowed mission.",
+            "Write a concrete system_prompt that addresses the cited failures without becoming verbose.",
+        ]
+    )
+
+
 def _resolve_openai_runtime_model(
     payload: AssistantAgentBuildRequest,
     default_model: str,
@@ -1070,6 +1191,97 @@ def _collect_agent_builder_warnings(
             f"Runtime model was reset to {runtime_model} because the previous model only applied to {current_draft.provider}."
         )
     return warnings
+
+
+def _build_openai_agent_self_update_schema(agent_definition: ManagedAssistantAgent) -> dict[str, Any]:
+    current_workspaces = list(agent_definition.allowed_workspaces)
+    current_capabilities = list(agent_definition.capabilities)
+    current_tools = list(agent_definition.allowed_tools)
+    current_action_types = list(agent_definition.allowed_action_types)
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+            },
+            "allowed_workspaces": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": len(current_workspaces),
+                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "enum": current_workspaces,
+                },
+            },
+            "capabilities": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": len(current_capabilities),
+                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "enum": current_capabilities,
+                },
+            },
+            "allowed_tools": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": len(current_tools),
+                "uniqueItems": True,
+                "items": (
+                    {
+                        "type": "string",
+                        "enum": current_tools,
+                    }
+                    if current_tools
+                    else {"type": "string"}
+                ),
+            },
+            "allowed_action_types": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": len(current_action_types),
+                "uniqueItems": True,
+                "items": (
+                    {
+                        "type": "string",
+                        "enum": current_action_types,
+                    }
+                    if current_action_types
+                    else {"type": "string"}
+                ),
+            },
+            "system_prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20_000,
+            },
+            "change_summary": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 6,
+                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                },
+            },
+        },
+        "required": [
+            "description",
+            "allowed_workspaces",
+            "capabilities",
+            "allowed_tools",
+            "allowed_action_types",
+            "system_prompt",
+            "change_summary",
+        ],
+    }
 
 
 def _build_openai_agent_builder_schema(published_tool_names: list[str]) -> dict[str, Any]:
@@ -1181,6 +1393,31 @@ def _parse_openai_agent_builder_output(response_payload: dict[str, Any]) -> dict
         raise AssistantServiceError(
             status_code=502,
             detail="OpenAI Agent Builder returned an unexpected payload shape.",
+        )
+
+    return cast(dict[str, Any], parsed_payload)
+
+
+def _parse_openai_agent_self_update_output(response_payload: dict[str, Any]) -> dict[str, Any]:
+    response_text = _extract_openai_text(response_payload)
+    if not response_text:
+        raise AssistantServiceError(
+            status_code=502,
+            detail="OpenAI Agent Self Update returned an empty response.",
+        )
+
+    try:
+        parsed_payload = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        raise AssistantServiceError(
+            status_code=502,
+            detail="OpenAI Agent Self Update returned invalid JSON.",
+        ) from exc
+
+    if not isinstance(parsed_payload, dict):
+        raise AssistantServiceError(
+            status_code=502,
+            detail="OpenAI Agent Self Update returned an unexpected payload shape.",
         )
 
     return cast(dict[str, Any], parsed_payload)

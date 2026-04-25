@@ -24,8 +24,11 @@ from apps.api.app.domains.assistant.services.action_catalog import (
     ALL_CATALOG_ACTION_TYPES,
     ASSISTANT_ACTION_CATALOG,
 )
-from apps.api.app.domains.assistant.services.action_runtime import ACTION_PLANNER_SEQUENCE, ACTION_PLANNERS
-from apps.api.app.domains.assistant.services.action_requests import ACTION_HANDLERS, ACTION_SPECS
+from apps.api.app.domains.assistant.services.action_registry import ACTION_HANDLERS, ACTION_SPECS
+from apps.api.app.domains.assistant.services.action_planners import (
+    ACTION_PLANNER_SEQUENCE,
+    ACTION_PLANNERS,
+)
 from apps.api.app.domains.assistant.services.chat import ASSISTANT_ACTION_DEFINITIONS
 from apps.api.app.domains.assistant.services.policies import POLICY_RULES
 from apps.api.app.domains.assistant.services.role_archetypes import validate_role_archetype_registry
@@ -40,6 +43,7 @@ from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
 from apps.api.app.models.assistant_conversation import AssistantConversation
+from apps.api.app.models.assistant_prompt_navigation_outcome import AssistantPromptNavigationOutcome
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
 from apps.api.app.models.document_ingestion import DocumentIngestion
@@ -148,6 +152,7 @@ class AssistantApiTests(unittest.TestCase):
             session.query(TradeWorkflowItem).delete()
             session.query(AssistantAgentWorkPackage).delete()
             session.query(AssistantActionRequest).delete()
+            session.query(AssistantPromptNavigationOutcome).delete()
             session.query(AssistantRunFeedback).delete()
             session.query(AssistantAgentEvalRun).delete()
             session.query(AssistantRun).delete()
@@ -221,6 +226,7 @@ class AssistantApiTests(unittest.TestCase):
         payload = response.json()
         role_keys = [row["role_key"] for row in payload]
         self.assertIn("trade-ops-copilot", role_keys)
+        self.assertIn("trade-capture-agent", role_keys)
         self.assertIn("pre-trade-structuring-agent", role_keys)
         self.assertIn("control-tower-agent", role_keys)
         phase_1_roles = [row for row in payload if row["catalog_status"] == "PHASE_1"]
@@ -237,7 +243,7 @@ class AssistantApiTests(unittest.TestCase):
 
         trade_ops = next(row for row in payload if row["role_key"] == "trade-ops-copilot")
         self.assertEqual(trade_ops["catalog_status"], "SEEDED")
-        self.assertEqual(trade_ops["authority_ceiling"], "STAGE")
+        self.assertEqual(trade_ops["authority_ceiling"], "EXECUTE")
         self.assertEqual(trade_ops["human_owner_role"], "Operations Lead")
         self.assertEqual(trade_ops["current_profile_ids"], ["trade-ops-copilot"])
         self.assertIn("ACTION", trade_ops["capability_ceiling"])
@@ -247,6 +253,7 @@ class AssistantApiTests(unittest.TestCase):
                 "issue_trade_confirmation",
                 "record_trade_confirmation_response",
                 "update_trade_workflow_item",
+                "record_trade_actualization",
                 "reprocess_document_ingestion",
             ],
         )
@@ -254,13 +261,27 @@ class AssistantApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(trade_ops["stop_conditions"]), 1)
         self.assertGreaterEqual(len(trade_ops["required_eval_coverage"]), 1)
         self.assertEqual(trade_ops["eval_gate"]["status"], "PASS")
-        self.assertIn("Allowed operational action staging.", trade_ops["eval_gate"]["covered_cases"])
+        self.assertIn("Allowed operational action execution.", trade_ops["eval_gate"]["covered_cases"])
         self.assertEqual(trade_ops["eval_gate"]["missing_cases"], [])
 
         pre_trade = next(row for row in payload if row["role_key"] == "pre-trade-structuring-agent")
         self.assertEqual(pre_trade["catalog_status"], "PHASE_1")
         self.assertEqual(pre_trade["current_profile_ids"], ["pre-trade-structuring-agent"])
         self.assertEqual(pre_trade["authority_ceiling"], "DRAFT")
+        self.assertIn("analyze_pretrade_scenario_draft", pre_trade["default_tools"])
+        self.assertIn("get_pretrade_recommendation_run", pre_trade["default_tools"])
+
+        trade_capture = next(row for row in payload if row["role_key"] == "trade-capture-agent")
+        self.assertEqual(trade_capture["catalog_status"], "SEEDED")
+        self.assertEqual(trade_capture["current_profile_ids"], ["trade-capture-agent"])
+        self.assertEqual(trade_capture["authority_ceiling"], "EXECUTE")
+        self.assertEqual(trade_capture["maximum_action_types"], ["cancel_trade"])
+
+        accounting_posting = next(row for row in payload if row["role_key"] == "accounting-posting-agent")
+        self.assertEqual(accounting_posting["catalog_status"], "SEEDED")
+        self.assertEqual(accounting_posting["current_profile_ids"], ["accounting-posting-agent"])
+        self.assertEqual(accounting_posting["authority_ceiling"], "DRAFT")
+        self.assertEqual(accounting_posting["maximum_action_types"], [])
 
     def test_admin_seed_sync_exposes_role_profiles_with_policy_and_eval_status(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
@@ -272,8 +293,8 @@ class AssistantApiTests(unittest.TestCase):
         )
 
         self.assertEqual(seed_response.status_code, 200)
-        self.assertEqual(seed_response.json()["total_profiles"], 13)
-        self.assertEqual(seed_response.json()["total_templates"], 13)
+        self.assertEqual(seed_response.json()["total_profiles"], 15)
+        self.assertEqual(seed_response.json()["total_templates"], 15)
 
         listing_response = self.client.get(
             "/admin/assistant/agents",
@@ -281,12 +302,28 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(listing_response.status_code, 200)
         profiles = {row["agent_id"]: row for row in listing_response.json()}
-        self.assertEqual(len(profiles), 13)
+        self.assertEqual(len(profiles), 15)
 
         active_profiles = [row for row in profiles.values() if row["status"] == "ACTIVE"]
         self.assertEqual(
             sorted(row["agent_id"] for row in active_profiles),
-            ["settlement-copilot", "trade-governor", "trade-ops-copilot"],
+            [
+                "accounting-posting-agent",
+                "accrual-controller-agent",
+                "counterparty-state-sync-agent",
+                "document-agent",
+                "fee-accrual-agent",
+                "logistics-coordinator",
+                "market-research-agent",
+                "movement-controller-agent",
+                "pre-trade-structuring-agent",
+                "reporting-reconciliation-agent",
+                "risk-sentinel",
+                "settlement-copilot",
+                "trade-capture-agent",
+                "trade-governor",
+                "trade-ops-copilot",
+            ],
         )
         for profile in active_profiles:
             self.assertEqual(profile["profile_kind"], "ROLE_DERIVED")
@@ -295,19 +332,9 @@ class AssistantApiTests(unittest.TestCase):
             self.assertTrue(profile["authority_ceiling"])
             self.assertIn("policy_notes", profile["effective_policy"])
             self.assertIn(profile["eval_gate"]["status"], {"PASS", "BLOCKED"})
-
-        pre_trade = profiles["pre-trade-structuring-agent"]
-        self.assertEqual(pre_trade["status"], "DRAFT")
-        self.assertEqual(pre_trade["profile_kind"], "ROLE_DERIVED")
-        self.assertEqual(pre_trade["authority_ceiling"], "DRAFT")
-        self.assertEqual(pre_trade["eval_gate"]["status"], "PASS")
-
-        document_agent = profiles["document-agent"]
-        self.assertEqual(document_agent["status"], "DRAFT")
-        self.assertEqual(document_agent["authority_ceiling"], "DRAFT")
-        self.assertNotIn("ACTION", document_agent["capabilities"])
-        self.assertEqual(document_agent["allowed_action_types"], [])
-        self.assertIn("outcome review", document_agent["activation_notes"])
+        self.assertEqual(profiles["movement-controller-agent"]["allowed_action_types"], ["record_trade_actualization", "update_trade_workflow_item"])
+        self.assertEqual(profiles["accounting-posting-agent"]["allowed_action_types"], [])
+        self.assertEqual(profiles["accounting-posting-agent"]["authority_ceiling"], "DRAFT")
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_SPECS), set(ALL_ASSISTANT_ACTION_TYPES))
@@ -1040,6 +1067,164 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn('"action_type_options"', request_payload["input"])
         self.assertIn('"allowed_action_types":["cancel_trade"]', request_payload["input"])
 
+    def test_admin_self_update_draft_generates_reviewable_agent_revision_from_learning_signals(self) -> None:
+        token = self._create_session_token()
+        captured_request: dict[str, object] = {}
+        now = datetime.now(timezone.utc)
+        self._create_agent(
+            agent_id="noisy-agent",
+            name="Noisy Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "operations"],
+            capabilities=["READ", "EXPLAIN", "ACTION"],
+            allowed_tools=["list_workflow_items", "get_trade_workbench"],
+            allowed_action_types=["update_trade_workflow_item"],
+            provider="openai",
+            model="gpt-5-mini",
+            role_key="trade-ops-copilot",
+            profile_kind="ROLE_DERIVED",
+            specialization_summary="Workflow triage specialist.",
+            human_owner_role="Operations Lead",
+            authority_ceiling="STAGE",
+            activation_notes="Prompt reviewed for staged workflow work.",
+        )
+        with self.SessionLocal() as session:
+            run = AssistantRun(
+                conversation_id=None,
+                status="COMPLETED",
+                user_id="ops_alpha",
+                session_id="self-update-session",
+                user_role="OPS_ADMIN",
+                workspace="operations",
+                agent_id="noisy-agent",
+                agent_name="Noisy Agent",
+                agent_role_key="trade-ops-copilot",
+                agent_profile_kind="ROLE_DERIVED",
+                provider="openai",
+                model="gpt-5-mini",
+                use_live_tools=False,
+                request_messages=[{"role": "user", "content": "Review the queue."}],
+                application_context=None,
+                prompt_sections=[],
+                rendered_system_prompt="System prompt.",
+                warnings=[],
+                tool_calls=[],
+                input_tokens=50,
+                output_tokens=20,
+                latest_user_message="Review the queue.",
+                assistant_message="Staged a workflow update without citing the owner.",
+                error_detail=None,
+                created_at=now - timedelta(hours=2),
+                completed_at=now - timedelta(hours=2),
+            )
+            eval_record = AssistantAgentEval(
+                agent_id="noisy-agent",
+                name="Queue owner coverage",
+                workspace="operations",
+                prompt="Who owns the blocked workflow item and what should happen next?",
+                context=None,
+                use_live_tools=True,
+                expected_substrings=["owner"],
+                expected_tool_names=["list_workflow_items"],
+                expected_action_types=["update_trade_workflow_item"],
+                created_at=now - timedelta(days=1),
+                created_by="ops_admin",
+                updated_at=now - timedelta(days=1),
+                updated_by="ops_admin",
+            )
+            session.add_all([run, eval_record])
+            session.flush()
+            session.add(
+                AssistantRunFeedback(
+                    run_id=run.id,
+                    conversation_id=None,
+                    user_id="ops_alpha",
+                    session_id="self-update-session",
+                    user_role="OPS_ADMIN",
+                    rating="NEEDS_WORK",
+                    comment="Surface the queue owner before staging workflow updates.",
+                    created_at=now - timedelta(minutes=45),
+                    updated_at=now - timedelta(minutes=45),
+                )
+            )
+            session.add(
+                AssistantAgentEvalRun(
+                    eval_id=eval_record.id,
+                    agent_id="noisy-agent",
+                    run_id=None,
+                    status="FAIL",
+                    failure_reasons=["Did not identify the workflow owner before proposing the action."],
+                    observed_tool_names=["list_workflow_items"],
+                    observed_action_types=["update_trade_workflow_item"],
+                    response_message="A workflow update should be staged.",
+                    started_at=now - timedelta(minutes=20),
+                    completed_at=now - timedelta(minutes=19),
+                    run_by="ops_admin",
+                )
+            )
+            session.commit()
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            captured_request["url"] = url
+            captured_request["headers"] = headers
+            captured_request["payload"] = payload
+            captured_request["provider_label"] = provider_label
+            return {
+                "output_text": json.dumps(
+                    {
+                        "description": "Stages workflow work only after naming the queue owner and evidence.",
+                        "allowed_workspaces": ["assistant", "operations"],
+                        "capabilities": ["READ", "EXPLAIN"],
+                        "allowed_tools": ["list_workflow_items"],
+                        "allowed_action_types": [],
+                        "system_prompt": "Name the queue owner, cite the evidence, and stop instead of staging when ownership is unclear.",
+                        "change_summary": [
+                            "Removed ACTION so the agent can explain and draft without staging unsupported workflow changes.",
+                            "Strengthened the prompt to require queue-owner evidence before proposing next steps.",
+                        ],
+                    }
+                ),
+                "usage": {"input_tokens": 120, "output_tokens": 60},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/admin/assistant/agents/noisy-agent/self-update-draft",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"brief": "Focus on missing queue-owner evidence and over-eager staging."},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent_id"], "noisy-agent")
+        self.assertEqual(payload["status"], "ACTIVE")
+        self.assertEqual(payload["scope"], "TEAM")
+        self.assertEqual(payload["provider"], "openai")
+        self.assertEqual(payload["model"], "gpt-5-mini")
+        self.assertEqual(payload["capabilities"], ["READ", "EXPLAIN"])
+        self.assertEqual(payload["allowed_tools"], ["list_workflow_items"])
+        self.assertEqual(payload["allowed_action_types"], [])
+        self.assertEqual(payload["builder_provider"], "openai")
+        self.assertEqual(payload["builder_model"], "gpt-5")
+        self.assertEqual(len(payload["change_summary"]), 2)
+        self.assertIn("queue owner", payload["evidence"]["recent_needs_work_feedback"][0])
+        self.assertIn("Queue owner coverage", payload["evidence"]["failing_eval_cases"][0])
+        self.assertIn("Focus on missing queue-owner evidence", payload["source_brief"])
+        self.assertEqual(payload["warnings"], [])
+
+        request_payload = captured_request["payload"]
+        assert isinstance(request_payload, dict)
+        self.assertEqual(captured_request["provider_label"], "OpenAI Agent Self Update")
+        self.assertEqual(captured_request["url"], "https://api.openai.com/v1/responses")
+        self.assertEqual(request_payload["model"], "gpt-5")
+        self.assertEqual(request_payload["text"]["format"]["name"], "assistant_agent_self_update_draft")
+        self.assertIn("Surface the queue owner before staging workflow updates.", request_payload["input"])
+        self.assertIn("Did not identify the workflow owner", request_payload["input"])
+        self.assertIn("Do not expand allowed workspaces, capabilities, live tools, or governed actions.", request_payload["input"])
+
     def test_assistant_prompt_uses_managed_agent_definition(self) -> None:
         token = self._create_session_token()
         self._create_agent(
@@ -1190,6 +1375,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(review_context["stale_state_basis"]["last_event_id"], "evt-t-1007")
         self.assertIn("Create a TradeCancelled event.", review_context["expected_downstream_effects"])
         self.assertEqual(review_context["idempotency_key"], "assistant-action:cancel_trade:T-1007:evt-t-1007")
+        self.assertEqual(review_context["execution_mode"], "REVIEW_REQUIRED")
         self.assertIn("STALE_STATE_RECHECK_REQUIRED", action_request["lifecycle"]["review_risk_flags"])
 
         prompt_context = fake_service.calls[0]["prompt_context"]
@@ -1204,7 +1390,67 @@ class AssistantApiTests(unittest.TestCase):
             self.assertIn("review_context", record.payload)
             stored_review_context = dict(review_context)
             stored_review_context.pop("action_preview", None)
+            stored_review_context.pop("autonomous_execution_reason", None)
+            stored_review_context.pop("delegated_ability_override_reason", None)
             self.assertEqual(record.payload["review_context"], stored_review_context)
+
+    def test_execute_capable_agent_autonomously_executes_cancel_trade_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1010")
+        self._create_agent(
+            agent_id="trade-captain-auto",
+            name="Trade Captain Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["cancel_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "trade-captain-auto",
+                    "workspace": "assistant",
+                    "context": "Selected trade:\n- trade_id: T-1010\n- commodity: WTI",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Cancel the selected trade."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["lifecycle"]["stage"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+        self.assertIn(
+            "typed services",
+            action_request["review_context"]["autonomous_execution_reason"],
+        )
+        self.assertIn("Governed action update:", payload["message"]["content"])
+        self.assertIn("Cancel trade T-1010", payload["message"]["content"])
+
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-1010")
+            self.assertIsNotNone(trade)
+            assert trade is not None
+            self.assertEqual(trade.status, "CANCELLED")
+
+            record = session.query(AssistantActionRequest).one()
+            self.assertEqual(record.status, "EXECUTED")
+            self.assertEqual(record.decided_by, "trade-captain-auto")
 
     def test_assistant_agent_listing_marks_depleted_token_budget_red(self) -> None:
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 20
@@ -2827,6 +3073,124 @@ class AssistantApiTests(unittest.TestCase):
                     ),
                 ]
             )
+            session.add_all(
+                [
+                    AssistantPromptNavigationOutcome(
+                        run_id=workflow_run.id,
+                        conversation_id=None,
+                        user_id="ops_alpha",
+                        session_id="workflow-session",
+                        user_role="OPS_ADMIN",
+                        surface="PROMPT_HOME",
+                        outcome="ACCEPTED",
+                        intent_key="open_workspace|operations|workflow_item|WF-1001|||Open Work Queue",
+                        target_view="operations",
+                        target_label="Open Work Queue",
+                        target_rationale="Review the queue blocker in operations.",
+                        focus_type="workflow_item",
+                        focus_id="WF-1001",
+                        focus_label="Late confirmation",
+                        detail=None,
+                        created_at=now - timedelta(minutes=28),
+                        updated_at=now - timedelta(minutes=28),
+                    ),
+                    AssistantPromptNavigationOutcome(
+                        run_id=workflow_run.id,
+                        conversation_id=None,
+                        user_id="ops_alpha",
+                        session_id="workflow-session",
+                        user_role="OPS_ADMIN",
+                        surface="PROMPT_HOME",
+                        outcome="ACCEPTED",
+                        intent_key="open_workspace|operations|workflow_item|WF-1002|||Open Work Queue",
+                        target_view="operations",
+                        target_label="Open Work Queue",
+                        target_rationale="Review the queue blocker in operations.",
+                        focus_type="workflow_item",
+                        focus_id="WF-1002",
+                        focus_label="Scheduling lag",
+                        detail=None,
+                        created_at=now - timedelta(minutes=27),
+                        updated_at=now - timedelta(minutes=27),
+                    ),
+                    AssistantPromptNavigationOutcome(
+                        run_id=workflow_run.id,
+                        conversation_id=None,
+                        user_id="ops_alpha",
+                        session_id="workflow-session",
+                        user_role="OPS_ADMIN",
+                        surface="PROMPT_HOME",
+                        outcome="ACCEPTED",
+                        intent_key="open_workspace|operations|workflow_item|WF-1003|||Open Work Queue",
+                        target_view="operations",
+                        target_label="Open Work Queue",
+                        target_rationale="Review the queue blocker in operations.",
+                        focus_type="workflow_item",
+                        focus_id="WF-1003",
+                        focus_label="Allocation follow-up",
+                        detail=None,
+                        created_at=now - timedelta(minutes=26),
+                        updated_at=now - timedelta(minutes=26),
+                    ),
+                    AssistantPromptNavigationOutcome(
+                        run_id=noisy_run.id,
+                        conversation_id=None,
+                        user_id="ops_beta",
+                        session_id="noisy-session",
+                        user_role="OPS_ADMIN",
+                        surface="PROMPT_HOME",
+                        outcome="DISMISSED",
+                        intent_key="open_workspace|settlement|invoice|INV-1|||Open Settlement",
+                        target_view="settlement",
+                        target_label="Open Settlement",
+                        target_rationale="Review invoice follow-through in settlement.",
+                        focus_type="invoice",
+                        focus_id="INV-1",
+                        focus_label="INV-1",
+                        detail=None,
+                        created_at=now - timedelta(minutes=24),
+                        updated_at=now - timedelta(minutes=24),
+                    ),
+                    AssistantPromptNavigationOutcome(
+                        run_id=noisy_run.id,
+                        conversation_id=None,
+                        user_id="ops_beta",
+                        session_id="noisy-session",
+                        user_role="OPS_ADMIN",
+                        surface="PROMPT_HOME",
+                        outcome="DISMISSED",
+                        intent_key="open_workspace|settlement|invoice|INV-2|||Open Settlement",
+                        target_view="settlement",
+                        target_label="Open Settlement",
+                        target_rationale="Review invoice follow-through in settlement.",
+                        focus_type="invoice",
+                        focus_id="INV-2",
+                        focus_label="INV-2",
+                        detail="User kept working from the prompt thread.",
+                        created_at=now - timedelta(minutes=23),
+                        updated_at=now - timedelta(minutes=23),
+                    ),
+                    AssistantPromptNavigationOutcome(
+                        run_id=noisy_run.id,
+                        conversation_id=None,
+                        user_id="ops_beta",
+                        session_id="noisy-session",
+                        user_role="OPS_ADMIN",
+                        surface="PROMPT_HOME",
+                        outcome="FAILED",
+                        intent_key="invalid_navigation_payload",
+                        target_view=None,
+                        target_label=None,
+                        target_rationale=None,
+                        focus_type=None,
+                        focus_id=None,
+                        focus_label=None,
+                        detail="A workspace handoff suggestion could not be applied and was ignored.",
+                        created_at=now - timedelta(minutes=22),
+                        updated_at=now - timedelta(minutes=22),
+                    ),
+                ]
+            )
 
             for index in range(10):
                 session.add(
@@ -3057,6 +3421,32 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(recent_feedback[0]["rating"], "NEEDS_WORK")
         self.assertIn("cancellation", recent_feedback[0]["comment"])
 
+        prompt_navigation_summary = payload["prompt_navigation_summary"]
+        self.assertEqual(prompt_navigation_summary["total_outcome_count"], 6)
+        self.assertEqual(prompt_navigation_summary["accepted_count"], 3)
+        self.assertEqual(prompt_navigation_summary["dismissed_count"], 2)
+        self.assertEqual(prompt_navigation_summary["failed_count"], 1)
+
+        prompt_target_rows = {
+            (row["target_view"], row["focus_type"]): row for row in payload["by_prompt_target"]
+        }
+        operations_prompt_row = prompt_target_rows[("operations", "workflow_item")]
+        self.assertEqual(operations_prompt_row["accepted_count"], 3)
+        self.assertEqual(operations_prompt_row["signal"], "CANDIDATE_FOR_RULE")
+        self.assertIn("deterministic rule candidate", operations_prompt_row["signal_reasons"][0])
+        self.assertGreaterEqual(len(operations_prompt_row["recent_prompt_examples"]), 1)
+        settlement_prompt_row = prompt_target_rows[("settlement", "invoice")]
+        self.assertEqual(settlement_prompt_row["dismissed_count"], 2)
+        self.assertEqual(settlement_prompt_row["signal"], "NARROW")
+        invalid_prompt_row = prompt_target_rows[(None, None)]
+        self.assertEqual(invalid_prompt_row["failed_count"], 1)
+
+        recent_prompt_navigation_outcomes = payload["recent_prompt_navigation_outcomes"]
+        self.assertEqual(recent_prompt_navigation_outcomes[0]["outcome"], "FAILED")
+        self.assertIsNone(recent_prompt_navigation_outcomes[0]["target_view"])
+        self.assertEqual(recent_prompt_navigation_outcomes[0]["source_workspace"], "assistant")
+        self.assertIn("ignored", recent_prompt_navigation_outcomes[0]["detail"])
+
         action_rows = {row["action_type"]: row for row in payload["by_action_type"]}
         self.assertEqual(action_rows["update_trade_workflow_item"]["executed_action_count"], 10)
         self.assertEqual(action_rows["update_trade_workflow_item"]["correction_count"], 1)
@@ -3077,6 +3467,10 @@ class AssistantApiTests(unittest.TestCase):
         filtered_metrics = filtered_metrics_response.json()
         self.assertEqual([row["agent_id"] for row in filtered_metrics["by_agent"]], ["workflow-agent"])
         self.assertEqual([row["agent_role_key"] for row in filtered_metrics["by_role"]], ["operations-coordinator"])
+        self.assertEqual(
+            [(row["target_view"], row["focus_type"]) for row in filtered_metrics["by_prompt_target"]],
+            [("operations", "workflow_item")],
+        )
         self.assertEqual([row["agent_profile_kind"] for row in filtered_metrics["by_profile"]], ["ROLE_DERIVED"])
         self.assertEqual(
             [row["action_type"] for row in filtered_metrics["by_action_type"]],
@@ -3208,7 +3602,7 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(payload["action_type_metrics"][0]["action_type"], "update_trade_workflow_item")
         self.assertEqual(payload["eval_signal"]["status"], "DECLARED")
-        self.assertIn("Allowed operational action staging.", payload["eval_signal"]["required_cases"])
+        self.assertIn("Allowed operational action execution.", payload["eval_signal"]["required_cases"])
         self.assertIn("Operations Lead", payload["human_owner_role"])
         self.assertTrue(payload["knowledge_base_entries"])
         self.assertTrue(any(entry["entry_type"] for entry in payload["knowledge_base_entries"]))
@@ -3361,6 +3755,12 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(accepted_package["status"], "ACCEPTED")
         self.assertEqual(accepted_package["accepted_by"], "assistant_user")
         self.assertEqual(accepted_package["notes"], "Promote into the policy backlog.")
+        self.assertEqual(accepted_package["implementation_evidence"]["eval_ids"], [])
+        self.assertEqual(accepted_package["implementation_evidence"]["test_names"], [])
+        self.assertEqual(accepted_package["implementation_evidence"]["doc_paths"], [])
+        self.assertIsNone(accepted_package["implementation_evidence"]["pr_url"])
+        self.assertIsNone(accepted_package["implementation_evidence"]["commit_sha"])
+        self.assertIsNone(accepted_package["implementation_evidence"]["owner"])
 
         start_response = self.client.patch(
             f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
@@ -3377,14 +3777,44 @@ class AssistantApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(missing_evidence_response.status_code, 400)
+        self.assertIn(
+            "Implementation evidence is required",
+            missing_evidence_response.json()["detail"],
+        )
 
         implemented_response = self.client.patch(
             f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
-            json={"status": "IMPLEMENTED", "notes": "Implemented checks with passing coverage."},
+            json={
+                "status": "IMPLEMENTED",
+                "notes": "Implemented checks with passing coverage.",
+                "implementation_evidence": {
+                    "pr_url": "https://github.com/org/repo/pull/123",
+                    "commit_sha": "ABC123DEF456",
+                    "eval_ids": [12, 18, 12],
+                    "test_names": ["assistant_api", "api contract"],
+                    "doc_paths": ["docs/engineering/agent-knowledge-base.md"],
+                    "owner": "Operations Lead",
+                },
+            },
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(implemented_response.status_code, 200)
-        self.assertEqual(implemented_response.json()["status"], "IMPLEMENTED")
+        implemented_payload = implemented_response.json()
+        self.assertEqual(implemented_payload["status"], "IMPLEMENTED")
+        self.assertEqual(implemented_payload["notes"], "Implemented checks with passing coverage.")
+        self.assertEqual(
+            implemented_payload["implementation_evidence"],
+            {
+                "pr_url": "https://github.com/org/repo/pull/123",
+                "commit_sha": "abc123def456",
+                "eval_ids": [12, 18],
+                "test_names": ["assistant_api", "api contract"],
+                "doc_paths": ["docs/engineering/agent-knowledge-base.md"],
+                "owner": "Operations Lead",
+            },
+        )
+        self.assertEqual(implemented_payload["implemented_by"], "assistant_user")
+        self.assertIsNotNone(implemented_payload["implemented_at"])
 
         invalid_transition_response = self.client.patch(
             f"/admin/assistant/agent-work-packages/{package['work_package_id']}",
@@ -3398,7 +3828,13 @@ class AssistantApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(list_response.status_code, 200)
-        self.assertEqual([row["work_package_id"] for row in list_response.json()], [package["work_package_id"]])
+        listed_packages = list_response.json()
+        self.assertEqual([row["work_package_id"] for row in listed_packages], [package["work_package_id"]])
+        self.assertEqual(
+            listed_packages[0]["implementation_evidence"]["pr_url"],
+            "https://github.com/org/repo/pull/123",
+        )
+        self.assertEqual(listed_packages[0]["implemented_by"], "assistant_user")
 
         invalid_filter_response = self.client.get(
             "/admin/assistant/agent-work-packages?status=UNKNOWN",
@@ -3483,6 +3919,59 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual([row["work_package_id"] for row in records], [package["work_package_id"]])
         with self.SessionLocal() as session:
             self.assertEqual(session.query(AssistantAgentWorkPackage).count(), 1)
+
+    def test_admin_lists_agent_work_packages_with_evidence_filters(self) -> None:
+        admin_token = self._create_session_token()
+        now = datetime.now(timezone.utc)
+        self._create_work_package(
+            work_package_id="policy-pr-tests",
+            title="Policy package with PR and tests",
+            status="IMPLEMENTED",
+            implementation_evidence={
+                "pr_url": "https://github.com/org/repo/pull/123",
+                "test_names": ["apps.api.tests.test_assistant_api"],
+            },
+            now=now,
+        )
+        self._create_work_package(
+            work_package_id="policy-eval-docs",
+            title="Policy package with evals and docs",
+            status="IMPLEMENTED",
+            implementation_evidence={
+                "eval_ids": [12],
+                "doc_paths": ["docs/engineering/agent-knowledge-base.md"],
+            },
+            now=now - timedelta(minutes=5),
+        )
+        self._create_work_package(
+            work_package_id="policy-in-progress",
+            title="Policy package in progress",
+            status="IN_PROGRESS",
+            implementation_evidence={},
+            now=now - timedelta(minutes=10),
+        )
+
+        pr_filter_response = self.client.get(
+            "/admin/assistant/agent-work-packages?status=IMPLEMENTED&has_pr=true&has_tests=true",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(pr_filter_response.status_code, 200)
+        self.assertEqual(
+            [row["work_package_id"] for row in pr_filter_response.json()],
+            ["policy-pr-tests"],
+        )
+
+        eval_filter_response = self.client.get(
+            "/admin/assistant/agent-work-packages?status=IMPLEMENTED&has_eval=true&has_docs=true&has_pr=false",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(eval_filter_response.status_code, 200)
+        self.assertEqual(
+            [row["work_package_id"] for row in eval_filter_response.json()],
+            ["policy-eval-docs"],
+        )
 
     def test_admin_control_tower_summary_reports_roster_activity_and_trust_signals(self) -> None:
         admin_token = self._create_session_token()
@@ -3671,6 +4160,59 @@ class AssistantApiTests(unittest.TestCase):
                 ]
             )
             session.commit()
+        self._create_work_package(
+            work_package_id="policy-implemented-pr-tests",
+            title="Implemented package with PR and tests",
+            status="IMPLEMENTED",
+            source_agent_id="watch-agent",
+            source_agent_name="Watch Agent",
+            implementation_evidence={
+                "pr_url": "https://github.com/org/repo/pull/123",
+                "commit_sha": "abc123def456",
+                "test_names": ["apps.api.tests.test_assistant_api"],
+            },
+            now=now,
+        )
+        self._create_work_package(
+            work_package_id="policy-implemented-eval-docs",
+            title="Implemented package with evals and docs",
+            status="IMPLEMENTED",
+            source_agent_id="risky-agent",
+            source_agent_name="Risky Agent",
+            implementation_evidence={
+                "eval_ids": [12],
+                "test_names": ["apps.api.tests.test_assistant_agent_health_review"],
+                "doc_paths": ["docs/engineering/agent-knowledge-base.md"],
+            },
+            now=now - timedelta(minutes=5),
+        )
+        self._create_work_package(
+            work_package_id="policy-in-progress",
+            title="Policy package in progress",
+            status="IN_PROGRESS",
+            source_agent_id="watch-agent",
+            source_agent_name="Watch Agent",
+            implementation_evidence={},
+            now=now - timedelta(minutes=10),
+        )
+        self._create_work_package(
+            work_package_id="policy-stale-accepted",
+            title="Accepted package still waiting on shipped proof",
+            status="ACCEPTED",
+            source_agent_id="risky-agent",
+            source_agent_name="Risky Agent",
+            implementation_evidence={},
+            now=now - timedelta(days=5),
+        )
+        self._create_work_package(
+            work_package_id="policy-stale-in-progress",
+            title="In-progress package stalled without shipped proof",
+            status="IN_PROGRESS",
+            source_agent_id="watch-agent",
+            source_agent_name="Watch Agent",
+            implementation_evidence={},
+            now=now - timedelta(days=4),
+        )
 
         response = self.client.get(
             "/admin/assistant/control-tower/summary",
@@ -3708,14 +4250,41 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(oldest_pending["action_type"], "issue_trade_invoice")
         self.assertGreaterEqual(oldest_pending["age_seconds"], 4 * 60 * 60)
 
+        self.assertEqual(payload["work_packages"]["total_count"], 5)
+        self.assertEqual(payload["work_packages"]["accepted_count"], 1)
+        self.assertEqual(payload["work_packages"]["in_progress_count"], 2)
+        self.assertEqual(payload["work_packages"]["implemented_count"], 2)
+        self.assertEqual(payload["work_packages"]["dismissed_count"], 0)
+        self.assertEqual(payload["work_packages"]["stale_count"], 2)
+        self.assertEqual(payload["work_packages"]["stale_accepted_count"], 1)
+        self.assertEqual(payload["work_packages"]["stale_in_progress_count"], 1)
+        self.assertEqual(payload["work_packages"]["implemented_with_pr_count"], 1)
+        self.assertEqual(payload["work_packages"]["implemented_with_commit_count"], 1)
+        self.assertEqual(payload["work_packages"]["implemented_with_eval_count"], 1)
+        self.assertEqual(payload["work_packages"]["implemented_with_tests_count"], 2)
+        self.assertEqual(payload["work_packages"]["implemented_with_docs_count"], 1)
+        self.assertEqual(payload["work_packages"]["implemented_missing_evidence_count"], 0)
+
         signals = {(row["agent_id"], row["signal_type"]): row for row in payload["trust_signals"]}
         self.assertIn(("risky-agent", "MISSING_EVAL_COVERAGE"), signals)
         self.assertIn(("risky-agent", "POLICY_WARNING"), signals)
         self.assertIn(("risky-agent", "ACTION_BACKLOG"), signals)
         self.assertIn(("risky-agent", "FAILED_ACTIONS"), signals)
+        self.assertIn(("risky-agent", "STALE_WORK_PACKAGE"), signals)
+        self.assertIn(("watch-agent", "STALE_WORK_PACKAGE"), signals)
         self.assertIn(("watch-agent", "RUN_WARNING"), signals)
         self.assertEqual(signals[("risky-agent", "POLICY_WARNING")]["severity"], "danger")
         self.assertEqual(signals[("risky-agent", "MISSING_EVAL_COVERAGE")]["eval_status"], "BLOCKED")
+        self.assertEqual(signals[("risky-agent", "STALE_WORK_PACKAGE")]["severity"], "warning")
+        self.assertEqual(signals[("watch-agent", "STALE_WORK_PACKAGE")]["severity"], "danger")
+        self.assertIn(
+            "Accepted",
+            signals[("risky-agent", "STALE_WORK_PACKAGE")]["details"][0],
+        )
+        self.assertIn(
+            "In Progress",
+            signals[("watch-agent", "STALE_WORK_PACKAGE")]["details"][0],
+        )
         self.assertIn(
             "must declare explicit allowed_action_types",
             signals[("risky-agent", "POLICY_WARNING")]["details"][0],
@@ -3892,6 +4461,209 @@ class AssistantApiTests(unittest.TestCase):
         second_input = second_request["input"]
         assert isinstance(second_input, list)
         self.assertEqual([item["call_id"] for item in second_input], ["call_1", "call_2"])
+
+    def test_assistant_prompt_prefetches_workspace_summary_candidates_for_open_invoices(self) -> None:
+        token = self._create_session_token()
+        captured_requests: list[dict[str, object]] = []
+        now = datetime(2026, 4, 23, 16, 0, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add(
+                Event(
+                    event_id="evt-t-invoice-prefetch",
+                    aggregate_type="trade",
+                    aggregate_id="T-INVOICE-PREFETCH",
+                    event_type="TradeCreated",
+                    occurred_at=now,
+                    recorded_at=now,
+                    actor_id="assistant_user",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={"trade_id": "T-INVOICE-PREFETCH"},
+                )
+            )
+            session.add(
+                Trade(
+                    trade_id="T-INVOICE-PREFETCH",
+                    external_trade_id="EXT-T-INVOICE-PREFETCH",
+                    source_system="TEST",
+                    created_at=now,
+                    updated_at=now,
+                    execution_timestamp=now - timedelta(days=2),
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="CRUDE",
+                    portfolio="PROMPT",
+                    counterparty="ACME",
+                    commodity_class="CRUDE",
+                    commodity="WTI",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    confirmation_status="CONFIRMED",
+                    nomination_status="COMPLETED",
+                    allocation_status="COMPLETED",
+                    invoice_status="PENDING",
+                    payment_status="PENDING",
+                    settlement_status="PENDING",
+                    price_index_code=None,
+                    price=75.25,
+                    volume=1000,
+                    trader_user="assistant_user",
+                    status="ACTIVE",
+                    last_event_id="evt-t-invoice-prefetch",
+                )
+            )
+            session.commit()
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, provider_label
+            captured_requests.append(payload)
+            return {
+                "output_text": "Prefetched invoice candidates.",
+                "usage": {"input_tokens": 28, "output_tokens": 9},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "settlement",
+                    "use_live_tools": True,
+                    "messages": [
+                        {"role": "assistant", "content": "Workspace summary shows open invoices that still need issuing."},
+                        {"role": "user", "content": "Let's handle the open invoices."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["message"]["content"], "Prefetched invoice candidates.")
+        self.assertEqual(payload["tool_calls"], [])
+
+        self.assertEqual(len(captured_requests), 1)
+        first_request = captured_requests[0]
+        self.assertIn("Live Tool Prefetch: get_workspace_summary", first_request["instructions"])
+        self.assertIn("tool: list_invoice_issue_candidates", first_request["instructions"])
+        self.assertIn("T-INVOICE-PREFETCH", first_request["instructions"])
+        self.assertIn("Top priority is T-INVOICE-PREFETCH because", first_request["instructions"])
+
+        run_detail = self.client.get(
+            f"/assistant/runs/{payload['run_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(run_detail.status_code, 200)
+        tool_sections = [
+            section
+            for section in run_detail.json()["prompt_sections"]
+            if section["source"] == "tool"
+        ]
+        self.assertGreaterEqual(len(tool_sections), 2)
+        self.assertTrue(
+            any("tool: list_invoice_issue_candidates" in section["content"] for section in tool_sections)
+        )
+
+    def test_assistant_prompt_prefetches_workspace_summary_candidates_from_explicit_summary_targets(self) -> None:
+        token = self._create_session_token()
+        captured_requests: list[dict[str, object]] = []
+        now = datetime(2026, 4, 23, 16, 0, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add(
+                Event(
+                    event_id="evt-t-summary-target-prefetch",
+                    aggregate_type="trade",
+                    aggregate_id="T-SUMMARY-TARGET-PREFETCH",
+                    event_type="TradeCreated",
+                    occurred_at=now,
+                    recorded_at=now,
+                    actor_id="assistant_user",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={"trade_id": "T-SUMMARY-TARGET-PREFETCH"},
+                )
+            )
+            session.add(
+                Trade(
+                    trade_id="T-SUMMARY-TARGET-PREFETCH",
+                    external_trade_id="EXT-T-SUMMARY-TARGET-PREFETCH",
+                    source_system="TEST",
+                    created_at=now,
+                    updated_at=now,
+                    execution_timestamp=now - timedelta(days=3),
+                    trade_nature="PHYSICAL",
+                    trade_structure="SINGLE",
+                    trade_side="BUY",
+                    book="CRUDE",
+                    portfolio="PROMPT",
+                    counterparty="ACME",
+                    commodity_class="CRUDE",
+                    commodity="WTI",
+                    pricing_type="FIXED",
+                    pricing_status="PRICED",
+                    confirmation_status="CONFIRMED",
+                    nomination_status="COMPLETED",
+                    allocation_status="COMPLETED",
+                    invoice_status="PENDING",
+                    payment_status="PENDING",
+                    settlement_status="PENDING",
+                    price_index_code=None,
+                    price=74.5,
+                    volume=500,
+                    trader_user="assistant_user",
+                    status="ACTIVE",
+                    last_event_id="evt-t-summary-target-prefetch",
+                )
+            )
+            session.commit()
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, provider_label
+            captured_requests.append(payload)
+            return {
+                "output_text": "Explicit summary targets prefetched invoice candidates.",
+                "usage": {"input_tokens": 24, "output_tokens": 8},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "summary_targets": ["settlement.invoice_pending_count"],
+                    "use_live_tools": True,
+                    "messages": [
+                        {"role": "user", "content": "Start with the first one."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["message"]["content"],
+            "Explicit summary targets prefetched invoice candidates.",
+        )
+
+        self.assertEqual(len(captured_requests), 1)
+        first_request = captured_requests[0]
+        self.assertIn("Requested Workspace Summary Focus", first_request["instructions"])
+        self.assertIn("settlement.invoice_pending_count", first_request["instructions"])
+        self.assertIn("tool: list_invoice_issue_candidates", first_request["instructions"])
+        self.assertIn("T-SUMMARY-TARGET-PREFETCH", first_request["instructions"])
+        self.assertIn("Top priority is T-SUMMARY-TARGET-PREFETCH because", first_request["instructions"])
 
     def test_trades_endpoint_returns_deterministic_recency_order(self) -> None:
         token = self._create_session_token()
@@ -4317,6 +5089,326 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(feedback_response.status_code, 403)
         self.assertIn("do not have access", feedback_response.json()["detail"])
 
+    def test_assistant_prompt_navigation_outcomes_record_distinct_route_feedback(self) -> None:
+        token = self._create_session_token()
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return {
+                "output_text": "Use operations for the confirmation blocker.",
+                "usage": {"input_tokens": 12, "output_tokens": 5},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "Where should I handle the confirmation blocker?"},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        run_id = response.json()["run_id"]
+        conversation_id = response.json()["conversation_id"]
+
+        accepted_response = self.client.post(
+            f"/assistant/runs/{run_id}/prompt-navigation-outcomes",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "outcome": "ACCEPTED",
+                "intent_key": "open_workspace|operations|trade|TRD-1001|||Open Work Queue",
+                "target_view": "operations",
+                "target_label": "Open Work Queue",
+                "target_rationale": "Review the blocker in operations.",
+                "focus_type": "trade",
+                "focus_id": "TRD-1001",
+                "focus_label": "TRD-1001",
+            },
+        )
+
+        self.assertEqual(accepted_response.status_code, 200)
+        accepted_payload = accepted_response.json()
+        self.assertEqual(accepted_payload["run_id"], run_id)
+        self.assertEqual(accepted_payload["conversation_id"], conversation_id)
+        self.assertEqual(accepted_payload["surface"], "PROMPT_HOME")
+        self.assertEqual(accepted_payload["outcome"], "ACCEPTED")
+        self.assertEqual(accepted_payload["target_view"], "operations")
+
+        duplicate_response = self.client.post(
+            f"/assistant/runs/{run_id}/prompt-navigation-outcomes",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "outcome": "ACCEPTED",
+                "intent_key": "open_workspace|operations|trade|TRD-1001|||Open Work Queue",
+                "target_view": "operations",
+                "target_label": "Open Work Queue",
+                "detail": "The user followed the route.",
+            },
+        )
+
+        self.assertEqual(duplicate_response.status_code, 200)
+        self.assertEqual(duplicate_response.json()["outcome_id"], accepted_payload["outcome_id"])
+        self.assertEqual(duplicate_response.json()["detail"], "The user followed the route.")
+
+        dismissed_response = self.client.post(
+            f"/assistant/runs/{run_id}/prompt-navigation-outcomes",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "outcome": "DISMISSED",
+                "intent_key": "open_workspace|operations|trade|TRD-1001|||Open Work Queue",
+                "target_view": "operations",
+                "target_label": "Open Work Queue",
+            },
+        )
+
+        self.assertEqual(dismissed_response.status_code, 200)
+        self.assertEqual(dismissed_response.json()["outcome"], "DISMISSED")
+        self.assertNotEqual(dismissed_response.json()["outcome_id"], accepted_payload["outcome_id"])
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(AssistantPromptNavigationOutcome).count(), 2)
+
+    def test_assistant_prompt_navigation_outcomes_are_scoped_to_accessible_runs(self) -> None:
+        owner_token = self._create_session_token()
+        other_token = self._create_session_token(
+            user_id="desk_user",
+            email="desk@example.com",
+            display_name="Desk User",
+            role="TRADER",
+        )
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return {
+                "output_text": "Use operations for the confirmation blocker.",
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {owner_token}"},
+                json={
+                    "provider": "openai",
+                    "workspace": "assistant",
+                    "messages": [
+                        {"role": "user", "content": "Where should I handle the confirmation blocker?"},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        run_id = response.json()["run_id"]
+
+        outcome_response = self.client.post(
+            f"/assistant/runs/{run_id}/prompt-navigation-outcomes",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={
+                "outcome": "ACCEPTED",
+                "intent_key": "open_workspace|operations|trade|TRD-1001|||Open Work Queue",
+                "target_view": "operations",
+            },
+        )
+
+        self.assertEqual(outcome_response.status_code, 403)
+        self.assertIn("do not have access", outcome_response.json()["detail"])
+
+    def test_prompt_home_navigation_outcomes_can_be_recorded_without_an_assistant_run(self) -> None:
+        token = self._create_session_token()
+
+        first_response = self.client.post(
+            "/assistant/prompt-navigation-outcomes",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "outcome": "ACCEPTED",
+                "intent_key": "open_workspace|operations|trade|T-AMEND-100|41||Open confirmation",
+                "target_view": "operations",
+                "target_label": "Open confirmation",
+                "target_rationale": "Review the confirmation blocker with the operations owner.",
+                "focus_type": "trade",
+                "focus_id": "T-AMEND-100",
+                "focus_label": "T-AMEND-100",
+            },
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        first_payload = first_response.json()
+        self.assertIsNone(first_payload["run_id"])
+        self.assertIsNone(first_payload["conversation_id"])
+        self.assertEqual(first_payload["target_label"], "Open confirmation")
+
+        second_response = self.client.post(
+            "/assistant/prompt-navigation-outcomes",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "outcome": "ACCEPTED",
+                "intent_key": "open_workspace|operations|trade|T-AMEND-101|44||Open confirmation",
+                "target_view": "operations",
+                "target_label": "Open confirmation",
+                "target_rationale": "Review the confirmation blocker with the operations owner.",
+                "focus_type": "trade",
+                "focus_id": "T-AMEND-101",
+                "focus_label": "T-AMEND-101",
+            },
+        )
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertNotEqual(second_response.json()["outcome_id"], first_payload["outcome_id"])
+
+        with self.SessionLocal() as session:
+            outcomes = session.query(AssistantPromptNavigationOutcome).order_by(AssistantPromptNavigationOutcome.id.asc()).all()
+            self.assertEqual(len(outcomes), 2)
+            self.assertIsNone(outcomes[0].run_id)
+            self.assertEqual(outcomes[0].target_label, "Open confirmation")
+
+    def test_assistant_prompt_route_recommendations_are_role_scoped_and_promote_candidates(self) -> None:
+        ops_token = self._create_session_token()
+        trader_token = self._create_session_token(
+            user_id="trader_alpha",
+            email="trader.alpha@example.com",
+            display_name="Trader Alpha",
+            role="TRADER",
+        )
+        now = datetime.now(timezone.utc)
+
+        with self.SessionLocal() as session:
+            for role, user_id, target_view, target_label, target_rationale, focus_type in [
+                (
+                    "OPS_ADMIN",
+                    "ops_admin",
+                    "operations",
+                    "Open Work Queue",
+                    "Use operations for confirmation blockers and handoffs.",
+                    None,
+                ),
+                (
+                    "TRADER",
+                    "trader_alpha",
+                    "trades",
+                    "Open Trade Capture",
+                    "Use Trade Capture for trade inspection and amendment follow-through.",
+                    None,
+                ),
+            ]:
+                for index in range(3):
+                    created_at = now - timedelta(days=1, minutes=index)
+                    session_id = f"{role.lower()}-prompt-route-{index}"
+                    run = AssistantRun(
+                        conversation_id=None,
+                        status="COMPLETED",
+                        user_id=user_id,
+                        session_id=session_id,
+                        user_role=role,
+                        workspace="assistant",
+                        agent_id=None,
+                        agent_name=None,
+                        agent_role_key=None,
+                        agent_profile_kind=None,
+                        provider="openai",
+                        model="gpt-5-mini",
+                        use_live_tools=False,
+                        request_messages=[{"role": "user", "content": "Where should I go next?"}],
+                        application_context=None,
+                        prompt_sections=[],
+                        rendered_system_prompt="System prompt.",
+                        warnings=[],
+                        tool_calls=[],
+                        input_tokens=12,
+                        output_tokens=6,
+                        latest_user_message="Where should I go next?",
+                        assistant_message=target_rationale,
+                        error_detail=None,
+                        created_at=created_at,
+                        completed_at=created_at,
+                    )
+                    session.add(run)
+                    session.flush()
+                    session.add(
+                        AssistantPromptNavigationOutcome(
+                            run_id=run.id,
+                            conversation_id=None,
+                            user_id=user_id,
+                            session_id=session_id,
+                            user_role=role,
+                            surface="PROMPT_HOME",
+                            outcome="ACCEPTED",
+                            intent_key=f"open_workspace|{target_view}|workspace|workspace|||{target_label}",
+                            target_view=target_view,
+                            target_label=target_label,
+                            target_rationale=target_rationale,
+                            focus_type=focus_type,
+                            focus_id=None,
+                            focus_label=None,
+                            detail=None,
+                            created_at=created_at,
+                            updated_at=created_at,
+                        )
+                    )
+            for index in range(3):
+                created_at = now - timedelta(hours=2, minutes=index)
+                session.add(
+                    AssistantPromptNavigationOutcome(
+                        run_id=None,
+                        conversation_id=None,
+                        user_id="ops_admin",
+                        session_id=f"ops-promoted-route-{index}",
+                        user_role="OPS_ADMIN",
+                        surface="PROMPT_HOME",
+                        outcome="ACCEPTED",
+                        intent_key=f"open_workspace|operations|trade|T-AMEND-10{index}|41||Open confirmation",
+                        target_view="operations",
+                        target_label="Open confirmation",
+                        target_rationale="Review the confirmation blocker with the operations owner.",
+                        focus_type="trade",
+                        focus_id=f"T-AMEND-10{index}",
+                        focus_label=f"T-AMEND-10{index}",
+                        detail=None,
+                        created_at=created_at,
+                        updated_at=created_at,
+                    )
+                )
+            session.commit()
+
+        ops_response = self.client.get(
+            "/assistant/prompt-route-recommendations",
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+
+        self.assertEqual(ops_response.status_code, 200)
+        ops_payload = ops_response.json()
+        self.assertEqual(len(ops_payload), 2)
+        self.assertEqual(ops_payload[0]["target_view"], "operations")
+        self.assertEqual(ops_payload[0]["target_label"], "Open confirmation")
+        self.assertEqual(ops_payload[0]["focus_type"], "trade")
+        self.assertEqual(ops_payload[0]["accepted_count"], 3)
+        self.assertEqual(ops_payload[0]["outcome_count"], 3)
+        self.assertEqual(ops_payload[0]["acceptance_rate"], 1.0)
+        self.assertEqual(ops_payload[0]["signal"], "CANDIDATE_FOR_RULE")
+        self.assertIn("deterministic rule candidate", ops_payload[0]["signal_reasons"][0])
+        self.assertEqual(ops_payload[1]["target_label"], "Open Work Queue")
+
+        trader_response = self.client.get(
+            "/assistant/prompt-route-recommendations",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+
+        self.assertEqual(trader_response.status_code, 200)
+        trader_payload = trader_response.json()
+        self.assertEqual(len(trader_payload), 1)
+        self.assertEqual(trader_payload[0]["target_view"], "trades")
+        self.assertEqual(trader_payload[0]["target_label"], "Open Trade Capture")
+
     def test_prepare_assistant_execution_does_not_persist_new_conversation(self) -> None:
         token = self._create_session_token()
         payload = AssistantPromptRequest.model_validate(
@@ -4671,6 +5763,49 @@ class AssistantApiTests(unittest.TestCase):
                         decided_by="ops_lead",
                     )
                 )
+            session.commit()
+
+    def _create_work_package(
+        self,
+        *,
+        work_package_id: str,
+        title: str,
+        status: str,
+        source_agent_id: str = "workflow-alpha",
+        source_agent_name: str = "Workflow Alpha",
+        implementation_evidence: dict[str, object] | None = None,
+        owner_role: str = "Operations Lead",
+        now: datetime | None = None,
+    ) -> None:
+        resolved_now = now or datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                AssistantAgentWorkPackage(
+                    work_package_id=work_package_id,
+                    title=title,
+                    package_type="POLICY",
+                    priority="P2",
+                    status=status,
+                    source_agent_ids=[source_agent_id],
+                    source_agent_names=[source_agent_name],
+                    source_recommendations=["KEEP_STAGED"],
+                    source_candidates=["Promote recurring reviewer decisions into typed policy."],
+                    recommended_owner_role=owner_role,
+                    rationale="Autonomy review surfaced a recurring deterministic candidate.",
+                    acceptance_checks=["Run policy simulation before rollout."],
+                    knowledge_base_titles=[],
+                    implementation_evidence=implementation_evidence or {},
+                    accepted_at=resolved_now - timedelta(hours=4),
+                    accepted_by="ops_admin",
+                    implemented_at=resolved_now - timedelta(hours=1) if status == "IMPLEMENTED" else None,
+                    implemented_by="ops_admin" if status == "IMPLEMENTED" else None,
+                    notes="Tracked in the backlog.",
+                    created_at=resolved_now - timedelta(hours=4),
+                    created_by="ops_admin",
+                    updated_at=resolved_now,
+                    updated_by="ops_admin",
+                )
+            )
             session.commit()
 
     def _create_agent(

@@ -10,13 +10,30 @@ import {
 } from 'react'
 
 import {
+  approveAssistantActionRequest,
   getAssistantConversation,
+  listAssistantActionRequests,
   listAssistantConversations,
+  listAssistantPromptRouteRecommendations,
   loadAssistantRuntimeSettings,
+  rejectAssistantActionRequest,
   requestAssistantResponse,
+  submitAssistantPromptNavigationOutcome,
 } from '../../entities/assistant/api'
 import {
+  AssistantActionRequestList,
+  type AssistantActionDecisionPayload,
+} from '../../entities/assistant/AssistantActionRequestList'
+import {
+  loadInvoiceIssueCandidates,
+  loadTradeAttentionCandidates,
+  type InvoiceIssueCandidateRecord,
+  type TradeAttentionCandidateRecord,
+} from '../../entities/app/api'
+import {
+  buildPromptNavigationIntentKey,
   buildPromptNavigationRouteHandoff,
+  INVALID_PROMPT_NAVIGATION_WARNING,
   normalizePromptNavigationIntent,
   parsePromptNavigationIntentsFromAssistantContent,
   promptNavigationIntentDetail,
@@ -30,7 +47,9 @@ import type {
   AssistantConversation,
   AssistantConversationSummary,
   AssistantProvider,
+  AssistantPromptRouteRecommendation,
   AssistantRuntimeSettings,
+  AssistantWorkspaceSummaryTarget,
   ViewKey,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
@@ -46,12 +65,15 @@ import {
   type PromptHomeContextualStarter,
   type PromptHomeCounts,
 } from './promptHomeStarters'
+import { buildPromptHomePromotedRoutes } from './promptPromotedRoutes'
 
 type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null
   health: string
   counts: PromptHomeCounts
   onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
+  onRefreshData?: () => Promise<void>
+  initialMessages?: PromptHomeMessage[]
 }
 
 type PromptHomeMessage = {
@@ -101,6 +123,9 @@ const NAVIGATION_INTENTS: PromptNavigationIntent[] = [
 ]
 
 const PROMPT_HOME_LIVE_CONTEXT_PANEL_ID = 'prompt-home-live-context-panel'
+const PROMPT_HOME_REVIEW_PANEL_ID = 'prompt-home-review-panel'
+const PROMPT_HOME_RECENT_PANEL_ID = 'prompt-home-recent-panel'
+const PROMPT_HOME_DIRECT_PANEL_ID = 'prompt-home-direct-panel'
 
 function createPromptMessageId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -121,6 +146,42 @@ function formatPromptTimestamp(value: string | null | undefined): string {
   }
 
   return date.toLocaleString()
+}
+
+function formatPromotedRouteEvidence(
+  recommendation: AssistantPromptRouteRecommendation,
+): string {
+  const acceptanceLabel =
+    typeof recommendation.acceptance_rate === 'number' && Number.isFinite(recommendation.acceptance_rate)
+      ? `${Math.round(recommendation.acceptance_rate * 100)}% accepted`
+      : 'Accepted route'
+  return `${recommendation.accepted_count}/${recommendation.outcome_count} accepted · ${acceptanceLabel}`
+}
+
+function formatPromotedRouteFocus(intent: PromptNavigationIntent): string | null {
+  if (!intent.focus) {
+    return null
+  }
+
+  const label = intent.focus.label ?? intent.focus.id
+  switch (intent.focus.type) {
+    case 'trade':
+      return `Trade: ${label}`
+    case 'workflow_item':
+      return `Workflow item: ${label}`
+    case 'invoice':
+      return `Invoice: ${label}`
+    case 'payment':
+      return `Payment: ${label}`
+    case 'document':
+      return `Document: ${label}`
+    case 'reference_record':
+      return `Reference: ${label}`
+    case 'report':
+      return `Report: ${label}`
+    default:
+      return label
+  }
 }
 
 function summarizePromptConversation(conversation: AssistantConversationSummary): string {
@@ -167,17 +228,62 @@ function promptMessagesFromConversation(conversation: AssistantConversation): Pr
             sourceRunId: message.run_id,
             sourceConversationId: conversation.conversation_id,
           })
-        : { content: message.content, intents: [] }
+        : { content: message.content, intents: [], warnings: [] }
+    const messageContent =
+      parsedResponse.intents.length > 0 || parsedResponse.warnings.length > 0
+        ? parsedResponse.content
+        : parsedResponse.content || message.content
 
     return {
       id: createPromptMessageId(),
       role: message.role,
-      content: parsedResponse.content || message.content,
+      content: messageContent,
       provider: message.provider ?? undefined,
       model: message.model ?? undefined,
       runId: message.run_id,
-      warnings: message.warnings,
+      warnings: [...message.warnings, ...parsedResponse.warnings],
       navigationIntents: parsedResponse.intents,
+    }
+  })
+}
+
+function replacePromptMessageActionRequest(
+  currentMessages: PromptHomeMessage[],
+  updatedActionRequest: AssistantActionRequest,
+): PromptHomeMessage[] {
+  return currentMessages.map((message) => {
+    if (!message.actionRequests?.some((request) => request.action_request_id === updatedActionRequest.action_request_id)) {
+      return message
+    }
+
+    return {
+      ...message,
+      actionRequests: message.actionRequests.map((request) =>
+        request.action_request_id === updatedActionRequest.action_request_id
+          ? updatedActionRequest
+          : request,
+      ),
+    }
+  })
+}
+
+function removePromptNavigationIntent(
+  currentMessages: PromptHomeMessage[],
+  args: {
+    messageId: string
+    intentKey: string
+  },
+): PromptHomeMessage[] {
+  return currentMessages.map((message) => {
+    if (message.id !== args.messageId || !message.navigationIntents?.length) {
+      return message
+    }
+
+    return {
+      ...message,
+      navigationIntents: message.navigationIntents.filter(
+        (intent) => buildPromptNavigationIntentKey(intent) !== args.intentKey,
+      ),
     }
   })
 }
@@ -187,11 +293,13 @@ export function PromptHomeWorkspace({
   health,
   counts,
   onOpenView,
+  onRefreshData,
+  initialMessages = [],
 }: PromptHomeWorkspaceProps) {
   const [runtimeSettings, setRuntimeSettings] = useState<AssistantRuntimeSettings | null>(null)
   const [runtimeError, setRuntimeError] = useState('')
   const [draft, setDraft] = useState('')
-  const [messages, setMessages] = useState<PromptHomeMessage[]>([])
+  const [messages, setMessages] = useState<PromptHomeMessage[]>(() => initialMessages)
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -200,7 +308,23 @@ export function PromptHomeWorkspace({
   const [conversationHistoryError, setConversationHistoryError] = useState('')
   const [conversationDetailLoading, setConversationDetailLoading] = useState(false)
   const [conversationDetailError, setConversationDetailError] = useState('')
+  const [actionRequestIdsInFlight, setActionRequestIdsInFlight] = useState<number[]>([])
+  const [pendingActionRequests, setPendingActionRequests] = useState<AssistantActionRequest[]>([])
+  const [pendingActionRequestsLoading, setPendingActionRequestsLoading] = useState(false)
+  const [pendingActionRequestsError, setPendingActionRequestsError] = useState('')
+  const [promptRouteRecommendations, setPromptRouteRecommendations] = useState<
+    AssistantPromptRouteRecommendation[]
+  >([])
+  const [promptRouteRecommendationsLoading, setPromptRouteRecommendationsLoading] = useState(false)
+  const [promptRouteRecommendationsError, setPromptRouteRecommendationsError] = useState('')
+  const [tradeAttentionCandidates, setTradeAttentionCandidates] = useState<TradeAttentionCandidateRecord[]>([])
+  const [invoiceIssueCandidates, setInvoiceIssueCandidates] = useState<InvoiceIssueCandidateRecord[]>([])
   const [liveContextExpanded, setLiveContextExpanded] = useState(false)
+  const [supportPanels, setSupportPanels] = useState({
+    review: false,
+    recent: authSession !== null,
+    direct: false,
+  })
   const promptResumeIntent = useSyncExternalStore(
     subscribePromptResumeIntent,
     getPromptResumeIntent,
@@ -220,6 +344,45 @@ export function PromptHomeWorkspace({
   const contextualStarters = useMemo(
     () => buildPromptHomeContextualStarters(counts),
     [counts],
+  )
+  const promotedRoutes = useMemo(
+    () =>
+      buildPromptHomePromotedRoutes({
+        recommendations: promptRouteRecommendations,
+        tradeAttentionCandidates,
+        invoiceIssueCandidates,
+      }),
+    [invoiceIssueCandidates, promptRouteRecommendations, tradeAttentionCandidates],
+  )
+  const displayedMessages = useMemo(() => [...messages].reverse(), [messages])
+
+  const recordPromptNavigationOutcome = useCallback(
+    (
+      runId: number | null | undefined,
+      payload: {
+        outcome: 'ACCEPTED' | 'DISMISSED' | 'FAILED'
+        intentKey: string
+        targetView?: ViewKey
+        targetLabel?: string
+        targetRationale?: string
+        focusType?: 'trade' | 'workflow_item' | 'document' | 'invoice' | 'payment' | 'reference_record' | 'report'
+        focusId?: string
+        focusLabel?: string
+        detail?: string
+      },
+    ) => {
+      if (!authSession) {
+        return
+      }
+
+      void submitAssistantPromptNavigationOutcome(
+        appConfig.apiBase,
+        runId,
+        payload,
+        { accessToken: authSession.accessToken },
+      ).catch(() => undefined)
+    },
+    [authSession],
   )
 
   const refreshRecentConversations = useCallback(async () => {
@@ -250,6 +413,143 @@ export function PromptHomeWorkspace({
     void refreshRecentConversations()
   }, [refreshRecentConversations])
 
+  const refreshPendingActionRequests = useCallback(async () => {
+    if (!authSession) {
+      setPendingActionRequests([])
+      setPendingActionRequestsError('')
+      return
+    }
+
+    setPendingActionRequestsLoading(true)
+    setPendingActionRequestsError('')
+    try {
+      const actionRequests = await listAssistantActionRequests(appConfig.apiBase, {
+        accessToken: authSession.accessToken,
+        status: 'PENDING',
+        limit: 4,
+      })
+      setPendingActionRequests(actionRequests)
+    } catch (error) {
+      setPendingActionRequestsError(
+        error instanceof Error ? error.message : 'Could not load governed review requests.',
+      )
+    } finally {
+      setPendingActionRequestsLoading(false)
+    }
+  }, [authSession])
+
+  useEffect(() => {
+    void refreshPendingActionRequests()
+  }, [refreshPendingActionRequests])
+
+  const refreshPromptRouteRecommendations = useCallback(async () => {
+    if (!authSession) {
+      setPromptRouteRecommendations([])
+      setPromptRouteRecommendationsError('')
+      return
+    }
+
+    setPromptRouteRecommendationsLoading(true)
+    setPromptRouteRecommendationsError('')
+    try {
+      const recommendations = await listAssistantPromptRouteRecommendations(appConfig.apiBase, {
+        accessToken: authSession.accessToken,
+      })
+      setPromptRouteRecommendations(recommendations)
+    } catch (error) {
+      setPromptRouteRecommendations([])
+      setPromptRouteRecommendationsError(
+        error instanceof Error ? error.message : 'Could not load promoted prompt routes.',
+      )
+    } finally {
+      setPromptRouteRecommendationsLoading(false)
+    }
+  }, [authSession])
+
+  useEffect(() => {
+    void refreshPromptRouteRecommendations()
+  }, [refreshPromptRouteRecommendations])
+
+  useEffect(() => {
+    if (!authSession || promptRouteRecommendations.length === 0) {
+      setTradeAttentionCandidates([])
+      setInvoiceIssueCandidates([])
+      return
+    }
+
+    const readHeaders = new Headers({ Authorization: `Bearer ${authSession.accessToken}` })
+    void Promise.allSettled([
+      loadTradeAttentionCandidates(
+        appConfig.apiBase,
+        { limit: 6 },
+        { readHeaders },
+      ),
+      loadInvoiceIssueCandidates(
+        appConfig.apiBase,
+        { readyOnly: true, limit: 6 },
+        { readHeaders },
+      ),
+    ]).then((results) => {
+      const [tradeCandidatesResult, invoiceCandidatesResult] = results
+      if (tradeCandidatesResult.status === 'fulfilled') {
+        setTradeAttentionCandidates(tradeCandidatesResult.value.items)
+      } else {
+        setTradeAttentionCandidates([])
+      }
+
+      if (invoiceCandidatesResult.status === 'fulfilled') {
+        setInvoiceIssueCandidates(invoiceCandidatesResult.value.items)
+      } else {
+        setInvoiceIssueCandidates([])
+      }
+    })
+  }, [authSession, promptRouteRecommendations])
+
+  useEffect(() => {
+    setSupportPanels((current) =>
+      current.recent === (authSession !== null)
+        ? current
+        : {
+            ...current,
+            recent: authSession !== null,
+          },
+    )
+  }, [authSession])
+
+  useEffect(() => {
+    if (
+      pendingActionRequests.length === 0 &&
+      !pendingActionRequestsError &&
+      !pendingActionRequestsLoading
+    ) {
+      return
+    }
+
+    setSupportPanels((current) => (current.review ? current : { ...current, review: true }))
+  }, [pendingActionRequests.length, pendingActionRequestsError, pendingActionRequestsLoading])
+
+  useEffect(() => {
+    if (
+      !authSession ||
+      (recentConversations.length === 0 &&
+        !conversationHistoryError &&
+        !conversationDetailError &&
+        !conversationHistoryLoading &&
+        !conversationDetailLoading)
+    ) {
+      return
+    }
+
+    setSupportPanels((current) => (current.recent ? current : { ...current, recent: true }))
+  }, [
+    authSession,
+    recentConversations.length,
+    conversationHistoryError,
+    conversationDetailError,
+    conversationHistoryLoading,
+    conversationDetailLoading,
+  ])
+
   async function loadRuntimeSettings(): Promise<AssistantRuntimeSettings> {
     if (runtimeSettings) {
       return runtimeSettings
@@ -267,7 +567,10 @@ export function PromptHomeWorkspace({
     }
   }
 
-  async function submitPrompt(prompt: string) {
+  async function submitPrompt(
+    prompt: string,
+    summaryTargets: AssistantWorkspaceSummaryTarget[] = [],
+  ) {
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt || !authSession || submitting) {
       return
@@ -304,6 +607,7 @@ export function PromptHomeWorkspace({
           provider,
           workspace: 'assistant',
           context: operatorContext,
+          summary_targets: summaryTargets,
           use_live_tools: true,
           messages: nextMessages.map((message) => ({
             role: message.role,
@@ -319,6 +623,18 @@ export function PromptHomeWorkspace({
         sourceRunId: response.run_id,
         sourceConversationId: responseConversationId,
       })
+      const responseContent =
+        parsedResponse.intents.length > 0 || parsedResponse.warnings.length > 0
+          ? parsedResponse.content
+          : parsedResponse.content || response.message.content
+
+      if (parsedResponse.warnings.includes(INVALID_PROMPT_NAVIGATION_WARNING)) {
+        recordPromptNavigationOutcome(response.run_id, {
+          outcome: 'FAILED',
+          intentKey: 'invalid_navigation_payload',
+          detail: INVALID_PROMPT_NAVIGATION_WARNING,
+        })
+      }
 
       setConversationId(responseConversationId)
       setMessages((current) => [
@@ -326,16 +642,17 @@ export function PromptHomeWorkspace({
         {
           id: createPromptMessageId(),
           role: 'assistant',
-          content: parsedResponse.content || response.message.content,
+          content: responseContent,
           provider: response.provider,
           model: response.model,
           runId: response.run_id,
-          warnings: response.warnings,
+          warnings: [...response.warnings, ...parsedResponse.warnings],
           actionRequests: response.action_requests,
           navigationIntents: parsedResponse.intents,
         },
       ])
       void refreshRecentConversations()
+      void refreshPendingActionRequests()
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Assistant request failed.')
     } finally {
@@ -343,9 +660,11 @@ export function PromptHomeWorkspace({
     }
   }
 
-  const submitResumedPrompt = useEffectEvent((prompt: string) => {
-    void submitPrompt(prompt)
-  })
+  const submitResumedPrompt = useEffectEvent(
+    (prompt: string, summaryTargets: AssistantWorkspaceSummaryTarget[] = []) => {
+      void submitPrompt(prompt, summaryTargets)
+    },
+  )
 
   useEffect(() => {
     if (!authSession || !promptResumeIntent) {
@@ -364,7 +683,7 @@ export function PromptHomeWorkspace({
     setConversationDetailError('')
 
     if (promptResumeIntent.submitAfterSignIn) {
-      submitResumedPrompt(promptResumeIntent.draft)
+      submitResumedPrompt(promptResumeIntent.draft, promptResumeIntent.summaryTargets ?? [])
     }
   }, [authSession, promptResumeIntent])
 
@@ -441,27 +760,118 @@ export function PromptHomeWorkspace({
     if (!authSession) {
       savePromptResumeIntent({
         draft: starter.prompt,
+        summaryTargets: starter.summaryTargets,
         submitAfterSignIn: true,
       })
       onOpenView('settings')
       return
     }
 
-    void submitPrompt(starter.prompt)
+    void submitPrompt(starter.prompt, starter.summaryTargets ?? [])
   }
 
-  function handleNavigationIntent(intent: PromptNavigationIntent, includeHandoff = true) {
+  function openNavigationIntent(
+    intent: PromptNavigationIntent,
+    options: {
+      includeHandoff?: boolean
+      recordOutcome?: boolean
+    } = {},
+  ) {
     const normalizedIntent = normalizePromptNavigationIntent(intent)
     if (!normalizedIntent) {
       setSubmitError('That navigation suggestion is no longer available.')
+      if (options.recordOutcome) {
+        recordPromptNavigationOutcome(intent.sourceRunId, {
+          outcome: 'FAILED',
+          intentKey: buildPromptNavigationIntentKey(intent),
+          detail: 'That navigation suggestion is no longer available.',
+        })
+      }
       return
+    }
+
+    if (options.recordOutcome) {
+      recordPromptNavigationOutcome(normalizedIntent.sourceRunId, {
+        outcome: 'ACCEPTED',
+        intentKey: buildPromptNavigationIntentKey(normalizedIntent),
+        targetView: normalizedIntent.targetView,
+        targetLabel: promptNavigationIntentLabel(normalizedIntent),
+        targetRationale: normalizedIntent.rationale,
+        focusType: normalizedIntent.focus?.type,
+        focusId: normalizedIntent.focus?.id,
+        focusLabel: normalizedIntent.focus?.label,
+      })
     }
 
     onOpenView(
       normalizedIntent.targetView,
-      includeHandoff ? buildPromptNavigationRouteHandoff(normalizedIntent) : null,
+      options.includeHandoff === false ? null : buildPromptNavigationRouteHandoff(normalizedIntent),
     )
   }
+
+  function handleDismissNavigationIntent(messageId: string, intent: PromptNavigationIntent) {
+    const intentKey = buildPromptNavigationIntentKey(intent)
+    setMessages((current) => removePromptNavigationIntent(current, { messageId, intentKey }))
+    recordPromptNavigationOutcome(intent.sourceRunId, {
+      outcome: 'DISMISSED',
+      intentKey,
+      targetView: intent.targetView,
+      targetLabel: promptNavigationIntentLabel(intent),
+      targetRationale: intent.rationale,
+      focusType: intent.focus?.type,
+      focusId: intent.focus?.id,
+      focusLabel: intent.focus?.label,
+    })
+  }
+
+  function toggleSupportPanel(panel: keyof typeof supportPanels) {
+    setSupportPanels((current) => ({
+      ...current,
+      [panel]: !current[panel],
+    }))
+  }
+
+  const handleActionRequestDecision = useCallback(
+    async (
+      actionRequestId: number,
+      decision: 'approve' | 'reject',
+      payload: AssistantActionDecisionPayload,
+    ) => {
+      setSubmitError('')
+      setPendingActionRequestsError('')
+      setActionRequestIdsInFlight((current) =>
+        current.includes(actionRequestId) ? current : [...current, actionRequestId],
+      )
+
+      try {
+        const updatedActionRequest =
+          decision === 'approve'
+            ? await approveAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
+            : await rejectAssistantActionRequest(appConfig.apiBase, actionRequestId, payload)
+
+        setMessages((current) => replacePromptMessageActionRequest(current, updatedActionRequest))
+        setPendingActionRequests((current) =>
+          current.filter((request) => request.action_request_id !== updatedActionRequest.action_request_id),
+        )
+
+        if (
+          (updatedActionRequest.status === 'EXECUTED' || updatedActionRequest.status === 'FAILED') &&
+          onRefreshData
+        ) {
+          await onRefreshData()
+        }
+
+        await refreshPendingActionRequests()
+      } catch (error) {
+        setSubmitError(
+          error instanceof Error ? error.message : 'Could not update the governed action request.',
+        )
+      } finally {
+        setActionRequestIdsInFlight((current) => current.filter((id) => id !== actionRequestId))
+      }
+    },
+    [onRefreshData, refreshPendingActionRequests],
+  )
 
   const runtimeNote = runtimeError
     ? runtimeError
@@ -481,6 +891,39 @@ export function PromptHomeWorkspace({
             : recentConversations.length > 0
               ? `${recentConversations.length} recent prompt thread${recentConversations.length === 1 ? '' : 's'} available.`
               : 'No recent prompt threads yet.'
+  const pendingActionReviewNote = !authSession
+    ? 'Sign in to review governed actions staged from Prompt Home.'
+    : pendingActionRequestsLoading
+      ? 'Refreshing the governed review queue.'
+      : pendingActionRequestsError
+        ? pendingActionRequestsError
+        : pendingActionRequests.length > 0
+        ? `${pendingActionRequests.length} governed action request${pendingActionRequests.length === 1 ? '' : 's'} currently waiting for review.`
+          : 'No governed action is waiting for review. If a prompt does not map to a supported action type, continue in Assistant Console or the recommended workspace.'
+  const reviewPanelSummary = !authSession
+    ? 'Sign in to review'
+    : pendingActionRequestsLoading
+      ? 'Refreshing'
+      : pendingActionRequests.length > 0
+        ? `${pendingActionRequests.length} waiting`
+        : 'No pending items'
+  const recentPanelSummary = !authSession
+    ? 'Sign in to resume'
+    : conversationHistoryLoading || conversationDetailLoading
+      ? 'Loading'
+      : recentConversations.length > 0
+        ? `${recentConversations.length} saved`
+        : 'No saved threads'
+  const directPanelSummary = `${NAVIGATION_INTENTS.length} shortcuts`
+  const promptRouteRecommendationNote = !authSession
+    ? 'Sign in to load promoted routes from accepted Prompt Home handoffs.'
+    : promptRouteRecommendationsLoading
+      ? 'Loading promoted routes.'
+      : promptRouteRecommendationsError
+        ? promptRouteRecommendationsError
+        : promotedRoutes.length > 0
+          ? `${promotedRoutes.length} promoted route${promotedRoutes.length === 1 ? '' : 's'} ready from repeated accepted Prompt Home handoffs.`
+          : 'Repeated accepted Prompt Home handoffs will appear here once a route stabilizes.'
 
   return (
     <div className="prompt-home">
@@ -490,21 +933,133 @@ export function PromptHomeWorkspace({
             <span className="eyebrow">Prompt Home</span>
             <h3>Start with the job in front of you</h3>
             <p>
-              Ask for the next best workspace, a grounded summary, or a safe path into
-              the old console when a form, report, queue, or approval surface is the
-              right place to continue.
+              Ask for the next best workspace, a grounded summary, or help deciding what
+              to do next without starting in the old console first.
             </p>
           </div>
-          <button
-            type="button"
-            className="button button-secondary prompt-home-live-context-toggle"
-            aria-expanded={liveContextExpanded}
-            aria-controls={PROMPT_HOME_LIVE_CONTEXT_PANEL_ID}
-            onClick={() => setLiveContextExpanded((expanded) => !expanded)}
-          >
-            {liveContextExpanded ? 'Hide live context' : 'Show live context'}
-          </button>
+          <div className="prompt-home-heading-actions">
+            <button
+              type="button"
+              className="button button-ghost prompt-home-live-context-toggle"
+              aria-expanded={liveContextExpanded}
+              aria-controls={PROMPT_HOME_LIVE_CONTEXT_PANEL_ID}
+              onClick={() => setLiveContextExpanded((expanded) => !expanded)}
+            >
+              {liveContextExpanded ? 'Hide live context' : 'Show live context'}
+            </button>
+            {authSession ? (
+              <button
+                type="button"
+                className="button button-ghost prompt-home-secondary-action"
+                onClick={() => onOpenView('assistant')}
+              >
+                Assistant Console
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="button button-ghost prompt-home-secondary-action"
+                onClick={handleSignIn}
+              >
+                Sign In
+              </button>
+            )}
+          </div>
         </div>
+
+        <form className="prompt-home-composer" onSubmit={handleSubmit}>
+          <label className="field prompt-home-composer-field">
+            <span>Operator prompt</span>
+            <textarea
+              className="control prompt-home-textarea"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value)
+                setSubmitError('')
+              }}
+              placeholder="Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
+            />
+          </label>
+
+          <div className="toolbar settings-actions prompt-home-actions">
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={!draft.trim() || submitting}
+            >
+              {submitting ? 'Sending...' : authSession ? 'Send Prompt' : 'Sign In to Send Prompt'}
+            </button>
+          </div>
+
+          <p className={`form-note ${submitError ? 'form-note-error' : ''}`}>
+            {submitError ||
+              (!authSession
+                ? 'You can draft the prompt here. We will only send it after you sign in.'
+                : runtimeNote)}
+          </p>
+        </form>
+
+        <div className="prompt-home-quick-prompts" aria-label="Quick prompts">
+          {QUICK_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              className="entity-chip entity-chip-soft"
+              onClick={() => setDraft(prompt)}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+
+        <section className="prompt-home-promoted-routes" aria-label="Promoted routes">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Promoted Routes</span>
+              <h3>Go straight to proven destinations</h3>
+            </div>
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => void refreshPromptRouteRecommendations()}
+              disabled={!authSession || promptRouteRecommendationsLoading}
+            >
+              Refresh
+            </button>
+          </div>
+          <p className={`form-note ${promptRouteRecommendationsError ? 'form-note-error' : ''}`}>
+            {promptRouteRecommendationNote}
+          </p>
+          {promotedRoutes.length > 0 ? (
+            <div className="prompt-home-destination-list">
+              {promotedRoutes.map((route) => {
+                const intent = route.intent
+                const focusLabel = formatPromotedRouteFocus(intent)
+                return (
+                  <button
+                    key={route.key}
+                    type="button"
+                    className="prompt-home-destination prompt-home-promoted-route"
+                    onClick={() =>
+                      openNavigationIntent(intent, {
+                        includeHandoff: route.hasFocusedHandoff,
+                        recordOutcome: true,
+                      })
+                    }
+                  >
+                    <div className="prompt-home-destination-head">
+                      <strong>{promptNavigationIntentLabel(intent)}</strong>
+                      <span className="status-pill status-pill-success">Promoted</span>
+                    </div>
+                    <span>{promptNavigationIntentDetail(intent)}</span>
+                    {focusLabel ? <small>{focusLabel}</small> : null}
+                    <small>{formatPromotedRouteEvidence(route.recommendation)}</small>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+        </section>
 
         <section
           id={PROMPT_HOME_LIVE_CONTEXT_PANEL_ID}
@@ -517,6 +1072,7 @@ export function PromptHomeWorkspace({
               <span className="eyebrow">Live Context</span>
               <h3>Start from current work</h3>
             </div>
+            <p>Use live counts when you want a more grounded opening prompt or a direct route.</p>
           </div>
 
           <div className="prompt-home-starter-list">
@@ -541,7 +1097,7 @@ export function PromptHomeWorkspace({
                   <button
                     type="button"
                     className="button button-secondary"
-                    onClick={() => handleNavigationIntent(starter.intent, false)}
+                    onClick={() => openNavigationIntent(starter.intent, { includeHandoff: false })}
                   >
                     {promptNavigationIntentLabel(starter.intent)}
                   </button>
@@ -550,60 +1106,6 @@ export function PromptHomeWorkspace({
             ))}
           </div>
         </section>
-
-        <form className="prompt-home-composer" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>Operator prompt</span>
-            <textarea
-              className="control prompt-home-textarea"
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value)
-                setSubmitError('')
-              }}
-              placeholder="Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
-            />
-          </label>
-
-          <div className="toolbar settings-actions prompt-home-actions">
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={!draft.trim() || submitting}
-            >
-              {submitting ? 'Sending...' : authSession ? 'Send Prompt' : 'Sign In to Send Prompt'}
-            </button>
-            {authSession ? (
-              <button type="button" className="button button-ghost" onClick={() => onOpenView('assistant')}>
-                Assistant Console
-              </button>
-            ) : (
-              <button type="button" className="button button-ghost" onClick={handleSignIn}>
-                Sign In
-              </button>
-            )}
-          </div>
-
-          <p className={`form-note ${submitError ? 'form-note-error' : ''}`}>
-            {submitError ||
-              (!authSession
-                ? 'You can draft the prompt here. We will only send it after you sign in.'
-                : runtimeNote)}
-          </p>
-        </form>
-
-        <div className="prompt-home-quick-prompts" aria-label="Quick prompts">
-          {QUICK_PROMPTS.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              className="entity-chip entity-chip-soft"
-              onClick={() => setDraft(prompt)}
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
       </section>
 
       <section className="prompt-home-grid">
@@ -613,23 +1115,26 @@ export function PromptHomeWorkspace({
               <span className="eyebrow">Conversation</span>
               <h3>Current prompt thread</h3>
             </div>
-            <p>Responses can explain, route, draft, or stage governed actions. They do not directly mutate records.</p>
+            <p>
+              Responses can explain, route, draft, or stage governed actions. They do not
+              directly mutate records.
+            </p>
           </div>
 
           <div className="prompt-home-chat-log">
-            {messages.length === 0 ? (
+            {displayedMessages.length === 0 ? (
               <div className="empty-state prompt-home-empty">
                 <strong>No prompt yet</strong>
                 <p>Use the composer above or pick a quick prompt to start from intent instead of choosing a screen first.</p>
               </div>
             ) : (
-              messages.map((message) => (
+              displayedMessages.map((message) => (
                 <article key={message.id} className={`assistant-message assistant-message-${message.role}`}>
                   <div className="assistant-message-head">
                     <strong>{message.role === 'assistant' ? 'Assistant' : 'You'}</strong>
                     {message.provider && message.model ? <span>{message.provider} · {message.model}</span> : null}
                   </div>
-                  <p>{message.content}</p>
+                  {message.content ? <p>{message.content}</p> : null}
                   {message.runId ? (
                     <div className="assistant-message-meta">
                       <span>Run #{message.runId}</span>
@@ -639,29 +1144,63 @@ export function PromptHomeWorkspace({
                     </div>
                   ) : null}
                   {message.actionRequests && message.actionRequests.length > 0 ? (
-                    <div className="feedback-banner prompt-home-action-banner">
-                      <strong>
-                        {message.actionRequests.length.toLocaleString()} governed action request
-                        {message.actionRequests.length === 1 ? '' : 's'} staged
-                      </strong>
-                      <p>Review the request before anything changes in the system.</p>
-                      <button type="button" className="button button-secondary" onClick={() => onOpenView('assistant')}>
-                        Open Review Path
-                      </button>
+                    <div className="prompt-home-action-review">
+                      <div className="feedback-banner prompt-home-action-banner">
+                        <strong>
+                          {message.actionRequests.length.toLocaleString()} governed action request
+                          {message.actionRequests.length === 1 ? '' : 's'} staged
+                        </strong>
+                        <p>Nothing changes until the typed review path approves and executes it.</p>
+                      </div>
+                      <AssistantActionRequestList
+                        actionRequests={message.actionRequests}
+                        actionRequestIdsInFlight={actionRequestIdsInFlight}
+                        formatDate={formatPromptTimestamp}
+                        onDecision={handleActionRequestDecision}
+                        onOpenRun={() => onOpenView('assistant')}
+                        showUserId
+                      />
+                      <div className="assistant-message-meta prompt-home-action-path">
+                        <span>Need the old review inbox or full run trace?</span>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => onOpenView('assistant')}
+                        >
+                          Open Assistant Console
+                        </button>
+                      </div>
                     </div>
                   ) : null}
                   {message.navigationIntents && message.navigationIntents.length > 0 ? (
                     <div className="prompt-home-handoff-list" aria-label="Assistant workspace handoffs">
                       {message.navigationIntents.map((intent) => (
-                        <button
-                          key={`${intent.targetView}-${intent.focus?.type ?? 'workspace'}-${intent.focus?.id ?? intent.label ?? intent.rationale ?? 'handoff'}`}
-                          type="button"
-                          className="prompt-home-handoff"
-                          onClick={() => handleNavigationIntent(intent)}
+                        <div
+                          key={buildPromptNavigationIntentKey(intent)}
+                          className="prompt-home-handoff-item"
                         >
-                          <strong>{promptNavigationIntentLabel(intent)}</strong>
-                          <span>{promptNavigationIntentDetail(intent)}</span>
-                        </button>
+                          <button
+                            type="button"
+                            className="prompt-home-handoff"
+                            onClick={() =>
+                              openNavigationIntent(intent, {
+                                includeHandoff: true,
+                                recordOutcome: true,
+                              })
+                            }
+                          >
+                            <strong>{promptNavigationIntentLabel(intent)}</strong>
+                            <span>{promptNavigationIntentDetail(intent)}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-ghost prompt-home-handoff-dismiss"
+                            aria-label={`Dismiss ${promptNavigationIntentLabel(intent)}`}
+                            onClick={() => handleDismissNavigationIntent(message.id, intent)}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
                       ))}
                     </div>
                   ) : null}
@@ -679,72 +1218,191 @@ export function PromptHomeWorkspace({
         </article>
 
         <aside className="prompt-home-sidecar">
-          <section className="surface prompt-home-recent">
-            <div className="section-head">
-              <div>
+          <section className="surface prompt-home-support-panel prompt-home-review-path">
+            <button
+              type="button"
+              className="prompt-home-support-toggle"
+              aria-expanded={supportPanels.review}
+              aria-controls={PROMPT_HOME_REVIEW_PANEL_ID}
+              onClick={() => toggleSupportPanel('review')}
+            >
+              <div className="prompt-home-support-toggle-copy">
+                <span className="eyebrow">Governed Review</span>
+                <h3>Review queue</h3>
+              </div>
+              <div className="prompt-home-support-toggle-meta">
+                <small>{reviewPanelSummary}</small>
+                <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                  {supportPanels.review ? '−' : '+'}
+                </span>
+              </div>
+            </button>
+
+            <div
+              id={PROMPT_HOME_REVIEW_PANEL_ID}
+              className="prompt-home-support-body"
+              hidden={!supportPanels.review}
+            >
+              <div className="prompt-home-support-body-head">
+                <p className={`form-note ${pendingActionRequestsError ? 'form-note-error' : ''}`}>
+                  {pendingActionReviewNote}
+                </p>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={() => void refreshPendingActionRequests()}
+                  disabled={!authSession || pendingActionRequestsLoading}
+                >
+                  Refresh
+                </button>
+              </div>
+              {pendingActionRequests.length > 0 ? (
+                <div className="prompt-home-review-list">
+                  {pendingActionRequests.map((actionRequest) => (
+                    <button
+                      key={actionRequest.action_request_id}
+                      type="button"
+                      className="prompt-home-thread prompt-home-review-item"
+                      onClick={() => onOpenView('assistant')}
+                    >
+                      <div className="prompt-home-review-item-head">
+                        <strong>{actionRequest.summary}</strong>
+                        <span className="status-pill status-pill-planned">
+                          {actionRequest.lifecycle.label}
+                        </span>
+                      </div>
+                      <span>{actionRequest.description}</span>
+                      <small>
+                        {actionRequest.agent_name ?? 'Platform foundation'} · {actionRequest.action_type}{' '}
+                        · Created {formatPromptTimestamp(actionRequest.created_at)}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <p className="prompt-home-review-note">
+                Unsupported writes stay manual. Use the assistant for review context, then finish
+                in the old workspace when a governed action does not exist.
+              </p>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => onOpenView('assistant')}
+                disabled={!authSession}
+              >
+                Open Assistant Console
+              </button>
+            </div>
+          </section>
+
+          <section className="surface prompt-home-support-panel prompt-home-recent">
+            <button
+              type="button"
+              className="prompt-home-support-toggle"
+              aria-expanded={supportPanels.recent}
+              aria-controls={PROMPT_HOME_RECENT_PANEL_ID}
+              onClick={() => toggleSupportPanel('recent')}
+            >
+              <div className="prompt-home-support-toggle-copy">
                 <span className="eyebrow">Resume</span>
                 <h3>Recent prompt threads</h3>
               </div>
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={() => void refreshRecentConversations()}
-                disabled={!authSession || conversationHistoryLoading}
-              >
-                Refresh
-              </button>
+              <div className="prompt-home-support-toggle-meta">
+                <small>{recentPanelSummary}</small>
+                <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                  {supportPanels.recent ? '−' : '+'}
+                </span>
+              </div>
+            </button>
+
+            <div
+              id={PROMPT_HOME_RECENT_PANEL_ID}
+              className="prompt-home-support-body"
+              hidden={!supportPanels.recent}
+            >
+              <div className="prompt-home-support-body-head">
+                <p className={`form-note ${conversationHistoryError || conversationDetailError ? 'form-note-error' : ''}`}>
+                  {conversationHistoryNote}
+                </p>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={() => void refreshRecentConversations()}
+                  disabled={!authSession || conversationHistoryLoading}
+                >
+                  Refresh
+                </button>
+              </div>
+              {recentConversations.length > 0 ? (
+                <div className="prompt-home-thread-list">
+                  {recentConversations.map((conversation) => (
+                    <button
+                      key={conversation.conversation_id}
+                      type="button"
+                      className={`prompt-home-thread ${conversationId === conversation.conversation_id ? 'is-selected' : ''}`}
+                      onClick={() => void resumeConversation(conversation)}
+                      disabled={submitting || conversationDetailLoading}
+                    >
+                      <strong>{conversation.title}</strong>
+                      <span>
+                        {conversation.latest_user_message ??
+                          conversation.latest_assistant_message ??
+                          'Stored prompt thread.'}
+                      </span>
+                      <small>
+                        {summarizePromptConversation(conversation)} · {conversation.run_count} run
+                        {conversation.run_count === 1 ? '' : 's'} · Updated{' '}
+                        {formatPromptTimestamp(conversation.updated_at)}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            <p className={`form-note ${conversationHistoryError || conversationDetailError ? 'form-note-error' : ''}`}>
-              {conversationHistoryNote}
-            </p>
-            {recentConversations.length > 0 ? (
-              <div className="prompt-home-thread-list">
-                {recentConversations.map((conversation) => (
+          </section>
+
+          <section className="surface prompt-home-support-panel prompt-home-destinations">
+            <button
+              type="button"
+              className="prompt-home-support-toggle"
+              aria-expanded={supportPanels.direct}
+              aria-controls={PROMPT_HOME_DIRECT_PANEL_ID}
+              onClick={() => toggleSupportPanel('direct')}
+            >
+              <div className="prompt-home-support-toggle-copy">
+                <span className="eyebrow">Old Console</span>
+                <h3>Go direct</h3>
+              </div>
+              <div className="prompt-home-support-toggle-meta">
+                <small>{directPanelSummary}</small>
+                <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                  {supportPanels.direct ? '−' : '+'}
+                </span>
+              </div>
+            </button>
+
+            <div
+              id={PROMPT_HOME_DIRECT_PANEL_ID}
+              className="prompt-home-support-body"
+              hidden={!supportPanels.direct}
+            >
+              <p className="form-note">
+                The traditional screens are still here when you already know where the work belongs.
+              </p>
+
+              <div className="prompt-home-destination-list">
+                {NAVIGATION_INTENTS.map((intent) => (
                   <button
-                    key={conversation.conversation_id}
+                    key={intent.targetView}
                     type="button"
-                    className={`prompt-home-thread ${conversationId === conversation.conversation_id ? 'is-selected' : ''}`}
-                    onClick={() => void resumeConversation(conversation)}
-                    disabled={submitting || conversationDetailLoading}
+                    className="prompt-home-destination"
+                    onClick={() => openNavigationIntent(intent, { includeHandoff: false })}
                   >
-                    <strong>{conversation.title}</strong>
-                    <span>
-                      {conversation.latest_user_message ??
-                        conversation.latest_assistant_message ??
-                        'Stored prompt thread.'}
-                    </span>
-                    <small>
-                      {summarizePromptConversation(conversation)} · {conversation.run_count} run
-                      {conversation.run_count === 1 ? '' : 's'} · Updated{' '}
-                      {formatPromptTimestamp(conversation.updated_at)}
-                    </small>
+                    <strong>{promptNavigationIntentLabel(intent)}</strong>
+                    <span>{promptNavigationIntentDetail(intent)}</span>
                   </button>
                 ))}
               </div>
-            ) : null}
-          </section>
-
-          <section className="surface prompt-home-destinations">
-            <div className="section-head">
-              <div>
-                <span className="eyebrow">Old Console</span>
-                <h3>Open a workspace</h3>
-              </div>
-              <p>The traditional screens are still here when you already know where the work belongs.</p>
-            </div>
-
-            <div className="prompt-home-destination-list">
-              {NAVIGATION_INTENTS.map((intent) => (
-                <button
-                  key={intent.targetView}
-                  type="button"
-                  className="prompt-home-destination"
-                  onClick={() => handleNavigationIntent(intent, false)}
-                >
-                  <strong>{promptNavigationIntentLabel(intent)}</strong>
-                  <span>{promptNavigationIntentDetail(intent)}</span>
-                </button>
-              ))}
             </div>
           </section>
         </aside>

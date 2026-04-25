@@ -20,6 +20,8 @@ This project is a good fit for:
 - Coding-agent guide: [AGENTS.md](AGENTS.md)
 - Engineering blueprint:
   [docs/engineering/platform-blueprint.md](docs/engineering/platform-blueprint.md)
+- Governed core platform roadmap:
+  [docs/engineering/core-platform-roadmap.md](docs/engineering/core-platform-roadmap.md)
 - AI workflow and prompt-management notes:
   [docs/engineering/ai-workflow.md](docs/engineering/ai-workflow.md)
 - Agent autonomy rubric:
@@ -182,6 +184,9 @@ dependencies.
 ## Additional Docs
 
 - [Business use case roadmap](docs/engineering/business-use-case-roadmap.md)
+- [Governed core platform roadmap](docs/engineering/core-platform-roadmap.md)
+- [Governed core platform slice lock](docs/engineering/core-platform-slice-lock.md)
+- [Governed core platform work packages](docs/engineering/core-platform-work-packages.md)
 - [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)

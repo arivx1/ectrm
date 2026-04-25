@@ -740,6 +740,10 @@
   gap: 0.85rem;
 }
 
+.workspace-local-filter-controls[hidden] {
+  display: none;
+}
+
 .workspace-local-filter-field {
   flex: 1 1 26rem;
   max-width: 42rem;
@@ -754,6 +758,7 @@
 }
 
 .nav-global-filter {
+  display: grid;
   gap: 0.9rem;
 }
 
@@ -761,45 +766,61 @@
   gap: 0.8rem;
 }
 
+.nav-global-filter-panel {
+  gap: 0.9rem;
+}
+
+.nav-global-filter-collapsed-head,
 .nav-global-filter-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.85rem;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.nav-global-filter-collapsed-card {
+  align-items: center;
+  text-align: left;
+}
+
+.nav-global-filter-collapsed-copy {
+  gap: 0.3rem;
+}
+
+.nav-global-filter-collapsed-copy small {
+  margin: 0;
+  color: var(--terminal-muted);
+  line-height: 1.45;
 }
 
 .nav-global-filter-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.6rem;
-  flex-shrink: 0;
-  padding-inline: 0.95rem;
-}
-
-.nav-global-filter-toggle-indicator {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  width: 1.6rem;
-  min-height: 1.6rem;
-  border-radius: 999px;
-  border: 1px solid rgba(126, 154, 184, 0.16);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--terminal-text);
-  font-weight: 700;
-  line-height: 1;
+  width: 3.4rem;
+  min-width: 3.4rem;
+  padding: 0.9rem 0.75rem;
+  flex-shrink: 0;
 }
 
-.nav-global-filter .workspace-local-filter-controls {
+.nav-global-filter-toggle::after {
+  display: none;
+}
+
+.nav-global-filter-panel .workspace-local-filter-copy {
+  min-width: 0;
+}
+
+.nav-global-filter-panel .workspace-local-filter-controls {
   align-items: stretch;
 }
 
-.nav-global-filter .workspace-local-filter-field {
+.nav-global-filter-panel .workspace-local-filter-field {
   flex-basis: 100%;
   max-width: none;
 }
 
-.nav-global-filter .workspace-local-filter-actions {
+.nav-global-filter-panel .workspace-local-filter-actions {
   justify-content: flex-start;
 }
 
@@ -838,15 +859,8 @@
 }
 
 @media (max-width: 720px) {
-  .nav-global-filter-head,
   .nav-global-filter-summary {
     flex-direction: column;
     align-items: stretch;
   }
-
-  .nav-global-filter-toggle {
-    justify-content: space-between;
-    width: 100%;
-  }
 }
-

@@ -11,6 +11,7 @@ import { normalizeAppRouteHandoff, type AppRouteHandoff } from '../../shared/app
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import type {
+  PreTradeGovernanceAuditExportRecord,
   PreTradeRecommendationRunRecord,
   PreTradeReviewItemRecord,
   TradeCreditExceptionRecord,
@@ -90,6 +91,10 @@ type Trade = {
   credit_approval_status?: string
   credit_hold_active?: boolean
   credit_hold_reason?: string | null
+  pretrade_review_id?: number | null
+  pretrade_recommendation_run_id?: number | null
+  pretrade_approval_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
+  pretrade_booking_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
 }
 
 type EventRow = {
@@ -373,6 +378,19 @@ function parsePreTradeReviewId(selectedTradeEvents: EventRow[]): number | null {
   const tradeCreatedEvent = selectedTradeEvents.find((event) => event.event_type === 'TradeCreated')
   const candidate = tradeCreatedEvent?.payload.pretrade_review_id
   return typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0 ? candidate : null
+}
+
+function governanceRiskStatusLabel(value: string): string {
+  return value.replaceAll('_', ' ')
+}
+
+function governanceAuditSummary(snapshot: PreTradeGovernanceAuditExportRecord): string {
+  return [
+    governanceRiskStatusLabel(snapshot.summary.risk_status),
+    `${snapshot.audit_rows.length} audit rows`,
+    `${snapshot.summary.override_count} overrides`,
+    `${snapshot.summary.stale_evidence_run_count} stale runs`,
+  ].join(' | ')
 }
 
 type TradingWorkspaceProps = {
@@ -680,9 +698,26 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   const [linkedPreTradeReviewError, setLinkedPreTradeReviewError] = useState('')
   const [linkedPreTradeRecommendationRun, setLinkedPreTradeRecommendationRun] = useState<PreTradeRecommendationRunRecord | null>(null)
   const [linkedPreTradeRecommendationRunError, setLinkedPreTradeRecommendationRunError] = useState('')
-  const linkedPreTradeReviewId = useMemo(() => parsePreTradeReviewId(selectedTradeEvents), [selectedTradeEvents])
+  const linkedPreTradeReviewId = useMemo(
+    () => selectedTrade?.pretrade_review_id ?? parsePreTradeReviewId(selectedTradeEvents),
+    [selectedTrade?.pretrade_review_id, selectedTradeEvents],
+  )
   const linkedPreTradeReviewAccessToken = authSession?.accessToken ?? null
-  const linkedPreTradeRecommendationRunId = linkedPreTradeReview?.recommendation_run_id ?? null
+  const linkedPreTradeRecommendationRunId = (
+    linkedPreTradeReview?.recommendation_run_id
+    ?? selectedTrade?.pretrade_recommendation_run_id
+    ?? null
+  )
+  const linkedPreTradeApprovalGovernanceSnapshot = (
+    selectedTrade?.pretrade_approval_governance_snapshot
+    ?? linkedPreTradeReview?.approval_governance_snapshot
+    ?? null
+  )
+  const linkedPreTradeBookingGovernanceSnapshot = (
+    selectedTrade?.pretrade_booking_governance_snapshot
+    ?? linkedPreTradeReview?.booking_governance_snapshot
+    ?? null
+  )
 
   useEffect(() => {
     if (!linkedPreTradeReviewAccessToken || linkedPreTradeReviewId === null) {
@@ -1288,6 +1323,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         <span>Review Booked By</span>
                         <strong>{linkedPreTradeReview.booked_by ?? '—'}</strong>
                       </div>
+                      {linkedPreTradeApprovalGovernanceSnapshot ? (
+                        <div className="detail-row">
+                          <span>Approval Audit</span>
+                          <strong>{formatDate(linkedPreTradeApprovalGovernanceSnapshot.generated_at)}</strong>
+                        </div>
+                      ) : null}
+                      {linkedPreTradeBookingGovernanceSnapshot ? (
+                        <div className="detail-row">
+                          <span>Booking Audit</span>
+                          <strong>{formatDate(linkedPreTradeBookingGovernanceSnapshot.generated_at)}</strong>
+                        </div>
+                      ) : null}
                       {linkedPreTradeReview.recommendation_summary ? (
                         <div className="detail-row">
                           <span>Recommendation</span>
@@ -1649,6 +1696,31 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                             ))}
                           </div>
                         </>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {linkedPreTradeApprovalGovernanceSnapshot || linkedPreTradeBookingGovernanceSnapshot ? (
+                    <div className="stack">
+                      <span className="eyebrow">Decision-Time Audit</span>
+                      {linkedPreTradeApprovalGovernanceSnapshot ? (
+                        <div className="surface pretrade-next-actions">
+                          <strong>Approval Snapshot</strong>
+                          <p>
+                            {formatDate(linkedPreTradeApprovalGovernanceSnapshot.generated_at)}
+                            {` | ${linkedPreTradeApprovalGovernanceSnapshot.exported_by}`}
+                          </p>
+                          <small>{governanceAuditSummary(linkedPreTradeApprovalGovernanceSnapshot)}</small>
+                        </div>
+                      ) : null}
+                      {linkedPreTradeBookingGovernanceSnapshot ? (
+                        <div className="surface pretrade-next-actions">
+                          <strong>Booking Snapshot</strong>
+                          <p>
+                            {formatDate(linkedPreTradeBookingGovernanceSnapshot.generated_at)}
+                            {` | ${linkedPreTradeBookingGovernanceSnapshot.exported_by}`}
+                          </p>
+                          <small>{governanceAuditSummary(linkedPreTradeBookingGovernanceSnapshot)}</small>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}

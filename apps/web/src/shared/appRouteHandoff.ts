@@ -283,6 +283,10 @@ export function getAppRouteHandoffTradeId(handoff: AppRouteHandoff | null): stri
   return normalizedHandoff?.focus.type === 'trade' ? normalizedHandoff.focus.id : null
 }
 
+export function viewAppliesAppRouteHandoffFilter(view: ViewKey): boolean {
+  return view === 'operations' || view === 'settlement' || view === 'shipments' || view === 'scheduling'
+}
+
 function formatFocusType(focusType: AppRouteHandoffFocusType): string {
   switch (focusType) {
     case 'trade':

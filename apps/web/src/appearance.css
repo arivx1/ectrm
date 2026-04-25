@@ -212,6 +212,7 @@
 
 :root[data-color-mode='light'] .brand-lockup h1,
 :root[data-color-mode='light'] .hero h2,
+:root[data-color-mode='light'] .workspace-topbar-copy strong,
 :root[data-color-mode='light'] .section-head h3,
 :root[data-color-mode='light'] .tile-layout-toolbar h3,
 :root[data-color-mode='light'] .workspace-tile-copy h3,
@@ -244,6 +245,7 @@
 :root[data-color-mode='light'] .brand-lockup p,
 :root[data-color-mode='light'] .side-card p,
 :root[data-color-mode='light'] .hero p,
+:root[data-color-mode='light'] .workspace-topbar-session,
 :root[data-color-mode='light'] .section-head p,
 :root[data-color-mode='light'] .metric-card p,
 :root[data-color-mode='light'] .timeline-body p,
@@ -571,6 +573,14 @@
 :root[data-color-mode='dark'] .auth-gate-signal-card strong,
 :root[data-color-mode='dark'] .auth-gate-step strong {
   color: #eff7ff;
+}
+
+:root[data-color-mode='dark'] .workspace-topbar-copy strong {
+  color: #eff7ff;
+}
+
+:root[data-color-mode='dark'] .workspace-topbar-session {
+  color: rgba(196, 213, 228, 0.76);
 }
 
 :root[data-color-mode='dark'] .auth-gate-signal-card p,
