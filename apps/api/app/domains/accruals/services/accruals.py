@@ -27,6 +27,7 @@ from apps.api.app.shared.enums import TradeNature, TradeStatus
 ZERO = Decimal("0")
 MANAGED_QUANTITY_ENTRY_TYPES = {"ACTUALIZATION_ESTIMATE", "ACTUALIZATION_TRUE_UP"}
 MANAGED_AMOUNT_ENTRY_TYPES = {"PRICE_MARK"}
+MANUAL_ENTRY_TYPES = {"MANUAL_ADJUSTMENT", "MANUAL_REVERSAL"}
 DEFAULT_ACCRUAL_CURRENCY_CODE = "USD"
 ACCRUAL_LOT_ID_NAMESPACE = uuid5(NAMESPACE_URL, "ectrm.trade_accrual_lots")
 INVOICE_RELIEF_ENTRY_TYPE = "INVOICE_APPLIED"
@@ -191,6 +192,32 @@ def _managed_entry_net_totals(
     return quantity_totals, amount_totals
 
 
+def _manual_entry_net_totals(
+    db: Session,
+    *,
+    accrual_lot_ids: list[str],
+) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+    quantity_totals = {accrual_lot_id: ZERO for accrual_lot_id in accrual_lot_ids}
+    amount_totals = {accrual_lot_id: ZERO for accrual_lot_id in accrual_lot_ids}
+    if not accrual_lot_ids:
+        return quantity_totals, amount_totals
+
+    rows = db.execute(
+        select(TradeAccrualEntry)
+        .where(
+            TradeAccrualEntry.accrual_lot_id.in_(accrual_lot_ids),
+            TradeAccrualEntry.entry_type.in_(tuple(sorted(MANUAL_ENTRY_TYPES))),
+        )
+        .order_by(TradeAccrualEntry.accrual_lot_id.asc(), TradeAccrualEntry.created_at.asc(), TradeAccrualEntry.entry_id.asc())
+    ).scalars().all()
+
+    for row in rows:
+        if row.quantity_delta is not None:
+            quantity_totals[row.accrual_lot_id] += Decimal(str(row.quantity_delta))
+        amount_totals[row.accrual_lot_id] += Decimal(str(row.amount_delta))
+    return quantity_totals, amount_totals
+
+
 def _lot_status(
     *,
     actualized_quantity: Decimal,
@@ -223,13 +250,14 @@ def _append_quantity_entry(
     *,
     lot: TradeAccrualLot,
     quantity_delta: Decimal,
+    existing_quantity_total: Decimal,
     effective_date: datetime,
     actor_id: str,
     created_at: datetime,
 ) -> None:
     if quantity_delta == ZERO:
         return
-    entry_type = "ACTUALIZATION_ESTIMATE" if lot.actualized_quantity == ZERO else "ACTUALIZATION_TRUE_UP"
+    entry_type = "ACTUALIZATION_ESTIMATE" if existing_quantity_total == ZERO else "ACTUALIZATION_TRUE_UP"
     db.add(
         TradeAccrualEntry(
             entry_id=str(uuid4()),
@@ -247,6 +275,7 @@ def _append_quantity_entry(
             price_index_code=None,
             fx_rate=None,
             notes="System-managed accrual sync from delivery actualization.",
+            reversal_of_entry_id=None,
             created_at=created_at,
             created_by=actor_id,
         )
@@ -283,6 +312,7 @@ def _append_price_mark_entry(
             price_index_code=price_index_code,
             fx_rate=None,
             notes="System-managed accrual mark refresh.",
+            reversal_of_entry_id=None,
             created_at=created_at,
             created_by=actor_id,
         )
@@ -320,6 +350,7 @@ def _append_invoice_relief_entry(
             price_index_code=None,
             fx_rate=None,
             notes=f"System-managed invoice relief sync for {invoice.invoice_number}.",
+            reversal_of_entry_id=None,
             created_at=created_at,
             created_by=actor_id,
         )
@@ -361,6 +392,7 @@ def _append_dispute_entry(
                 if disputed_amount_delta > ZERO
                 else f"Invoice dispute hold released for {invoice.invoice_number}."
             ),
+            reversal_of_entry_id=None,
             created_at=created_at,
             created_by=actor_id,
         )
@@ -657,6 +689,8 @@ def _sync_existing_lot_to_target(
     lot: TradeAccrualLot,
     desired_actualized_quantity: Decimal,
     desired_accrued_amount: Decimal,
+    manual_quantity_total: Decimal,
+    manual_amount_total: Decimal,
     planned_quantity: Decimal | None,
     quantity_unit_code: str | None,
     book: str,
@@ -679,11 +713,14 @@ def _sync_existing_lot_to_target(
 ) -> None:
     quantity_delta = desired_actualized_quantity - quantity_total
     amount_delta = desired_accrued_amount - amount_total
+    total_actualized_quantity = desired_actualized_quantity + manual_quantity_total
+    total_accrued_amount = desired_accrued_amount + manual_amount_total
 
     _append_quantity_entry(
         db,
         lot=lot,
         quantity_delta=quantity_delta,
+        existing_quantity_total=quantity_total,
         effective_date=quantity_effective_at,
         actor_id=actor_id,
         created_at=updated_at,
@@ -709,8 +746,8 @@ def _sync_existing_lot_to_target(
         "trade_currency_code": trade_currency_code,
         "quantity_unit_code": quantity_unit_code,
         "planned_quantity": planned_quantity,
-        "actualized_quantity": desired_actualized_quantity,
-        "accrued_amount": desired_accrued_amount,
+        "actualized_quantity": total_actualized_quantity,
+        "accrued_amount": total_accrued_amount,
         "opened_at": opened_at,
         "closed_at": None,
         "notes": notes,
@@ -721,8 +758,8 @@ def _sync_existing_lot_to_target(
             changed = True
 
     next_status = _lot_status(
-        actualized_quantity=desired_actualized_quantity,
-        is_priced=is_priced,
+        actualized_quantity=total_actualized_quantity,
+        is_priced=is_priced or total_accrued_amount > ZERO,
         billed_quantity=Decimal(str(lot.billed_quantity)),
         billed_amount=Decimal(str(lot.billed_amount)),
         collected_amount=Decimal(str(lot.collected_amount)),
@@ -759,6 +796,10 @@ def synchronize_trade_accruals(
         db,
         accrual_lot_ids=[lot.accrual_lot_id for lot in existing_lots],
     )
+    manual_quantity_totals, manual_amount_totals = _manual_entry_net_totals(
+        db,
+        accrual_lot_ids=[lot.accrual_lot_id for lot in existing_lots],
+    )
 
     if (
         trade is None
@@ -771,6 +812,8 @@ def synchronize_trade_accruals(
                 lot=lot,
                 desired_actualized_quantity=ZERO,
                 desired_accrued_amount=ZERO,
+                manual_quantity_total=manual_quantity_totals.get(lot.accrual_lot_id, ZERO),
+                manual_amount_total=manual_amount_totals.get(lot.accrual_lot_id, ZERO),
                 planned_quantity=lot.planned_quantity,
                 quantity_unit_code=lot.quantity_unit_code,
                 book=lot.book,
@@ -877,6 +920,8 @@ def synchronize_trade_accruals(
             lots_by_id[lot_id] = lot
             quantity_totals[lot_id] = ZERO
             amount_totals[lot_id] = ZERO
+            manual_quantity_totals[lot_id] = ZERO
+            manual_amount_totals[lot_id] = ZERO
 
         touched_lot_ids.add(lot_id)
         _sync_existing_lot_to_target(
@@ -884,6 +929,8 @@ def synchronize_trade_accruals(
             lot=lot,
             desired_actualized_quantity=actualized_quantity,
             desired_accrued_amount=desired_amount,
+            manual_quantity_total=manual_quantity_totals.get(lot_id, ZERO),
+            manual_amount_total=manual_amount_totals.get(lot_id, ZERO),
             planned_quantity=planned_quantity,
             quantity_unit_code=target.unit_of_measure,
             book=trade.book,
@@ -918,6 +965,8 @@ def synchronize_trade_accruals(
             lot=lot,
             desired_actualized_quantity=ZERO,
             desired_accrued_amount=ZERO,
+            manual_quantity_total=manual_quantity_totals.get(lot_id, ZERO),
+            manual_amount_total=manual_amount_totals.get(lot_id, ZERO),
             planned_quantity=lot.planned_quantity,
             quantity_unit_code=lot.quantity_unit_code,
             book=lot.book,
@@ -950,6 +999,57 @@ def synchronize_trade_accruals(
     )
     db.flush()
     return synchronized_count
+
+
+def _refresh_lot_rollup_from_entries(
+    db: Session,
+    *,
+    lot: TradeAccrualLot,
+    actor_id: str,
+    updated_at: datetime,
+) -> None:
+    managed_quantity_totals, managed_amount_totals = _managed_entry_net_totals(
+        db,
+        accrual_lot_ids=[lot.accrual_lot_id],
+    )
+    manual_quantity_totals, manual_amount_totals = _manual_entry_net_totals(
+        db,
+        accrual_lot_ids=[lot.accrual_lot_id],
+    )
+    total_actualized_quantity = (
+        managed_quantity_totals.get(lot.accrual_lot_id, ZERO)
+        + manual_quantity_totals.get(lot.accrual_lot_id, ZERO)
+    )
+    total_accrued_amount = (
+        managed_amount_totals.get(lot.accrual_lot_id, ZERO)
+        + manual_amount_totals.get(lot.accrual_lot_id, ZERO)
+    )
+
+    changed = False
+    if Decimal(str(lot.actualized_quantity)) != total_actualized_quantity:
+        lot.actualized_quantity = total_actualized_quantity
+        changed = True
+    if Decimal(str(lot.accrued_amount)) != total_accrued_amount:
+        lot.accrued_amount = total_accrued_amount
+        changed = True
+
+    next_status = _lot_status(
+        actualized_quantity=total_actualized_quantity,
+        is_priced=total_accrued_amount > ZERO,
+        billed_quantity=Decimal(str(lot.billed_quantity)),
+        billed_amount=Decimal(str(lot.billed_amount)),
+        collected_amount=Decimal(str(lot.collected_amount)),
+        disputed_amount=Decimal(str(lot.disputed_amount)),
+        closed_at=_coerce_utc(lot.closed_at),
+    )
+    if lot.status != next_status:
+        lot.status = next_status
+        changed = True
+
+    if changed:
+        lot.updated_at = updated_at
+        lot.updated_by = actor_id
+        lot.version += 1
 
 
 def synchronize_trade_invoice_relief(

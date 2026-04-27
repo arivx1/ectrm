@@ -809,10 +809,17 @@ export type AssetRecord = ReferenceRecord & {
   asset_reality: string
   commodity_code?: string | null
   location_code?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  geometry_geojson?: Record<string, unknown> | null
   capacity_value?: number | null
   capacity_unit_code?: string | null
   operator_name?: string | null
   operating_status: string
+  source_name?: string | null
+  source_url?: string | null
+  confidence?: number | null
+  notes?: string | null
 }
 
 export type PriceIndexRecord = ReferenceRecord & {
@@ -2161,13 +2168,20 @@ export type AssistantAgentAuthorityLevel =
   | 'EXECUTE'
   | 'EXTERNAL_COMMIT'
 export const ASSISTANT_ACTION_TYPES = [
+  'create_trade',
+  'amend_trade',
   'cancel_trade',
+  'record_delivery_event',
+  'create_manual_accrual_entry',
+  'reverse_accrual_entry',
   'issue_trade_confirmation',
   'record_trade_confirmation_response',
   'update_trade_workflow_item',
   'record_trade_actualization',
   'issue_trade_invoice',
   'create_trade_payment',
+  'create_accounting_entry',
+  'reverse_accounting_entry',
   'reprocess_document_ingestion',
 ] as const
 export type AssistantActionType = (typeof ASSISTANT_ACTION_TYPES)[number]
@@ -2773,6 +2787,7 @@ export type AssistantPromptRouteRecommendation = {
   target_label?: string | null
   target_rationale?: string | null
   focus_type?: AssistantPromptNavigationFocusType | null
+  last_accepted_at?: string | null
   accepted_count: number
   outcome_count: number
   acceptance_rate?: number | null
@@ -3334,6 +3349,9 @@ export type AssetForm = {
   asset_reality: string
   commodity_code: string
   location_code: string
+  latitude: string
+  longitude: string
+  geometry_geojson: string
   capacity_value: string
   capacity_unit_code: string
   operator_name: string

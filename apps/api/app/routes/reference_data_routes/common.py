@@ -160,10 +160,17 @@ def to_out(record: ModelT, schema_cls):
         payload["asset_reality"] = record.asset_reality
         payload["commodity_code"] = record.commodity_code
         payload["location_code"] = record.location_code
+        payload["latitude"] = record.latitude
+        payload["longitude"] = record.longitude
+        payload["geometry_geojson"] = record.geometry_geojson
         payload["capacity_value"] = record.capacity_value
         payload["capacity_unit_code"] = record.capacity_unit_code
         payload["operator_name"] = record.operator_name
         payload["operating_status"] = record.operating_status
+        payload["source_name"] = record.source_name
+        payload["source_url"] = record.source_url
+        payload["confidence"] = record.confidence
+        payload["notes"] = record.notes
     if isinstance(record, ReferenceCounterparty):
         payload["short_name"] = record.short_name
         payload["legal_entity_name"] = record.legal_entity_name

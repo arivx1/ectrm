@@ -13,6 +13,8 @@ position, and settlement spine can safely support.
 
 - [Platform Blueprint](./platform-blueprint.md)
 - [Governed Core Platform Slice Lock](./core-platform-slice-lock.md)
+- [Governed Core Platform Boundary Reset](./core-platform-boundary-reset.md)
+- [Governed Core Trade Command Model](./core-platform-trade-command-model.md)
 - [ADR 0002: V2 Application Architecture And Canonical Domain Boundaries](../adr/0002-v2-application-architecture.md)
 - [Business Use Case Roadmap](./business-use-case-roadmap.md)
 - [Future-Ready Engineering Work Packages](./future-ready-engineering-work-packages.md)

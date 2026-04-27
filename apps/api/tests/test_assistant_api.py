@@ -4,6 +4,8 @@ import enum
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from uuid import uuid4
 from unittest.mock import patch
 
 if not hasattr(enum, "StrEnum"):
@@ -20,10 +22,17 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.config import settings
 from apps.api.app.core.auth import create_user_session, hash_password
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.accounting.services import (
+    create_trade_accounting_entry,
+)
+from apps.api.app.domains.accruals.services import (
+    create_manual_accrual_entry,
+)
 from apps.api.app.domains.assistant.services.action_catalog import (
     ALL_CATALOG_ACTION_TYPES,
     ASSISTANT_ACTION_CATALOG,
 )
+from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
 from apps.api.app.domains.assistant.services.action_registry import ACTION_HANDLERS, ACTION_SPECS
 from apps.api.app.domains.assistant.services.action_planners import (
     ACTION_PLANNER_SEQUENCE,
@@ -48,9 +57,23 @@ from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.assistant_run_feedback import AssistantRunFeedback
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.delivery_event import DeliveryEvent
+from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.event import Event
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
+from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_counterparty import ReferenceCounterparty
+from apps.api.app.models.reference_currency import ReferenceCurrency
+from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_portfolio import ReferencePortfolio
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_accounting_entry import TradeAccountingEntry
+from apps.api.app.models.trade_accounting_entry_line import TradeAccountingEntryLine
+from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
+from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
@@ -146,10 +169,17 @@ class AssistantApiTests(unittest.TestCase):
             session.query(UserSession).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
+            session.query(TradeAccountingEntryLine).delete()
+            session.query(TradeAccountingEntry).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
             session.query(TradeWorkflowItem).delete()
+            session.query(TradeAccrualEntry).delete()
+            session.query(TradeAccrualLot).delete()
+            session.query(TradeActualization).delete()
+            session.query(DeliveryEvent).delete()
+            session.query(DeliveryObligation).delete()
             session.query(AssistantAgentWorkPackage).delete()
             session.query(AssistantActionRequest).delete()
             session.query(AssistantPromptNavigationOutcome).delete()
@@ -227,6 +257,7 @@ class AssistantApiTests(unittest.TestCase):
         role_keys = [row["role_key"] for row in payload]
         self.assertIn("trade-ops-copilot", role_keys)
         self.assertIn("trade-capture-agent", role_keys)
+        self.assertIn("confirmation-controller-agent", role_keys)
         self.assertIn("pre-trade-structuring-agent", role_keys)
         self.assertIn("control-tower-agent", role_keys)
         phase_1_roles = [row for row in payload if row["catalog_status"] == "PHASE_1"]
@@ -250,6 +281,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(
             trade_ops["maximum_action_types"],
             [
+                "record_delivery_event",
                 "issue_trade_confirmation",
                 "record_trade_confirmation_response",
                 "update_trade_workflow_item",
@@ -275,13 +307,42 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(trade_capture["catalog_status"], "SEEDED")
         self.assertEqual(trade_capture["current_profile_ids"], ["trade-capture-agent"])
         self.assertEqual(trade_capture["authority_ceiling"], "EXECUTE")
-        self.assertEqual(trade_capture["maximum_action_types"], ["cancel_trade"])
+        self.assertEqual(trade_capture["maximum_action_types"], ["create_trade", "amend_trade", "cancel_trade"])
 
         accounting_posting = next(row for row in payload if row["role_key"] == "accounting-posting-agent")
         self.assertEqual(accounting_posting["catalog_status"], "SEEDED")
         self.assertEqual(accounting_posting["current_profile_ids"], ["accounting-posting-agent"])
-        self.assertEqual(accounting_posting["authority_ceiling"], "DRAFT")
-        self.assertEqual(accounting_posting["maximum_action_types"], [])
+        self.assertEqual(accounting_posting["authority_ceiling"], "EXECUTE")
+        self.assertEqual(
+            accounting_posting["maximum_action_types"],
+            ["create_accounting_entry", "reverse_accounting_entry"],
+        )
+
+        accrual_controller = next(row for row in payload if row["role_key"] == "accrual-controller-agent")
+        self.assertEqual(accrual_controller["catalog_status"], "SEEDED")
+        self.assertEqual(accrual_controller["current_profile_ids"], ["accrual-controller-agent"])
+        self.assertEqual(accrual_controller["authority_ceiling"], "EXECUTE")
+        self.assertEqual(
+            accrual_controller["maximum_action_types"],
+            ["create_manual_accrual_entry", "reverse_accrual_entry"],
+        )
+
+        confirmation_controller = next(row for row in payload if row["role_key"] == "confirmation-controller-agent")
+        self.assertEqual(confirmation_controller["catalog_status"], "SEEDED")
+        self.assertEqual(confirmation_controller["current_profile_ids"], ["confirmation-controller-agent"])
+        self.assertEqual(confirmation_controller["authority_ceiling"], "EXECUTE")
+        self.assertEqual(
+            confirmation_controller["maximum_action_types"],
+            [
+                "issue_trade_confirmation",
+                "record_trade_confirmation_response",
+                "update_trade_workflow_item",
+            ],
+        )
+
+        control_tower = next(row for row in payload if row["role_key"] == "control-tower-agent")
+        self.assertEqual(control_tower["current_profile_ids"], ["control-tower-agent"])
+        self.assertEqual(control_tower["authority_ceiling"], "DRAFT")
 
     def test_admin_seed_sync_exposes_role_profiles_with_policy_and_eval_status(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
@@ -293,8 +354,8 @@ class AssistantApiTests(unittest.TestCase):
         )
 
         self.assertEqual(seed_response.status_code, 200)
-        self.assertEqual(seed_response.json()["total_profiles"], 15)
-        self.assertEqual(seed_response.json()["total_templates"], 15)
+        self.assertEqual(seed_response.json()["total_profiles"], 20)
+        self.assertEqual(seed_response.json()["total_templates"], 20)
 
         listing_response = self.client.get(
             "/admin/assistant/agents",
@@ -302,7 +363,7 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(listing_response.status_code, 200)
         profiles = {row["agent_id"]: row for row in listing_response.json()}
-        self.assertEqual(len(profiles), 15)
+        self.assertEqual(len(profiles), 20)
 
         active_profiles = [row for row in profiles.values() if row["status"] == "ACTIVE"]
         self.assertEqual(
@@ -310,9 +371,13 @@ class AssistantApiTests(unittest.TestCase):
             [
                 "accounting-posting-agent",
                 "accrual-controller-agent",
+                "confirmation-controller-agent",
+                "control-tower-agent",
+                "counterparty-outreach-agent",
                 "counterparty-state-sync-agent",
                 "document-agent",
                 "fee-accrual-agent",
+                "invoice-controller-agent",
                 "logistics-coordinator",
                 "market-research-agent",
                 "movement-controller-agent",
@@ -323,6 +388,7 @@ class AssistantApiTests(unittest.TestCase):
                 "trade-capture-agent",
                 "trade-governor",
                 "trade-ops-copilot",
+                "workflow-controller-agent",
             ],
         )
         for profile in active_profiles:
@@ -332,9 +398,30 @@ class AssistantApiTests(unittest.TestCase):
             self.assertTrue(profile["authority_ceiling"])
             self.assertIn("policy_notes", profile["effective_policy"])
             self.assertIn(profile["eval_gate"]["status"], {"PASS", "BLOCKED"})
-        self.assertEqual(profiles["movement-controller-agent"]["allowed_action_types"], ["record_trade_actualization", "update_trade_workflow_item"])
-        self.assertEqual(profiles["accounting-posting-agent"]["allowed_action_types"], [])
-        self.assertEqual(profiles["accounting-posting-agent"]["authority_ceiling"], "DRAFT")
+        self.assertEqual(
+            profiles["movement-controller-agent"]["allowed_action_types"],
+            ["record_delivery_event", "record_trade_actualization", "update_trade_workflow_item"],
+        )
+        self.assertEqual(
+            profiles["trade-capture-agent"]["allowed_action_types"],
+            ["create_trade", "amend_trade", "cancel_trade"],
+        )
+        self.assertEqual(
+            profiles["accrual-controller-agent"]["allowed_action_types"],
+            ["create_manual_accrual_entry", "reverse_accrual_entry"],
+        )
+        self.assertEqual(profiles["accrual-controller-agent"]["authority_ceiling"], "EXECUTE")
+        self.assertEqual(
+            profiles["accounting-posting-agent"]["allowed_action_types"],
+            ["create_accounting_entry", "reverse_accounting_entry"],
+        )
+        self.assertEqual(profiles["accounting-posting-agent"]["authority_ceiling"], "EXECUTE")
+        self.assertEqual(
+            profiles["confirmation-controller-agent"]["allowed_action_types"],
+            ["issue_trade_confirmation", "record_trade_confirmation_response", "update_trade_workflow_item"],
+        )
+        self.assertEqual(profiles["control-tower-agent"]["allowed_action_types"], [])
+        self.assertEqual(profiles["control-tower-agent"]["authority_ceiling"], "DRAFT")
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_SPECS), set(ALL_ASSISTANT_ACTION_TYPES))
@@ -391,11 +478,19 @@ class AssistantApiTests(unittest.TestCase):
             tuple(planner.action_type for planner in ACTION_PLANNER_SEQUENCE),
             (
                 "cancel_trade",
+                "create_trade",
+                "amend_trade",
                 "issue_trade_confirmation",
                 "update_trade_workflow_item",
+                "record_delivery_event",
+                "record_trade_actualization",
                 "record_trade_confirmation_response",
+                "create_manual_accrual_entry",
+                "reverse_accrual_entry",
                 "issue_trade_invoice",
                 "create_trade_payment",
+                "create_accounting_entry",
+                "reverse_accounting_entry",
                 "reprocess_document_ingestion",
             ),
         )
@@ -907,12 +1002,20 @@ class AssistantApiTests(unittest.TestCase):
                 for decision in create_response.json()["effective_policy"]["blocked_actions"]
             },
             {
+                "create_trade",
+                "amend_trade",
                 "cancel_trade",
+                "record_delivery_event",
+                "create_manual_accrual_entry",
+                "reverse_accrual_entry",
                 "issue_trade_confirmation",
                 "record_trade_confirmation_response",
                 "update_trade_workflow_item",
+                "record_trade_actualization",
                 "issue_trade_invoice",
                 "create_trade_payment",
+                "create_accounting_entry",
+                "reverse_accounting_entry",
                 "reprocess_document_ingestion",
             },
         )
@@ -1449,8 +1552,546 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(trade.status, "CANCELLED")
 
             record = session.query(AssistantActionRequest).one()
-            self.assertEqual(record.status, "EXECUTED")
-            self.assertEqual(record.decided_by, "trade-captain-auto")
+        self.assertEqual(record.status, "EXECUTED")
+        self.assertEqual(record.decided_by, "trade-captain-auto")
+
+    def test_execute_capable_agent_autonomously_executes_create_trade_action(self) -> None:
+        token = self._create_session_token()
+        with self.SessionLocal() as session:
+            self._seed_trade_reference_data(session)
+            session.commit()
+        self._create_agent(
+            agent_id="trade-capture-auto",
+            name="Trade Capture Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["create_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "trade-capture-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Trade capture:",
+                            "- trade_id: T-1020",
+                            "- book: CRUDE",
+                            "- commodity_class: CRUDE",
+                            "- commodity: WTI",
+                            "- pricing_type: FIXED",
+                            "- price: 81.5",
+                            "- volume: 500",
+                            "- trade_side: BUY",
+                            "- occurred_at: 2026-04-25T12:00:00Z",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Create trade T-1020 and reflect the booking in the system."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "create_trade")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["payload"]["trade_id"], "T-1020")
+        self.assertEqual(action_request["payload"]["book"], "CRUDE")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+        self.assertIn("TradeCreated", action_request["review_context"]["expected_downstream_effects"][0])
+
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-1020")
+            self.assertIsNotNone(trade)
+            assert trade is not None
+            self.assertEqual(trade.status, "ACTIVE")
+            self.assertEqual(float(trade.price), 81.5)
+            self.assertEqual(float(trade.volume), 500.0)
+            created_event = (
+                session.query(Event)
+                .filter(Event.aggregate_id == "T-1020", Event.event_type == "TradeCreated")
+                .one()
+            )
+            self.assertEqual(created_event.actor_id, "trade-capture-auto")
+
+    def test_execute_capable_agent_autonomously_executes_amend_trade_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1021")
+        self._create_agent(
+            agent_id="trade-capture-amend",
+            name="Trade Capture Amend",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["amend_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "trade-capture-amend",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected trade:",
+                            "- trade_id: T-1021",
+                            "- price: 84.75",
+                            "- volume: 1250",
+                            "- occurred_at: 2026-04-25T13:15:00Z",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Amend the trade to the updated economics."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "amend_trade")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+        self.assertEqual(
+            action_request["review_context"]["proposed_mutation"]["changed_fields"],
+            ["price", "volume"],
+        )
+
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-1021")
+            self.assertIsNotNone(trade)
+            assert trade is not None
+            self.assertEqual(float(trade.price), 84.75)
+            self.assertEqual(float(trade.volume), 1250.0)
+            amended_event = (
+                session.query(Event)
+                .filter(Event.aggregate_id == "T-1021", Event.event_type == "TradeAmended")
+                .one()
+            )
+            self.assertEqual(amended_event.actor_id, "trade-capture-amend")
+
+    def test_execute_capable_agent_autonomously_executes_record_delivery_event_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1022")
+        delivery_id = build_delivery_obligation_id("T-1022")
+        self._seed_delivery_obligation(trade_id="T-1022", delivery_id=delivery_id)
+        self._create_agent(
+            agent_id="movement-auto",
+            name="Movement Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["record_delivery_event"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "movement-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected delivery:",
+                            f"- delivery_id: {delivery_id}",
+                            "- event_type: DELIVERY_COMPLETED",
+                            "- occurred_at: 2026-04-25T14:30:00Z",
+                            "- reference_code: BOL-1022",
+                            "- source: terminal-report",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Record the delivery event so the system reflects reality."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "record_delivery_event")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            delivery = session.get(DeliveryObligation, delivery_id)
+            self.assertIsNotNone(delivery)
+            assert delivery is not None
+            self.assertEqual(delivery.execution_status, "COMPLETED")
+            delivery_event = (
+                session.query(DeliveryEvent)
+                .filter(DeliveryEvent.delivery_id == delivery_id, DeliveryEvent.event_type == "DELIVERY_COMPLETED")
+                .one()
+            )
+            self.assertEqual(delivery_event.reference_code, "BOL-1022")
+            self.assertEqual(delivery_event.created_by, "movement-auto")
+
+    def test_execute_capable_agent_autonomously_executes_create_manual_accrual_entry_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1023")
+        accrual_lot_id = "ALOT-1023"
+        self._seed_accrual_lot_record(
+            trade_id="T-1023",
+            accrual_lot_id=accrual_lot_id,
+            actualized_quantity=Decimal("100"),
+            accrued_amount=Decimal("8000"),
+        )
+        self._create_agent(
+            agent_id="accrual-auto",
+            name="Accrual Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["create_manual_accrual_entry"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "accrual-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected accrual lot:",
+                            f"- accrual_lot_id: {accrual_lot_id}",
+                            "- quantity_delta: 12",
+                            "- amount_delta: 960",
+                            "- effective_at: 2026-04-25T15:00:00Z",
+                            "- notes: Controller catch-up accrual.",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Create a manual accrual entry so the lot reflects reality."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "create_manual_accrual_entry")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            lot = session.get(TradeAccrualLot, accrual_lot_id)
+            self.assertIsNotNone(lot)
+            assert lot is not None
+            self.assertEqual(float(lot.actualized_quantity), 112.0)
+            self.assertEqual(float(lot.accrued_amount), 8960.0)
+            manual_entries = (
+                session.query(TradeAccrualEntry)
+                .filter(TradeAccrualEntry.accrual_lot_id == accrual_lot_id)
+                .filter(TradeAccrualEntry.entry_type == "MANUAL_ADJUSTMENT")
+                .all()
+            )
+            self.assertEqual(len(manual_entries), 1)
+            self.assertEqual(manual_entries[0].created_by, "accrual-auto")
+
+    def test_execute_capable_agent_autonomously_executes_reverse_accrual_entry_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1024")
+        accrual_lot_id = "ALOT-1024"
+        self._seed_accrual_lot_record(
+            trade_id="T-1024",
+            accrual_lot_id=accrual_lot_id,
+            actualized_quantity=Decimal("100"),
+            accrued_amount=Decimal("8000"),
+        )
+        with self.SessionLocal() as session:
+            reference_time = datetime(2026, 4, 25, 15, 0, tzinfo=timezone.utc)
+            original_entry = create_manual_accrual_entry(
+                session,
+                accrual_lot_id=accrual_lot_id,
+                actor_id="controller",
+                quantity_delta=Decimal("10"),
+                amount_delta=Decimal("500"),
+                effective_at=reference_time,
+                notes="Temporary accrual catch-up.",
+                now=reference_time,
+            )
+            original_entry_id = original_entry.entry_id
+            session.commit()
+
+        self._create_agent(
+            agent_id="accrual-reverse-auto",
+            name="Accrual Reverse Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["reverse_accrual_entry"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "accrual-reverse-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected accrual entry:",
+                            f"- entry_id: {original_entry_id}",
+                            "- reversal_reason: Duplicate controller adjustment.",
+                            "- effective_at: 2026-04-25T16:00:00Z",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Reverse the manual accrual entry."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "reverse_accrual_entry")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            lot = session.get(TradeAccrualLot, accrual_lot_id)
+            self.assertIsNotNone(lot)
+            assert lot is not None
+            self.assertEqual(float(lot.actualized_quantity), 100.0)
+            self.assertEqual(float(lot.accrued_amount), 8000.0)
+            reversal_entries = (
+                session.query(TradeAccrualEntry)
+                .filter(TradeAccrualEntry.reversal_of_entry_id == original_entry_id)
+                .all()
+            )
+            self.assertEqual(len(reversal_entries), 1)
+            self.assertEqual(reversal_entries[0].created_by, "accrual-reverse-auto")
+
+    def test_execute_capable_agent_autonomously_executes_create_accounting_entry_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1025")
+        self._create_agent(
+            agent_id="accounting-auto",
+            name="Accounting Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["create_accounting_entry"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+        lines_json = json.dumps(
+            [
+                {
+                    "side": "DEBIT",
+                    "account_code": "1300-INVENTORY",
+                    "amount": 1500,
+                    "currency_code": "USD",
+                },
+                {
+                    "side": "CREDIT",
+                    "account_code": "2200-ACCRUAL",
+                    "amount": 1500,
+                    "currency_code": "USD",
+                },
+            ]
+        )
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "accounting-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Accounting package:",
+                            "- trade_id: T-1025",
+                            "- description: Record delivered inventory accrual.",
+                            "- journal_code: ACCRUAL",
+                            "- effective_at: 2026-04-25T17:00:00Z",
+                            f"- lines_json: {lines_json}",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Create the accounting entry so the ledger matches reality."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "create_accounting_entry")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            entries = session.query(TradeAccountingEntry).filter_by(trade_id="T-1025").all()
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].journal_code, "ACCRUAL")
+            lines = (
+                session.query(TradeAccountingEntryLine)
+                .filter_by(accounting_entry_id=entries[0].accounting_entry_id)
+                .order_by(TradeAccountingEntryLine.line_no.asc())
+                .all()
+            )
+            self.assertEqual([line.side for line in lines], ["DEBIT", "CREDIT"])
+
+    def test_execute_capable_agent_autonomously_executes_reverse_accounting_entry_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1026")
+        with self.SessionLocal() as session:
+            original_entry = create_trade_accounting_entry(
+                session,
+                actor_id="controller",
+                trade_id="T-1026",
+                description="Initial accrual posting.",
+                effective_at=datetime(2026, 4, 25, 17, 0, tzinfo=timezone.utc),
+                lines=[
+                    {
+                        "side": "DEBIT",
+                        "account_code": "1300-INVENTORY",
+                        "amount": Decimal("1100"),
+                        "currency_code": "USD",
+                    },
+                    {
+                        "side": "CREDIT",
+                        "account_code": "2200-ACCRUAL",
+                        "amount": Decimal("1100"),
+                        "currency_code": "USD",
+                    },
+                ],
+                now=datetime(2026, 4, 25, 17, 0, tzinfo=timezone.utc),
+            )
+            original_entry_id = original_entry.accounting_entry_id
+            session.commit()
+
+        self._create_agent(
+            agent_id="accounting-reverse-auto",
+            name="Accounting Reverse Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["reverse_accounting_entry"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "accounting-reverse-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Accounting package:",
+                            f"- accounting_entry_id: {original_entry_id}",
+                            "- reversal_reason: Original posting duplicated.",
+                            "- effective_at: 2026-04-25T18:00:00Z",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Reverse the accounting entry."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "reverse_accounting_entry")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            original = session.get(TradeAccountingEntry, original_entry_id)
+            self.assertIsNotNone(original)
+            assert original is not None
+            self.assertEqual(original.status, "REVERSED")
+            reversals = (
+                session.query(TradeAccountingEntry)
+                .filter(TradeAccountingEntry.reversal_of_entry_id == original_entry_id)
+                .all()
+            )
+            self.assertEqual(len(reversals), 1)
+            reversal_lines = (
+                session.query(TradeAccountingEntryLine)
+                .filter_by(accounting_entry_id=reversals[0].accounting_entry_id)
+                .order_by(TradeAccountingEntryLine.line_no.asc())
+                .all()
+            )
+            self.assertEqual([line.side for line in reversal_lines], ["CREDIT", "DEBIT"])
 
     def test_assistant_agent_listing_marks_depleted_token_budget_red(self) -> None:
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 20
@@ -5380,6 +6021,28 @@ class AssistantApiTests(unittest.TestCase):
                 )
             session.commit()
 
+        def _json_datetime(value: datetime) -> str:
+            normalized_value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+            return normalized_value.isoformat().replace("+00:00", "Z")
+
+        with self.SessionLocal() as session:
+            ops_latest_accepted_at = max(
+                row.created_at
+                for row in session.query(AssistantPromptNavigationOutcome)
+                .filter(AssistantPromptNavigationOutcome.user_id == "ops_admin")
+                .filter(AssistantPromptNavigationOutcome.target_view == "operations")
+                .filter(AssistantPromptNavigationOutcome.target_label == "Open confirmation")
+                .all()
+            )
+            trader_latest_accepted_at = max(
+                row.created_at
+                for row in session.query(AssistantPromptNavigationOutcome)
+                .filter(AssistantPromptNavigationOutcome.user_id == "trader_alpha")
+                .filter(AssistantPromptNavigationOutcome.target_view == "trades")
+                .filter(AssistantPromptNavigationOutcome.target_label == "Open Trade Capture")
+                .all()
+            )
+
         ops_response = self.client.get(
             "/assistant/prompt-route-recommendations",
             headers={"Authorization": f"Bearer {ops_token}"},
@@ -5391,6 +6054,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(ops_payload[0]["target_view"], "operations")
         self.assertEqual(ops_payload[0]["target_label"], "Open confirmation")
         self.assertEqual(ops_payload[0]["focus_type"], "trade")
+        self.assertEqual(ops_payload[0]["last_accepted_at"], _json_datetime(ops_latest_accepted_at))
         self.assertEqual(ops_payload[0]["accepted_count"], 3)
         self.assertEqual(ops_payload[0]["outcome_count"], 3)
         self.assertEqual(ops_payload[0]["acceptance_rate"], 1.0)
@@ -5408,6 +6072,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(len(trader_payload), 1)
         self.assertEqual(trader_payload[0]["target_view"], "trades")
         self.assertEqual(trader_payload[0]["target_label"], "Open Trade Capture")
+        self.assertEqual(trader_payload[0]["last_accepted_at"], _json_datetime(trader_latest_accepted_at))
 
     def test_prepare_assistant_execution_does_not_persist_new_conversation(self) -> None:
         token = self._create_session_token()
@@ -5920,6 +6585,7 @@ class AssistantApiTests(unittest.TestCase):
     def _create_trade_with_event(self, *, trade_id: str) -> None:
         now = datetime.now(timezone.utc)
         with self.SessionLocal() as session:
+            self._seed_trade_reference_data(session, now=now)
             session.add(
                 Event(
                     event_id=f"evt-{trade_id.lower()}",
@@ -5960,6 +6626,297 @@ class AssistantApiTests(unittest.TestCase):
                     trader_user="assistant_user",
                     status="ACTIVE",
                     last_event_id=f"evt-{trade_id.lower()}",
+                )
+            )
+            session.commit()
+
+    def _seed_trade_reference_data(self, session, *, now: datetime | None = None) -> None:
+        reference_time = now or datetime.now(timezone.utc)
+        if session.get(ReferenceBook, "CRUDE") is None:
+            session.add(
+                ReferenceBook(
+                    code="CRUDE",
+                    name="Crude",
+                    description="Assistant API test book",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=reference_time,
+                    created_by="test-suite",
+                    updated_at=reference_time,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+        if session.get(ReferenceCommodity, "WTI") is None:
+            session.add(
+                ReferenceCommodity(
+                    code="WTI",
+                    commodity_class="CRUDE",
+                    name="WTI",
+                    description="Assistant API test commodity",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=reference_time,
+                    created_by="test-suite",
+                    updated_at=reference_time,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+        if session.get(ReferenceCounterparty, "ACME") is None:
+            session.add(
+                ReferenceCounterparty(
+                    code="ACME",
+                    name="ACME Trading",
+                    short_name="ACME",
+                    legal_entity_name="ACME Trading LLC",
+                    counterparty_type="SUPPLIER",
+                    country_code="US",
+                    credit_status="APPROVED",
+                    description="Assistant API counterparty fixture",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=reference_time,
+                    created_by="test-suite",
+                    updated_at=reference_time,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+        if session.get(ReferencePortfolio, "PROMPT") is None:
+            session.add(
+                ReferencePortfolio(
+                    code="PROMPT",
+                    name="Prompt Desk",
+                    book_code="CRUDE",
+                    owner=None,
+                    strategy="Directional",
+                    trader_persona=None,
+                    risk_archetype=None,
+                    description="Assistant API portfolio fixture",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=reference_time,
+                    created_by="test-suite",
+                    updated_at=reference_time,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+        if session.get(ReferenceUnit, "BBL") is None:
+            session.add(
+                ReferenceUnit(
+                    code="BBL",
+                    name="Barrel",
+                    commodity_class="CRUDE",
+                    dimension="VOLUME",
+                    base_unit_code=None,
+                    conversion_factor=None,
+                    precision=3,
+                    description="Assistant API unit fixture",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=reference_time,
+                    created_by="test-suite",
+                    updated_at=reference_time,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+        if session.get(ReferenceCurrency, "USD") is None:
+            session.add(
+                ReferenceCurrency(
+                    code="USD",
+                    name="US Dollar",
+                    symbol="$",
+                    description="Assistant API currency fixture",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=reference_time,
+                    created_by="test-suite",
+                    updated_at=reference_time,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+        if session.get(ReferenceLocation, "CUSHING") is None:
+            session.add(
+                ReferenceLocation(
+                    code="CUSHING",
+                    name="Cushing",
+                    location_kind="POINT",
+                    location_type="HUB",
+                    parent_location_code=None,
+                    market="PHYSICAL",
+                    city="Cushing",
+                    subdivision_code="OK",
+                    country_code="US",
+                    continent_code="NA",
+                    latitude=None,
+                    longitude=None,
+                    region="Midcontinent",
+                    timezone="America/Chicago",
+                    description="Assistant API location fixture",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=reference_time,
+                    created_by="test-suite",
+                    updated_at=reference_time,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+        session.flush()
+
+    def _seed_accrual_lot_record(
+        self,
+        *,
+        trade_id: str,
+        accrual_lot_id: str,
+        actualized_quantity: Decimal,
+        accrued_amount: Decimal,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                TradeAccrualLot(
+                    accrual_lot_id=accrual_lot_id,
+                    trade_id=trade_id,
+                    delivery_id=None,
+                    leg_no=None,
+                    book="CRUDE",
+                    portfolio="PROMPT",
+                    counterparty="ACME",
+                    commodity_class="CRUDE",
+                    commodity="WTI",
+                    trade_currency_code="USD",
+                    accrual_currency_code="USD",
+                    quantity_unit_code="BBL",
+                    planned_quantity=actualized_quantity,
+                    actualized_quantity=actualized_quantity,
+                    billed_quantity=Decimal("0"),
+                    accrued_amount=accrued_amount,
+                    billed_amount=Decimal("0"),
+                    collected_amount=Decimal("0"),
+                    disputed_amount=Decimal("0"),
+                    status="ACCRUED",
+                    opened_at=now,
+                    closed_at=None,
+                    notes="Assistant API accrual fixture",
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            if actualized_quantity != Decimal("0"):
+                session.add(
+                    TradeAccrualEntry(
+                        entry_id=str(uuid4()),
+                        accrual_lot_id=accrual_lot_id,
+                        entry_type="ACTUALIZATION_ESTIMATE",
+                        trade_id=trade_id,
+                        delivery_id=None,
+                        invoice_id=None,
+                        payment_id=None,
+                        effective_date=now.date(),
+                        currency_code="USD",
+                        quantity_delta=actualized_quantity,
+                        amount_delta=Decimal("0"),
+                        reference_price=None,
+                        price_index_code=None,
+                        fx_rate=None,
+                        notes="Assistant API baseline actualization entry",
+                        reversal_of_entry_id=None,
+                        created_at=now,
+                        created_by="test-suite",
+                    )
+                )
+            if accrued_amount != Decimal("0"):
+                reference_price = (
+                    accrued_amount / actualized_quantity if actualized_quantity != Decimal("0") else None
+                )
+                session.add(
+                    TradeAccrualEntry(
+                        entry_id=str(uuid4()),
+                        accrual_lot_id=accrual_lot_id,
+                        entry_type="PRICE_MARK",
+                        trade_id=trade_id,
+                        delivery_id=None,
+                        invoice_id=None,
+                        payment_id=None,
+                        effective_date=now.date(),
+                        currency_code="USD",
+                        quantity_delta=None,
+                        amount_delta=accrued_amount,
+                        reference_price=reference_price,
+                        price_index_code=None,
+                        fx_rate=None,
+                        notes="Assistant API baseline accrual mark",
+                        reversal_of_entry_id=None,
+                        created_at=now,
+                        created_by="test-suite",
+                    )
+                )
+            session.commit()
+
+    def _seed_delivery_obligation(self, *, trade_id: str, delivery_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            if session.get(DeliveryObligation, delivery_id) is not None:
+                return
+            session.add(
+                DeliveryObligation(
+                    delivery_id=delivery_id,
+                    trade_id=trade_id,
+                    trade_leg_id=None,
+                    leg_no=None,
+                    external_trade_id=f"EXT-{trade_id}",
+                    direction="INBOUND",
+                    mode_family="LOGISTICS",
+                    transport_mode="TRUCK",
+                    transport_mode_source="TRADE_DERIVED",
+                    delivery_profile="LOAD_DISCHARGE_WINDOW",
+                    book="CRUDE",
+                    book_source="TRADE_DERIVED",
+                    portfolio="PROMPT",
+                    portfolio_source="TRADE_DERIVED",
+                    counterparty="ACME",
+                    counterparty_source="TRADE_DERIVED",
+                    commodity_class="CRUDE",
+                    commodity="WTI",
+                    volume=1000,
+                    unit_of_measure="BBL",
+                    trade_currency_code="USD",
+                    price_unit_code="BBL",
+                    location_code="CUSHING",
+                    location_source="TRADE_DERIVED",
+                    delivery_start=now.date(),
+                    delivery_end=(now + timedelta(days=1)).date(),
+                    delivery_window_source="TRADE_DERIVED",
+                    execution_status="PLANNED",
+                    execution_status_source="TRADE_DERIVED",
+                    operations_owner="ops.scheduler",
+                    operations_owner_source="MANUAL",
+                    external_reference=None,
+                    external_reference_source="MANUAL",
+                    ops_notes="Assistant API delivery fixture",
+                    ops_notes_source="MANUAL",
+                    booked_at=now,
+                    source_trade_updated_at=now,
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
                 )
             )
             session.commit()

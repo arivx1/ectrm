@@ -49,6 +49,8 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
 from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
 from apps.api.app.models.trade_actualization import TradeActualization
+from apps.api.app.models.trade_accounting_entry import TradeAccountingEntry
+from apps.api.app.models.trade_accounting_entry_line import TradeAccountingEntryLine
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_credit_approval_decision import TradeCreditApprovalDecision
 from apps.api.app.models.trade_credit_exception import TradeCreditException
@@ -114,6 +116,8 @@ __all__ = [
     "TradeAccrualEntry",
     "TradeAccrualLot",
     "TradeActualization",
+    "TradeAccountingEntry",
+    "TradeAccountingEntryLine",
     "TradeConfirmation",
     "TradeCreditApprovalDecision",
     "TradeCreditException",

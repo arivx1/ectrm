@@ -83,6 +83,80 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-04-27 - Promote Accrual and Accounting Autonomy Through Immutable Ledgers
+
+- Type: lesson
+- Domain: assistant accrual and accounting execution
+- Applies to: `create_manual_accrual_entry`, `reverse_accrual_entry`,
+  `create_accounting_entry`, `reverse_accounting_entry`, seeded execute-capable
+  controller roles, and assistant eval fixtures
+- Status: implemented
+- Source:
+  `apps/api/app/domains/accruals/services/manual_entries.py`,
+  `apps/api/app/domains/accounting/services/postings.py`,
+  `apps/api/app/domains/assistant/services/action_handlers.py`,
+  `apps/api/app/domains/assistant/services/action_planners.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Lesson: when an agent needs to correct accrual or accounting state to reflect
+  reality, the mutation seam should be immutable and ledger-shaped rather than
+  an in-place overwrite. Manual accrual changes now append `MANUAL_ADJUSTMENT`
+  or `MANUAL_REVERSAL` entries on open lots and refresh lot rollups from the
+  ledger, while accounting changes create balanced posting headers plus lines
+  and reverse through offsetting entries that mark the original reversed.
+- Deterministic opportunity: keep rollup recomputation, balanced-line
+  validation, reversal-duplication checks, and trade-linkage validation inside
+  the typed domain services so agent planners only assemble evidence-backed
+  payloads instead of re-implementing finance rules in prompts.
+- Agent autonomy impact: the accrual-controller and accounting-posting agents
+  can now execute bounded internal corrections without per-action human
+  approval, but only for immutable manual adjustments or reversals with
+  stale-state rechecks, idempotency, provenance, and explicit override logging
+  intact.
+- Tests or evidence: focused service coverage in
+  `apps/api/tests/test_trade_accruals_service.py` and
+  `apps/api/tests/test_trade_accounting_service.py`; autonomous assistant
+  execution coverage in `apps/api/tests/test_assistant_api.py`; builder
+  coverage in `apps/web/tests/assistantAgentBuilder.test.ts`.
+- Follow-up: extend the same immutable pattern to future fee-recognition or
+  official reporting posting seams instead of adding mutable side doors.
+
+### 2026-04-27 - Promote New Mutation Seams Only Through Canonical Identifiers and Typed Services
+
+- Type: lesson
+- Domain: assistant trade capture and movement execution
+- Applies to: `create_trade`, `amend_trade`, `record_delivery_event`, seeded
+  execute-capable role scopes, and assistant eval fixtures
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/action_handlers.py`,
+  `apps/api/app/domains/assistant/services/action_planners.py`,
+  `apps/api/app/domains/trading/services/event_writes.py`,
+  `apps/api/app/domains/operations/services/shipments.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Lesson: when a new governed mutation seam is promoted for autonomous agent
+  execution, the assistant layer should call the canonical typed domain service
+  instead of inventing a parallel write path. Trade creation and amendment now
+  go through the event-write service, while delivery-event logging goes through
+  the shipment service. Delivery actions should use the same canonical
+  `build_delivery_obligation_id(...)` identifier shape that the operational
+  resource layer derives, otherwise staged actions can look valid while the
+  downstream execution projection cannot resolve the target record.
+- Deterministic opportunity: keep planner payload resolution and seeded test
+  fixtures aligned to the same ID builders and reference-data preconditions that
+  the typed service expects, so new action seams fail fast at plan time instead
+  of only during execution.
+- Agent autonomy impact: execute-capable agents can now reflect reality for new
+  trade bookings, trade amendments, and delivery event logging without a
+  separate approval hop, but only through the published typed contract with
+  stale-state checks, idempotency, and audit metadata intact.
+- Tests or evidence: focused API coverage for autonomous trade create, amend,
+  and delivery-event execution plus seeded-role catalog checks in
+  `apps/api/tests/test_assistant_api.py` and
+  `apps/api/tests/test_admin_seed_api.py`; builder coverage in
+  `apps/web/tests/assistantAgentBuilder.test.ts`.
+- Follow-up: extend the same pattern to future governed operational seams only
+  after the canonical domain service and identifier model are already stable.
+
 ### 2026-04-25 - Seed New Domain Agents With Truthful Mutation Scope
 
 - Type: lesson
@@ -114,6 +188,35 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: add explicit typed actions for trade create or amend, accrual
   adjustments, and accounting postings before promoting those seeded roles
   beyond their current bounded scope.
+
+### 2026-04-25 - Prefer Narrow Controller Agents Once Action Seams Stabilize
+
+- Type: lesson
+- Domain: managed-agent role design
+- Applies to: confirmation, workflow, invoice, outreach, and supervision
+  agent specialization
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/role_archetypes.py`,
+  `apps/api/app/domains/admin/services/seed_assistant_agents.py`, and
+  `apps/web/src/workspaces/admin/assistantAgentBuilder.ts`
+- Lesson: once a governed action seam is stable, it is useful to seed narrower
+  controller agents around that seam instead of relying only on broader
+  copilot roles. The narrower role should have a tighter mission, a smaller
+  tool set, and stop conditions that push adjacent work back to the right
+  business record or human owner.
+- Deterministic opportunity: if multiple narrow agents repeatedly hit the same
+  stop condition, that gap is a good candidate for a new typed action contract
+  or a shared deterministic routing helper.
+- Agent autonomy impact: narrower agents can be activated earlier and audited
+  more easily because their allowed mutations and override rationales are
+  easier to reason about.
+- Tests or evidence: `apps/api/tests/test_admin_seed_api.py`,
+  `apps/api/tests/test_assistant_api.py`, and
+  `apps/web/tests/assistantAgentBuilder.test.ts`.
+- Follow-up: keep specialized controller agents aligned to the same action
+  registry and policy notes as the broader copilot roles so they do not drift
+  into parallel mutation rules.
 
 ### 2026-04-25 - Agent Learning Must Produce Reviewable Self-Update Drafts
 
@@ -1624,6 +1727,39 @@ proposal form until a human owner approves the domain rule.
   is available, add a small “not ready right now” state instead of silently
   dropping the card.
 
+### 2026-04-25 - Keep Route-Specific Prompt Promotions Visible With Honest Readiness States
+
+- Type: lesson
+- Domain: prompt-first operator experience and promoted-route lifecycle
+- Applies to: Prompt Home promoted routes, route-specific workspace handoffs,
+  live candidate availability, and telemetry-driven promotion retirement
+- Status: implemented
+- Source:
+  [`prompt_route_recommendations.py`](../../apps/api/app/domains/assistant/services/prompt_route_recommendations.py),
+  [`promptPromotedRoutes.ts`](../../apps/web/src/workspaces/prompt/promptPromotedRoutes.ts),
+  [`PromptHomeWorkspace.tsx`](../../apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx),
+  and
+  [`promptPromotedRoutes.test.ts`](../../apps/web/tests/promptPromotedRoutes.test.ts)
+- Lesson: route-specific Prompt Home promotions should not silently disappear
+  when the live object they need is temporarily missing. Keep the promoted card
+  visible with an explicit readiness state such as `Ready`, `Not ready right
+  now`, or `Cooling off`, show when it last succeeded, and offer the generic
+  legacy workspace as fallback when no focused handoff is currently honest.
+- Deterministic opportunity: treat promotion readiness as a typed product rule,
+  not prompt behavior. The route recommendation service should expose recency
+  metadata, while the Prompt Home chooser decides whether a route is ready,
+  waiting on live context, or cooling off after a bounded stale window.
+- Agent autonomy impact: this keeps the assistant out of the loop for route
+  retirement or suspense decisions. Product logic owns when to present, pause,
+  or decay a promoted shortcut, and the human can still reach the old-school
+  workspace directly.
+- Tests or evidence: focused API coverage verifies promoted-route recency;
+  focused web tests cover ready, waiting, cooling-off, and ordering behavior;
+  browser smoke keeps the promoted-route and legacy-workspace handoff flows
+  green together.
+- Follow-up: if cooling-off routes remain useful for discovery, consider a
+  lightweight dismissal or pinning rule before promoting them back to `Ready`.
+
 ### 2026-04-25 - Execute-Capable Agents Must Still Use Typed Services and Log Boundary Overrides
 
 - Type: lesson
@@ -1723,3 +1859,104 @@ proposal form until a human owner approves the domain rule.
   invoice and payment candidate follow-through for the same workflow family.
 - Follow-up: align GCP-02 through GCP-14 work against this locked slice before
   introducing broader product-family, pricing, or autonomy scope.
+
+### 2026-04-25 - Treat Admin, Reports, And Assistant As Surfaces, Not Domains Of Truth
+
+- Type: lesson
+- Domain: architecture boundaries, rule placement, and governed-core review
+- Applies to: new service placement, report queries, admin APIs, assistant
+  tools, and workflow or action-request orchestration
+- Status: accepted
+- Source: [Governed Core Platform Boundary Reset](./core-platform-boundary-reset.md)
+- Lesson: during the governed-core phase, durable business truth should trend
+  toward authority-first seams such as trade lifecycle, reference data,
+  market data, risk, settlement, operations, workflow, policy, documents,
+  integrations, AI gateway, and audit. `admin`, `reports`, and `assistant`
+  remain important product surfaces, but they should orchestrate or summarize
+  governed outputs instead of becoming the only home of business rules.
+- Deterministic opportunity: use the boundary-reset checklist as a code-review
+  rule. If a change would make an admin panel, report query, prompt profile,
+  assistant helper, or frontend component the sole owner of a business rule,
+  move that rule into the owning domain or policy seam first.
+- Agent autonomy impact: this keeps the assistant runtime subordinate to typed
+  read and stage seams and prevents agent surfaces from growing into a parallel
+  mutation or policy architecture.
+- Tests or evidence: the governed-core planning package now includes an
+  explicit seam map, allowed and disallowed dependency examples, and review
+  anti-patterns for domain rule placement.
+- Follow-up: when implementing GCP-03 and later packages, prefer moving rule
+  ownership first, even if the file-system or route migration happens
+  incrementally afterward.
+
+### 2026-04-25 - Trade Writes Should Be Command-Owned, Event-Recorded
+
+- Type: lesson
+- Domain: trade lifecycle architecture, write-path governance, and stale-state
+  enforcement
+- Applies to: trade capture, amend and cancel flows, future correction paths,
+  assistant-staged trade actions, and route or service refactors around
+  `/events`
+- Status: accepted
+- Source: [Governed Core Trade Command Model](./core-platform-trade-command-model.md)
+- Lesson: the public contract for governed trade writes should be explicit
+  business commands such as `BookTrade`, `AmendTradeTerms`, and `CancelTrade`,
+  while `TradeCreated`, `TradeAmended`, and `TradeCancelled` remain the
+  internal durable events emitted after validation succeeds. The current event
+  route can stay as a compatibility adapter during migration, but it should not
+  remain the source of truth for write intent.
+- Deterministic opportunity: centralize reference-data validation, policy
+  checks, pricing and measurement rules, and expected `last_event_id`
+  stale-state guards in command handlers so the UI, scripts, assistants, and
+  future automation reuse the same write semantics.
+- Agent autonomy impact: assistants may stage typed action requests against the
+  same command-owned seam, but they should not be allowed to append raw trade
+  lifecycle events directly or bypass stale-state and policy checks through a
+  chat-specific path.
+- Tests or evidence: the current repo already routes create, amend, and cancel
+  writes through `/events` and `apply_trade_event`, which makes the migration
+  boundary visible; the command model now defines the target catalog,
+  envelope, compatibility mapping, and stale-state expectations for the locked
+  fixed-price physical gas slice.
+- Follow-up: wire the first trade command application service above raw event
+  append calls, then migrate the web app away from direct event-type write
+  semantics without losing the event store and projection architecture.
+
+### 2026-04-27 - Trade Create, Amend, and Cancel Now Enter Through a Command Adapter
+
+- Type: algorithm-added
+- Domain: trade lifecycle write-path governance and mutation provenance
+- Applies to: `/events`, web trade capture, trade amendments, trade
+  cancellations, and future assistant-staged trade commands
+- Status: implemented
+- Source:
+  `apps/api/app/domains/trading/services/trade_commands.py`,
+  `apps/api/app/routes/events.py`,
+  `apps/api/app/domains/trading/services/event_writes.py`,
+  `apps/web/src/entities/trade/api.ts`, and
+  `apps/web/src/entities/app/useAppTradeActions.ts`
+- Lesson: the first governed trade command seam now exists in code. The
+  compatibility `/events` route recognizes `TradeCreated`, `TradeAmended`, and
+  `TradeCancelled` writes for the locked slice, maps them to typed trade
+  commands, and records command-aware provenance before the existing event and
+  projection flow runs. The web app no longer submits create, amend, and cancel
+  writes from raw event names at the call site; it calls explicit trade command
+  helpers that still use `/events` as an adapter during migration.
+- Deterministic opportunity: the next safe promotion step is to move expected
+  `last_event_id` stale-state enforcement and later policy/reference-data
+  prechecks into the command layer, because the route and web callers now carry
+  the command metadata needed to do that without inventing a new transport.
+- Agent autonomy impact: assistants and future automation should target the
+  same command-owned seam, either through action requests or later typed
+  command services, instead of appending trade lifecycle events directly.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_commands_service
+  apps.api.tests.test_event_writes_service
+  apps.api.tests.test_admin_provenance_api`,
+  `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`,
+  `cd apps/web && npx eslint src/entities/trade/api.ts src/entities/app/useAppTradeActions.ts`,
+  and `cd apps/web && npm run build`.
+- Follow-up: enforce stale-state checks in the command service, then move more
+  callers and future action-request execution onto the same typed command path.

@@ -19,6 +19,8 @@ These packages assume:
 
 - [Governed Core Platform Roadmap](./core-platform-roadmap.md)
 - [Governed Core Platform Slice Lock](./core-platform-slice-lock.md)
+- [Governed Core Platform Boundary Reset](./core-platform-boundary-reset.md)
+- [Governed Core Trade Command Model](./core-platform-trade-command-model.md)
 - [Platform Blueprint](./platform-blueprint.md)
 - [ADR 0002: V2 Application Architecture And Canonical Domain Boundaries](../adr/0002-v2-application-architecture.md)
 - [Business Use Case Roadmap](./business-use-case-roadmap.md)
@@ -149,6 +151,10 @@ M
 The repo has a canonical module direction based on business authority and
 invariants rather than UI surfaces.
 
+### Status
+
+Drafted in [Governed Core Platform Boundary Reset](./core-platform-boundary-reset.md).
+
 ### Scope
 
 - define the durable core seams:
@@ -191,6 +197,10 @@ M
 
 Critical trade lifecycle writes move toward explicit commands and handlers
 instead of generic update behavior.
+
+### Status
+
+Drafted in [Governed Core Trade Command Model](./core-platform-trade-command-model.md).
 
 ### Scope
 

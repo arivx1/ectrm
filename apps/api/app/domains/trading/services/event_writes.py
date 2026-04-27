@@ -25,6 +25,9 @@ class AppendDomainEventCommand:
     schema_version: int = 1
     event_id: str | None = None
     recorded_at: datetime | None = None
+    operation_key: str | None = None
+    source_surface: str = "events"
+    provenance_details: Mapping[str, Any] | None = None
 
 
 def _coerce_utc(value: datetime | None) -> datetime | None:
@@ -91,10 +94,20 @@ def append_domain_event(
                 )
             )
 
+        provenance_details = {
+            "event_id": event.event_id,
+            "aggregate_type": event.aggregate_type,
+            "aggregate_id": event.aggregate_id,
+            "event_type": event.event_type,
+            "schema_version": event.schema_version,
+        }
+        if command.provenance_details:
+            provenance_details.update(dict(command.provenance_details))
+
         record_mutation_provenance(
             db,
-            operation_key=f"event_write.{event.event_type}",
-            source_surface="events",
+            operation_key=command.operation_key or f"event_write.{event.event_type}",
+            source_surface=command.source_surface,
             affected_records=[
                 {
                     "record_type": "event",
@@ -103,13 +116,7 @@ def append_domain_event(
                     "label": f"{event.aggregate_type}:{event.aggregate_id}",
                 }
             ],
-            details={
-                "event_id": event.event_id,
-                "aggregate_type": event.aggregate_type,
-                "aggregate_id": event.aggregate_id,
-                "event_type": event.event_type,
-                "schema_version": event.schema_version,
-            },
+            details=provenance_details,
             started_at=effective_recorded_at,
             completed_at=effective_recorded_at,
         )

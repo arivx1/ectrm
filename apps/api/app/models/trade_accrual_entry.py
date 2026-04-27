@@ -48,5 +48,11 @@ class TradeAccrualEntry(Base):
     price_index_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     fx_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reversal_of_entry_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("trade_accrual_entries.entry_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)

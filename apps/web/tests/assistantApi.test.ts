@@ -355,6 +355,7 @@ test('listAssistantPromptRouteRecommendations loads current-user promoted prompt
       target_view: 'operations',
       target_label: 'Open Work Queue',
       target_rationale: 'Use operations for confirmation blockers and handoffs.',
+      last_accepted_at: '2026-04-25T09:00:00Z',
       accepted_count: 4,
       outcome_count: 5,
       acceptance_rate: 0.8,

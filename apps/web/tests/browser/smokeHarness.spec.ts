@@ -358,7 +358,7 @@ test('prompt home opens a promoted deterministic route directly', async ({ page 
       .filter({ has: page.getByRole('heading', { name: 'Go straight to proven destinations' }) })
       .first()
     await expect(promotedRoutes).toBeVisible()
-    await expect(promotedRoutes.getByText('1 promoted route ready from repeated accepted Prompt Home handoffs.')).toBeVisible()
+    await expect(promotedRoutes.getByText('Promoted routes: 1 ready.')).toBeVisible()
     await expect(promotedRoutes.getByText('Trade: T-AMEND-100')).toBeVisible()
     await expect(promotedRoutes.getByText('4/5 accepted')).toBeVisible()
 

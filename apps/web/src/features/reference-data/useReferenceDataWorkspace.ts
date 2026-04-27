@@ -30,6 +30,7 @@ import {
   DEFAULT_COUNTERPARTY_STANDARDS as defaultCounterpartyStandards,
   DEFAULT_LOCATION_STANDARDS as defaultLocationStandards,
 } from '../../shared/models'
+import { formatAssetGeometryInput } from './referenceDataFormState'
 
 export function emptyBookForm(): BookForm {
   return { code: '', name: '', description: '' }
@@ -53,6 +54,9 @@ export function emptyAssetForm(assetStandards: AssetStandards = defaultAssetStan
     asset_reality: assetStandards.default_asset_reality,
     commodity_code: '',
     location_code: '',
+    latitude: '',
+    longitude: '',
+    geometry_geojson: '',
     capacity_value: '',
     capacity_unit_code: '',
     operator_name: '',
@@ -307,6 +311,9 @@ export function useReferenceDataWorkspace({
         asset.operating_status.toLowerCase().includes(query) ||
         (asset.commodity_code ?? '').toLowerCase().includes(query) ||
         (asset.location_code ?? '').toLowerCase().includes(query) ||
+        (asset.latitude?.toString() ?? '').toLowerCase().includes(query) ||
+        (asset.longitude?.toString() ?? '').toLowerCase().includes(query) ||
+        formatAssetGeometryInput(asset.geometry_geojson).toLowerCase().includes(query) ||
         (asset.capacity_unit_code ?? '').toLowerCase().includes(query) ||
         (asset.operator_name ?? '').toLowerCase().includes(query) ||
         (asset.description ?? '').toLowerCase().includes(query)
@@ -507,6 +514,9 @@ export function useReferenceDataWorkspace({
       asset_reality: record.asset_reality,
       commodity_code: record.commodity_code ?? '',
       location_code: record.location_code ?? '',
+      latitude: record.latitude?.toString() ?? '',
+      longitude: record.longitude?.toString() ?? '',
+      geometry_geojson: formatAssetGeometryInput(record.geometry_geojson),
       capacity_value: record.capacity_value?.toString() ?? '',
       capacity_unit_code: record.capacity_unit_code ?? '',
       operator_name: record.operator_name ?? '',

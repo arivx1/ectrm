@@ -67,13 +67,20 @@ AssistantAgentEvalGateStatus = Literal["PASS", "BLOCKED", "NOT_REQUIRED"]
 AssistantPolicyResourceType = Literal["tool", "action"]
 AssistantPolicyRiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 AssistantActionType = Literal[
+    "create_trade",
+    "amend_trade",
     "cancel_trade",
+    "record_delivery_event",
+    "create_manual_accrual_entry",
+    "reverse_accrual_entry",
     "issue_trade_confirmation",
     "record_trade_confirmation_response",
     "update_trade_workflow_item",
     "record_trade_actualization",
     "issue_trade_invoice",
     "create_trade_payment",
+    "create_accounting_entry",
+    "reverse_accounting_entry",
     "reprocess_document_ingestion",
 ]
 AssistantActionRequestStatus = Literal["PENDING", "REJECTED", "EXECUTED", "FAILED"]
@@ -687,6 +694,7 @@ class AssistantPromptRouteRecommendationOut(BaseModel):
     target_label: Optional[str] = None
     target_rationale: Optional[str] = None
     focus_type: Optional[AssistantPromptNavigationFocusType] = None
+    last_accepted_at: Optional[datetime] = None
     accepted_count: int
     outcome_count: int
     acceptance_rate: Optional[float] = None

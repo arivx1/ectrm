@@ -21,6 +21,95 @@ import type {
 } from '../../shared/models'
 import { buildCounterpartyCreditProfileForm, sameText } from './referenceDataHelpers'
 
+const ASSET_GEOJSON_ALLOWED_TYPES = new Set([
+  'Feature',
+  'FeatureCollection',
+  'GeometryCollection',
+  'LineString',
+  'MultiLineString',
+  'MultiPoint',
+  'MultiPolygon',
+  'Point',
+  'Polygon',
+])
+
+export function parseAssetCoordinatePair(args: {
+  latitudeText: string
+  longitudeText: string
+}): { latitude: number | null; longitude: number | null; error: string | null } {
+  const latitudeText = args.latitudeText.trim()
+  const longitudeText = args.longitudeText.trim()
+
+  if ((latitudeText.length > 0) !== (longitudeText.length > 0)) {
+    return {
+      latitude: null,
+      longitude: null,
+      error: 'Latitude and longitude must be provided together.',
+    }
+  }
+
+  if (!latitudeText) {
+    return { latitude: null, longitude: null, error: null }
+  }
+
+  const latitude = Number(latitudeText)
+  const longitude = Number(longitudeText)
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return {
+      latitude: null,
+      longitude: null,
+      error: 'Latitude and longitude must be numeric.',
+    }
+  }
+
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return {
+      latitude: null,
+      longitude: null,
+      error: 'Latitude must be between -90 and 90, and longitude must be between -180 and 180.',
+    }
+  }
+
+  return { latitude, longitude, error: null }
+}
+
+export function parseAssetGeometryInput(
+  rawValue: string,
+): { value: Record<string, unknown> | null; error: string | null } {
+  const trimmedValue = rawValue.trim()
+  if (!trimmedValue) {
+    return { value: null, error: null }
+  }
+
+  let parsedValue: unknown
+  try {
+    parsedValue = JSON.parse(trimmedValue)
+  } catch {
+    return { value: null, error: 'Geometry GeoJSON must be valid JSON.' }
+  }
+
+  if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue)) {
+    return { value: null, error: 'Geometry GeoJSON must be a GeoJSON object.' }
+  }
+
+  const parsedGeoJson = parsedValue as Record<string, unknown>
+  const geometryType = parsedGeoJson.type
+  if (typeof geometryType !== 'string' || !ASSET_GEOJSON_ALLOWED_TYPES.has(geometryType)) {
+    return {
+      value: null,
+      error: `Geometry GeoJSON type must be one of ${Array.from(ASSET_GEOJSON_ALLOWED_TYPES).join(', ')}.`,
+    }
+  }
+
+  return { value: parsedGeoJson, error: null }
+}
+
+export function formatAssetGeometryInput(
+  value: Record<string, unknown> | null | undefined,
+): string {
+  return value ? JSON.stringify(value, null, 2) : ''
+}
+
 export function buildAssetFieldErrors(
   assetForm: AssetForm,
   assetFormMode: 'create' | 'edit',
@@ -34,6 +123,8 @@ export function buildAssetFieldErrors(
     | 'asset_type'
     | 'asset_reality'
     | 'operating_status'
+    | 'coordinates'
+    | 'geometry_geojson'
     | 'capacity'
     | 'capacity_unit_code',
     string
@@ -47,6 +138,8 @@ export function buildAssetFieldErrors(
       | 'asset_type'
       | 'asset_reality'
       | 'operating_status'
+      | 'coordinates'
+      | 'geometry_geojson'
       | 'capacity'
       | 'capacity_unit_code',
       string
@@ -86,6 +179,19 @@ export function buildAssetFieldErrors(
     errors.operating_status = 'Operating status is required.'
   } else if (!assetStandards.operating_statuses.includes(normalizedOperatingStatus)) {
     errors.operating_status = 'Operating status is invalid.'
+  }
+
+  const parsedCoordinates = parseAssetCoordinatePair({
+    latitudeText: assetForm.latitude,
+    longitudeText: assetForm.longitude,
+  })
+  if (parsedCoordinates.error) {
+    errors.coordinates = parsedCoordinates.error
+  }
+
+  const parsedGeometry = parseAssetGeometryInput(assetForm.geometry_geojson)
+  if (parsedGeometry.error) {
+    errors.geometry_geojson = parsedGeometry.error
   }
 
   const hasCapacityValue = assetForm.capacity_value.trim().length > 0
@@ -310,6 +416,9 @@ export function isAssetFormDirty(
       !sameText(assetForm.asset_reality, assetStandards.default_asset_reality) ||
       !sameText(assetForm.commodity_code, '') ||
       !sameText(assetForm.location_code, '') ||
+      !sameText(assetForm.latitude, '') ||
+      !sameText(assetForm.longitude, '') ||
+      !sameText(assetForm.geometry_geojson, '') ||
       !sameText(assetForm.capacity_value, '') ||
       !sameText(assetForm.capacity_unit_code, '') ||
       !sameText(assetForm.operator_name, '') ||
@@ -330,6 +439,9 @@ export function isAssetFormDirty(
     !sameText(assetForm.asset_reality, selectedAsset.asset_reality) ||
     !sameText(assetForm.commodity_code, selectedAsset.commodity_code) ||
     !sameText(assetForm.location_code, selectedAsset.location_code) ||
+    !sameText(assetForm.latitude, selectedAsset.latitude?.toString()) ||
+    !sameText(assetForm.longitude, selectedAsset.longitude?.toString()) ||
+    !sameText(assetForm.geometry_geojson, formatAssetGeometryInput(selectedAsset.geometry_geojson)) ||
     !sameText(assetForm.capacity_value, selectedAsset.capacity_value?.toString()) ||
     !sameText(assetForm.capacity_unit_code, selectedAsset.capacity_unit_code) ||
     !sameText(assetForm.operator_name, selectedAsset.operator_name) ||

@@ -40,6 +40,7 @@ def list_reference_collection(
     limit: int,
     offset: int,
     extra_filters: list[Any] | None = None,
+    search_columns: list[Any] | None = None,
 ) -> list[Any]:
     rows = list_reference_records(
         db,
@@ -49,6 +50,7 @@ def list_reference_collection(
         limit,
         offset,
         extra_filters=extra_filters,
+        search_columns=search_columns,
     )
     return [to_out(row, spec.out_schema_cls) for row in rows]
 

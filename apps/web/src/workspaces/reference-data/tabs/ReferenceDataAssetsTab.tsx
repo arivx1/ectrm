@@ -10,6 +10,17 @@ function formatCapacity(value: number | null | undefined, unitCode: string | nul
   return `${value.toLocaleString()}${unitCode ? ` ${unitCode}` : ''}`
 }
 
+function formatCoordinatePair(
+  latitude: number | null | undefined,
+  longitude: number | null | undefined,
+): string {
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+    return '—'
+  }
+
+  return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+}
+
 export function ReferenceDataAssetsDirectory({ controller }: ReferenceDataTabProps) {
   const { filteredAssets, locations, selectedAssetCode, startEditAsset } = controller
 
@@ -27,12 +38,18 @@ export function ReferenceDataAssetsDirectory({ controller }: ReferenceDataTabPro
         description="Review physical and processing asset masters in a compact sheet before maintaining details in the side editor."
         columns={[
           { id: 'code', label: 'Code', width: '10rem', renderCell: (asset) => asset.code },
-        { id: 'name', label: 'Name', width: '18rem', renderCell: (asset) => asset.name },
-        { id: 'class', label: 'Class', width: '12rem', renderCell: (asset) => asset.asset_class },
-        { id: 'type', label: 'Type', width: '12rem', renderCell: (asset) => asset.asset_type },
-        { id: 'reality', label: 'Reality', width: '8rem', renderCell: (asset) => asset.asset_reality },
-        { id: 'commodity', label: 'Commodity', width: '10rem', renderCell: (asset) => asset.commodity_code ?? '—' },
+          { id: 'name', label: 'Name', width: '18rem', renderCell: (asset) => asset.name },
+          { id: 'class', label: 'Class', width: '12rem', renderCell: (asset) => asset.asset_class },
+          { id: 'type', label: 'Type', width: '12rem', renderCell: (asset) => asset.asset_type },
+          { id: 'reality', label: 'Reality', width: '8rem', renderCell: (asset) => asset.asset_reality },
+          { id: 'commodity', label: 'Commodity', width: '10rem', renderCell: (asset) => asset.commodity_code ?? '—' },
           { id: 'location', label: 'Location', width: '10rem', renderCell: (asset) => asset.location_code ?? '—' },
+          {
+            id: 'coordinates',
+            label: 'Asset Point',
+            width: '12rem',
+            renderCell: (asset) => formatCoordinatePair(asset.latitude, asset.longitude),
+          },
           {
             id: 'capacity',
             label: 'Capacity',
@@ -104,6 +121,10 @@ export function ReferenceDataAssetsEditor({ controller, formatDate }: ReferenceD
           </p>
           <p>
             {selectedAsset.location_code ?? 'No location'} · {selectedAsset.commodity_code ?? 'No commodity'}
+          </p>
+          <p>
+            {formatCoordinatePair(selectedAsset.latitude, selectedAsset.longitude)} ·{' '}
+            {selectedAsset.geometry_geojson ? 'GeoJSON geometry present' : 'No asset GeoJSON'}
           </p>
         </div>
       ) : null}
@@ -229,6 +250,56 @@ export function ReferenceDataAssetsEditor({ controller, formatDate }: ReferenceD
 
         <div className="mini-grid">
           <label className="field">
+            <span>Latitude</span>
+            <input
+              className="control"
+              value={assetForm.latitude}
+              onChange={(event) =>
+                setAssetForm((current) => ({ ...current, latitude: event.target.value }))
+              }
+              disabled={savingReference}
+              placeholder="Optional"
+            />
+            {assetFieldErrors.coordinates ? (
+              <small className="field-error">{assetFieldErrors.coordinates}</small>
+            ) : null}
+          </label>
+          <label className="field">
+            <span>Longitude</span>
+            <input
+              className="control"
+              value={assetForm.longitude}
+              onChange={(event) =>
+                setAssetForm((current) => ({ ...current, longitude: event.target.value }))
+              }
+              disabled={savingReference}
+              placeholder="Optional"
+            />
+          </label>
+        </div>
+
+        <label className="field">
+          <span>Geometry GeoJSON</span>
+          <textarea
+            className="control control-textarea"
+            value={assetForm.geometry_geojson}
+            onChange={(event) =>
+              setAssetForm((current) => ({ ...current, geometry_geojson: event.target.value }))
+            }
+            disabled={savingReference}
+            placeholder='Optional: {"type":"LineString","coordinates":[[-104.5,31.7],[-103.1,31.8]]}'
+          />
+          {assetFieldErrors.geometry_geojson ? (
+            <small className="field-error">{assetFieldErrors.geometry_geojson}</small>
+          ) : (
+            <small className="form-note">
+              Map precedence is GeoJSON, then direct asset coordinates, then the linked location.
+            </small>
+          )}
+        </label>
+
+        <div className="mini-grid">
+          <label className="field">
             <span>Asset Reality</span>
             <select
               className="control"
@@ -347,6 +418,8 @@ export function ReferenceDataAssetsEditor({ controller, formatDate }: ReferenceD
                 assetFieldErrors.asset_class ||
                 assetFieldErrors.asset_type ||
                 assetFieldErrors.asset_reality ||
+                assetFieldErrors.coordinates ||
+                assetFieldErrors.geometry_geojson ||
                 assetFieldErrors.capacity ||
                 assetFieldErrors.capacity_unit_code ||
                 assetFieldErrors.operating_status,
@@ -371,6 +444,14 @@ export function ReferenceDataAssetsEditor({ controller, formatDate }: ReferenceD
           <div className="detail-row">
             <span>Reality</span>
             <strong>{selectedAsset.asset_reality}</strong>
+          </div>
+          <div className="detail-row">
+            <span>Asset Point</span>
+            <strong>{formatCoordinatePair(selectedAsset.latitude, selectedAsset.longitude)}</strong>
+          </div>
+          <div className="detail-row">
+            <span>Geometry</span>
+            <strong>{selectedAsset.geometry_geojson ? 'Present' : 'None'}</strong>
           </div>
           <div className="detail-row">
             <span>Capacity</span>

@@ -1594,10 +1594,23 @@ class ReferenceDataApiTests(unittest.TestCase):
                     asset_reality=" real ",
                     commodity_code=" natural_gas ",
                     location_code=" permian ",
+                    latitude=31.7636,
+                    longitude=-104.5208,
+                    geometry_geojson={
+                        "type": "LineString",
+                        "coordinates": [
+                            [-104.5208, 31.7636],
+                            [-103.1026, 31.8457],
+                        ],
+                    },
                     capacity_value=2400.5,
                     capacity_unit_code=" mmbtu ",
                     operator_name=" Midstream Ops ",
                     operating_status=" operating ",
+                    source_name=" Internal Source Catalog ",
+                    source_url=" https://example.com/assets/waha ",
+                    confidence=0.92,
+                    notes=" Seeded from curated source ",
                     description="test asset",
                     created_by="test-user",
                 ),
@@ -1610,9 +1623,16 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertEqual(created.asset_reality, "REAL")
         self.assertEqual(created.commodity_code, "NATURAL_GAS")
         self.assertEqual(created.location_code, "PERMIAN")
+        self.assertEqual(created.latitude, 31.7636)
+        self.assertEqual(created.longitude, -104.5208)
+        self.assertEqual(created.geometry_geojson["type"], "LineString")
         self.assertEqual(created.capacity_unit_code, "MMBTU")
         self.assertEqual(created.operator_name, "Midstream Ops")
         self.assertEqual(created.operating_status, "OPERATING")
+        self.assertEqual(created.source_name, "Internal Source Catalog")
+        self.assertEqual(created.source_url, "https://example.com/assets/waha")
+        self.assertEqual(created.confidence, 0.92)
+        self.assertEqual(created.notes, "Seeded from curated source")
 
         standards = list_asset_standards()
         self.assertEqual(standards.default_asset_class, "PIPELINE")
@@ -1622,6 +1642,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             listed = list_assets(
+                q="curated source",
                 asset_class="pipeline",
                 asset_type="transmission",
                 asset_reality="real",
@@ -1641,10 +1662,28 @@ class ReferenceDataApiTests(unittest.TestCase):
                     asset_reality="simulated",
                     commodity_code=None,
                     location_code=None,
+                    latitude=None,
+                    longitude=None,
+                    geometry_geojson={
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [-103.2, 31.7],
+                                [-103.0, 31.7],
+                                [-103.0, 31.9],
+                                [-103.2, 31.9],
+                                [-103.2, 31.7],
+                            ]
+                        ],
+                    },
                     capacity_value=None,
                     capacity_unit_code=None,
                     operator_name=" Plant Ops ",
                     operating_status="idled",
+                    source_name=" Scenario Builder ",
+                    source_url=" https://example.com/assets/waha/sim ",
+                    confidence=0.51,
+                    notes=" Retired from curated source ",
                     updated_by="test-user",
                 ),
                 db=session,
@@ -1666,10 +1705,17 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertEqual(updated.asset_reality, "SIMULATED")
         self.assertIsNone(updated.commodity_code)
         self.assertIsNone(updated.location_code)
+        self.assertIsNone(updated.latitude)
+        self.assertIsNone(updated.longitude)
+        self.assertEqual(updated.geometry_geojson["type"], "Polygon")
         self.assertIsNone(updated.capacity_value)
         self.assertIsNone(updated.capacity_unit_code)
         self.assertEqual(updated.operator_name, "Plant Ops")
         self.assertEqual(updated.operating_status, "IDLED")
+        self.assertEqual(updated.source_name, "Scenario Builder")
+        self.assertEqual(updated.source_url, "https://example.com/assets/waha/sim")
+        self.assertEqual(updated.confidence, 0.51)
+        self.assertEqual(updated.notes, "Retired from curated source")
         self.assertFalse(deactivated.is_active)
         self.assertTrue(reactivated.is_active)
 
@@ -1727,6 +1773,42 @@ class ReferenceDataApiTests(unittest.TestCase):
                         capacity_value=100.0,
                         operating_status="OPERATING",
                         description="bad capacity",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "latitude and longitude must be provided together"):
+                create_asset(
+                    AssetCreate(
+                        code="BAD_COORDINATES",
+                        name="Bad Coordinates",
+                        asset_class="GENERATION",
+                        asset_type="THERMAL",
+                        asset_reality="REAL",
+                        commodity_code="ACTIVE_GAS",
+                        latitude=31.5,
+                        operating_status="OPERATING",
+                        description="bad coordinates",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "geometry_geojson type must be one of"):
+                create_asset(
+                    AssetCreate(
+                        code="BAD_GEOMETRY",
+                        name="Bad Geometry",
+                        asset_class="GENERATION",
+                        asset_type="THERMAL",
+                        asset_reality="REAL",
+                        commodity_code="ACTIVE_GAS",
+                        geometry_geojson={"type": "BadType", "coordinates": [0, 0]},
+                        operating_status="OPERATING",
+                        description="bad geometry",
                         created_by="test-user",
                     ),
                     db=session,

@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This document defines the Phase 1 contract for agent-staged action requests.
-It gives reviewers, implementers, and future agents a shared answer to:
+This document defines the governed contract for assistant action requests. It
+gives reviewers, implementers, and future agents a shared answer to:
 
 - what action is being proposed?
 - which work object owns it?
@@ -12,8 +12,10 @@ It gives reviewers, implementers, and future agents a shared answer to:
 - what policy or stop conditions apply?
 - what should happen if the target record changes before approval?
 
-Phase 1 action requests are approval-gated. They are not autonomous execution
-and they must not let freeform model output mutate business records directly.
+The same contract now supports both review-gated actions and autonomous
+execution by execute-capable managed agents. In both modes, freeform model
+output must not mutate business records directly; execution still has to flow
+through typed action handlers and domain services.
 
 Related docs:
 
@@ -47,12 +49,12 @@ approval shell:
 | `correction_summary` and `correction_fields` | Structured reviewer correction evidence when approval required edits. |
 | `created_at`, `decided_at`, `decided_by` | Review and decision audit. |
 
-Phase 1 should preserve this shell while making the `payload` and reviewer
-metadata more explicit.
+The current implementation should preserve this shell while making the
+`payload` and reviewer metadata more explicit.
 
 ## Target Contract
 
-Every staged action request should answer the following fields either through
+Every action request should answer the following fields either through
 top-level columns or a structured metadata envelope.
 
 | Field | Required in Phase 1 | Purpose |
@@ -118,20 +120,26 @@ not arbitrary metadata values.
 
 ## Execution Enforcement
 
-The approval gateway now treats `review_context` as a required execution
-contract. Before any side effect runs, approval must:
+The governed action runtime now treats `review_context` as a required execution
+contract. Before any side effect runs, the runtime must:
 
 - require a `review_context` envelope
 - require a non-empty `review_context.idempotency_key`
 - reject duplicate idempotency keys that already executed
 - re-read the current target record and compare it with `stale_state_basis`
-- record the passed approval policy evidence in the action `result`
+- record the passed policy and execution evidence in the action `result`
+
+Execute-capable agents may self-execute a governed action in the same request,
+but they still use this same contract and persist execution metadata inside
+`review_context`, including `execution_mode`,
+`autonomous_execution_reason`, and, when applicable,
+`delegated_ability_override_reason`.
 
 Stale-state rechecks are performed server-side for all published action types,
-including trade cancellation, confirmations, workflow item updates, invoices,
-payments, and document reprocessing. Workflow item updates may still allow an
-idempotent retry when the requested mutation is already reflected on the target
-record.
+including trade create/amend/cancel, delivery events, actualizations,
+confirmations, workflow item updates, invoices, payments, and document
+reprocessing. Workflow item updates may still allow an idempotent retry when
+the requested mutation is already reflected on the target record.
 
 ## Reviewer Decision Capture
 
@@ -157,11 +165,19 @@ the configured threshold.
 | Action type | Owning work object | Reviewer role | Current required payload | Expected effect | Phase 1 contract gap |
 | --- | --- | --- | --- | --- | --- |
 | `cancel_trade` | `trade` | Trader, Desk Lead, or Admin | `trade_id` | Creates `TradeCancelled`, marks trade cancelled, refreshes projections. | Add stale basis from trade status and `last_event_id`; add downstream-effect metadata. |
+| `create_trade` | `trade` | Trader or Desk Lead | `trade_id` plus trade economics payload | Creates `TradeCreated`, builds the active trade projection, and refreshes downstream workflow or position projections. | Keep required field checks, reference-data validation, and explicit create-only stale basis. |
+| `amend_trade` | `trade` | Trader or Desk Lead | `trade_id` plus changed trade fields | Creates `TradeAmended`, updates the trade projection, and refreshes downstream workflow or position projections. | Keep changed-field preview, event-led audit context, and stale basis from trade status plus `last_event_id`. |
 | `issue_trade_confirmation` | `trade_confirmation` | Operations Lead or Trader | `confirmation_id` | Updates issue metadata and confirmation workflow state. | Add target trade/confirmation summary, recipient evidence, and reviewer role. |
 | `record_trade_confirmation_response` | `trade_confirmation` | Operations Lead | `confirmation_id`, `action` | Updates receipt status and downstream workflow state. | Add response evidence, source reference, and stale basis from confirmation version/status. |
 | `update_trade_workflow_item` | `trade_workflow_item` | Operations Lead or Settlement Lead | `item_id`, `changes` | Applies workflow field changes with audit. | Add old/new field preview, queue owner, and stale basis from workflow item version/status. |
+| `record_trade_actualization` | `trade_actualization` owned by `trade` | Operations Lead | `trade_id`, `actual_quantity`, `actualized_at` | Upserts actualization state and refreshes downstream accrual and workflow projections. | Keep delivery ID derivation, quantity evidence, and stale basis from actualization version plus trade status. |
+| `record_delivery_event` | `delivery_obligation` | Operations Lead | `delivery_id`, `event_type`, `occurred_at` | Appends a delivery event and refreshes derived movement execution state. | Use canonical delivery IDs, event-history stale basis, and explicit event-type validation. |
+| `create_manual_accrual_entry` | `trade_accrual_lot` | Settlement Lead or Controller | `accrual_lot_id` plus non-zero `quantity_delta` or `amount_delta`, and `effective_at` | Appends an immutable manual accrual entry and recomputes the owning lot rollup. | Keep the action limited to open lots, immutable entries, and explicit evidence-linked deltas. |
+| `reverse_accrual_entry` | `trade_accrual_entry` | Settlement Lead or Controller | `entry_id` | Appends an immutable reversal entry and recomputes the owning lot rollup. | Restrict the path to manual accrual entries and preserve duplicate-reversal protection. |
 | `issue_trade_invoice` | `trade_invoice` candidate owned by `trade` | Settlement Lead | `trade_id` | Creates invoice and refreshes settlement workflow projections. | Add amount/date evidence, invoice readiness checks, and clear missing-evidence fields. |
 | `create_trade_payment` | `trade_payment` candidate owned by `trade_invoice` | Settlement Lead | `invoice_id` | Creates payment and refreshes payment workflow projections. | Add outstanding amount, currency checks, and stale basis from invoice/payment balance. |
+| `create_accounting_entry` | `trade` plus linked accrual, invoice, or payment evidence when present | Controller or Finance Lead | `trade_id`, balanced `lines`, `description`, and `effective_at` | Creates a posted internal accounting entry plus balanced posting lines. | Enforce balanced same-currency lines and keep linkage validation inside the typed posting service. |
+| `reverse_accounting_entry` | `trade_accounting_entry` | Controller or Finance Lead | `accounting_entry_id` | Creates an offsetting reversal entry, marks the original reversed, and preserves the ledger trail. | Keep reversal immutable and block duplicate reversal attempts. |
 | `reprocess_document_ingestion` | `document_ingestion` | Operations Lead or Admin | `document_id` | Resets analysis state and reruns document processing. | Add current review status, processor selection rationale, and expected state reset. |
 
 ## Reviewer Display Requirements
@@ -195,11 +211,19 @@ Recommended checks by action:
 | Action type | Minimum stale-state basis |
 | --- | --- |
 | `cancel_trade` | Trade exists, status is still `ACTIVE`, and `last_event_id` matches when available. |
+| `create_trade` | Trade does not already exist for the requested `trade_id`. |
+| `amend_trade` | Trade exists, current status still permits amendment, and `last_event_id` matches when available. |
 | `issue_trade_confirmation` | Confirmation exists and current status/issue count still matches staged basis. |
 | `record_trade_confirmation_response` | Confirmation exists and receipt status still matches staged basis. |
 | `update_trade_workflow_item` | Workflow item exists and version/status still matches staged basis. |
+| `record_trade_actualization` | Trade exists, current trade status still matches, and current actualization version or quantity has not drifted from the staged basis. |
+| `record_delivery_event` | Delivery exists under the canonical delivery projection, current execution status still matches, and event count plus latest event basis have not drifted. |
+| `create_manual_accrual_entry` | Accrual lot exists, is still open, and lot status, version, and entry count still match the staged basis. |
+| `reverse_accrual_entry` | Accrual entry exists, still belongs to the same lot, and no reversal entry has been recorded since staging. |
 | `issue_trade_invoice` | Trade exists, settlement/invoice readiness has not materially changed, and no duplicate invoice number was created. |
 | `create_trade_payment` | Invoice exists, outstanding amount/currency still support the payment, and duplicate payment reference is not present. |
+| `create_accounting_entry` | Trade exists, linked accrual or settlement records still match their staged versions, and the entry does not already exist under the idempotency key. |
+| `reverse_accounting_entry` | Accounting entry exists, current status and version still match the staged basis, and no reversal entry has already been recorded. |
 | `reprocess_document_ingestion` | Document exists and is not already in a conflicting processing state. |
 
 ## Idempotency Guidance
@@ -239,6 +263,6 @@ recommend the next manual or lower-authority step.
   `review_context`.
 - The Admin approval inbox and Assistant pending-approval surfaces should read
   the same serialized contract.
-- Assistant evals should assert that staged action requests include reviewer
-  metadata for at least one representative action per action-capable pilot
-  agent.
+- Assistant evals should assert that both staged and autonomously executed
+  action requests include reviewer metadata for at least one representative
+  action per action-capable pilot agent.

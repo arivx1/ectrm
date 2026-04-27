@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { loadPreTradeReviewDrift } from '../pretrade/api'
 import { createTradeWorkflowItem } from '../operations/api'
-import { submitTradeEvent } from '../trade/api'
+import {
+  submitAmendTradeTerms,
+  submitBookTrade,
+  submitCancelTrade,
+  submitTradeEvent,
+} from '../trade/api'
 import { buildPreTradeWorkflowNote } from '../../features/trades/preTradeCapture'
 import type { useTradeAmendForm } from '../../features/trades/useTradeAmendForm'
 import type { useTradeCaptureForm } from '../../features/trades/useTradeCaptureForm'
@@ -340,9 +345,8 @@ export function useAppTradeActions(args: {
         ? buildPreTradeWorkflowNote(captureForm.preTradeReviewContext)
         : null
 
-      await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: submission.tradeId,
-        event_type: 'TradeCreated',
+      await submitBookTrade(appConfig.apiBase, {
+        trade_id: submission.tradeId,
         payload: preTradeReviewId
           ? {
               ...submission.payload,
@@ -465,10 +469,10 @@ export function useAppTradeActions(args: {
     setAmending(true)
 
     try {
-      await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: selectedTradeId,
-        event_type: 'TradeAmended',
+      await submitAmendTradeTerms(appConfig.apiBase, {
+        trade_id: selectedTradeId,
         payload: submission.payload,
+        expected_last_event_id: selectedTrade.last_event_id,
       })
 
       await refreshTradeMutationData()
@@ -502,13 +506,13 @@ export function useAppTradeActions(args: {
     setCancelling(true)
 
     try {
-      await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: selectedTradeId,
-        event_type: 'TradeCancelled',
+      await submitCancelTrade(appConfig.apiBase, {
+        trade_id: selectedTradeId,
         payload: {
           status: tradeStatusValues.cancelled,
           cancellation_reason: reason.trim(),
         },
+        expected_last_event_id: selectedTrade.last_event_id,
       })
 
       await refreshTradeMutationData()

@@ -17,6 +17,8 @@ import {
   buildCommodityFieldErrors,
   buildCurrencyFieldErrors,
   buildLocationFieldErrors,
+  parseAssetCoordinatePair,
+  parseAssetGeometryInput,
   buildPriceIndexFieldErrors,
   buildUnitFieldErrors,
   isAssetFormDirty,
@@ -117,6 +119,21 @@ export function useReferenceDataAssetController({
       return
     }
 
+    const parsedCoordinates = parseAssetCoordinatePair({
+      latitudeText: assetForm.latitude,
+      longitudeText: assetForm.longitude,
+    })
+    if (parsedCoordinates.error) {
+      setReferenceActionError(parsedCoordinates.error)
+      return
+    }
+
+    const parsedGeometry = parseAssetGeometryInput(assetForm.geometry_geojson)
+    if (parsedGeometry.error) {
+      setReferenceActionError(parsedGeometry.error)
+      return
+    }
+
     const payload = {
       code: assetForm.code.trim().toUpperCase(),
       name: assetForm.name.trim(),
@@ -125,6 +142,9 @@ export function useReferenceDataAssetController({
       asset_reality: assetForm.asset_reality.trim().toUpperCase(),
       commodity_code: assetForm.commodity_code.trim().toUpperCase() || null,
       location_code: assetForm.location_code.trim().toUpperCase() || null,
+      latitude: parsedCoordinates.latitude,
+      longitude: parsedCoordinates.longitude,
+      geometry_geojson: parsedGeometry.value,
       capacity_value: capacityValue,
       capacity_unit_code: assetForm.capacity_unit_code.trim().toUpperCase() || null,
       operator_name: assetForm.operator_name.trim() || null,

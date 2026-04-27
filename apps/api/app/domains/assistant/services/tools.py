@@ -19,6 +19,9 @@ from apps.api.app.domains.accruals.services.accruals import (
 from apps.api.app.domains.accruals.services.accruals import (
     list_accrual_lots as load_accrual_lots,
 )
+from apps.api.app.domains.accounting.services import (
+    list_trade_accounting_entries as load_trade_accounting_entries,
+)
 from apps.api.app.domains.documents.services.ingestion import (
     get_document_ingestion as load_document_ingestion,
 )
@@ -896,6 +899,49 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
                 "additionalProperties": False,
             },
             executor=_get_accrual_reconciliation,
+        ),
+        AssistantToolDefinition(
+            name="list_accounting_entries",
+            description=(
+                "Load internal accounting postings tied to trades, accruals, invoices, or payments. Use this when "
+                "the user asks about journal history, posted accounting adjustments, or whether an internal posting "
+                "has already been reversed."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "entry_id": {
+                        "type": "string",
+                        "description": "Optional exact accounting entry identifier.",
+                    },
+                    "trade_id": {
+                        "type": "string",
+                        "description": "Optional exact trade identifier filter.",
+                    },
+                    "accrual_lot_id": {
+                        "type": "string",
+                        "description": "Optional exact accrual lot identifier filter.",
+                    },
+                    "invoice_id": {
+                        "type": "integer",
+                        "description": "Optional exact invoice identifier filter.",
+                    },
+                    "payment_id": {
+                        "type": "integer",
+                        "description": "Optional exact payment identifier filter.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional exact posting status filter such as POSTED or REVERSED.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of rows to return. Defaults to 10 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_list_accounting_entries,
         ),
         AssistantToolDefinition(
             name="list_documents",
@@ -1987,6 +2033,27 @@ def _get_accrual_reconciliation(db: Session, arguments: dict[str, Any]) -> Assis
         summary=summary,
         record_count=int(payload["row_count"]),
     )
+
+
+def _list_accounting_entries(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+    rows = load_trade_accounting_entries(
+        db,
+        entry_id=_optional_text(arguments.get("entry_id")),
+        trade_id=_optional_text(arguments.get("trade_id")),
+        accrual_lot_id=_optional_text(arguments.get("accrual_lot_id")),
+        invoice_id=_normalize_optional_int(arguments.get("invoice_id"), field_name="invoice_id"),
+        payment_id=_normalize_optional_int(arguments.get("payment_id"), field_name="payment_id"),
+        status_filter=_optional_upper(arguments.get("status")),
+        limit=limit,
+        offset=0,
+    )
+    payload = {"count": len(rows), "items": rows}
+    summary = f"Returned {len(rows)} accounting entry row(s)."
+    trade_id = _optional_text(arguments.get("trade_id"))
+    if trade_id:
+        summary = f"Returned {len(rows)} accounting entry row(s) for trade {trade_id}."
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(rows))
 
 
 def _list_documents(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:

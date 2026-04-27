@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from typing import Any
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -46,6 +48,19 @@ from .factory import set_reference_resource_active
 from .factory import update_reference_resource
 
 router = APIRouter()
+_ALLOWED_GEOJSON_TYPES = frozenset(
+    {
+        "Point",
+        "MultiPoint",
+        "LineString",
+        "MultiLineString",
+        "Polygon",
+        "MultiPolygon",
+        "GeometryCollection",
+        "Feature",
+        "FeatureCollection",
+    }
+)
 
 
 def _normalize_capacity_fields(
@@ -63,6 +78,70 @@ def _normalize_capacity_fields(
     return capacity_value, ensure_active_unit_exists(db, capacity_unit_code)
 
 
+def _normalize_coordinate_fields(
+    *,
+    latitude: Optional[float],
+    longitude: Optional[float],
+) -> tuple[Optional[float], Optional[float]]:
+    if (latitude is None) != (longitude is None):
+        raise ValueError("latitude and longitude must be provided together")
+
+    if latitude is None:
+        return None, None
+
+    return latitude, longitude
+
+
+def _normalize_geometry_geojson(value: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    if value is None:
+        return None
+
+    if not isinstance(value, dict):
+        raise ValueError("geometry_geojson must be a GeoJSON object")
+
+    try:
+        json.dumps(value)
+    except TypeError as exc:
+        raise ValueError("geometry_geojson must be JSON serializable") from exc
+
+    geojson_type = value.get("type")
+    if not isinstance(geojson_type, str) or geojson_type not in _ALLOWED_GEOJSON_TYPES:
+        allowed_types = ", ".join(sorted(_ALLOWED_GEOJSON_TYPES))
+        raise ValueError(f"geometry_geojson type must be one of {allowed_types}")
+
+    if geojson_type == "Feature":
+        geometry = value.get("geometry")
+        if geometry is None or not isinstance(geometry, dict):
+            raise ValueError("geometry_geojson Feature objects must include a geometry object")
+        _normalize_geometry_geojson(geometry)
+        return value
+
+    if geojson_type == "FeatureCollection":
+        features = value.get("features")
+        if not isinstance(features, list):
+            raise ValueError("geometry_geojson FeatureCollection objects must include a features array")
+        for feature in features:
+            if not isinstance(feature, dict):
+                raise ValueError("geometry_geojson FeatureCollection features must be objects")
+            _normalize_geometry_geojson(feature)
+        return value
+
+    if geojson_type == "GeometryCollection":
+        geometries = value.get("geometries")
+        if not isinstance(geometries, list):
+            raise ValueError("geometry_geojson GeometryCollection objects must include a geometries array")
+        for geometry in geometries:
+            if not isinstance(geometry, dict):
+                raise ValueError("geometry_geojson GeometryCollection geometries must be objects")
+            _normalize_geometry_geojson(geometry)
+        return value
+
+    if "coordinates" not in value:
+        raise ValueError("geometry_geojson geometry objects must include coordinates")
+
+    return value
+
+
 def _build_asset_create_values(db: Session, payload: AssetCreate) -> dict[str, object]:
     asset_class = normalize_asset_class(payload.asset_class)
     asset_type = normalize_asset_type(payload.asset_type, asset_class=asset_class)
@@ -75,6 +154,11 @@ def _build_asset_create_values(db: Session, payload: AssetCreate) -> dict[str, o
             capacity_value=payload.capacity_value,
             capacity_unit_code=payload.capacity_unit_code,
         )
+        latitude, longitude = _normalize_coordinate_fields(
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+        )
+        geometry_geojson = _normalize_geometry_geojson(payload.geometry_geojson)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
@@ -92,10 +176,17 @@ def _build_asset_create_values(db: Session, payload: AssetCreate) -> dict[str, o
             if payload.location_code is not None and payload.location_code.strip()
             else None
         ),
+        "latitude": latitude,
+        "longitude": longitude,
+        "geometry_geojson": geometry_geojson,
         "capacity_value": capacity_value,
         "capacity_unit_code": capacity_unit_code,
         "operator_name": clean_optional_text(payload.operator_name),
         "operating_status": operating_status,
+        "source_name": clean_optional_text(payload.source_name),
+        "source_url": clean_optional_text(payload.source_url),
+        "confidence": payload.confidence,
+        "notes": clean_optional_text(payload.notes),
     }
 
 
@@ -116,12 +207,22 @@ def _update_asset_fields(db: Session, record, payload, provided_fields: set[str]
     next_capacity_unit_code = record.capacity_unit_code
     if "capacity_unit_code" in provided_fields:
         next_capacity_unit_code = payload.capacity_unit_code
+    next_latitude = record.latitude
+    if "latitude" in provided_fields:
+        next_latitude = payload.latitude
+    next_longitude = record.longitude
+    if "longitude" in provided_fields:
+        next_longitude = payload.longitude
 
     try:
         normalized_capacity_value, normalized_capacity_unit_code = _normalize_capacity_fields(
             db,
             capacity_value=next_capacity_value,
             capacity_unit_code=next_capacity_unit_code,
+        )
+        normalized_latitude, normalized_longitude = _normalize_coordinate_fields(
+            latitude=next_latitude,
+            longitude=next_longitude,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
@@ -144,6 +245,14 @@ def _update_asset_fields(db: Session, record, payload, provided_fields: set[str]
             if payload.location_code is not None and payload.location_code.strip()
             else None
         )
+    if "latitude" in provided_fields or "longitude" in provided_fields:
+        record.latitude = normalized_latitude
+        record.longitude = normalized_longitude
+    if "geometry_geojson" in provided_fields:
+        try:
+            record.geometry_geojson = _normalize_geometry_geojson(payload.geometry_geojson)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     if "capacity_value" in provided_fields or "capacity_unit_code" in provided_fields:
         record.capacity_value = normalized_capacity_value
         record.capacity_unit_code = normalized_capacity_unit_code
@@ -151,6 +260,14 @@ def _update_asset_fields(db: Session, record, payload, provided_fields: set[str]
         record.operator_name = clean_optional_text(payload.operator_name)
     if "operating_status" in provided_fields and payload.operating_status is not None:
         record.operating_status = normalize_asset_operating_status(payload.operating_status)
+    if "source_name" in provided_fields:
+        record.source_name = clean_optional_text(payload.source_name)
+    if "source_url" in provided_fields:
+        record.source_url = clean_optional_text(payload.source_url)
+    if "confidence" in provided_fields:
+        record.confidence = payload.confidence
+    if "notes" in provided_fields:
+        record.notes = clean_optional_text(payload.notes)
 
 
 ASSET_SPEC = ReferenceDataCrudSpec(
@@ -205,6 +322,15 @@ def list_assets(
         limit=limit,
         offset=offset,
         extra_filters=extra_filters,
+        search_columns=[
+            ReferenceAsset.code,
+            ReferenceAsset.name,
+            ReferenceAsset.description,
+            ReferenceAsset.operator_name,
+            ReferenceAsset.source_name,
+            ReferenceAsset.source_url,
+            ReferenceAsset.notes,
+        ],
     )
 
 

@@ -3,9 +3,11 @@ import type { StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import {
+  buildAssetMapFeatureCollection,
   buildAssetMapSummary,
   formatAssetMapLocation,
   formatAssetMapPlacement,
+  formatAssetMapSource,
   type AssetMapRecord,
 } from '../../../features/reference-data/assetMap'
 import type { AssetRecord, LocationRecord } from '../../../shared/models'
@@ -18,6 +20,11 @@ type AssetMapPanelProps = {
 }
 
 type MapLibreModule = typeof import('maplibre-gl')
+
+const ASSET_GEOMETRY_SOURCE_ID = 'asset-geometry-source'
+const ASSET_GEOMETRY_FILL_LAYER_ID = 'asset-geometry-fill-layer'
+const ASSET_GEOMETRY_LINE_LAYER_ID = 'asset-geometry-line-layer'
+const ASSET_GEOMETRY_POINT_LAYER_ID = 'asset-geometry-point-layer'
 
 const FALLBACK_MAP_STYLE: StyleSpecification = {
   version: 8,
@@ -36,6 +43,20 @@ const FALLBACK_MAP_STYLE: StyleSpecification = {
       source: 'openstreetmap',
     },
   ],
+}
+
+function buildRecordSignature(records: AssetMapRecord[]): string {
+  return records
+    .map((record) =>
+      [
+        record.asset.code,
+        record.asset.latitude ?? 'na',
+        record.asset.longitude ?? 'na',
+        JSON.stringify(record.asset.geometry_geojson ?? null),
+        record.placementStatus,
+      ].join(':'),
+    )
+    .join('|')
 }
 
 function AssetMapCanvas({
@@ -120,13 +141,7 @@ function AssetMapCanvas({
     return () => observer.disconnect()
   }, [ready])
 
-  const recordSignature = useMemo(
-    () =>
-      records
-        .map((record) => `${record.asset.code}:${record.latitude ?? 'na'}:${record.longitude ?? 'na'}`)
-        .join('|'),
-    [records],
-  )
+  const recordSignature = useMemo(() => buildRecordSignature(records), [records])
 
   useEffect(() => {
     if (!ready || !mapRef.current || !runtimeRef.current) {
@@ -135,6 +150,73 @@ function AssetMapCanvas({
 
     const map = mapRef.current
     const runtime = runtimeRef.current
+
+    const featureCollection = buildAssetMapFeatureCollection(records)
+    const sourceData = {
+      ...featureCollection,
+      features: featureCollection.features.map((feature) => ({
+        ...feature,
+        properties: {
+          ...(feature.properties ?? {}),
+          isSelected: feature.properties?.assetCode === selectedAssetCode,
+        },
+      })),
+    }
+
+    const existingSource = map.getSource(ASSET_GEOMETRY_SOURCE_ID) as
+      | {
+          setData: (data: unknown) => void
+        }
+      | undefined
+
+    if (existingSource) {
+      existingSource.setData(sourceData)
+    } else {
+      map.addSource(ASSET_GEOMETRY_SOURCE_ID, {
+        type: 'geojson',
+        data: sourceData,
+      })
+      map.addLayer({
+        id: ASSET_GEOMETRY_FILL_LAYER_ID,
+        type: 'fill',
+        source: ASSET_GEOMETRY_SOURCE_ID,
+        filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+        paint: {
+          'fill-color': ['case', ['boolean', ['get', 'isSelected'], false], '#13293d', '#127c6c'],
+          'fill-opacity': ['case', ['boolean', ['get', 'isSelected'], false], 0.22, 0.1],
+        },
+      })
+      map.addLayer({
+        id: ASSET_GEOMETRY_LINE_LAYER_ID,
+        type: 'line',
+        source: ASSET_GEOMETRY_SOURCE_ID,
+        filter: [
+          'any',
+          ['==', ['geometry-type'], 'LineString'],
+          ['==', ['geometry-type'], 'MultiLineString'],
+          ['==', ['geometry-type'], 'Polygon'],
+          ['==', ['geometry-type'], 'MultiPolygon'],
+        ],
+        paint: {
+          'line-color': ['case', ['boolean', ['get', 'isSelected'], false], '#13293d', '#127c6c'],
+          'line-opacity': 0.8,
+          'line-width': ['case', ['boolean', ['get', 'isSelected'], false], 3, 2],
+        },
+      })
+      map.addLayer({
+        id: ASSET_GEOMETRY_POINT_LAYER_ID,
+        type: 'circle',
+        source: ASSET_GEOMETRY_SOURCE_ID,
+        filter: ['any', ['==', ['geometry-type'], 'Point'], ['==', ['geometry-type'], 'MultiPoint']],
+        paint: {
+          'circle-color': ['case', ['boolean', ['get', 'isSelected'], false], '#13293d', '#127c6c'],
+          'circle-radius': ['case', ['boolean', ['get', 'isSelected'], false], 6, 4],
+          'circle-opacity': 0.45,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1.5,
+        },
+      })
+    }
 
     markersRef.current.forEach((marker) => marker.remove())
     markersRef.current = []
@@ -153,10 +235,7 @@ function AssetMapCanvas({
       ]
         .filter(Boolean)
         .join(' ')
-      markerElement.setAttribute(
-        'aria-label',
-        `Open asset ${record.asset.code}: ${record.asset.name}`,
-      )
+      markerElement.setAttribute('aria-label', `Open asset ${record.asset.code}: ${record.asset.name}`)
       markerElement.title = `${record.asset.code} · ${record.asset.name}`
       markerElement.addEventListener('click', () => {
         handleSelectAsset(record.asset.code)
@@ -175,38 +254,26 @@ function AssetMapCanvas({
     map.resize()
 
     const selectedRecord = records.find((record) => record.asset.code === selectedAssetCode) ?? null
-    if (selectedRecord && selectedRecord.latitude !== null && selectedRecord.longitude !== null) {
+    const fitRecords = selectedRecord ? [selectedRecord] : records
+    const allCoordinates = fitRecords.flatMap((record) => record.extentCoordinates)
+
+    if (allCoordinates.length === 1) {
+      const [longitude, latitude] = allCoordinates[0]
       map.easeTo({
-        center: [selectedRecord.longitude, selectedRecord.latitude],
-        zoom: Math.max(map.getZoom(), 5.8),
+        center: [longitude, latitude],
+        zoom: Math.max(map.getZoom(), selectedRecord ? 6.2 : 5.2),
         duration: 600,
       })
       return
     }
 
-    if (records.length === 1 && records[0].latitude !== null && records[0].longitude !== null) {
-      map.easeTo({
-        center: [records[0].longitude, records[0].latitude],
-        zoom: 5.2,
-        duration: 600,
-      })
-      return
-    }
-
-    if (records.length > 1) {
-      const bounds = new runtime.LngLatBounds(
-        [records[0].longitude ?? 0, records[0].latitude ?? 0],
-        [records[0].longitude ?? 0, records[0].latitude ?? 0],
-      )
-      records.forEach((record) => {
-        if (record.latitude !== null && record.longitude !== null) {
-          bounds.extend([record.longitude, record.latitude])
-        }
-      })
+    if (allCoordinates.length > 1) {
+      const bounds = new runtime.LngLatBounds(allCoordinates[0], allCoordinates[0])
+      allCoordinates.slice(1).forEach((coordinate) => bounds.extend(coordinate))
       map.fitBounds(bounds, {
-        padding: 64,
+        padding: selectedRecord ? 72 : 64,
         duration: 600,
-        maxZoom: 6,
+        maxZoom: selectedRecord ? 8 : 6,
       })
     }
   }, [ready, recordSignature, records, selectedAssetCode])
@@ -226,9 +293,7 @@ export function AssetMapPanel({
   onSelectAsset,
 }: AssetMapPanelProps) {
   const mapSummary = useMemo(() => buildAssetMapSummary(assets, locations), [assets, locations])
-  const selectedRecord =
-    mapSummary.records.find((record) => record.asset.code === selectedAssetCode) ?? null
-
+  const selectedRecord = mapSummary.records.find((record) => record.asset.code === selectedAssetCode) ?? null
   const pendingPlacementPreview = mapSummary.unmappedRecords.slice(0, 3)
 
   return (
@@ -238,19 +303,19 @@ export function AssetMapPanel({
           <span className="eyebrow">Map</span>
           <h4>Asset Footprint</h4>
           <p>
-            Plotting follows each asset&apos;s linked reference location, so zoom, pan, and rotate
-            the footprint before opening the asset record in the editor.
+            The map prefers asset GeoJSON, then direct asset coordinates, then the linked location
+            coordinates, so we can zoom, pan, and rotate around the physical footprint instead of a
+            generic reference point.
           </p>
         </div>
         <div className="asset-map-stats" aria-label="Asset map coverage">
           <span className="entity-chip entity-chip-soft">{mapSummary.mappedCount} plotted</span>
+          <span className="entity-chip entity-chip-soft">{mapSummary.assetGeometryCount} geometry</span>
+          <span className="entity-chip entity-chip-soft">{mapSummary.assetPointCount} asset points</span>
+          <span className="entity-chip entity-chip-soft">{mapSummary.linkedLocationCount} linked locations</span>
           <span className="entity-chip entity-chip-soft">
             {mapSummary.missingCoordinatesCount} awaiting coordinates
           </span>
-          <span className="entity-chip entity-chip-soft">
-            {mapSummary.missingLocationCount} missing location links
-          </span>
-          <span className="entity-chip entity-chip-soft">{mapSummary.inactiveCount} inactive</span>
         </div>
       </div>
 
@@ -264,8 +329,8 @@ export function AssetMapPanel({
         <div className="asset-map-empty">
           <strong>No filtered assets can be plotted yet.</strong>
           <p>
-            Add latitude and longitude to the linked reference locations, or connect each asset to
-            an existing point location.
+            Add asset GeoJSON, direct asset latitude and longitude, or coordinates on the linked
+            reference location.
           </p>
         </div>
       )}
@@ -274,9 +339,7 @@ export function AssetMapPanel({
         <div className="reference-usage-card asset-map-card">
           <div className="reference-usage-head">
             <strong>Selected Asset</strong>
-            <span className="entity-chip entity-chip-soft">
-              {selectedRecord?.asset.code ?? 'No selection'}
-            </span>
+            <span className="entity-chip entity-chip-soft">{selectedRecord?.asset.code ?? 'No selection'}</span>
           </div>
           {selectedRecord ? (
             <>
@@ -284,6 +347,7 @@ export function AssetMapPanel({
                 {selectedRecord.asset.name} · {selectedRecord.asset.asset_class} ·{' '}
                 {selectedRecord.asset.asset_type}
               </p>
+              <p>{formatAssetMapSource(selectedRecord)}</p>
               <p>{formatAssetMapPlacement(selectedRecord)}</p>
             </>
           ) : (
@@ -306,15 +370,14 @@ export function AssetMapPanel({
               ))}
             </ul>
           ) : (
-            <p>All filtered assets currently have usable map coordinates.</p>
+            <p>All filtered assets currently have usable map placement data.</p>
           )}
         </div>
       </div>
 
       {mapSummary.mappedRecords.length > 0 ? (
         <p className="form-note asset-map-footnote">
-          Selected markers use the linked location label, such as{' '}
-          {formatAssetMapLocation(mapSummary.mappedRecords[0])}.
+          Current selection example: {formatAssetMapLocation(mapSummary.mappedRecords[0])}.
         </p>
       ) : null}
     </section>

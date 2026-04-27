@@ -7,14 +7,26 @@ import type {
   InvoiceIssueCandidateRecord,
   TradeAttentionCandidateRecord,
 } from '../../entities/app/api'
-import type { PromptNavigationIntent } from '../../entities/app/promptNavigationIntent'
+import {
+  promptNavigationIntentDetail,
+  promptNavigationIntentLabel,
+  type PromptNavigationIntent,
+} from '../../entities/app/promptNavigationIntent'
 import type { AssistantPromptRouteRecommendation } from '../../shared/models'
 
 export type PromptHomePromotedRoute = {
   key: string
   recommendation: AssistantPromptRouteRecommendation
   intent: PromptNavigationIntent
+  displayLabel: string
+  displayDetail: string
+  displayFocusLabel: string | null
   hasFocusedHandoff: boolean
+  recordOutcomeOnOpen: boolean
+  readiness: 'ready' | 'waiting' | 'cooling_off'
+  readinessLabel: string
+  readinessTone: 'active' | 'planned' | 'in-progress'
+  ageLabel: string | null
 }
 
 type CandidateRouteOptionSource = 'trade_attention' | 'invoice_issue'
@@ -31,30 +43,77 @@ type PromptHomePromotedRouteInputs = {
   recommendations: AssistantPromptRouteRecommendation[]
   tradeAttentionCandidates?: TradeAttentionCandidateRecord[]
   invoiceIssueCandidates?: InvoiceIssueCandidateRecord[]
+  now?: Date | string | null
 }
 
 export function buildPromptHomePromotedRoutes(
   inputs: PromptHomePromotedRouteInputs,
 ): PromptHomePromotedRoute[] {
-  return inputs.recommendations.flatMap((recommendation) => {
+  const generatedAt = coercePromotedRouteDate(inputs.now) ?? new Date()
+  return inputs.recommendations
+    .map<PromptHomePromotedRoute>((recommendation) => {
     const candidateHandoff = matchingCandidateWorkflowHandoff(recommendation, inputs)
-    if (candidateHandoff === null && recommendationRequiresLiveMatch(recommendation)) {
-      return []
-    }
+    const requiresLiveMatch = recommendationRequiresLiveMatch(recommendation)
+    const ageLabel = promotedRouteAgeLabel(recommendation, generatedAt)
 
-    const intent = candidateHandoff
-      ? promptIntentFromCandidateWorkflowHandoff(recommendation, candidateHandoff)
-      : promptIntentFromRecommendation(recommendation)
-
-    return [
-      {
+    if (candidateHandoff !== null) {
+      const intent = promptIntentFromCandidateWorkflowHandoff(recommendation, candidateHandoff)
+      return {
         key: `${recommendation.target_view}:${recommendation.target_label ?? ''}:${recommendation.focus_type ?? 'workspace'}`,
         recommendation,
         intent,
-        hasFocusedHandoff: candidateHandoff !== null,
-      },
-    ]
+        displayLabel: promptNavigationIntentLabel(intent),
+        displayDetail: promptNavigationIntentDetail(intent),
+        displayFocusLabel: formatPromotedRouteFocusLabel(intent),
+        hasFocusedHandoff: true,
+        recordOutcomeOnOpen: true,
+        readiness: 'ready' as const,
+        readinessLabel: 'Ready',
+        readinessTone: 'active' as const,
+        ageLabel,
+      }
+    }
+
+    const fallbackIntent = fallbackWorkspaceIntentFromRecommendation(recommendation)
+    if (!requiresLiveMatch) {
+      return {
+        key: `${recommendation.target_view}:${recommendation.target_label ?? ''}:${recommendation.focus_type ?? 'workspace'}`,
+        recommendation,
+        intent: fallbackIntent,
+        displayLabel: promptNavigationIntentLabel(fallbackIntent),
+        displayDetail: promptNavigationIntentDetail(fallbackIntent),
+        displayFocusLabel: null,
+        hasFocusedHandoff: false,
+        recordOutcomeOnOpen: true,
+        readiness: 'ready' as const,
+        readinessLabel: 'Ready',
+        readinessTone: 'active' as const,
+        ageLabel,
+      }
+    }
+
+    const readiness = promotedRouteReadinessWithoutLiveMatch(recommendation, generatedAt)
+    const readinessTone: PromptHomePromotedRoute['readinessTone'] =
+      readiness === 'cooling_off' ? 'in-progress' : 'planned'
+    return {
+      key: `${recommendation.target_view}:${recommendation.target_label ?? ''}:${recommendation.focus_type ?? 'workspace'}`,
+      recommendation,
+      intent: fallbackIntent,
+      displayLabel: recommendation.target_label?.trim() || promptNavigationIntentLabel(fallbackIntent),
+      displayDetail:
+        readiness === 'cooling_off'
+          ? 'No current live match has returned for this promoted route recently. It is cooling off until the same pattern shows up again.'
+          : 'No current live match is available for this promoted route right now. It will return as soon as the same pattern appears again.',
+      displayFocusLabel: null,
+      hasFocusedHandoff: false,
+      recordOutcomeOnOpen: false,
+      readiness,
+      readinessLabel: readiness === 'cooling_off' ? 'Cooling off' : 'Not ready right now',
+      readinessTone,
+      ageLabel,
+    }
   })
+    .sort((left, right) => comparePromotedRoutes(left, right))
 }
 
 function matchingCandidateWorkflowHandoff(
@@ -71,13 +130,12 @@ function matchingCandidateWorkflowHandoff(
     .at(0)?.handoff ?? null
 }
 
-function promptIntentFromRecommendation(
+function fallbackWorkspaceIntentFromRecommendation(
   recommendation: AssistantPromptRouteRecommendation,
 ): PromptNavigationIntent {
   return {
     kind: 'open_workspace',
     targetView: recommendation.target_view,
-    label: recommendation.target_label ?? undefined,
     rationale:
       recommendation.target_rationale ??
       recommendation.signal_reasons[0] ??
@@ -303,6 +361,118 @@ function recommendationRequiresLiveMatch(
 ): boolean {
   return recommendation.focus_type !== null && recommendation.focus_type !== undefined
 }
+
+function formatPromotedRouteFocusLabel(intent: PromptNavigationIntent): string | null {
+  if (!intent.focus) {
+    return null
+  }
+
+  const label = intent.focus.label ?? intent.focus.id
+  switch (intent.focus.type) {
+    case 'trade':
+      return `Trade: ${label}`
+    case 'workflow_item':
+      return `Workflow item: ${label}`
+    case 'invoice':
+      return `Invoice: ${label}`
+    case 'payment':
+      return `Payment: ${label}`
+    case 'document':
+      return `Document: ${label}`
+    case 'reference_record':
+      return `Reference: ${label}`
+    case 'report':
+      return `Report: ${label}`
+    default:
+      return label
+  }
+}
+
+function comparePromotedRoutes(
+  left: PromptHomePromotedRoute,
+  right: PromptHomePromotedRoute,
+): number {
+  const readinessDelta = promotedRouteReadinessPriority(left.readiness) - promotedRouteReadinessPriority(right.readiness)
+  if (readinessDelta !== 0) {
+    return readinessDelta
+  }
+
+  const rightAcceptedAt = coercePromotedRouteDate(right.recommendation.last_accepted_at)
+  const leftAcceptedAt = coercePromotedRouteDate(left.recommendation.last_accepted_at)
+  const recencyDelta = (rightAcceptedAt?.getTime() ?? 0) - (leftAcceptedAt?.getTime() ?? 0)
+  if (recencyDelta !== 0) {
+    return recencyDelta
+  }
+
+  const acceptedDelta = right.recommendation.accepted_count - left.recommendation.accepted_count
+  if (acceptedDelta !== 0) {
+    return acceptedDelta
+  }
+
+  return left.displayLabel.localeCompare(right.displayLabel)
+}
+
+function promotedRouteReadinessPriority(
+  readiness: PromptHomePromotedRoute['readiness'],
+): number {
+  switch (readiness) {
+    case 'ready':
+      return 0
+    case 'waiting':
+      return 1
+    case 'cooling_off':
+      return 2
+    default:
+      return 3
+  }
+}
+
+function promotedRouteReadinessWithoutLiveMatch(
+  recommendation: AssistantPromptRouteRecommendation,
+  generatedAt: Date,
+): 'waiting' | 'cooling_off' {
+  const lastAcceptedAt = coercePromotedRouteDate(recommendation.last_accepted_at)
+  if (lastAcceptedAt === null) {
+    return 'waiting'
+  }
+
+  const ageInDays = Math.floor((generatedAt.getTime() - lastAcceptedAt.getTime()) / DAY_IN_MILLISECONDS)
+  return ageInDays >= PROMOTED_ROUTE_COOLING_OFF_AFTER_DAYS ? 'cooling_off' : 'waiting'
+}
+
+function promotedRouteAgeLabel(
+  recommendation: AssistantPromptRouteRecommendation,
+  generatedAt: Date,
+): string | null {
+  const lastAcceptedAt = coercePromotedRouteDate(recommendation.last_accepted_at)
+  if (lastAcceptedAt === null) {
+    return null
+  }
+
+  const ageInDays = Math.max(0, Math.floor((generatedAt.getTime() - lastAcceptedAt.getTime()) / DAY_IN_MILLISECONDS))
+  if (ageInDays === 0) {
+    return 'Last accepted today.'
+  }
+  if (ageInDays === 1) {
+    return 'Last accepted yesterday.'
+  }
+  return `Last accepted ${ageInDays} days ago.`
+}
+
+function coercePromotedRouteDate(value: Date | string | null | undefined): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return null
+  }
+
+  const parsedDate = new Date(value)
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
+}
+
+const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000
+const PROMOTED_ROUTE_COOLING_OFF_AFTER_DAYS = 7
 
 const GENERIC_ROUTE_TOKENS = new Set([
   'open',

@@ -131,8 +131,8 @@ test('seedTradingSources keeps replaceExisting inside the typed admin helper', a
 test('seedAssistantAgents routes through the typed admin seed helper', async () => {
   const expected = {
     requested_by: 'ops.admin',
-    total_profiles: 15,
-    total_templates: 15,
+    total_profiles: 20,
+    total_templates: 20,
     created_count: 2,
     updated_count: 1,
     agent_ids: [
@@ -144,6 +144,9 @@ test('seedAssistantAgents routes through the typed admin seed helper', async () 
       'accrual-controller-agent',
       'accounting-posting-agent',
       'counterparty-state-sync-agent',
+      'confirmation-controller-agent',
+      'workflow-controller-agent',
+      'invoice-controller-agent',
       'market-research-agent',
       'pre-trade-structuring-agent',
       'risk-sentinel',
@@ -151,6 +154,8 @@ test('seedAssistantAgents routes through the typed admin seed helper', async () 
       'reporting-reconciliation-agent',
       'logistics-coordinator',
       'fee-accrual-agent',
+      'counterparty-outreach-agent',
+      'control-tower-agent',
     ],
   }
   postJsonMock.mockResolvedValueOnce(expected)

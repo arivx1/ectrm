@@ -31,6 +31,7 @@ class AssistantPromptRouteRecommendation:
     target_label: str | None
     target_rationale: str | None
     focus_type: str | None
+    last_accepted_at: datetime | None
     accepted_count: int
     outcome_count: int
     acceptance_rate: float | None
@@ -44,6 +45,7 @@ class _PromptRouteAccumulator:
     target_label: str | None = None
     target_rationale: str | None = None
     focus_type: str | None = None
+    last_accepted_at: datetime | None = None
     accepted_count: int = 0
     dismissed_count: int = 0
     failed_count: int = 0
@@ -98,6 +100,11 @@ def list_prompt_route_recommendations(
         outcome = _normalize_optional_text(record.outcome, uppercase=True)
         if outcome == "ACCEPTED":
             accumulator.accepted_count += 1
+            accepted_at = _coerce_aware_datetime(record.created_at) or _coerce_aware_datetime(record.updated_at)
+            if accepted_at is not None and (
+                accumulator.last_accepted_at is None or accepted_at > accumulator.last_accepted_at
+            ):
+                accumulator.last_accepted_at = accepted_at
         elif outcome == "DISMISSED":
             accumulator.dismissed_count += 1
         elif outcome == "FAILED":
@@ -116,6 +123,7 @@ def list_prompt_route_recommendations(
                 target_label=accumulator.target_label,
                 target_rationale=accumulator.target_rationale,
                 focus_type=accumulator.focus_type,
+                last_accepted_at=accumulator.last_accepted_at,
                 accepted_count=accumulator.accepted_count,
                 outcome_count=outcome_count,
                 acceptance_rate=_safe_ratio(accumulator.accepted_count, outcome_count),
@@ -126,6 +134,7 @@ def list_prompt_route_recommendations(
 
     recommendations.sort(
         key=lambda recommendation: (
+            _coerce_aware_datetime(recommendation.last_accepted_at) or datetime.min.replace(tzinfo=timezone.utc),
             recommendation.accepted_count,
             recommendation.acceptance_rate or 0.0,
             _prompt_route_specificity_score(recommendation),

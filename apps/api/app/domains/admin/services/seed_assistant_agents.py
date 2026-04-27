@@ -135,6 +135,9 @@ SEEDED_PILOT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
     _seed_definition_from_role("accrual-controller-agent", status="ACTIVE", scope="ORGANIZATION"),
     _seed_definition_from_role("accounting-posting-agent", status="ACTIVE", scope="ORGANIZATION"),
     _seed_definition_from_role("counterparty-state-sync-agent", status="ACTIVE"),
+    _seed_definition_from_role("confirmation-controller-agent", status="ACTIVE"),
+    _seed_definition_from_role("workflow-controller-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("invoice-controller-agent", status="ACTIVE"),
     _seed_definition_from_role("market-research-agent", status="ACTIVE", scope="ORGANIZATION"),
     _seed_definition_from_role("pre-trade-structuring-agent", status="ACTIVE", scope="ORGANIZATION"),
     _seed_definition_from_role("risk-sentinel", status="ACTIVE", scope="ORGANIZATION"),
@@ -142,6 +145,8 @@ SEEDED_PILOT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (
     _seed_definition_from_role("reporting-reconciliation-agent", status="ACTIVE", scope="ORGANIZATION"),
     _seed_definition_from_role("logistics-coordinator", status="ACTIVE"),
     _seed_definition_from_role("fee-accrual-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("counterparty-outreach-agent", status="ACTIVE", scope="ORGANIZATION"),
+    _seed_definition_from_role("control-tower-agent", status="ACTIVE", scope="ORGANIZATION"),
 )
 
 PILOT_ASSISTANT_AGENT_DEFINITIONS: tuple[AssistantAgentSeedDefinition, ...] = (

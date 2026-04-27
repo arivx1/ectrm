@@ -158,30 +158,26 @@ function formatPromotedRouteEvidence(
   return `${recommendation.accepted_count}/${recommendation.outcome_count} accepted · ${acceptanceLabel}`
 }
 
-function formatPromotedRouteFocus(intent: PromptNavigationIntent): string | null {
-  if (!intent.focus) {
-    return null
+function formatPromotedRouteSummary(
+  routes: Array<{ readiness: 'ready' | 'waiting' | 'cooling_off' }>,
+): string {
+  const readyCount = routes.filter((route) => route.readiness === 'ready').length
+  const waitingCount = routes.filter((route) => route.readiness === 'waiting').length
+  const coolingCount = routes.filter((route) => route.readiness === 'cooling_off').length
+  const parts: string[] = []
+  if (readyCount > 0) {
+    parts.push(`${readyCount} ready`)
+  }
+  if (waitingCount > 0) {
+    parts.push(`${waitingCount} waiting on live context`)
+  }
+  if (coolingCount > 0) {
+    parts.push(`${coolingCount} cooling off`)
   }
 
-  const label = intent.focus.label ?? intent.focus.id
-  switch (intent.focus.type) {
-    case 'trade':
-      return `Trade: ${label}`
-    case 'workflow_item':
-      return `Workflow item: ${label}`
-    case 'invoice':
-      return `Invoice: ${label}`
-    case 'payment':
-      return `Payment: ${label}`
-    case 'document':
-      return `Document: ${label}`
-    case 'reference_record':
-      return `Reference: ${label}`
-    case 'report':
-      return `Report: ${label}`
-    default:
-      return label
-  }
+  return parts.length > 0
+    ? `Promoted routes: ${parts.join(' · ')}.`
+    : 'Repeated accepted Prompt Home handoffs will appear here once a route stabilizes.'
 }
 
 function summarizePromptConversation(conversation: AssistantConversationSummary): string {
@@ -921,9 +917,7 @@ export function PromptHomeWorkspace({
       ? 'Loading promoted routes.'
       : promptRouteRecommendationsError
         ? promptRouteRecommendationsError
-        : promotedRoutes.length > 0
-          ? `${promotedRoutes.length} promoted route${promotedRoutes.length === 1 ? '' : 's'} ready from repeated accepted Prompt Home handoffs.`
-          : 'Repeated accepted Prompt Home handoffs will appear here once a route stabilizes.'
+        : formatPromotedRouteSummary(promotedRoutes)
 
   return (
     <div className="prompt-home">
@@ -1033,28 +1027,53 @@ export function PromptHomeWorkspace({
           {promotedRoutes.length > 0 ? (
             <div className="prompt-home-destination-list">
               {promotedRoutes.map((route) => {
-                const intent = route.intent
-                const focusLabel = formatPromotedRouteFocus(intent)
-                return (
+                if (route.readiness === 'ready') {
+                  return (
                   <button
                     key={route.key}
                     type="button"
                     className="prompt-home-destination prompt-home-promoted-route"
                     onClick={() =>
-                      openNavigationIntent(intent, {
+                      openNavigationIntent(route.intent, {
                         includeHandoff: route.hasFocusedHandoff,
-                        recordOutcome: true,
+                        recordOutcome: route.recordOutcomeOnOpen,
                       })
                     }
                   >
                     <div className="prompt-home-destination-head">
-                      <strong>{promptNavigationIntentLabel(intent)}</strong>
-                      <span className="status-pill status-pill-success">Promoted</span>
+                      <strong>{route.displayLabel}</strong>
+                      <span className={`status-pill status-pill-${route.readinessTone}`}>{route.readinessLabel}</span>
                     </div>
-                    <span>{promptNavigationIntentDetail(intent)}</span>
-                    {focusLabel ? <small>{focusLabel}</small> : null}
+                    <span>{route.displayDetail}</span>
+                    {route.displayFocusLabel ? <small>{route.displayFocusLabel}</small> : null}
+                    {route.ageLabel ? <small>{route.ageLabel}</small> : null}
                     <small>{formatPromotedRouteEvidence(route.recommendation)}</small>
                   </button>
+                  )
+                }
+
+                return (
+                  <article
+                    key={route.key}
+                    className="prompt-home-destination prompt-home-promoted-route is-unavailable"
+                  >
+                    <div className="prompt-home-destination-head">
+                      <strong>{route.displayLabel}</strong>
+                      <span className={`status-pill status-pill-${route.readinessTone}`}>{route.readinessLabel}</span>
+                    </div>
+                    <span>{route.displayDetail}</span>
+                    {route.ageLabel ? <small>{route.ageLabel}</small> : null}
+                    <div className="prompt-home-destination-actions">
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => openNavigationIntent(route.intent, { includeHandoff: false })}
+                      >
+                        {promptNavigationIntentLabel(route.intent)}
+                      </button>
+                    </div>
+                    <small>{formatPromotedRouteEvidence(route.recommendation)}</small>
+                  </article>
                 )
               })}
             </div>

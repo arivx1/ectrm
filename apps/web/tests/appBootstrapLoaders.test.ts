@@ -114,6 +114,8 @@ const bootstrapAsset: AssetRecord = {
   asset_reality: 'REAL',
   commodity_code: 'POWER',
   location_code: 'PJM-WEST',
+  latitude: 40.4406,
+  longitude: -79.9959,
   capacity_value: 150000,
   capacity_unit_code: 'MWH',
   operator_name: 'Desk Ops',
@@ -165,6 +167,8 @@ const bootstrapLocation: LocationRecord = {
   location_kind: 'POINT',
   location_type: 'HUB',
   market: 'PJM',
+  latitude: 40.4406,
+  longitude: -79.9959,
 }
 
 const bootstrapCounterparty: CounterpartyRecord = {

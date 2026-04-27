@@ -51,15 +51,16 @@ Related docs:
 | Market opportunity generation | Opportunity note, watchlist item, research thesis | Draft | Trader or Desk Lead | No | Agent can propose, but humans decide whether to pursue. |
 | Pre-trade scenario drafting | Scenario draft, thesis, target price, target volume | Draft, then stage review item | Trader | No | Good Phase 1 target because it precedes commitment. |
 | Pre-trade review decision | Approve or reject review item for capture | Draft recommendation | Trader or Desk Lead | No | Approval should stay human until review policy is formal. |
-| Trade capture | Book a new trade | Draft only | Trader | Potentially yes | Direct booking should not be agent-executed in Phase 1. |
-| Trade amendment | Change economics, dates, counterparty, quantity, pricing | Draft only | Trader | Potentially yes | Requires stronger event, policy, and approval controls. |
-| Trade cancellation | Cancel active trade | Stage | Trader, Desk Lead, or Admin | Potentially yes | Current Trade Governor pattern is a good constrained model. |
+| Trade capture | Book a new trade already agreed in the real world | Execute through typed event service | Trader | Potentially yes | Use only published trade-create actions with structured economics, stale-state checks, and audit. |
+| Trade amendment | Change economics, dates, counterparty, quantity, pricing | Execute through typed event service | Trader | Potentially yes | Safe only when the amendment is recorded as a governed event and the agent is correcting the platform to match asserted reality. |
+| Trade cancellation | Cancel active trade | Execute through typed event service | Trader, Desk Lead, or Admin | Potentially yes | Current Trade Governor pattern remains the constrained model: event-led, audited, and reversible only through follow-up domain actions. |
 | Workflow item update | Owner, due date, status, notes | Stage, then limited execute later | Operations Lead or Settlement Lead | No | Good candidate for bounded autonomy after evals and policy. |
 | Confirmation issuance | Issue trade confirmation | Stage | Operations Lead or Trader | Yes | Requires reviewer confidence in economics and recipient. |
 | Confirmation response recording | Record counterparty response | Stage | Operations Lead | Sometimes | Safer than issuance, but still needs evidence and audit. |
 | Delivery blocker triage | Blocker summary, owner, next action | Draft or stage workflow update | Operations Lead | No | Good Phase 1 workflow improvement area. |
+| Delivery event logging | Record checkpoint, start, delay, or completion event | Execute through typed shipment service | Operations Lead | Sometimes | Use canonical delivery IDs, preserve event history, and let projections derive the latest movement state. |
 | Scheduling commitment | Commit schedule, nomination, allocation | Draft initially | Operations Lead | Yes | Move slowly because this can create external obligations. |
-| Delivery actualization | Record actual delivered quantity or event | Draft initially | Operations Lead | Sometimes | Requires source evidence and correction policy. |
+| Delivery actualization | Record actual delivered quantity | Execute through typed actualization service | Operations Lead | Sometimes | Requires source evidence, stale-state recheck, and correction path, but can be bounded internal execution. |
 | Document reprocessing | Re-run ingestion or review flow | Stage | Operations Lead or Admin | No | Current action type is a safe first document action. |
 | Document linkage | Attach document to trade, delivery, invoice, or payment | Draft initially, stage later | Owning workflow lead | No | Can become approval-gated once linkage confidence rules exist. |
 | Document-created records | Create confirmation, invoice, payment, or quality record from document | Draft initially, stage later | Owning workflow lead | Potentially yes | Requires explicit matching, ambiguity, and approval policy. |
@@ -68,7 +69,8 @@ Related docs:
 | Payment release or instruction | Send payment, release funds, communicate bank instructions | Human only | Settlement Lead, Finance, Compliance | Yes | Keep out of agent execution until a separate payments control model exists. |
 | Settlement exception triage | Aging, dispute, missing invoice, missing payment | Draft or stage workflow update | Settlement Lead | No | Strong Phase 1 target for measurable cycle-time reduction. |
 | Fee identification | Identify missing fees or charges | Draft | Settlement Lead or Trader | No | Needs fee model before execution. |
-| Accrual recognition | Create or update accrual lot/entry | Draft initially | Settlement Lead or Controller | No | Wait for accrual domain to exist. |
+| Accrual recognition | Append or reverse manual accrual ledger entries on an existing lot | Execute through typed accrual ledger service | Settlement Lead or Controller | No | Limit autonomy to immutable manual adjustments and reversals on open lots with stale-state checks and audit. |
+| Accounting posting | Create or reverse internal accounting postings | Execute through typed accounting ledger service | Controller or Finance Lead | No | Use balanced lines only, preserve immutable reversal history, and keep official external accounting sign-off outside the agent lane. |
 | Risk alerting | Exposure breach, stale price, stale credit, position change | Draft alert, then stage workflow item later | Risk or Credit Owner | No | Good Phase 1 sentinel candidate. |
 | Credit approval | Approve breached counterparty exposure | Draft recommendation only | Risk or Credit Owner | Potentially yes | Keep human-only until delegated approval policy is explicit. |
 | Counterparty email draft | Draft outreach, confirmation chase, collection note | Draft | Trader, Operations Lead, or Settlement Lead | Yes when sent | Agent can draft; human sends in Phase 1. |
@@ -84,12 +86,14 @@ Related docs:
 Phase 1 should use these defaults unless a specific exception is approved:
 
 - Agents may observe, explain, and draft across their allowed workspace scope.
-- Agents may stage only published approval-gated action types.
+- Agents may stage or execute only published typed action types, depending on
+  their role ceiling and policy.
 - Agents may not approve their own action requests.
 - Agents may not externally commit the firm.
 - Agents may not mutate policy, permissions, reference data, or agent
   configuration.
-- Agents may not create or amend trades directly.
+- Agents may not create, amend, cancel, or actualize trades outside published
+  typed action contracts.
 - Agents may not release cash, send bank instructions, or bind counterparty
   communications.
 

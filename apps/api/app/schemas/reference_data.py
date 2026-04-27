@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from datetime import date, datetime
 from typing import Optional
 
@@ -61,15 +62,23 @@ class BookOut(ReferenceDataOut):
 
 
 class AssetCreate(ReferenceDataCreate):
+    code: str = Field(..., min_length=1, max_length=100)
     asset_class: str = Field(..., min_length=1, max_length=40)
     asset_type: str = Field(..., min_length=1, max_length=60)
     asset_reality: str = Field(..., min_length=1, max_length=20)
     commodity_code: Optional[str] = Field(None, min_length=1, max_length=50)
     location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    geometry_geojson: Optional[dict[str, Any]] = None
     capacity_value: Optional[float] = Field(None, ge=0)
     capacity_unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
     operator_name: Optional[str] = Field(None, min_length=1, max_length=120)
     operating_status: str = Field(..., min_length=1, max_length=32)
+    source_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    source_url: Optional[str] = Field(None, min_length=1)
+    confidence: Optional[float] = Field(None, ge=0, le=1)
+    notes: Optional[str] = None
 
 
 class AssetUpdate(ReferenceDataUpdate):
@@ -78,10 +87,17 @@ class AssetUpdate(ReferenceDataUpdate):
     asset_reality: Optional[str] = Field(None, min_length=1, max_length=20)
     commodity_code: Optional[str] = Field(None, min_length=1, max_length=50)
     location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    geometry_geojson: Optional[dict[str, Any]] = None
     capacity_value: Optional[float] = Field(None, ge=0)
     capacity_unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
     operator_name: Optional[str] = Field(None, min_length=1, max_length=120)
     operating_status: Optional[str] = Field(None, min_length=1, max_length=32)
+    source_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    source_url: Optional[str] = Field(None, min_length=1)
+    confidence: Optional[float] = Field(None, ge=0, le=1)
+    notes: Optional[str] = None
 
 
 class AssetStatusUpdate(ReferenceDataStatusUpdate):
@@ -89,15 +105,23 @@ class AssetStatusUpdate(ReferenceDataStatusUpdate):
 
 
 class AssetOut(ReferenceDataOut):
+    code: str = Field(..., min_length=1, max_length=100)
     asset_class: str
     asset_type: str
     asset_reality: str
     commodity_code: Optional[str]
     location_code: Optional[str]
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    geometry_geojson: Optional[dict[str, Any]] = None
     capacity_value: Optional[float]
     capacity_unit_code: Optional[str]
     operator_name: Optional[str]
     operating_status: str
+    source_name: Optional[str] = None
+    source_url: Optional[str] = None
+    confidence: Optional[float] = None
+    notes: Optional[str] = None
 
 
 class AssetStandardsOut(BaseModel):

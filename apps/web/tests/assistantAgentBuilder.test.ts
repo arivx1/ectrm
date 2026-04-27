@@ -92,6 +92,7 @@ describe('assistant agent builder helpers', () => {
     expect(draft.authority_ceiling).toBe('EXECUTE')
     expect(draft.allowed_tools).toEqual(['get_trade_workbench', 'list_documents'])
     expect(draft.allowed_action_types).toEqual([
+      'record_delivery_event',
       'issue_trade_confirmation',
       'record_trade_confirmation_response',
       'update_trade_workflow_item',
@@ -127,21 +128,83 @@ describe('assistant agent builder helpers', () => {
       'get_workspace_summary',
     ])
     expect(draft.allowed_action_types).toEqual([
+      'record_delivery_event',
       'record_trade_actualization',
       'update_trade_workflow_item',
     ])
   })
 
-  it('keeps accounting posting presets draft-only until ledger actions exist', () => {
+  it('includes governed trade lifecycle execution for the trade capture preset', () => {
+    const draft = buildAgentBuilderDraft('trade-capture-agent', ['get_trade_by_id', 'list_trade_events'])
+
+    expect(draft.role_key).toBe('trade-capture-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.allowed_tools).toEqual(['get_trade_by_id', 'list_trade_events'])
+    expect(draft.allowed_action_types).toEqual(['create_trade', 'amend_trade', 'cancel_trade'])
+  })
+
+  it('includes accounting posting execution authority for the posting controller preset', () => {
     const draft = buildAgentBuilderDraft('accounting-posting-agent', [
       'list_trade_invoices',
       'list_accrual_entries',
+      'list_accounting_entries',
     ])
 
     expect(draft.role_key).toBe('accounting-posting-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.allowed_tools).toEqual([
+      'list_trade_invoices',
+      'list_accrual_entries',
+      'list_accounting_entries',
+    ])
+    expect(draft.allowed_action_types).toEqual(['create_accounting_entry', 'reverse_accounting_entry'])
+  })
+
+  it('includes manual accrual execution authority for the accrual controller preset', () => {
+    const draft = buildAgentBuilderDraft('accrual-controller-agent', [
+      'list_accrual_lots',
+      'list_accrual_entries',
+      'get_accrual_reconciliation',
+    ])
+
+    expect(draft.role_key).toBe('accrual-controller-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.allowed_tools).toEqual([
+      'list_accrual_lots',
+      'list_accrual_entries',
+      'get_accrual_reconciliation',
+    ])
+    expect(draft.allowed_action_types).toEqual(['create_manual_accrual_entry', 'reverse_accrual_entry'])
+  })
+
+  it('includes confirmation execution authority for the confirmation controller preset', () => {
+    const draft = buildAgentBuilderDraft('confirmation-controller-agent', [
+      'list_trade_confirmations',
+      'list_workflow_items',
+      'unused_tool',
+    ])
+
+    expect(draft.role_key).toBe('confirmation-controller-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.allowed_tools).toEqual(['list_trade_confirmations', 'list_workflow_items'])
+    expect(draft.allowed_action_types).toEqual([
+      'issue_trade_confirmation',
+      'record_trade_confirmation_response',
+      'update_trade_workflow_item',
+    ])
+  })
+
+  it('keeps control tower presets supervision-only with no governed actions', () => {
+    const draft = buildAgentBuilderDraft('control-tower-agent', ['get_workspace_summary'])
+
+    expect(draft.role_key).toBe('control-tower-agent')
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT'])
     expect(draft.authority_ceiling).toBe('DRAFT')
-    expect(draft.allowed_tools).toEqual(['list_trade_invoices', 'list_accrual_entries'])
+    expect(draft.allowed_tools).toEqual(['get_workspace_summary'])
     expect(draft.allowed_action_types).toEqual([])
   })
 

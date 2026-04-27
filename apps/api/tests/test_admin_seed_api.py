@@ -87,9 +87,9 @@ class AdminSeedApiTests(unittest.TestCase):
                 db=session,
             )
 
-            self.assertEqual(first.total_profiles, 15)
-            self.assertEqual(first.total_templates, 15)
-            self.assertEqual(first.created_count, 15)
+            self.assertEqual(first.total_profiles, 20)
+            self.assertEqual(first.total_templates, 20)
+            self.assertEqual(first.created_count, 20)
             self.assertEqual(first.updated_count, 0)
             self.assertEqual(
                 first.agent_ids,
@@ -102,6 +102,9 @@ class AdminSeedApiTests(unittest.TestCase):
                     "accrual-controller-agent",
                     "accounting-posting-agent",
                     "counterparty-state-sync-agent",
+                    "confirmation-controller-agent",
+                    "workflow-controller-agent",
+                    "invoice-controller-agent",
                     "market-research-agent",
                     "pre-trade-structuring-agent",
                     "risk-sentinel",
@@ -109,6 +112,8 @@ class AdminSeedApiTests(unittest.TestCase):
                     "reporting-reconciliation-agent",
                     "logistics-coordinator",
                     "fee-accrual-agent",
+                    "counterparty-outreach-agent",
+                    "control-tower-agent",
                 ],
             )
 
@@ -138,10 +143,30 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(session.get(AssistantAgent, "pre-trade-structuring-agent").status, "ACTIVE")
             self.assertEqual(session.get(AssistantAgent, "market-research-agent").status, "ACTIVE")
             self.assertEqual(session.get(AssistantAgent, "movement-controller-agent").authority_ceiling, "EXECUTE")
-            self.assertEqual(session.get(AssistantAgent, "movement-controller-agent").allowed_action_types, ["record_trade_actualization", "update_trade_workflow_item"])
+            self.assertEqual(
+                session.get(AssistantAgent, "movement-controller-agent").allowed_action_types,
+                ["record_delivery_event", "record_trade_actualization", "update_trade_workflow_item"],
+            )
+            self.assertEqual(
+                session.get(AssistantAgent, "trade-capture-agent").allowed_action_types,
+                ["create_trade", "amend_trade", "cancel_trade"],
+            )
+            self.assertEqual(session.get(AssistantAgent, "accrual-controller-agent").status, "ACTIVE")
+            self.assertEqual(session.get(AssistantAgent, "accrual-controller-agent").authority_ceiling, "EXECUTE")
+            self.assertEqual(
+                session.get(AssistantAgent, "accrual-controller-agent").allowed_action_types,
+                ["create_manual_accrual_entry", "reverse_accrual_entry"],
+            )
             self.assertEqual(session.get(AssistantAgent, "accounting-posting-agent").status, "ACTIVE")
-            self.assertEqual(session.get(AssistantAgent, "accounting-posting-agent").authority_ceiling, "DRAFT")
-            self.assertEqual(session.get(AssistantAgent, "accounting-posting-agent").allowed_action_types, [])
+            self.assertEqual(session.get(AssistantAgent, "accounting-posting-agent").authority_ceiling, "EXECUTE")
+            self.assertEqual(
+                session.get(AssistantAgent, "accounting-posting-agent").allowed_action_types,
+                ["create_accounting_entry", "reverse_accounting_entry"],
+            )
+            self.assertEqual(session.get(AssistantAgent, "confirmation-controller-agent").allowed_action_types, ["issue_trade_confirmation", "record_trade_confirmation_response", "update_trade_workflow_item"])
+            self.assertEqual(session.get(AssistantAgent, "workflow-controller-agent").authority_ceiling, "EXECUTE")
+            self.assertEqual(session.get(AssistantAgent, "counterparty-outreach-agent").authority_ceiling, "DRAFT")
+            self.assertEqual(session.get(AssistantAgent, "control-tower-agent").status, "ACTIVE")
 
             governor.description = "Outdated scope"
             governor.role_key = None

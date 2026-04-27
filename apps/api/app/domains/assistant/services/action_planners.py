@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 
@@ -14,17 +15,24 @@ from apps.api.app.domains.assistant.services.action_specs import (
     AssistantActionProposal,
     AssistantActionSpec,
 )
+from apps.api.app.domains.accruals.services.accruals import MANUAL_ENTRY_TYPES
 from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
 from apps.api.app.domains.operations.services.settlement_invoices import preview_trade_invoice_issue
 from apps.api.app.domains.operations.services.workflow_items import evaluate_trade_workflow_item_update_policy
 from apps.api.app.domains.operations.services.workflow_items import workflow_allowed_statuses
+from apps.api.app.models.delivery_event import DeliveryEvent
+from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion import DocumentIngestion
+from apps.api.app.models.trade_accounting_entry import TradeAccountingEntry
+from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
+from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.shared.enums import DeliveryEventType
 
 TRADE_ID_PATTERN = re.compile(r"\b([A-Za-z][A-Za-z0-9]{0,5}-\d{2,})\b")
 INT_PATTERN_TEMPLATE = r"\b{label}(?:\s+(?:id|#))?[:\s#-]*(\d+)\b"
@@ -32,6 +40,69 @@ DOCUMENT_ID_PATTERN = re.compile(
     r"\bdocument(?:\s+id)?\s*(?:[:#]|number\s+)\s*([A-Za-z0-9][A-Za-z0-9-]{2,63})\b",
     re.IGNORECASE,
 )
+DELIVERY_ID_PATTERN = re.compile(
+    r"\bdelivery(?:\s+id)?\s*(?:[:#]|number\s+)?\s*([A-Za-z0-9][A-Za-z0-9-]{2,95})\b",
+    re.IGNORECASE,
+)
+ACCRUAL_LOT_ID_PATTERN = re.compile(
+    r"\baccrual(?:\s+lot)?(?:\s+id)?\s*(?:[:#]|number\s+)?\s*([A-Za-z0-9][A-Za-z0-9-]{7,95})\b",
+    re.IGNORECASE,
+)
+ACCRUAL_ENTRY_ID_PATTERN = re.compile(
+    r"\baccrual(?:\s+entry)?(?:\s+id)?\s*(?:[:#]|number\s+)?\s*([A-Za-z0-9][A-Za-z0-9-]{7,95})\b",
+    re.IGNORECASE,
+)
+ACCOUNTING_ENTRY_ID_PATTERN = re.compile(
+    r"\baccounting(?:\s+entry)?(?:\s+id)?\s*(?:[:#]|number\s+)?\s*([A-Za-z0-9][A-Za-z0-9-]{7,95})\b",
+    re.IGNORECASE,
+)
+DELIVERY_EVENT_TYPES = {event_type.value for event_type in DeliveryEventType}
+TRADE_PAYLOAD_CONTEXT_KEYS: tuple[str, ...] = (
+    "external_trade_id",
+    "source_system",
+    "execution_timestamp",
+    "trade_date",
+    "effective_start_date",
+    "effective_end_date",
+    "quality_spec",
+    "unit_of_measure",
+    "trade_currency_code",
+    "location_code",
+    "delivery_start",
+    "delivery_end",
+    "price_unit_code",
+    "instrument_type",
+    "option_type",
+    "option_style",
+    "option_expiration_date",
+    "option_strike_price",
+    "originating_option_trade_id",
+    "trade_nature",
+    "trade_structure",
+    "trade_side",
+    "book",
+    "portfolio",
+    "counterparty",
+    "commodity_class",
+    "commodity",
+    "pricing_type",
+    "pricing_status",
+    "confirmation_status",
+    "nomination_status",
+    "allocation_status",
+    "actualization_status",
+    "price_index_code",
+    "price",
+    "volume",
+    "invoice_status",
+    "payment_status",
+    "settlement_status",
+    "trader_user",
+    "status",
+    "pretrade_review_id",
+)
+TRADE_NUMERIC_CONTEXT_KEYS = {"price", "volume", "option_strike_price"}
+TRADE_INTEGER_CONTEXT_KEYS = {"pretrade_review_id"}
 
 
 def _object_ref(record_type: str, record_id: object, label: str | None = None) -> dict[str, object]:
@@ -130,6 +201,55 @@ class CancelTradeActionPlanner:
         )
 
 
+class CreateTradeActionPlanner:
+    action_type = "create_trade"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_create_trade(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class AmendTradeActionPlanner:
+    action_type = "amend_trade"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_amend_trade(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class CreateManualAccrualEntryActionPlanner:
+    action_type = "create_manual_accrual_entry"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_create_manual_accrual_entry(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class ReverseAccrualEntryActionPlanner:
+    action_type = "reverse_accrual_entry"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_reverse_accrual_entry(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
 class IssueTradeConfirmationActionPlanner:
     action_type = "issue_trade_confirmation"
 
@@ -160,6 +280,19 @@ class RecordTradeActualizationActionPlanner:
 
     def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
         return _plan_record_trade_actualization(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class RecordDeliveryEventActionPlanner:
+    action_type = "record_delivery_event"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_record_delivery_event(
             message=context.message,
             message_lower=context.message_lower,
             context=context.context,
@@ -206,6 +339,31 @@ class CreateTradePaymentActionPlanner:
         )
 
 
+class CreateAccountingEntryActionPlanner:
+    action_type = "create_accounting_entry"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_create_accounting_entry(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class ReverseAccountingEntryActionPlanner:
+    action_type = "reverse_accounting_entry"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_reverse_accounting_entry(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
 class ReprocessDocumentIngestionActionPlanner:
     action_type = "reprocess_document_ingestion"
 
@@ -221,12 +379,19 @@ class ReprocessDocumentIngestionActionPlanner:
 
 ACTION_PLANNER_SEQUENCE: tuple[AssistantActionPlanner, ...] = (
     CancelTradeActionPlanner(),
+    CreateTradeActionPlanner(),
+    AmendTradeActionPlanner(),
     IssueTradeConfirmationActionPlanner(),
     UpdateTradeWorkflowItemActionPlanner(),
+    RecordDeliveryEventActionPlanner(),
     RecordTradeActualizationActionPlanner(),
     RecordTradeConfirmationResponseActionPlanner(),
+    CreateManualAccrualEntryActionPlanner(),
+    ReverseAccrualEntryActionPlanner(),
     IssueTradeInvoiceActionPlanner(),
     CreateTradePaymentActionPlanner(),
+    CreateAccountingEntryActionPlanner(),
+    ReverseAccountingEntryActionPlanner(),
     ReprocessDocumentIngestionActionPlanner(),
 )
 ACTION_PLANNERS: dict[str, AssistantActionPlanner] = {
@@ -381,6 +546,45 @@ def _resolve_invoice_id(message: str, *, context_fields: dict[str, str]) -> int 
     )
 
 
+def _resolve_payment_id(message: str, *, context_fields: dict[str, str]) -> int | None:
+    return _resolve_int_id(
+        message,
+        label_patterns=("payment",),
+        context_fields=context_fields,
+        field_keys=("payment_id",),
+    )
+
+
+def _resolve_accrual_lot_id(message: str, *, context_fields: dict[str, str]) -> str | None:
+    value = _first_present_value(context_fields, "accrual_lot_id")
+    if value:
+        return value.strip() or None
+    match = ACCRUAL_LOT_ID_PATTERN.search(message)
+    if match is None:
+        return None
+    return match.group(1).strip() or None
+
+
+def _resolve_accrual_entry_id(message: str, *, context_fields: dict[str, str]) -> str | None:
+    value = _first_present_value(context_fields, "entry_id", "accrual_entry_id")
+    if value:
+        return value.strip() or None
+    match = ACCRUAL_ENTRY_ID_PATTERN.search(message)
+    if match is None:
+        return None
+    return match.group(1).strip() or None
+
+
+def _resolve_accounting_entry_id(message: str, *, context_fields: dict[str, str]) -> str | None:
+    value = _first_present_value(context_fields, "accounting_entry_id", "entry_id")
+    if value:
+        return value.strip() or None
+    match = ACCOUNTING_ENTRY_ID_PATTERN.search(message)
+    if match is None:
+        return None
+    return match.group(1).strip() or None
+
+
 def _resolve_document_id(message: str, *, context: str | None, context_fields: dict[str, str]) -> str | None:
     value = _first_present_value(context_fields, "document_id", "source_document_id")
     if value:
@@ -427,6 +631,154 @@ def _parse_optional_int_value(value: str | None) -> int | None:
         return int(value.strip())
     except ValueError:
         return None
+
+
+def _parse_optional_json_dict(value: str | None) -> dict[str, object] | None:
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return dict(parsed) if isinstance(parsed, dict) else None
+
+
+def _parse_optional_json_list(value: str | None) -> list[dict[str, object]] | None:
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    normalized = [item for item in parsed if isinstance(item, dict)]
+    return normalized or None
+
+
+def _balanced_accounting_line_preview(
+    lines: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], float, float] | None:
+    normalized_lines: list[dict[str, object]] = []
+    debit_total = 0.0
+    credit_total = 0.0
+    for raw_line in lines:
+        side = str(raw_line.get("side") or "").strip().upper()
+        account_code = str(raw_line.get("account_code") or "").strip()
+        amount = raw_line.get("amount")
+        if side not in {"DEBIT", "CREDIT"} or not account_code:
+            return None
+        try:
+            normalized_amount = float(amount)
+        except (TypeError, ValueError):
+            return None
+        if normalized_amount <= 0:
+            return None
+        normalized_line = {
+            "side": side,
+            "account_code": account_code,
+            "amount": normalized_amount,
+            **(
+                {"currency_code": str(raw_line.get("currency_code")).strip().upper()}
+                if raw_line.get("currency_code")
+                else {}
+            ),
+            **({"reference_code": str(raw_line.get("reference_code")).strip()} if raw_line.get("reference_code") else {}),
+            **({"notes": str(raw_line.get("notes")).strip()} if raw_line.get("notes") else {}),
+        }
+        normalized_lines.append(normalized_line)
+        if side == "DEBIT":
+            debit_total += normalized_amount
+        else:
+            credit_total += normalized_amount
+    if len(normalized_lines) < 2 or round(debit_total, 6) != round(credit_total, 6):
+        return None
+    return normalized_lines, debit_total, credit_total
+
+
+def _normalized_event_type(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().upper().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in DELIVERY_EVENT_TYPES else None
+
+
+def _resolve_delivery_id(message: str, *, context: str | None, context_fields: dict[str, str]) -> str | None:
+    explicit_value = _first_present_value(context_fields, "delivery_id")
+    if explicit_value:
+        return explicit_value.strip().upper() or None
+    match = DELIVERY_ID_PATTERN.search(message)
+    if match is not None:
+        return match.group(1).strip().upper() or None
+    if context:
+        context_match = re.search(r"^- delivery_id:\s*(.+)$", context, re.IGNORECASE | re.MULTILINE)
+        if context_match is not None:
+            return context_match.group(1).strip().upper() or None
+    trade_id = _resolve_trade_id(message, context)
+    if trade_id is None:
+        return None
+    leg_no = _parse_optional_int_value(_first_present_value(context_fields, "leg_no"))
+    return build_delivery_obligation_id(trade_id, leg_no)
+
+
+def _resolve_delivery_event_type(message_lower: str, context_fields: dict[str, str]) -> str | None:
+    explicit_value = _normalized_event_type(_first_present_value(context_fields, "event_type", "delivery_event_type"))
+    if explicit_value is not None:
+        return explicit_value
+
+    phrase_map = {
+        "delivery completed": "DELIVERY_COMPLETED",
+        "completed delivery": "DELIVERY_COMPLETED",
+        "delivery complete": "DELIVERY_COMPLETED",
+        "execution started": "EXECUTION_STARTED",
+        "started delivery": "EXECUTION_STARTED",
+        "checkpoint recorded": "CHECKPOINT_RECORDED",
+        "record checkpoint": "CHECKPOINT_RECORDED",
+        "schedule committed": "SCHEDULE_COMMITTED",
+        "committed schedule": "SCHEDULE_COMMITTED",
+        "hold applied": "HOLD_APPLIED",
+        "put on hold": "HOLD_APPLIED",
+        "hold released": "HOLD_RELEASED",
+        "released hold": "HOLD_RELEASED",
+        "delivery cancelled": "CANCELLED",
+        "cancelled delivery": "CANCELLED",
+        "plan captured": "PLAN_CAPTURED",
+    }
+    for phrase, event_type in phrase_map.items():
+        if phrase in message_lower:
+            return event_type
+    return None
+
+
+def _merge_trade_payload_context(context_fields: dict[str, str]) -> dict[str, object]:
+    payload = (
+        _parse_optional_json_dict(_first_present_value(context_fields, "trade_payload_json", "payload_json", "payload"))
+        or {}
+    )
+    for key in TRADE_PAYLOAD_CONTEXT_KEYS:
+        raw_value = context_fields.get(key)
+        if raw_value is None:
+            continue
+        if key in TRADE_NUMERIC_CONTEXT_KEYS:
+            parsed_value = _parse_optional_float_value(raw_value)
+            if parsed_value is None:
+                continue
+            payload[key] = parsed_value
+            continue
+        if key in TRADE_INTEGER_CONTEXT_KEYS:
+            parsed_value = _parse_optional_int_value(raw_value)
+            if parsed_value is None:
+                continue
+            payload[key] = parsed_value
+            continue
+        normalized = raw_value.strip()
+        if normalized:
+            payload[key] = normalized
+
+    legs_payload = _parse_optional_json_list(_first_present_value(context_fields, "legs_json", "legs"))
+    if legs_payload is not None:
+        payload["legs"] = legs_payload
+    return payload
 
 
 def _extract_amount_from_message(message: str) -> float | None:
@@ -476,6 +828,184 @@ def _extract_owner_from_message(message: str) -> str | None:
         if match is not None:
             return match.group(1).strip().strip("'\"")
     return None
+
+
+def _plan_create_trade(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_create_trade(message_lower):
+        return None
+
+    trade_id = _first_present_value(context_fields, "trade_id")
+    if trade_id:
+        trade_id = trade_id.strip().upper() or None
+    if trade_id is None:
+        trade_id = _resolve_trade_id(message, None)
+    if trade_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No trade_id was provided for a governed trade-create request."
+        )
+
+    if db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first() is not None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Trade {trade_id} already exists, so no create-trade action was staged."
+        )
+
+    payload = _merge_trade_payload_context(context_fields)
+    payload["status"] = str(payload.get("status") or "ACTIVE").strip().upper()
+
+    pricing_type = str(payload.get("pricing_type") or "FIXED").strip().upper()
+    trade_structure = str(payload.get("trade_structure") or "SINGLE").strip().upper()
+    missing_fields = [
+        label
+        for label, present in (
+            ("book", bool(payload.get("book"))),
+            ("commodity_class", bool(payload.get("commodity_class"))),
+            ("commodity", bool(payload.get("commodity"))),
+            ("volume", trade_structure != "SINGLE" or payload.get("volume") is not None or bool(payload.get("legs"))),
+            ("price", pricing_type not in {"FIXED", "HYBRID"} or payload.get("price") is not None),
+            ("price_index_code", pricing_type not in {"INDEX", "HYBRID"} or bool(payload.get("price_index_code"))),
+        )
+        if not present
+    ]
+    if missing_fields:
+        return AssistantActionPlanningCandidate(
+            warning=(
+                f"Trade {trade_id} needs structured fields before create_trade can run: "
+                + ", ".join(missing_fields)
+                + "."
+            )
+        )
+
+    occurred_at = _parse_iso_datetime_value(_first_present_value(context_fields, "occurred_at", "event_occurred_at"))
+    if occurred_at is None and payload.get("execution_timestamp"):
+        occurred_at = _parse_iso_datetime_value(str(payload.get("execution_timestamp")))
+    action_payload = {
+        "trade_id": trade_id,
+        **payload,
+        **({"occurred_at": occurred_at} if occurred_at else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="create_trade",
+            summary=f"Create trade {trade_id}",
+            description=(
+                f"Create trade {trade_id} through the canonical event-led trade service. "
+                "If executed, the application will append a TradeCreated event and build the current trade projection."
+            ),
+            payload=_with_review_context(
+                action_payload,
+                owning_work_object=_object_ref("trade", trade_id),
+                required_reviewer_role="TRADER_OR_DESK_LEAD",
+                business_rationale=(
+                    f"Trade {trade_id} was requested as a new platform booking and enough structured economics were supplied to create it through the governed trade event path."
+                ),
+                proposed_mutation={
+                    "operation": "create_trade",
+                    "trade_id": trade_id,
+                    "fields": sorted(key for key in payload.keys()),
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "trade",
+                        trade_id,
+                        "No existing trade with this identifier was present when the action was staged.",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Create a TradeCreated event.",
+                    "Build the active trade projection.",
+                    "Refresh workflow, position, and accrual projections tied to the new trade.",
+                ),
+                stale_state_basis={"trade_exists": False},
+                idempotency_key=f"assistant-action:create_trade:{trade_id}",
+            ),
+        )
+    )
+
+
+def _plan_amend_trade(
+    *,
+    message: str,
+    message_lower: str,
+    context: str | None,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_amend_trade(message_lower):
+        return None
+
+    trade_id = _resolve_trade_id(message, context)
+    if trade_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No trade was identified for a governed trade-amend request."
+        )
+
+    trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
+    if trade is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Trade {trade_id} was not found, so no amend-trade action was staged."
+        )
+
+    payload = _merge_trade_payload_context(context_fields)
+    payload.pop("status", None) if str(payload.get("status") or "").strip() == "" else None
+    changed_payload = {key: value for key, value in payload.items() if key in {*TRADE_PAYLOAD_CONTEXT_KEYS, "legs"}}
+    if not changed_payload:
+        return AssistantActionPlanningCandidate(
+            warning=f"Trade {trade_id} was identified, but no amendment fields were supplied."
+        )
+
+    occurred_at = _parse_iso_datetime_value(_first_present_value(context_fields, "occurred_at", "event_occurred_at"))
+    action_payload = {
+        "trade_id": trade_id,
+        **changed_payload,
+        **({"occurred_at": occurred_at} if occurred_at else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="amend_trade",
+            summary=f"Amend trade {trade_id}",
+            description=(
+                f"Amend trade {trade_id} through the canonical event-led trade service. "
+                "If executed, the application will append a TradeAmended event and refresh the trade projection."
+            ),
+            payload=_with_review_context(
+                action_payload,
+                owning_work_object=_object_ref("trade", trade_id),
+                required_reviewer_role="TRADER_OR_DESK_LEAD",
+                business_rationale=(
+                    f"Trade {trade_id} was explicitly selected for amendment and structured field changes were provided."
+                ),
+                proposed_mutation={
+                    "operation": "amend_trade",
+                    "trade_id": trade_id,
+                    "changed_fields": sorted(changed_payload.keys()),
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "trade",
+                        trade_id,
+                        f"Trade status was {trade.status} with last_event_id {trade.last_event_id}.",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Create a TradeAmended event.",
+                    "Refresh the trade projection and dependent workflow state.",
+                    "Recompute position, option exposure, and accrual projections affected by the amendment.",
+                ),
+                stale_state_basis={
+                    "trade_exists": True,
+                    "status": trade.status,
+                    "last_event_id": trade.last_event_id,
+                },
+                idempotency_key=f"assistant-action:amend_trade:{trade_id}:{trade.last_event_id}",
+            ),
+        )
+    )
 
 
 def _plan_cancel_trade(
@@ -897,6 +1427,560 @@ def _plan_record_trade_actualization(
     )
 
 
+def _plan_record_delivery_event(
+    *,
+    message: str,
+    message_lower: str,
+    context: str | None,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_delivery_event(message_lower, context_fields):
+        return None
+
+    delivery_id = _resolve_delivery_id(message, context=context, context_fields=context_fields)
+    if delivery_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No delivery was identified for a governed delivery-event request."
+        )
+
+    delivery = db.get(DeliveryObligation, delivery_id)
+    if delivery is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Delivery {delivery_id} was not found, so no delivery-event action was staged."
+        )
+
+    event_type = _resolve_delivery_event_type(message_lower, context_fields)
+    if event_type is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Delivery {delivery_id} was identified, but no valid delivery event type was provided."
+        )
+
+    occurred_at = (
+        _parse_iso_datetime_value(_first_present_value(context_fields, "occurred_at", "event_occurred_at"))
+        or _extract_labeled_iso_datetime_from_message(
+            message,
+            labels=("occurred", "event", "delivery completed", "execution started", "checkpoint"),
+        )
+    )
+    if occurred_at is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Delivery {delivery_id} needs an occurred_at timestamp before the delivery event can run."
+        )
+
+    delivery_events = list(
+        db.execute(
+            select(DeliveryEvent)
+            .where(DeliveryEvent.delivery_id == delivery_id)
+            .order_by(DeliveryEvent.occurred_at.desc(), DeliveryEvent.id.desc())
+        ).scalars().all()
+    )
+    latest_event = delivery_events[0] if delivery_events else None
+    payload = {
+        "delivery_id": delivery_id,
+        "event_type": event_type,
+        "occurred_at": occurred_at,
+        **(
+            {"location_code": value}
+            if (value := _first_present_value(context_fields, "location_code"))
+            else {}
+        ),
+        **(
+            {"reference_code": value}
+            if (value := _first_present_value(context_fields, "reference_code"))
+            else {}
+        ),
+        **({"source": value} if (value := _first_present_value(context_fields, "source")) else {}),
+        **({"notes": value} if (value := _first_present_value(context_fields, "notes")) else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="record_delivery_event",
+            summary=f"Record {event_type.lower().replace('_', ' ')} on delivery {delivery_id}",
+            description=(
+                f"Record delivery event {event_type} on {delivery_id}. "
+                "If executed, the application will log the delivery event and refresh internal movement status."
+            ),
+            payload=_with_review_context(
+                payload,
+                owning_work_object=_object_ref("delivery_obligation", delivery_id, f"Delivery {delivery_id}"),
+                required_reviewer_role="OPERATIONS_LEAD",
+                business_rationale=(
+                    f"Delivery {delivery_id} was selected for movement-state synchronization based on the user's reported logistics event."
+                ),
+                proposed_mutation={"operation": "record_delivery_event", **payload},
+                supporting_records=(
+                    _supporting_record(
+                        "delivery_obligation",
+                        delivery_id,
+                        f"Delivery execution status was {delivery.execution_status} with {len(delivery_events)} recorded events.",
+                        f"Delivery {delivery_id}",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Append a delivery movement event.",
+                    "Refresh the delivery execution status and latest-event projection.",
+                    "Expose the updated movement state in operations and shipment views.",
+                ),
+                stale_state_basis={
+                    "execution_status": delivery.execution_status,
+                    "event_count": len(delivery_events),
+                    "latest_event_type": latest_event.event_type if latest_event is not None else None,
+                    "latest_event_at": latest_event.occurred_at.isoformat() if latest_event is not None else None,
+                    "delivery_version": delivery.version,
+                },
+                idempotency_key=(
+                    f"assistant-action:record_delivery_event:{delivery_id}:{len(delivery_events)}:{event_type}:{occurred_at}"
+                ),
+            ),
+        )
+    )
+
+
+def _plan_create_manual_accrual_entry(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_create_manual_accrual_entry(message_lower, context_fields):
+        return None
+
+    accrual_lot_id = _resolve_accrual_lot_id(message, context_fields=context_fields)
+    if accrual_lot_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No accrual lot was identified for a governed manual accrual entry request."
+        )
+
+    lot = db.get(TradeAccrualLot, accrual_lot_id)
+    if lot is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accrual lot {accrual_lot_id} was not found, so no manual accrual action was staged."
+        )
+
+    quantity_delta = _parse_optional_float_value(_first_present_value(context_fields, "quantity_delta"))
+    amount_delta = _parse_optional_float_value(_first_present_value(context_fields, "amount_delta"))
+    if (quantity_delta is None or quantity_delta == 0) and (amount_delta is None or amount_delta == 0):
+        return AssistantActionPlanningCandidate(
+            warning=f"Accrual lot {accrual_lot_id} was identified, but no non-zero quantity_delta or amount_delta was supplied."
+        )
+
+    effective_at = _parse_iso_datetime_value(_first_present_value(context_fields, "effective_at", "effective_date"))
+    if effective_at is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Manual accrual entry for lot {accrual_lot_id} needs an effective_at timestamp before it can run."
+        )
+
+    entry_count = db.execute(
+        select(TradeAccrualEntry.entry_id).where(TradeAccrualEntry.accrual_lot_id == accrual_lot_id)
+    ).scalars().all()
+    payload = {
+        "accrual_lot_id": accrual_lot_id,
+        "effective_at": effective_at,
+        **({"quantity_delta": quantity_delta} if quantity_delta not in {None, 0} else {}),
+        **({"amount_delta": amount_delta} if amount_delta not in {None, 0} else {}),
+        **({"notes": value} if (value := _first_present_value(context_fields, "notes", "reason")) else {}),
+        **(
+            {"reference_price": value}
+            if (value := _parse_optional_float_value(_first_present_value(context_fields, "reference_price"))) is not None
+            else {}
+        ),
+        **(
+            {"price_index_code": value}
+            if (value := _first_present_value(context_fields, "price_index_code"))
+            else {}
+        ),
+        **(
+            {"fx_rate": value}
+            if (value := _parse_optional_float_value(_first_present_value(context_fields, "fx_rate"))) is not None
+            else {}
+        ),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="create_manual_accrual_entry",
+            summary=f"Create manual accrual entry on lot {accrual_lot_id}",
+            description=(
+                f"Append an immutable manual accrual adjustment entry on lot {accrual_lot_id}. "
+                "If executed, the application will recalculate accrual lot balances and reconciliation state."
+            ),
+            payload=_with_review_context(
+                payload,
+                owning_work_object=_object_ref("trade_accrual_lot", accrual_lot_id, f"Accrual lot {accrual_lot_id}"),
+                required_reviewer_role="SETTLEMENT_LEAD_OR_CONTROLLER",
+                business_rationale=(
+                    f"Accrual lot {accrual_lot_id} needs a controller-directed manual adjustment so the platform ledger reflects the asserted operational reality."
+                ),
+                proposed_mutation={"operation": "create_manual_accrual_entry", **payload},
+                supporting_records=(
+                    _supporting_record(
+                        "trade_accrual_lot",
+                        accrual_lot_id,
+                        f"Lot status was {lot.status} with version {lot.version} when the manual adjustment was staged.",
+                        f"Accrual lot {accrual_lot_id}",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Append a manual accrual ledger entry.",
+                    "Recompute accrual lot balances and status.",
+                    "Expose the revised balances in accrual reconciliation reads.",
+                ),
+                stale_state_basis={
+                    "trade_id": lot.trade_id,
+                    "lot_status": lot.status,
+                    "lot_version": lot.version,
+                    "entry_count": len(entry_count),
+                    "closed_at": lot.closed_at.isoformat() if lot.closed_at is not None else None,
+                },
+                idempotency_key=(
+                    f"assistant-action:create_manual_accrual_entry:{accrual_lot_id}:{lot.version}:{effective_at}:{quantity_delta}:{amount_delta}"
+                ),
+            ),
+        )
+    )
+
+
+def _plan_reverse_accrual_entry(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_reverse_accrual_entry(message_lower, context_fields):
+        return None
+
+    entry_id = _resolve_accrual_entry_id(message, context_fields=context_fields)
+    if entry_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No accrual entry was identified for a governed accrual reversal request."
+        )
+
+    entry = db.get(TradeAccrualEntry, entry_id)
+    if entry is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accrual entry {entry_id} was not found, so no reversal action was staged."
+        )
+    if entry.entry_type not in MANUAL_ENTRY_TYPES:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accrual entry {entry_id} is not a manual entry and cannot be reversed through the governed reversal path."
+        )
+
+    lot = db.get(TradeAccrualLot, entry.accrual_lot_id)
+    reversal_entry_id = db.execute(
+        select(TradeAccrualEntry.entry_id).where(TradeAccrualEntry.reversal_of_entry_id == entry_id).limit(1)
+    ).scalars().first()
+    if reversal_entry_id is not None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accrual entry {entry_id} has already been reversed by {reversal_entry_id}."
+        )
+
+    payload = {
+        "entry_id": entry_id,
+        **(
+            {"effective_at": value}
+            if (value := _parse_iso_datetime_value(_first_present_value(context_fields, "effective_at", "effective_date")))
+            else {}
+        ),
+        **({"reversal_reason": value} if (value := _first_present_value(context_fields, "reversal_reason", "reason", "notes")) else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="reverse_accrual_entry",
+            summary=f"Reverse accrual entry {entry_id}",
+            description=(
+                f"Reverse manual accrual entry {entry_id} with an immutable offsetting ledger row. "
+                "If executed, the application will recompute the owning accrual lot balances and status."
+            ),
+            payload=_with_review_context(
+                payload,
+                owning_work_object=_object_ref("trade_accrual_entry", entry_id, f"Accrual entry {entry_id}"),
+                required_reviewer_role="SETTLEMENT_LEAD_OR_CONTROLLER",
+                business_rationale=(
+                    f"Manual accrual entry {entry_id} no longer reflects the intended controller view and should be reversed through the accrual ledger."
+                ),
+                proposed_mutation={"operation": "reverse_accrual_entry", **payload},
+                supporting_records=(
+                    _supporting_record(
+                        "trade_accrual_entry",
+                        entry_id,
+                        f"Entry type was {entry.entry_type} on accrual lot {entry.accrual_lot_id}.",
+                        f"Accrual entry {entry_id}",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Append an immutable manual reversal entry.",
+                    "Recompute the owning accrual lot balances and status.",
+                    "Preserve a traceable reversal chain for the manual accrual history.",
+                ),
+                stale_state_basis={
+                    "accrual_lot_id": entry.accrual_lot_id,
+                    "trade_id": entry.trade_id,
+                    "entry_type": entry.entry_type,
+                    "lot_status": lot.status if lot is not None else None,
+                    "lot_version": lot.version if lot is not None else None,
+                    "closed_at": lot.closed_at.isoformat() if lot is not None and lot.closed_at is not None else None,
+                    "existing_reversal_entry_id": None,
+                },
+                idempotency_key=f"assistant-action:reverse_accrual_entry:{entry_id}",
+            ),
+        )
+    )
+
+
+def _plan_create_accounting_entry(
+    *,
+    message: str,
+    message_lower: str,
+    context: str | None,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_create_accounting_entry(message_lower, context_fields):
+        return None
+
+    trade_id = _resolve_trade_id(message, context)
+    accrual_lot_id = _resolve_accrual_lot_id(message, context_fields=context_fields)
+    accrual_entry_id = _resolve_accrual_entry_id(message, context_fields=context_fields)
+    invoice_id = _resolve_invoice_id(message, context_fields=context_fields)
+    payment_id = _resolve_payment_id(message, context_fields=context_fields)
+
+    lot = db.get(TradeAccrualLot, accrual_lot_id) if accrual_lot_id is not None else None
+    accrual_entry = db.get(TradeAccrualEntry, accrual_entry_id) if accrual_entry_id is not None else None
+    invoice = db.get(TradeInvoice, invoice_id) if invoice_id is not None else None
+    payment = db.get(TradePayment, payment_id) if payment_id is not None else None
+    if trade_id is None:
+        trade_id = (
+            lot.trade_id if lot is not None else None
+        ) or (
+            accrual_entry.trade_id if accrual_entry is not None else None
+        ) or (
+            invoice.trade_id if invoice is not None else None
+        ) or (
+            payment.trade_id if payment is not None else None
+        )
+    if trade_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No trade or linked accrual, invoice, or payment record was identified for the accounting entry request."
+        )
+
+    trade = db.get(Trade, trade_id)
+    if trade is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Trade {trade_id} was not found, so no accounting entry action was staged."
+        )
+
+    raw_lines = (
+        _parse_optional_json_list(_first_present_value(context_fields, "accounting_lines_json", "journal_lines_json", "lines_json", "lines"))
+        or []
+    )
+    preview = _balanced_accounting_line_preview(raw_lines)
+    if preview is None:
+        return AssistantActionPlanningCandidate(
+            warning="Accounting entry requests need a balanced lines_json payload with at least one debit and one credit line."
+        )
+    normalized_lines, debit_total, credit_total = preview
+
+    description = _first_present_value(context_fields, "description", "entry_description", "journal_description")
+    if description is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accounting entry for trade {trade.trade_id} needs a description before it can run."
+        )
+
+    effective_at = _parse_iso_datetime_value(_first_present_value(context_fields, "effective_at", "effective_date"))
+    if effective_at is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accounting entry for trade {trade.trade_id} needs an effective_at timestamp before it can run."
+        )
+
+    payload = {
+        "trade_id": trade.trade_id,
+        "description": description,
+        "effective_at": effective_at,
+        "lines": normalized_lines,
+        **({"accrual_lot_id": accrual_lot_id} if accrual_lot_id is not None else {}),
+        **({"accrual_entry_id": accrual_entry_id} if accrual_entry_id is not None else {}),
+        **({"invoice_id": invoice_id} if invoice_id is not None else {}),
+        **({"payment_id": payment_id} if payment_id is not None else {}),
+        **({"journal_code": value} if (value := _first_present_value(context_fields, "journal_code")) else {}),
+        **({"entry_type": value} if (value := _first_present_value(context_fields, "entry_type")) else {}),
+        **({"currency_code": value} if (value := _first_present_value(context_fields, "currency_code")) else {}),
+        **({"notes": value} if (value := _first_present_value(context_fields, "notes", "reason")) else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="create_accounting_entry",
+            summary=f"Create accounting entry for trade {trade.trade_id}",
+            description=(
+                f"Create a balanced internal accounting entry for trade {trade.trade_id}. "
+                "If executed, the application will persist the posting header and its debit or credit lines."
+            ),
+            payload=_with_review_context(
+                payload,
+                owning_work_object=_object_ref("trade", trade.trade_id),
+                required_reviewer_role="CONTROLLER_OR_FINANCE_LEAD",
+                business_rationale=(
+                    f"Trade {trade.trade_id} needs an internal accounting posting so the platform ledger reflects the asserted finance reality."
+                ),
+                proposed_mutation={
+                    "operation": "create_accounting_entry",
+                    "trade_id": trade.trade_id,
+                    "line_count": len(normalized_lines),
+                    "debit_total": debit_total,
+                    "credit_total": credit_total,
+                    "links": {
+                        key: value
+                        for key, value in {
+                            "accrual_lot_id": accrual_lot_id,
+                            "accrual_entry_id": accrual_entry_id,
+                            "invoice_id": invoice_id,
+                            "payment_id": payment_id,
+                        }.items()
+                        if value is not None
+                    },
+                },
+                supporting_records=tuple(
+                    record
+                    for record in (
+                        _supporting_record("trade", trade.trade_id, f"Trade status was {trade.status}."),
+                        _supporting_record("trade_accrual_lot", accrual_lot_id, f"Lot version was {lot.version}.")
+                        if lot is not None
+                        else None,
+                        _supporting_record("trade_invoice", invoice_id, f"Invoice status was {invoice.status}.")
+                        if invoice is not None
+                        else None,
+                        _supporting_record("trade_payment", payment_id, f"Payment status was {payment.status}.")
+                        if payment is not None
+                        else None,
+                    )
+                    if record is not None
+                ),
+                expected_downstream_effects=(
+                    "Create a posted internal accounting entry.",
+                    "Persist balanced debit and credit posting lines.",
+                    "Expose the posting history for future accounting review and reversal.",
+                ),
+                stale_state_basis={
+                    "trade_status": trade.status,
+                    "trade_last_event_id": trade.last_event_id,
+                    "accrual_lot_version": lot.version if lot is not None else None,
+                    "invoice_version": invoice.version if invoice is not None else None,
+                    "payment_version": payment.version if payment is not None else None,
+                },
+                idempotency_key=(
+                    "assistant-action:create_accounting_entry:"
+                    f"{trade.trade_id}:{effective_at}:{json.dumps(normalized_lines, sort_keys=True)}"
+                ),
+                action_preview={
+                    "preview_type": "create_accounting_entry",
+                    "status": "READY",
+                    "summary": (
+                        f"Balanced {len(normalized_lines)}-line accounting entry for trade {trade.trade_id} "
+                        f"with debits and credits totaling {debit_total:.2f}."
+                    ),
+                    "affected_records": [
+                        _supporting_record("trade", trade.trade_id, f"Trade status was {trade.status}."),
+                    ],
+                    "expected_side_effects": [
+                        "Create a posted internal accounting entry.",
+                        "Persist balanced debit and credit posting lines.",
+                    ],
+                    "assumptions": [
+                        "Finance has already validated the described posting treatment against the loaded evidence.",
+                    ],
+                },
+            ),
+        )
+    )
+
+
+def _plan_reverse_accounting_entry(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_reverse_accounting_entry(message_lower, context_fields):
+        return None
+
+    accounting_entry_id = _resolve_accounting_entry_id(message, context_fields=context_fields)
+    if accounting_entry_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No accounting entry was identified for a governed accounting reversal request."
+        )
+
+    entry = db.get(TradeAccountingEntry, accounting_entry_id)
+    if entry is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accounting entry {accounting_entry_id} was not found, so no accounting reversal was staged."
+        )
+
+    reversal_entry_id = db.execute(
+        select(TradeAccountingEntry.accounting_entry_id)
+        .where(TradeAccountingEntry.reversal_of_entry_id == accounting_entry_id)
+        .limit(1)
+    ).scalars().first()
+    if reversal_entry_id is not None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Accounting entry {accounting_entry_id} has already been reversed by {reversal_entry_id}."
+        )
+
+    payload = {
+        "accounting_entry_id": accounting_entry_id,
+        **(
+            {"effective_at": value}
+            if (value := _parse_iso_datetime_value(_first_present_value(context_fields, "effective_at", "effective_date")))
+            else {}
+        ),
+        **({"reversal_reason": value} if (value := _first_present_value(context_fields, "reversal_reason", "reason", "notes")) else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="reverse_accounting_entry",
+            summary=f"Reverse accounting entry {accounting_entry_id}",
+            description=(
+                f"Reverse accounting entry {accounting_entry_id} with a balanced offsetting posting. "
+                "If executed, the application will mark the original as reversed and persist the reversal entry."
+            ),
+            payload=_with_review_context(
+                payload,
+                owning_work_object=_object_ref(
+                    "trade_accounting_entry",
+                    accounting_entry_id,
+                    f"Accounting entry {accounting_entry_id}",
+                ),
+                required_reviewer_role="CONTROLLER_OR_FINANCE_LEAD",
+                business_rationale=(
+                    f"Accounting entry {accounting_entry_id} no longer reflects the intended posting outcome and should be reversed through the internal ledger."
+                ),
+                proposed_mutation={"operation": "reverse_accounting_entry", **payload},
+                supporting_records=(
+                    _supporting_record(
+                        "trade_accounting_entry",
+                        accounting_entry_id,
+                        f"Entry status was {entry.status} with version {entry.version}.",
+                        f"Accounting entry {accounting_entry_id}",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Create a balanced reversal posting entry.",
+                    "Mark the original accounting entry as reversed.",
+                    "Preserve a traceable posting reversal chain.",
+                ),
+                stale_state_basis={
+                    "trade_id": entry.trade_id,
+                    "status": entry.status,
+                    "version": entry.version,
+                    "existing_reversal_entry_id": None,
+                },
+                idempotency_key=f"assistant-action:reverse_accounting_entry:{accounting_entry_id}",
+            ),
+        )
+    )
+
+
 def _plan_issue_trade_invoice(
     *,
     message: str,
@@ -1205,6 +2289,66 @@ def _mentions_issue_confirmation(message_lower: str) -> bool:
     )
 
 
+def _mentions_create_trade(message_lower: str) -> bool:
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "create trade",
+            "book trade",
+            "capture trade",
+            "create a trade",
+            "book a trade",
+        )
+    )
+
+
+def _mentions_amend_trade(message_lower: str) -> bool:
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "amend trade",
+            "amend the trade",
+            "update the trade",
+            "change the trade",
+            "modify the trade",
+        )
+    )
+
+
+def _mentions_create_manual_accrual_entry(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if "reverse" in message_lower or "reversal" in message_lower:
+        return False
+    if any(key in context_fields for key in ("accrual_lot_id", "quantity_delta", "amount_delta")):
+        return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "create accrual entry",
+            "record accrual entry",
+            "manual accrual entry",
+            "manual accrual adjustment",
+            "adjust accrual lot",
+            "post accrual adjustment",
+        )
+    )
+
+
+def _mentions_reverse_accrual_entry(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if any(key in context_fields for key in ("entry_id", "accrual_entry_id")) and (
+        "reverse" in message_lower or "reversal" in message_lower
+    ):
+        return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "reverse accrual entry",
+            "reverse the accrual entry",
+            "undo accrual entry",
+            "undo accrual adjustment",
+        )
+    )
+
+
 def _mentions_workflow_update(message_lower: str) -> bool:
     return any(
         phrase in message_lower
@@ -1216,6 +2360,23 @@ def _mentions_workflow_update(message_lower: str) -> bool:
             "assign it",
             "update workflow",
             "mark workflow",
+        )
+    )
+
+
+def _mentions_delivery_event(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if any(key in context_fields for key in ("delivery_id", "delivery_event_type", "event_type")):
+        return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "delivery event",
+            "movement event",
+            "delivery completed",
+            "execution started",
+            "checkpoint recorded",
+            "hold applied",
+            "hold released",
         )
     )
 
@@ -1273,6 +2434,36 @@ def _mentions_payment_creation(message_lower: str) -> bool:
             "mark this invoice paid",
             "record cash receipt",
             "settle invoice",
+        )
+    )
+
+
+def _mentions_create_accounting_entry(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if any(key in context_fields for key in ("accounting_lines_json", "journal_lines_json", "lines_json")):
+        if "reverse" not in message_lower and "reversal" not in message_lower:
+            return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "create accounting entry",
+            "create journal entry",
+            "post journal entry",
+            "book accounting entry",
+            "create posting",
+        )
+    )
+
+
+def _mentions_reverse_accounting_entry(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if "accounting_entry_id" in context_fields and ("reverse" in message_lower or "reversal" in message_lower):
+        return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "reverse accounting entry",
+            "reverse journal entry",
+            "reverse posting",
+            "void accounting entry",
         )
     )
 

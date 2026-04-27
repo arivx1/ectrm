@@ -38,6 +38,15 @@ function buildControllerStub() {
         asset_reality: 'REAL',
         commodity_code: 'HENRY_HUB',
         location_code: 'HOUSTON',
+        latitude: 29.7604,
+        longitude: -95.3698,
+        geometry_geojson: {
+          type: 'LineString',
+          coordinates: [
+            [-95.3698, 29.7604],
+            [-95.1, 29.9],
+          ],
+        },
         capacity_value: 125000,
         capacity_unit_code: 'MMBTU',
         operator_name: 'Grid Ops',
@@ -63,6 +72,15 @@ function buildControllerStub() {
       asset_reality: 'REAL',
       commodity_code: 'HENRY_HUB',
       location_code: 'HOUSTON',
+      latitude: 29.7604,
+      longitude: -95.3698,
+      geometry_geojson: {
+        type: 'LineString',
+        coordinates: [
+          [-95.3698, 29.7604],
+          [-95.1, 29.9],
+        ],
+      },
       capacity_value: 125000,
       capacity_unit_code: 'MMBTU',
       operator_name: 'Grid Ops',
@@ -77,6 +95,9 @@ function buildControllerStub() {
       asset_reality: 'REAL',
       commodity_code: 'HENRY_HUB',
       location_code: 'HOUSTON',
+      latitude: '29.7604',
+      longitude: '-95.3698',
+      geometry_geojson: '{\n  "type": "LineString",\n  "coordinates": [\n    [\n      -95.3698,\n      29.7604\n    ],\n    [\n      -95.1,\n      29.9\n    ]\n  ]\n}',
       capacity_value: '125000',
       capacity_unit_code: '',
       operator_name: 'Grid Ops',
@@ -108,6 +129,8 @@ function buildControllerStub() {
     handleSaveAsset: () => undefined,
     handleToggleAsset: () => undefined,
     assetFieldErrors: {
+      coordinates: 'Latitude and longitude must be provided together.',
+      geometry_geojson: 'Geometry GeoJSON must be valid JSON.',
       capacity: 'Capacity value and unit must be provided together.',
       capacity_unit_code: 'Capacity value and unit must be provided together.',
     },
@@ -146,13 +169,16 @@ test('assets tab definition renders directory and editor content through the sha
   assert.match(directoryMarkup, /Gulf Transmission/)
   assert.match(directoryMarkup, /PIPELINE/)
   assert.match(directoryMarkup, /REAL/)
+  assert.match(directoryMarkup, /29\.7604, -95\.3698/)
   assert.match(directoryMarkup, /125,000 MMBTU/)
   assert.match(directoryMarkup, /1 plotted/)
-  assert.match(directoryMarkup, /0 awaiting coordinates/)
+  assert.match(directoryMarkup, /1 geometry/)
 
   assert.match(editorMarkup, /New Asset/)
   assert.match(editorMarkup, /Asset Status/)
   assert.match(editorMarkup, /Asset Reality/)
+  assert.match(editorMarkup, /Latitude/)
+  assert.match(editorMarkup, /Geometry GeoJSON/)
   assert.match(editorMarkup, /Operating Status/)
   assert.match(editorMarkup, /Capacity Unit/)
   assert.match(editorMarkup, /Capacity value and unit must be provided together\./)
