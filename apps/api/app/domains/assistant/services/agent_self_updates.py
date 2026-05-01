@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+from apps.api.app.domains.assistant.services.agent_revisions import (
+    build_agent_revision_diff_summary,
+    create_agent_revision,
+    ensure_agent_publication_snapshot,
+    next_agent_revision_version,
+)
 from apps.api.app.domains.assistant.services.agent_evals import (
     latest_eval_runs_by_eval_id,
     list_agent_evals,
@@ -32,6 +40,7 @@ async def generate_assistant_agent_self_update_draft(
     agent_id: str,
     payload: AssistantAgentSelfUpdateRequest | None,
     assistant_service: AssistantService,
+    actor_id: str,
 ) -> AssistantAgentSelfUpdateDraftOut:
     normalized_agent_id = agent_id.strip().lower()
     record = get_agent_record(db, normalized_agent_id)
@@ -75,7 +84,44 @@ async def generate_assistant_agent_self_update_draft(
     if not evidence.failing_eval_cases:
         warnings.append("No failing eval runs were available; add or update eval coverage so future learning stays measurable.")
 
+    ensure_agent_publication_snapshot(record)
+    revision_payload = {
+        "name": record.name,
+        "description": suggestion.description,
+        "status": record.status,
+        "scope": record.scope,
+        "provider": record.provider,
+        "model": record.model,
+        "role_key": record.role_key,
+        "profile_kind": record.profile_kind or "CUSTOM",
+        "specialization_summary": record.specialization_summary,
+        "human_owner_role": record.human_owner_role,
+        "authority_ceiling": record.authority_ceiling,
+        "activation_notes": record.activation_notes,
+        "profile_request_id": record.profile_request_id,
+        "allowed_workspaces": list(suggestion.allowed_workspaces),
+        "capabilities": list(suggestion.capabilities),
+        "allowed_tools": list(suggestion.allowed_tools),
+        "allowed_action_types": list(suggestion.allowed_action_types),
+        "daily_token_allocation": record.daily_token_allocation,
+        "system_prompt": suggestion.system_prompt,
+    }
+    revision = create_agent_revision(
+        db,
+        record=record,
+        payload=revision_payload,
+        change_summary=list(suggestion.change_summary),
+        created_by=actor_id,
+        version=next_agent_revision_version(db, record=record),
+        published=False,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.commit()
+    db.refresh(record)
+
     return AssistantAgentSelfUpdateDraftOut(
+        revision_id=revision.revision_id,
+        revision_version=revision.version,
         agent_id=record.agent_id,
         name=record.name,
         description=suggestion.description,
@@ -98,10 +144,15 @@ async def generate_assistant_agent_self_update_draft(
         system_prompt=suggestion.system_prompt,
         source_brief=source_brief,
         change_summary=list(suggestion.change_summary),
+        diff_summary=build_agent_revision_diff_summary(record.published_snapshot, revision.payload),
         warnings=warnings,
         builder_provider=suggestion.builder_provider,
         builder_model=suggestion.builder_model,
         evidence=evidence,
+        created_at=revision.created_at,
+        created_by=revision.created_by,
+        published_at=revision.published_at,
+        published_by=revision.published_by,
     )
 
 

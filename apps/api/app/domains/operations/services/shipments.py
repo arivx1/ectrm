@@ -613,6 +613,41 @@ def _delivery_event_sort_key(event: DeliveryEvent) -> tuple[datetime, int]:
     )
 
 
+def _reversed_delivery_event_ids(delivery_events: list[DeliveryEvent]) -> set[int]:
+    return {
+        int(event.reversal_of_event_id)
+        for event in delivery_events
+        if event.reversal_of_event_id is not None
+    }
+
+
+def _active_business_delivery_events(delivery_events: list[DeliveryEvent]) -> list[DeliveryEvent]:
+    reversed_ids = _reversed_delivery_event_ids(delivery_events)
+    return [
+        event
+        for event in delivery_events
+        if event.reversal_of_event_id is None
+        and event.event_type != DeliveryEventType.EVENT_REVERSED.value
+        and event.id not in reversed_ids
+    ]
+
+
+def _project_delivery_execution_status_from_events(
+    *,
+    delivery_events: list[DeliveryEvent],
+    fallback_status: DeliveryExecutionStatus,
+) -> DeliveryExecutionStatus:
+    current_status = fallback_status
+    resumable_status = fallback_status
+    for event in sorted(_active_business_delivery_events(delivery_events), key=_delivery_event_sort_key):
+        current_status, resumable_status = _advance_delivery_event_status(
+            event_type=_validate_delivery_event_type(event.event_type),
+            current_status=current_status,
+            resumable_status=resumable_status,
+        )
+    return current_status
+
+
 def _advance_delivery_event_status(
     *,
     event_type: DeliveryEventType,
@@ -650,7 +685,7 @@ def _event_execution_status_for_type(
             int(existing_event.id or 0),
             _validate_delivery_event_type(existing_event.event_type),
         )
-        for existing_event in existing_events
+        for existing_event in _active_business_delivery_events(existing_events)
     ]
     ordered_events.append(
         (
@@ -683,7 +718,10 @@ def _delivery_event_projection(
 
     latest_event = max(delivery_events, key=_delivery_event_sort_key)
     return DeliveryEventProjection(
-        execution_status=_validate_delivery_execution_status(latest_event.execution_status),
+        execution_status=_project_delivery_execution_status_from_events(
+            delivery_events=delivery_events,
+            fallback_status=fallback_status,
+        ),
         latest_event_type=latest_event.event_type,
         latest_event_at=_coerce_utc(latest_event.occurred_at),
     )
@@ -698,6 +736,8 @@ def _delivery_event_to_out(event: DeliveryEvent) -> DeliveryEventOut:
         event_type=event.event_type,
         execution_status=event.execution_status,
         occurred_at=_coerce_utc(event.occurred_at) or datetime.now(timezone.utc),
+        reversal_of_event_id=event.reversal_of_event_id,
+        reversal_reason=event.reversal_reason,
         location_code=event.location_code,
         reference_code=event.reference_code,
         source=event.source,
@@ -2625,6 +2665,246 @@ def append_delivery_event(
                 "occurred_at": occurred_at,
                 "location_code": location_code,
                 "reference_code": reference_code,
+                "source": source,
+                "notes": notes,
+            }.items()
+            if value is not None
+        },
+        latest_event=latest_event,
+    )
+    return delivery_out
+
+
+def preview_delivery_event_reversal(
+    db: Session,
+    *,
+    delivery_id: str,
+    event_id: int,
+    reversal_reason: object | None = None,
+    reversed_at: datetime | None = None,
+    now: Optional[datetime] = None,
+) -> dict[str, object]:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    try:
+        delivery, trade, _trade_leg = _load_active_delivery_record(db, delivery_id=delivery_id)
+    except (LookupError, ValueError) as exc:
+        return {
+            "preview_type": "reverse_delivery_event",
+            "status": "BLOCKED",
+            "summary": f"Delivery-event reversal preview for {delivery_id} is blocked.",
+            "affected_records": [],
+            "field_changes": [],
+            "expected_side_effects": [],
+            "warnings": [],
+            "blocking_reasons": [str(exc)],
+            "assumptions": [],
+        }
+
+    existing_events = _delivery_events_by_delivery_id(db, delivery_ids=[delivery_id]).get(delivery_id, [])
+    target_event = next((event for event in existing_events if event.id == event_id), None)
+    if target_event is None:
+        return {
+            "preview_type": "reverse_delivery_event",
+            "status": "BLOCKED",
+            "summary": f"Delivery-event reversal preview for {delivery_id} is blocked.",
+            "affected_records": [],
+            "field_changes": [],
+            "expected_side_effects": [],
+            "warnings": [],
+            "blocking_reasons": [f"Delivery event {event_id} was not found on delivery {delivery_id}."],
+            "assumptions": [],
+        }
+
+    blocking_reasons: list[str] = []
+    if target_event.reversal_of_event_id is not None or target_event.event_type == DeliveryEventType.EVENT_REVERSED.value:
+        blocking_reasons.append(
+            f"Delivery event {event_id} is already a reversal entry and cannot be reversed again."
+        )
+    if any(event.reversal_of_event_id == target_event.id for event in existing_events):
+        blocking_reasons.append(
+            f"Delivery event {event_id} has already been reversed through a later movement correction."
+        )
+
+    normalized_reversal_reason = _normalize_optional_text(reversal_reason)
+    if normalized_reversal_reason is None:
+        blocking_reasons.append("Reversal reason is required.")
+
+    fallback_status = _default_execution_status_for_trade(trade)
+    remaining_business_events = [
+        event for event in _active_business_delivery_events(existing_events) if event.id != target_event.id
+    ]
+    projected_execution_status = _project_delivery_execution_status_from_events(
+        delivery_events=remaining_business_events,
+        fallback_status=fallback_status,
+    )
+    latest_event = max(existing_events, key=_delivery_event_sort_key) if existing_events else None
+    current_active_latest_event = (
+        max(_active_business_delivery_events(existing_events), key=_delivery_event_sort_key)
+        if _active_business_delivery_events(existing_events)
+        else None
+    )
+    active_latest_event = (
+        max(remaining_business_events, key=_delivery_event_sort_key) if remaining_business_events else None
+    )
+    normalized_reversed_at = _coerce_utc(reversed_at) or reference_time
+
+    return {
+        "preview_type": "reverse_delivery_event",
+        "status": "BLOCKED" if blocking_reasons else "READY",
+        "summary": (
+            f"Delivery event {event_id} on {delivery_id} will be reversed and movement status will be recomputed."
+            if not blocking_reasons
+            else f"Delivery-event reversal preview for {delivery_id} is blocked."
+        ),
+        "affected_records": [
+            {
+                "type": "delivery_event",
+                "id": str(target_event.id),
+                "label": f"Delivery event {target_event.id}",
+                "summary": (
+                    f"{target_event.event_type} recorded at "
+                    f"{(_coerce_utc(target_event.occurred_at) or reference_time).isoformat()}."
+                ),
+            },
+            {
+                "type": "delivery_obligation",
+                "id": delivery_id,
+                "label": f"Delivery {delivery_id}",
+                "summary": f"Current execution status is {delivery.execution_status}.",
+            },
+        ],
+        "field_changes": [
+            {
+                "field": "execution_status",
+                "current_value": delivery.execution_status,
+                "proposed_value": projected_execution_status.value,
+            },
+            {
+                "field": "latest_event_type",
+                "current_value": latest_event.event_type if latest_event is not None else None,
+                "proposed_value": DeliveryEventType.EVENT_REVERSED.value,
+            },
+            {
+                "field": "reversed_at",
+                "current_value": None,
+                "proposed_value": normalized_reversed_at.isoformat(),
+            },
+            {
+                "field": "reversal_reason",
+                "current_value": None,
+                "proposed_value": normalized_reversal_reason,
+            },
+            {
+                "field": "active_latest_event_type",
+                "current_value": (
+                    max(_active_business_delivery_events(existing_events), key=_delivery_event_sort_key).event_type
+                    if _active_business_delivery_events(existing_events)
+                    else None
+                ),
+                "proposed_value": active_latest_event.event_type if active_latest_event is not None else None,
+            },
+        ],
+        "expected_side_effects": [
+            "Append a delivery-event reversal record instead of deleting history.",
+            "Recompute live delivery execution status from the remaining active event history.",
+            "Expose the corrected movement state in deliveries and shipments views.",
+            "Append a TradeDeliveryEventReversed audit event after execution.",
+        ],
+        "warnings": [
+            *(
+                ["Reversing a non-latest movement event will recompute live execution status from earlier remaining history."]
+                if current_active_latest_event is not None and current_active_latest_event.id != target_event.id
+                else []
+            ),
+        ],
+        "blocking_reasons": blocking_reasons,
+        "assumptions": [],
+    }
+
+
+def reverse_delivery_event(
+    db: Session,
+    *,
+    delivery_id: str,
+    event_id: int,
+    actor_id: str,
+    reversal_reason: object | None,
+    reversed_at: datetime | None = None,
+    source: object | None = None,
+    notes: object | None = None,
+    now: Optional[datetime] = None,
+) -> DeliveryObligationOut:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    delivery, trade, _trade_leg = _load_active_delivery_record(db, delivery_id=delivery_id)
+    existing_events = _delivery_events_by_delivery_id(db, delivery_ids=[delivery_id]).get(delivery_id, [])
+    target_event = next((event for event in existing_events if event.id == event_id), None)
+    if target_event is None:
+        raise LookupError(f"Delivery event {event_id} was not found on delivery {delivery_id}.")
+    if target_event.reversal_of_event_id is not None or target_event.event_type == DeliveryEventType.EVENT_REVERSED.value:
+        raise ValueError(f"Delivery event {event_id} is already a reversal entry and cannot be reversed.")
+    if any(event.reversal_of_event_id == target_event.id for event in existing_events):
+        raise ValueError(f"Delivery event {event_id} has already been reversed.")
+
+    normalized_reversed_at = _coerce_utc(reversed_at) or reference_time
+    normalized_reversal_reason = _normalize_required_text(reversal_reason, label="Reversal reason")
+    remaining_business_events = [
+        event for event in _active_business_delivery_events(existing_events) if event.id != target_event.id
+    ]
+    projected_execution_status = _project_delivery_execution_status_from_events(
+        delivery_events=remaining_business_events,
+        fallback_status=_default_execution_status_for_trade(trade),
+    )
+
+    reversal_event = DeliveryEvent(
+        delivery_id=delivery_id,
+        trade_id=delivery.trade_id,
+        leg_no=delivery.leg_no,
+        event_type=DeliveryEventType.EVENT_REVERSED.value,
+        execution_status=projected_execution_status.value,
+        occurred_at=normalized_reversed_at,
+        reversal_of_event_id=target_event.id,
+        reversal_reason=normalized_reversal_reason,
+        location_code=None,
+        reference_code=None,
+        source=_normalize_optional_text(source),
+        notes=_normalize_optional_text(notes),
+        created_at=reference_time,
+        created_by=actor_id,
+        updated_at=reference_time,
+        updated_by=actor_id,
+        version=1,
+    )
+    db.add(reversal_event)
+
+    execution_status_source = _resolved_delivery_field_source(
+        delivery,
+        source_field_name="execution_status_source",
+        fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+    )
+    if execution_status_source != DeliveryFieldSource.MANUAL and _apply_model_changes(
+        delivery,
+        {
+            "execution_status": projected_execution_status.value,
+            "execution_status_source": DeliveryFieldSource.SYSTEM_GENERATED.value,
+        },
+    ):
+        _touch_audited_record(delivery, actor_id=actor_id, reference_time=reference_time)
+
+    db.flush()
+    delivery_out = get_delivery_obligation_for_operations(db, delivery_id=delivery_id, now=reference_time)
+    latest_event = delivery_out.delivery_events[0] if delivery_out.delivery_events else None
+    _append_delivery_trade_audit(
+        db,
+        delivery=delivery_out,
+        actor_id=actor_id,
+        event_type="TradeDeliveryEventReversed",
+        causation_id=f"delivery:{delivery_out.delivery_id}:event-reversal",
+        request_payload={
+            key: value
+            for key, value in {
+                "event_id": event_id,
+                "reversal_reason": reversal_reason,
+                "reversed_at": reversed_at,
                 "source": source,
                 "notes": notes,
             }.items()

@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.domains.assistant.services.agent_revisions import has_unpublished_agent_revision
 from apps.api.app.domains.assistant.services.policies import build_effective_policy_for_agent
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_run import AssistantRun
@@ -160,6 +161,11 @@ def to_admin_agent_out(
         updated_at=record.updated_at,
         updated_by=record.updated_by,
         version=record.version,
+        latest_revision_id=record.latest_revision_id,
+        published_revision_id=record.published_revision_id,
+        published_at=record.published_at,
+        published_by=record.published_by,
+        has_unpublished_revision=has_unpublished_agent_revision(record),
     )
 
 

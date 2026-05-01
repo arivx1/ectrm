@@ -24,6 +24,7 @@ from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_spatial_feature import ReferenceSpatialFeature
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.position import Position
 from apps.api.app.models.trade import Trade
@@ -52,11 +53,16 @@ from apps.api.app.routes.reference_data import (
     PriceIndexUpdate,
     PortfolioCreate,
     PortfolioUpdate,
+    SpatialFeatureCreate,
+    SpatialFeatureStatusUpdate,
+    SpatialFeatureUpdate,
     UnitCreate,
     UnitStatusUpdate,
+    activate_spatial_feature,
     activate_asset,
     activate_book,
     create_asset,
+    create_spatial_feature,
     activate_counterparty,
     activate_location,
     create_commodity,
@@ -80,15 +86,19 @@ from apps.api.app.routes.reference_data import (
     deactivate_commodity,
     deactivate_location,
     deactivate_price_index,
+    deactivate_spatial_feature,
     deactivate_unit,
     list_location_standards,
     list_locations,
     list_price_indices,
+    list_spatial_feature_standards,
+    list_spatial_features,
     update_book,
     update_asset,
     update_counterparty,
     update_location,
     update_price_index,
+    update_spatial_feature,
 )
 from apps.api.app.schemas.reference_data import PriceIndexStatusUpdate
 from apps.api.app.schemas.event import EventCreate
@@ -120,6 +130,7 @@ class ReferenceDataApiTests(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(Event).delete()
             session.query(ReferenceAsset).delete()
+            session.query(ReferenceSpatialFeature).delete()
             session.query(ReferencePriceIndex).delete()
             session.query(ReferencePortfolio).delete()
             session.query(ReferenceLocation).delete()
@@ -1826,6 +1837,233 @@ class ReferenceDataApiTests(unittest.TestCase):
                         commodity_code="ACTIVE_GAS",
                         operating_status="OPERATING",
                         description="bad reality",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+    def test_spatial_feature_crud_supports_routes_regions_and_entity_links(self) -> None:
+        self._create_commodity("NATURAL_GAS")
+        self._create_location("HOUSTON", location_kind="POINT", location_type="HUB")
+        self._create_location("GULF_COAST", location_kind="REGION", location_type="CORRIDOR")
+
+        with self.SessionLocal() as session:
+            create_asset(
+                AssetCreate(
+                    code="gulf_pipe",
+                    name="Gulf Pipe",
+                    asset_class="PIPELINE",
+                    asset_type="TRANSMISSION",
+                    asset_reality="REAL",
+                    commodity_code="NATURAL_GAS",
+                    location_code="HOUSTON",
+                    operating_status="OPERATING",
+                    description="linked asset",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        with self.SessionLocal() as session:
+            created = create_spatial_feature(
+                SpatialFeatureCreate(
+                    code=" gulf_route ",
+                    name=" Gulf Route ",
+                    feature_kind=" route ",
+                    geometry_geojson={
+                        "type": "FeatureCollection",
+                        "features": [
+                            {
+                                "type": "Feature",
+                                "geometry": {
+                                    "type": "LineString",
+                                    "coordinates": [
+                                        [-95.3698, 29.7604],
+                                        [-94.8, 29.95],
+                                    ],
+                                },
+                                "properties": {"segment": "A"},
+                            }
+                        ],
+                    },
+                    entity_type=" asset ",
+                    entity_code=" gulf_pipe ",
+                    is_primary=True,
+                    source_name=" Curated Geometry Feed ",
+                    source_url=" https://example.com/spatial/gulf-route ",
+                    confidence=0.88,
+                    notes=" Seeded route overlay ",
+                    description="test spatial feature",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(created.code, "GULF_ROUTE")
+        self.assertEqual(created.feature_kind, "ROUTE")
+        self.assertEqual(created.geometry_type, "LINE")
+        self.assertEqual(created.entity_type, "ASSET")
+        self.assertEqual(created.entity_code, "GULF_PIPE")
+        self.assertTrue(created.is_primary)
+        self.assertEqual(created.source_name, "Curated Geometry Feed")
+        self.assertEqual(created.source_url, "https://example.com/spatial/gulf-route")
+        self.assertEqual(created.confidence, 0.88)
+        self.assertEqual(created.notes, "Seeded route overlay")
+
+        standards = list_spatial_feature_standards()
+        self.assertEqual(standards.default_feature_kind, "REGION")
+        self.assertIn("PIPELINE", standards.feature_kinds)
+        self.assertIn("ASSET", standards.entity_types)
+        self.assertIn("LINE", standards.geometry_types)
+
+        with self.SessionLocal() as session:
+            listed = list_spatial_features(
+                q="curated geometry",
+                feature_kind="route",
+                geometry_type="line",
+                entity_type="asset",
+                entity_code="gulf_pipe",
+                is_active=True,
+                limit=50,
+                offset=0,
+                db=session,
+            )
+            updated = update_spatial_feature(
+                "gulf_route",
+                SpatialFeatureUpdate(
+                    feature_kind="region",
+                    geometry_geojson={
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [-95.6, 29.6],
+                                [-94.7, 29.6],
+                                [-94.7, 30.2],
+                                [-95.6, 30.2],
+                                [-95.6, 29.6],
+                            ]
+                        ],
+                    },
+                    entity_type="location",
+                    entity_code="gulf_coast",
+                    label_latitude=29.9,
+                    label_longitude=-95.15,
+                    is_primary=False,
+                    source_name="Scenario Overlay",
+                    source_url="https://example.com/spatial/gulf-region",
+                    confidence=0.55,
+                    notes="Expanded area coverage",
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+            deactivated = deactivate_spatial_feature(
+                "GULF_ROUTE",
+                SpatialFeatureStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+            reactivated = activate_spatial_feature(
+                "GULF_ROUTE",
+                SpatialFeatureStatusUpdate(updated_by="test-user"),
+                db=session,
+            )
+
+        self.assertEqual([feature.code for feature in listed], ["GULF_ROUTE"])
+        self.assertEqual(updated.feature_kind, "REGION")
+        self.assertEqual(updated.geometry_type, "AREA")
+        self.assertEqual(updated.entity_type, "LOCATION")
+        self.assertEqual(updated.entity_code, "GULF_COAST")
+        self.assertEqual(updated.label_latitude, 29.9)
+        self.assertEqual(updated.label_longitude, -95.15)
+        self.assertFalse(updated.is_primary)
+        self.assertEqual(updated.source_name, "Scenario Overlay")
+        self.assertEqual(updated.source_url, "https://example.com/spatial/gulf-region")
+        self.assertEqual(updated.confidence, 0.55)
+        self.assertEqual(updated.notes, "Expanded area coverage")
+        self.assertFalse(deactivated.is_active)
+        self.assertTrue(reactivated.is_active)
+
+    def test_spatial_feature_creation_rejects_partial_links_partial_labels_and_unknown_entities(self) -> None:
+        self._create_location("HOUSTON", location_kind="POINT", location_type="HUB")
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "entity_type and entity_code must be provided together"):
+                create_spatial_feature(
+                    SpatialFeatureCreate(
+                        code="BAD_LINK",
+                        name="Bad Link",
+                        feature_kind="ROUTE",
+                        geometry_geojson={
+                            "type": "LineString",
+                            "coordinates": [
+                                [-95.3698, 29.7604],
+                                [-95.1, 29.9],
+                            ],
+                        },
+                        entity_type="ASSET",
+                        description="bad link",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "label_latitude and label_longitude must be provided together"):
+                create_spatial_feature(
+                    SpatialFeatureCreate(
+                        code="BAD_LABEL",
+                        name="Bad Label",
+                        feature_kind="REGION",
+                        geometry_geojson={
+                            "type": "Polygon",
+                            "coordinates": [
+                                [
+                                    [-95.5, 29.5],
+                                    [-95.0, 29.5],
+                                    [-95.0, 30.0],
+                                    [-95.5, 30.0],
+                                    [-95.5, 29.5],
+                                ]
+                            ],
+                        },
+                        label_latitude=29.7,
+                        description="bad label",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "Linked asset 'MISSING_ASSET' does not exist"):
+                create_spatial_feature(
+                    SpatialFeatureCreate(
+                        code="BAD_ENTITY",
+                        name="Bad Entity",
+                        feature_kind="PIPELINE",
+                        geometry_geojson={
+                            "type": "LineString",
+                            "coordinates": [
+                                [-95.3698, 29.7604],
+                                [-95.1, 29.9],
+                            ],
+                        },
+                        entity_type="ASSET",
+                        entity_code="missing_asset",
+                        description="bad entity",
+                        created_by="test-user",
+                    ),
+                    db=session,
+                )
+
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(Exception, "geometry_geojson type must be one of"):
+                create_spatial_feature(
+                    SpatialFeatureCreate(
+                        code="BAD_GEOMETRY_FEATURE",
+                        name="Bad Geometry Feature",
+                        feature_kind="ROUTE",
+                        geometry_geojson={"type": "BadType", "coordinates": [0, 0]},
+                        description="bad geometry",
                         created_by="test-user",
                     ),
                     db=session,

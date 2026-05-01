@@ -53,6 +53,7 @@ function buildControllerStub() {
         operating_status: 'OPERATING',
       },
     ],
+    spatialFeatures: [],
     locations,
     selectedAssetCode: 'PIPE_01',
     startEditAsset: () => undefined,
@@ -165,14 +166,13 @@ test('assets tab definition renders directory and editor content through the sha
   )
 
   assert.match(directoryMarkup, /Assets/)
-  assert.match(directoryMarkup, /Asset Footprint/)
+  assert.match(directoryMarkup, /Use the dedicated Map workspace to inspect rendered geography\./)
   assert.match(directoryMarkup, /Gulf Transmission/)
   assert.match(directoryMarkup, /PIPELINE/)
   assert.match(directoryMarkup, /REAL/)
   assert.match(directoryMarkup, /29\.7604, -95\.3698/)
   assert.match(directoryMarkup, /125,000 MMBTU/)
-  assert.match(directoryMarkup, /1 plotted/)
-  assert.match(directoryMarkup, /1 geometry/)
+  assert.doesNotMatch(directoryMarkup, /Asset Footprint/)
 
   assert.match(editorMarkup, /New Asset/)
   assert.match(editorMarkup, /Asset Status/)

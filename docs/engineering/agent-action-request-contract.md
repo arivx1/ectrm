@@ -135,6 +135,13 @@ but they still use this same contract and persist execution metadata inside
 `autonomous_execution_reason`, and, when applicable,
 `delegated_ability_override_reason`.
 
+Correction actions should prefer explicit business reversals or voids over hard
+deletes. Settlement corrections now use invoice voids and payment reversals so
+the audit trail, stale-state basis, and downstream projection changes remain
+inspectable after the fact. Movement corrections now follow the same pattern:
+delivery events reverse through append-only correction rows and actualizations
+void through explicit metadata instead of delete paths.
+
 Stale-state rechecks are performed server-side for all published action types,
 including trade create/amend/cancel, delivery events, actualizations,
 confirmations, workflow item updates, invoices, payments, and document
@@ -172,10 +179,14 @@ the configured threshold.
 | `update_trade_workflow_item` | `trade_workflow_item` | Operations Lead or Settlement Lead | `item_id`, `changes` | Applies workflow field changes with audit. | Add old/new field preview, queue owner, and stale basis from workflow item version/status. |
 | `record_trade_actualization` | `trade_actualization` owned by `trade` | Operations Lead | `trade_id`, `actual_quantity`, `actualized_at` | Upserts actualization state and refreshes downstream accrual and workflow projections. | Keep delivery ID derivation, quantity evidence, and stale basis from actualization version plus trade status. |
 | `record_delivery_event` | `delivery_obligation` | Operations Lead | `delivery_id`, `event_type`, `occurred_at` | Appends a delivery event and refreshes derived movement execution state. | Use canonical delivery IDs, event-history stale basis, and explicit event-type validation. |
+| `reverse_delivery_event` | `delivery_event` owned by `delivery_obligation` | Operations Lead | `delivery_id`, `event_id`, `reversal_reason` | Appends an `EVENT_REVERSED` correction row and recomputes live movement execution state from remaining active event history. | Keep the path append-only, block duplicate reversals, and preserve target-event stale-state checks. |
+| `void_trade_actualization` | `trade_actualization` owned by `trade` | Operations Lead | `trade_id`, `void_reason` | Stamps explicit void metadata on the recorded actualization and refreshes downstream actualization, accrual, and workflow projections. | Keep the path non-destructive, require a reason, and block repeat voids through actualization-version stale checks. |
 | `create_manual_accrual_entry` | `trade_accrual_lot` | Settlement Lead or Controller | `accrual_lot_id` plus non-zero `quantity_delta` or `amount_delta`, and `effective_at` | Appends an immutable manual accrual entry and recomputes the owning lot rollup. | Keep the action limited to open lots, immutable entries, and explicit evidence-linked deltas. |
 | `reverse_accrual_entry` | `trade_accrual_entry` | Settlement Lead or Controller | `entry_id` | Appends an immutable reversal entry and recomputes the owning lot rollup. | Restrict the path to manual accrual entries and preserve duplicate-reversal protection. |
-| `issue_trade_invoice` | `trade_invoice` candidate owned by `trade` | Settlement Lead | `trade_id` | Creates invoice and refreshes settlement workflow projections. | Add amount/date evidence, invoice readiness checks, and clear missing-evidence fields. |
-| `create_trade_payment` | `trade_payment` candidate owned by `trade_invoice` | Settlement Lead | `invoice_id` | Creates payment and refreshes payment workflow projections. | Add outstanding amount, currency checks, and stale basis from invoice/payment balance. |
+| `issue_trade_invoice` | `trade_invoice` candidate owned by `trade` | Settlement Lead | `trade_id` | Creates an internal invoice record and refreshes settlement workflow projections. | Keep invoice readiness preview, duplicate invoice prevention, and accrual-relief sync inside the typed settlement service. |
+| `void_trade_invoice` | `trade_invoice` | Settlement Lead | `invoice_id`, `void_reason` | Marks the invoice `NOT_REQUIRED`, stamps explicit void metadata, refreshes settlement posture, and unwinds eligible invoice relief. | Block while net paid cash is still applied and keep payment-state drift checks tied to the invoice. |
+| `create_trade_payment` | `trade_payment` candidate owned by `trade_invoice` | Settlement Lead | `invoice_id` plus payment amount, status, and currency fields when needed | Creates a payment record and refreshes payment workflow projections. | Keep outstanding-balance, currency-match, and duplicate-reference checks inside the typed settlement payment service. |
+| `reverse_trade_payment` | `trade_payment` | Settlement Lead | `payment_id`, `reversal_reason` | Appends an offsetting reversal payment record, refreshes payment workflow projections, and reopens invoice balance when appropriate. | Keep reversal immutable and block duplicate reversal or reversal-of-reversal attempts. |
 | `create_accounting_entry` | `trade` plus linked accrual, invoice, or payment evidence when present | Controller or Finance Lead | `trade_id`, balanced `lines`, `description`, and `effective_at` | Creates a posted internal accounting entry plus balanced posting lines. | Enforce balanced same-currency lines and keep linkage validation inside the typed posting service. |
 | `reverse_accounting_entry` | `trade_accounting_entry` | Controller or Finance Lead | `accounting_entry_id` | Creates an offsetting reversal entry, marks the original reversed, and preserves the ledger trail. | Keep reversal immutable and block duplicate reversal attempts. |
 | `reprocess_document_ingestion` | `document_ingestion` | Operations Lead or Admin | `document_id` | Resets analysis state and reruns document processing. | Add current review status, processor selection rationale, and expected state reset. |
@@ -218,10 +229,14 @@ Recommended checks by action:
 | `update_trade_workflow_item` | Workflow item exists and version/status still matches staged basis. |
 | `record_trade_actualization` | Trade exists, current trade status still matches, and current actualization version or quantity has not drifted from the staged basis. |
 | `record_delivery_event` | Delivery exists under the canonical delivery projection, current execution status still matches, and event count plus latest event basis have not drifted. |
+| `reverse_delivery_event` | Delivery exists, current execution status plus event-count basis still match, target event still exists on that delivery, and the target event has not already been reversed or itself become a reversal row. |
+| `void_trade_actualization` | Trade exists, current trade status still matches, actualization record still exists for the derived delivery ID, and the actualization version plus `voided_at` basis have not drifted. |
 | `create_manual_accrual_entry` | Accrual lot exists, is still open, and lot status, version, and entry count still match the staged basis. |
 | `reverse_accrual_entry` | Accrual entry exists, still belongs to the same lot, and no reversal entry has been recorded since staging. |
 | `issue_trade_invoice` | Trade exists, settlement/invoice readiness has not materially changed, and no duplicate invoice number was created. |
+| `void_trade_invoice` | Invoice exists, is not already `NOT_REQUIRED`, invoice version and payment-state token still match the staged basis, and no net paid cash has appeared since staging. |
 | `create_trade_payment` | Invoice exists, outstanding amount/currency still support the payment, and duplicate payment reference is not present. |
+| `reverse_trade_payment` | Payment exists, still belongs to the same invoice, payment version and `invoice_id` still match the staged basis, and no reversal entry has already been recorded. |
 | `create_accounting_entry` | Trade exists, linked accrual or settlement records still match their staged versions, and the entry does not already exist under the idempotency key. |
 | `reverse_accounting_entry` | Accounting entry exists, current status and version still match the staged basis, and no reversal entry has already been recorded. |
 | `reprocess_document_ingestion` | Document exists and is not already in a conflicting processing state. |

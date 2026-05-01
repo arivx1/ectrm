@@ -2299,7 +2299,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
               emptyStateDetail={
                 hasScreenFilter
                   ? 'Clear the local filter to reopen the broader blotter and resync the inspector with active rows.'
-                  : 'Book a trade or open the walkthrough to seed the blotter and inspector with live-looking trade context.'
+                  : 'Book a trade to seed the blotter and inspector with live-looking trade context.'
               }
             >
               <DataSheet
@@ -2317,7 +2317,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                 emptyMessage={
                   hasScreenFilter
                     ? 'No trades match the current local filter.'
-                    : 'Book a trade or open the walkthrough to seed the blotter and inspector with trade context.'
+                    : 'Book a trade to seed the blotter and inspector with trade context.'
                 }
               />
             </OperationalBoardController>

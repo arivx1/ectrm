@@ -9,6 +9,8 @@ import type {
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   UnitRecord,
 } from '../../shared/models'
 import { type useReferenceDataWorkspace } from './useReferenceDataWorkspace'
@@ -17,6 +19,7 @@ import {
   buildCommodityFieldErrors,
   buildCurrencyFieldErrors,
   buildLocationFieldErrors,
+  buildSpatialFeatureFieldErrors,
   parseAssetCoordinatePair,
   parseAssetGeometryInput,
   buildPriceIndexFieldErrors,
@@ -26,6 +29,7 @@ import {
   isCurrencyFormDirty,
   isLocationFormDirty,
   isPriceIndexFormDirty,
+  isSpatialFeatureFormDirty,
   isUnitFormDirty,
 } from './referenceDataFormState'
 
@@ -181,6 +185,154 @@ export function useReferenceDataAssetController({
     startEditAsset,
     handleSaveAsset,
     handleToggleAsset,
+  }
+}
+
+export function useReferenceDataSpatialFeatureController({
+  workspace,
+  spatialFeatures,
+  spatialFeatureStandards,
+  beginReferenceAction,
+  currentActorId,
+  submitReference,
+  setReferenceActionError,
+}: {
+  workspace: Pick<
+    ReferenceDataWorkspaceState,
+    | 'spatialFeatureForm'
+    | 'spatialFeatureFormMode'
+    | 'selectedSpatialFeature'
+    | 'startCreateSpatialFeature'
+    | 'startEditSpatialFeature'
+  >
+  spatialFeatures: SpatialFeatureRecord[]
+  spatialFeatureStandards: SpatialFeatureStandards
+} & Pick<
+  EntityControllerActions,
+  'beginReferenceAction' | 'currentActorId' | 'submitReference' | 'setReferenceActionError'
+>) {
+  const {
+    spatialFeatureForm,
+    spatialFeatureFormMode,
+    selectedSpatialFeature,
+    startCreateSpatialFeature: startCreateSpatialFeatureBase,
+    startEditSpatialFeature: startEditSpatialFeatureBase,
+  } = workspace
+
+  const spatialFeatureFieldErrors = useMemo(
+    () =>
+      buildSpatialFeatureFieldErrors(
+        spatialFeatureForm,
+        spatialFeatureFormMode,
+        spatialFeatures,
+        spatialFeatureStandards,
+      ),
+    [spatialFeatureForm, spatialFeatureFormMode, spatialFeatureStandards, spatialFeatures],
+  )
+
+  const spatialFeatureFormDirty = useMemo(
+    () =>
+      isSpatialFeatureFormDirty(
+        spatialFeatureForm,
+        spatialFeatureFormMode,
+        selectedSpatialFeature,
+        spatialFeatureStandards,
+      ),
+    [selectedSpatialFeature, spatialFeatureForm, spatialFeatureFormMode, spatialFeatureStandards],
+  )
+
+  function startCreateSpatialFeature() {
+    beginReferenceAction(startCreateSpatialFeatureBase)
+  }
+
+  function startEditSpatialFeature(code: string) {
+    beginReferenceAction(() => startEditSpatialFeatureBase(code))
+  }
+
+  async function handleSaveSpatialFeature(e: React.FormEvent) {
+    e.preventDefault()
+    if (
+      !spatialFeatureForm.code.trim() ||
+      !spatialFeatureForm.name.trim() ||
+      !spatialFeatureForm.feature_kind.trim()
+    ) {
+      setReferenceActionError('Spatial feature code, name, kind, and geometry are required.')
+      return
+    }
+
+    const parsedLabelCoordinates = parseAssetCoordinatePair({
+      latitudeText: spatialFeatureForm.label_latitude,
+      longitudeText: spatialFeatureForm.label_longitude,
+    })
+    if (parsedLabelCoordinates.error) {
+      setReferenceActionError(parsedLabelCoordinates.error)
+      return
+    }
+
+    const parsedGeometry = parseAssetGeometryInput(spatialFeatureForm.geometry_geojson)
+    if (parsedGeometry.error) {
+      setReferenceActionError(parsedGeometry.error)
+      return
+    }
+    if (parsedGeometry.value === null) {
+      setReferenceActionError('Geometry GeoJSON is required.')
+      return
+    }
+
+    const normalizedEntityType = spatialFeatureForm.entity_type.trim().toUpperCase()
+    const normalizedEntityCode = spatialFeatureForm.entity_code.trim().toUpperCase()
+    if (Boolean(normalizedEntityType) !== Boolean(normalizedEntityCode)) {
+      setReferenceActionError('Entity type and linked code must be provided together.')
+      return
+    }
+
+    const payload = {
+      code: spatialFeatureForm.code.trim().toUpperCase(),
+      name: spatialFeatureForm.name.trim(),
+      feature_kind: spatialFeatureForm.feature_kind.trim().toUpperCase(),
+      geometry_geojson: parsedGeometry.value,
+      entity_type: normalizedEntityType || null,
+      entity_code: normalizedEntityCode || null,
+      label_latitude: parsedLabelCoordinates.latitude,
+      label_longitude: parsedLabelCoordinates.longitude,
+      is_primary: spatialFeatureForm.is_primary,
+      description: spatialFeatureForm.description.trim() || null,
+    }
+
+    if (spatialFeatureFormMode === 'create') {
+      await submitReference(
+        '/reference/spatial-features',
+        'POST',
+        { ...payload, created_by: currentActorId() },
+        `Spatial feature ${payload.code} created.`,
+      )
+      startEditSpatialFeatureBase(payload.code)
+    } else if (selectedSpatialFeature) {
+      await submitReference(
+        `/reference/spatial-features/${selectedSpatialFeature.code}`,
+        'PUT',
+        { ...payload, updated_by: currentActorId() },
+        `Spatial feature ${selectedSpatialFeature.code} updated.`,
+      )
+    }
+  }
+
+  async function handleToggleSpatialFeature(record: SpatialFeatureRecord) {
+    await submitReference(
+      `/reference/spatial-features/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
+      'POST',
+      { updated_by: currentActorId() },
+      `Spatial feature ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
+    )
+  }
+
+  return {
+    spatialFeatureFieldErrors,
+    spatialFeatureFormDirty,
+    startCreateSpatialFeature,
+    startEditSpatialFeature,
+    handleSaveSpatialFeature,
+    handleToggleSpatialFeature,
   }
 }
 

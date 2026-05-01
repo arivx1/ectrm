@@ -7,7 +7,6 @@ type ManualSectionId =
   | 'run-post-trade-work'
   | 'troubleshooting-matrix'
   | 'access-and-safe-use'
-  | 'visual-walkthroughs'
 
 type RelatedHelpLink = {
   sectionId: ManualSectionId
@@ -32,13 +31,11 @@ const KNOWN_MANUAL_SECTIONS = new Set<ManualSectionId>([
   'run-post-trade-work',
   'troubleshooting-matrix',
   'access-and-safe-use',
-  'visual-walkthroughs',
 ])
 
 const VIEW_MANUAL_SECTION: Partial<Record<ViewKey, ManualSectionId>> = {
   prompt: 'start-here',
   dashboard: 'start-here',
-  demo: 'start-here',
   pretrade: 'book-or-amend-a-trade',
   trades: 'book-or-amend-a-trade',
   events: 'book-or-amend-a-trade',

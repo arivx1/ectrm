@@ -37,3 +37,8 @@ class AssistantAgent(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_by: Mapped[str] = mapped_column(String(128), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    latest_revision_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    published_revision_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    published_snapshot: Mapped[Optional[dict[str, object]]] = mapped_column(JSON, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

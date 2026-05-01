@@ -9,11 +9,13 @@ from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMI
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services.shipments import append_delivery_event
 from apps.api.app.domains.operations.services.shipments import list_delivery_obligations_for_operations
+from apps.api.app.domains.operations.services.shipments import reverse_delivery_event
 from apps.api.app.domains.operations.services.shipments import synchronize_delivery_obligations_from_trades
 from apps.api.app.domains.operations.services.shipments import update_delivery_logistics_detail
 from apps.api.app.domains.operations.services.shipments import update_delivery_obligation
 from apps.api.app.domains.operations.services.shipments import update_delivery_pipeline_detail
 from apps.api.app.domains.operations.services.shipments import update_delivery_power_detail
+from apps.api.app.schemas.shipment import DeliveryEventReverseWrite
 from apps.api.app.schemas.shipment import DeliveryEventWrite
 from apps.api.app.schemas.shipment import DeliveryLogisticsDetailUpdate
 from apps.api.app.schemas.shipment import DeliveryObligationOut
@@ -86,6 +88,35 @@ def post_delivery_event(
             occurred_at=payload.occurred_at,
             location_code=payload.location_code,
             reference_code=payload.reference_code,
+            source=payload.source,
+            notes=payload.notes,
+        )
+    )
+
+
+@router.post(
+    "/{delivery_id}/events/{event_id}/reverse",
+    response_model=DeliveryObligationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_delivery_event_reversal(
+    delivery_id: str,
+    event_id: int,
+    payload: DeliveryEventReverseWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DeliveryObligationOut:
+    return execute_operational_mutation(
+        DELIVERY_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: reverse_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            event_id=event_id,
+            actor_id=actor.actor_id,
+            reversal_reason=payload.reversal_reason,
+            reversed_at=payload.reversed_at,
             source=payload.source,
             notes=payload.notes,
         )
@@ -185,6 +216,7 @@ __all__ = [
     "list_deliveries",
     "post_delivery_sync",
     "post_delivery_event",
+    "post_delivery_event_reversal",
     "patch_delivery",
     "patch_delivery_logistics_details",
     "patch_delivery_pipeline_details",

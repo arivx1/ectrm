@@ -17,7 +17,11 @@ from apps.api.app.domains.assistant.services.action_specs import (
 )
 from apps.api.app.domains.accruals.services.accruals import MANUAL_ENTRY_TYPES
 from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
+from apps.api.app.domains.operations.services.actualizations import preview_trade_actualization_void
 from apps.api.app.domains.operations.services.settlement_invoices import preview_trade_invoice_issue
+from apps.api.app.domains.operations.services.settlement_invoices import preview_trade_invoice_void
+from apps.api.app.domains.operations.services.settlement_payments import preview_trade_payment_reversal
+from apps.api.app.domains.operations.services.shipments import preview_delivery_event_reversal
 from apps.api.app.domains.operations.services.workflow_items import evaluate_trade_workflow_item_update_policy
 from apps.api.app.domains.operations.services.workflow_items import workflow_allowed_statuses
 from apps.api.app.models.delivery_event import DeliveryEvent
@@ -288,11 +292,37 @@ class RecordTradeActualizationActionPlanner:
         )
 
 
+class VoidTradeActualizationActionPlanner:
+    action_type = "void_trade_actualization"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_void_trade_actualization(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
 class RecordDeliveryEventActionPlanner:
     action_type = "record_delivery_event"
 
     def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
         return _plan_record_delivery_event(
+            message=context.message,
+            message_lower=context.message_lower,
+            context=context.context,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class ReverseDeliveryEventActionPlanner:
+    action_type = "reverse_delivery_event"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_reverse_delivery_event(
             message=context.message,
             message_lower=context.message_lower,
             context=context.context,
@@ -332,6 +362,30 @@ class CreateTradePaymentActionPlanner:
 
     def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
         return _plan_create_trade_payment(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class VoidTradeInvoiceActionPlanner:
+    action_type = "void_trade_invoice"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_void_trade_invoice(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
+class ReverseTradePaymentActionPlanner:
+    action_type = "reverse_trade_payment"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_reverse_trade_payment(
             message=context.message,
             message_lower=context.message_lower,
             context_fields=context.context_fields,
@@ -384,12 +438,16 @@ ACTION_PLANNER_SEQUENCE: tuple[AssistantActionPlanner, ...] = (
     IssueTradeConfirmationActionPlanner(),
     UpdateTradeWorkflowItemActionPlanner(),
     RecordDeliveryEventActionPlanner(),
+    ReverseDeliveryEventActionPlanner(),
     RecordTradeActualizationActionPlanner(),
+    VoidTradeActualizationActionPlanner(),
     RecordTradeConfirmationResponseActionPlanner(),
     CreateManualAccrualEntryActionPlanner(),
     ReverseAccrualEntryActionPlanner(),
     IssueTradeInvoiceActionPlanner(),
+    VoidTradeInvoiceActionPlanner(),
     CreateTradePaymentActionPlanner(),
+    ReverseTradePaymentActionPlanner(),
     CreateAccountingEntryActionPlanner(),
     ReverseAccountingEntryActionPlanner(),
     ReprocessDocumentIngestionActionPlanner(),
@@ -555,6 +613,54 @@ def _resolve_payment_id(message: str, *, context_fields: dict[str, str]) -> int 
     )
 
 
+def _resolve_delivery_event_id(
+    message: str,
+    *,
+    message_lower: str,
+    delivery_id: str | None,
+    context_fields: dict[str, str],
+    db: Session,
+) -> int | None:
+    resolved_id = _resolve_int_id(
+        message,
+        label_patterns=("delivery event", "event"),
+        context_fields=context_fields,
+        field_keys=("event_id", "delivery_event_id"),
+    )
+    if resolved_id is not None:
+        return resolved_id
+    if delivery_id is None:
+        return None
+
+    delivery_events = list(
+        db.execute(
+            select(DeliveryEvent)
+            .where(DeliveryEvent.delivery_id == delivery_id)
+            .order_by(DeliveryEvent.occurred_at.desc(), DeliveryEvent.id.desc())
+        ).scalars().all()
+    )
+    reversed_event_ids = {
+        int(event.reversal_of_event_id)
+        for event in delivery_events
+        if event.reversal_of_event_id is not None
+    }
+    active_events = [
+        event
+        for event in delivery_events
+        if event.reversal_of_event_id is None
+        and event.event_type != DeliveryEventType.EVENT_REVERSED.value
+        and event.id not in reversed_event_ids
+    ]
+    if not active_events:
+        return None
+
+    event_type = _resolve_delivery_event_type(message_lower, context_fields)
+    if event_type is not None:
+        matched_event = next((event for event in active_events if event.event_type == event_type), None)
+        return matched_event.id if matched_event is not None else None
+    return active_events[0].id
+
+
 def _resolve_accrual_lot_id(message: str, *, context_fields: dict[str, str]) -> str | None:
     value = _first_present_value(context_fields, "accrual_lot_id")
     if value:
@@ -608,6 +714,15 @@ def _parse_iso_datetime_value(value: str | None) -> str | None:
         return None
     try:
         return datetime.fromisoformat(normalized.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        return None
+
+
+def _preview_datetime_value(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
 
@@ -1319,7 +1434,7 @@ def _plan_record_trade_actualization(
     context_fields: dict[str, str],
     db: Session,
 ) -> AssistantActionPlanningCandidate | None:
-    if not _mentions_trade_actualization(message_lower):
+    if not _mentions_trade_actualization(message_lower, context_fields):
         return None
 
     trade_id = _resolve_trade_id(message, context)
@@ -1422,6 +1537,113 @@ def _plan_record_trade_actualization(
                     "assistant-action:record_trade_actualization:"
                     f"{delivery_id}:{existing_actualization.version if existing_actualization is not None else 'new'}:{actualized_at}"
                 ),
+            ),
+        )
+    )
+
+
+def _plan_void_trade_actualization(
+    *,
+    message: str,
+    message_lower: str,
+    context: str | None,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_trade_actualization_void(message_lower, context_fields):
+        return None
+
+    trade_id = _resolve_trade_id(message, context)
+    if trade_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No trade was identified for an actualization-void request."
+        )
+
+    trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
+    if trade is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Trade {trade_id} was not found, so no actualization-void request was staged."
+        )
+
+    leg_no = _parse_optional_int_value(_first_present_value(context_fields, "leg_no"))
+    delivery_id = build_delivery_obligation_id(trade_id, leg_no)
+    existing_actualization = db.execute(
+        select(TradeActualization).where(TradeActualization.delivery_id == delivery_id)
+    ).scalars().first()
+    if existing_actualization is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Delivery {delivery_id} does not have an actualization record to void."
+        )
+
+    void_reason = _first_present_value(context_fields, "void_reason", "reason", "notes")
+    notes = _first_present_value(context_fields, "notes")
+    action_preview = preview_trade_actualization_void(
+        db,
+        trade_id=trade_id,
+        leg_no=leg_no,
+        void_reason=void_reason,
+    )
+    payload = {
+        "trade_id": trade_id,
+        **({"leg_no": leg_no} if leg_no is not None else {}),
+        **({"void_reason": void_reason} if void_reason else {}),
+        **({"notes": notes} if notes else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="void_trade_actualization",
+            summary=f"Void actualization for trade {trade_id}",
+            description=(
+                f"Void the recorded actualization for delivery {delivery_id}. "
+                "If executed, the application will clear the mistaken movement actualization from live state and "
+                "refresh downstream accrual and workflow projections."
+            ),
+            payload=_with_review_context(
+                payload,
+                owning_work_object=_object_ref(
+                    "trade_actualization",
+                    existing_actualization.id,
+                    f"Actualization {existing_actualization.id}",
+                ),
+                required_reviewer_role="OPERATIONS_LEAD",
+                business_rationale=(
+                    f"Trade {trade_id} actualization was selected for correction because the recorded executed quantity "
+                    "no longer reflects the user's asserted movement reality."
+                ),
+                proposed_mutation={"operation": "void_trade_actualization", **payload},
+                supporting_records=(
+                    _supporting_record(
+                        "trade_actualization",
+                        existing_actualization.id,
+                        (
+                            f"Delivery {delivery_id} actualization status was {trade.actualization_status} with "
+                            f"recorded quantity {float(existing_actualization.actual_quantity)}."
+                        ),
+                    ),
+                    _supporting_record("trade", trade_id, f"Trade status was {trade.status}."),
+                ),
+                expected_downstream_effects=(
+                    "Mark the actualization record voided with explicit correction metadata.",
+                    "Refresh delivery and trade actualization status back to pending state.",
+                    "Synchronize derived accrual lots and workflow projections.",
+                ),
+                missing_evidence=(() if void_reason else ("No void reason was provided.",)),
+                stale_state_basis={
+                    "trade_status": trade.status,
+                    "actualization_status": trade.actualization_status,
+                    "last_event_id": trade.last_event_id,
+                    "delivery_id": delivery_id,
+                    "actualization_version": existing_actualization.version,
+                    "actual_quantity": float(existing_actualization.actual_quantity),
+                    "actualized_at": existing_actualization.actualized_at.isoformat(),
+                    "voided_at": existing_actualization.voided_at.isoformat()
+                    if existing_actualization.voided_at is not None
+                    else None,
+                },
+                idempotency_key=(
+                    f"assistant-action:void_trade_actualization:{delivery_id}:{existing_actualization.version}"
+                ),
+                action_preview=action_preview,
             ),
         )
     )
@@ -1532,6 +1754,137 @@ def _plan_record_delivery_event(
                 idempotency_key=(
                     f"assistant-action:record_delivery_event:{delivery_id}:{len(delivery_events)}:{event_type}:{occurred_at}"
                 ),
+            ),
+        )
+    )
+
+
+def _plan_reverse_delivery_event(
+    *,
+    message: str,
+    message_lower: str,
+    context: str | None,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_delivery_event_reversal(message_lower, context_fields):
+        return None
+
+    delivery_id = _resolve_delivery_id(message, context=context, context_fields=context_fields)
+    if delivery_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No delivery was identified for a delivery-event reversal request."
+        )
+
+    delivery = db.get(DeliveryObligation, delivery_id)
+    if delivery is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Delivery {delivery_id} was not found, so no delivery-event reversal was staged."
+        )
+
+    event_id = _resolve_delivery_event_id(
+        message,
+        message_lower=message_lower,
+        delivery_id=delivery_id,
+        context_fields=context_fields,
+        db=db,
+    )
+    if event_id is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Delivery {delivery_id} was identified, but no reversible delivery event could be resolved."
+        )
+
+    delivery_events = list(
+        db.execute(
+            select(DeliveryEvent)
+            .where(DeliveryEvent.delivery_id == delivery_id)
+            .order_by(DeliveryEvent.occurred_at.desc(), DeliveryEvent.id.desc())
+        ).scalars().all()
+    )
+    target_event = next((event for event in delivery_events if event.id == event_id), None)
+    if target_event is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Delivery event {event_id} was not found on delivery {delivery_id}."
+        )
+
+    reversal_reason = _first_present_value(context_fields, "reversal_reason", "reason", "notes")
+    notes = _first_present_value(context_fields, "notes")
+    source = _first_present_value(context_fields, "source")
+    reversed_at = (
+        _parse_iso_datetime_value(_first_present_value(context_fields, "reversed_at", "occurred_at"))
+        or _extract_labeled_iso_datetime_from_message(
+            message,
+            labels=("reversed", "reversed at", "undo", "undo at"),
+        )
+    )
+    action_preview = preview_delivery_event_reversal(
+        db,
+        delivery_id=delivery_id,
+        event_id=event_id,
+        reversal_reason=reversal_reason,
+        reversed_at=_preview_datetime_value(reversed_at),
+    )
+    latest_event = delivery_events[0] if delivery_events else None
+    payload = {
+        "delivery_id": delivery_id,
+        "event_id": event_id,
+        **({"reversal_reason": reversal_reason} if reversal_reason else {}),
+        **({"reversed_at": reversed_at} if reversed_at else {}),
+        **({"source": source} if source else {}),
+        **({"notes": notes} if notes else {}),
+    }
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="reverse_delivery_event",
+            summary=f"Reverse delivery event {event_id} on {delivery_id}",
+            description=(
+                f"Reverse delivery event {event_id} on {delivery_id}. "
+                "If executed, the application will append a correction record and recompute live movement status "
+                "from the remaining event history."
+            ),
+            payload=_with_review_context(
+                payload,
+                owning_work_object=_object_ref("delivery_event", event_id, f"Delivery event {event_id}"),
+                required_reviewer_role="OPERATIONS_LEAD",
+                business_rationale=(
+                    f"Delivery {delivery_id} event {event_id} was selected for correction because the logged movement "
+                    "event no longer reflects the user's reported reality."
+                ),
+                proposed_mutation={"operation": "reverse_delivery_event", **payload},
+                supporting_records=(
+                    _supporting_record(
+                        "delivery_obligation",
+                        delivery_id,
+                        f"Delivery execution status was {delivery.execution_status} with {len(delivery_events)} recorded events.",
+                        f"Delivery {delivery_id}",
+                    ),
+                    _supporting_record(
+                        "delivery_event",
+                        event_id,
+                        f"Target event type was {target_event.event_type} at {target_event.occurred_at.isoformat()}.",
+                        f"Delivery event {event_id}",
+                    ),
+                ),
+                expected_downstream_effects=(
+                    "Append a delivery-event reversal record.",
+                    "Recompute live delivery execution status from the remaining active event history.",
+                    "Expose the corrected movement state in operations and shipment views.",
+                ),
+                missing_evidence=(() if reversal_reason else ("No reversal reason was provided.",)),
+                stale_state_basis={
+                    "execution_status": delivery.execution_status,
+                    "event_count": len(delivery_events),
+                    "latest_event_type": latest_event.event_type if latest_event is not None else None,
+                    "latest_event_at": latest_event.occurred_at.isoformat() if latest_event is not None else None,
+                    "delivery_version": delivery.version,
+                    "target_event_id": target_event.id,
+                    "target_event_type": target_event.event_type,
+                    "target_event_occurred_at": target_event.occurred_at.isoformat(),
+                    "target_event_version": target_event.version,
+                    "target_event_reversal_of_event_id": target_event.reversal_of_event_id,
+                },
+                idempotency_key=f"assistant-action:reverse_delivery_event:{delivery_id}:{event_id}:{len(delivery_events)}",
+                action_preview=action_preview,
             ),
         )
     )
@@ -2049,8 +2402,8 @@ def _plan_issue_trade_invoice(
         invoice_currency_code=invoice_payload.get("invoice_currency_code"),
         billed_quantity=invoice_payload.get("billed_quantity"),
         invoice_amount=invoice_payload.get("invoice_amount"),
-        issued_at=issued_at,
-        due_at=due_at,
+        issued_at=_preview_datetime_value(issued_at),
+        due_at=_preview_datetime_value(due_at),
     )
 
     return AssistantActionPlanningCandidate(
@@ -2202,6 +2555,184 @@ def _plan_create_trade_payment(
                 idempotency_key=(
                     f"assistant-action:create_trade_payment:{invoice_id}:{payment_reference or invoice.version}"
                 ),
+            ),
+        )
+    )
+
+
+def _plan_void_trade_invoice(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_invoice_void(message_lower):
+        return None
+
+    invoice_id = _resolve_invoice_id(message, context_fields=context_fields)
+    if invoice_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No invoice was identified for an invoice-void request."
+        )
+
+    invoice = db.get(TradeInvoice, invoice_id)
+    if invoice is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Invoice {invoice_id} was not found, so no void request was staged."
+        )
+
+    payments = list(
+        db.execute(
+            select(TradePayment)
+            .where(TradePayment.invoice_id == invoice_id)
+            .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+        ).scalars().all()
+    )
+    void_reason = _first_present_value(context_fields, "void_reason", "reason", "notes")
+    notes = _first_present_value(context_fields, "notes")
+    action_preview = preview_trade_invoice_void(
+        db,
+        invoice_id=invoice_id,
+        void_reason=void_reason,
+    )
+
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="void_trade_invoice",
+            summary=f"Void invoice {invoice.invoice_number}",
+            description=(
+                f"Void invoice {invoice.invoice_number} for trade {invoice.trade_id}. "
+                "If executed, the application will mark the invoice as not required, clear eligible unpaid payment rows, "
+                "and refresh settlement projections."
+            ),
+            payload=_with_review_context(
+                {
+                    "invoice_id": invoice_id,
+                    **({"void_reason": void_reason} if void_reason else {}),
+                    **({"notes": notes} if notes else {}),
+                },
+                owning_work_object=_object_ref("trade_invoice", invoice_id),
+                required_reviewer_role="SETTLEMENT_LEAD",
+                business_rationale=f"Invoice {invoice.invoice_number} was selected for settlement correction.",
+                proposed_mutation={
+                    "operation": "void_trade_invoice",
+                    "invoice_id": invoice_id,
+                    **({"void_reason": void_reason} if void_reason else {}),
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "trade_invoice",
+                        invoice_id,
+                        f"Invoice status was {invoice.status} with invoice amount {invoice.invoice_amount}.",
+                    ),
+                    _supporting_record("trade", invoice.trade_id, "Owning trade for the invoice."),
+                ),
+                expected_downstream_effects=(
+                    "Mark the invoice NOT_REQUIRED with explicit void metadata.",
+                    "Refresh settlement workflow projections.",
+                    "Auto-clear unpaid payment records tied to the invoice when eligible.",
+                ),
+                missing_evidence=(() if void_reason else ("No void reason was provided.",)),
+                stale_state_basis={
+                    "invoice_status": invoice.status,
+                    "invoice_amount": float(invoice.invoice_amount),
+                    "version": invoice.version,
+                    "voided_at": invoice.voided_at,
+                    "existing_payment_count": len(payments),
+                    "payment_state_token": _payment_state_token(payments),
+                },
+                idempotency_key=f"assistant-action:void_trade_invoice:{invoice_id}",
+                action_preview=action_preview,
+            ),
+        )
+    )
+
+
+def _plan_reverse_trade_payment(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_payment_reversal(message_lower, context_fields):
+        return None
+
+    payment_id = _resolve_payment_id(message, context_fields=context_fields)
+    if payment_id is None:
+        return AssistantActionPlanningCandidate(
+            warning="No payment was identified for a payment-reversal request."
+        )
+
+    payment = db.get(TradePayment, payment_id)
+    if payment is None:
+        return AssistantActionPlanningCandidate(
+            warning=f"Payment {payment_id} was not found, so no reversal request was staged."
+        )
+
+    reversal_reason = _first_present_value(context_fields, "reversal_reason", "reason", "notes")
+    notes = _first_present_value(context_fields, "notes")
+    payment_reference = _first_present_value(context_fields, "payment_reference")
+    reversed_at = (
+        _parse_iso_datetime_value(_first_present_value(context_fields, "reversed_at", "effective_at"))
+        or _extract_labeled_iso_datetime_from_message(message, labels=("reversed", "reverse", "effective"))
+    )
+    action_preview = preview_trade_payment_reversal(
+        db,
+        payment_id=payment_id,
+        reversal_reason=reversal_reason,
+        reversed_at=_preview_datetime_value(reversed_at),
+        payment_reference=payment_reference,
+    )
+
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="reverse_trade_payment",
+            summary=f"Reverse payment {payment.payment_reference}",
+            description=(
+                f"Reverse payment {payment.payment_reference} on invoice {payment.invoice_id}. "
+                "If executed, the application will append an offsetting payment entry and refresh settlement projections."
+            ),
+            payload=_with_review_context(
+                {
+                    "payment_id": payment_id,
+                    **({"reversal_reason": reversal_reason} if reversal_reason else {}),
+                    **({"payment_reference": payment_reference} if payment_reference else {}),
+                    **({"reversed_at": reversed_at} if reversed_at else {}),
+                    **({"notes": notes} if notes else {}),
+                },
+                owning_work_object=_object_ref("trade_payment", payment_id),
+                required_reviewer_role="SETTLEMENT_LEAD",
+                business_rationale=f"Payment {payment.payment_reference} was selected for settlement correction.",
+                proposed_mutation={
+                    "operation": "reverse_trade_payment",
+                    "payment_id": payment_id,
+                    **({"reversal_reason": reversal_reason} if reversal_reason else {}),
+                },
+                supporting_records=(
+                    _supporting_record(
+                        "trade_payment",
+                        payment_id,
+                        f"Payment status was {payment.status} with amount {payment.payment_amount}.",
+                    ),
+                    _supporting_record("trade_invoice", payment.invoice_id, "Owning invoice for the payment."),
+                ),
+                expected_downstream_effects=(
+                    "Create an offsetting payment ledger record.",
+                    "Refresh payment workflow projections.",
+                    "Re-open invoice balance if the original payment no longer reflects reality.",
+                ),
+                missing_evidence=(() if reversal_reason else ("No reversal reason was provided.",)),
+                stale_state_basis={
+                    "payment_status": payment.status,
+                    "payment_amount": float(payment.payment_amount),
+                    "version": payment.version,
+                    "reversal_of_payment_id": payment.reversal_of_payment_id,
+                    "invoice_id": payment.invoice_id,
+                },
+                idempotency_key=f"assistant-action:reverse_trade_payment:{payment_id}",
+                action_preview=action_preview,
             ),
         )
     )
@@ -2364,7 +2895,28 @@ def _mentions_workflow_update(message_lower: str) -> bool:
     )
 
 
+def _mentions_delivery_event_reversal(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if any(key in context_fields for key in ("event_id", "delivery_event_id")) and (
+        "reverse" in message_lower or "reversal" in message_lower or "undo" in message_lower
+    ):
+        return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "reverse delivery event",
+            "reverse this delivery event",
+            "reverse movement event",
+            "undo delivery event",
+            "undo movement event",
+            "remove delivery event",
+            "delete delivery event",
+        )
+    )
+
+
 def _mentions_delivery_event(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if _mentions_delivery_event_reversal(message_lower, context_fields):
+        return False
     if any(key in context_fields for key in ("delivery_id", "delivery_event_type", "event_type")):
         return True
     return any(
@@ -2381,7 +2933,28 @@ def _mentions_delivery_event(message_lower: str, context_fields: dict[str, str])
     )
 
 
-def _mentions_trade_actualization(message_lower: str) -> bool:
+def _mentions_trade_actualization_void(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if any(key in context_fields for key in ("void_reason", "reason")) and (
+        "void" in message_lower or "clear" in message_lower or "undo" in message_lower
+    ):
+        return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "void actualization",
+            "void this actualization",
+            "clear actualization",
+            "clear this actualization",
+            "undo actualization",
+            "remove actualization",
+            "delete actualization",
+        )
+    )
+
+
+def _mentions_trade_actualization(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if _mentions_trade_actualization_void(message_lower, context_fields):
+        return False
     return any(
         phrase in message_lower
         for phrase in (
@@ -2424,6 +2997,19 @@ def _mentions_invoice_issue(message_lower: str) -> bool:
     )
 
 
+def _mentions_invoice_void(message_lower: str) -> bool:
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "void invoice",
+            "void this invoice",
+            "cancel invoice",
+            "delete invoice",
+            "remove invoice",
+        )
+    )
+
+
 def _mentions_payment_creation(message_lower: str) -> bool:
     return any(
         phrase in message_lower
@@ -2434,6 +3020,21 @@ def _mentions_payment_creation(message_lower: str) -> bool:
             "mark this invoice paid",
             "record cash receipt",
             "settle invoice",
+        )
+    )
+
+
+def _mentions_payment_reversal(message_lower: str, context_fields: dict[str, str]) -> bool:
+    if "payment_id" in context_fields and ("reverse" in message_lower or "reversal" in message_lower):
+        return True
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "reverse payment",
+            "reverse this payment",
+            "undo payment",
+            "delete payment",
+            "remove payment",
         )
     )
 

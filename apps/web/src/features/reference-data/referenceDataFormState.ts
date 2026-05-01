@@ -16,6 +16,9 @@ import type {
   PriceIndexForm,
   PriceIndexRecord,
   ReferenceRecord,
+  SpatialFeatureForm,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   UnitForm,
   UnitRecord,
 } from '../../shared/models'
@@ -201,6 +204,61 @@ export function buildAssetFieldErrors(
     errors.capacity_unit_code = 'Capacity value and unit must be provided together.'
   } else if (hasCapacityValue && Number.isNaN(Number(assetForm.capacity_value.trim()))) {
     errors.capacity = 'Capacity must be numeric.'
+  }
+
+  return errors
+}
+
+export function buildSpatialFeatureFieldErrors(
+  spatialFeatureForm: SpatialFeatureForm,
+  spatialFeatureFormMode: 'create' | 'edit',
+  spatialFeatures: SpatialFeatureRecord[],
+  spatialFeatureStandards: SpatialFeatureStandards,
+): Partial<Record<'code' | 'name' | 'feature_kind' | 'entity_link' | 'label_coordinates' | 'geometry_geojson', string>> {
+  const errors: Partial<
+    Record<'code' | 'name' | 'feature_kind' | 'entity_link' | 'label_coordinates' | 'geometry_geojson', string>
+  > = {}
+  const normalizedFeatureKind = spatialFeatureForm.feature_kind.trim().toUpperCase()
+  const normalizedEntityType = spatialFeatureForm.entity_type.trim().toUpperCase()
+  const hasEntityType = normalizedEntityType.length > 0
+  const hasEntityCode = spatialFeatureForm.entity_code.trim().length > 0
+
+  if (!spatialFeatureForm.code.trim()) {
+    errors.code = 'Code is required.'
+  } else if (
+    spatialFeatureFormMode === 'create' &&
+    spatialFeatures.some((feature) => feature.code === spatialFeatureForm.code.trim().toUpperCase())
+  ) {
+    errors.code = 'Code already exists.'
+  }
+  if (!spatialFeatureForm.name.trim()) {
+    errors.name = 'Name is required.'
+  }
+  if (!normalizedFeatureKind) {
+    errors.feature_kind = 'Feature kind is required.'
+  } else if (!spatialFeatureStandards.feature_kinds.includes(normalizedFeatureKind)) {
+    errors.feature_kind = 'Feature kind is invalid.'
+  }
+
+  if (hasEntityType !== hasEntityCode) {
+    errors.entity_link = 'Entity type and linked code must be provided together.'
+  } else if (hasEntityType && !spatialFeatureStandards.entity_types.includes(normalizedEntityType)) {
+    errors.entity_link = 'Entity type is invalid.'
+  }
+
+  const parsedLabelCoordinates = parseAssetCoordinatePair({
+    latitudeText: spatialFeatureForm.label_latitude,
+    longitudeText: spatialFeatureForm.label_longitude,
+  })
+  if (parsedLabelCoordinates.error) {
+    errors.label_coordinates = parsedLabelCoordinates.error
+  }
+
+  const parsedGeometry = parseAssetGeometryInput(spatialFeatureForm.geometry_geojson)
+  if (parsedGeometry.error) {
+    errors.geometry_geojson = parsedGeometry.error
+  } else if (parsedGeometry.value === null) {
+    errors.geometry_geojson = 'Geometry GeoJSON is required.'
   }
 
   return errors
@@ -447,6 +505,48 @@ export function isAssetFormDirty(
     !sameText(assetForm.operator_name, selectedAsset.operator_name) ||
     !sameText(assetForm.operating_status, selectedAsset.operating_status) ||
     !sameText(assetForm.description, selectedAsset.description)
+  )
+}
+
+export function isSpatialFeatureFormDirty(
+  spatialFeatureForm: SpatialFeatureForm,
+  spatialFeatureFormMode: 'create' | 'edit',
+  selectedSpatialFeature: SpatialFeatureRecord | null,
+  spatialFeatureStandards: SpatialFeatureStandards,
+): boolean {
+  if (spatialFeatureFormMode === 'create') {
+    return (
+      !sameText(spatialFeatureForm.code, '') ||
+      !sameText(spatialFeatureForm.name, '') ||
+      !sameText(spatialFeatureForm.feature_kind, spatialFeatureStandards.default_feature_kind) ||
+      !sameText(spatialFeatureForm.entity_type, '') ||
+      !sameText(spatialFeatureForm.entity_code, '') ||
+      !sameText(spatialFeatureForm.label_latitude, '') ||
+      !sameText(spatialFeatureForm.label_longitude, '') ||
+      spatialFeatureForm.is_primary ||
+      !sameText(spatialFeatureForm.geometry_geojson, '') ||
+      !sameText(spatialFeatureForm.description, '')
+    )
+  }
+
+  if (!selectedSpatialFeature) {
+    return false
+  }
+
+  return (
+    !sameText(spatialFeatureForm.code, selectedSpatialFeature.code) ||
+    !sameText(spatialFeatureForm.name, selectedSpatialFeature.name) ||
+    !sameText(spatialFeatureForm.feature_kind, selectedSpatialFeature.feature_kind) ||
+    !sameText(spatialFeatureForm.entity_type, selectedSpatialFeature.entity_type) ||
+    !sameText(spatialFeatureForm.entity_code, selectedSpatialFeature.entity_code) ||
+    !sameText(spatialFeatureForm.label_latitude, selectedSpatialFeature.label_latitude?.toString()) ||
+    !sameText(spatialFeatureForm.label_longitude, selectedSpatialFeature.label_longitude?.toString()) ||
+    spatialFeatureForm.is_primary !== selectedSpatialFeature.is_primary ||
+    !sameText(
+      spatialFeatureForm.geometry_geojson,
+      formatAssetGeometryInput(selectedSpatialFeature.geometry_geojson),
+    ) ||
+    !sameText(spatialFeatureForm.description, selectedSpatialFeature.description)
   )
 }
 

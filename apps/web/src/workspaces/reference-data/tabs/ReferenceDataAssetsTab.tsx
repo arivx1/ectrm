@@ -1,7 +1,6 @@
 import { DataSheet } from '../../../shared/ui/DataSheet'
 import { EditorStateBadge } from '../ReferenceDataShared'
 import { createStatusColumn, type ReferenceDataTabProps } from '../referenceDataTabShared'
-import { AssetMapPanel } from './AssetMapPanel'
 
 function formatCapacity(value: number | null | undefined, unitCode: string | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -22,50 +21,41 @@ function formatCoordinatePair(
 }
 
 export function ReferenceDataAssetsDirectory({ controller }: ReferenceDataTabProps) {
-  const { filteredAssets, locations, selectedAssetCode, startEditAsset } = controller
+  const { filteredAssets, selectedAssetCode, startEditAsset } = controller
 
   return (
-    <div className="reference-stack">
-      <AssetMapPanel
-        assets={filteredAssets}
-        locations={locations}
-        selectedAssetCode={selectedAssetCode}
-        onSelectAsset={startEditAsset}
-      />
-
-      <DataSheet
-        label="Assets"
-        description="Review physical and processing asset masters in a compact sheet before maintaining details in the side editor."
-        columns={[
-          { id: 'code', label: 'Code', width: '10rem', renderCell: (asset) => asset.code },
-          { id: 'name', label: 'Name', width: '18rem', renderCell: (asset) => asset.name },
-          { id: 'class', label: 'Class', width: '12rem', renderCell: (asset) => asset.asset_class },
-          { id: 'type', label: 'Type', width: '12rem', renderCell: (asset) => asset.asset_type },
-          { id: 'reality', label: 'Reality', width: '8rem', renderCell: (asset) => asset.asset_reality },
-          { id: 'commodity', label: 'Commodity', width: '10rem', renderCell: (asset) => asset.commodity_code ?? '—' },
-          { id: 'location', label: 'Location', width: '10rem', renderCell: (asset) => asset.location_code ?? '—' },
-          {
-            id: 'coordinates',
-            label: 'Asset Point',
-            width: '12rem',
-            renderCell: (asset) => formatCoordinatePair(asset.latitude, asset.longitude),
-          },
-          {
-            id: 'capacity',
-            label: 'Capacity',
-            width: '12rem',
-            renderCell: (asset) => formatCapacity(asset.capacity_value, asset.capacity_unit_code),
-          },
-          createStatusColumn<(typeof filteredAssets)[number]>(),
-        ]}
-        rows={filteredAssets}
-        getRowId={(asset) => asset.code}
-        getRowLabel={(asset) => `${asset.code} ${asset.name}`}
-        selectedRowId={selectedAssetCode}
-        onSelectRow={(asset) => startEditAsset(asset.code)}
-        emptyMessage="No assets match the current filter."
-      />
-    </div>
+    <DataSheet
+      label="Assets"
+      description="Review physical and processing asset masters in a compact sheet before maintaining details in the side editor. Use the dedicated Map workspace to inspect rendered geography."
+      columns={[
+        { id: 'code', label: 'Code', width: '10rem', renderCell: (asset) => asset.code },
+        { id: 'name', label: 'Name', width: '18rem', renderCell: (asset) => asset.name },
+        { id: 'class', label: 'Class', width: '12rem', renderCell: (asset) => asset.asset_class },
+        { id: 'type', label: 'Type', width: '12rem', renderCell: (asset) => asset.asset_type },
+        { id: 'reality', label: 'Reality', width: '8rem', renderCell: (asset) => asset.asset_reality },
+        { id: 'commodity', label: 'Commodity', width: '10rem', renderCell: (asset) => asset.commodity_code ?? '—' },
+        { id: 'location', label: 'Location', width: '10rem', renderCell: (asset) => asset.location_code ?? '—' },
+        {
+          id: 'coordinates',
+          label: 'Asset Point',
+          width: '12rem',
+          renderCell: (asset) => formatCoordinatePair(asset.latitude, asset.longitude),
+        },
+        {
+          id: 'capacity',
+          label: 'Capacity',
+          width: '12rem',
+          renderCell: (asset) => formatCapacity(asset.capacity_value, asset.capacity_unit_code),
+        },
+        createStatusColumn<(typeof filteredAssets)[number]>(),
+      ]}
+      rows={filteredAssets}
+      getRowId={(asset) => asset.code}
+      getRowLabel={(asset) => `${asset.code} ${asset.name}`}
+      selectedRowId={selectedAssetCode}
+      onSelectRow={(asset) => startEditAsset(asset.code)}
+      emptyMessage="No assets match the current filter."
+    />
   )
 }
 
@@ -293,7 +283,8 @@ export function ReferenceDataAssetsEditor({ controller, formatDate }: ReferenceD
             <small className="field-error">{assetFieldErrors.geometry_geojson}</small>
           ) : (
             <small className="form-note">
-              Map precedence is GeoJSON, then direct asset coordinates, then the linked location.
+              Map precedence is GeoJSON, then direct asset coordinates, then the linked location. Use the
+              dedicated Map workspace to review the rendered footprint.
             </small>
           )}
         </label>

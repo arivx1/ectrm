@@ -53,8 +53,10 @@ import {
   listAdminAssistantAgentEvals,
   listAdminAssistantAgentEvalRuns,
   listAdminAssistantActionRequests,
+  listAdminAssistantAgentRevisions,
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
+  publishAssistantAgentRevision,
   listAssistantActionRequests,
   listAssistantConversations,
   listAssistantPromptRouteRecommendations,
@@ -1263,6 +1265,8 @@ test('buildAssistantAgentDraft posts the normalized current draft to the admin b
 
 test('generateAssistantAgentSelfUpdateDraft posts an optional normalized focus brief to the admin route', async () => {
   const expected = {
+    revision_id: 14,
+    revision_version: 5,
     agent_id: 'ops-briefing',
     name: 'Ops Briefing',
     description: 'Summarizes queue pressure with stricter evidence language.',
@@ -1285,9 +1289,21 @@ test('generateAssistantAgentSelfUpdateDraft posts an optional normalized focus b
     system_prompt: 'Name the owner and stop when evidence is missing.',
     source_brief: 'Revise the agent after recent mistakes.',
     change_summary: ['Removed ACTION until evidence quality improves.'],
+    diff_summary: [
+      {
+        field_key: 'capabilities',
+        label: 'Capabilities',
+        current_value: 'READ, EXPLAIN, ACTION',
+        next_value: 'READ, EXPLAIN',
+      },
+    ],
     warnings: [],
     builder_provider: 'openai',
     builder_model: 'gpt-5',
+    created_at: '2026-04-27T18:00:00Z',
+    created_by: 'ops_admin',
+    published_at: null,
+    published_by: null,
     evidence: {
       recommendation_reasons: ['High correction rate.'],
       recent_needs_work_feedback: ['Surface the queue owner before staging workflow updates.'],
@@ -1308,6 +1324,118 @@ test('generateAssistantAgentSelfUpdateDraft posts an optional normalized focus b
   assert.deepEqual(body, {
     brief: 'Focus on unsupported staging and missing owner evidence.',
   })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('listAdminAssistantAgentRevisions reads the stored revision history for one agent', async () => {
+  const expected = [
+    {
+      revision_id: 14,
+      agent_id: 'ops-briefing',
+      version: 5,
+      change_summary: ['Removed ACTION until evidence quality improves.'],
+      diff_summary: [],
+      payload: {
+        name: 'Ops Briefing',
+        description: 'Summarizes queue pressure with stricter evidence language.',
+        status: 'ACTIVE',
+        scope: 'TEAM',
+        provider: 'openai',
+        model: 'gpt-5-mini',
+        role_key: 'trade-ops-copilot',
+        profile_kind: 'ROLE_DERIVED',
+        specialization_summary: 'Workflow triage specialist.',
+        human_owner_role: 'Operations Lead',
+        authority_ceiling: 'STAGE',
+        activation_notes: 'Prompt reviewed.',
+        profile_request_id: null,
+        allowed_workspaces: ['assistant', 'operations'],
+        capabilities: ['READ', 'EXPLAIN'],
+        allowed_tools: ['list_workflow_items'],
+        allowed_action_types: [],
+        daily_token_allocation: null,
+        system_prompt: 'Name the owner and stop when evidence is missing.',
+      },
+      created_at: '2026-04-27T18:00:00Z',
+      created_by: 'ops_admin',
+      published_at: null,
+      published_by: null,
+      restored_from_revision_id: null,
+      is_published: false,
+    },
+  ]
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await listAdminAssistantAgentRevisions('http://api.test', 'ops-briefing')
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agents/ops-briefing/revisions')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
+test('publishAssistantAgentRevision posts the explicit publish action for a stored draft', async () => {
+  const expected = {
+    agent_id: 'ops-briefing',
+    name: 'Ops Briefing',
+    description: 'Summarizes queue pressure with stricter evidence language.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: 'openai',
+    model: 'gpt-5-mini',
+    role_key: 'trade-ops-copilot',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Workflow triage specialist.',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'STAGE',
+    activation_notes: 'Prompt reviewed.',
+    profile_request_id: null,
+    allowed_workspaces: ['assistant', 'operations'],
+    capabilities: ['READ', 'EXPLAIN'],
+    allowed_tools: ['list_workflow_items'],
+    allowed_action_types: [],
+    daily_token_allocation: null,
+    token_budget: {
+      status: 'GREEN',
+      allocated_tokens: 100000,
+      used_tokens: 0,
+      remaining_tokens: 100000,
+      percent_used: 0,
+      warning_threshold_percent: 80,
+      allocation_source: 'DEFAULT',
+      window_started_at: '2026-04-27T00:00:00Z',
+      reset_at: '2026-04-28T00:00:00Z',
+    },
+    effective_policy: {
+      allowed_tools: [],
+      blocked_tools: [],
+      allowed_actions: [],
+      blocked_actions: [],
+      policy_notes: [],
+    },
+    eval_gate: null,
+    system_prompt: 'Name the owner and stop when evidence is missing.',
+    created_at: '2026-04-20T18:00:00Z',
+    created_by: 'ops_admin',
+    updated_at: '2026-04-27T18:05:00Z',
+    updated_by: 'ops_admin',
+    version: 5,
+    latest_revision_id: 14,
+    published_revision_id: 14,
+    published_at: '2026-04-27T18:05:00Z',
+    published_by: 'ops_admin',
+    has_unpublished_revision: false,
+  }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await publishAssistantAgentRevision('http://api.test', 'ops-briefing', 14)
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agents/ops-briefing/revisions/14/publish')
+  assert.deepEqual(body, {})
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })

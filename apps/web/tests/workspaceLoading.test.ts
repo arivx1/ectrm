@@ -21,9 +21,9 @@ test('buildRequestedGroups starts with core plus the current workspace dependenc
   assert.deepEqual(requestedGroups, ['core', 'trades', 'reference', 'operations'])
 })
 
-test('buildRequestedGroups keeps the demo workspace light by only requesting core data', () => {
+test('buildRequestedGroups keeps the guide workspace light by only requesting core data', () => {
   const requestedGroups = buildRequestedGroups({
-    currentView: 'demo',
+    currentView: 'guide',
     force: false,
     groupLoaded: { ...EMPTY_GROUP_FLAGS },
     groupLoading: { ...EMPTY_GROUP_FLAGS },

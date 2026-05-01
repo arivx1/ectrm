@@ -459,6 +459,9 @@ def _allocate_invoice_relief(
     candidate_lots: list[TradeAccrualLot],
     current_relief_by_lot_id: dict[str, InvoiceLotRelief],
 ) -> dict[str, InvoiceLotRelief] | None:
+    if invoice.status == InvoiceStatus.NOT_REQUIRED.value:
+        return {}
+
     requested_billed_quantity = (
         Decimal(str(invoice.billed_quantity))
         if invoice.billed_quantity is not None

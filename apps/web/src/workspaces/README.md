@@ -11,6 +11,7 @@ Top-level product areas should live here:
 - operations
 - settlement
 - reports
+- map
 - reference-data
 - admin
 - settings

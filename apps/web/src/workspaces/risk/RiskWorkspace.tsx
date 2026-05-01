@@ -689,7 +689,7 @@ export function RiskWorkspace({
             ) : (
               <div className="empty-state">
                 <strong>No risk surface yet</strong>
-                <p>Book a trade or run the walkthrough to populate exposure, pricing attention, and option expiry decisions here.</p>
+                <p>Book a trade to populate exposure, pricing attention, and option expiry decisions here.</p>
               </div>
             ),
         },

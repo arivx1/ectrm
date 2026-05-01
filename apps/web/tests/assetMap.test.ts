@@ -5,6 +5,7 @@ import { test } from 'vitest'
 import {
   buildAssetMapFeatureCollection,
   buildAssetMapSummary,
+  buildSpatialFeatureMapFeatureCollection,
   formatAssetMapLocation,
   formatAssetMapPlacement,
   formatAssetMapSource,
@@ -260,4 +261,52 @@ test('asset map ignores malformed geojson geometry and falls back to linked coor
   assert.equal(summary.linkedLocationCount, 1)
   assert.equal(summary.mappedRecords[0]?.placementStatus, 'linked_location')
   assert.equal(summary.mappedRecords[0]?.geometryFeatures.length, 0)
+})
+
+test('spatial feature map collections flatten shared overlays for rendering', () => {
+  const featureCollection = buildSpatialFeatureMapFeatureCollection([
+    {
+      code: 'GULF_REGION',
+      name: 'Gulf Region',
+      description: null,
+      is_active: true,
+      feature_kind: 'REGION',
+      geometry_type: 'AREA',
+      entity_type: 'LOCATION',
+      entity_code: 'GULF_COAST',
+      label_latitude: 29.8,
+      label_longitude: -95.2,
+      is_primary: true,
+      geometry_geojson: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [-95.6, 29.6],
+                  [-94.7, 29.6],
+                  [-94.7, 30.2],
+                  [-95.6, 30.2],
+                  [-95.6, 29.6],
+                ],
+              ],
+            },
+            properties: {
+              region: 'gulf',
+            },
+          },
+        ],
+      },
+    },
+  ])
+
+  assert.equal(featureCollection.features.length, 1)
+  assert.equal(featureCollection.features[0]?.properties?.featureCode, 'GULF_REGION')
+  assert.equal(featureCollection.features[0]?.properties?.featureKind, 'REGION')
+  assert.equal(featureCollection.features[0]?.properties?.entityType, 'LOCATION')
+  assert.equal(featureCollection.features[0]?.properties?.entityCode, 'GULF_COAST')
+  assert.equal(featureCollection.features[0]?.properties?.region, 'gulf')
 })

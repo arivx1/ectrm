@@ -16,6 +16,7 @@ import type {
   AssistantAdminAgent,
   AssistantAgent,
   AssistantAgentHealthReview,
+  AssistantAgentRevision,
   AssistantAgentSelfUpdateDraft,
   AssistantAgentWorkPackage,
   AssistantAgentWorkPackageStatus,
@@ -123,6 +124,10 @@ export type BuildAssistantAgentDraftResult = Omit<CreateAssistantAgentInput, 'pr
 
 export type GenerateAssistantAgentSelfUpdateDraftInput = {
   brief?: string
+}
+
+export type PublishAssistantAgentRevisionInput = {
+  revisionId: number
 }
 
 export type AssistantStreamEvent = {
@@ -1167,6 +1172,32 @@ export async function generateAssistantAgentSelfUpdateDraft(
   return postJson<AssistantAgentSelfUpdateDraft>(
     `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/self-update-draft`,
     normalizedBrief ? { brief: normalizedBrief } : {},
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function listAdminAssistantAgentRevisions(
+  apiBase: string,
+  agentId: string,
+): Promise<AssistantAgentRevision[]> {
+  return fetchJson<AssistantAgentRevision[]>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/revisions`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function publishAssistantAgentRevision(
+  apiBase: string,
+  agentId: string,
+  revisionId: number,
+): Promise<AssistantAdminAgent> {
+  return postJson<AssistantAdminAgent>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/revisions/${revisionId}/publish`,
+    {},
     {
       headers: assistantMutationHeaders(),
     },

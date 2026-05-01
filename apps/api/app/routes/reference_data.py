@@ -95,6 +95,16 @@ from apps.api.app.routes.reference_data_routes.price_indices import (
     router as price_indices_router,
     update_price_index,
 )
+from apps.api.app.routes.reference_data_routes.spatial_features import (
+    activate_spatial_feature,
+    create_spatial_feature,
+    deactivate_spatial_feature,
+    get_spatial_feature,
+    list_spatial_feature_standards,
+    list_spatial_features,
+    router as spatial_features_router,
+    update_spatial_feature,
+)
 from apps.api.app.routes.reference_data_routes.units import (
     activate_unit,
     create_unit,
@@ -144,6 +154,11 @@ from apps.api.app.schemas.reference_data import (
     PortfolioOut,
     PortfolioStatusUpdate,
     PortfolioUpdate,
+    SpatialFeatureCreate,
+    SpatialFeatureOut,
+    SpatialFeatureStandardsOut,
+    SpatialFeatureStatusUpdate,
+    SpatialFeatureUpdate,
     UnitCreate,
     UnitOut,
     UnitStatusUpdate,
@@ -160,3 +175,4 @@ router.include_router(units_router)
 router.include_router(locations_router)
 router.include_router(portfolios_router)
 router.include_router(price_indices_router)
+router.include_router(spatial_features_router)

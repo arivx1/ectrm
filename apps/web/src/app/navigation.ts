@@ -11,10 +11,10 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     kicker: 'Start here',
     heroTitle: 'Start, learn, and orient quickly',
     heroBody:
-      'Use the live desk, product guide, and guided walkthrough as your first stop before diving into a specific workflow.',
+      'Use Prompt Home, the live desk, and the product guide as your first stop before diving into a specific workflow.',
     landingBody:
       'This section answers the first question new or returning operators have: where should I start for the job in front of me?',
-    viewKeys: ['prompt', 'dashboard', 'guide', 'demo'],
+    viewKeys: ['prompt', 'dashboard', 'guide'],
     startPaths: [
       {
         title: 'Ask the operator prompt',
@@ -33,12 +33,6 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
         detail: 'See desk health, recent activity, exposure, and open attention points on one screen.',
         viewKey: 'dashboard',
         actionLabel: 'Open Live Desk',
-      },
-      {
-        title: 'Run a safe walkthrough',
-        detail: 'Use a local-only scenario to understand the trade lifecycle without mutating live data.',
-        viewKey: 'demo',
-        actionLabel: 'Open Walkthrough',
       },
     ],
   },
@@ -120,13 +114,19 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     key: 'intelligence',
     label: 'Analysis',
     kicker: 'Understand',
-    heroTitle: 'Reports, reference data, and desk support',
+    heroTitle: 'Reports, maps, reference data, and desk support',
     heroBody:
-      'Jump between reporting, reference data, and the assistant when you need answers faster than raw tables can give them.',
+      'Jump between reporting, spatial context, reference data, and the assistant when you need answers faster than raw tables can give them.',
     landingBody:
-      'Use this section for analyst-style work: reporting, desk reference maintenance, and grounded AI assistance.',
-    viewKeys: ['reports', 'reference', 'assistant'],
+      'Use this section for analyst-style work: map review, reporting, desk reference maintenance, and grounded AI assistance.',
+    viewKeys: ['reports', 'map', 'reference', 'assistant'],
     startPaths: [
+      {
+        title: 'Review physical footprint',
+        detail: 'Open the dedicated map workspace to inspect map-ready assets, shared routes, and governed regions without entering maintenance mode.',
+        viewKey: 'map',
+        actionLabel: 'Open Map',
+      },
       {
         title: 'Run a report',
         detail: 'Open curated desk reporting when someone needs an answer on exposure, activity, credit, or settlement.',

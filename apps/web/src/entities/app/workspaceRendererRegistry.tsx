@@ -41,11 +41,6 @@ const DashboardWorkspace = lazy(() =>
     default: module.DashboardWorkspace,
   })),
 )
-const DemoWorkspace = lazy(() =>
-  import('../../workspaces/demo/DemoWorkspace').then((module) => ({
-    default: module.DemoWorkspace,
-  })),
-)
 const PreTradeWorkspace = lazy(() =>
   import('../../workspaces/pretrade/PreTradeWorkspace').then((module) => ({
     default: module.PreTradeWorkspace,
@@ -118,6 +113,11 @@ function buildActivityFeedHandoff(
 const ReportsWorkspace = lazy(() =>
   import('../../workspaces/reports/ReportsWorkspace').then((module) => ({
     default: module.ReportsWorkspace,
+  })),
+)
+const MapWorkspace = lazy(() =>
+  import('../../workspaces/map/MapWorkspace').then((module) => ({
+    default: module.MapWorkspace,
   })),
 )
 const ReferenceDataWorkspace = lazy(() =>
@@ -722,16 +722,6 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     dataGroups: [],
     blockingGroups: [],
   },
-  demo: {
-    key: 'demo',
-    label: 'Walkthrough',
-    kicker: 'Practice',
-    heroTitle: 'Guided trade lifecycle walkthrough',
-    heroBody:
-      'Run a safe scenario with realistic lifecycle friction and jump through the exact workspaces used to manage it.',
-    dataGroups: [],
-    blockingGroups: [],
-  },
   pretrade: {
     key: 'pretrade',
     label: 'Pre-Trade',
@@ -885,6 +875,16 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     dataGroups: ['trades', 'reports'],
     blockingGroups: ['trades', 'reports'],
   },
+  map: {
+    key: 'map',
+    label: 'Map',
+    kicker: 'Spatial',
+    heroTitle: 'Physical footprint and governed overlays',
+    heroBody:
+      'Review map-ready assets, linked locations, and shared routes or regions from one navigable spatial workspace.',
+    dataGroups: ['reference'],
+    blockingGroups: ['reference'],
+  },
   reference: {
     key: 'reference',
     label: 'Reference Data',
@@ -1001,11 +1001,6 @@ export const WORKSPACE_RENDERERS: Record<
         formatNumber={formatNumber}
         formatDate={formatDate}
       />
-    ),
-  },
-  demo: {
-    render: (context) => (
-      <DemoWorkspace authSession={context.workspaceData.authSession} onOpenView={context.navigateToView} />
     ),
   },
   pretrade: {
@@ -1409,6 +1404,18 @@ export const WORKSPACE_RENDERERS: Record<
         formatDateOnly={formatDateOnly}
         onOpenSettlement={() => context.navigateToView('settlement')}
         onOpenTrade={context.navigateToTrade}
+      />
+    ),
+  },
+  map: {
+    render: (context) => (
+      <MapWorkspace
+        assets={context.workspaceData.assets}
+        locations={context.workspaceData.locations}
+        spatialFeatures={context.workspaceData.spatialFeatures}
+        globalFilter={context.shell.globalFilter}
+        onOpenReferenceData={() => context.navigateToView('reference')}
+        onPrepareReferenceAsset={context.referenceState.startEditAsset}
       />
     ),
   },

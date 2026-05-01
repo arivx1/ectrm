@@ -24,13 +24,21 @@ from apps.api.app.domains.documents.services.ingestion import reprocess_document
 from apps.api.app.domains.operations.services.actualizations import (
     build_delivery_obligation_id,
     upsert_trade_actualization,
+    void_trade_actualization,
 )
-from apps.api.app.domains.operations.services.shipments import append_delivery_event
-from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
-from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
+from apps.api.app.domains.operations.services.shipments import append_delivery_event, reverse_delivery_event
+from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice, void_trade_invoice
+from apps.api.app.domains.operations.services.settlement_payments import (
+    create_trade_payment,
+    reverse_trade_payment,
+)
 from apps.api.app.domains.operations.services.trade_confirmations import issue_trade_confirmation
 from apps.api.app.domains.operations.services.trade_confirmations import record_trade_confirmation_response
 from apps.api.app.domains.operations.services.workflow_items import update_trade_workflow_item
+from apps.api.app.domains.trading.services.trade_commands import (
+    TradeWriteCommand,
+    append_trade_write_command,
+)
 from apps.api.app.domains.trading.services.event_writes import AppendDomainEventCommand, append_domain_event
 from apps.api.app.domains.trading.services.trade_event_support import (
     sync_option_exposures_for_trade_change,
@@ -349,6 +357,55 @@ class RecordTradeActualizationActionHandler(NonIdempotentActionHandler):
             "actualization_version": actualization.version if actualization is not None else None,
             "actual_quantity": float(actualization.actual_quantity) if actualization is not None else None,
             "actualized_at": actualization.actualized_at if actualization is not None else None,
+            "voided_at": actualization.voided_at if actualization is not None else None,
+        }
+
+
+class VoidTradeActualizationActionHandler(NonIdempotentActionHandler):
+    action_type = "void_trade_actualization"
+
+    def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
+        return _execute_void_trade_actualization_action(
+            db=context.db,
+            record=context.record,
+            actor_id=context.actor_id,
+            decided_at=context.decided_at,
+        )
+
+    def current_stale_state(
+        self,
+        *,
+        db: Session,
+        record: AssistantActionRequest,
+    ) -> dict[str, object | None]:
+        trade_id = _required_str_payload_value(
+            record,
+            "trade_id",
+            "The trade actualization void request is missing a trade_id.",
+        )
+        leg_no = _optional_int_payload_value(record, "leg_no")
+        trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
+        if trade is None:
+            raise AssistantActionRequestError(
+                f"Trade {trade_id} was not found during actualization-void stale-state recheck."
+            )
+        delivery_id = build_delivery_obligation_id(trade_id, leg_no)
+        actualization = db.execute(
+            select(TradeActualization).where(TradeActualization.delivery_id == delivery_id)
+        ).scalars().first()
+        if actualization is None:
+            raise AssistantActionRequestError(
+                f"Delivery {delivery_id} does not have an actualization record during stale-state recheck."
+            )
+        return {
+            "trade_status": trade.status,
+            "actualization_status": trade.actualization_status,
+            "last_event_id": trade.last_event_id,
+            "delivery_id": delivery_id,
+            "actualization_version": actualization.version,
+            "actual_quantity": float(actualization.actual_quantity),
+            "actualized_at": actualization.actualized_at,
+            "voided_at": actualization.voided_at,
         }
 
 
@@ -393,6 +450,65 @@ class RecordDeliveryEventActionHandler(NonIdempotentActionHandler):
             "latest_event_type": latest_event.event_type if latest_event is not None else None,
             "latest_event_at": latest_event.occurred_at if latest_event is not None else None,
             "delivery_version": delivery.version,
+        }
+
+
+class ReverseDeliveryEventActionHandler(NonIdempotentActionHandler):
+    action_type = "reverse_delivery_event"
+
+    def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
+        return _execute_reverse_delivery_event_action(
+            db=context.db,
+            record=context.record,
+            actor_id=context.actor_id,
+            decided_at=context.decided_at,
+        )
+
+    def current_stale_state(
+        self,
+        *,
+        db: Session,
+        record: AssistantActionRequest,
+    ) -> dict[str, object | None]:
+        delivery_id = _required_str_payload_value(
+            record,
+            "delivery_id",
+            "The delivery-event reversal request is missing a delivery_id.",
+        )
+        event_id = _required_int_payload_value(
+            record,
+            "event_id",
+            "The delivery-event reversal request is missing an event_id.",
+        )
+        delivery = db.get(DeliveryObligation, delivery_id)
+        if delivery is None:
+            raise AssistantActionRequestError(
+                f"Delivery {delivery_id} was not found during approval stale-state recheck."
+            )
+        delivery_events = list(
+            db.execute(
+                select(DeliveryEvent)
+                .where(DeliveryEvent.delivery_id == delivery_id)
+                .order_by(DeliveryEvent.occurred_at.desc(), DeliveryEvent.id.desc())
+            ).scalars().all()
+        )
+        latest_event = delivery_events[0] if delivery_events else None
+        target_event = next((event for event in delivery_events if event.id == event_id), None)
+        if target_event is None:
+            raise AssistantActionRequestError(
+                f"Delivery event {event_id} was not found on delivery {delivery_id} during stale-state recheck."
+            )
+        return {
+            "execution_status": delivery.execution_status,
+            "event_count": len(delivery_events),
+            "latest_event_type": latest_event.event_type if latest_event is not None else None,
+            "latest_event_at": latest_event.occurred_at if latest_event is not None else None,
+            "delivery_version": delivery.version,
+            "target_event_id": target_event.id,
+            "target_event_type": target_event.event_type,
+            "target_event_occurred_at": target_event.occurred_at,
+            "target_event_version": target_event.version,
+            "target_event_reversal_of_event_id": target_event.reversal_of_event_id,
         }
 
 
@@ -631,6 +747,92 @@ class CreateTradePaymentActionHandler(NonIdempotentActionHandler):
         }
 
 
+class VoidTradeInvoiceActionHandler(NonIdempotentActionHandler):
+    action_type = "void_trade_invoice"
+
+    def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
+        return _execute_void_trade_invoice_action(
+            db=context.db,
+            record=context.record,
+            actor_id=context.actor_id,
+            decided_at=context.decided_at,
+        )
+
+    def current_stale_state(
+        self,
+        *,
+        db: Session,
+        record: AssistantActionRequest,
+    ) -> dict[str, object | None]:
+        invoice_id = _required_int_payload_value(
+            record,
+            "invoice_id",
+            "The invoice-void request is missing an invoice_id.",
+        )
+        invoice = db.get(TradeInvoice, invoice_id)
+        if invoice is None:
+            raise AssistantActionRequestError(
+                f"Invoice {invoice_id} was not found during approval stale-state recheck."
+            )
+        existing_payments = list(
+            db.execute(
+                select(TradePayment)
+                .where(TradePayment.invoice_id == invoice_id)
+                .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+            ).scalars().all()
+        )
+        return {
+            "invoice_status": invoice.status,
+            "invoice_amount": float(invoice.invoice_amount),
+            "version": invoice.version,
+            "voided_at": invoice.voided_at,
+            "existing_payment_count": len(existing_payments),
+            "payment_state_token": _payment_state_token(existing_payments),
+        }
+
+
+class ReverseTradePaymentActionHandler(NonIdempotentActionHandler):
+    action_type = "reverse_trade_payment"
+
+    def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
+        return _execute_reverse_trade_payment_action(
+            db=context.db,
+            record=context.record,
+            actor_id=context.actor_id,
+            decided_at=context.decided_at,
+        )
+
+    def current_stale_state(
+        self,
+        *,
+        db: Session,
+        record: AssistantActionRequest,
+    ) -> dict[str, object | None]:
+        payment_id = _required_int_payload_value(
+            record,
+            "payment_id",
+            "The payment-reversal request is missing a payment_id.",
+        )
+        payment = db.get(TradePayment, payment_id)
+        if payment is None:
+            raise AssistantActionRequestError(
+                f"Payment {payment_id} was not found during approval stale-state recheck."
+            )
+        reversal_id = db.execute(
+            select(TradePayment.id)
+            .where(TradePayment.reversal_of_payment_id == payment_id)
+            .limit(1)
+        ).scalars().first()
+        return {
+            "payment_status": payment.status,
+            "payment_amount": float(payment.payment_amount),
+            "version": payment.version,
+            "reversal_of_payment_id": payment.reversal_of_payment_id,
+            "invoice_id": payment.invoice_id,
+            "existing_reversal_payment_id": reversal_id,
+        }
+
+
 class ReprocessDocumentIngestionActionHandler(NonIdempotentActionHandler):
     action_type = "reprocess_document_ingestion"
 
@@ -669,14 +871,18 @@ ACTION_HANDLER_SEQUENCE: tuple[AssistantActionHandler, ...] = (
     AmendTradeActionHandler(),
     CancelTradeActionHandler(),
     RecordDeliveryEventActionHandler(),
+    ReverseDeliveryEventActionHandler(),
     CreateManualAccrualEntryActionHandler(),
     ReverseAccrualEntryActionHandler(),
     IssueTradeConfirmationActionHandler(),
     RecordTradeConfirmationResponseActionHandler(),
     UpdateTradeWorkflowItemActionHandler(),
     RecordTradeActualizationActionHandler(),
+    VoidTradeActualizationActionHandler(),
     IssueTradeInvoiceActionHandler(),
+    VoidTradeInvoiceActionHandler(),
     CreateTradePaymentActionHandler(),
+    ReverseTradePaymentActionHandler(),
     CreateAccountingEntryActionHandler(),
     ReverseAccountingEntryActionHandler(),
     ReprocessDocumentIngestionActionHandler(),
@@ -694,6 +900,7 @@ def _invoice_state_token(invoices: list[TradeInvoice]) -> list[dict[str, object 
             "status": invoice.status,
             "invoice_amount": float(invoice.invoice_amount),
             "billed_quantity": float(invoice.billed_quantity) if invoice.billed_quantity is not None else None,
+            "voided_at": invoice.voided_at,
             "version": invoice.version,
         }
         for invoice in invoices
@@ -708,6 +915,7 @@ def _payment_state_token(payments: list[TradePayment]) -> list[dict[str, object 
             "status": payment.status,
             "payment_amount": float(payment.payment_amount),
             "payment_currency_code": payment.payment_currency_code,
+            "reversal_of_payment_id": payment.reversal_of_payment_id,
             "version": payment.version,
         }
         for payment in payments
@@ -725,44 +933,33 @@ def _execute_cancel_trade_action(
     if not trade_id:
         raise AssistantActionRequestError("The cancel-trade request is missing a trade_id.")
 
-    trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
-    if trade is None:
-        raise AssistantActionRequestError(f"Trade {trade_id} was not found.")
-    if str(trade.status or "ACTIVE").strip().upper() != "ACTIVE":
-        raise AssistantActionRequestError(f"Trade {trade_id} is already closed as {trade.status}.")
-
-    before = trade_snapshot(db, trade)
-    event = Event(
-        event_id=str(uuid.uuid4()),
-        aggregate_type="trade",
-        aggregate_id=trade_id,
-        event_type="TradeCancelled",
-        occurred_at=decided_at,
-        recorded_at=decided_at,
+    command_id = _assistant_trade_command_id(record, command_type="CancelTrade")
+    event = _append_assistant_trade_write_command(
+        db=db,
+        record=record,
         actor_id=actor_id,
-        correlation_id=f"assistant-action-{record.id}",
-        causation_id=f"assistant-action-request:{record.id}",
-        schema_version=1,
+        decided_at=decided_at,
+        command_type="CancelTrade",
+        trade_id=trade_id,
+        command_id=command_id,
         payload={
+            **_domain_payload(record, exclude_keys={"trade_id", "occurred_at"}),
             "status": "CANCELLED",
             "assistant_action_request_id": record.id,
             "assistant_run_id": record.run_id,
         },
     )
-    db.add(event)
-    db.flush()
-
-    trade.updated_at = decided_at
-    trade.status = "CANCELLED"
-    trade.last_event_id = event.event_id
-    after = trade_snapshot(db, trade)
-    sync_positions_for_trade_change(db, before, after, decided_at)
-    sync_option_exposures_for_trade_change(db, before, after, decided_at)
+    trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
+    if trade is None:
+        raise AssistantActionRequestError(f"Trade {trade_id} was not found after cancellation.")
 
     return {
         "event_id": event.event_id,
+        "command_id": command_id,
+        "command_type": "CancelTrade",
         "trade_id": trade_id,
         "trade_status": trade.status,
+        "last_event_id": trade.last_event_id,
     }
 
 
@@ -774,38 +971,29 @@ def _execute_create_trade_action(
     decided_at: datetime,
 ) -> dict[str, object]:
     trade_id = _required_str_payload_value(record, "trade_id", "The create-trade request is missing a trade_id.")
-    if db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first() is not None:
-        raise AssistantActionRequestError(f"Trade {trade_id} already exists.")
-
-    payload = _domain_payload(record, exclude_keys={"trade_id", "occurred_at"})
-    try:
-        event = append_domain_event(
-            db,
-            AppendDomainEventCommand(
-                aggregate_type="trade",
-                aggregate_id=trade_id,
-                event_type="TradeCreated",
-                payload={
-                    **payload,
-                    "assistant_action_request_id": record.id,
-                    "assistant_run_id": record.run_id,
-                },
-                occurred_at=_optional_datetime_payload_value(record, "occurred_at") or decided_at,
-                actor_id=actor_id,
-                correlation_id=f"assistant-action-{record.id}",
-                causation_id=f"assistant-action-request:{record.id}",
-                recorded_at=decided_at,
-            ),
-            refresh=True,
-        )
-    except HTTPException as exc:
-        raise AssistantActionRequestError(str(exc.detail or exc)) from exc
+    command_id = _assistant_trade_command_id(record, command_type="BookTrade")
+    event = _append_assistant_trade_write_command(
+        db=db,
+        record=record,
+        actor_id=actor_id,
+        decided_at=decided_at,
+        command_type="BookTrade",
+        trade_id=trade_id,
+        command_id=command_id,
+        payload={
+            **_domain_payload(record, exclude_keys={"trade_id", "occurred_at"}),
+            "assistant_action_request_id": record.id,
+            "assistant_run_id": record.run_id,
+        },
+    )
 
     trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
     if trade is None:
         raise AssistantActionRequestError(f"Trade {trade_id} was not created.")
     return {
         "event_id": event.event_id,
+        "command_id": command_id,
+        "command_type": "BookTrade",
         "trade_id": trade.trade_id,
         "trade_status": trade.status,
         "last_event_id": trade.last_event_id,
@@ -820,40 +1008,32 @@ def _execute_amend_trade_action(
     decided_at: datetime,
 ) -> dict[str, object]:
     trade_id = _required_str_payload_value(record, "trade_id", "The amend-trade request is missing a trade_id.")
-    if db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first() is None:
-        raise AssistantActionRequestError(f"Trade {trade_id} was not found.")
-
     payload = _domain_payload(record, exclude_keys={"trade_id", "occurred_at"})
     if not payload:
         raise AssistantActionRequestError("The amend-trade request is missing changed fields.")
-    try:
-        event = append_domain_event(
-            db,
-            AppendDomainEventCommand(
-                aggregate_type="trade",
-                aggregate_id=trade_id,
-                event_type="TradeAmended",
-                payload={
-                    **payload,
-                    "assistant_action_request_id": record.id,
-                    "assistant_run_id": record.run_id,
-                },
-                occurred_at=_optional_datetime_payload_value(record, "occurred_at") or decided_at,
-                actor_id=actor_id,
-                correlation_id=f"assistant-action-{record.id}",
-                causation_id=f"assistant-action-request:{record.id}",
-                recorded_at=decided_at,
-            ),
-            refresh=True,
-        )
-    except HTTPException as exc:
-        raise AssistantActionRequestError(str(exc.detail or exc)) from exc
+    command_id = _assistant_trade_command_id(record, command_type="AmendTradeTerms")
+    event = _append_assistant_trade_write_command(
+        db=db,
+        record=record,
+        actor_id=actor_id,
+        decided_at=decided_at,
+        command_type="AmendTradeTerms",
+        trade_id=trade_id,
+        command_id=command_id,
+        payload={
+            **payload,
+            "assistant_action_request_id": record.id,
+            "assistant_run_id": record.run_id,
+        },
+    )
 
     trade = db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first()
     if trade is None:
         raise AssistantActionRequestError(f"Trade {trade_id} was not found after amendment.")
     return {
         "event_id": event.event_id,
+        "command_id": command_id,
+        "command_type": "AmendTradeTerms",
         "trade_id": trade.trade_id,
         "trade_status": trade.status,
         "last_event_id": trade.last_event_id,
@@ -1005,6 +1185,51 @@ def _execute_record_trade_actualization_action(
     )
 
 
+def _execute_void_trade_actualization_action(
+    *,
+    db: Session,
+    record: AssistantActionRequest,
+    actor_id: str,
+    decided_at: datetime,
+) -> dict[str, object]:
+    trade_id = _required_str_payload_value(
+        record,
+        "trade_id",
+        "The trade actualization void request is missing a trade_id.",
+    )
+    try:
+        actualization = void_trade_actualization(
+            db,
+            trade_id=trade_id,
+            leg_no=_optional_int_payload_value(record, "leg_no"),
+            actor_id=actor_id,
+            void_reason=_required_str_payload_value(
+                record,
+                "void_reason",
+                "The trade actualization void request is missing a void_reason.",
+            ),
+            notes=_optional_str_payload_value(record, "notes"),
+            now=decided_at,
+        )
+    except (HTTPException, LookupError, ValueError) as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        raise AssistantActionRequestError(detail or "Trade actualization void execution failed.") from exc
+
+    return jsonable_encoder(
+        {
+            "actualization_id": actualization.actualization_id,
+            "delivery_id": actualization.delivery_id,
+            "trade_id": actualization.trade_id,
+            "leg_no": actualization.leg_no,
+            "actualization_status": actualization.actualization_status,
+            "actual_quantity": actualization.actual_quantity,
+            "actualized_at": actualization.actualized_at,
+            "voided_at": actualization.voided_at,
+            "void_reason": actualization.void_reason,
+        }
+    )
+
+
 def _execute_record_delivery_event_action(
     *,
     db: Session,
@@ -1049,6 +1274,56 @@ def _execute_record_delivery_event_action(
         "execution_status": delivery.execution_status,
         "event_count": delivery.event_count,
         "latest_event_type": latest_event.event_type if latest_event is not None else None,
+    }
+
+
+def _execute_reverse_delivery_event_action(
+    *,
+    db: Session,
+    record: AssistantActionRequest,
+    actor_id: str,
+    decided_at: datetime,
+) -> dict[str, object]:
+    delivery_id = _required_str_payload_value(
+        record,
+        "delivery_id",
+        "The delivery-event reversal request is missing a delivery_id.",
+    )
+    try:
+        delivery = reverse_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            event_id=_required_int_payload_value(
+                record,
+                "event_id",
+                "The delivery-event reversal request is missing an event_id.",
+            ),
+            actor_id=actor_id,
+            reversal_reason=_required_str_payload_value(
+                record,
+                "reversal_reason",
+                "The delivery-event reversal request is missing a reversal_reason.",
+            ),
+            reversed_at=_optional_datetime_payload_value(record, "reversed_at"),
+            source=_optional_str_payload_value(record, "source"),
+            notes=_optional_str_payload_value(record, "notes"),
+            now=decided_at,
+        )
+    except (HTTPException, LookupError, ValueError) as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        raise AssistantActionRequestError(detail or "Delivery event reversal execution failed.") from exc
+
+    latest_event = delivery.delivery_events[0] if delivery.delivery_events else None
+    return {
+        "delivery_id": delivery.delivery_id,
+        "trade_id": delivery.trade_id,
+        "execution_status": delivery.execution_status,
+        "event_count": delivery.event_count,
+        "latest_event_type": latest_event.event_type if latest_event is not None else None,
+        "latest_event_id": latest_event.event_id if latest_event is not None else None,
+        "latest_event_reversal_of_event_id": (
+            latest_event.reversal_of_event_id if latest_event is not None else None
+        ),
     }
 
 
@@ -1283,6 +1558,67 @@ def _execute_create_trade_payment_action(
     }
 
 
+def _execute_void_trade_invoice_action(
+    *,
+    db: Session,
+    record: AssistantActionRequest,
+    actor_id: str,
+    decided_at: datetime,
+) -> dict[str, object]:
+    invoice_id = _required_int_payload_value(
+        record,
+        "invoice_id",
+        "The invoice-void request is missing an invoice_id.",
+    )
+    invoice = void_trade_invoice(
+        db,
+        invoice_id=invoice_id,
+        actor_id=actor_id,
+        void_reason=_optional_str_payload_value(record, "void_reason"),
+        notes=_optional_str_payload_value(record, "notes"),
+        now=decided_at,
+    )
+    return {
+        "invoice_id": invoice.invoice_id,
+        "trade_id": invoice.trade_id,
+        "invoice_number": invoice.invoice_number,
+        "status": invoice.status,
+        "void_reason": invoice.void_reason,
+    }
+
+
+def _execute_reverse_trade_payment_action(
+    *,
+    db: Session,
+    record: AssistantActionRequest,
+    actor_id: str,
+    decided_at: datetime,
+) -> dict[str, object]:
+    payment_id = _required_int_payload_value(
+        record,
+        "payment_id",
+        "The payment-reversal request is missing a payment_id.",
+    )
+    payment = reverse_trade_payment(
+        db,
+        payment_id=payment_id,
+        actor_id=actor_id,
+        reversal_reason=_optional_str_payload_value(record, "reversal_reason"),
+        payment_reference=_optional_str_payload_value(record, "payment_reference"),
+        reversed_at=_optional_datetime_payload_value(record, "reversed_at"),
+        notes=_optional_str_payload_value(record, "notes"),
+        now=decided_at,
+    )
+    return {
+        "payment_id": payment.payment_id,
+        "invoice_id": payment.invoice_id,
+        "trade_id": payment.trade_id,
+        "payment_reference": payment.payment_reference,
+        "status": payment.status,
+        "reversal_of_payment_id": payment.reversal_of_payment_id,
+    }
+
+
 def _execute_reprocess_document_ingestion_action(
     *,
     db: Session,
@@ -1456,3 +1792,71 @@ def _domain_payload(
     for key in {"review_context", *(exclude_keys or set())}:
         payload.pop(key, None)
     return payload
+
+
+def _assistant_trade_command_id(record: AssistantActionRequest, *, command_type: str) -> str:
+    return f"assistant-action-request:{record.id}:{command_type}"
+
+
+def _assistant_trade_source_surface(record: AssistantActionRequest) -> str:
+    payload = dict(record.payload or {})
+    review_context = payload.get("review_context")
+    if not isinstance(review_context, dict):
+        return "assistant.action_requests.execute"
+
+    execution_mode = str(review_context.get("execution_mode") or "").strip().upper()
+    if execution_mode == "AUTONOMOUS":
+        return "assistant.action_requests.autonomous"
+    if execution_mode == "REVIEW_REQUIRED":
+        return "assistant.action_requests.approve"
+    return "assistant.action_requests.execute"
+
+
+def _assistant_trade_expected_last_event_id(record: AssistantActionRequest) -> str | None:
+    payload = dict(record.payload or {})
+    review_context = payload.get("review_context")
+    if not isinstance(review_context, dict):
+        return None
+
+    stale_state_basis = review_context.get("stale_state_basis")
+    if not isinstance(stale_state_basis, dict):
+        return None
+
+    last_event_id = stale_state_basis.get("last_event_id")
+    if last_event_id is None:
+        return None
+    normalized = str(last_event_id).strip()
+    return normalized or None
+
+
+def _append_assistant_trade_write_command(
+    *,
+    db: Session,
+    record: AssistantActionRequest,
+    actor_id: str,
+    decided_at: datetime,
+    command_type: str,
+    trade_id: str,
+    command_id: str,
+    payload: dict[str, object],
+) -> Event:
+    try:
+        return append_trade_write_command(
+            db,
+            TradeWriteCommand(
+                command_id=command_id,
+                command_type=command_type,
+                trade_id=trade_id,
+                payload=payload,
+                occurred_at=_optional_datetime_payload_value(record, "occurred_at") or decided_at,
+                recorded_at=decided_at,
+                actor_id=actor_id,
+                correlation_id=f"assistant-action-{record.id}",
+                causation_id=f"assistant-action-request:{record.id}",
+                source_surface=_assistant_trade_source_surface(record),
+                expected_last_event_id=_assistant_trade_expected_last_event_id(record),
+            ),
+            refresh=True,
+        )
+    except HTTPException as exc:
+        raise AssistantActionRequestError(str(exc.detail or exc)) from exc

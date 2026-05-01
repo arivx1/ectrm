@@ -148,6 +148,7 @@ export type DeliveryEventType =
   | 'HOLD_APPLIED'
   | 'HOLD_RELEASED'
   | 'CANCELLED'
+  | 'EVENT_REVERSED'
 
 export type DeliveryEventRecord = {
   event_id: number
@@ -157,6 +158,8 @@ export type DeliveryEventRecord = {
   event_type: DeliveryEventType
   execution_status: DeliveryExecutionStatus
   occurred_at: string
+  reversal_of_event_id: number | null
+  reversal_reason: string | null
   location_code: string | null
   reference_code: string | null
   source: string | null
@@ -478,6 +481,9 @@ export type TradeInvoiceRecord = {
   issued_at: string
   due_at: string
   dispute_reason: string | null
+  voided_at: string | null
+  voided_by: string | null
+  void_reason: string | null
   notes: string | null
   created_at: string
   created_by: string
@@ -516,6 +522,8 @@ export type TradePaymentRecord = {
   status: string
   due_at: string
   received_at: string | null
+  reversal_of_payment_id: number | null
+  reversal_reason: string | null
   notes: string | null
   created_at: string
   created_by: string
@@ -822,6 +830,21 @@ export type AssetRecord = ReferenceRecord & {
   notes?: string | null
 }
 
+export type SpatialFeatureRecord = ReferenceRecord & {
+  feature_kind: string
+  geometry_type: string
+  geometry_geojson: Record<string, unknown>
+  entity_type?: string | null
+  entity_code?: string | null
+  label_latitude?: number | null
+  label_longitude?: number | null
+  is_primary: boolean
+  source_name?: string | null
+  source_url?: string | null
+  confidence?: number | null
+  notes?: string | null
+}
+
 export type PriceIndexRecord = ReferenceRecord & {
   commodity_code: string
   currency_code: string
@@ -930,6 +953,20 @@ export const DEFAULT_ASSET_STANDARDS: AssetStandards = {
   asset_realities: ['REAL', 'SIMULATED'],
   default_operating_status: 'OPERATING',
   operating_statuses: ['IDLED', 'MAINTENANCE', 'OPERATING', 'PLANNED', 'RETIRED', 'UNDER_CONSTRUCTION'],
+}
+
+export type SpatialFeatureStandards = {
+  default_feature_kind: string
+  feature_kinds: string[]
+  geometry_types: string[]
+  entity_types: string[]
+}
+
+export const DEFAULT_SPATIAL_FEATURE_STANDARDS: SpatialFeatureStandards = {
+  default_feature_kind: 'REGION',
+  feature_kinds: ['AREA', 'BASIN', 'CORRIDOR', 'FOOTPRINT', 'PIPELINE', 'REGION', 'ROUTE', 'TERRITORY'],
+  geometry_types: ['AREA', 'LINE', 'MIXED', 'POINT'],
+  entity_types: ['ASSET', 'LOCATION'],
 }
 
 export type CounterpartyRecord = ReferenceRecord & {
@@ -2172,14 +2209,18 @@ export const ASSISTANT_ACTION_TYPES = [
   'amend_trade',
   'cancel_trade',
   'record_delivery_event',
+  'reverse_delivery_event',
   'create_manual_accrual_entry',
   'reverse_accrual_entry',
   'issue_trade_confirmation',
   'record_trade_confirmation_response',
   'update_trade_workflow_item',
   'record_trade_actualization',
+  'void_trade_actualization',
   'issue_trade_invoice',
+  'void_trade_invoice',
   'create_trade_payment',
+  'reverse_trade_payment',
   'create_accounting_entry',
   'reverse_accounting_entry',
   'reprocess_document_ingestion',
@@ -2343,6 +2384,55 @@ export type AssistantAdminAgent = AssistantAgent & {
   updated_at: string
   updated_by: string
   version: number
+  latest_revision_id?: number | null
+  published_revision_id?: number | null
+  published_at?: string | null
+  published_by?: string | null
+  has_unpublished_revision?: boolean
+}
+
+export type AssistantAgentRevisionPayload = {
+  name: string
+  description: string
+  status: AssistantAgentStatus
+  scope: AssistantAgentScope
+  provider: AssistantProvider | null
+  model: string | null
+  role_key?: string | null
+  profile_kind: AssistantAgentProfileKind
+  specialization_summary?: string | null
+  human_owner_role?: string | null
+  authority_ceiling?: AssistantAgentAuthorityLevel | null
+  activation_notes?: string | null
+  profile_request_id?: number | null
+  allowed_workspaces: ViewKey[]
+  capabilities: AssistantAgentCapability[]
+  allowed_tools: string[]
+  allowed_action_types: AssistantActionType[]
+  daily_token_allocation?: number | null
+  system_prompt: string
+}
+
+export type AssistantAgentRevisionDiff = {
+  field_key: string
+  label: string
+  current_value: string
+  next_value: string
+}
+
+export type AssistantAgentRevision = {
+  revision_id: number
+  agent_id: string
+  version: number
+  change_summary: string[]
+  diff_summary: AssistantAgentRevisionDiff[]
+  payload: AssistantAgentRevisionPayload
+  created_at: string
+  created_by: string
+  published_at: string | null
+  published_by: string | null
+  restored_from_revision_id?: number | null
+  is_published: boolean
 }
 
 export type AssistantAgentSelfUpdateEvidence = {
@@ -2354,6 +2444,8 @@ export type AssistantAgentSelfUpdateEvidence = {
 }
 
 export type AssistantAgentSelfUpdateDraft = {
+  revision_id: number
+  revision_version: number
   agent_id: string
   name: string
   description: string
@@ -2376,10 +2468,15 @@ export type AssistantAgentSelfUpdateDraft = {
   system_prompt: string
   source_brief: string
   change_summary: string[]
+  diff_summary: AssistantAgentRevisionDiff[]
   warnings: string[]
   builder_provider: AssistantProvider
   builder_model: string
   evidence: AssistantAgentSelfUpdateEvidence
+  created_at: string
+  created_by: string
+  published_at: string | null
+  published_by: string | null
 }
 
 export type AssistantAgentRoleArchetype = {
@@ -3252,7 +3349,6 @@ export type ViewKey =
   | 'prompt'
   | 'dashboard'
   | 'guide'
-  | 'demo'
   | 'pretrade'
   | 'trades'
   | 'events'
@@ -3263,6 +3359,7 @@ export type ViewKey =
   | 'operations'
   | 'settlement'
   | 'reports'
+  | 'map'
   | 'reference'
   | 'admin'
   | 'settings'
@@ -3275,6 +3372,7 @@ export type ReferenceTab =
   | 'currencies'
   | 'units'
   | 'locations'
+  | 'spatial-features'
   | 'assets'
   | 'counterparties'
   | 'portfolios'
@@ -3356,6 +3454,19 @@ export type AssetForm = {
   capacity_unit_code: string
   operator_name: string
   operating_status: string
+  description: string
+}
+
+export type SpatialFeatureForm = {
+  code: string
+  name: string
+  feature_kind: string
+  entity_type: string
+  entity_code: string
+  label_latitude: string
+  label_longitude: string
+  is_primary: boolean
+  geometry_geojson: string
   description: string
 }
 

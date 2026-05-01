@@ -3,6 +3,7 @@ from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
+from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_prompt_navigation_outcome import AssistantPromptNavigationOutcome
@@ -44,6 +45,7 @@ from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
+from apps.api.app.models.reference_spatial_feature import ReferenceSpatialFeature
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
@@ -71,6 +73,7 @@ __all__ = [
     "AssistantAgentEval",
     "AssistantAgentEvalRun",
     "AssistantAgentProfileRequest",
+    "AssistantAgentRevision",
     "AssistantAgentWorkPackage",
     "AssistantConversation",
     "AssistantPromptNavigationOutcome",
@@ -111,6 +114,7 @@ __all__ = [
     "ReferencePortfolio",
     "ReferencePriceIndex",
     "ReferencePriceIndexSource",
+    "ReferenceSpatialFeature",
     "ReferenceUnit",
     "Trade",
     "TradeAccrualEntry",

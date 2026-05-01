@@ -15,6 +15,8 @@ import type {
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   Trade,
   UnitRecord,
 } from '../../shared/models'
@@ -27,6 +29,7 @@ import {
   useReferenceDataLocationController,
   useReferenceDataPortfolioController,
   useReferenceDataPriceIndexController,
+  useReferenceDataSpatialFeatureController,
   useReferenceDataUnitController,
 } from './useReferenceDataEntityControllers'
 import { useReferenceDataBookController } from './useReferenceDataBookController'
@@ -57,7 +60,9 @@ type UseReferenceDataControllerArgs = {
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
   assetStandards: AssetStandards
+  spatialFeatureStandards: SpatialFeatureStandards
   counterparties: CounterpartyRecord[]
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
   counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
@@ -85,7 +90,9 @@ export function useReferenceDataController({
   currencies,
   units,
   locations,
+  spatialFeatures,
   assetStandards,
+  spatialFeatureStandards,
   counterparties,
   counterpartyCreditProfiles,
   counterpartyExternalCreditSnapshots,
@@ -113,7 +120,9 @@ export function useReferenceDataController({
     currencies,
     units,
     locations,
+    spatialFeatures,
     assetStandards,
+    spatialFeatureStandards,
     counterparties,
     portfolios,
     activeBooks,
@@ -188,6 +197,16 @@ export function useReferenceDataController({
     workspace,
     assets,
     assetStandards,
+    beginReferenceAction,
+    currentActorId,
+    submitReference,
+    setReferenceActionError,
+  })
+
+  const spatialFeatureController = useReferenceDataSpatialFeatureController({
+    workspace,
+    spatialFeatures,
+    spatialFeatureStandards,
     beginReferenceAction,
     currentActorId,
     submitReference,
@@ -287,6 +306,7 @@ export function useReferenceDataController({
     activeUnits,
     activeLocations,
     assetStandards,
+    spatialFeatureStandards,
     locationStandards,
     counterpartyStandards,
     commodityClassOrder,
@@ -297,6 +317,7 @@ export function useReferenceDataController({
     counterpartyCreditReportByCode: derived.counterpartyCreditReportByCode,
     ...bookController,
     ...assetController,
+    ...spatialFeatureController,
     ...commodityController,
     ...priceIndexController,
     ...currencyController,

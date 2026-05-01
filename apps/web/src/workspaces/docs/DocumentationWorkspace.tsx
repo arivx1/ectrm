@@ -117,13 +117,6 @@ const GUIDE_START_ACTIONS: Array<{
     actionLabel: 'Open Work Queue',
     view: 'operations',
   },
-  {
-    eyebrow: 'Practice',
-    title: 'Practice the workflow safely',
-    detail: 'Run the walkthrough when you want a local-only scenario that explains the lifecycle without touching live data.',
-    actionLabel: 'Open Walkthrough',
-    view: 'demo',
-  },
 ] as const
 
 const TASK_PLAYBOOKS: Array<{

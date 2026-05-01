@@ -27,6 +27,7 @@ export const REFERENCE_TAB_ORDER: ReferenceTab[] = [
   'currencies',
   'units',
   'locations',
+  'spatial-features',
   'assets',
   'counterparties',
   'portfolios',

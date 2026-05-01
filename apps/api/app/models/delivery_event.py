@@ -29,6 +29,13 @@ class DeliveryEvent(Base):
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
     execution_status: Mapped[str] = mapped_column(String(32), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    reversal_of_event_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("delivery_events.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reversal_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     location_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     reference_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

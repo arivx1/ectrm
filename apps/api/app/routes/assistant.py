@@ -34,6 +34,16 @@ from apps.api.app.domains.assistant.services.agent_evals import (
     to_agent_eval_run_out,
     update_agent_eval,
 )
+from apps.api.app.domains.assistant.services.agent_revisions import (
+    build_agent_revision_diff_summary,
+    create_agent_revision,
+    ensure_agent_publication_snapshot,
+    get_agent_revision,
+    list_agent_revisions,
+    next_agent_revision_version,
+    normalize_agent_revision_payload,
+    serialize_agent_revision_payload,
+)
 from apps.api.app.domains.assistant.services.autonomy_review import (
     build_assistant_agent_health_review,
     build_assistant_autonomy_review_brief,
@@ -133,6 +143,7 @@ from apps.api.app.domains.assistant.services.registry import (
     to_public_agent_out,
 )
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.schemas.assistant import (
     AssistantActionDecisionRequest,
@@ -140,6 +151,8 @@ from apps.api.app.schemas.assistant import (
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
     AssistantAgentHealthReviewOut,
+    AssistantAgentRevisionPayloadOut,
+    AssistantAgentRevisionOut,
     AssistantAgentWorkPackageAcceptRequest,
     AssistantAgentWorkPackageOut,
     AssistantAgentWorkPackageUpdateRequest,
@@ -816,9 +829,69 @@ async def build_admin_assistant_agent_self_update_draft(
             agent_id=agent_id,
             payload=payload,
             assistant_service=get_assistant_service(db),
+            actor_id=resolve_audit_actor_id(user.user_id),
         )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.get("/agents/{agent_id}/revisions", response_model=list[AssistantAgentRevisionOut])
+def list_admin_assistant_agent_revisions(
+    agent_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentRevisionOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_agent_record(db, agent_id.strip().lower())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant agent not found")
+
+    ensure_agent_publication_snapshot(record)
+    rows = list_agent_revisions(db, agent_id=record.agent_id)
+    return [_to_agent_revision_out(record, row) for row in rows]
+
+
+@admin_router.post("/agents/{agent_id}/revisions/{revision_id}/publish", response_model=AssistantAgentAdminOut)
+def publish_admin_assistant_agent_revision(
+    agent_id: str,
+    revision_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantAgentAdminOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_agent_record(db, agent_id.strip().lower())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant agent not found")
+    revision = get_agent_revision(db, agent_id=record.agent_id, revision_id=revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Assistant agent revision not found")
+    if record.latest_revision_id is not None and revision.revision_id != record.latest_revision_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Only the latest assistant agent revision can be published",
+        )
+
+    actor_id = resolve_audit_actor_id(user.user_id)
+    _publish_agent_revision(db, record=record, revision=revision, actor_id=actor_id)
+    db.commit()
+    db.refresh(record)
+    return to_admin_agent_out(
+        record,
+        token_budget=summarize_agent_token_budget(db, record),
+        eval_gate=build_agent_eval_gate(db, record),
+    )
 
 
 @admin_router.get("/runs", response_model=list[AssistantRunSummaryOut])
@@ -1179,6 +1252,16 @@ def create_assistant_agent(
     )
     db.add(record)
     db.flush()
+    create_agent_revision(
+        db,
+        record=record,
+        payload=serialize_agent_revision_payload(record),
+        change_summary=["Initial assistant agent snapshot."],
+        created_by=actor_id,
+        version=record.version,
+        published=record.status != "DRAFT",
+        created_at=now,
+    )
     _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
     _validate_agent_activation(db, agent_id=payload.agent_id, payload=payload)
     if record.status == "ACTIVE":
@@ -1208,6 +1291,7 @@ def update_assistant_agent(
         raise HTTPException(status_code=404, detail="Assistant agent not found")
 
     old_status = record.status
+    previous_payload = serialize_agent_revision_payload(record)
     policy_defaults = _resolve_agent_profile_defaults(payload)
     record.name = payload.name
     record.description = payload.description
@@ -1230,8 +1314,18 @@ def update_assistant_agent(
     record.system_prompt = payload.system_prompt
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = resolve_audit_actor_id(payload.updated_by)
-    record.version += 1
+    record.version = next_agent_revision_version(db, record=record)
     db.flush()
+    create_agent_revision(
+        db,
+        record=record,
+        payload=serialize_agent_revision_payload(record),
+        change_summary=_build_agent_change_summary(previous_payload, serialize_agent_revision_payload(record)),
+        created_by=record.updated_by,
+        version=record.version,
+        published=record.status != "DRAFT",
+        created_at=record.updated_at,
+    )
     _seed_profile_request_evals_for_agent(db, record=record, actor_id=record.updated_by)
     _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
     if old_status != "ACTIVE" and record.status == "ACTIVE":
@@ -1249,6 +1343,91 @@ def update_assistant_agent(
         token_budget=summarize_agent_token_budget(db, record),
         eval_gate=build_agent_eval_gate(db, record),
     )
+
+
+def _publish_agent_revision(
+    db: Session,
+    *,
+    record: AssistantAgent,
+    revision: AssistantAgentRevision,
+    actor_id: str,
+) -> None:
+    payload = AssistantAgentRevisionPayloadOut.model_validate(normalize_agent_revision_payload(revision.payload))
+    old_status = record.status
+    policy_defaults = _resolve_agent_profile_defaults(payload)
+    record.name = payload.name
+    record.description = payload.description
+    record.status = payload.status
+    record.scope = payload.scope
+    record.provider = payload.provider
+    record.model = payload.model
+    record.role_key = payload.role_key
+    record.profile_kind = payload.profile_kind
+    record.specialization_summary = payload.specialization_summary
+    record.human_owner_role = payload.human_owner_role
+    record.authority_ceiling = payload.authority_ceiling
+    record.activation_notes = payload.activation_notes
+    record.profile_request_id = payload.profile_request_id
+    record.allowed_workspaces = list(payload.allowed_workspaces)
+    record.capabilities = list(payload.capabilities)
+    record.allowed_tools = list(policy_defaults.allowed_tools)
+    record.allowed_action_types = list(policy_defaults.allowed_action_types)
+    record.daily_token_allocation = payload.daily_token_allocation
+    record.system_prompt = payload.system_prompt
+    record.updated_at = datetime.now(timezone.utc)
+    record.updated_by = actor_id
+    record.version = max(int(record.version or 0), int(revision.version or 0))
+    record.latest_revision_id = revision.revision_id
+    record.published_revision_id = revision.revision_id
+    record.published_snapshot = normalize_agent_revision_payload(revision.payload)
+    record.published_at = record.updated_at
+    record.published_by = actor_id
+    revision.published_at = record.updated_at
+    revision.published_by = actor_id
+    db.flush()
+    _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
+    _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
+    if old_status != "ACTIVE" and record.status == "ACTIVE":
+        _mark_profile_request_activated_for_agent(db, record=record, actor_id=actor_id)
+    _record_agent_provenance(
+        db,
+        record=record,
+        operation_key=_agent_status_operation_key(old_status=old_status, new_status=record.status),
+        action=record.status.lower() if old_status != record.status else "published",
+    )
+
+
+def _to_agent_revision_out(record: AssistantAgent, revision: AssistantAgentRevision) -> AssistantAgentRevisionOut:
+    baseline_payload = None
+    if record.published_revision_id != revision.revision_id:
+        baseline_payload = record.published_snapshot
+    return AssistantAgentRevisionOut(
+        revision_id=revision.revision_id,
+        agent_id=revision.agent_id,
+        version=revision.version,
+        change_summary=list(revision.change_summary or []),
+        diff_summary=build_agent_revision_diff_summary(baseline_payload, revision.payload),
+        payload=AssistantAgentRevisionPayloadOut.model_validate(normalize_agent_revision_payload(revision.payload)),
+        created_at=revision.created_at,
+        created_by=revision.created_by,
+        published_at=revision.published_at,
+        published_by=revision.published_by,
+        restored_from_revision_id=revision.restored_from_revision_id,
+        is_published=revision.published_at is not None,
+    )
+
+
+def _build_agent_change_summary(
+    previous_payload: dict[str, object],
+    next_payload: dict[str, object],
+) -> list[str]:
+    diff_summary = build_agent_revision_diff_summary(previous_payload, next_payload)
+    if not diff_summary:
+        return ["No material profile changes recorded."]
+    return [
+        f"{entry['label']}: {entry['current_value']} -> {entry['next_value']}"
+        for entry in diff_summary[:6]
+    ]
 
 
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:
@@ -1270,7 +1449,9 @@ def _encode_sse(event: str, payload: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 
-def _resolve_agent_profile_defaults(payload: AssistantAgentCreate | AssistantAgentUpdate) -> AssistantAgentProfilePolicyDefaults:
+def _resolve_agent_profile_defaults(
+    payload: AssistantAgentCreate | AssistantAgentUpdate | AssistantAgentRevisionPayloadOut,
+) -> AssistantAgentProfilePolicyDefaults:
     defaults = resolve_agent_profile_policy_defaults(
         role_key=payload.role_key,
         profile_kind=payload.profile_kind,
@@ -1299,7 +1480,7 @@ def _validate_agent_activation(
     db: Session,
     *,
     agent_id: str,
-    payload: AssistantAgentCreate | AssistantAgentUpdate,
+    payload: AssistantAgentCreate | AssistantAgentUpdate | AssistantAgentRevisionPayloadOut,
 ) -> None:
     try:
         validate_agent_activation_requirements(

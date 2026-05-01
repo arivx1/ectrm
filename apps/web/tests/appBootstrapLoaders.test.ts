@@ -11,6 +11,8 @@ import type {
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   TradingSourceRecord,
   UnitRecord,
 } from '../src/shared/models.ts'
@@ -131,6 +133,33 @@ const bootstrapAssetStandards: AssetStandards = {
   asset_realities: ['REAL', 'SIMULATED'],
   default_operating_status: 'OPERATING',
   operating_statuses: ['OPERATING'],
+}
+
+const bootstrapSpatialFeature: SpatialFeatureRecord = {
+  code: 'GULF_ROUTE',
+  name: 'Gulf Route',
+  is_active: true,
+  feature_kind: 'ROUTE',
+  geometry_type: 'LINE',
+  geometry_geojson: {
+    type: 'LineString',
+    coordinates: [
+      [-95.3698, 29.7604],
+      [-95.1, 29.9],
+    ],
+  },
+  entity_type: 'ASSET',
+  entity_code: 'HSC_PIPE',
+  label_latitude: 29.8,
+  label_longitude: -95.2,
+  is_primary: true,
+}
+
+const bootstrapSpatialFeatureStandards: SpatialFeatureStandards = {
+  default_feature_kind: 'REGION',
+  feature_kinds: ['PIPELINE', 'REGION', 'ROUTE'],
+  geometry_types: ['AREA', 'LINE', 'POINT'],
+  entity_types: ['ASSET', 'LOCATION'],
 }
 
 const bootstrapPriceIndex: PriceIndexRecord = {
@@ -926,6 +955,8 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
       ['https://example.test/api/reference/units?limit=2000', [bootstrapUnit]],
       ['https://example.test/api/reference/locations?limit=2000', [bootstrapLocation]],
       ['https://example.test/api/reference/locations/standards', { location_kinds: ['HUB'] }],
+      ['https://example.test/api/reference/spatial-features?limit=2000', [bootstrapSpatialFeature]],
+      ['https://example.test/api/reference/spatial-features/standards', bootstrapSpatialFeatureStandards],
       ['https://example.test/api/reference/assets?limit=2000', [bootstrapAsset]],
       ['https://example.test/api/reference/assets/standards', bootstrapAssetStandards],
       ['https://example.test/api/reference/counterparties?limit=2000', [bootstrapCounterparty]],
@@ -945,6 +976,8 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.deepEqual(payload.books, [bootstrapBook])
   assert.deepEqual(payload.commodities, [bootstrapCommodity])
   assert.deepEqual(payload.locationStandards, { location_kinds: ['HUB'] })
+  assert.deepEqual(payload.spatialFeatures, [bootstrapSpatialFeature])
+  assert.deepEqual(payload.spatialFeatureStandards, bootstrapSpatialFeatureStandards)
   assert.deepEqual(payload.assets, [bootstrapAsset])
   assert.deepEqual(payload.assetStandards, bootstrapAssetStandards)
   assert.deepEqual(payload.counterpartyStandards, { credit_statuses: ['APPROVED'] })
@@ -956,6 +989,7 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   const firstCurrency: CurrencyRecord = payload.currencies[0]!
   const firstUnit: UnitRecord = payload.units[0]!
   const firstLocation: LocationRecord = payload.locations[0]!
+  const firstSpatialFeature: SpatialFeatureRecord = payload.spatialFeatures[0]!
   const firstAsset: AssetRecord = payload.assets[0]!
   const firstCounterparty: CounterpartyRecord = payload.counterparties[0]!
   const firstPortfolio: PortfolioRecord = payload.portfolios[0]!
@@ -965,6 +999,7 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.equal(firstCurrency.code, 'USD')
   assert.equal(firstUnit.code, 'MWH')
   assert.equal(firstLocation.code, 'PJM-WEST')
+  assert.equal(firstSpatialFeature.code, 'GULF_ROUTE')
   assert.equal(firstAsset.code, 'HSC_PIPE')
   assert.equal(firstAsset.asset_reality, 'REAL')
   assert.equal(firstCounterparty.code, 'CP-1')

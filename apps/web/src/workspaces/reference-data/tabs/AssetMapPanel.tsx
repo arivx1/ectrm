@@ -5,16 +5,18 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   buildAssetMapFeatureCollection,
   buildAssetMapSummary,
+  buildSpatialFeatureMapFeatureCollection,
   formatAssetMapLocation,
   formatAssetMapPlacement,
   formatAssetMapSource,
   type AssetMapRecord,
 } from '../../../features/reference-data/assetMap'
-import type { AssetRecord, LocationRecord } from '../../../shared/models'
+import type { AssetRecord, LocationRecord, SpatialFeatureRecord } from '../../../shared/models'
 
 type AssetMapPanelProps = {
   assets: AssetRecord[]
   locations: LocationRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
   selectedAssetCode: string | null
   onSelectAsset: (code: string) => void
 }
@@ -25,6 +27,10 @@ const ASSET_GEOMETRY_SOURCE_ID = 'asset-geometry-source'
 const ASSET_GEOMETRY_FILL_LAYER_ID = 'asset-geometry-fill-layer'
 const ASSET_GEOMETRY_LINE_LAYER_ID = 'asset-geometry-line-layer'
 const ASSET_GEOMETRY_POINT_LAYER_ID = 'asset-geometry-point-layer'
+const SPATIAL_FEATURE_SOURCE_ID = 'spatial-feature-source'
+const SPATIAL_FEATURE_FILL_LAYER_ID = 'spatial-feature-fill-layer'
+const SPATIAL_FEATURE_LINE_LAYER_ID = 'spatial-feature-line-layer'
+const SPATIAL_FEATURE_POINT_LAYER_ID = 'spatial-feature-point-layer'
 
 const FALLBACK_MAP_STYLE: StyleSpecification = {
   version: 8,
@@ -59,12 +65,29 @@ function buildRecordSignature(records: AssetMapRecord[]): string {
     .join('|')
 }
 
+function buildSpatialFeatureSignature(spatialFeatures: SpatialFeatureRecord[]): string {
+  return spatialFeatures
+    .map((feature) =>
+      [
+        feature.code,
+        feature.feature_kind,
+        feature.geometry_type,
+        feature.entity_type ?? 'na',
+        feature.entity_code ?? 'na',
+        JSON.stringify(feature.geometry_geojson),
+      ].join(':'),
+    )
+    .join('|')
+}
+
 function AssetMapCanvas({
   records,
+  spatialFeatures,
   selectedAssetCode,
   onSelectAsset,
 }: {
   records: AssetMapRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
   selectedAssetCode: string | null
   onSelectAsset: (code: string) => void
 }) {
@@ -142,6 +165,10 @@ function AssetMapCanvas({
   }, [ready])
 
   const recordSignature = useMemo(() => buildRecordSignature(records), [records])
+  const spatialFeatureSignature = useMemo(
+    () => buildSpatialFeatureSignature(spatialFeatures),
+    [spatialFeatures],
+  )
 
   useEffect(() => {
     if (!ready || !mapRef.current || !runtimeRef.current) {
@@ -218,6 +245,76 @@ function AssetMapCanvas({
       })
     }
 
+    const activeSpatialFeatures = spatialFeatures.filter((feature) => feature.is_active)
+    const spatialFeatureCollection = buildSpatialFeatureMapFeatureCollection(activeSpatialFeatures)
+    const spatialFeatureSourceData = {
+      ...spatialFeatureCollection,
+      features: spatialFeatureCollection.features.map((feature) => ({
+        ...feature,
+        properties: {
+          ...(feature.properties ?? {}),
+          isLinkedSelection:
+            feature.properties?.entityType === 'ASSET' && feature.properties?.entityCode === selectedAssetCode,
+        },
+      })),
+    }
+
+    const existingSpatialFeatureSource = map.getSource(SPATIAL_FEATURE_SOURCE_ID) as
+      | {
+          setData: (data: unknown) => void
+        }
+      | undefined
+
+    if (existingSpatialFeatureSource) {
+      existingSpatialFeatureSource.setData(spatialFeatureSourceData)
+    } else {
+      map.addSource(SPATIAL_FEATURE_SOURCE_ID, {
+        type: 'geojson',
+        data: spatialFeatureSourceData,
+      })
+      map.addLayer({
+        id: SPATIAL_FEATURE_FILL_LAYER_ID,
+        type: 'fill',
+        source: SPATIAL_FEATURE_SOURCE_ID,
+        filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+        paint: {
+          'fill-color': ['case', ['boolean', ['get', 'isLinkedSelection'], false], '#9a3412', '#b45309'],
+          'fill-opacity': ['case', ['boolean', ['get', 'isLinkedSelection'], false], 0.14, 0.08],
+        },
+      })
+      map.addLayer({
+        id: SPATIAL_FEATURE_LINE_LAYER_ID,
+        type: 'line',
+        source: SPATIAL_FEATURE_SOURCE_ID,
+        filter: [
+          'any',
+          ['==', ['geometry-type'], 'LineString'],
+          ['==', ['geometry-type'], 'MultiLineString'],
+          ['==', ['geometry-type'], 'Polygon'],
+          ['==', ['geometry-type'], 'MultiPolygon'],
+        ],
+        paint: {
+          'line-color': ['case', ['boolean', ['get', 'isLinkedSelection'], false], '#9a3412', '#b45309'],
+          'line-opacity': 0.7,
+          'line-width': ['case', ['boolean', ['get', 'isLinkedSelection'], false], 3, 2],
+          'line-dasharray': [2, 1],
+        },
+      })
+      map.addLayer({
+        id: SPATIAL_FEATURE_POINT_LAYER_ID,
+        type: 'circle',
+        source: SPATIAL_FEATURE_SOURCE_ID,
+        filter: ['any', ['==', ['geometry-type'], 'Point'], ['==', ['geometry-type'], 'MultiPoint']],
+        paint: {
+          'circle-color': ['case', ['boolean', ['get', 'isLinkedSelection'], false], '#9a3412', '#b45309'],
+          'circle-radius': ['case', ['boolean', ['get', 'isLinkedSelection'], false], 5, 3],
+          'circle-opacity': 0.4,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1,
+        },
+      })
+    }
+
     markersRef.current.forEach((marker) => marker.remove())
     markersRef.current = []
 
@@ -276,7 +373,7 @@ function AssetMapCanvas({
         maxZoom: selectedRecord ? 8 : 6,
       })
     }
-  }, [ready, recordSignature, records, selectedAssetCode])
+  }, [ready, recordSignature, records, selectedAssetCode, spatialFeatureSignature, spatialFeatures])
 
   return (
     <div className="asset-map-canvas-shell">
@@ -289,12 +386,21 @@ function AssetMapCanvas({
 export function AssetMapPanel({
   assets,
   locations,
+  spatialFeatures,
   selectedAssetCode,
   onSelectAsset,
 }: AssetMapPanelProps) {
   const mapSummary = useMemo(() => buildAssetMapSummary(assets, locations), [assets, locations])
-  const selectedRecord = mapSummary.records.find((record) => record.asset.code === selectedAssetCode) ?? null
-  const pendingPlacementPreview = mapSummary.unmappedRecords.slice(0, 3)
+  const selectedRecord = mapSummary.mappedRecords.find((record) => record.asset.code === selectedAssetCode) ?? null
+  const selectedAsset = useMemo(
+    () => assets.find((asset) => asset.code === selectedAssetCode) ?? null,
+    [assets, selectedAssetCode],
+  )
+  const activeSpatialFeatures = useMemo(
+    () => spatialFeatures.filter((feature) => feature.is_active),
+    [spatialFeatures],
+  )
+  const hiddenAssetCount = Math.max(0, assets.length - mapSummary.mappedCount)
 
   return (
     <section className="asset-map-shell">
@@ -304,8 +410,8 @@ export function AssetMapPanel({
           <h4>Asset Footprint</h4>
           <p>
             The map prefers asset GeoJSON, then direct asset coordinates, then the linked location
-            coordinates, so we can zoom, pan, and rotate around the physical footprint instead of a
-            generic reference point.
+            coordinates, and now overlays governed spatial features like routes and regions for shared context.
+            Only map-ready assets are included here.
           </p>
         </div>
         <div className="asset-map-stats" aria-label="Asset map coverage">
@@ -313,24 +419,24 @@ export function AssetMapPanel({
           <span className="entity-chip entity-chip-soft">{mapSummary.assetGeometryCount} geometry</span>
           <span className="entity-chip entity-chip-soft">{mapSummary.assetPointCount} asset points</span>
           <span className="entity-chip entity-chip-soft">{mapSummary.linkedLocationCount} linked locations</span>
-          <span className="entity-chip entity-chip-soft">
-            {mapSummary.missingCoordinatesCount} awaiting coordinates
-          </span>
+          <span className="entity-chip entity-chip-soft">{activeSpatialFeatures.length} shared overlays</span>
+          <span className="entity-chip entity-chip-soft">{hiddenAssetCount} hidden</span>
         </div>
       </div>
 
       {mapSummary.mappedCount > 0 ? (
         <AssetMapCanvas
           records={mapSummary.mappedRecords}
+          spatialFeatures={activeSpatialFeatures}
           selectedAssetCode={selectedAssetCode}
           onSelectAsset={onSelectAsset}
         />
       ) : (
         <div className="asset-map-empty">
-          <strong>No filtered assets can be plotted yet.</strong>
+          <strong>No filtered assets are map-ready yet.</strong>
           <p>
-            Add asset GeoJSON, direct asset latitude and longitude, or coordinates on the linked
-            reference location.
+            This map only includes assets with GeoJSON, direct asset coordinates, or linked
+            location coordinates.
           </p>
         </div>
       )}
@@ -350,34 +456,35 @@ export function AssetMapPanel({
               <p>{formatAssetMapSource(selectedRecord)}</p>
               <p>{formatAssetMapPlacement(selectedRecord)}</p>
             </>
+          ) : selectedAsset ? (
+            <p>
+              {selectedAsset.code} is not map-ready yet. Only assets with GeoJSON, direct coordinates,
+              or linked location coordinates are eligible for the map.
+            </p>
           ) : (
-            <p>Select a plotted asset from the map or directory to center the view and prep the editor.</p>
+            <p>Pan freely, or select a plotted asset from the map or directory to inspect its placement.</p>
           )}
         </div>
 
         <div className="reference-usage-card asset-map-card">
           <div className="reference-usage-head">
-            <strong>Placement Gaps</strong>
-            <span className="entity-chip entity-chip-soft">{mapSummary.unmappedRecords.length}</span>
+            <strong>Map Scope</strong>
+            <span className="entity-chip entity-chip-soft">{hiddenAssetCount}</span>
           </div>
-          {pendingPlacementPreview.length > 0 ? (
-            <ul className="asset-map-gap-list">
-              {pendingPlacementPreview.map((record) => (
-                <li key={record.asset.code}>
-                  <strong>{record.asset.code}</strong>
-                  <span>{formatAssetMapPlacement(record)}</span>
-                </li>
-              ))}
-            </ul>
+          {hiddenAssetCount > 0 ? (
+            <p>
+              {hiddenAssetCount} filtered asset{hiddenAssetCount === 1 ? '' : 's'} are currently hidden from
+              the map until they gain GeoJSON, direct coordinates, or linked location coordinates.
+            </p>
           ) : (
-            <p>All filtered assets currently have usable map placement data.</p>
+            <p>All filtered assets currently meet the map-ready rules.</p>
           )}
         </div>
       </div>
 
       {mapSummary.mappedRecords.length > 0 ? (
         <p className="form-note asset-map-footnote">
-          Current selection example: {formatAssetMapLocation(mapSummary.mappedRecords[0])}.
+          Example plotted asset: {formatAssetMapLocation(mapSummary.mappedRecords[0])}. Shared overlays stay visible for corridors, routes, and regions.
         </p>
       ) : null}
     </section>

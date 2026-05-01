@@ -104,7 +104,6 @@ type AgentBuilderTemplateProfile = Pick<
 export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
   'dashboard',
   'guide',
-  'demo',
   'trades',
   'events',
   'risk',
@@ -114,6 +113,7 @@ export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
   'operations',
   'settlement',
   'reports',
+  'map',
   'reference',
   'admin',
   'settings',
@@ -167,7 +167,7 @@ function buildRoleSystemPrompt(role: AssistantAgentRoleArchetype): string {
       role.maximum_action_types.length > 0
         ? role.authority_ceiling === 'EXECUTE'
           ? 'Execute only explicitly allowed governed actions when evidence supports them.'
-          : 'Stage only explicitly allowed approval-gated actions when evidence supports them.'
+          : 'Stage only explicitly allowed governed actions when evidence supports them.'
         : 'Do not stage or execute governed actions for this profile.',
     ]),
   ].join('\n\n')
@@ -235,7 +235,7 @@ const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuild
     role_key: 'movement-controller-agent',
     profile_kind: 'ROLE_DERIVED',
     specialization_summary:
-      'Seeded default blueprint for movement synchronization and actualization execution.',
+      'Seeded default blueprint for movement synchronization, correction, and actualization execution.',
     human_owner_role: 'Operations Lead',
     authority_ceiling: 'EXECUTE',
     activation_notes: 'Seeded default aligned with the platform role catalog.',
@@ -481,23 +481,27 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     ],
     recommended_action_types: [
       'record_delivery_event',
+      'reverse_delivery_event',
       'issue_trade_confirmation',
       'record_trade_confirmation_response',
       'update_trade_workflow_item',
       'record_trade_actualization',
+      'void_trade_actualization',
       'reprocess_document_ingestion',
     ],
-    summary: 'Built for operations teams that need one governed agent to read downstream state and stage the next step.',
-    best_for: 'Confirmation follow-up, workflow ownership changes, and document-routing exceptions.',
+    summary:
+      'Built for operations teams that need one governed agent to read downstream state and execute the smallest justified internal correction.',
+    best_for:
+      'Confirmation follow-up, workflow ownership changes, delivery-state corrections, and document-routing exceptions.',
     focus_areas: ['Confirmations', 'Workflow ownership', 'Delivery blockers', 'Document reprocessing'],
     system_prompt: buildSystemPrompt({
       name: 'Trade Ops Copilot',
       mission: [
-        'Keep booked trades moving by combining operations visibility with tightly scoped, approval-gated actions.',
-        'Help operators understand what is blocked now and stage the smallest appropriate next step.',
+        'Keep booked trades moving by combining operations visibility with tightly scoped governed actions.',
+        'Help operators understand what is blocked now and execute or stage the smallest appropriate next step.',
       ],
       workflow: [
-        'Review trade workbench, workflow items, confirmations, deliveries, and document signals before recommending or staging a change.',
+        'Review trade workbench, workflow items, confirmations, deliveries, and document signals before recommending or acting on a change.',
         'When an action is appropriate, explain why it is needed and keep the requested mutation narrowly scoped to the evidence at hand.',
         'Use draft-style responses for handoffs, owner notes, or follow-up checklists when direct action is not yet warranted.',
         'If the platform record is behind real-world state, execute the smallest governed action that corrects it.',
@@ -537,18 +541,23 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       'list_workflow_items',
       'get_workspace_summary',
     ],
-    recommended_action_types: ['issue_trade_invoice', 'create_trade_payment'],
-    summary: 'Designed for finance and operations users managing invoice readiness, payment follow-through, cash exceptions, and open accrual posture.',
-    best_for: 'Settlement exception triage, invoice issuance, payment recording, and accrual-aware settlement review.',
+    recommended_action_types: [
+      'issue_trade_invoice',
+      'void_trade_invoice',
+      'create_trade_payment',
+      'reverse_trade_payment',
+    ],
+    summary: 'Designed for finance and operations users managing invoice readiness, payment follow-through, settlement corrections, cash exceptions, and open accrual posture.',
+    best_for: 'Settlement exception triage, invoice issuance and voiding, payment recording and reversal, and accrual-aware settlement review.',
     focus_areas: ['Invoices', 'Payments', 'Settlement aging', 'Cash follow-up'],
     system_prompt: buildSystemPrompt({
       name: 'Settlement Copilot',
       mission: [
-        'Explain settlement posture clearly and help the team stage the right invoice or payment action when it is justified.',
+        'Explain settlement posture clearly and help the team execute the right invoice or payment action when it is justified.',
         'Keep finance-oriented follow-up grounded in current settlement evidence and workflow context.',
       ],
       workflow: [
-        'Verify invoice, payment, settlement, accrual, and workflow records before suggesting or executing a cash action.',
+        'Verify invoice, payment, settlement, accrual, and workflow records before suggesting or executing a settlement action.',
         'Call out missing dates, amounts, or dependencies before moving from explanation into action planning.',
         'Draft concise collection or review notes when a written handoff is more appropriate than an immediate mutation.',
       ],
@@ -557,7 +566,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
         'Keep action descriptions tight enough for another operator to audit confidently.',
       ],
       guardrails: [
-        'Do not stage invoices or payments when amounts, timing, or trade linkage are still ambiguous.',
+        'Do not execute invoices or payments when amounts, timing, or trade linkage are still ambiguous.',
         'Do not smooth over missing settlement evidence; surface it directly.',
       ],
     }),
@@ -664,7 +673,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     agent_id: 'movement-controller-agent',
     name: 'Movement Controller Agent',
     description:
-      'Tracks delivery and movement reality with bounded actualization execution and blocker synchronization.',
+      'Tracks delivery and movement reality with bounded event, correction, and actualization execution.',
     status: 'ACTIVE',
     scope: 'TEAM',
     provider: '',
@@ -680,10 +689,17 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       'get_document_ingestion',
       'get_workspace_summary',
     ],
-    recommended_action_types: ['record_delivery_event', 'record_trade_actualization', 'update_trade_workflow_item'],
+    recommended_action_types: [
+      'record_delivery_event',
+      'reverse_delivery_event',
+      'record_trade_actualization',
+      'void_trade_actualization',
+      'update_trade_workflow_item',
+    ],
     summary:
-      'Designed for operators syncing delivery events and actualized movement reality into the platform while keeping external scheduling commitments outside the agent lane.',
-    best_for: 'Movement blocker triage, delivery-event logging, actualization updates, and delivery-related workflow synchronization.',
+      'Designed for operators syncing delivery events, correcting mistaken movement records, and keeping external scheduling commitments outside the agent lane.',
+    best_for:
+      'Movement blocker triage, delivery-event logging or reversal, actualization correction, and delivery-related workflow synchronization.',
     focus_areas: ['Delivery events', 'Actualization', 'Movement evidence', 'Workflow sync'],
     system_prompt: buildSystemPrompt({
       name: 'Movement Controller Agent',
@@ -693,7 +709,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       ],
       workflow: [
         'Inspect deliveries, trade workbench context, workflow items, and any supporting document evidence before acting.',
-        'When movement reality is clear, use the governed delivery-event, actualization, or workflow synchronization action instead of asking for separate approval.',
+        'When movement reality is clear, use the governed delivery-event, delivery-event reversal, actualization, actualization-void, or workflow synchronization action instead of asking for separate approval.',
         'If the requested step would commit the firm externally, stop and explain the boundary directly.',
       ],
       response_style: [
@@ -986,10 +1002,10 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       'list_workflow_items',
       'get_workspace_summary',
     ],
-    recommended_action_types: ['issue_trade_invoice'],
+    recommended_action_types: ['issue_trade_invoice', 'void_trade_invoice'],
     summary:
       'Designed for teams that want a narrower invoice-only execution role instead of routing every billing question through the broader settlement copilot.',
-    best_for: 'Invoice readiness, invoice issuance, and invoice-specific settlement exceptions.',
+    best_for: 'Invoice readiness, invoice issuance and voiding, and invoice-specific settlement exceptions.',
     focus_areas: ['Invoice candidates', 'Readiness evidence', 'Billing exceptions', 'Settlement handoff'],
     system_prompt: buildSystemPrompt({
       name: 'Invoice Controller Agent',
@@ -1000,6 +1016,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       workflow: [
         'Review invoice candidates, settlement summaries, accrual context, and workflow detail before acting.',
         'When invoice readiness is clear, execute invoice issuance through the governed path instead of asking for separate approval.',
+        'When an invoice no longer reflects reality, void it through the typed correction path instead of relying on an undocumented delete.',
         'If the task drifts into cash release, accounting entry creation, or unresolved settlement ambiguity, stop and explain the missing boundary.',
       ],
       response_style: [

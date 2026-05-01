@@ -75,6 +75,20 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         planner_priority=34,
     ),
     AssistantActionCatalogEntry(
+        name="reverse_delivery_event",
+        label="Reverse delivery event",
+        description=(
+            "Reverse a previously logged delivery movement event through an append-only correction record when the "
+            "existing event no longer reflects reality."
+        ),
+        policy_key="assistant.actions.delivery_event_reverse.v1",
+        risk_level="MEDIUM",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "operations", "shipments", "scheduling", "admin"),
+        planner_priority=35,
+    ),
+    AssistantActionCatalogEntry(
         name="create_manual_accrual_entry",
         label="Create manual accrual entry",
         description=(
@@ -156,7 +170,21 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         max_scope="TEAM",
         reviewer_roles=("OPS_ADMIN", "ADMIN"),
         workspaces=("assistant", "operations", "shipments", "admin"),
-        planner_priority=35,
+        planner_priority=36,
+    ),
+    AssistantActionCatalogEntry(
+        name="void_trade_actualization",
+        label="Void trade actualization",
+        description=(
+            "Void a mistaken physical-delivery actualization through the governed actualization service when the "
+            "platform should stop treating that recorded quantity as live execution state."
+        ),
+        policy_key="assistant.actions.trade_actualization_void.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "operations", "shipments", "admin"),
+        planner_priority=37,
     ),
     AssistantActionCatalogEntry(
         name="issue_trade_invoice",
@@ -173,6 +201,20 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         planner_priority=50,
     ),
     AssistantActionCatalogEntry(
+        name="void_trade_invoice",
+        label="Void invoice",
+        description=(
+            "Void an existing invoice through the governed settlement service when the internal record should no "
+            "longer claim that invoice as a live settlement obligation."
+        ),
+        policy_key="assistant.actions.invoice_void.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "admin"),
+        planner_priority=55,
+    ),
+    AssistantActionCatalogEntry(
         name="create_trade_payment",
         label="Create payment",
         description=(
@@ -185,6 +227,20 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         reviewer_roles=("OPS_ADMIN", "ADMIN"),
         workspaces=("assistant", "settlement", "admin"),
         planner_priority=60,
+    ),
+    AssistantActionCatalogEntry(
+        name="reverse_trade_payment",
+        label="Reverse payment",
+        description=(
+            "Reverse an applied payment through an offsetting payment ledger entry when the recorded cash receipt "
+            "no longer reflects reality."
+        ),
+        policy_key="assistant.actions.payment_reverse.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "admin"),
+        planner_priority=62,
     ),
     AssistantActionCatalogEntry(
         name="create_accounting_entry",

@@ -59,13 +59,17 @@ Related docs:
 | Confirmation response recording | Record counterparty response | Stage | Operations Lead | Sometimes | Safer than issuance, but still needs evidence and audit. |
 | Delivery blocker triage | Blocker summary, owner, next action | Draft or stage workflow update | Operations Lead | No | Good Phase 1 workflow improvement area. |
 | Delivery event logging | Record checkpoint, start, delay, or completion event | Execute through typed shipment service | Operations Lead | Sometimes | Use canonical delivery IDs, preserve event history, and let projections derive the latest movement state. |
+| Delivery event correction | Reverse a mistaken movement event through an append-only correction row | Execute through typed shipment service | Operations Lead | No | Do not delete event history; recompute live state from the remaining active business events. |
 | Scheduling commitment | Commit schedule, nomination, allocation | Draft initially | Operations Lead | Yes | Move slowly because this can create external obligations. |
 | Delivery actualization | Record actual delivered quantity | Execute through typed actualization service | Operations Lead | Sometimes | Requires source evidence, stale-state recheck, and correction path, but can be bounded internal execution. |
+| Delivery actualization correction | Void a mistaken delivered quantity record | Execute through typed actualization service | Operations Lead | No | Keep the original row with explicit void metadata and recompute live actualization state without hard deletes. |
 | Document reprocessing | Re-run ingestion or review flow | Stage | Operations Lead or Admin | No | Current action type is a safe first document action. |
 | Document linkage | Attach document to trade, delivery, invoice, or payment | Draft initially, stage later | Owning workflow lead | No | Can become approval-gated once linkage confidence rules exist. |
 | Document-created records | Create confirmation, invoice, payment, or quality record from document | Draft initially, stage later | Owning workflow lead | Potentially yes | Requires explicit matching, ambiguity, and approval policy. |
-| Invoice issuance | Issue invoice record | Stage | Settlement Lead | Yes | Current Settlement Copilot pattern is appropriate. |
-| Payment recording | Record payment against invoice | Stage | Settlement Lead | Sometimes | Recording receipt is lower risk than funds release. |
+| Invoice issuance | Create an internal invoice record | Execute through typed settlement invoice service | Settlement Lead | No | Internal invoice issuance can execute when readiness evidence is clear; external delivery of the invoice remains outside the agent lane. |
+| Invoice voiding | Void an internal invoice record | Execute through typed settlement invoice service | Settlement Lead | No | Use `NOT_REQUIRED` plus explicit void metadata, block while net paid cash is still applied, and auto-clear only unpaid linked payment rows. |
+| Payment recording | Record a payment receipt or application against an invoice | Execute through typed settlement payment service | Settlement Lead | No | Recording receipt is allowed when the invoice balance and currency checks pass; releasing cash remains human-only. |
+| Payment reversal | Reverse an internal payment application | Execute through typed settlement payment service | Settlement Lead | No | Use an immutable offsetting reversal entry and block double-reversal or reversal-of-reversal paths. |
 | Payment release or instruction | Send payment, release funds, communicate bank instructions | Human only | Settlement Lead, Finance, Compliance | Yes | Keep out of agent execution until a separate payments control model exists. |
 | Settlement exception triage | Aging, dispute, missing invoice, missing payment | Draft or stage workflow update | Settlement Lead | No | Strong Phase 1 target for measurable cycle-time reduction. |
 | Fee identification | Identify missing fees or charges | Draft | Settlement Lead or Trader | No | Needs fee model before execution. |
@@ -92,6 +96,8 @@ Phase 1 should use these defaults unless a specific exception is approved:
 - Agents may not externally commit the firm.
 - Agents may not mutate policy, permissions, reference data, or agent
   configuration.
+- Agents may not hard-delete settlement or movement records; corrections must
+  flow through typed cancel, void, reverse, or mark-not-required paths.
 - Agents may not create, amend, cancel, or actualize trades outside published
   typed action contracts.
 - Agents may not release cash, send bank instructions, or bind counterparty

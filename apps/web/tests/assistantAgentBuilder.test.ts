@@ -20,7 +20,15 @@ const tradeOpsRole: AssistantAgentRoleArchetype = {
   work_objects: ['trade', 'workflow item'],
   capability_ceiling: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
   default_tools: ['get_trade_workbench', 'list_workflow_items', 'list_documents'],
-  maximum_action_types: ['issue_trade_confirmation', 'update_trade_workflow_item', 'record_trade_actualization'],
+  maximum_action_types: [
+    'record_delivery_event',
+    'reverse_delivery_event',
+    'issue_trade_confirmation',
+    'record_trade_confirmation_response',
+    'update_trade_workflow_item',
+    'record_trade_actualization',
+    'void_trade_actualization',
+  ],
   authority_ceiling: 'EXECUTE',
   approval_rules: ['Operations Lead audits executed actions.'],
   stop_conditions: ['Evidence is ambiguous.'],
@@ -93,10 +101,12 @@ describe('assistant agent builder helpers', () => {
     expect(draft.allowed_tools).toEqual(['get_trade_workbench', 'list_documents'])
     expect(draft.allowed_action_types).toEqual([
       'record_delivery_event',
+      'reverse_delivery_event',
       'issue_trade_confirmation',
       'record_trade_confirmation_response',
       'update_trade_workflow_item',
       'record_trade_actualization',
+      'void_trade_actualization',
       'reprocess_document_ingestion',
     ])
   })
@@ -129,8 +139,33 @@ describe('assistant agent builder helpers', () => {
     ])
     expect(draft.allowed_action_types).toEqual([
       'record_delivery_event',
+      'reverse_delivery_event',
       'record_trade_actualization',
+      'void_trade_actualization',
       'update_trade_workflow_item',
+    ])
+  })
+
+  it('includes settlement correction authority for the settlement copilot preset', () => {
+    const draft = buildAgentBuilderDraft('settlement-copilot', [
+      'list_trade_invoices',
+      'list_trade_payments',
+      'get_trade_settlement_summary',
+    ])
+
+    expect(draft.role_key).toBe('settlement-copilot')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.allowed_tools).toEqual([
+      'list_trade_invoices',
+      'list_trade_payments',
+      'get_trade_settlement_summary',
+    ])
+    expect(draft.allowed_action_types).toEqual([
+      'issue_trade_invoice',
+      'void_trade_invoice',
+      'create_trade_payment',
+      'reverse_trade_payment',
     ])
   })
 
@@ -198,6 +233,19 @@ describe('assistant agent builder helpers', () => {
     ])
   })
 
+  it('includes invoice correction authority for the invoice controller preset', () => {
+    const draft = buildAgentBuilderDraft('invoice-controller-agent', [
+      'list_trade_invoices',
+      'get_trade_settlement_summary',
+    ])
+
+    expect(draft.role_key).toBe('invoice-controller-agent')
+    expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.allowed_tools).toEqual(['list_trade_invoices', 'get_trade_settlement_summary'])
+    expect(draft.allowed_action_types).toEqual(['issue_trade_invoice', 'void_trade_invoice'])
+  })
+
   it('keeps control tower presets supervision-only with no governed actions', () => {
     const draft = buildAgentBuilderDraft('control-tower-agent', ['get_workspace_summary'])
 
@@ -237,9 +285,13 @@ describe('assistant agent builder helpers', () => {
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
     expect(draft.allowed_tools).toEqual(['get_trade_workbench', 'list_workflow_items'])
     expect(draft.allowed_action_types).toEqual([
+      'record_delivery_event',
+      'reverse_delivery_event',
       'issue_trade_confirmation',
+      'record_trade_confirmation_response',
       'update_trade_workflow_item',
       'record_trade_actualization',
+      'void_trade_actualization',
     ])
     expect(draft.system_prompt).toContain('Role mission')
     expect(draft.system_prompt).toContain('Stop conditions')

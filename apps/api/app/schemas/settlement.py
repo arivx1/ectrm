@@ -21,6 +21,9 @@ class TradeInvoiceOut(BaseModel):
     issued_at: datetime
     due_at: datetime
     dispute_reason: Optional[str]
+    voided_at: Optional[datetime]
+    voided_by: Optional[str]
+    void_reason: Optional[str]
     notes: Optional[str]
     created_at: datetime
     created_by: str
@@ -71,6 +74,11 @@ class TradeInvoiceUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class TradeInvoiceVoid(BaseModel):
+    void_reason: str
+    notes: Optional[str] = None
+
+
 class TradePaymentOut(BaseModel):
     payment_id: int
     trade_id: str
@@ -82,6 +90,8 @@ class TradePaymentOut(BaseModel):
     status: str
     due_at: datetime
     received_at: Optional[datetime]
+    reversal_of_payment_id: Optional[int]
+    reversal_reason: Optional[str]
     notes: Optional[str]
     created_at: datetime
     created_by: str
@@ -163,4 +173,11 @@ class TradePaymentUpdate(BaseModel):
     status: Optional[str] = None
     due_at: Optional[datetime] = None
     received_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class TradePaymentReverse(BaseModel):
+    reversal_reason: str
+    payment_reference: Optional[str] = None
+    reversed_at: Optional[datetime] = None
     notes: Optional[str] = None

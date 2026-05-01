@@ -34,6 +34,10 @@ import {
   ReferenceDataPriceIndicesEditor,
 } from './tabs/ReferenceDataPriceIndicesTab'
 import {
+  ReferenceDataSpatialFeaturesDirectory,
+  ReferenceDataSpatialFeaturesEditor,
+} from './tabs/ReferenceDataSpatialFeaturesTab'
+import {
   ReferenceDataUnitsDirectory,
   ReferenceDataUnitsEditor,
 } from './tabs/ReferenceDataUnitsTab'
@@ -88,6 +92,13 @@ export const REFERENCE_TAB_DEFINITIONS: Record<ReferenceTab, ReferenceDataTabDef
     editorTitle: 'Location Editor',
     Directory: ReferenceDataLocationsDirectory,
     Editor: ReferenceDataLocationsEditor,
+  },
+  'spatial-features': {
+    label: 'Spatial Features',
+    tooltip: 'Spatial features govern shared routes, pipelines, regions, and map overlays that do not belong in a point-only asset record.',
+    editorTitle: 'Spatial Feature Editor',
+    Directory: ReferenceDataSpatialFeaturesDirectory,
+    Editor: ReferenceDataSpatialFeaturesEditor,
   },
   counterparties: {
     label: 'Counterparties',

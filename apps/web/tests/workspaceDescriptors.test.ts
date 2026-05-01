@@ -17,6 +17,8 @@ describe('workspace descriptor system', () => {
       'reference',
     ])
     expect(WORKSPACE_DESCRIPTORS.pretrade.buildWindowNotices).toBeUndefined()
+    expect(WORKSPACE_DESCRIPTORS.map.dataGroups).toEqual(['reference'])
+    expect(WORKSPACE_DESCRIPTORS.map.buildWindowNotices).toBeUndefined()
 
     expect(WORKSPACE_DESCRIPTORS.operations.dataGroups).toEqual([
       'trades',

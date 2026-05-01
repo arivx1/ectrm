@@ -24,7 +24,8 @@ describe('manual navigation helpers', () => {
   })
 
   it('normalizes unknown section ids safely', () => {
-    expect(normalizeManualSectionId('visual-walkthroughs')).toBe('visual-walkthroughs')
+    expect(normalizeManualSectionId('access-and-safe-use')).toBe('access-and-safe-use')
+    expect(normalizeManualSectionId('visual-walkthroughs')).toBe('start-here')
     expect(normalizeManualSectionId('definitely-not-a-section')).toBe('start-here')
     expect(normalizeManualSectionId(null)).toBe('start-here')
   })

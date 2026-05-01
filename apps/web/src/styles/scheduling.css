@@ -678,10 +678,6 @@
   .workflow-item-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .demo-workspace {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 960px) {
@@ -754,12 +750,6 @@
   .main-stage {
     padding: 1rem 1rem 1.7rem;
   }
-
-  .demo-parameter-grid,
-  .demo-readout-grid,
-  .demo-artifact-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {
@@ -813,16 +803,4 @@
     flex-direction: column;
     align-items: flex-start;
   }
-
-  .demo-step-card-head,
-  .demo-step-actions,
-  .demo-trigger-card-head,
-  .demo-artifact-card-head {
-    flex-direction: column;
-  }
-
-  .demo-step-actions .button {
-    width: 100%;
-  }
 }
-

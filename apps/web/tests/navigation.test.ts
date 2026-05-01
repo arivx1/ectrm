@@ -98,10 +98,10 @@ describe('mobile navigation helpers', () => {
   it('maps representative workspaces into their grouped nav sections', () => {
     expect(primaryNavigationSectionForView('prompt').key).toBe('overview')
     expect(primaryNavigationSectionForView('dashboard').key).toBe('overview')
-    expect(primaryNavigationSectionForView('demo').key).toBe('overview')
     expect(primaryNavigationSectionForView('pretrade').key).toBe('trading')
     expect(primaryNavigationSectionForView('trades').key).toBe('trading')
     expect(primaryNavigationSectionForView('shipments').key).toBe('execution')
+    expect(primaryNavigationSectionForView('map').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('settings').key).toBe('administration')
   })
@@ -114,13 +114,13 @@ describe('mobile navigation helpers', () => {
       }),
     ])
 
-    expect(filterPrimaryNavigationSections('walkthrough')).toEqual([
+    expect(filterPrimaryNavigationSections('product guide')).toEqual([
       expect.objectContaining({
         key: 'overview',
         views: expect.arrayContaining([
+          expect.objectContaining({ key: 'prompt' }),
           expect.objectContaining({ key: 'dashboard' }),
           expect.objectContaining({ key: 'guide' }),
-          expect.objectContaining({ key: 'demo' }),
         ]),
       }),
     ])

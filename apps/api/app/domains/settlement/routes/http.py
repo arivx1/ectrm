@@ -19,16 +19,20 @@ from apps.api.app.domains.operations.services.settlement_invoices import issue_t
 from apps.api.app.domains.operations.services.settlement_invoices import list_invoice_issue_candidates
 from apps.api.app.domains.operations.services.settlement_invoices import list_trade_invoices
 from apps.api.app.domains.operations.services.settlement_invoices import update_trade_invoice
+from apps.api.app.domains.operations.services.settlement_invoices import void_trade_invoice
 from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
 from apps.api.app.domains.operations.services.settlement_payments import list_trade_payments
+from apps.api.app.domains.operations.services.settlement_payments import reverse_trade_payment
 from apps.api.app.domains.operations.services.settlement_payments import update_trade_payment
 from apps.api.app.schemas.settlement import InvoiceIssueCandidateListOut
 from apps.api.app.schemas.settlement import InvoiceIssueCandidateOut
 from apps.api.app.schemas.settlement import TradeInvoiceCreate
 from apps.api.app.schemas.settlement import TradeInvoiceOut
 from apps.api.app.schemas.settlement import TradeInvoiceUpdate
+from apps.api.app.schemas.settlement import TradeInvoiceVoid
 from apps.api.app.schemas.settlement import TradePaymentCreate
 from apps.api.app.schemas.settlement import TradePaymentOut
+from apps.api.app.schemas.settlement import TradePaymentReverse
 from apps.api.app.schemas.settlement import TradePaymentUpdate
 
 router = APIRouter(prefix="/settlement", tags=["settlement"])
@@ -158,6 +162,27 @@ def patch_trade_invoice(
     )
 
 
+@router.post("/invoices/{invoice_id}/void", response_model=TradeInvoiceOut)
+def post_trade_invoice_void(
+    invoice_id: int,
+    payload: TradeInvoiceVoid,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TradeInvoiceOut:
+    return execute_operational_mutation(
+        SETTLEMENT_RESOURCE_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: void_trade_invoice(
+            db,
+            invoice_id=invoice_id,
+            actor_id=actor.actor_id,
+            void_reason=payload.void_reason,
+            notes=payload.notes,
+        )
+    )
+
+
 @router.get("/payments", response_model=list[TradePaymentOut])
 def get_trade_payments(
     trade_id: str | None = Query(default=None),
@@ -222,12 +247,37 @@ def patch_trade_payment(
     )
 
 
+@router.post("/payments/{payment_id}/reverse", response_model=TradePaymentOut)
+def post_trade_payment_reverse(
+    payment_id: int,
+    payload: TradePaymentReverse,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TradePaymentOut:
+    return execute_operational_mutation(
+        SETTLEMENT_RESOURCE_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: reverse_trade_payment(
+            db,
+            payment_id=payment_id,
+            actor_id=actor.actor_id,
+            reversal_reason=payload.reversal_reason,
+            payment_reference=payload.payment_reference,
+            reversed_at=payload.reversed_at,
+            notes=payload.notes,
+        )
+    )
+
+
 __all__ = [
     "router",
     "get_trade_invoices",
     "post_trade_invoice",
     "patch_trade_invoice",
+    "post_trade_invoice_void",
     "get_trade_payments",
     "post_trade_payment",
     "patch_trade_payment",
+    "post_trade_payment_reverse",
 ]

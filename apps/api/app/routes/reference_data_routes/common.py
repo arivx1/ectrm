@@ -15,6 +15,7 @@ from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_spatial_feature import ReferenceSpatialFeature
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 
@@ -29,6 +30,7 @@ ModelT = TypeVar(
     ReferenceLocation,
     ReferencePortfolio,
     ReferencePriceIndex,
+    ReferenceSpatialFeature,
 )
 
 
@@ -219,6 +221,19 @@ def to_out(record: ModelT, schema_cls):
         payload["market"] = record.market
         payload["location_code"] = record.location_code
         payload["calendar_code"] = record.calendar_code
+    if isinstance(record, ReferenceSpatialFeature):
+        payload["feature_kind"] = record.feature_kind
+        payload["geometry_type"] = record.geometry_type
+        payload["entity_type"] = record.entity_type
+        payload["entity_code"] = record.entity_code
+        payload["label_latitude"] = record.label_latitude
+        payload["label_longitude"] = record.label_longitude
+        payload["is_primary"] = record.is_primary
+        payload["geometry_geojson"] = record.geometry_geojson
+        payload["source_name"] = record.source_name
+        payload["source_url"] = record.source_url
+        payload["confidence"] = record.confidence
+        payload["notes"] = record.notes
 
     return schema_cls(**payload)
 

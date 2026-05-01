@@ -26,6 +26,11 @@ class DeliveryActualizationWrite(BaseModel):
     notes: Optional[str] = None
 
 
+class DeliveryActualizationVoidWrite(BaseModel):
+    void_reason: str
+    notes: Optional[str] = None
+
+
 class DeliveryActualizationOut(BaseModel):
     actualization_id: int
     delivery_id: str
@@ -33,12 +38,15 @@ class DeliveryActualizationOut(BaseModel):
     leg_no: Optional[int]
     unit_of_measure: Optional[str]
     planned_quantity: Optional[float]
-    actual_quantity: float
+    actual_quantity: Optional[float]
     quantity_variance: Optional[float]
     actualization_status: str
-    actualized_at: datetime
+    actualized_at: Optional[datetime]
     source: Optional[str]
     notes: Optional[str]
+    voided_at: Optional[datetime]
+    voided_by: Optional[str]
+    void_reason: Optional[str]
     created_at: datetime
     created_by: str
     updated_at: datetime
@@ -54,6 +62,8 @@ class DeliveryEventOut(BaseModel):
     event_type: str
     execution_status: str
     occurred_at: datetime
+    reversal_of_event_id: Optional[int]
+    reversal_reason: Optional[str]
     location_code: Optional[str]
     reference_code: Optional[str]
     source: Optional[str]
@@ -246,6 +256,13 @@ class DeliveryEventWrite(BaseModel):
     occurred_at: datetime
     location_code: Optional[str] = None
     reference_code: Optional[str] = None
+    source: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class DeliveryEventReverseWrite(BaseModel):
+    reversal_reason: str
+    reversed_at: Optional[datetime] = None
     source: Optional[str] = None
     notes: Optional[str] = None
 

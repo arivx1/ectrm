@@ -181,6 +181,21 @@ def _normalize_required_text(value: object | None, *, field_name: str) -> str:
     return normalized
 
 
+def _append_note(existing: str | None, addition: str | None) -> str | None:
+    normalized_addition = _normalize_optional_text(addition)
+    if normalized_addition is None:
+        return existing
+    if not existing:
+        return normalized_addition
+    if normalized_addition in existing:
+        return existing
+    return f"{existing}\n{normalized_addition}"
+
+
+def _payment_is_paid(payment: TradePayment) -> bool:
+    return _coerce_utc(payment.received_at) is not None or payment.status == PaymentStatus.PAID.value
+
+
 def _normalize_currency_code(value: object | None, *, trade: Trade) -> str:
     normalized = str(value or trade.trade_currency_code or "USD").strip().upper()
     if not normalized:
@@ -542,6 +557,135 @@ def _derive_trade_invoice_projection(invoices: list[TradeInvoice]) -> TradeInvoi
     return TradeInvoiceProjection(status=status, due_at=due_at, notes=note)
 
 
+def preview_trade_invoice_void(
+    db: Session,
+    *,
+    invoice_id: int,
+    void_reason: object | None = None,
+    now: Optional[datetime] = None,
+) -> dict[str, object]:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    row = db.execute(
+        select(TradeInvoice, Trade)
+        .join(Trade, Trade.trade_id == TradeInvoice.trade_id)
+        .where(TradeInvoice.id == invoice_id)
+    ).first()
+    if row is None:
+        return {
+            "preview_type": "void_trade_invoice",
+            "status": "BLOCKED",
+            "summary": f"Invoice void preview for invoice {invoice_id} is blocked.",
+            "affected_records": [],
+            "field_changes": [],
+            "expected_side_effects": [],
+            "warnings": [],
+            "blocking_reasons": [f"Invoice '{invoice_id}' was not found."],
+            "assumptions": [],
+        }
+
+    invoice, trade = row
+    payments = db.execute(
+        select(TradePayment)
+        .where(TradePayment.invoice_id == invoice.id)
+        .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+    ).scalars().all()
+    payment_projection = derive_invoice_payment_projection(
+        invoice=invoice,
+        payments=payments,
+        now=reference_time,
+    )
+    blocking_reasons: list[str] = []
+    if invoice.status == InvoiceStatus.NOT_REQUIRED.value:
+        blocking_reasons.append(
+            f"Invoice '{invoice.invoice_number}' is already marked NOT_REQUIRED and cannot be voided again."
+        )
+
+    normalized_void_reason = _normalize_optional_text(void_reason)
+    if normalized_void_reason is None:
+        blocking_reasons.append("Void reason is required.")
+
+    if payment_projection.total_paid_amount > ZERO:
+        blocking_reasons.append(
+            f"Invoice '{invoice.invoice_number}' still has net paid cash applied. Reverse the payment before voiding the invoice."
+        )
+
+    auto_cleared_payments = [
+        payment
+        for payment in payments
+        if payment.status != PaymentStatus.NOT_REQUIRED.value
+        and not _payment_is_paid(payment)
+    ]
+    preview_status = "BLOCKED" if blocking_reasons else "READY"
+    return {
+        "preview_type": "void_trade_invoice",
+        "status": preview_status,
+        "summary": (
+            f"Invoice {invoice.invoice_number} for trade {trade.trade_id} will be voided and removed from active settlement posture."
+            if not blocking_reasons
+            else f"Invoice void preview for invoice {invoice.invoice_number} is blocked."
+        ),
+        "affected_records": [
+            {
+                "type": "trade_invoice",
+                "id": str(invoice.id),
+                "label": f"Invoice {invoice.invoice_number}",
+                "summary": (
+                    f"{invoice.status} invoice for {invoice.invoice_currency_code} {float(invoice.invoice_amount):.2f} "
+                    f"on trade {trade.trade_id}."
+                ),
+            },
+            {
+                "type": "trade",
+                "id": trade.trade_id,
+                "label": f"Trade {trade.trade_id}",
+                "summary": f"Trade settlement status is {trade.settlement_status}.",
+            },
+        ],
+        "field_changes": [
+            {
+                "field": "status",
+                "current_value": invoice.status,
+                "proposed_value": InvoiceStatus.NOT_REQUIRED.value,
+            },
+            {
+                "field": "voided_at",
+                "current_value": _coerce_utc(invoice.voided_at).isoformat() if invoice.voided_at is not None else None,
+                "proposed_value": reference_time.isoformat(),
+            },
+            {
+                "field": "void_reason",
+                "current_value": invoice.void_reason,
+                "proposed_value": normalized_void_reason,
+            },
+            {
+                "field": "payment_records_auto_cleared",
+                "current_value": 0,
+                "proposed_value": len(auto_cleared_payments),
+            },
+        ],
+        "expected_side_effects": [
+            "Mark the invoice as NOT_REQUIRED and stamp explicit void metadata.",
+            "Refresh invoice and payment workflow projections.",
+            "Synchronize physical accrual invoice relief back to the corrected state when applicable.",
+            "Append a TradeInvoiceVoided audit event after execution.",
+            *(
+                [f"Automatically clear {len(auto_cleared_payments)} unpaid payment record(s) tied to the invoice."]
+                if auto_cleared_payments
+                else []
+            ),
+        ],
+        "warnings": [
+            *(
+                ["This invoice already has payment history; only unpaid payment records will be auto-cleared."]
+                if payments and auto_cleared_payments
+                else []
+            ),
+        ],
+        "blocking_reasons": blocking_reasons,
+        "assumptions": [],
+    }
+
+
 def preview_trade_invoice_issue(
     db: Session,
     *,
@@ -774,6 +918,9 @@ def _to_out(
         issued_at=issued_at,
         due_at=due_at,
         dispute_reason=invoice.dispute_reason,
+        voided_at=_coerce_utc(invoice.voided_at),
+        voided_by=invoice.voided_by,
+        void_reason=invoice.void_reason,
         notes=invoice.notes,
         created_at=_coerce_utc(invoice.created_at) or issued_at,
         created_by=invoice.created_by,
@@ -1432,6 +1579,137 @@ def update_trade_invoice(
         causation_id=f"trade-invoice:{invoice_out.invoice_id}",
         payload={
             "requested_changes": jsonable_encoder(changes),
+            "invoice": _audit_invoice_payload(invoice_out),
+        },
+    )
+    return invoice_out
+
+
+def void_trade_invoice(
+    db: Session,
+    *,
+    invoice_id: int,
+    actor_id: str,
+    void_reason: object | None,
+    notes: object | None = None,
+    now: Optional[datetime] = None,
+) -> TradeInvoiceOut:
+    from apps.api.app.domains.accruals.services import (
+        synchronize_trade_accruals,
+        synchronize_trade_invoice_relief,
+    )
+
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    row = db.execute(
+        select(TradeInvoice, Trade)
+        .join(Trade, Trade.trade_id == TradeInvoice.trade_id)
+        .where(TradeInvoice.id == invoice_id)
+    ).first()
+    if row is None:
+        raise LookupError(f"Invoice '{invoice_id}' was not found.")
+
+    invoice, trade = row
+    if invoice.status == InvoiceStatus.NOT_REQUIRED.value:
+        raise ValueError(f"Invoice '{invoice.invoice_number}' is already marked NOT_REQUIRED.")
+
+    normalized_void_reason = _normalize_required_text(void_reason, field_name="Void reason")
+    invoice_payments = db.execute(
+        select(TradePayment)
+        .where(TradePayment.invoice_id == invoice.id)
+        .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+    ).scalars().all()
+    payment_projection = derive_invoice_payment_projection(
+        invoice=invoice,
+        payments=invoice_payments,
+        now=reference_time,
+    )
+    if payment_projection.total_paid_amount > ZERO:
+        raise ValueError(
+            f"Invoice '{invoice.invoice_number}' still has net paid cash applied. Reverse the payment before voiding the invoice."
+        )
+
+    invoice.status = InvoiceStatus.NOT_REQUIRED.value
+    invoice.dispute_reason = None
+    invoice.voided_at = reference_time
+    invoice.voided_by = actor_id
+    invoice.void_reason = normalized_void_reason
+    invoice.notes = _append_note(invoice.notes, _normalize_optional_text(notes))
+    invoice.updated_at = reference_time
+    invoice.updated_by = actor_id
+    invoice.version += 1
+
+    auto_cleared_payment_ids: list[int] = []
+    for payment in invoice_payments:
+        if payment.status == PaymentStatus.NOT_REQUIRED.value:
+            continue
+        if _payment_is_paid(payment):
+            continue
+        payment.status = PaymentStatus.NOT_REQUIRED.value
+        payment.received_at = None
+        payment.notes = _append_note(
+            payment.notes,
+            f"Auto-cleared when invoice {invoice.invoice_number} was voided.",
+        )
+        payment.updated_at = reference_time
+        payment.updated_by = actor_id
+        payment.version += 1
+        auto_cleared_payment_ids.append(payment.id)
+
+    if trade.trade_nature == TradeNature.PHYSICAL.value:
+        synchronize_trade_accruals(
+            db,
+            trade_id=trade.trade_id,
+            actor_id=actor_id,
+            now=reference_time,
+        )
+        synchronize_trade_invoice_relief(
+            db,
+            invoice_id=invoice.id,
+            actor_id=actor_id,
+            now=reference_time,
+            strict=False,
+        )
+
+    workflow_item = synchronize_trade_invoice_projection(
+        db,
+        trade=trade,
+        actor_id=actor_id,
+        now=reference_time,
+    )
+    synchronize_trade_payment_projection(
+        db,
+        trade=trade,
+        actor_id=actor_id,
+        now=reference_time,
+    )
+    refreshed_payments = db.execute(
+        select(TradePayment)
+        .where(TradePayment.invoice_id == invoice.id)
+        .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+    ).scalars().all()
+    invoice_out = _to_out(
+        invoice,
+        trade,
+        workflow_item,
+        payments_for_invoice=refreshed_payments,
+        now=reference_time,
+    )
+    append_trade_audit_event(
+        db,
+        trade_id=invoice_out.trade_id,
+        actor_id=actor_id,
+        event_type="TradeInvoiceVoided",
+        occurred_at=invoice_out.updated_at,
+        causation_id=f"trade-invoice:void:{invoice_out.invoice_id}",
+        payload={
+            "request": jsonable_encoder(
+                {
+                    "invoice_id": invoice_id,
+                    "void_reason": normalized_void_reason,
+                    "notes": notes,
+                }
+            ),
+            "auto_cleared_payment_ids": auto_cleared_payment_ids,
             "invoice": _audit_invoice_payload(invoice_out),
         },
     )

@@ -276,6 +276,64 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             self.assertEqual(audit_event.payload["request"]["trade_id"], "T-INV-1")
             self.assertEqual(audit_event.payload["invoice"]["invoice_number"], "INV-1001")
 
+    def test_void_invoice_marks_not_required_and_clears_unpaid_payment_rows(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-VOID-1")
+        self._actualize_trade(admin_token, trade_id="T-INV-VOID-1", actual_quantity=1000)
+
+        issue_response = self.client.post(
+            "/settlement/invoices",
+            json={
+                "trade_id": "T-INV-VOID-1",
+                "invoice_number": "INV-VOID-1001",
+                "invoice_amount": 79250,
+                "due_at": "2026-04-10T12:00:00Z",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 201)
+        invoice_id = issue_response.json()["invoice_id"]
+
+        payment_response = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_reference": "WIRE-PENDING-VOID-1",
+                "payment_amount": 79250,
+                "due_at": "2026-04-12T12:00:00Z",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(payment_response.status_code, 201)
+        self.assertEqual(payment_response.json()["status"], "OVERDUE")
+
+        response = self.client.post(
+            f"/settlement/invoices/{invoice_id}/void",
+            json={"void_reason": "Duplicate invoice captured in error."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["invoice_id"], invoice_id)
+        self.assertEqual(body["status"], "NOT_REQUIRED")
+        self.assertEqual(body["void_reason"], "Duplicate invoice captured in error.")
+
+        with self.SessionLocal() as session:
+            invoice = session.get(TradeInvoice, invoice_id)
+            assert invoice is not None
+            payment = session.query(TradePayment).filter(TradePayment.invoice_id == invoice_id).one()
+            trade = session.query(Trade).filter(Trade.trade_id == "T-INV-VOID-1").one()
+
+            self.assertEqual(invoice.status, "NOT_REQUIRED")
+            self.assertEqual(invoice.voided_by, "settlement_admin")
+            self.assertEqual(invoice.void_reason, "Duplicate invoice captured in error.")
+            self.assertEqual(payment.status, "NOT_REQUIRED")
+            self.assertIn("Auto-cleared when invoice INV-VOID-1001 was voided.", payment.notes or "")
+            self.assertEqual(trade.invoice_status, "NOT_REQUIRED")
+            self.assertEqual(trade.payment_status, "NOT_REQUIRED")
+            self.assertEqual(trade.settlement_status, "SETTLED")
+
     def test_invoice_issue_candidates_endpoint_lists_unissued_trade_candidates(self) -> None:
         admin_token = self._bootstrap_admin()
         self._seed_trade(trade_id="T-INV-CANDIDATE")

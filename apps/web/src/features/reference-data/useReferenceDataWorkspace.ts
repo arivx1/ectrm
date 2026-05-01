@@ -22,6 +22,9 @@ import type {
   PriceIndexRecord,
   ReferenceRecord,
   ReferenceTab,
+  SpatialFeatureForm,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   UnitForm,
   UnitRecord,
 } from '../../shared/models'
@@ -29,6 +32,7 @@ import {
   DEFAULT_ASSET_STANDARDS as defaultAssetStandards,
   DEFAULT_COUNTERPARTY_STANDARDS as defaultCounterpartyStandards,
   DEFAULT_LOCATION_STANDARDS as defaultLocationStandards,
+  DEFAULT_SPATIAL_FEATURE_STANDARDS as defaultSpatialFeatureStandards,
 } from '../../shared/models'
 import { formatAssetGeometryInput } from './referenceDataFormState'
 
@@ -61,6 +65,23 @@ export function emptyAssetForm(assetStandards: AssetStandards = defaultAssetStan
     capacity_unit_code: '',
     operator_name: '',
     operating_status: assetStandards.default_operating_status,
+    description: '',
+  }
+}
+
+export function emptySpatialFeatureForm(
+  spatialFeatureStandards: SpatialFeatureStandards = defaultSpatialFeatureStandards,
+): SpatialFeatureForm {
+  return {
+    code: '',
+    name: '',
+    feature_kind: spatialFeatureStandards.default_feature_kind,
+    entity_type: '',
+    entity_code: '',
+    label_latitude: '',
+    label_longitude: '',
+    is_primary: false,
+    geometry_geojson: '',
     description: '',
   }
 }
@@ -171,7 +192,9 @@ type UseReferenceDataWorkspaceArgs = {
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
   assetStandards: AssetStandards
+  spatialFeatureStandards: SpatialFeatureStandards
   counterparties: CounterpartyRecord[]
   portfolios: PortfolioRecord[]
   activeBooks: ReferenceRecord[]
@@ -193,7 +216,9 @@ export function useReferenceDataWorkspace({
   currencies,
   units,
   locations,
+  spatialFeatures,
   assetStandards,
+  spatialFeatureStandards,
   counterparties,
   portfolios,
   activeBooks,
@@ -215,6 +240,7 @@ export function useReferenceDataWorkspace({
   const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<string | null>(null)
   const [selectedUnitCode, setSelectedUnitCode] = useState<string | null>(null)
   const [selectedLocationCode, setSelectedLocationCode] = useState<string | null>(null)
+  const [selectedSpatialFeatureCode, setSelectedSpatialFeatureCode] = useState<string | null>(null)
   const [selectedCounterpartyCode, setSelectedCounterpartyCode] = useState<string | null>(null)
   const [selectedPortfolioCode, setSelectedPortfolioCode] = useState<string | null>(null)
 
@@ -225,6 +251,7 @@ export function useReferenceDataWorkspace({
   const [currencyForm, setCurrencyForm] = useState(emptyCurrencyForm())
   const [unitForm, setUnitForm] = useState(emptyUnitForm(commodityClassOrder[0]))
   const [locationForm, setLocationForm] = useState(emptyLocationForm(locationStandards))
+  const [spatialFeatureForm, setSpatialFeatureForm] = useState(emptySpatialFeatureForm(spatialFeatureStandards))
   const [counterpartyForm, setCounterpartyForm] = useState(emptyCounterpartyForm(counterpartyStandards))
   const [portfolioForm, setPortfolioForm] = useState(emptyPortfolioForm())
 
@@ -235,6 +262,7 @@ export function useReferenceDataWorkspace({
   const [currencyFormMode, setCurrencyFormMode] = useState<'create' | 'edit'>('create')
   const [unitFormMode, setUnitFormMode] = useState<'create' | 'edit'>('create')
   const [locationFormMode, setLocationFormMode] = useState<'create' | 'edit'>('create')
+  const [spatialFeatureFormMode, setSpatialFeatureFormMode] = useState<'create' | 'edit'>('create')
   const [counterpartyFormMode, setCounterpartyFormMode] = useState<'create' | 'edit'>('create')
   const [portfolioFormMode, setPortfolioFormMode] = useState<'create' | 'edit'>('create')
   const effectiveReferenceSearch = combineTextFilters(referenceSearch, externalReferenceSearch)
@@ -246,6 +274,7 @@ export function useReferenceDataWorkspace({
   const resolvedSelectedCurrencyCode = resolveSelectedCode(selectedCurrencyCode, currencies)
   const resolvedSelectedUnitCode = resolveSelectedCode(selectedUnitCode, units)
   const resolvedSelectedLocationCode = resolveSelectedCode(selectedLocationCode, locations)
+  const resolvedSelectedSpatialFeatureCode = resolveSelectedCode(selectedSpatialFeatureCode, spatialFeatures)
   const resolvedSelectedCounterpartyCode = resolveSelectedCode(selectedCounterpartyCode, counterparties)
   const resolvedSelectedPortfolioCode = resolveSelectedCode(selectedPortfolioCode, portfolios)
 
@@ -276,6 +305,10 @@ export function useReferenceDataWorkspace({
   const selectedLocation = useMemo(
     () => locations.find((location) => location.code === resolvedSelectedLocationCode) ?? null,
     [locations, resolvedSelectedLocationCode],
+  )
+  const selectedSpatialFeature = useMemo(
+    () => spatialFeatures.find((feature) => feature.code === resolvedSelectedSpatialFeatureCode) ?? null,
+    [resolvedSelectedSpatialFeatureCode, spatialFeatures],
   )
   const selectedCounterparty = useMemo(
     () => counterparties.find((counterparty) => counterparty.code === resolvedSelectedCounterpartyCode) ?? null,
@@ -405,6 +438,23 @@ export function useReferenceDataWorkspace({
     })
   }, [effectiveReferenceSearch, locations])
 
+  const filteredSpatialFeatures = useMemo(() => {
+    const query = effectiveReferenceSearch.trim().toLowerCase()
+    return spatialFeatures.filter((feature) => {
+      if (!query) return true
+      return (
+        feature.code.toLowerCase().includes(query) ||
+        feature.name.toLowerCase().includes(query) ||
+        feature.feature_kind.toLowerCase().includes(query) ||
+        feature.geometry_type.toLowerCase().includes(query) ||
+        (feature.entity_type ?? '').toLowerCase().includes(query) ||
+        (feature.entity_code ?? '').toLowerCase().includes(query) ||
+        formatAssetGeometryInput(feature.geometry_geojson).toLowerCase().includes(query) ||
+        (feature.description ?? '').toLowerCase().includes(query)
+      )
+    })
+  }, [effectiveReferenceSearch, spatialFeatures])
+
   const filteredCounterparties = useMemo(() => {
     const query = effectiveReferenceSearch.trim().toLowerCase()
     return counterparties.filter((counterparty) => {
@@ -478,6 +528,8 @@ export function useReferenceDataWorkspace({
     }),
     [activeBooks, portfolioForm],
   )
+
+  const activeAssets = useMemo(() => assets.filter((asset) => asset.is_active), [assets])
 
   function startCreateBook() {
     setBookFormMode('create')
@@ -646,6 +698,32 @@ export function useReferenceDataWorkspace({
     })
   }
 
+  function startCreateSpatialFeature() {
+    setSpatialFeatureFormMode('create')
+    setSpatialFeatureForm(emptySpatialFeatureForm(spatialFeatureStandards))
+  }
+
+  function startEditSpatialFeature(code: string) {
+    const record = spatialFeatures.find((feature) => feature.code === code)
+    if (!record) {
+      return
+    }
+    setSelectedSpatialFeatureCode(code)
+    setSpatialFeatureFormMode('edit')
+    setSpatialFeatureForm({
+      code: record.code,
+      name: record.name,
+      feature_kind: record.feature_kind,
+      entity_type: record.entity_type ?? '',
+      entity_code: record.entity_code ?? '',
+      label_latitude: record.label_latitude?.toString() ?? '',
+      label_longitude: record.label_longitude?.toString() ?? '',
+      is_primary: record.is_primary,
+      geometry_geojson: formatAssetGeometryInput(record.geometry_geojson),
+      description: record.description ?? '',
+    })
+  }
+
   function startCreateCounterparty() {
     setCounterpartyFormMode('create')
     setCounterpartyForm(emptyCounterpartyForm(counterpartyStandards))
@@ -702,6 +780,7 @@ export function useReferenceDataWorkspace({
     setReferenceSearch,
     assets,
     locations,
+    spatialFeatures,
     selectedBookCode: resolvedSelectedBookCode,
     setSelectedBookCode,
     selectedAssetCode: resolvedSelectedAssetCode,
@@ -716,6 +795,8 @@ export function useReferenceDataWorkspace({
     setSelectedUnitCode,
     selectedLocationCode: resolvedSelectedLocationCode,
     setSelectedLocationCode,
+    selectedSpatialFeatureCode: resolvedSelectedSpatialFeatureCode,
+    setSelectedSpatialFeatureCode,
     selectedCounterpartyCode: resolvedSelectedCounterpartyCode,
     setSelectedCounterpartyCode,
     selectedPortfolioCode: resolvedSelectedPortfolioCode,
@@ -734,6 +815,8 @@ export function useReferenceDataWorkspace({
     setUnitForm,
     locationForm,
     setLocationForm,
+    spatialFeatureForm,
+    setSpatialFeatureForm,
     counterpartyForm,
     setCounterpartyForm,
     portfolioForm: resolvedPortfolioForm,
@@ -752,6 +835,8 @@ export function useReferenceDataWorkspace({
     setUnitFormMode,
     locationFormMode,
     setLocationFormMode,
+    spatialFeatureFormMode,
+    setSpatialFeatureFormMode,
     counterpartyFormMode,
     setCounterpartyFormMode,
     portfolioFormMode,
@@ -763,6 +848,7 @@ export function useReferenceDataWorkspace({
     selectedCurrency,
     selectedUnit,
     selectedLocation,
+    selectedSpatialFeature,
     selectedCounterparty,
     selectedPortfolio,
     filteredBooks,
@@ -772,9 +858,11 @@ export function useReferenceDataWorkspace({
     filteredCurrencies,
     filteredUnits,
     filteredLocations,
+    filteredSpatialFeatures,
     filteredCounterparties,
     filteredPortfolios,
     selectablePriceIndexUnits,
+    activeAssets,
     startCreateBook,
     startEditBook,
     startCreateAsset,
@@ -789,6 +877,8 @@ export function useReferenceDataWorkspace({
     startEditUnit,
     startCreateLocation,
     startEditLocation,
+    startCreateSpatialFeature,
+    startEditSpatialFeature,
     startCreateCounterparty,
     startEditCounterparty,
     startCreatePortfolio,

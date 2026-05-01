@@ -135,6 +135,62 @@ class AssetStandardsOut(BaseModel):
     operating_statuses: list[str]
 
 
+class SpatialFeatureCreate(ReferenceDataCreate):
+    code: str = Field(..., min_length=1, max_length=100)
+    feature_kind: str = Field(..., min_length=1, max_length=32)
+    geometry_geojson: dict[str, Any]
+    entity_type: Optional[str] = Field(None, min_length=1, max_length=32)
+    entity_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    label_latitude: Optional[float] = Field(None, ge=-90, le=90)
+    label_longitude: Optional[float] = Field(None, ge=-180, le=180)
+    is_primary: bool = False
+    source_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    source_url: Optional[str] = Field(None, min_length=1)
+    confidence: Optional[float] = Field(None, ge=0, le=1)
+    notes: Optional[str] = None
+
+
+class SpatialFeatureUpdate(ReferenceDataUpdate):
+    feature_kind: Optional[str] = Field(None, min_length=1, max_length=32)
+    geometry_geojson: Optional[dict[str, Any]] = None
+    entity_type: Optional[str] = Field(None, min_length=1, max_length=32)
+    entity_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    label_latitude: Optional[float] = Field(None, ge=-90, le=90)
+    label_longitude: Optional[float] = Field(None, ge=-180, le=180)
+    is_primary: Optional[bool] = None
+    source_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    source_url: Optional[str] = Field(None, min_length=1)
+    confidence: Optional[float] = Field(None, ge=0, le=1)
+    notes: Optional[str] = None
+
+
+class SpatialFeatureStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class SpatialFeatureOut(ReferenceDataOut):
+    code: str = Field(..., min_length=1, max_length=100)
+    feature_kind: str
+    geometry_type: str
+    geometry_geojson: dict[str, Any]
+    entity_type: Optional[str] = None
+    entity_code: Optional[str] = None
+    label_latitude: Optional[float] = None
+    label_longitude: Optional[float] = None
+    is_primary: bool
+    source_name: Optional[str] = None
+    source_url: Optional[str] = None
+    confidence: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class SpatialFeatureStandardsOut(BaseModel):
+    default_feature_kind: str
+    feature_kinds: list[str]
+    geometry_types: list[str]
+    entity_types: list[str]
+
+
 class CommodityCreate(ReferenceDataCreate):
     commodity_class: str = Field(..., min_length=1, max_length=50)
 

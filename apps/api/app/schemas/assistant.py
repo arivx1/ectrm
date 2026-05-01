@@ -71,14 +71,18 @@ AssistantActionType = Literal[
     "amend_trade",
     "cancel_trade",
     "record_delivery_event",
+    "reverse_delivery_event",
     "create_manual_accrual_entry",
     "reverse_accrual_entry",
     "issue_trade_confirmation",
     "record_trade_confirmation_response",
     "update_trade_workflow_item",
     "record_trade_actualization",
+    "void_trade_actualization",
     "issue_trade_invoice",
+    "void_trade_invoice",
     "create_trade_payment",
+    "reverse_trade_payment",
     "create_accounting_entry",
     "reverse_accounting_entry",
     "reprocess_document_ingestion",
@@ -1495,6 +1499,37 @@ class AssistantAgentAdminOut(AssistantAgentOut):
     updated_at: datetime
     updated_by: str
     version: int
+    latest_revision_id: Optional[int] = None
+    published_revision_id: Optional[int] = None
+    published_at: Optional[datetime] = None
+    published_by: Optional[str] = None
+    has_unpublished_revision: bool = False
+
+
+class AssistantAgentRevisionPayloadOut(AssistantAgentBase):
+    pass
+
+
+class AssistantAgentRevisionDiffOut(BaseModel):
+    field_key: str
+    label: str
+    current_value: str
+    next_value: str
+
+
+class AssistantAgentRevisionOut(BaseModel):
+    revision_id: int
+    agent_id: str
+    version: int
+    change_summary: list[str] = Field(default_factory=list)
+    diff_summary: list[AssistantAgentRevisionDiffOut] = Field(default_factory=list)
+    payload: AssistantAgentRevisionPayloadOut
+    created_at: datetime
+    created_by: str
+    published_at: Optional[datetime] = None
+    published_by: Optional[str] = None
+    restored_from_revision_id: Optional[int] = None
+    is_published: bool = False
 
 
 class AssistantAgentRoleArchetypeOut(BaseModel):
@@ -1751,6 +1786,8 @@ class AssistantAgentSelfUpdateEvidenceOut(BaseModel):
 
 
 class AssistantAgentSelfUpdateDraftOut(BaseModel):
+    revision_id: int
+    revision_version: int
     agent_id: str
     name: str
     description: str
@@ -1773,10 +1810,15 @@ class AssistantAgentSelfUpdateDraftOut(BaseModel):
     system_prompt: str
     source_brief: str
     change_summary: list[str] = Field(default_factory=list)
+    diff_summary: list[AssistantAgentRevisionDiffOut] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     builder_provider: AssistantProvider
     builder_model: str
     evidence: AssistantAgentSelfUpdateEvidenceOut
+    created_at: datetime
+    created_by: str
+    published_at: Optional[datetime] = None
+    published_by: Optional[str] = None
 
 class AssistantRunSummaryOut(BaseModel):
     conversation_id: Optional[int] = None

@@ -11,7 +11,15 @@ from apps.api.app.domains.assistant.services.action_specs import (
 
 __all__ = ["ACTION_HANDLERS", "ACTION_SPECS"]
 
-_READY_PREVIEW_ACTION_TYPES = frozenset({"issue_trade_invoice"})
+_READY_PREVIEW_ACTION_TYPES = frozenset(
+    {
+        "issue_trade_invoice",
+        "void_trade_invoice",
+        "reverse_trade_payment",
+        "reverse_delivery_event",
+        "void_trade_actualization",
+    }
+)
 
 
 def _action_spec(handler: AssistantActionHandler) -> AssistantActionSpec:

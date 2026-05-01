@@ -83,6 +83,80 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-04-29 - Treat Movement Corrections as Reversals and Voids, Not Deletes
+
+- Type: lesson
+- Domain: assistant movement and logistics execution
+- Applies to: `record_delivery_event`, `reverse_delivery_event`,
+  `record_trade_actualization`, `void_trade_actualization`, execute-capable
+  operations roles, and shipment correction previews
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/shipments.py`,
+  `apps/api/app/domains/operations/services/actualizations.py`,
+  `apps/api/app/domains/assistant/services/action_planners.py`,
+  `apps/api/app/domains/assistant/services/action_handlers.py`,
+  `apps/api/tests/test_shipments_api.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Lesson: when movement reality changes, preserve the operational audit trail
+  by correcting through explicit domain verbs instead of deleting history.
+  Delivery-event correction now appends an `EVENT_REVERSED` row that points at
+  the mistaken event and recomputes live execution status from the remaining
+  active business events, while actualization correction stamps `voided_at`,
+  `voided_by`, and `void_reason` on the original actualization row and clears
+  it from live projection state.
+- Deterministic opportunity: keep delivery-event activity filtering,
+  status recomputation, duplicate-reversal prevention, and actualization-void
+  projection logic inside the typed shipment and actualization services so
+  assistant planners only assemble evidence-backed payloads.
+- Agent autonomy impact: execute-capable operations roles can now reverse
+  mistaken movement events and void mistaken actualizations without per-action
+  approval, but only through previewable typed contracts with stale-state
+  rechecks, idempotency, provenance, and delegated-ability override logging.
+- Tests or evidence: focused shipment service coverage in
+  `apps/api/tests/test_shipments_api.py`; autonomous assistant execution
+  coverage in `apps/api/tests/test_assistant_api.py`.
+- Follow-up: apply the same non-destructive correction pattern to future
+  logistics scheduling or movement-side ledger seams instead of adding delete
+  shortcuts.
+
+### 2026-04-27 - Treat Settlement Corrections as Voids and Reversals, Not Deletes
+
+- Type: lesson
+- Domain: assistant settlement execution
+- Applies to: `issue_trade_invoice`, `void_trade_invoice`,
+  `create_trade_payment`, `reverse_trade_payment`, execute-capable settlement
+  roles, and settlement preview gates
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/settlement_invoices.py`,
+  `apps/api/app/domains/operations/services/settlement_payments.py`,
+  `apps/api/app/domains/assistant/services/action_planners.py`,
+  `apps/api/app/domains/assistant/services/action_handlers.py`,
+  `apps/api/tests/test_settlement_invoices_api.py`,
+  `apps/api/tests/test_settlement_payments_api.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Lesson: when settlement reality changes, preserve auditability by correcting
+  through explicit domain verbs instead of deleting rows. Invoice correction
+  now voids the invoice by marking it `NOT_REQUIRED` with `voided_at`,
+  `voided_by`, and `void_reason`, while payment correction appends an
+  offsetting negative payment with `reversal_of_payment_id` instead of
+  overwriting the original receipt.
+- Deterministic opportunity: keep payment-balance math, duplicate-reversal
+  prevention, payment-state drift tokens, invoice-relief unwinds, and preview
+  blockers inside the typed settlement services so assistant planners only
+  stage or execute evidence-backed payloads.
+- Agent autonomy impact: execute-capable settlement roles can now issue, void,
+  record, and reverse settlement records to reflect asserted real-world state
+  without per-action approval, but only through previewable typed contracts
+  with stale-state rechecks, idempotency, provenance, and explicit override
+  logging.
+- Tests or evidence: focused settlement API coverage for invoice void and
+  payment reversal flows, plus autonomous and approval-path assistant coverage
+  in `apps/api/tests/test_assistant_api.py`.
+- Follow-up: extend the same correction pattern to future logistics or movement
+  correction seams instead of introducing hard-delete side doors.
+
 ### 2026-04-27 - Promote Accrual and Accounting Autonomy Through Immutable Ledgers
 
 - Type: lesson
@@ -226,6 +300,7 @@ proposal form until a human owner approves the domain rule.
   revisions, admin review surfaces
 - Status: implemented
 - Source:
+  `apps/api/app/domains/assistant/services/agent_revisions.py`,
   `apps/api/app/domains/assistant/services/agent_self_updates.py`,
   `apps/api/app/domains/assistant/services/chat.py`,
   `apps/api/app/routes/assistant.py`, and
@@ -234,9 +309,12 @@ proposal form until a human owner approves the domain rule.
   that evidence into a constrained self-update draft instead of silently
   mutating the active prompt. The draft is built from recent needs-work
   feedback, failing evals, autonomy-review reasons, and matched knowledge-base
-  lessons, then loaded into the admin editor for review before save. The draft
-  preserves identity and governance metadata and may only preserve or narrow
-  workspaces, capabilities, live tools, or governed action types.
+  lessons, then stored as an unpublished agent revision with a visible diff
+  against the published snapshot. Admins can load that revision into the editor
+  for refinement, but the live agent changes only after an explicit publish
+  step. The draft preserves identity and governance metadata and may only
+  preserve or narrow workspaces, capabilities, live tools, or governed action
+  types.
 - Deterministic opportunity: repeated failure patterns that point to stable
   business rules should still graduate into typed policy, service logic, or
   eval coverage instead of staying prompt-only.
@@ -1138,26 +1216,29 @@ proposal form until a human owner approves the domain rule.
 
 - Type: algorithm-added
 - Domain: assistant action governance
-- Applies to: staged invoice issuance, action request approval, reviewer
-  surfaces, future sensitive action previews
+- Applies to: settlement preview-backed actions, action request approval,
+  execute-capable settlement roles, reviewer surfaces, future sensitive action
+  previews
 - Status: implemented
 - Source:
   [`settlement_invoices.py`](../../apps/api/app/domains/operations/services/settlement_invoices.py),
   [`action_requests.py`](../../apps/api/app/domains/assistant/services/action_requests.py),
   and [Agent Action Request Contract](./agent-action-request-contract.md)
 - Lesson: a sensitive staged action should expose a deterministic dry-run
-  preview before approval. For `issue_trade_invoice`, the preview resolves the
-  same invoice defaults and validation path as execution, lists affected records
-  and expected side effects, and marks the request blocked when the proposed
-  mutation is not safe to execute.
+  preview before approval or bounded execution. For settlement mutations such
+  as `issue_trade_invoice`, `void_trade_invoice`, and
+  `reverse_trade_payment`, the preview resolves the same normalization and
+  validation path as execution, lists affected records and expected side
+  effects, and marks the request blocked when the proposed mutation is not safe
+  to execute.
 - Deterministic opportunity: each future high-risk action preview should reuse
   its domain service normalization and stop conditions instead of summarizing
   model intent. Preview failures should block approval without creating side
   effects.
-- Agent autonomy impact: preview gates make staged agent work easier to review,
-  but they do not grant execution authority. Humans still approve invoice
-  issuance, and blocked previews should be rejected or restaged with corrected
-  input.
+- Agent autonomy impact: preview gates make staged agent work easier to review
+  and bounded execution safer. Execute-capable settlement roles may self-execute
+  only when the preview is ready, while blocked previews must still stop the
+  mutation path before any side effect runs.
 - Tests or evidence: focused assistant API tests cover ready preview output,
   blocked duplicate invoice previews, missing-preview approval failure, and
   no-side-effect guarantees. Web tests cover ready and blocked preview rendering
@@ -1296,13 +1377,14 @@ proposal form until a human owner approves the domain rule.
   logic with the same open-settlement and no-existing-invoice criteria as the
   workspace summary, plus deterministic invoice-issue preview blockers before
   any action is staged.
-- Agent autonomy impact: surfacing candidates improves read/explain/stage
-  quality without increasing authority. Issuance remains an approval-gated
-  `issue_trade_invoice` action and blocked previews should stop staging until
-  missing evidence is resolved.
+- Agent autonomy impact: surfacing candidates improves read/explain quality and
+  powers either staged review or bounded execution. Execute-capable settlement
+  roles may issue directly when the readiness preview is ready, and blocked
+  previews should stop both staging and self-execution until missing evidence
+  is resolved.
 - Tests or evidence: assistant tooling coverage verifies candidate payloads and
-  recommended approval-gated actions; assistant eval coverage verifies a
-  settlement read agent can call the candidate tool for pending invoices.
+  recommended governed actions; assistant eval coverage verifies a settlement
+  read agent can call the candidate tool for pending invoices.
 - Follow-up: if finance users need sorting or prioritization beyond oldest open
   execution, promote that rule as a named settlement queue policy.
 
@@ -1357,11 +1439,12 @@ proposal form until a human owner approves the domain rule.
 - Deterministic opportunity: the same typed candidate conditions should power
   both summary counts and assistant candidate reads. Candidate payloads should
   include supporting child-record counts, suggested read tools, blockers, and
-  only approval-gated recommended actions where the durable record link exists.
+  only recommended governed actions where the durable record link exists.
 - Agent autonomy impact: candidate reads improve triage and explanation while
-  preserving manual fallback. Confirmation issue and payment creation remain
-  approval-gated, and missing ledger records are blockers rather than hidden
-  mutations.
+  preserving manual fallback. Missing ledger records remain blockers rather
+  than hidden mutations, while execute-capable roles may only use the
+  published typed action path once the durable record link and previewable
+  evidence are both available.
 - Tests or evidence: assistant tooling tests cover child-row gaps and payment
   due candidates; assistant eval coverage verifies a managed read agent uses
   the candidate tool for trade-state counts.
@@ -1960,3 +2043,150 @@ proposal form until a human owner approves the domain rule.
   and `cd apps/web && npm run build`.
 - Follow-up: enforce stale-state checks in the command service, then move more
   callers and future action-request execution onto the same typed command path.
+
+### 2026-04-27 - Trade Commands Now Reject Stale last_event_id Bases Before Event Append
+
+- Type: algorithm-added
+- Domain: trade lifecycle stale-state enforcement and fail-closed mutation
+  safety
+- Applies to: trade amendments, trade cancellations, compatibility writes
+  through `/events`, and future action-request execution against the same seam
+- Status: implemented
+- Source:
+  `apps/api/app/domains/trading/services/trade_commands.py` and
+  `apps/api/tests/test_trade_commands_service.py`
+- Lesson: the trade command seam now treats `expected_last_event_id` as the
+  canonical stale-state anchor for amend and cancel operations. When the caller
+  supplies that basis and the current trade projection has moved on, the
+  command service raises `409` before any new lifecycle event is appended.
+- Deterministic opportunity: the same seam can now absorb more deterministic
+  prechecks, especially policy and reference-data validation, because drift
+  detection already happens before the event store is touched.
+- Agent autonomy impact: assistants and future automation should carry the same
+  `last_event_id` basis in action requests and execution calls, so approval-time
+  stale-state rechecks and execution-time stale-state guards stay aligned.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_commands_service
+  apps.api.tests.test_event_writes_service
+  apps.api.tests.test_admin_provenance_api`
+  and `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
+- Follow-up: require and expose this stale-state basis consistently across more
+  callers as the raw `/events` compatibility path is retired.
+
+### 2026-04-28 - Trade Commands Now Own First-Pass Authorization, Reference Checks, And Lifecycle Policy
+
+- Type: algorithm-added
+- Domain: trade lifecycle command validation and fail-fast governance
+- Applies to: create, amend, and cancel trade writes entering through the
+  governed command seam or the `/events` compatibility adapter
+- Status: implemented
+- Source:
+  `apps/api/app/domains/trading/services/trade_commands.py`,
+  `apps/api/tests/test_trade_commands_service.py`, and
+  `apps/api/tests/test_auth_http.py`
+- Lesson: the trade command seam now performs a first-pass policy and
+  reference-data screen before any event append. It blocks read-only viewer
+  sessions, catches invalid reference selections and duplicate creates on new
+  trades, and rejects amend or cancel requests that violate current lifecycle
+  policy such as closed-trade cancellation, credit-hold blocked fields, or
+  managed projection override rules.
+- Deterministic opportunity: keep promoting prechecks into the command layer
+  when they are read-only and deterministic, so the event store remains a
+  record of accepted business facts rather than a place where avoidable invalid
+  writes are attempted and then rolled back.
+- Agent autonomy impact: assistants and future automation now have a clearer
+  target contract. If they stage or execute trade changes, they must satisfy
+  the same actor-role, stale-state, reference-data, and lifecycle-policy
+  contract as the manual web path.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_commands_service
+  apps.api.tests.test_event_writes_service
+  apps.api.tests.test_admin_provenance_api`,
+  `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`,
+  and `.venv/bin/python -m unittest
+  apps.api.tests.test_auth_http.AuthHttpTests.test_trade_writes_require_session_and_use_session_actor
+  apps.api.tests.test_auth_http.AuthHttpTests.test_trade_http_rejects_duplicate_create_and_missing_amend`.
+- Follow-up: move the remaining deterministic trade validations that are still
+  buried inside projection application into reusable command-layer helpers, and
+  then decide whether command-specific role rules should tighten beyond the
+  initial governed-write allowlist.
+
+### 2026-04-29 - Trade Write Validation Now Lives In One Shared Deterministic Path
+
+- Type: algorithm-added
+- Domain: trade lifecycle normalization and validation reuse across command
+  prechecks and projection application
+- Applies to: `TradeCreated`, `TradeAmended`, and `TradeCancelled` handling in
+  the governed command seam and the event-application projection path
+- Status: implemented
+- Source:
+  `apps/api/app/domains/trading/services/trade_write_validation.py`,
+  `apps/api/app/domains/trading/services/trade_commands.py`, and
+  `apps/api/app/domains/trading/services/trade_event_application.py`
+- Lesson: trade write validation is now shared instead of duplicated. Create,
+  amend, and cancel normalization and deterministic business checks run through
+  `trade_write_validation.py`, so the command seam and projection application
+  consume the same reference-data, lifecycle, option, credit, and pretrade
+  alignment rules instead of carrying parallel copies that can drift.
+- Deterministic opportunity: keep moving more trade-write invariants into
+  reusable helpers that return normalized write plans, so future action-request
+  execution can reuse the exact same contract instead of rebuilding field-level
+  rules again.
+- Agent autonomy impact: assistants and future automation now have a more
+  stable target for staged trade changes because the validation behavior they
+  meet at command time is the same behavior that projection application uses to
+  accept and materialize the event.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_commands_service` and
+  `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
+- Follow-up: route more mutation entry points through explicit command services,
+  then decide whether the shared validator should start returning richer write
+  plans for settlement and workflow side effects as those seams move under the
+  same governed contract.
+
+### 2026-04-30 - Assistant Trade Actions Now Execute Through Trade Commands
+
+- Type: algorithm-added
+- Domain: governed assistant execution and trade mutation authority
+- Applies to: assistant `create_trade`, `amend_trade`, and `cancel_trade`
+  action requests in both review-approved and autonomous execution modes
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/action_handlers.py`,
+  `apps/api/app/domains/trading/services/trade_commands.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Lesson: assistant trade actions no longer append raw trade events or mutate
+  projections directly inside the assistant runtime. They now construct typed
+  `TradeWriteCommand` records with assistant-specific command IDs,
+  source-surface metadata, and review-context `last_event_id` basis, then
+  execute through `append_trade_write_command(...)`.
+- Deterministic opportunity: any future assistant, automation, or workflow
+  path that changes trades should reuse the same command seam instead of
+  building a parallel event-write shortcut, so stale-state, reference-data,
+  lifecycle, and provenance rules stay aligned.
+- Agent autonomy impact: autonomous agents remain subordinate to deterministic
+  trade services. Even execute-capable agents now use the exact same governed
+  trade write seam as manual and approval-driven trade changes, with distinct
+  `source_surface` values for reviewer-approved vs autonomous execution.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_trade_cancellation
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_create_trade_action
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_amend_trade_action`
+  and `.venv/bin/python -m unittest
+  apps.api.tests.test_trade_commands_service
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
+- Follow-up: move non-trade governed assistant mutations toward the same
+  pattern of typed application services with explicit source-surface and stale
+  basis propagation, then measure autonomous execution outcomes by command seam
+  instead of raw action type alone.

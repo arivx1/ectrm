@@ -188,6 +188,7 @@ class DeliveryEventType(StrEnum):
     HOLD_APPLIED = "HOLD_APPLIED"
     HOLD_RELEASED = "HOLD_RELEASED"
     CANCELLED = "CANCELLED"
+    EVENT_REVERSED = "EVENT_REVERSED"
 
 
 class DeliveryFieldSource(StrEnum):

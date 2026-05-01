@@ -15,10 +15,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.domains.operations.services.actualizations import void_trade_actualization
 from apps.api.app.domains.operations.services.shipments import list_delivery_obligations_for_operations
 from apps.api.app.domains.operations.services.shipments import append_delivery_event
+from apps.api.app.domains.operations.services.shipments import reverse_delivery_event
 from apps.api.app.domains.operations.services.shipments import synchronize_delivery_obligations_from_trades
 from apps.api.app.models import Base, Trade
+from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
+from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetail
 from apps.api.app.models.delivery_obligation import DeliveryObligation
@@ -47,6 +51,8 @@ class DeliveriesApiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.SessionLocal() as session:
+            session.query(TradeAccrualEntry).delete()
+            session.query(TradeAccrualLot).delete()
             session.query(TradeActualization).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(DeliveryEvent).delete()
@@ -755,3 +761,247 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(gas_delivery_after_sync.execution_status, "COMPLETED")
         self.assertEqual(gas_delivery_after_sync.latest_event_type, "DELIVERY_COMPLETED")
         self.assertEqual(gas_delivery_after_sync.event_count, 2)
+
+    def test_reverse_delivery_event_appends_reversal_and_recomputes_live_status(self) -> None:
+        with self.SessionLocal() as session:
+            synchronize_delivery_obligations_from_trades(
+                session,
+                actor_id="ops.sync",
+                now=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            )
+            append_delivery_event(
+                session,
+                delivery_id="DLV-T-GAS-1",
+                actor_id="scheduler.gas",
+                event_type="SCHEDULE_COMMITTED",
+                occurred_at=datetime(2026, 4, 8, 7, 0, tzinfo=timezone.utc),
+                location_code="HENRY_HUB",
+                reference_code="NOM-70",
+                notes="Timely nomination accepted.",
+                now=datetime(2026, 4, 8, 7, 5, tzinfo=timezone.utc),
+            )
+            completed_delivery = append_delivery_event(
+                session,
+                delivery_id="DLV-T-GAS-1",
+                actor_id="scheduler.gas",
+                event_type="DELIVERY_COMPLETED",
+                occurred_at=datetime(2026, 4, 8, 18, 0, tzinfo=timezone.utc),
+                location_code="HENRY_HUB",
+                reference_code="ALLOC-70",
+                notes="Flow confirmed complete.",
+                now=datetime(2026, 4, 8, 18, 5, tzinfo=timezone.utc),
+            )
+            completed_event_id = completed_delivery.delivery_events[0].event_id
+            reversed_delivery = reverse_delivery_event(
+                session,
+                delivery_id="DLV-T-GAS-1",
+                event_id=completed_event_id,
+                actor_id="ops.corrector",
+                reversal_reason="Completion was posted against the wrong cycle close.",
+                reversed_at=datetime(2026, 4, 8, 19, 0, tzinfo=timezone.utc),
+                source="ops-console",
+                notes="Reopen movement state while allocation is corrected.",
+                now=datetime(2026, 4, 8, 19, 5, tzinfo=timezone.utc),
+            )
+            session.commit()
+
+        self.assertEqual(reversed_delivery.execution_status, "SCHEDULED")
+        self.assertEqual(reversed_delivery.latest_event_type, "EVENT_REVERSED")
+        self.assertEqual(reversed_delivery.event_count, 3)
+        self.assertEqual(reversed_delivery.delivery_events[0].reversal_of_event_id, completed_event_id)
+        self.assertEqual(
+            reversed_delivery.delivery_events[0].reversal_reason,
+            "Completion was posted against the wrong cycle close.",
+        )
+
+        with self.SessionLocal() as session:
+            persisted_delivery = session.get(DeliveryObligation, "DLV-T-GAS-1")
+            self.assertIsNotNone(persisted_delivery)
+            if persisted_delivery is None:
+                raise AssertionError("Expected synchronized gas delivery to remain.")
+            self.assertEqual(persisted_delivery.execution_status, "SCHEDULED")
+            reversal_event = (
+                session.query(DeliveryEvent)
+                .filter(DeliveryEvent.delivery_id == "DLV-T-GAS-1", DeliveryEvent.event_type == "EVENT_REVERSED")
+                .one()
+            )
+            self.assertEqual(reversal_event.reversal_of_event_id, completed_event_id)
+            self.assertEqual(reversal_event.created_by, "ops.corrector")
+
+    def test_reverse_delivery_event_rejects_duplicate_and_reversal_targets(self) -> None:
+        with self.SessionLocal() as session:
+            synchronize_delivery_obligations_from_trades(
+                session,
+                actor_id="ops.sync",
+                now=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            )
+            completed_delivery = append_delivery_event(
+                session,
+                delivery_id="DLV-T-LOG-1",
+                actor_id="ops.logger",
+                event_type="DELIVERY_COMPLETED",
+                occurred_at=datetime(2026, 4, 6, 17, 0, tzinfo=timezone.utc),
+                location_code="CUSHING",
+                reference_code="BOL-LOG-1",
+                notes="Logged in error.",
+                now=datetime(2026, 4, 6, 17, 5, tzinfo=timezone.utc),
+            )
+            completed_event_id = completed_delivery.delivery_events[0].event_id
+            reverse_delivery_event(
+                session,
+                delivery_id="DLV-T-LOG-1",
+                event_id=completed_event_id,
+                actor_id="ops.corrector",
+                reversal_reason="Wrong truck ticket.",
+                reversed_at=datetime(2026, 4, 6, 18, 0, tzinfo=timezone.utc),
+                now=datetime(2026, 4, 6, 18, 5, tzinfo=timezone.utc),
+            )
+            session.commit()
+
+            reversal_event_id = (
+                session.query(DeliveryEvent.id)
+                .filter(
+                    DeliveryEvent.delivery_id == "DLV-T-LOG-1",
+                    DeliveryEvent.event_type == "EVENT_REVERSED",
+                )
+                .scalar()
+            )
+
+            with self.assertRaisesRegex(ValueError, "already been reversed"):
+                reverse_delivery_event(
+                    session,
+                    delivery_id="DLV-T-LOG-1",
+                    event_id=completed_event_id,
+                    actor_id="ops.corrector",
+                    reversal_reason="Duplicate retry.",
+                    now=datetime(2026, 4, 6, 18, 10, tzinfo=timezone.utc),
+                )
+
+            with self.assertRaisesRegex(ValueError, "already a reversal entry"):
+                reverse_delivery_event(
+                    session,
+                    delivery_id="DLV-T-LOG-1",
+                    event_id=reversal_event_id,
+                    actor_id="ops.corrector",
+                    reversal_reason="Should not reverse a reversal.",
+                    now=datetime(2026, 4, 6, 18, 15, tzinfo=timezone.utc),
+                )
+
+    def test_void_trade_actualization_marks_record_void_and_clears_projection(self) -> None:
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-LOG-1")
+            self.assertIsNotNone(trade)
+            if trade is None:
+                raise AssertionError("Expected logistics trade to exist.")
+            trade.actualization_status = "ACTUALIZED"
+            session.add(
+                TradeActualization(
+                    delivery_id="DLV-T-LOG-1",
+                    trade_id="T-LOG-1",
+                    leg_no=None,
+                    actual_quantity=1000,
+                    actualized_at=datetime(2026, 4, 7, 18, 0, tzinfo=timezone.utc),
+                    source="terminal-report",
+                    notes="Mistaken delivered quantity.",
+                    voided_at=None,
+                    voided_by=None,
+                    void_reason=None,
+                    created_at=datetime(2026, 4, 7, 18, 0, tzinfo=timezone.utc),
+                    created_by="ops.seed",
+                    updated_at=datetime(2026, 4, 7, 18, 0, tzinfo=timezone.utc),
+                    updated_by="ops.seed",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            actualization = void_trade_actualization(
+                session,
+                trade_id="T-LOG-1",
+                actor_id="ops.corrector",
+                void_reason="Movement was recorded against the wrong trade ticket.",
+                notes="Clear the mistaken delivered quantity from live state.",
+                now=datetime(2026, 4, 7, 19, 0, tzinfo=timezone.utc),
+            )
+            session.commit()
+
+        self.assertEqual(actualization.actualization_status, "PENDING")
+        self.assertIsNone(actualization.actual_quantity)
+        self.assertIsNone(actualization.actualized_at)
+        self.assertIsNotNone(actualization.voided_at)
+        self.assertEqual(actualization.void_reason, "Movement was recorded against the wrong trade ticket.")
+
+        with self.SessionLocal() as session:
+            persisted_actualization = (
+                session.query(TradeActualization)
+                .filter(TradeActualization.delivery_id == "DLV-T-LOG-1")
+                .one()
+            )
+            self.assertEqual(float(persisted_actualization.actual_quantity), 1000.0)
+            self.assertIsNotNone(persisted_actualization.voided_at)
+            self.assertEqual(persisted_actualization.voided_by, "ops.corrector")
+
+            payload = list_delivery_obligations_for_operations(
+                session,
+                now=datetime(2026, 4, 7, 19, 5, tzinfo=timezone.utc),
+            )
+
+        logistics = next(delivery for delivery in payload if delivery.delivery_id == "DLV-T-LOG-1")
+        self.assertEqual(logistics.actualization_status, "PENDING")
+        self.assertIsNone(logistics.actualized_quantity)
+        self.assertIsNone(logistics.actualized_at)
+
+    def test_void_trade_actualization_rejects_missing_and_already_voided_rows(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(LookupError, "does not have an actualization record to void"):
+                void_trade_actualization(
+                    session,
+                    trade_id="T-POWER-1",
+                    actor_id="ops.corrector",
+                    void_reason="Nothing to void yet.",
+                    now=datetime(2026, 4, 7, 12, 0, tzinfo=timezone.utc),
+                )
+
+            trade = session.get(Trade, "T-POWER-1")
+            self.assertIsNotNone(trade)
+            if trade is None:
+                raise AssertionError("Expected power trade to exist.")
+            trade.actualization_status = "ACTUALIZED"
+            session.add(
+                TradeActualization(
+                    delivery_id="DLV-T-POWER-1",
+                    trade_id="T-POWER-1",
+                    leg_no=None,
+                    actual_quantity=500,
+                    actualized_at=datetime(2026, 4, 7, 18, 0, tzinfo=timezone.utc),
+                    source="iso-report",
+                    notes="Temporary actualization.",
+                    voided_at=None,
+                    voided_by=None,
+                    void_reason=None,
+                    created_at=datetime(2026, 4, 7, 18, 0, tzinfo=timezone.utc),
+                    created_by="ops.seed",
+                    updated_at=datetime(2026, 4, 7, 18, 0, tzinfo=timezone.utc),
+                    updated_by="ops.seed",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            void_trade_actualization(
+                session,
+                trade_id="T-POWER-1",
+                actor_id="ops.corrector",
+                void_reason="Wrong interval schedule.",
+                now=datetime(2026, 4, 7, 19, 0, tzinfo=timezone.utc),
+            )
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "already voided"):
+                void_trade_actualization(
+                    session,
+                    trade_id="T-POWER-1",
+                    actor_id="ops.corrector",
+                    void_reason="Duplicate retry.",
+                    now=datetime(2026, 4, 7, 19, 5, tzinfo=timezone.utc),
+                )

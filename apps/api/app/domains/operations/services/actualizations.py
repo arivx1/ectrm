@@ -66,6 +66,13 @@ def _normalize_optional_text(value: object | None) -> str | None:
     return normalized or None
 
 
+def _normalize_required_text(value: object | None, *, field_name: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError(f"{field_name} is required.")
+    return normalized
+
+
 def _normalize_positive_quantity(value: object | None) -> Decimal:
     try:
         normalized = Decimal(str(value))
@@ -139,8 +146,12 @@ def build_delivery_actualization_projection(
             quantity_variance=None,
         )
 
+    active_actualization = actualization
+    if active_actualization is not None and _coerce_utc(active_actualization.voided_at) is not None:
+        active_actualization = None
+
     planned_quantity = planned_quantity_for_trade_leg(trade, leg)
-    actual_quantity = float(actualization.actual_quantity) if actualization is not None else None
+    actual_quantity = float(active_actualization.actual_quantity) if active_actualization is not None else None
     quantity_variance = (
         actual_quantity - planned_quantity
         if actual_quantity is not None and planned_quantity is not None
@@ -153,10 +164,10 @@ def build_delivery_actualization_projection(
             actual_quantity=actual_quantity,
         ),
         actual_quantity=actual_quantity,
-        actualized_at=_coerce_utc(actualization.actualized_at) if actualization is not None else None,
-        source=actualization.source if actualization is not None else None,
-        notes=actualization.notes if actualization is not None else None,
-        updated_at=_coerce_utc(actualization.updated_at) if actualization is not None else None,
+        actualized_at=_coerce_utc(active_actualization.actualized_at) if active_actualization is not None else None,
+        source=active_actualization.source if active_actualization is not None else None,
+        notes=active_actualization.notes if active_actualization is not None else None,
+        updated_at=_coerce_utc(active_actualization.updated_at) if active_actualization is not None else None,
         quantity_variance=quantity_variance,
     )
 
@@ -255,7 +266,10 @@ def trade_has_actualization_record(db: Session, *, trade_id: str) -> bool:
     return (
         db.execute(
             select(TradeActualization.id)
-            .where(TradeActualization.trade_id == trade_id)
+            .where(
+                TradeActualization.trade_id == trade_id,
+                TradeActualization.voided_at.is_(None),
+            )
             .limit(1)
         ).scalar_one_or_none()
         is not None
@@ -376,12 +390,133 @@ def upsert_delivery_actualization(
         row.notes = normalized_notes
         changed = True
 
+    if row.voided_at is not None or row.voided_by is not None or row.void_reason is not None:
+        row.voided_at = None
+        row.voided_by = None
+        row.void_reason = None
+        changed = True
+
     if changed:
         row.updated_at = reference_time
         row.updated_by = actor_id
         row.version += 1
     db.flush()
     return row, target
+
+
+def preview_trade_actualization_void(
+    db: Session,
+    *,
+    trade_id: str,
+    leg_no: int | None = None,
+    void_reason: object | None = None,
+    now: Optional[datetime] = None,
+) -> dict[str, object]:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    try:
+        target = load_delivery_target(db, trade_id=trade_id, leg_no=leg_no)
+    except (LookupError, ValueError) as exc:
+        return {
+            "preview_type": "void_trade_actualization",
+            "status": "BLOCKED",
+            "summary": f"Actualization void preview for trade {trade_id} is blocked.",
+            "affected_records": [],
+            "field_changes": [],
+            "expected_side_effects": [],
+            "warnings": [],
+            "blocking_reasons": [str(exc)],
+            "assumptions": [],
+        }
+
+    actualization = db.execute(
+        select(TradeActualization).where(TradeActualization.delivery_id == target.delivery_id)
+    ).scalars().first()
+    if actualization is None:
+        return {
+            "preview_type": "void_trade_actualization",
+            "status": "BLOCKED",
+            "summary": f"Actualization void preview for trade {trade_id} is blocked.",
+            "affected_records": [],
+            "field_changes": [],
+            "expected_side_effects": [],
+            "warnings": [],
+            "blocking_reasons": [f"Delivery {target.delivery_id} does not have an actualization record to void."],
+            "assumptions": [],
+        }
+
+    blocking_reasons: list[str] = []
+    if _coerce_utc(actualization.voided_at) is not None:
+        blocking_reasons.append(
+            f"Actualization record {actualization.id} is already voided and cannot be voided again."
+        )
+
+    normalized_void_reason = _normalize_optional_text(void_reason)
+    if normalized_void_reason is None:
+        blocking_reasons.append("Void reason is required.")
+
+    current_projection = build_delivery_actualization_projection(
+        trade=target.trade,
+        leg=target.leg,
+        actualization=actualization,
+    )
+    return {
+        "preview_type": "void_trade_actualization",
+        "status": "BLOCKED" if blocking_reasons else "READY",
+        "summary": (
+            f"Actualization for delivery {target.delivery_id} will be cleared from active movement state."
+            if not blocking_reasons
+            else f"Actualization void preview for delivery {target.delivery_id} is blocked."
+        ),
+        "affected_records": [
+            {
+                "type": "trade_actualization",
+                "id": str(actualization.id),
+                "label": f"Actualization {actualization.id}",
+                "summary": (
+                    f"Delivery {target.delivery_id} currently records {current_projection.actual_quantity} "
+                    f"{target.unit_of_measure or ''}".strip()
+                ),
+            },
+            {
+                "type": "delivery_obligation",
+                "id": target.delivery_id,
+                "label": f"Delivery {target.delivery_id}",
+                "summary": f"Current movement actualization status is {current_projection.status}.",
+            },
+            {
+                "type": "trade",
+                "id": target.trade_id,
+                "label": f"Trade {target.trade_id}",
+                "summary": f"Trade actualization status is {target.trade.actualization_status}.",
+            },
+        ],
+        "field_changes": [
+            {
+                "field": "actualization_status",
+                "current_value": current_projection.status,
+                "proposed_value": ActualizationStatus.PENDING.value,
+            },
+            {
+                "field": "voided_at",
+                "current_value": _coerce_utc(actualization.voided_at).isoformat() if actualization.voided_at else None,
+                "proposed_value": reference_time.isoformat(),
+            },
+            {
+                "field": "void_reason",
+                "current_value": actualization.void_reason,
+                "proposed_value": normalized_void_reason,
+            },
+        ],
+        "expected_side_effects": [
+            "Mark the actualization record voided with explicit correction metadata.",
+            "Refresh delivery and trade actualization projections back to pending state.",
+            "Synchronize derived accrual lots and workflow projections.",
+            "Append a TradeActualizationVoided audit event after execution.",
+        ],
+        "warnings": [],
+        "blocking_reasons": blocking_reasons,
+        "assumptions": [],
+    }
 
 
 def upsert_trade_actualization(
@@ -449,6 +584,75 @@ def upsert_trade_actualization(
     return actualization_out
 
 
+def void_trade_actualization(
+    db: Session,
+    *,
+    trade_id: str,
+    leg_no: int | None = None,
+    actor_id: str,
+    void_reason: object | None,
+    notes: object | None = None,
+    now: datetime | None = None,
+) -> DeliveryActualizationOut:
+    from apps.api.app.domains.accruals.services import synchronize_trade_accruals
+    from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
+
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    target = load_delivery_target(db, trade_id=trade_id, leg_no=leg_no)
+    actualization = db.execute(
+        select(TradeActualization).where(TradeActualization.delivery_id == target.delivery_id)
+    ).scalars().first()
+    if actualization is None:
+        raise LookupError(f"Delivery {target.delivery_id} does not have an actualization record to void.")
+    if _coerce_utc(actualization.voided_at) is not None:
+        raise ValueError(f"Actualization record {actualization.id} is already voided.")
+
+    previous_actualization = delivery_actualization_to_out(actualization, target=target)
+    actualization.voided_at = reference_time
+    actualization.voided_by = actor_id
+    actualization.void_reason = _normalize_required_text(void_reason, field_name="Void reason")
+    actualization.updated_at = reference_time
+    actualization.updated_by = actor_id
+    actualization.version += 1
+
+    synchronize_trade_actualization_status(db, trade=target.trade, now=reference_time)
+    synchronize_trade_accruals(
+        db,
+        trade_id=target.trade.trade_id,
+        actor_id=actor_id,
+        now=reference_time,
+    )
+    synchronize_trade_workflow_items(db, target.trade, actor_id=actor_id, now=reference_time)
+
+    actualization_out = delivery_actualization_to_out(actualization, target=target)
+    payload: dict[str, object] = {
+        "request": jsonable_encoder(
+            {
+                key: value
+                for key, value in {
+                    "void_reason": void_reason,
+                    "notes": notes,
+                }.items()
+                if value is not None
+            }
+        ),
+        "previous_actualization": _audit_actualization_payload(previous_actualization),
+        "actualization": _audit_actualization_payload(actualization_out),
+    }
+    if leg_no is not None:
+        payload["leg_no"] = leg_no
+    append_trade_audit_event(
+        db,
+        trade_id=actualization_out.trade_id,
+        actor_id=actor_id,
+        event_type="TradeActualizationVoided",
+        occurred_at=actualization.updated_at,
+        causation_id=f"trade-actualization:void:{actualization_out.actualization_id}",
+        payload=payload,
+    )
+    return actualization_out
+
+
 def delivery_actualization_to_out(
     actualization: TradeActualization,
     *,
@@ -466,12 +670,15 @@ def delivery_actualization_to_out(
         leg_no=target.leg_no,
         unit_of_measure=target.unit_of_measure,
         planned_quantity=target.planned_quantity,
-        actual_quantity=float(actualization.actual_quantity),
+        actual_quantity=projection.actual_quantity,
         quantity_variance=projection.quantity_variance,
         actualization_status=projection.status,
-        actualized_at=_coerce_utc(actualization.actualized_at) or datetime.now(timezone.utc),
-        source=actualization.source,
-        notes=actualization.notes,
+        actualized_at=projection.actualized_at,
+        source=projection.source,
+        notes=projection.notes,
+        voided_at=_coerce_utc(actualization.voided_at),
+        voided_by=actualization.voided_by,
+        void_reason=actualization.void_reason,
         created_at=_coerce_utc(actualization.created_at) or datetime.now(timezone.utc),
         created_by=actualization.created_by,
         updated_at=_coerce_utc(actualization.updated_at) or datetime.now(timezone.utc),

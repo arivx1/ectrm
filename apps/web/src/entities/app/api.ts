@@ -23,6 +23,8 @@ import type {
   PositionRow,
   PriceIndexRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   Trade,
   TradeConfirmationRecord,
   TradeInvoiceRecord,
@@ -319,6 +321,8 @@ export type ReferenceWorkspaceBootstrap = {
   units: UnitRecord[]
   locations: LocationRecord[]
   locationStandards: LocationStandards
+  spatialFeatures: SpatialFeatureRecord[]
+  spatialFeatureStandards: SpatialFeatureStandards
   assets: AssetRecord[]
   assetStandards: AssetStandards
   counterparties: CounterpartyRecord[]
@@ -818,6 +822,8 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    spatialFeatures,
+    spatialFeatureStandards,
     assets,
     assetStandards,
     counterparties,
@@ -850,6 +856,14 @@ export async function loadReferenceWorkspaceBootstrap(
     ),
     fetchJson<LocationStandards>(
       `${apiBase}/reference/locations/standards`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<SpatialFeatureRecord[]>(
+      `${apiBase}${withLimit('/reference/spatial-features', bootstrapQueryLimits.referenceData)}`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<SpatialFeatureStandards>(
+      `${apiBase}/reference/spatial-features/standards`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<AssetRecord[]>(
@@ -904,6 +918,8 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    spatialFeatures,
+    spatialFeatureStandards,
     assets,
     assetStandards,
     counterparties,

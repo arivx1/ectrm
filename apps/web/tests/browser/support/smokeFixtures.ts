@@ -1079,6 +1079,40 @@ export const assets = [
   },
 ]
 
+export const spatialFeatures = [
+  {
+    code: 'GULF_REGION',
+    name: 'Gulf Region',
+    feature_kind: 'REGION',
+    geometry_type: 'AREA',
+    geometry_geojson: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-93.8, 31.8],
+          [-92.5, 31.8],
+          [-92.5, 32.8],
+          [-93.8, 32.8],
+          [-93.8, 31.8],
+        ],
+      ],
+    },
+    entity_type: 'LOCATION',
+    entity_code: 'HENRY_HUB',
+    label_latitude: 32.2,
+    label_longitude: -93.1,
+    is_primary: true,
+    is_active: true,
+  },
+]
+
+export const spatialFeatureStandards = {
+  default_feature_kind: 'REGION',
+  feature_kinds: ['PIPELINE', 'REGION', 'ROUTE'],
+  geometry_types: ['AREA', 'LINE', 'POINT'],
+  entity_types: ['ASSET', 'LOCATION'],
+} as const
+
 export const assetStandards = {
   default_asset_class: 'PIPELINE',
   default_asset_type_by_class: {

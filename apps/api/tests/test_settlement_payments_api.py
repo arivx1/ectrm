@@ -233,6 +233,57 @@ class SettlementPaymentsApiTests(unittest.TestCase):
             self.assertEqual(workflow_item.status, "PAID")
             self.assertIn("Paid USD 80000.00", workflow_item.notes)
 
+    def test_reverse_paid_payment_creates_offsetting_entry_and_reopens_invoice_balance(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-PMT-REV-1")
+        invoice_id = self._issue_invoice(
+            admin_token,
+            trade_id="T-PMT-REV-1",
+            invoice_amount=80000,
+            due_at="2026-04-11T12:00:00Z",
+        )
+
+        payment_response = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_reference": "WIRE-REV-80000",
+                "payment_amount": 80000,
+                "status": "PAID",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(payment_response.status_code, 201)
+        original_payment_id = payment_response.json()["payment_id"]
+
+        response = self.client.post(
+            f"/settlement/payments/{original_payment_id}/reverse",
+            json={"reversal_reason": "Receipt was recorded against the wrong invoice."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["reversal_of_payment_id"], original_payment_id)
+        self.assertEqual(body["payment_amount"], -80000)
+        self.assertEqual(body["reversal_reason"], "Receipt was recorded against the wrong invoice.")
+
+        with self.SessionLocal() as session:
+            trade = session.query(Trade).filter(Trade.trade_id == "T-PMT-REV-1").one()
+            payments = (
+                session.query(TradePayment)
+                .filter(TradePayment.invoice_id == invoice_id)
+                .order_by(TradePayment.id.asc())
+                .all()
+            )
+
+            self.assertEqual(len(payments), 2)
+            self.assertEqual(float(payments[1].payment_amount), -80000.0)
+            self.assertEqual(payments[1].reversal_of_payment_id, original_payment_id)
+            self.assertEqual(payments[1].reversal_reason, "Receipt was recorded against the wrong invoice.")
+            self.assertEqual(trade.payment_status, "OVERDUE")
+            self.assertEqual(trade.settlement_status, "INVOICED")
+
     def test_accounting_role_can_create_payment(self) -> None:
         self._create_user(
             user_id="accounting.payment",

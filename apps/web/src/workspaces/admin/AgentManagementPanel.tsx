@@ -14,10 +14,12 @@ import {
   listAdminAssistantAgentEvalRuns,
   listAdminAssistantAgentEvals,
   listAdminAssistantAgents,
+  listAdminAssistantAgentRevisions,
   listAdminAssistantAgentWorkPackages,
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
+  publishAssistantAgentRevision,
   rejectAssistantAgentProfileRequest,
   runAssistantAgentEval,
   runAssistantAgentEvalSuite,
@@ -59,6 +61,8 @@ import type {
   AssistantAgentEvalRun,
   AssistantAgentEvalRunStatus,
   AssistantAgentHealthReview,
+  AssistantAgentRevision,
+  AssistantAgentRevisionPayload,
   AssistantAgentSelfUpdateDraft,
   AssistantAgentWorkPackage,
   AssistantAgentWorkPackageStatus,
@@ -307,30 +311,91 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
 }
 
 function toAgentFormFromSelfUpdateDraft(draft: AssistantAgentSelfUpdateDraft): AgentForm {
-  return {
-    agent_id: draft.agent_id,
+  return toAgentFormFromRevisionPayload({
     name: draft.name,
     description: draft.description,
     status: draft.status,
     scope: draft.scope,
-    provider: draft.provider ?? '',
-    model: draft.model ?? '',
-    role_key: draft.role_key ?? '',
-    profile_kind: draft.profile_kind ?? 'CUSTOM',
-    specialization_summary: draft.specialization_summary ?? '',
-    human_owner_role: draft.human_owner_role ?? '',
-    authority_ceiling: draft.authority_ceiling ?? '',
-    activation_notes: draft.activation_notes ?? '',
+    provider: draft.provider,
+    model: draft.model,
+    role_key: draft.role_key ?? null,
+    profile_kind: draft.profile_kind,
+    specialization_summary: draft.specialization_summary ?? null,
+    human_owner_role: draft.human_owner_role ?? null,
+    authority_ceiling: draft.authority_ceiling ?? null,
+    activation_notes: draft.activation_notes ?? null,
     profile_request_id: draft.profile_request_id ?? null,
     allowed_workspaces: [...draft.allowed_workspaces],
     capabilities: [...draft.capabilities],
     allowed_tools: [...draft.allowed_tools],
     allowed_action_types: [...draft.allowed_action_types],
-    daily_token_allocation:
-      draft.daily_token_allocation === null || draft.daily_token_allocation === undefined
-        ? ''
-        : String(draft.daily_token_allocation),
+    daily_token_allocation: draft.daily_token_allocation ?? null,
     system_prompt: draft.system_prompt,
+  }, draft.agent_id)
+}
+
+function toAgentFormFromRevisionPayload(payload: AssistantAgentRevisionPayload, agentId: string): AgentForm {
+  return {
+    agent_id: agentId,
+    name: payload.name,
+    description: payload.description,
+    status: payload.status,
+    scope: payload.scope,
+    provider: payload.provider ?? '',
+    model: payload.model ?? '',
+    role_key: payload.role_key ?? '',
+    profile_kind: payload.profile_kind ?? 'CUSTOM',
+    specialization_summary: payload.specialization_summary ?? '',
+    human_owner_role: payload.human_owner_role ?? '',
+    authority_ceiling: payload.authority_ceiling ?? '',
+    activation_notes: payload.activation_notes ?? '',
+    profile_request_id: payload.profile_request_id ?? null,
+    allowed_workspaces: [...payload.allowed_workspaces],
+    capabilities: [...payload.capabilities],
+    allowed_tools: [...payload.allowed_tools],
+    allowed_action_types: [...payload.allowed_action_types],
+    daily_token_allocation:
+      payload.daily_token_allocation === null || payload.daily_token_allocation === undefined
+        ? ''
+        : String(payload.daily_token_allocation),
+    system_prompt: payload.system_prompt,
+  }
+}
+
+function toRevisionFromSelfUpdateDraft(draft: AssistantAgentSelfUpdateDraft): AssistantAgentRevision {
+  return {
+    revision_id: draft.revision_id,
+    agent_id: draft.agent_id,
+    version: draft.revision_version,
+    change_summary: draft.change_summary,
+    diff_summary: draft.diff_summary,
+    payload: {
+      name: draft.name,
+      description: draft.description,
+      status: draft.status,
+      scope: draft.scope,
+      provider: draft.provider,
+      model: draft.model,
+      role_key: draft.role_key ?? null,
+      profile_kind: draft.profile_kind,
+      specialization_summary: draft.specialization_summary ?? null,
+      human_owner_role: draft.human_owner_role ?? null,
+      authority_ceiling: draft.authority_ceiling ?? null,
+      activation_notes: draft.activation_notes ?? null,
+      profile_request_id: draft.profile_request_id ?? null,
+      allowed_workspaces: draft.allowed_workspaces,
+      capabilities: draft.capabilities,
+      allowed_tools: draft.allowed_tools,
+      allowed_action_types: draft.allowed_action_types,
+      daily_token_allocation: draft.daily_token_allocation ?? null,
+      system_prompt: draft.system_prompt,
+    },
+    created_at: draft.created_at,
+    created_by: draft.created_by,
+    published_at: draft.published_at,
+    published_by: draft.published_by,
+    restored_from_revision_id: null,
+    is_published: Boolean(draft.published_at),
   }
 }
 
@@ -951,6 +1016,10 @@ export function AgentManagementPanel({
   const [selfUpdateDraft, setSelfUpdateDraft] = useState<AssistantAgentSelfUpdateDraft | null>(null)
   const [selfUpdateLoading, setSelfUpdateLoading] = useState(false)
   const [selfUpdateError, setSelfUpdateError] = useState('')
+  const [agentRevisions, setAgentRevisions] = useState<AssistantAgentRevision[]>([])
+  const [agentRevisionsLoading, setAgentRevisionsLoading] = useState(false)
+  const [agentRevisionsError, setAgentRevisionsError] = useState('')
+  const [publishingRevisionId, setPublishingRevisionId] = useState<number | null>(null)
   const [agentHealthReview, setAgentHealthReview] = useState<AssistantAgentHealthReview | null>(null)
   const [agentHealthReviewLoading, setAgentHealthReviewLoading] = useState(false)
   const [agentHealthReviewError, setAgentHealthReviewError] = useState('')
@@ -1172,6 +1241,32 @@ export function AgentManagementPanel({
     [adminEnabled],
   )
 
+  const loadAgentRevisions = useCallback(
+    async (agentId: string | null) => {
+      if (!adminEnabled || !agentId) {
+        setAgentRevisions([])
+        setAgentRevisionsError('')
+        setAgentRevisionsLoading(false)
+        return
+      }
+
+      setAgentRevisionsLoading(true)
+      setAgentRevisionsError('')
+      try {
+        const revisions = await listAdminAssistantAgentRevisions(appConfig.apiBase, agentId)
+        setAgentRevisions(revisions)
+      } catch (error) {
+        setAgentRevisions([])
+        setAgentRevisionsError(
+          error instanceof Error ? error.message : 'Could not load assistant agent revisions.',
+        )
+      } finally {
+        setAgentRevisionsLoading(false)
+      }
+    },
+    [adminEnabled],
+  )
+
   const loadAgentWorkPackages = useCallback(async () => {
     if (!adminEnabled) {
       setAgentWorkPackages([])
@@ -1254,6 +1349,10 @@ export function AgentManagementPanel({
       setSelfUpdateDraft(null)
       setSelfUpdateError('')
       setSelfUpdateLoading(false)
+      setAgentRevisions([])
+      setAgentRevisionsError('')
+      setAgentRevisionsLoading(false)
+      setPublishingRevisionId(null)
       setAgentHealthReview(null)
       setAgentHealthReviewError('')
       setAgentHealthReviewLoading(false)
@@ -1307,6 +1406,10 @@ export function AgentManagementPanel({
       setSelfUpdateDraft(null)
       setSelfUpdateError('')
       setSelfUpdateLoading(false)
+      setAgentRevisions([])
+      setAgentRevisionsError('')
+      setAgentRevisionsLoading(false)
+      setPublishingRevisionId(null)
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -1329,6 +1432,10 @@ export function AgentManagementPanel({
     setSelfUpdateDraft(null)
     setSelfUpdateError('')
     setSelfUpdateLoading(false)
+    setAgentRevisions([])
+    setAgentRevisionsError('')
+    setAgentRevisionsLoading(false)
+    setPublishingRevisionId(null)
     setAgentEvalRuns([])
     setAgentEvalRunsLoading(false)
     setAgentEvalError('')
@@ -1344,6 +1451,10 @@ export function AgentManagementPanel({
         : selectedAgent.allowed_workspaces[0] ?? 'assistant',
     )
   }, [selectedAgent, selectedAgentEvalRecords])
+
+  useEffect(() => {
+    void loadAgentRevisions(selectedAgent?.agent_id ?? null)
+  }, [loadAgentRevisions, selectedAgent?.agent_id])
 
   useEffect(() => {
     if (!controlTowerIntent) {
@@ -1968,12 +2079,18 @@ export function AgentManagementPanel({
     setSelfUpdateLoading(true)
     setSelfUpdateError('')
     setSelfUpdateDraft(null)
+    setAgentFlash(null)
 
     try {
       const draft = await generateAssistantAgentSelfUpdateDraft(appConfig.apiBase, selectedAgent.agent_id, {
         brief: selfUpdateBrief,
       })
       setSelfUpdateDraft(draft)
+      await loadAgentRevisions(selectedAgent.agent_id)
+      setAgentFlash({
+        tone: 'success',
+        message: `Stored self-update draft revision v${draft.revision_version} for ${selectedAgent.name}. Review the diff, then publish when ready.`,
+      })
     } catch (error) {
       setSelfUpdateError(
         error instanceof Error ? error.message : 'Could not generate the self-update draft.',
@@ -1991,8 +2108,57 @@ export function AgentManagementPanel({
     setEditForm(toAgentFormFromSelfUpdateDraft(selfUpdateDraft))
     setAgentFlash({
       tone: 'success',
-      message: `${selfUpdateDraft.name} self-update draft loaded into the editor. Review the narrowed scope and prompt before saving.`,
+      message: `${selfUpdateDraft.name} self-update draft revision loaded into the editor. Review the narrowed scope and prompt before saving.`,
     })
+  }
+
+  function handleLoadRevisionIntoEditor(revision: AssistantAgentRevision) {
+    setEditForm(toAgentFormFromRevisionPayload(revision.payload, revision.agent_id))
+    setAgentFlash({
+      tone: 'success',
+      message: `Revision v${revision.version} loaded into the editor for review.`,
+    })
+  }
+
+  async function handlePublishAgentRevision(revision: AssistantAgentRevision) {
+    if (!selectedAgent) {
+      return
+    }
+
+    setPublishingRevisionId(revision.revision_id)
+    setSelfUpdateError('')
+    setAgentRevisionsError('')
+    setAgentFlash(null)
+
+    try {
+      const published = await publishAssistantAgentRevision(
+        appConfig.apiBase,
+        selectedAgent.agent_id,
+        revision.revision_id,
+      )
+      await refreshAgents(published.agent_id)
+      await loadAgentRevisions(published.agent_id)
+      setActiveSupervisionIntent(null)
+      setSelfUpdateDraft((current) =>
+        current && current.revision_id === revision.revision_id
+          ? {
+              ...current,
+              published_at: published.published_at ?? current.published_at,
+              published_by: published.published_by ?? current.published_by,
+            }
+          : current,
+      )
+      setAgentFlash({
+        tone: 'success',
+        message: `Revision v${revision.version} is now published to ${published.name}.`,
+      })
+    } catch (error) {
+      setAgentRevisionsError(
+        error instanceof Error ? error.message : 'Could not publish the assistant agent revision.',
+      )
+    } finally {
+      setPublishingRevisionId(null)
+    }
   }
 
   async function handleGenerateAgentHealthReview() {
@@ -4765,15 +4931,38 @@ export function AgentManagementPanel({
                         Apply To Editor
                       </button>
                     ) : null}
+                    {selfUpdateDraft ? (
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        onClick={() => void handlePublishAgentRevision(toRevisionFromSelfUpdateDraft(selfUpdateDraft))}
+                        disabled={publishingRevisionId === selfUpdateDraft.revision_id}
+                      >
+                        {publishingRevisionId === selfUpdateDraft.revision_id
+                          ? 'Publishing...'
+                          : 'Publish Draft Revision'}
+                      </button>
+                    ) : null}
                   </div>
 
                   {selfUpdateError ? (
                     <div className="feedback-banner feedback-banner-error">{selfUpdateError}</div>
                   ) : null}
 
+                  {agentRevisionsError ? (
+                    <div className="feedback-banner feedback-banner-error">{agentRevisionsError}</div>
+                  ) : null}
+
                   {selfUpdateDraft ? (
                     <>
                       <div className="assistant-builder-preview-grid">
+                        <div className="assistant-sidebar-block">
+                          <strong>Draft revision</strong>
+                          <p>v{selfUpdateDraft.revision_version}</p>
+                          <small>
+                            Stored {formatDate(selfUpdateDraft.created_at)} by {selfUpdateDraft.created_by}
+                          </small>
+                        </div>
                         <div className="assistant-sidebar-block">
                           <strong>Suggested changes</strong>
                           <p>{selfUpdateDraft.change_summary.length}</p>
@@ -4790,9 +4979,9 @@ export function AgentManagementPanel({
                           <small>{selfUpdateDraft.evidence.failing_eval_cases[0] ?? 'No failing evals captured.'}</small>
                         </div>
                         <div className="assistant-sidebar-block">
-                          <strong>Builder</strong>
-                          <p>{selfUpdateDraft.builder_model}</p>
-                          <small>{selfUpdateDraft.builder_provider.toUpperCase()} generated this review draft.</small>
+                          <strong>Visible diffs</strong>
+                          <p>{selfUpdateDraft.diff_summary.length}</p>
+                          <small>{selfUpdateDraft.diff_summary[0]?.label ?? 'No field-level diff returned.'}</small>
                         </div>
                       </div>
 
@@ -4803,6 +4992,16 @@ export function AgentManagementPanel({
                           </small>
                         ))}
                       </div>
+
+                      {selfUpdateDraft.diff_summary.length > 0 ? (
+                        <div className="assistant-builder-warning-list">
+                          {selfUpdateDraft.diff_summary.map((entry) => (
+                            <small key={`${entry.field_key}-${entry.next_value}`} className="form-note">
+                              {entry.label}: {entry.current_value} -> {entry.next_value}
+                            </small>
+                          ))}
+                        </div>
+                      ) : null}
 
                       {selfUpdateDraft.warnings.length > 0 ? (
                         <div className="assistant-builder-warning-list">
@@ -4815,6 +5014,55 @@ export function AgentManagementPanel({
                       ) : null}
                     </>
                   ) : null}
+
+                  <div className="assistant-builder-warning-list">
+                    <strong>Recent revisions</strong>
+                    {agentRevisionsLoading ? (
+                      <small className="form-note">Loading recent revision history...</small>
+                    ) : agentRevisions.length === 0 ? (
+                      <small className="form-note">
+                        No stored revisions yet. Generate a self-update draft or save the agent to start revision history.
+                      </small>
+                    ) : (
+                      agentRevisions.map((revision) => (
+                        <div key={revision.revision_id} className="assistant-sidebar-block">
+                          <strong>
+                            v{revision.version} {revision.is_published ? 'Published' : 'Draft'}
+                          </strong>
+                          <p>{revision.change_summary[0] ?? 'No change summary recorded.'}</p>
+                          <small>
+                            {formatDate(revision.created_at)} by {revision.created_by}
+                          </small>
+                          <small>
+                            {revision.diff_summary.length > 0
+                              ? `${revision.diff_summary.length} visible diffs`
+                              : revision.is_published
+                                ? 'Matches the current published revision.'
+                                : 'No field-level diff summary available.'}
+                          </small>
+                          <div className="toolbar settings-actions">
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              onClick={() => handleLoadRevisionIntoEditor(revision)}
+                            >
+                              Load Into Editor
+                            </button>
+                            {!revision.is_published ? (
+                              <button
+                                type="button"
+                                className="button button-primary"
+                                onClick={() => void handlePublishAgentRevision(revision)}
+                                disabled={publishingRevisionId === revision.revision_id}
+                              >
+                                {publishingRevisionId === revision.revision_id ? 'Publishing...' : 'Publish'}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
 
                 <div className="assistant-admin-form-grid">

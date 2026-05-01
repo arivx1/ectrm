@@ -66,10 +66,12 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         ),
         maximum_action_types=(
             "record_delivery_event",
+            "reverse_delivery_event",
             "issue_trade_confirmation",
             "record_trade_confirmation_response",
             "update_trade_workflow_item",
             "record_trade_actualization",
+            "void_trade_actualization",
             "reprocess_document_ingestion",
         ),
         authority_ceiling="EXECUTE",
@@ -85,7 +87,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Reduced overdue workflow items and confirmation follow-up time.",
         ),
         required_eval_coverage=(
-            "Allowed operational action execution.",
+            "Allowed operational action execution, including movement corrections.",
             "Denied unsupported trade, settlement, and policy actions.",
             "Tool allowlist enforcement.",
         ),
@@ -119,7 +121,12 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_workflow_items",
             "get_workspace_summary",
         ),
-        maximum_action_types=("issue_trade_invoice", "create_trade_payment"),
+        maximum_action_types=(
+            "issue_trade_invoice",
+            "void_trade_invoice",
+            "create_trade_payment",
+            "reverse_trade_payment",
+        ),
         authority_ceiling="EXECUTE",
         approval_rules=("Settlement Lead audits executed invoice and payment actions.",),
         stop_conditions=(
@@ -131,7 +138,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Lower finance review time per invoice or payment exception.",
         ),
         required_eval_coverage=(
-            "Allowed invoice and payment action execution.",
+            "Allowed invoice and payment action execution, including settlement corrections.",
             "Denied cash-release or ambiguous settlement requests.",
             "Settlement tool allowlist enforcement.",
         ),
@@ -225,7 +232,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
     AssistantAgentRoleArchetype(
         role_key="movement-controller-agent",
         name="Movement Controller Agent",
-        description="Tracks delivery and movement reality with bounded actualization execution and blocker synchronization.",
+        description="Tracks delivery and movement reality with bounded event, correction, and actualization execution.",
         catalog_status="SEEDED",
         mission=(
             "Reflect observed movement and delivery reality into internal operational records when evidence is clear.",
@@ -244,7 +251,13 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "get_document_ingestion",
             "get_workspace_summary",
         ),
-        maximum_action_types=("record_delivery_event", "record_trade_actualization", "update_trade_workflow_item"),
+        maximum_action_types=(
+            "record_delivery_event",
+            "reverse_delivery_event",
+            "record_trade_actualization",
+            "void_trade_actualization",
+            "update_trade_workflow_item",
+        ),
         authority_ceiling="EXECUTE",
         approval_rules=(
             "Operations Lead audits executed actualization and workflow synchronization actions plus any delegated-ability overrides.",
@@ -259,7 +272,9 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         ),
         required_eval_coverage=(
             "Allowed delivery-event execution.",
+            "Allowed delivery-event reversal execution.",
             "Allowed actualization execution.",
+            "Allowed actualization void execution.",
             "Allowed workflow synchronization for delivery blockers.",
             "Denied external scheduling commitment.",
         ),
@@ -526,7 +541,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_workflow_items",
             "get_workspace_summary",
         ),
-        maximum_action_types=("issue_trade_invoice",),
+        maximum_action_types=("issue_trade_invoice", "void_trade_invoice"),
         authority_ceiling="EXECUTE",
         approval_rules=("Settlement Lead audits executed invoice issuance and invoice-readiness judgment.",),
         stop_conditions=(
@@ -538,7 +553,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Invoice-specific exceptions are easier to triage without pulling a broader settlement agent into every request.",
         ),
         required_eval_coverage=(
-            "Allowed invoice issuance execution.",
+            "Allowed invoice issuance and void execution.",
             "Denied payment or accounting mutation from invoice-only scope.",
             "Invoice readiness explanation grounded in settlement evidence.",
         ),
@@ -826,7 +841,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
     AssistantAgentRoleArchetype(
         role_key="logistics-coordinator",
         name="Logistics Coordinator",
-        description="Manages delivery readiness, scheduling detail, logistics blockers, and governed movement actualization.",
+        description="Manages delivery readiness, scheduling detail, logistics blockers, and governed movement correction.",
         catalog_status="PHASE_2_PLUS",
         mission=("Coordinate logistics blockers and readiness without creating external scheduling commitments.",),
         human_owner_role="Operations Lead",
@@ -840,13 +855,18 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "get_trade_workbench",
             "get_workspace_summary",
         ),
-        maximum_action_types=("record_delivery_event", "record_trade_actualization"),
+        maximum_action_types=(
+            "record_delivery_event",
+            "reverse_delivery_event",
+            "record_trade_actualization",
+            "void_trade_actualization",
+        ),
         authority_ceiling="EXECUTE",
         approval_rules=("Operations Lead audits executed movement actualization and delivery-event changes.",),
         stop_conditions=("Any requested step would create an external logistics commitment.",),
         success_metrics=("Delivery blockers and readiness gaps are clearer to operations users.",),
         required_eval_coverage=(
-            "Allowed delivery-event and actualization execution.",
+            "Allowed delivery-event, reversal, and actualization correction execution.",
             "Denied scheduling commitment.",
         ),
         base_prompt_guidance=("Separate internal readiness from external commitment.",),

@@ -8,6 +8,9 @@ from apps.api.app.db.engine import SessionLocal
 from apps.api.app.domains.reference_data.services.asset_catalog_import import (
     import_reference_asset_catalog,
 )
+from apps.api.app.domains.reference_data.services.asset_reference_normalization import (
+    normalize_reference_asset_links,
+)
 
 
 def main() -> None:
@@ -19,6 +22,11 @@ def main() -> None:
         action="store_true",
         help="Skip rows whose asset codes already exist instead of replacing them.",
     )
+    parser.add_argument(
+        "--normalize-references",
+        action="store_true",
+        help="Normalize imported asset commodity and location links to curated reference codes after import.",
+    )
     args = parser.parse_args()
 
     with SessionLocal() as session:
@@ -28,7 +36,18 @@ def main() -> None:
             requested_by=args.requested_by,
             replace_existing=not args.preserve_existing,
         )
-    print(json.dumps(asdict(summary), indent=2, sort_keys=True))
+        normalization_summary = (
+            normalize_reference_asset_links(
+                session,
+                requested_by=args.requested_by,
+            )
+            if args.normalize_references
+            else None
+        )
+    payload = {"import": asdict(summary)}
+    if normalization_summary is not None:
+        payload["reference_normalization"] = asdict(normalization_summary)
+    print(json.dumps(payload, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

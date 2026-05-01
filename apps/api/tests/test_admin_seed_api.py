@@ -145,7 +145,13 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(session.get(AssistantAgent, "movement-controller-agent").authority_ceiling, "EXECUTE")
             self.assertEqual(
                 session.get(AssistantAgent, "movement-controller-agent").allowed_action_types,
-                ["record_delivery_event", "record_trade_actualization", "update_trade_workflow_item"],
+                [
+                    "record_delivery_event",
+                    "reverse_delivery_event",
+                    "record_trade_actualization",
+                    "void_trade_actualization",
+                    "update_trade_workflow_item",
+                ],
             )
             self.assertEqual(
                 session.get(AssistantAgent, "trade-capture-agent").allowed_action_types,
@@ -162,6 +168,19 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(
                 session.get(AssistantAgent, "accounting-posting-agent").allowed_action_types,
                 ["create_accounting_entry", "reverse_accounting_entry"],
+            )
+            self.assertEqual(
+                session.get(AssistantAgent, "settlement-copilot").allowed_action_types,
+                [
+                    "issue_trade_invoice",
+                    "void_trade_invoice",
+                    "create_trade_payment",
+                    "reverse_trade_payment",
+                ],
+            )
+            self.assertEqual(
+                session.get(AssistantAgent, "invoice-controller-agent").allowed_action_types,
+                ["issue_trade_invoice", "void_trade_invoice"],
             )
             self.assertEqual(session.get(AssistantAgent, "confirmation-controller-agent").allowed_action_types, ["issue_trade_confirmation", "record_trade_confirmation_response", "update_trade_workflow_item"])
             self.assertEqual(session.get(AssistantAgent, "workflow-controller-agent").authority_ceiling, "EXECUTE")

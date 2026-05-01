@@ -50,6 +50,7 @@ from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
+from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_prompt_navigation_outcome import AssistantPromptNavigationOutcome
@@ -188,6 +189,7 @@ class AssistantApiTests(unittest.TestCase):
             session.query(AssistantRun).delete()
             session.query(AssistantConversation).delete()
             session.query(AssistantAgentEval).delete()
+            session.query(AssistantAgentRevision).delete()
             session.query(AssistantAgent).delete()
             session.query(AssistantAgentProfileRequest).delete()
             session.query(MutationProvenanceRecord).delete()
@@ -282,10 +284,12 @@ class AssistantApiTests(unittest.TestCase):
             trade_ops["maximum_action_types"],
             [
                 "record_delivery_event",
+                "reverse_delivery_event",
                 "issue_trade_confirmation",
                 "record_trade_confirmation_response",
                 "update_trade_workflow_item",
                 "record_trade_actualization",
+                "void_trade_actualization",
                 "reprocess_document_ingestion",
             ],
         )
@@ -293,7 +297,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(trade_ops["stop_conditions"]), 1)
         self.assertGreaterEqual(len(trade_ops["required_eval_coverage"]), 1)
         self.assertEqual(trade_ops["eval_gate"]["status"], "PASS")
-        self.assertIn("Allowed operational action execution.", trade_ops["eval_gate"]["covered_cases"])
+        self.assertIn(
+            "Allowed operational action execution, including movement corrections.",
+            trade_ops["eval_gate"]["covered_cases"],
+        )
         self.assertEqual(trade_ops["eval_gate"]["missing_cases"], [])
 
         pre_trade = next(row for row in payload if row["role_key"] == "pre-trade-structuring-agent")
@@ -400,7 +407,13 @@ class AssistantApiTests(unittest.TestCase):
             self.assertIn(profile["eval_gate"]["status"], {"PASS", "BLOCKED"})
         self.assertEqual(
             profiles["movement-controller-agent"]["allowed_action_types"],
-            ["record_delivery_event", "record_trade_actualization", "update_trade_workflow_item"],
+            [
+                "record_delivery_event",
+                "reverse_delivery_event",
+                "record_trade_actualization",
+                "void_trade_actualization",
+                "update_trade_workflow_item",
+            ],
         )
         self.assertEqual(
             profiles["trade-capture-agent"]["allowed_action_types"],
@@ -416,6 +429,19 @@ class AssistantApiTests(unittest.TestCase):
             ["create_accounting_entry", "reverse_accounting_entry"],
         )
         self.assertEqual(profiles["accounting-posting-agent"]["authority_ceiling"], "EXECUTE")
+        self.assertEqual(
+            profiles["settlement-copilot"]["allowed_action_types"],
+            [
+                "issue_trade_invoice",
+                "void_trade_invoice",
+                "create_trade_payment",
+                "reverse_trade_payment",
+            ],
+        )
+        self.assertEqual(
+            profiles["invoice-controller-agent"]["allowed_action_types"],
+            ["issue_trade_invoice", "void_trade_invoice"],
+        )
         self.assertEqual(
             profiles["confirmation-controller-agent"]["allowed_action_types"],
             ["issue_trade_confirmation", "record_trade_confirmation_response", "update_trade_workflow_item"],
@@ -460,6 +486,8 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(action_spec.planner.action_type, entry.name)
 
         self.assertTrue(ACTION_SPECS["issue_trade_invoice"].requires_ready_preview)
+        self.assertTrue(ACTION_SPECS["void_trade_invoice"].requires_ready_preview)
+        self.assertTrue(ACTION_SPECS["reverse_trade_payment"].requires_ready_preview)
         self.assertFalse(ACTION_SPECS["cancel_trade"].requires_ready_preview)
 
     def test_action_planner_registry_covers_all_published_action_types(self) -> None:
@@ -483,12 +511,16 @@ class AssistantApiTests(unittest.TestCase):
                 "issue_trade_confirmation",
                 "update_trade_workflow_item",
                 "record_delivery_event",
+                "reverse_delivery_event",
                 "record_trade_actualization",
+                "void_trade_actualization",
                 "record_trade_confirmation_response",
                 "create_manual_accrual_entry",
                 "reverse_accrual_entry",
                 "issue_trade_invoice",
+                "void_trade_invoice",
                 "create_trade_payment",
+                "reverse_trade_payment",
                 "create_accounting_entry",
                 "reverse_accounting_entry",
                 "reprocess_document_ingestion",
@@ -508,7 +540,15 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(payload["role_key"], "settlement-copilot")
         self.assertEqual(payload["catalog_status"], "SEEDED")
         self.assertEqual(payload["current_profile_ids"], ["settlement-copilot"])
-        self.assertEqual(payload["maximum_action_types"], ["issue_trade_invoice", "create_trade_payment"])
+        self.assertEqual(
+            payload["maximum_action_types"],
+            [
+                "issue_trade_invoice",
+                "void_trade_invoice",
+                "create_trade_payment",
+                "reverse_trade_payment",
+            ],
+        )
 
     def test_admin_role_archetype_detail_returns_404_for_unknown_role(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
@@ -1006,14 +1046,18 @@ class AssistantApiTests(unittest.TestCase):
                 "amend_trade",
                 "cancel_trade",
                 "record_delivery_event",
+                "reverse_delivery_event",
                 "create_manual_accrual_entry",
                 "reverse_accrual_entry",
                 "issue_trade_confirmation",
                 "record_trade_confirmation_response",
                 "update_trade_workflow_item",
                 "record_trade_actualization",
+                "void_trade_actualization",
                 "issue_trade_invoice",
+                "void_trade_invoice",
                 "create_trade_payment",
+                "reverse_trade_payment",
                 "create_accounting_entry",
                 "reverse_accounting_entry",
                 "reprocess_document_ingestion",
@@ -1312,11 +1356,27 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(payload["allowed_action_types"], [])
         self.assertEqual(payload["builder_provider"], "openai")
         self.assertEqual(payload["builder_model"], "gpt-5")
+        self.assertIsInstance(payload["revision_id"], int)
+        self.assertGreaterEqual(payload["revision_version"], 2)
         self.assertEqual(len(payload["change_summary"]), 2)
+        self.assertGreaterEqual(len(payload["diff_summary"]), 2)
+        self.assertEqual(payload["created_by"], "assistant_user")
+        self.assertIsNone(payload["published_at"])
         self.assertIn("queue owner", payload["evidence"]["recent_needs_work_feedback"][0])
         self.assertIn("Queue owner coverage", payload["evidence"]["failing_eval_cases"][0])
         self.assertIn("Focus on missing queue-owner evidence", payload["source_brief"])
         self.assertEqual(payload["warnings"], [])
+
+        with self.SessionLocal() as session:
+            record = session.get(AssistantAgent, "noisy-agent")
+            assert record is not None
+            self.assertIsNone(record.published_revision_id)
+            self.assertEqual(record.latest_revision_id, payload["revision_id"])
+            self.assertEqual(record.published_snapshot["allowed_action_types"], ["update_trade_workflow_item"])
+            revision = session.get(AssistantAgentRevision, payload["revision_id"])
+            assert revision is not None
+            self.assertIsNone(revision.published_at)
+            self.assertEqual(revision.payload["allowed_action_types"], [])
 
         request_payload = captured_request["payload"]
         assert isinstance(request_payload, dict)
@@ -1327,6 +1387,101 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("Surface the queue owner before staging workflow updates.", request_payload["input"])
         self.assertIn("Did not identify the workflow owner", request_payload["input"])
         self.assertIn("Do not expand allowed workspaces, capabilities, live tools, or governed actions.", request_payload["input"])
+
+        revisions_response = self.client.get(
+            "/admin/assistant/agents/noisy-agent/revisions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(revisions_response.status_code, 200)
+        revisions_payload = revisions_response.json()
+        self.assertEqual(revisions_payload[0]["revision_id"], payload["revision_id"])
+        self.assertFalse(revisions_payload[0]["is_published"])
+        self.assertEqual(revisions_payload[0]["payload"]["allowed_action_types"], [])
+
+    def test_admin_publish_agent_revision_applies_stored_self_update_draft_to_live_agent(self) -> None:
+        token = self._create_session_token()
+        self._create_agent(
+            agent_id="publishable-agent",
+            name="Publishable Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "operations"],
+            capabilities=["READ", "EXPLAIN", "ACTION"],
+            allowed_tools=["list_workflow_items"],
+            allowed_action_types=["update_trade_workflow_item"],
+            provider="openai",
+            model="gpt-5-mini",
+            role_key="trade-ops-copilot",
+            profile_kind="ROLE_DERIVED",
+            specialization_summary="Workflow triage specialist.",
+            human_owner_role="Operations Lead",
+            authority_ceiling="STAGE",
+            activation_notes="Prompt reviewed for staged workflow work.",
+        )
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return {
+                "output_text": json.dumps(
+                    {
+                        "description": "Explains workflow blockers and owner evidence before any staging recommendation.",
+                        "allowed_workspaces": ["assistant", "operations"],
+                        "capabilities": ["READ", "EXPLAIN"],
+                        "allowed_tools": ["list_workflow_items"],
+                        "allowed_action_types": [],
+                        "system_prompt": "Always cite the owner and evidence. Stop instead of staging when ownership is missing.",
+                        "change_summary": [
+                            "Removed staged workflow actions until owner evidence is available.",
+                        ],
+                    }
+                ),
+                "usage": {"input_tokens": 80, "output_tokens": 40},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            draft_response = self.client.post(
+                "/admin/assistant/agents/publishable-agent/self-update-draft",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"brief": "Narrow the agent until it reliably names the workflow owner."},
+            )
+
+        self.assertEqual(draft_response.status_code, 200)
+        draft_payload = draft_response.json()
+        self.assertIsNone(draft_payload["published_at"])
+
+        publish_response = self.client.post(
+            f"/admin/assistant/agents/publishable-agent/revisions/{draft_payload['revision_id']}/publish",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(publish_response.status_code, 200)
+        published_agent = publish_response.json()
+        self.assertEqual(published_agent["description"], draft_payload["description"])
+        self.assertEqual(published_agent["capabilities"], ["READ", "EXPLAIN"])
+        self.assertEqual(published_agent["allowed_action_types"], [])
+        self.assertEqual(
+            published_agent["system_prompt"],
+            "Always cite the owner and evidence. Stop instead of staging when ownership is missing.",
+        )
+        self.assertEqual(published_agent["published_revision_id"], draft_payload["revision_id"])
+        self.assertEqual(published_agent["latest_revision_id"], draft_payload["revision_id"])
+        self.assertFalse(published_agent["has_unpublished_revision"])
+        self.assertEqual(published_agent["version"], draft_payload["revision_version"])
+
+        with self.SessionLocal() as session:
+            record = session.get(AssistantAgent, "publishable-agent")
+            assert record is not None
+            self.assertEqual(record.description, draft_payload["description"])
+            self.assertEqual(record.capabilities, ["READ", "EXPLAIN"])
+            self.assertEqual(record.allowed_action_types, [])
+            self.assertEqual(record.published_revision_id, draft_payload["revision_id"])
+            self.assertEqual(record.latest_revision_id, draft_payload["revision_id"])
+            self.assertEqual(record.published_snapshot["allowed_action_types"], [])
+            revision = session.get(AssistantAgentRevision, draft_payload["revision_id"])
+            assert revision is not None
+            self.assertIsNotNone(revision.published_at)
+            self.assertEqual(revision.published_by, "assistant_user")
 
     def test_assistant_prompt_uses_managed_agent_definition(self) -> None:
         token = self._create_session_token()
@@ -1628,6 +1783,16 @@ class AssistantApiTests(unittest.TestCase):
                 .one()
             )
             self.assertEqual(created_event.actor_id, "trade-capture-auto")
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            self.assertIsNotNone(provenance)
+            assert provenance is not None
+            self.assertEqual(provenance.operation_key, "trade_command.BookTrade")
+            self.assertEqual(provenance.source_surface, "assistant.action_requests.autonomous")
+            self.assertEqual(provenance.details["command_type"], "BookTrade")
 
     def test_execute_capable_agent_autonomously_executes_amend_trade_action(self) -> None:
         token = self._create_session_token()
@@ -1761,6 +1926,214 @@ class AssistantApiTests(unittest.TestCase):
             )
             self.assertEqual(delivery_event.reference_code, "BOL-1022")
             self.assertEqual(delivery_event.created_by, "movement-auto")
+
+    def test_execute_capable_agent_autonomously_executes_reverse_delivery_event_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1022R")
+        delivery_id = build_delivery_obligation_id("T-1022R")
+        self._seed_delivery_obligation(trade_id="T-1022R", delivery_id=delivery_id)
+        with self.SessionLocal() as session:
+            delivery = session.get(DeliveryObligation, delivery_id)
+            self.assertIsNotNone(delivery)
+            assert delivery is not None
+            delivery.execution_status = "COMPLETED"
+            scheduled_event = DeliveryEvent(
+                delivery_id=delivery_id,
+                trade_id="T-1022R",
+                leg_no=None,
+                event_type="SCHEDULE_COMMITTED",
+                execution_status="SCHEDULED",
+                occurred_at=datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc),
+                reversal_of_event_id=None,
+                reversal_reason=None,
+                location_code="CUSHING",
+                reference_code="NOM-1022R",
+                source="terminal-report",
+                notes="Initial nomination accepted.",
+                created_at=datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc),
+                created_by="ops.seed",
+                updated_at=datetime(2026, 4, 25, 12, 0, tzinfo=timezone.utc),
+                updated_by="ops.seed",
+                version=1,
+            )
+            completed_event = DeliveryEvent(
+                delivery_id=delivery_id,
+                trade_id="T-1022R",
+                leg_no=None,
+                event_type="DELIVERY_COMPLETED",
+                execution_status="COMPLETED",
+                occurred_at=datetime(2026, 4, 25, 18, 0, tzinfo=timezone.utc),
+                reversal_of_event_id=None,
+                reversal_reason=None,
+                location_code="CUSHING",
+                reference_code="BOL-1022R",
+                source="terminal-report",
+                notes="Mistaken completion entry.",
+                created_at=datetime(2026, 4, 25, 18, 0, tzinfo=timezone.utc),
+                created_by="ops.seed",
+                updated_at=datetime(2026, 4, 25, 18, 0, tzinfo=timezone.utc),
+                updated_by="ops.seed",
+                version=1,
+            )
+            session.add_all([scheduled_event, completed_event])
+            session.flush()
+            target_event_id = completed_event.id
+            session.commit()
+
+        self._create_agent(
+            agent_id="movement-reverse-auto",
+            name="Movement Reverse Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["reverse_delivery_event"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "movement-reverse-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected delivery event:",
+                            f"- delivery_id: {delivery_id}",
+                            f"- event_id: {target_event_id}",
+                            "- reversal_reason: Completion was logged against the wrong truck ticket.",
+                            "- reversed_at: 2026-04-25T19:00:00Z",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Reverse the delivery event so the platform reflects reality."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "reverse_delivery_event")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            delivery = session.get(DeliveryObligation, delivery_id)
+            self.assertIsNotNone(delivery)
+            assert delivery is not None
+            self.assertEqual(delivery.execution_status, "SCHEDULED")
+            reversal_event = (
+                session.query(DeliveryEvent)
+                .filter(DeliveryEvent.delivery_id == delivery_id, DeliveryEvent.event_type == "EVENT_REVERSED")
+                .one()
+            )
+            self.assertEqual(reversal_event.reversal_of_event_id, target_event_id)
+            self.assertEqual(
+                reversal_event.reversal_reason,
+                "Completion was logged against the wrong truck ticket.",
+            )
+            self.assertEqual(reversal_event.created_by, "movement-reverse-auto")
+
+    def test_execute_capable_agent_autonomously_executes_void_trade_actualization_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1022A")
+        delivery_id = build_delivery_obligation_id("T-1022A")
+        self._seed_delivery_obligation(trade_id="T-1022A", delivery_id=delivery_id)
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-1022A")
+            self.assertIsNotNone(trade)
+            assert trade is not None
+            trade.actualization_status = "ACTUALIZED"
+            session.add(
+                TradeActualization(
+                    delivery_id=delivery_id,
+                    trade_id="T-1022A",
+                    leg_no=None,
+                    actual_quantity=Decimal("1000"),
+                    actualized_at=datetime(2026, 4, 25, 18, 30, tzinfo=timezone.utc),
+                    source="terminal-report",
+                    notes="Mistaken actualization.",
+                    voided_at=None,
+                    voided_by=None,
+                    void_reason=None,
+                    created_at=datetime(2026, 4, 25, 18, 30, tzinfo=timezone.utc),
+                    created_by="ops.seed",
+                    updated_at=datetime(2026, 4, 25, 18, 30, tzinfo=timezone.utc),
+                    updated_by="ops.seed",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        self._create_agent(
+            agent_id="movement-void-auto",
+            name="Movement Void Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["void_trade_actualization"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "movement-void-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected trade actualization:",
+                            "- trade_id: T-1022A",
+                            "- void_reason: The movement was booked against the wrong trade.",
+                            "- notes: Clear the mistaken delivered quantity.",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Void the actualization so the system reflects reality."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "void_trade_actualization")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-1022A")
+            self.assertIsNotNone(trade)
+            assert trade is not None
+            self.assertEqual(trade.actualization_status, "PENDING")
+            actualization = (
+                session.query(TradeActualization)
+                .filter(TradeActualization.delivery_id == delivery_id)
+                .one()
+            )
+            self.assertIsNotNone(actualization.voided_at)
+            self.assertEqual(actualization.void_reason, "The movement was booked against the wrong trade.")
+            self.assertEqual(actualization.voided_by, "movement-void-auto")
 
     def test_execute_capable_agent_autonomously_executes_create_manual_accrual_entry_action(self) -> None:
         token = self._create_session_token()
@@ -2092,6 +2465,141 @@ class AssistantApiTests(unittest.TestCase):
                 .all()
             )
             self.assertEqual([line.side for line in reversal_lines], ["CREDIT", "DEBIT"])
+
+    def test_execute_capable_agent_autonomously_executes_void_trade_invoice_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1027")
+        self._seed_invoice_record(
+            trade_id="T-1027",
+            invoice_id=271,
+            invoice_number="INV-T-1027",
+            invoice_amount=2400.0,
+        )
+        self._create_agent(
+            agent_id="invoice-void-auto",
+            name="Invoice Void Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["void_trade_invoice"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "invoice-void-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected invoice:",
+                            "- invoice_id: 271",
+                            "- void_reason: Duplicate invoice captured in error.",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Void this invoice."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "void_trade_invoice")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            invoice = session.get(TradeInvoice, 271)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            self.assertEqual(invoice.status, "NOT_REQUIRED")
+            self.assertEqual(invoice.void_reason, "Duplicate invoice captured in error.")
+            self.assertEqual(invoice.voided_by, "invoice-void-auto")
+
+    def test_execute_capable_agent_autonomously_executes_reverse_trade_payment_action(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1028")
+        self._seed_invoice_record(
+            trade_id="T-1028",
+            invoice_id=281,
+            invoice_number="INV-T-1028",
+            invoice_amount=3000.0,
+        )
+        self._seed_payment_record(
+            trade_id="T-1028",
+            invoice_id=281,
+            payment_id=2811,
+            payment_reference="PAY-T-1028-1",
+            payment_amount=3000.0,
+        )
+        self._create_agent(
+            agent_id="payment-reverse-auto",
+            name="Payment Reverse Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN", "READ"],
+            allowed_action_types=["reverse_trade_payment"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "payment-reverse-auto",
+                    "workspace": "assistant",
+                    "context": "\n".join(
+                        [
+                            "Selected payment:",
+                            "- payment_id: 2811",
+                            "- reversal_reason: Receipt was posted to the wrong invoice.",
+                            "- reversed_at: 2026-04-25T19:00:00Z",
+                        ]
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Reverse this payment."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "reverse_trade_payment")
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            reversals = (
+                session.query(TradePayment)
+                .filter(TradePayment.reversal_of_payment_id == 2811)
+                .all()
+            )
+            self.assertEqual(len(reversals), 1)
+            self.assertEqual(float(reversals[0].payment_amount), -3000.0)
+            self.assertEqual(reversals[0].reversal_reason, "Receipt was posted to the wrong invoice.")
+            self.assertEqual(reversals[0].created_by, "payment-reverse-auto")
 
     def test_assistant_agent_listing_marks_depleted_token_budget_red(self) -> None:
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 20
@@ -2520,6 +3028,17 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(trade.status, "CANCELLED")
             cancelled_events = session.query(Event).filter(Event.event_type == "TradeCancelled").count()
             self.assertEqual(cancelled_events, 1)
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            self.assertIsNotNone(provenance)
+            assert provenance is not None
+            self.assertEqual(provenance.operation_key, "trade_command.CancelTrade")
+            self.assertEqual(provenance.source_surface, "assistant.action_requests.approve")
+            self.assertEqual(provenance.details["command_type"], "CancelTrade")
+            self.assertEqual(provenance.details["expected_last_event_id"], "evt-t-1008")
 
     def test_assistant_action_request_approval_records_reviewer_corrections(self) -> None:
         token = self._create_session_token()
@@ -3302,6 +3821,99 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(payment.payment_reference, "PAY-T-1018-1")
             self.assertEqual(payment.status, "PAID")
             self.assertEqual(float(payment.payment_amount), 1800.0)
+
+    def test_assistant_action_request_approval_executes_invoice_void(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1018V")
+        self._seed_invoice_record(
+            trade_id="T-1018V",
+            invoice_id=182,
+            invoice_number="INV-T-1018V",
+            invoice_amount=1800.0,
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected invoice:\n"
+                "- invoice_id: 182\n"
+                "- void_reason: Duplicate invoice captured in error.\n"
+            ),
+            message="Void this invoice.",
+        )
+
+        self.assertEqual(action_request["action_type"], "void_trade_invoice")
+        self.assertEqual(action_request["payload"]["invoice_id"], 182)
+        self.assertEqual(action_request["review_context"]["action_preview"]["status"], "READY")
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["invoice_id"], 182)
+        self.assertEqual(payload["result"]["status"], "NOT_REQUIRED")
+        self.assertEqual(payload["result"]["void_reason"], "Duplicate invoice captured in error.")
+
+        with self.SessionLocal() as session:
+            invoice = session.get(TradeInvoice, 182)
+            assert invoice is not None
+            self.assertEqual(invoice.status, "NOT_REQUIRED")
+            self.assertEqual(invoice.void_reason, "Duplicate invoice captured in error.")
+
+    def test_assistant_action_request_approval_executes_payment_reversal(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-1018R")
+        self._seed_invoice_record(
+            trade_id="T-1018R",
+            invoice_id=183,
+            invoice_number="INV-T-1018R",
+            invoice_amount=1800.0,
+        )
+        self._seed_payment_record(
+            trade_id="T-1018R",
+            invoice_id=183,
+            payment_id=1831,
+            payment_reference="PAY-T-1018R-1",
+            payment_amount=1800.0,
+        )
+
+        action_request = self._create_action_request_via_prompt(
+            token=token,
+            context=(
+                "Selected payment:\n"
+                "- payment_id: 1831\n"
+                "- reversal_reason: Cash receipt was posted to the wrong invoice.\n"
+                "- reversed_at: 2026-04-25T18:00:00Z\n"
+            ),
+            message="Reverse this payment.",
+        )
+
+        self.assertEqual(action_request["action_type"], "reverse_trade_payment")
+        self.assertEqual(action_request["payload"]["payment_id"], 1831)
+        self.assertEqual(action_request["review_context"]["action_preview"]["status"], "READY")
+
+        response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "EXECUTED")
+        self.assertEqual(payload["result"]["reversal_of_payment_id"], 1831)
+
+        with self.SessionLocal() as session:
+            reversals = (
+                session.query(TradePayment)
+                .filter(TradePayment.reversal_of_payment_id == 1831)
+                .all()
+            )
+            self.assertEqual(len(reversals), 1)
+            self.assertEqual(float(reversals[0].payment_amount), -1800.0)
 
     def test_assistant_action_request_approval_blocks_payment_when_payment_set_changed(self) -> None:
         token = self._create_session_token()

@@ -32,6 +32,8 @@ import {
   priceIndices,
   projectionMonitoringAdminRecord,
   publicRuntimeSettings,
+  spatialFeatures,
+  spatialFeatureStandards,
   type RecordedRequest,
   selectedTradeEvents,
   smokeAccessToken,
@@ -2210,6 +2212,16 @@ async function startMockApiServer(
 
     if (url.pathname === '/reference/assets/standards' && method === 'GET') {
       writeJson(response, assetStandards)
+      return
+    }
+
+    if (url.pathname === '/reference/spatial-features' && method === 'GET') {
+      writeJson(response, spatialFeatures)
+      return
+    }
+
+    if (url.pathname === '/reference/spatial-features/standards' && method === 'GET') {
+      writeJson(response, spatialFeatureStandards)
       return
     }
 

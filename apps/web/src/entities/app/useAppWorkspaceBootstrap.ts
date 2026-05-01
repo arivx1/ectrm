@@ -61,6 +61,7 @@ import {
   DEFAULT_ASSET_STANDARDS,
   DEFAULT_COUNTERPARTY_STANDARDS,
   DEFAULT_LOCATION_STANDARDS,
+  DEFAULT_SPATIAL_FEATURE_STANDARDS,
 } from '../../shared/models'
 import type {
   AssetRecord,
@@ -82,6 +83,8 @@ import type {
   PortfolioRecord,
   PriceIndexRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   Trade,
   TradeConfirmationRecord,
   TradeInvoiceRecord,
@@ -181,6 +184,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [units, setUnits] = useState<UnitRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
   const [locationStandards, setLocationStandards] = useState<LocationStandards>(DEFAULT_LOCATION_STANDARDS)
+  const [spatialFeatures, setSpatialFeatures] = useState<SpatialFeatureRecord[]>([])
+  const [spatialFeatureStandards, setSpatialFeatureStandards] = useState<SpatialFeatureStandards>(
+    DEFAULT_SPATIAL_FEATURE_STANDARDS,
+  )
   const [assets, setAssets] = useState<AssetRecord[]>([])
   const [assetStandards, setAssetStandards] = useState<AssetStandards>(DEFAULT_ASSET_STANDARDS)
   const [counterpartyStandards, setCounterpartyStandards] = useState<CounterpartyStandards>(
@@ -307,6 +314,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setUnits([])
     setLocations([])
     setLocationStandards(DEFAULT_LOCATION_STANDARDS)
+    setSpatialFeatures([])
+    setSpatialFeatureStandards(DEFAULT_SPATIAL_FEATURE_STANDARDS)
     setAssets([])
     setAssetStandards(DEFAULT_ASSET_STANDARDS)
     setCounterparties([])
@@ -439,6 +448,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setUnits(payload.units as UnitRecord[])
         setLocations(payload.locations as LocationRecord[])
         setLocationStandards(payload.locationStandards as LocationStandards)
+        setSpatialFeatures(payload.spatialFeatures as SpatialFeatureRecord[])
+        setSpatialFeatureStandards(payload.spatialFeatureStandards as SpatialFeatureStandards)
         setAssets(payload.assets as AssetRecord[])
         setAssetStandards(payload.assetStandards as AssetStandards)
         setCounterparties(payload.counterparties as CounterpartyRecord[])
@@ -1023,6 +1034,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     priceIndices,
     refreshMutationData,
     operationalResourceDescriptors,
+    spatialFeatures,
+    spatialFeatureStandards,
     tradeMetadata,
     tradeMetadataError,
     tradeMetadataSource,

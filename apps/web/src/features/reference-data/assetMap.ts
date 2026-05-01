@@ -1,4 +1,4 @@
-import type { AssetRecord, LocationRecord } from '../../shared/models'
+import type { AssetRecord, LocationRecord, SpatialFeatureRecord } from '../../shared/models'
 import type { Feature, FeatureCollection, Geometry, GeoJsonProperties } from 'geojson'
 
 type AssetGeometrySource = 'ASSET_GEOMETRY' | 'ASSET_POINT' | 'LINKED_LOCATION'
@@ -6,6 +6,11 @@ type AssetGeometrySource = 'ASSET_GEOMETRY' | 'ASSET_POINT' | 'LINKED_LOCATION'
 type AssetGeoJsonProperties = GeoJsonProperties & {
   assetCode?: string
   assetName?: string
+  featureCode?: string
+  featureName?: string
+  featureKind?: string
+  entityType?: string | null
+  entityCode?: string | null
 }
 
 type GeoJsonFeature = Feature<Geometry, AssetGeoJsonProperties>
@@ -157,6 +162,68 @@ function toFeatureList(
       properties: {
         assetCode: asset.code,
         assetName: asset.name,
+      },
+    },
+  ]
+}
+
+function toSpatialFeatureList(
+  geojson: Record<string, unknown> | null | undefined,
+  feature: SpatialFeatureRecord,
+): GeoJsonFeature[] {
+  if (!geojson || typeof geojson.type !== 'string') {
+    return []
+  }
+
+  if (geojson.type === 'FeatureCollection') {
+    const features = Array.isArray(geojson.features) ? geojson.features : []
+    return features.flatMap((entry) => (isRecord(entry) ? toSpatialFeatureList(entry, feature) : []))
+  }
+
+  if (geojson.type === 'Feature') {
+    if (!isGeoJsonGeometry(geojson.geometry)) {
+      return []
+    }
+
+    return [
+      {
+        type: 'Feature',
+        geometry: geojson.geometry,
+        properties:
+          isRecord(geojson.properties)
+            ? {
+                ...geojson.properties,
+                featureCode: feature.code,
+                featureName: feature.name,
+                featureKind: feature.feature_kind,
+                entityType: feature.entity_type ?? null,
+                entityCode: feature.entity_code ?? null,
+              }
+            : {
+                featureCode: feature.code,
+                featureName: feature.name,
+                featureKind: feature.feature_kind,
+                entityType: feature.entity_type ?? null,
+                entityCode: feature.entity_code ?? null,
+              },
+      },
+    ]
+  }
+
+  if (!isGeoJsonGeometry(geojson)) {
+    return []
+  }
+
+  return [
+    {
+      type: 'Feature',
+      geometry: geojson,
+      properties: {
+        featureCode: feature.code,
+        featureName: feature.name,
+        featureKind: feature.feature_kind,
+        entityType: feature.entity_type ?? null,
+        entityCode: feature.entity_code ?? null,
       },
     },
   ]
@@ -320,6 +387,27 @@ export function buildAssetMapFeatureCollection(records: AssetMapRecord[]): GeoJs
           ...(feature.properties ?? {}),
           assetCode: record.asset.code,
           assetName: record.asset.name,
+        },
+      })),
+    ),
+  }
+}
+
+export function buildSpatialFeatureMapFeatureCollection(
+  spatialFeatures: SpatialFeatureRecord[],
+): GeoJsonFeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: spatialFeatures.flatMap((feature) =>
+      toSpatialFeatureList(feature.geometry_geojson, feature).map((entry) => ({
+        ...entry,
+        properties: {
+          ...(entry.properties ?? {}),
+          featureCode: feature.code,
+          featureName: feature.name,
+          featureKind: feature.feature_kind,
+          entityType: feature.entity_type ?? null,
+          entityCode: feature.entity_code ?? null,
         },
       })),
     ),

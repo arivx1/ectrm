@@ -223,6 +223,8 @@ Agents can now turn recent mistakes into a reviewable self-update draft from
 the admin surface through:
 
 - `POST /admin/assistant/agents/{agent_id}/self-update-draft`
+- `GET /admin/assistant/agents/{agent_id}/revisions`
+- `POST /admin/assistant/agents/{agent_id}/revisions/{revision_id}/publish`
 
 This is a supervised learning loop, not silent self-modification. The server
 builds the draft from current agent configuration plus:
@@ -232,18 +234,23 @@ builds the draft from current agent configuration plus:
 - autonomy-review recommendation reasons
 - matched knowledge-base lessons and stop conditions
 
-The generated draft is intentionally constrained:
+The generated draft is intentionally constrained and now lands as an
+unpublished stored revision:
 
 - it preserves identity and governance metadata such as `agent_id`, provider,
   model, scope, role mapping, owner role, authority ceiling, and token budget
 - it may preserve or narrow allowed workspaces, capabilities, live tools, and
   governed action types
 - it may not widen authority from observed mistakes
+- it does not mutate the live agent until an admin explicitly publishes the
+  stored revision
 
-Admins review the returned draft in the existing agent editor before saving any
-change. If the learning signal points to durable product behavior instead of a
-prompt boundary, prefer the deterministic algorithm loop and knowledge-base
-update instead of relying on prompt-only correction.
+Admins can review the returned draft evidence, inspect the field-level diff
+against the published snapshot, load the revision into the editor if they want
+to refine it further, and then publish it explicitly. If the learning signal
+points to durable product behavior instead of a prompt boundary, prefer the
+deterministic algorithm loop and knowledge-base update instead of relying on
+prompt-only correction.
 
 ## Codex Task Dispatch
 
