@@ -224,13 +224,32 @@ def upgrade() -> None:
             )
         )
     )
+
     for row in LOCATION_BACKFILLS:
         code = row["code"]
-        values = {key: value for key, value in row.items() if key != "code"}
+        values = {
+            key: value
+            for key, value in row.items()
+            if key not in {"code", "parent_location_code"}
+        }
         op.execute(
             reference_locations.update()
             .where(reference_locations.c.code == code)
             .values(**values)
+        )
+
+    bind = op.get_bind()
+    existing_codes = set(
+        bind.execute(sa.select(reference_locations.c.code)).scalars()
+    )
+    for row in LOCATION_BACKFILLS:
+        parent_location_code = row["parent_location_code"]
+        if parent_location_code is not None and parent_location_code not in existing_codes:
+            continue
+        op.execute(
+            reference_locations.update()
+            .where(reference_locations.c.code == row["code"])
+            .values(parent_location_code=parent_location_code)
         )
 
     op.alter_column("reference_locations", "location_kind", server_default=None)

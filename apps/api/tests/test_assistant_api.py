@@ -32,6 +32,7 @@ from apps.api.app.domains.assistant.services.action_catalog import (
     ALL_CATALOG_ACTION_TYPES,
     ASSISTANT_ACTION_CATALOG,
 )
+from apps.api.app.domains.assistant.services.action_specs import AssistantActionExecutionContext
 from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
 from apps.api.app.domains.assistant.services.action_registry import ACTION_HANDLERS, ACTION_SPECS
 from apps.api.app.domains.assistant.services.action_planners import (
@@ -2134,6 +2135,18 @@ class AssistantApiTests(unittest.TestCase):
             self.assertIsNotNone(actualization.voided_at)
             self.assertEqual(actualization.void_reason, "The movement was booked against the wrong trade.")
             self.assertEqual(actualization.voided_by, "movement-void-auto")
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .filter(MutationProvenanceRecord.operation_key == "operations.void_trade_actualization")
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            self.assertIsNotNone(provenance)
+            assert provenance is not None
+            self.assertEqual(provenance.source_surface, "assistant.action_requests.autonomous")
+            self.assertEqual(provenance.details["action_request_id"], action_request["action_request_id"])
+            self.assertEqual(provenance.details["assistant_action_type"], "void_trade_actualization")
+            self.assertEqual(provenance.details["event_type"], "TradeActualizationVoided")
 
     def test_execute_capable_agent_autonomously_executes_create_manual_accrual_entry_action(self) -> None:
         token = self._create_session_token()
@@ -2527,6 +2540,120 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(invoice.status, "NOT_REQUIRED")
             self.assertEqual(invoice.void_reason, "Duplicate invoice captured in error.")
             self.assertEqual(invoice.voided_by, "invoice-void-auto")
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .filter(MutationProvenanceRecord.operation_key == "settlement.void_trade_invoice")
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            self.assertIsNotNone(provenance)
+            assert provenance is not None
+            self.assertEqual(provenance.source_surface, "assistant.action_requests.autonomous")
+            self.assertEqual(provenance.details["action_request_id"], action_request["action_request_id"])
+            self.assertEqual(provenance.details["assistant_action_type"], "void_trade_invoice")
+            self.assertEqual(provenance.details["event_type"], "TradeInvoiceVoided")
+
+    def test_void_trade_invoice_handler_records_assistant_mutation_context(self) -> None:
+        self._create_trade_with_event(trade_id="T-1027H")
+        self._seed_invoice_record(
+            trade_id="T-1027H",
+            invoice_id=2711,
+            invoice_number="INV-T-1027H",
+            invoice_amount=2400.0,
+        )
+        now = datetime.now(timezone.utc)
+
+        with self.SessionLocal() as session:
+            run = AssistantRun(
+                conversation_id=None,
+                status="COMPLETED",
+                user_id="assistant_user",
+                session_id="invoice-void-handler-session",
+                user_role="OPS_ADMIN",
+                workspace="assistant",
+                agent_id="invoice-void-auto",
+                agent_name="Invoice Void Auto",
+                agent_role_key="trade-ops-copilot",
+                agent_profile_kind="ROLE_DERIVED",
+                provider="openai",
+                model="gpt-5-mini",
+                use_live_tools=False,
+                request_messages=[{"role": "user", "content": "Void this invoice."}],
+                application_context=None,
+                prompt_sections=[],
+                rendered_system_prompt="System prompt.",
+                warnings=[],
+                tool_calls=[],
+                input_tokens=10,
+                output_tokens=5,
+                latest_user_message="Void this invoice.",
+                assistant_message="Preparing invoice void execution.",
+                error_detail=None,
+                created_at=now,
+                completed_at=now,
+            )
+            session.add(run)
+            session.flush()
+            record = AssistantActionRequest(
+                run_id=run.id,
+                status="PENDING",
+                user_id="assistant_user",
+                session_id="invoice-void-handler-session",
+                workspace="assistant",
+                agent_id="invoice-void-auto",
+                agent_name="Invoice Void Auto",
+                action_type="void_trade_invoice",
+                summary="Void invoice 2711",
+                description="Void this invoice.",
+                payload={
+                    "invoice_id": 2711,
+                    "void_reason": "Duplicate invoice captured in error.",
+                    "review_context": {
+                        "execution_mode": "AUTONOMOUS",
+                    },
+                },
+                result=None,
+                error_detail=None,
+                review_outcome=None,
+                decision_note=None,
+                correction_summary=None,
+                correction_fields=None,
+                created_at=now,
+                decided_at=None,
+                decided_by=None,
+            )
+            session.add(record)
+            session.flush()
+
+            result = ACTION_HANDLERS["void_trade_invoice"].execute(
+                AssistantActionExecutionContext(
+                    db=session,
+                    record=record,
+                    actor_id="invoice-void-auto",
+                    actor_role="OPS_ADMIN",
+                    decided_at=now,
+                )
+            )
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .filter(MutationProvenanceRecord.operation_key == "settlement.void_trade_invoice")
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            invoice = session.get(TradeInvoice, 2711)
+
+        self.assertEqual(result["invoice_id"], 2711)
+        self.assertEqual(result["status"], "NOT_REQUIRED")
+        self.assertIsNotNone(provenance)
+        assert provenance is not None
+        self.assertEqual(provenance.source_surface, "assistant.action_requests.autonomous")
+        self.assertEqual(provenance.details["action_request_id"], record.id)
+        self.assertEqual(provenance.details["assistant_action_type"], "void_trade_invoice")
+        self.assertEqual(provenance.details["event_type"], "TradeInvoiceVoided")
+        self.assertIsNotNone(invoice)
+        assert invoice is not None
+        self.assertEqual(invoice.status, "NOT_REQUIRED")
+        self.assertEqual(invoice.voided_by, "invoice-void-auto")
 
     def test_execute_capable_agent_autonomously_executes_reverse_trade_payment_action(self) -> None:
         token = self._create_session_token()
@@ -2600,6 +2727,18 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(float(reversals[0].payment_amount), -3000.0)
             self.assertEqual(reversals[0].reversal_reason, "Receipt was posted to the wrong invoice.")
             self.assertEqual(reversals[0].created_by, "payment-reverse-auto")
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .filter(MutationProvenanceRecord.operation_key == "settlement.reverse_trade_payment")
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            self.assertIsNotNone(provenance)
+            assert provenance is not None
+            self.assertEqual(provenance.source_surface, "assistant.action_requests.autonomous")
+            self.assertEqual(provenance.details["action_request_id"], action_request["action_request_id"])
+            self.assertEqual(provenance.details["assistant_action_type"], "reverse_trade_payment")
+            self.assertEqual(provenance.details["event_type"], "TradePaymentReversed")
 
     def test_assistant_agent_listing_marks_depleted_token_budget_red(self) -> None:
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 20
@@ -3636,6 +3775,18 @@ class AssistantApiTests(unittest.TestCase):
             invoice = session.query(TradeInvoice).filter(TradeInvoice.trade_id == "T-1017").one()
             self.assertEqual(invoice.invoice_number, "INV-T-1017")
             self.assertEqual(float(invoice.invoice_amount), 2500.0)
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .filter(MutationProvenanceRecord.operation_key == "settlement.issue_trade_invoice")
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            self.assertIsNotNone(provenance)
+            assert provenance is not None
+            self.assertEqual(provenance.source_surface, "assistant.action_requests.approve")
+            self.assertEqual(provenance.details["action_request_id"], action_request["action_request_id"])
+            self.assertEqual(provenance.details["assistant_action_type"], "issue_trade_invoice")
+            self.assertEqual(provenance.details["event_type"], "TradeInvoiceIssued")
 
     def test_assistant_action_request_invoice_preview_blocks_duplicate_invoice_number(self) -> None:
         token = self._create_session_token()
@@ -3821,6 +3972,18 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(payment.payment_reference, "PAY-T-1018-1")
             self.assertEqual(payment.status, "PAID")
             self.assertEqual(float(payment.payment_amount), 1800.0)
+            provenance = (
+                session.query(MutationProvenanceRecord)
+                .filter(MutationProvenanceRecord.operation_key == "settlement.create_trade_payment")
+                .order_by(MutationProvenanceRecord.id.desc())
+                .first()
+            )
+            self.assertIsNotNone(provenance)
+            assert provenance is not None
+            self.assertEqual(provenance.source_surface, "assistant.action_requests.approve")
+            self.assertEqual(provenance.details["action_request_id"], action_request["action_request_id"])
+            self.assertEqual(provenance.details["assistant_action_type"], "create_trade_payment")
+            self.assertEqual(provenance.details["event_type"], "TradePaymentCreated")
 
     def test_assistant_action_request_approval_executes_invoice_void(self) -> None:
         token = self._create_session_token()

@@ -363,5 +363,5 @@ test('assistant prompt navigation outcome rows distinguish accepted and failed h
   assert.equal(acceptedRow?.title, 'Accepted handoff')
   assert.equal(acceptedRow?.subtitle, 'Open Work Queue')
   assert.equal(acceptedRow?.tone, 'success')
-  assert.equal(acceptedRow?.meta[0], 'Prompt Home route')
+  assert.equal(acceptedRow?.meta[0], 'Home route')
 })

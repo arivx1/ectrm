@@ -425,6 +425,10 @@ type ReadWorkspaceOptions = {
   readHeaders?: HeadersInit | null
 }
 
+// Mirror the API pagination contract so client-side bootstrap requests fail closed.
+const STANDARD_LIST_LIMIT_MAX = 2000
+const ADMIN_LIST_LIMIT_MAX = 1000
+
 function withLimit(path: string, limit: number): string {
   return `${path}${path.includes('?') ? '&' : '?'}limit=${limit}`
 }
@@ -469,6 +473,14 @@ function withReadHeaders(
   }
 }
 
+function clampListLimit(limit: number, max: number): number {
+  if (!Number.isFinite(limit)) {
+    return 1
+  }
+
+  return Math.min(Math.max(1, Math.floor(limit)), max)
+}
+
 function toSizedWindowedPage<T>(rows: T[], windowSize: number): WindowedPage<T> {
   const normalizedWindowSize = Math.max(1, windowSize)
   const hasMore = rows.length > normalizedWindowSize
@@ -489,12 +501,13 @@ async function fetchWindowedPage<T>(
   init?: RequestInit,
   windowSize = bootstrapQueryLimits.workspaceRecords,
 ): Promise<WindowedPage<T>> {
-  const requestLimit = Math.max(1, windowSize) + 1
+  const normalizedWindowSize = clampListLimit(windowSize, STANDARD_LIST_LIMIT_MAX - 1)
+  const requestLimit = normalizedWindowSize + 1
   const rows = await fetchJson<T[]>(
     `${apiBase}${withLimit(path, requestLimit)}`,
     withReadHeaders(init, options),
   )
-  return toSizedWindowedPage(rows, windowSize)
+  return toSizedWindowedPage(rows, normalizedWindowSize)
 }
 
 export async function loadTradesWindow(
@@ -729,8 +742,9 @@ export async function loadEventsWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<EventsWorkspaceBootstrap> {
+  const eventsLimit = clampListLimit(bootstrapQueryLimits.events, STANDARD_LIST_LIMIT_MAX)
   const events = await fetchJson<EventRow[]>(
-    `${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`,
+    `${apiBase}${withLimit('/events', eventsLimit)}`,
     withReadHeaders(undefined, options),
   )
 
@@ -814,6 +828,11 @@ export async function loadReferenceWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<ReferenceWorkspaceBootstrap> {
+  const referenceBootstrapLimit = clampListLimit(
+    bootstrapQueryLimits.referenceData,
+    STANDARD_LIST_LIMIT_MAX,
+  )
+  const locationBootstrapLimit = STANDARD_LIST_LIMIT_MAX
   const [
     books,
     commodities,
@@ -831,27 +850,27 @@ export async function loadReferenceWorkspaceBootstrap(
     portfolios,
   ] = await Promise.all([
     fetchJson<ReferenceRecord[]>(
-      `${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/books', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<ReferenceRecord[]>(
-      `${apiBase}${withLimit('/reference/commodities', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/commodities', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<PriceIndexRecord[]>(
-      `${apiBase}${withLimit('/reference/price-indices', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/price-indices', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<CurrencyRecord[]>(
-      `${apiBase}${withLimit('/reference/currencies', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/currencies', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<UnitRecord[]>(
-      `${apiBase}${withLimit('/reference/units', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/units', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<LocationRecord[]>(
-      `${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/locations', locationBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<LocationStandards>(
@@ -859,7 +878,7 @@ export async function loadReferenceWorkspaceBootstrap(
       withReadHeaders(undefined, options),
     ),
     fetchJson<SpatialFeatureRecord[]>(
-      `${apiBase}${withLimit('/reference/spatial-features', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/spatial-features', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<SpatialFeatureStandards>(
@@ -867,7 +886,7 @@ export async function loadReferenceWorkspaceBootstrap(
       withReadHeaders(undefined, options),
     ),
     fetchJson<AssetRecord[]>(
-      `${apiBase}${withLimit('/reference/assets', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/assets', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<AssetStandards>(
@@ -875,7 +894,7 @@ export async function loadReferenceWorkspaceBootstrap(
       withReadHeaders(undefined, options),
     ),
     fetchJson<CounterpartyRecord[]>(
-      `${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/counterparties', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<CounterpartyStandards>(
@@ -883,7 +902,7 @@ export async function loadReferenceWorkspaceBootstrap(
       withReadHeaders(undefined, options),
     ),
     fetchJson<PortfolioRecord[]>(
-      `${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/portfolios', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
   ])
@@ -891,13 +910,14 @@ export async function loadReferenceWorkspaceBootstrap(
   let counterpartyCreditProfiles: CounterpartyCreditProfileRecord[] = []
   let counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[] = []
 
-  const [counterpartyCreditProfilesResult, counterpartyExternalCreditSnapshotsResult] = await Promise.allSettled([
+  const [counterpartyCreditProfilesResult, counterpartyExternalCreditSnapshotsResult] =
+    await Promise.allSettled([
       fetchJson<CounterpartyCreditProfileRecord[]>(
-        `${apiBase}${withLimit('/reference/counterparties/credit-profiles', bootstrapQueryLimits.referenceData)}`,
+        `${apiBase}${withLimit('/reference/counterparties/credit-profiles', referenceBootstrapLimit)}`,
         withReadHeaders(undefined, options),
       ),
       fetchJson<CounterpartyExternalCreditSnapshotRecord[]>(
-        `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', bootstrapQueryLimits.referenceData)}`,
+        `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', referenceBootstrapLimit)}`,
         withReadHeaders(undefined, options),
       ),
     ])
@@ -961,11 +981,19 @@ export async function loadAdminWorkspaceBootstrap(
   let tradingSources: TradingSourceRecord[] = []
   let weatherLocations: WeatherLocationRecord[] = []
   let weatherSyncStatus: WeatherSyncStatusRecord | null = null
+  const externalDataRunsLimit = clampListLimit(
+    bootstrapQueryLimits.externalDataRuns,
+    STANDARD_LIST_LIMIT_MAX,
+  )
+  const tradingSourcesLimit = clampListLimit(
+    bootstrapQueryLimits.tradingSources,
+    ADMIN_LIST_LIMIT_MAX,
+  )
 
   const [externalDataRunsResult, externalDataSyncStatusResult, tradingSourcesResult, weatherLocationsResult, weatherSyncStatusResult] =
     await Promise.allSettled([
       fetchJson<ExternalDataRunRecord[]>(
-        `${apiBase}${withLimit('/admin/external-data/runs', bootstrapQueryLimits.externalDataRuns)}`,
+        `${apiBase}${withLimit('/admin/external-data/runs', externalDataRunsLimit)}`,
         { headers: options.adminHeaders },
       ),
       fetchJson<ExternalDataSyncStatusRecord>(`${apiBase}/admin/external-data/status`, {
@@ -973,7 +1001,7 @@ export async function loadAdminWorkspaceBootstrap(
         cache: 'no-store',
       }),
       fetchJson<TradingSourceRecord[]>(
-        `${apiBase}${withLimit('/admin/trading-sources', bootstrapQueryLimits.tradingSources)}`,
+        `${apiBase}${withLimit('/admin/trading-sources', tradingSourcesLimit)}`,
         { headers: options.adminHeaders },
       ),
       loadWeatherLocations(apiBase, {

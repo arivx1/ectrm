@@ -1006,6 +1006,22 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.equal(firstPortfolio.code, 'PTF-1')
 })
 
+test('windowed loaders cap oversized bootstrap requests at the API list contract', async () => {
+  fetchJsonMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/trades?limit=2000')) {
+      return makeStringRows('trade_id', 'TRD', 2000)
+    }
+
+    throw new Error(`Unexpected URL: ${url}`)
+  })
+
+  const page = await loadTradesWindow('https://example.test/api', undefined, 0, 5000)
+
+  assert.equal(page.rows.length, 1999)
+  assert.equal(page.rows.at(-1)?.trade_id, 'TRD-1999')
+  assert.deepEqual(page.window, { loadedCount: 1999, hasMore: true })
+})
+
 test('loadAdminWorkspaceBootstrap returns empty admin data without an authenticated header set', async () => {
   const payload = await loadAdminWorkspaceBootstrap('https://example.test/api', {
     adminHeaders: null,

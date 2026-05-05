@@ -400,7 +400,7 @@ export function buildAssistantPromptNavigationOutcomeRows(
         row.latest_user_message?.trim() ||
         'Prompt-first route outcome recorded without an additional note.',
       meta: [
-        typeof row.run_id === 'number' ? `Run ${row.run_id}` : 'Prompt Home route',
+        typeof row.run_id === 'number' ? `Run ${row.run_id}` : 'Home route',
         ...(row.target_view ? [`Target ${workspaceLabel(row.target_view)}`] : []),
         ...(row.focus_label?.trim() ? [row.focus_label.trim()] : row.focus_id?.trim() ? [row.focus_id.trim()] : []),
       ],

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
@@ -19,6 +19,7 @@ type AssetMapPanelProps = {
   spatialFeatures: SpatialFeatureRecord[]
   selectedAssetCode: string | null
   onSelectAsset: (code: string) => void
+  filterControls?: ReactNode
 }
 
 type MapLibreModule = typeof import('maplibre-gl')
@@ -80,16 +81,20 @@ function buildSpatialFeatureSignature(spatialFeatures: SpatialFeatureRecord[]): 
     .join('|')
 }
 
-function AssetMapCanvas({
+export function AssetMapCanvas({
   records,
   spatialFeatures,
   selectedAssetCode,
   onSelectAsset,
+  statusTitle,
+  statusDetail,
 }: {
   records: AssetMapRecord[]
   spatialFeatures: SpatialFeatureRecord[]
   selectedAssetCode: string | null
   onSelectAsset: (code: string) => void
+  statusTitle?: string | null
+  statusDetail?: string | null
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<InstanceType<MapLibreModule['Map']> | null>(null)
@@ -379,6 +384,12 @@ function AssetMapCanvas({
     <div className="asset-map-canvas-shell">
       <div ref={containerRef} className="asset-map-canvas" />
       {loadError ? <div className="asset-map-overlay">{loadError}</div> : null}
+      {!loadError && statusTitle ? (
+        <div className="asset-map-overlay asset-map-overlay-info">
+          <strong>{statusTitle}</strong>
+          {statusDetail ? <p>{statusDetail}</p> : null}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -389,6 +400,7 @@ export function AssetMapPanel({
   spatialFeatures,
   selectedAssetCode,
   onSelectAsset,
+  filterControls,
 }: AssetMapPanelProps) {
   const mapSummary = useMemo(() => buildAssetMapSummary(assets, locations), [assets, locations])
   const selectedRecord = mapSummary.mappedRecords.find((record) => record.asset.code === selectedAssetCode) ?? null
@@ -401,6 +413,11 @@ export function AssetMapPanel({
     [spatialFeatures],
   )
   const hiddenAssetCount = Math.max(0, assets.length - mapSummary.mappedCount)
+  const mapStatusTitle = mapSummary.mappedCount === 0 ? 'No filtered assets are map-ready yet.' : null
+  const mapStatusDetail =
+    mapSummary.mappedCount === 0
+      ? 'The base map is still available for zoom, pan, and rotate. Assets only plot once they have GeoJSON, direct coordinates, or linked location coordinates.'
+      : null
 
   return (
     <section className="asset-map-shell">
@@ -424,22 +441,16 @@ export function AssetMapPanel({
         </div>
       </div>
 
-      {mapSummary.mappedCount > 0 ? (
-        <AssetMapCanvas
-          records={mapSummary.mappedRecords}
-          spatialFeatures={activeSpatialFeatures}
-          selectedAssetCode={selectedAssetCode}
-          onSelectAsset={onSelectAsset}
-        />
-      ) : (
-        <div className="asset-map-empty">
-          <strong>No filtered assets are map-ready yet.</strong>
-          <p>
-            This map only includes assets with GeoJSON, direct asset coordinates, or linked
-            location coordinates.
-          </p>
-        </div>
-      )}
+      {filterControls ? <div className="asset-map-filter-strip">{filterControls}</div> : null}
+
+      <AssetMapCanvas
+        records={mapSummary.mappedRecords}
+        spatialFeatures={activeSpatialFeatures}
+        selectedAssetCode={selectedAssetCode}
+        onSelectAsset={onSelectAsset}
+        statusTitle={mapStatusTitle}
+        statusDetail={mapStatusDetail}
+      />
 
       <div className="asset-map-summary-grid">
         <div className="reference-usage-card asset-map-card">

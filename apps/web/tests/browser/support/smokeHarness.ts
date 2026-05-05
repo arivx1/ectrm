@@ -427,7 +427,7 @@ async function startMockApiServer(
 
     if (normalizedPrompt.includes('broken handoff') || normalizedPrompt.includes('invalid handoff')) {
       return [
-        'Stay in Prompt Home for now while we confirm the route.',
+        'Stay on Home for now while we confirm the route.',
         '```navigation_intent',
         JSON.stringify({
           kind: 'open_workspace',
@@ -920,6 +920,7 @@ async function startMockApiServer(
     if (
       method !== 'GET' &&
       !(method === 'POST' && url.pathname === '/auth/heartbeat') &&
+      !(method === 'POST' && url.pathname === '/auth/logout') &&
       !(method === 'POST' && url.pathname === '/auth/session') &&
       !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
       !(method === 'POST' && url.pathname === '/assistant/respond') &&
@@ -992,6 +993,12 @@ async function startMockApiServer(
         return
       }
 
+      writeNoContent(response)
+      return
+    }
+
+    if (url.pathname === '/auth/logout' && method === 'POST') {
+      sessionExpired = true
       writeNoContent(response)
       return
     }

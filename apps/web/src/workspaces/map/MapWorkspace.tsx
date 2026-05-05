@@ -20,6 +20,16 @@ type MapWorkspaceProps = {
   onPrepareReferenceAsset: (code: string) => void
 }
 
+function sortedUniqueValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value?.trim() ?? '')
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right))
+}
+
 function matchesMapAssetFilter(asset: AssetRecord, query: string): boolean {
   return matchesTextFilter(query, [
     asset.code,
@@ -74,6 +84,27 @@ export function MapWorkspace({
 }: MapWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
   const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(null)
+  const [assetClassFilter, setAssetClassFilter] = useState('')
+  const [assetTypeFilter, setAssetTypeFilter] = useState('')
+  const [commodityFilter, setCommodityFilter] = useState('')
+
+  const assetClassOptions = useMemo(
+    () => sortedUniqueValues(assets.map((asset) => asset.asset_class)),
+    [assets],
+  )
+  const assetTypeOptions = useMemo(
+    () =>
+      sortedUniqueValues(
+        assets
+          .filter((asset) => !assetClassFilter || asset.asset_class === assetClassFilter)
+          .map((asset) => asset.asset_type),
+      ),
+    [assetClassFilter, assets],
+  )
+  const commodityOptions = useMemo(
+    () => sortedUniqueValues(assets.map((asset) => asset.commodity_code ?? '')),
+    [assets],
+  )
 
   const effectiveScreenFilter = useMemo(
     () => combineTextFilters(globalFilter, screenFilter),
@@ -81,8 +112,15 @@ export function MapWorkspace({
   )
 
   const filteredAssets = useMemo(
-    () => assets.filter((asset) => matchesMapAssetFilter(asset, effectiveScreenFilter)),
-    [assets, effectiveScreenFilter],
+    () =>
+      assets.filter(
+        (asset) =>
+          matchesMapAssetFilter(asset, effectiveScreenFilter) &&
+          (!assetClassFilter || asset.asset_class === assetClassFilter) &&
+          (!assetTypeFilter || asset.asset_type === assetTypeFilter) &&
+          (!commodityFilter || (asset.commodity_code ?? '') === commodityFilter),
+      ),
+    [assetClassFilter, assetTypeFilter, assets, commodityFilter, effectiveScreenFilter],
   )
 
   const activeSelectedAssetCode = useMemo(
@@ -107,6 +145,7 @@ export function MapWorkspace({
     () => filteredAssets.find((asset) => asset.code === activeSelectedAssetCode) ?? null,
     [activeSelectedAssetCode, filteredAssets],
   )
+  const activeFacetFilterCount = [assetClassFilter, assetTypeFilter, commodityFilter].filter(Boolean).length
 
   function handleOpenReferenceData() {
     if (activeSelectedAssetCode) {
@@ -115,8 +154,25 @@ export function MapWorkspace({
     onOpenReferenceData()
   }
 
+  function handleAssetClassChange(nextAssetClass: string) {
+    setAssetClassFilter(nextAssetClass)
+    if (
+      nextAssetClass &&
+      assetTypeFilter &&
+      !assets.some((asset) => asset.asset_class === nextAssetClass && asset.asset_type === assetTypeFilter)
+    ) {
+      setAssetTypeFilter('')
+    }
+  }
+
+  function resetFacetFilters() {
+    setAssetClassFilter('')
+    setAssetTypeFilter('')
+    setCommodityFilter('')
+  }
+
   return (
-    <div className="stack">
+    <div className="stack map-workspace">
       <WorkspaceLocalFilterBar
         value={screenFilter}
         onChange={setScreenFilter}
@@ -135,6 +191,67 @@ export function MapWorkspace({
         spatialFeatures={spatialFeatures}
         selectedAssetCode={activeSelectedAssetCode}
         onSelectAsset={setSelectedAssetCode}
+        filterControls={(
+          <>
+            <label className="field">
+              <span>Asset Class</span>
+              <select
+                className="control control-compact"
+                value={assetClassFilter}
+                onChange={(event) => handleAssetClassChange(event.target.value)}
+              >
+                <option value="">All classes</option>
+                {assetClassOptions.map((assetClass) => (
+                  <option key={assetClass} value={assetClass}>
+                    {assetClass}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Asset Type</span>
+              <select
+                className="control control-compact"
+                value={assetTypeFilter}
+                onChange={(event) => setAssetTypeFilter(event.target.value)}
+              >
+                <option value="">All types</option>
+                {assetTypeOptions.map((assetType) => (
+                  <option key={assetType} value={assetType}>
+                    {assetType}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Commodity</span>
+              <select
+                className="control control-compact"
+                value={commodityFilter}
+                onChange={(event) => setCommodityFilter(event.target.value)}
+              >
+                <option value="">All commodities</option>
+                {commodityOptions.map((commodity) => (
+                  <option key={commodity} value={commodity}>
+                    {commodity}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="asset-map-filter-actions">
+              <span className="entity-chip entity-chip-soft">
+                {activeFacetFilterCount === 0
+                  ? 'All map filters open'
+                  : `${activeFacetFilterCount} map filter${activeFacetFilterCount === 1 ? '' : 's'} active`}
+              </span>
+              {activeFacetFilterCount > 0 ? (
+                <button type="button" className="button button-ghost" onClick={resetFacetFilters}>
+                  Clear Map Filters
+                </button>
+              ) : null}
+            </div>
+          </>
+        )}
       />
 
       <section className="surface">

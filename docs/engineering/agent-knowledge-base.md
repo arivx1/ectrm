@@ -83,6 +83,37 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-05 - Guided Home Prompt Kits Should Stay Visible and Deterministic
+
+- Type: lesson
+- Domain: prompt-first UX
+- Applies to: Home prompt kits, information gathering asks, trade construction
+  interview flows
+- Status: implemented
+- Source:
+  [`promptHomePromptKits.ts`](../../apps/web/src/workspaces/prompt/promptHomePromptKits.ts)
+  and
+  [`PromptHomeWorkspace.tsx`](../../apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx)
+- Lesson: when users repeatedly start the same research or trade-drafting
+  conversations, expose a visible product-managed starter prompt instead of
+  relying on hidden model instructions. Trade-construction kits should stay in
+  draft mode, ask one gating question at a time, and confirm intent like real
+  versus simulated or user-supplied versus assistant-built before proposing a
+  structure.
+- Deterministic opportunity: if prompt kits become role-specific, ordered by
+  policy, or admin-managed, move them into typed configuration instead of
+  leaving them as inline component literals.
+- Agent autonomy impact: prompt kits improve explanation and drafting
+  consistency without granting trade write authority or bypassing governed
+  capture and review paths.
+- Tests or evidence:
+  [`promptHomePromptKits.test.ts`](../../apps/web/tests/promptHomePromptKits.test.ts)
+  and
+  [`promptHomeWorkspace.test.ts`](../../apps/web/tests/promptHomeWorkspace.test.ts)
+- Follow-up: add future reusable prompt openings through the same visible Home
+  prompt-kit surface so operators can inspect the opening question flow before
+  sending.
+
 ### 2026-04-29 - Treat Movement Corrections as Reversals and Voids, Not Deletes
 
 - Type: lesson
@@ -2190,3 +2221,133 @@ proposal form until a human owner approves the domain rule.
   pattern of typed application services with explicit source-surface and stale
   basis propagation, then measure autonomous execution outcomes by command seam
   instead of raw action type alone.
+
+### 2026-05-01 - Assistant Settlement And Actualization Writes Preserve Service-Owned Provenance
+
+- Type: lesson
+- Domain: governed assistant execution, settlement workflows, and operational
+  actualization auditability
+- Applies to: assistant `issue_trade_invoice`, `void_trade_invoice`,
+  `create_trade_payment`, `reverse_trade_payment`, `record_trade_actualization`,
+  and `void_trade_actualization` execution paths
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/audit_events.py`,
+  `apps/api/app/domains/operations/services/actualizations.py`,
+  `apps/api/app/domains/operations/services/settlement_invoices.py`,
+  `apps/api/app/domains/operations/services/settlement_payments.py`, and
+  `apps/api/app/domains/assistant/services/action_handlers.py`
+- Lesson: non-trade assistant mutations should keep their business writes in
+  typed operational services, but they should not lose assistant execution
+  provenance at the handoff. Settlement and actualization services now accept a
+  governed audit mutation context so their trade audit events record the
+  originating assistant `source_surface`, assistant action-request identifiers,
+  and service-owned operation keys such as `settlement.issue_trade_invoice`
+  instead of collapsing everything into a generic `events` write.
+- Deterministic opportunity: when more high-trust domains move under governed
+  assistant execution, add execution metadata through service-owned mutation
+  contexts rather than letting assistant handlers create one-off provenance
+  shortcuts. The service should still own the operation key and audit event
+  semantics.
+- Agent autonomy impact: execute-capable agents remain subordinate to the same
+  settlement and actualization services as human-triggered flows. Autonomous
+  and reviewer-approved assistant actions now remain distinguishable in
+  mutation provenance without adding assistant-only write paths.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_void_trade_actualization_action
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_void_trade_invoice_handler_records_assistant_mutation_context
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_reverse_trade_payment_action
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_invoice_issue
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_payment_creation
+  apps.api.tests.test_settlement_invoices_api.SettlementInvoicesApiTests.test_void_invoice_marks_not_required_and_clears_unpaid_payment_rows
+  apps.api.tests.test_settlement_payments_api.SettlementPaymentsApiTests.test_reverse_paid_payment_creates_offsetting_entry_and_reopens_invoice_balance`
+  and `make api-assistant-evals`.
+- Follow-up: extend the same governed mutation-context pattern to remaining
+  high-trust assistant domains like confirmations, workflow mutations, delivery
+  events, manual accruals, and accounting entries so action-request execution
+  can be traced by service seam across the full platform.
+
+### 2026-05-01 - Reference Asset Spatial Enrichment Uses Source-Owned Ordering Before Fallback Geography
+
+- Type: algorithm-added
+- Domain: reference data stewardship and governed asset spatial hydration
+- Applies to: imported reference assets that carry upstream source URLs for
+  WRI and HIFLD energy infrastructure catalogs
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reference_data/services/asset_spatial_enrichment.py`,
+  `apps/api/scripts/enrich_reference_asset_spatial_fields.py`, and
+  `apps/api/tests/test_asset_spatial_enrichment.py`
+- Lesson: when a large imported asset catalog omits direct coordinates but
+  preserves deterministic upstream identifiers, enrich spatial fields from the
+  upstream source order instead of inventing fallback points. WRI assets map by
+  CKAN row id, while HIFLD assets map by the original `resultOffset` ordered by
+  upstream `OBJECTID`, then store the source geometry as GeoJSON and derive a
+  representative point from that geometry for map centering.
+- Deterministic opportunity: keep future bulk spatial loaders behind explicit
+  source adapters that define how records are matched, how geometry is
+  converted, and how representative points are derived. Reuse linked
+  `location_code` only when no source-backed asset geometry or coordinates are
+  available.
+- Agent autonomy impact: agents can run repeatable spatial hydration against
+  reference assets without freeform judgment about route shapes or manual point
+  placement. The deterministic adapter owns matching rules and geometry
+  conversion.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_asset_spatial_enrichment
+  apps.api.tests.test_asset_catalog_import
+  apps.api.tests.test_asset_reference_normalization
+  apps.api.tests.test_reference_data
+  apps.api.tests.test_admin_seed_api` and repeated live runs of
+  `PYTHONPATH=. ./.venv/bin/python apps/api/scripts/enrich_reference_asset_spatial_fields.py --requested-by codex`
+  with the second run returning `updated_asset_count = 0`.
+- Follow-up: replace public-clone HIFLD adapters with the exact archived source
+  packages when those downloads are available from this environment, then add
+  more source adapters for the remaining non-point GEM and refinery catalogs.
+
+### 2026-05-01 - Location-Backed Asset Map Readiness Depends On Hydrated Reference Geography And Full Location Bootstrap
+
+- Type: lesson
+- Domain: reference data stewardship, spatial fallback behavior, and map
+  workspace reliability
+- Applies to: asset map readiness when assets rely on `location_code` instead
+  of direct coordinates or source geometry
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reference_data/services/location_spatial_enrichment.py`,
+  `apps/api/scripts/enrich_reference_location_spatial_fields.py`,
+  `apps/api/tests/test_location_spatial_enrichment.py`,
+  `apps/web/src/entities/app/api.ts`, and
+  `apps/web/tests/appBootstrapLoaders.test.ts`
+- Lesson: once source-backed asset geometry and point enrichment are in place,
+  the next spatial bottleneck is usually the governed location catalog, not the
+  asset rows. Asset map readiness should fall back to linked `location_code`
+  coordinates, so reference locations need deterministic centroid hydration
+  from maintained geography catalogs, and the reference workspace bootstrap
+  must always load the full location catalog instead of inheriting a smaller
+  generic row limit.
+- Deterministic opportunity: keep location centroid enrichment behind a
+  repeatable service that hydrates countries and subdivisions from Natural
+  Earth, derives corridor and region centroids from governed member locations,
+  and reruns idempotently. Treat client bootstrap coverage for location
+  references as part of the deterministic map-readiness contract.
+- Agent autonomy impact: agents can improve asset map coverage through
+  repeatable location-reference enrichment without inventing points for assets
+  that lack source geometry. The deterministic location service owns fallback
+  geography, while the client consistently loads the linked reference rows that
+  the asset map logic depends on.
+- Tests or evidence: `.venv/bin/python -m unittest
+  apps.api.tests.test_location_spatial_enrichment
+  apps.api.tests.test_asset_spatial_enrichment
+  apps.api.tests.test_asset_catalog_import
+  apps.api.tests.test_asset_reference_normalization
+  apps.api.tests.test_reference_data
+  apps.api.tests.test_admin_seed_api`,
+  `cd apps/web && npm test -- --run appBootstrapLoaders.test.ts referenceDataAssetsTab.test.ts referenceDataCharacterization.test.ts`,
+  and repeated live runs of
+  `PYTHONPATH=. ./.venv/bin/python apps/api/scripts/enrich_reference_location_spatial_fields.py --requested-by codex`
+  with the second run returning `updated_location_count = 0`.
+- Follow-up: add targeted adapters or curated overrides for the remaining
+  unsupported subdivisions and politically special geographies that Natural
+  Earth does not resolve cleanly, then refresh the small residual set of assets
+  still blocked on those locations.

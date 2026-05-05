@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   type FormEvent,
+  type ReactNode,
 } from 'react'
 
 import {
@@ -41,6 +42,7 @@ import {
   type PromptNavigationIntent,
 } from '../../entities/app/promptNavigationIntent'
 import { appConfig } from '../../shared/config'
+import { usePersistentCollapsibleCardState } from '../../shared/collapsibleCardState'
 import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   AssistantActionRequest,
@@ -50,6 +52,9 @@ import type {
   AssistantPromptRouteRecommendation,
   AssistantRuntimeSettings,
   AssistantWorkspaceSummaryTarget,
+  AssetRecord,
+  LocationRecord,
+  SpatialFeatureRecord,
   ViewKey,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
@@ -61,16 +66,39 @@ import {
   subscribePromptResumeIntent,
 } from '../../shared/promptResumeIntent'
 import {
-  buildPromptHomeContextualStarters,
-  type PromptHomeContextualStarter,
+  formatTimeDisplayTimeZonePreferenceLabel,
+  getTimeDisplaySettingsSnapshot,
+  listTimeDisplayTimeZoneOptions,
+  resolveTimeDisplayTimeZone,
+  saveTimeDisplaySettingsSnapshot,
+  type TimeDisplaySettings,
+  type TimeDisplayTimeZoneOption,
+} from '../../shared/timeDisplaySettings'
+import {
+  buildAssetMapSummary,
+  formatAssetMapPlacement,
+  formatAssetMapSource,
+} from '../../features/reference-data/assetMap'
+import {
   type PromptHomeCounts,
 } from './promptHomeStarters'
+import {
+  PROMPT_HOME_PROMPT_KITS,
+  type PromptHomePromptKit,
+} from './promptHomePromptKits'
+import {
+  getPromptHomeNextClockTickDelay,
+} from './promptHomeClock'
 import { buildPromptHomePromotedRoutes } from './promptPromotedRoutes'
+import { AssetMapCanvas } from '../reference-data/tabs/AssetMapPanel'
 
 type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null
   health: string
   counts: PromptHomeCounts
+  assets?: AssetRecord[]
+  locations?: LocationRecord[]
+  spatialFeatures?: SpatialFeatureRecord[]
   onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
   onRefreshData?: () => Promise<void>
   initialMessages?: PromptHomeMessage[]
@@ -122,13 +150,466 @@ const NAVIGATION_INTENTS: PromptNavigationIntent[] = [
   },
 ]
 
-const PROMPT_HOME_LIVE_CONTEXT_PANEL_ID = 'prompt-home-live-context-panel'
 const PROMPT_HOME_REVIEW_PANEL_ID = 'prompt-home-review-panel'
 const PROMPT_HOME_RECENT_PANEL_ID = 'prompt-home-recent-panel'
 const PROMPT_HOME_DIRECT_PANEL_ID = 'prompt-home-direct-panel'
+const PROMPT_HOME_TIMEFRAME_PANEL_ID = 'prompt-home-timeframe-panel'
+const PROMPT_HOME_DAY_PANEL_ID = 'prompt-home-day-panel'
+const PROMPT_HOME_WEEK_PANEL_ID = 'prompt-home-week-panel'
+const PROMPT_HOME_MONTH_PANEL_ID = 'prompt-home-month-panel'
+const PROMPT_HOME_MAP_PANEL_ID = 'prompt-home-map-panel'
+const PROMPT_HOME_TRADING_HOURS_PANEL_ID = 'prompt-home-trading-hours-panel'
+const PROMPT_HOME_DAY_HOURS = 24
+const PROMPT_HOME_DAY_MINUTES = PROMPT_HOME_DAY_HOURS * 60
+const PROMPT_HOME_WEEK_DAYS = 7
+const PROMPT_HOME_WEEK_MINUTES = PROMPT_HOME_WEEK_DAYS * PROMPT_HOME_DAY_MINUTES
+const PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING = 7
+const PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING = 22
+const PROMPT_HOME_DAY_METER_TICKS = [0, 6, 12, 18, 24]
+const PROMPT_HOME_WEEKDAY_SHORT_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+const PROMPT_HOME_WEEKDAY_FULL_LABELS = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const
+
+type PromptHomeMeterTick = {
+  key: string
+  label: string
+  percent: number
+  align?: 'start' | 'center' | 'end'
+}
+
+type PromptHomeMeterMarker = {
+  key: string
+  label: string
+  detail: string
+  percent: number
+  align?: 'start' | 'end'
+}
+
+type PromptHomeZonedDateParts = {
+  year: number
+  month: number
+  day: number
+  weekdayIndex: number
+  hour: number
+  minute: number
+  second: number
+}
+
+type PromptHomeExchangeSessionWindow = {
+  startHour: number
+  startMinute: number
+  endHour: number
+  endMinute: number
+}
+
+type PromptHomeExchangeSessionDefinition = {
+  key: string
+  label: string
+  detail: string
+  tone:
+    | 'ice'
+    | 'lme'
+    | 'lme-ring'
+    | 'sgx'
+    | 'cme'
+    | 'eex'
+    | 'tocom'
+  sourceTimeZone: string
+  sourceWindowLabel: string
+  windows: PromptHomeExchangeSessionWindow[]
+}
+
+type PromptHomeExchangeSessionSegment = {
+  key: string
+  startPercent: number
+  widthPercent: number
+}
+
+type PromptHomeExchangeSessionLane = PromptHomeExchangeSessionDefinition & {
+  displayWindowLabel: string
+  segments: PromptHomeExchangeSessionSegment[]
+}
+
+const PROMPT_HOME_MAJOR_EXCHANGE_SESSIONS: PromptHomeExchangeSessionDefinition[] = [
+  {
+    key: 'ice-brent',
+    label: 'ICE Brent',
+    detail: 'Representative Brent crude session',
+    tone: 'ice',
+    sourceTimeZone: 'Europe/London',
+    sourceWindowLabel: '01:00-23:00 London',
+    windows: [{ startHour: 1, startMinute: 0, endHour: 23, endMinute: 0 }],
+  },
+  {
+    key: 'lme-electronic',
+    label: 'LMEselect',
+    detail: 'Electronic metals session',
+    tone: 'lme',
+    sourceTimeZone: 'Europe/London',
+    sourceWindowLabel: '01:00-19:00 London',
+    windows: [{ startHour: 1, startMinute: 0, endHour: 19, endMinute: 0 }],
+  },
+  {
+    key: 'lme-ring',
+    label: 'LME Ring',
+    detail: 'Open-outcry reference session',
+    tone: 'lme-ring',
+    sourceTimeZone: 'Europe/London',
+    sourceWindowLabel: '11:40-17:00 London',
+    windows: [{ startHour: 11, startMinute: 40, endHour: 17, endMinute: 0 }],
+  },
+  {
+    key: 'sgx-msci',
+    label: 'SGX MSCI',
+    detail: 'T and T+1 futures sessions',
+    tone: 'sgx',
+    sourceTimeZone: 'Asia/Singapore',
+    sourceWindowLabel: '08:30-17:20 / 17:50-05:15 Singapore',
+    windows: [
+      { startHour: 8, startMinute: 30, endHour: 17, endMinute: 20 },
+      { startHour: 17, startMinute: 50, endHour: 5, endMinute: 15 },
+    ],
+  },
+  {
+    key: 'cme-wti',
+    label: 'CME WTI',
+    detail: 'NYMEX WTI on CME Globex',
+    tone: 'cme',
+    sourceTimeZone: 'America/Chicago',
+    sourceWindowLabel: '17:00-16:00 Central',
+    windows: [{ startHour: 17, startMinute: 0, endHour: 16, endMinute: 0 }],
+  },
+  {
+    key: 'eex-power',
+    label: 'EEX Power',
+    detail: 'Representative power derivatives session',
+    tone: 'eex',
+    sourceTimeZone: 'Europe/Berlin',
+    sourceWindowLabel: '08:00-18:00 Central Europe',
+    windows: [{ startHour: 8, startMinute: 0, endHour: 18, endMinute: 0 }],
+  },
+  {
+    key: 'tocom-energy',
+    label: 'TOCOM Energy',
+    detail: 'Representative Japan energy session',
+    tone: 'tocom',
+    sourceTimeZone: 'Asia/Tokyo',
+    sourceWindowLabel: '08:45-15:40 / 17:00-05:55 Tokyo',
+    windows: [
+      { startHour: 8, startMinute: 45, endHour: 15, endMinute: 40 },
+      { startHour: 17, startMinute: 0, endHour: 5, endMinute: 55 },
+    ],
+  },
+]
 
 function createPromptMessageId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value))
+}
+
+function meterPercentForRatio(value: number, total: number): number {
+  if (total <= 0) {
+    return 0
+  }
+
+  return clampPercent((value / total) * 100)
+}
+
+function meterPercentForHourEnding(hourEnding: number): number {
+  return meterPercentForRatio(hourEnding, PROMPT_HOME_DAY_HOURS)
+}
+
+function normalizeMinutes(value: number): number {
+  return ((value % PROMPT_HOME_DAY_MINUTES) + PROMPT_HOME_DAY_MINUTES) % PROMPT_HOME_DAY_MINUTES
+}
+
+function minutesIntoDay(parts: PromptHomeZonedDateParts): number {
+  return parts.hour * 60 + parts.minute + parts.second / 60
+}
+
+function formatHourEndingLabel(hourEnding: number): string {
+  return `HE${hourEnding.toString().padStart(2, '0')}`
+}
+
+function currentHourEnding(parts: PromptHomeZonedDateParts): number {
+  if (parts.minute === 0 && parts.second === 0) {
+    return parts.hour
+  }
+
+  return Math.min(PROMPT_HOME_DAY_HOURS, parts.hour + 1)
+}
+
+function formatPromptHomeClockTime(value: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(value)
+}
+
+function formatPromptHomeMonthLabel(value: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'long',
+    year: 'numeric',
+  }).format(value)
+}
+
+function formatPromptHomeMonthDayLabel(value: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+  }).format(value)
+}
+
+function formatPromptHomeSummaryMonthDayLabel(value: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: '2-digit',
+  }).format(value)
+}
+
+function dayCountSuffix(value: number): string {
+  if (value % 100 >= 11 && value % 100 <= 13) {
+    return 'th'
+  }
+
+  switch (value % 10) {
+    case 1:
+      return 'st'
+    case 2:
+      return 'nd'
+    case 3:
+      return 'rd'
+    default:
+      return 'th'
+  }
+}
+
+function formatOrdinal(value: number): string {
+  return `${value}${dayCountSuffix(value)}`
+}
+
+function parseFormatterParts(parts: Intl.DateTimeFormatPart[]): PromptHomeZonedDateParts {
+  const values: Record<string, string> = {}
+  for (const part of parts) {
+    if (part.type !== 'literal') {
+      values[part.type] = part.value
+    }
+  }
+
+  const weekdayIndex = PROMPT_HOME_WEEKDAY_SHORT_LABELS.indexOf(
+    (values.weekday ?? 'Sun') as (typeof PROMPT_HOME_WEEKDAY_SHORT_LABELS)[number],
+  )
+
+  return {
+    year: Number.parseInt(values.year ?? '1970', 10),
+    month: Number.parseInt(values.month ?? '1', 10),
+    day: Number.parseInt(values.day ?? '1', 10),
+    weekdayIndex: weekdayIndex >= 0 ? weekdayIndex : 0,
+    hour: Number.parseInt(values.hour ?? '0', 10),
+    minute: Number.parseInt(values.minute ?? '0', 10),
+    second: Number.parseInt(values.second ?? '0', 10),
+  }
+}
+
+function getPromptHomeZonedDateParts(value: Date, timeZone: string): PromptHomeZonedDateParts {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hourCycle: 'h23',
+  })
+
+  return parseFormatterParts(formatter.formatToParts(value))
+}
+
+function parseTimeZoneOffsetLabel(value: string): number | null {
+  if (value === 'GMT' || value === 'UTC') {
+    return 0
+  }
+
+  const match = value.match(/(?:GMT|UTC)([+-])(\d{1,2})(?::?(\d{2}))?$/)
+  if (!match) {
+    return null
+  }
+
+  const sign = match[1] === '-' ? -1 : 1
+  const hours = Number.parseInt(match[2] ?? '0', 10)
+  const minutes = Number.parseInt(match[3] ?? '0', 10)
+  return sign * (hours * 60 + minutes)
+}
+
+function getTimeZoneOffsetMinutes(value: Date, timeZone: string): number {
+  const offsetFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'shortOffset',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+  const offsetLabel = offsetFormatter.formatToParts(value).find((part) => part.type === 'timeZoneName')?.value
+  const parsedOffset = offsetLabel ? parseTimeZoneOffsetLabel(offsetLabel) : null
+  if (parsedOffset !== null) {
+    return parsedOffset
+  }
+
+  const zonedDateParts = getPromptHomeZonedDateParts(value, timeZone)
+  const zonedTimestamp = Date.UTC(
+    zonedDateParts.year,
+    zonedDateParts.month - 1,
+    zonedDateParts.day,
+    zonedDateParts.hour,
+    zonedDateParts.minute,
+    zonedDateParts.second,
+  )
+  return Math.round((zonedTimestamp - value.getTime()) / 60_000)
+}
+
+function daysInMonth(parts: PromptHomeZonedDateParts): number {
+  return new Date(Date.UTC(parts.year, parts.month, 0)).getUTCDate()
+}
+
+function windowDurationMinutes(window: PromptHomeExchangeSessionWindow): number {
+  const startMinutes = window.startHour * 60 + window.startMinute
+  const endMinutes = window.endHour * 60 + window.endMinute
+  return endMinutes > startMinutes
+    ? endMinutes - startMinutes
+    : PROMPT_HOME_DAY_MINUTES - startMinutes + endMinutes
+}
+
+function formatPromptHomeClockMinutes(value: number): string {
+  const normalizedValue = normalizeMinutes(value)
+  const hours = Math.floor(normalizedValue / 60)
+  const minutes = normalizedValue % 60
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12
+  const meridiem = hours >= 12 ? 'PM' : 'AM'
+  return `${displayHour}:${minutes.toString().padStart(2, '0')} ${meridiem}`
+}
+
+function buildExchangeSessionWindowDisplayLabel(args: {
+  window: PromptHomeExchangeSessionWindow
+  sourceOffsetMinutes: number
+  targetOffsetMinutes: number
+}): string {
+  const sourceStartMinutes = args.window.startHour * 60 + args.window.startMinute
+  const durationMinutes = windowDurationMinutes(args.window)
+  const targetStartMinutes = normalizeMinutes(
+    sourceStartMinutes - args.sourceOffsetMinutes + args.targetOffsetMinutes,
+  )
+  const targetEndMinutes = normalizeMinutes(targetStartMinutes + durationMinutes)
+  const wrapsToNextDay = durationMinutes > PROMPT_HOME_DAY_MINUTES - targetStartMinutes
+
+  return `${formatPromptHomeClockMinutes(targetStartMinutes)} to ${formatPromptHomeClockMinutes(
+    targetEndMinutes,
+  )}${wrapsToNextDay ? ' next day' : ''}`
+}
+
+function buildExchangeSessionWindowSegments(args: {
+  keyPrefix: string
+  window: PromptHomeExchangeSessionWindow
+  sourceOffsetMinutes: number
+  targetOffsetMinutes: number
+}): PromptHomeExchangeSessionSegment[] {
+  const sourceStartMinutes = args.window.startHour * 60 + args.window.startMinute
+  const durationMinutes = windowDurationMinutes(args.window)
+  if (durationMinutes <= 0) {
+    return []
+  }
+
+  const targetStartMinutes = normalizeMinutes(
+    sourceStartMinutes - args.sourceOffsetMinutes + args.targetOffsetMinutes,
+  )
+  const firstSegmentMinutes =
+    durationMinutes >= PROMPT_HOME_DAY_MINUTES
+      ? PROMPT_HOME_DAY_MINUTES
+      : Math.min(durationMinutes, PROMPT_HOME_DAY_MINUTES - targetStartMinutes)
+  const segments: PromptHomeExchangeSessionSegment[] = [
+    {
+      key: `${args.keyPrefix}-0`,
+      startPercent: meterPercentForRatio(targetStartMinutes, PROMPT_HOME_DAY_MINUTES),
+      widthPercent: meterPercentForRatio(firstSegmentMinutes, PROMPT_HOME_DAY_MINUTES),
+    },
+  ]
+  const remainingMinutes = durationMinutes - firstSegmentMinutes
+
+  if (remainingMinutes > 0) {
+    segments.push({
+      key: `${args.keyPrefix}-1`,
+      startPercent: 0,
+      widthPercent: meterPercentForRatio(remainingMinutes, PROMPT_HOME_DAY_MINUTES),
+    })
+  }
+
+  return segments.filter((segment) => segment.widthPercent > 0)
+}
+
+function buildPromptHomeExchangeSessionLane(
+  definition: PromptHomeExchangeSessionDefinition,
+  targetTimeZone: string,
+  currentTime: Date,
+): PromptHomeExchangeSessionLane {
+  const sourceOffsetMinutes = getTimeZoneOffsetMinutes(currentTime, definition.sourceTimeZone)
+  const targetOffsetMinutes = getTimeZoneOffsetMinutes(currentTime, targetTimeZone)
+
+  return {
+    ...definition,
+    displayWindowLabel: definition.windows
+      .map((window) =>
+        buildExchangeSessionWindowDisplayLabel({
+          window,
+          sourceOffsetMinutes,
+          targetOffsetMinutes,
+        }),
+      )
+      .join(' / '),
+    segments: definition.windows.flatMap((window, index) =>
+      buildExchangeSessionWindowSegments({
+        keyPrefix: `${definition.key}-${index}`,
+        window,
+        sourceOffsetMinutes,
+        targetOffsetMinutes,
+      }),
+    ),
+  }
+}
+
+function buildWeekMeterTicks(): PromptHomeMeterTick[] {
+  return PROMPT_HOME_WEEKDAY_SHORT_LABELS.map((label, index) => ({
+    key: label,
+    label,
+    percent: meterPercentForRatio(index, PROMPT_HOME_WEEK_DAYS - 1),
+    align: index === 0 ? 'start' : index === PROMPT_HOME_WEEK_DAYS - 1 ? 'end' : 'center',
+  }))
+}
+
+function buildMonthMeterTicks(dayTotal: number): PromptHomeMeterTick[] {
+  const checkpoints = [1, Math.ceil(dayTotal * 0.25), Math.ceil(dayTotal * 0.5), Math.ceil(dayTotal * 0.75), dayTotal]
+  const uniqueCheckpoints = checkpoints.filter((day, index) => checkpoints.indexOf(day) === index)
+
+  return uniqueCheckpoints.map((day, index) => ({
+    key: String(day),
+    label: day === dayTotal ? 'EOM' : String(day),
+    percent: meterPercentForRatio(day - 1, Math.max(dayTotal - 1, 1)),
+    align: index === 0 ? 'start' : index === uniqueCheckpoints.length - 1 ? 'end' : 'center',
+  }))
 }
 
 function formatCount(value: number | null): string {
@@ -169,7 +650,7 @@ function formatPromotedRouteSummary(
     parts.push(`${readyCount} ready`)
   }
   if (waitingCount > 0) {
-    parts.push(`${waitingCount} waiting on live context`)
+    parts.push(`${waitingCount} gathering more signal`)
   }
   if (coolingCount > 0) {
     parts.push(`${coolingCount} cooling off`)
@@ -177,7 +658,7 @@ function formatPromotedRouteSummary(
 
   return parts.length > 0
     ? `Promoted routes: ${parts.join(' · ')}.`
-    : 'Repeated accepted Prompt Home handoffs will appear here once a route stabilizes.'
+    : 'Repeated accepted Home handoffs will appear here once a route stabilizes.'
 }
 
 function summarizePromptConversation(conversation: AssistantConversationSummary): string {
@@ -284,14 +765,519 @@ function removePromptNavigationIntent(
   })
 }
 
+function PromptHomeTimeMeterCard({
+  panelId,
+  eyebrow,
+  title,
+  detail,
+  badge,
+  meta,
+  collapsedSummary = meta,
+  ticks,
+  markers = [],
+  currentPercent,
+  ariaLabel,
+  highlightedWindowStartPercent,
+  highlightedWindowWidthPercent,
+  expanded,
+  onToggle,
+  children,
+}: {
+  panelId: string
+  eyebrow: string
+  title: string
+  detail: string
+  badge: string
+  meta: string
+  collapsedSummary?: string
+  ticks: PromptHomeMeterTick[]
+  markers?: PromptHomeMeterMarker[]
+  currentPercent: number
+  ariaLabel: string
+  highlightedWindowStartPercent?: number
+  highlightedWindowWidthPercent?: number
+  expanded: boolean
+  onToggle: () => void
+  children?: ReactNode
+}) {
+  return (
+    <article
+      className={`prompt-home-time-meter-card ${expanded ? 'is-expanded' : 'is-collapsed'}`}
+      aria-label={ariaLabel}
+    >
+      <button
+        type="button"
+        className="prompt-home-time-meter-card-toggle"
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={onToggle}
+      >
+        <div className="prompt-home-time-meter-card-head">
+          <div className={`prompt-home-time-meter-card-copy${expanded ? '' : ' is-collapsed'}`}>
+            {expanded ? (
+              <>
+                <span className="eyebrow">{eyebrow}</span>
+                <strong>{title}</strong>
+              </>
+            ) : (
+              <div className="prompt-home-time-meter-card-collapsed-line">
+                <span className="eyebrow prompt-home-time-meter-card-inline-eyebrow">{eyebrow}</span>
+                <strong>{title}</strong>
+                <small className="prompt-home-time-meter-card-summary">{collapsedSummary}</small>
+              </div>
+            )}
+          </div>
+          <div className="prompt-home-time-meter-card-toggle-side">
+            <div className="prompt-home-time-meter-card-toggle-meta">
+              <small>{expanded ? 'Hide card' : 'Show card'}</small>
+              <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                {expanded ? '−' : '+'}
+              </span>
+            </div>
+            <span className="status-pill status-pill-active">{badge}</span>
+          </div>
+        </div>
+      </button>
+
+      <div id={panelId} className="prompt-home-time-meter-card-body" hidden={!expanded}>
+        <div className="prompt-home-time-meter-card-body-head">
+          <p>{detail}</p>
+          <small>{meta}</small>
+        </div>
+
+        {markers.length > 0 ? (
+          <div className="prompt-home-time-meter-markers" aria-hidden="true">
+            {markers.map((marker) => (
+              <div
+                key={marker.key}
+                className={`prompt-home-time-meter-marker ${marker.align === 'end' ? 'is-end' : 'is-start'}`}
+                style={{ left: `${marker.percent}%` }}
+              >
+                <span>{marker.label}</span>
+                <strong>{marker.detail}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="prompt-home-time-meter-scale" aria-hidden="true">
+          {typeof highlightedWindowStartPercent === 'number' &&
+          typeof highlightedWindowWidthPercent === 'number' ? (
+            <span
+              className="prompt-home-time-meter-window"
+              style={{
+                left: `${highlightedWindowStartPercent}%`,
+                width: `${highlightedWindowWidthPercent}%`,
+              }}
+            />
+          ) : null}
+          {markers.map((marker) => (
+            <span
+              key={`${marker.key}-boundary`}
+              className="prompt-home-time-meter-boundary"
+              style={{ left: `${marker.percent}%` }}
+            />
+          ))}
+          <span className="prompt-home-time-meter-now" style={{ left: `${currentPercent}%` }} />
+        </div>
+
+        <div className="prompt-home-time-meter-ticks" aria-hidden="true">
+          {ticks.map((tick) => (
+            <span
+              key={tick.key}
+              className={`prompt-home-time-meter-tick ${
+                tick.align === 'start' ? 'is-start' : tick.align === 'end' ? 'is-end' : ''
+              }`}
+              style={{ left: `${tick.percent}%` }}
+            >
+              {tick.label}
+            </span>
+          ))}
+        </div>
+
+        {children}
+      </div>
+    </article>
+  )
+}
+
+function PromptHomeMapTile({
+  assets,
+  locations,
+  spatialFeatures,
+  onOpenMapWorkspace,
+}: {
+  assets: AssetRecord[]
+  locations: LocationRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
+  onOpenMapWorkspace: () => void
+}) {
+  const mapCardExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe.map-card', false)
+  const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(null)
+  const mapSummary = useMemo(() => buildAssetMapSummary(assets, locations), [assets, locations])
+  const activeSpatialFeatures = useMemo(
+    () => spatialFeatures.filter((feature) => feature.is_active),
+    [spatialFeatures],
+  )
+  const hiddenAssetCount = Math.max(0, assets.length - mapSummary.mappedCount)
+  const activeSelectedAssetCode = useMemo(
+    () =>
+      selectedAssetCode && mapSummary.mappedRecords.some((record) => record.asset.code === selectedAssetCode)
+        ? selectedAssetCode
+        : null,
+    [mapSummary.mappedRecords, selectedAssetCode],
+  )
+  const selectedRecord = useMemo(
+    () => mapSummary.mappedRecords.find((record) => record.asset.code === activeSelectedAssetCode) ?? null,
+    [activeSelectedAssetCode, mapSummary.mappedRecords],
+  )
+  const collapsedSummary = [
+    `${mapSummary.mappedCount} plotted`,
+    `${hiddenAssetCount} hidden`,
+    `${activeSpatialFeatures.length} overlays`,
+  ].join(' | ')
+  const statusTitle = mapSummary.mappedCount === 0 ? 'No map-ready assets yet.' : null
+  const statusDetail =
+    mapSummary.mappedCount === 0
+      ? 'The base map still loads here. Assets appear once they have GeoJSON, direct coordinates, or linked location coordinates.'
+      : null
+
+  return (
+    <article className={`prompt-home-map-card ${mapCardExpandedState.expanded ? 'is-expanded' : 'is-collapsed'}`}>
+      <button
+        type="button"
+        className="prompt-home-map-card-toggle"
+        aria-expanded={mapCardExpandedState.expanded}
+        aria-controls={PROMPT_HOME_MAP_PANEL_ID}
+        onClick={() => mapCardExpandedState.setExpanded((current) => !current)}
+      >
+        <div className="prompt-home-map-card-head">
+          <div className="prompt-home-map-card-copy">
+            <span className="eyebrow">Map</span>
+            <strong>Asset footprint preview</strong>
+            <p>{collapsedSummary}</p>
+          </div>
+          <div className="prompt-home-map-card-toggle-side">
+            <div className="prompt-home-map-card-toggle-meta">
+              <small>{mapCardExpandedState.expanded ? 'Hide card' : 'Show card'}</small>
+              <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                {mapCardExpandedState.expanded ? '−' : '+'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </button>
+
+      <div id={PROMPT_HOME_MAP_PANEL_ID} className="prompt-home-map-card-body" hidden={!mapCardExpandedState.expanded}>
+        <div className="prompt-home-map-card-body-head">
+          <p>Preview map-ready assets and shared spatial overlays without leaving Home.</p>
+          <small>{collapsedSummary}</small>
+        </div>
+
+        <AssetMapCanvas
+          records={mapSummary.mappedRecords}
+          spatialFeatures={activeSpatialFeatures}
+          selectedAssetCode={activeSelectedAssetCode}
+          onSelectAsset={setSelectedAssetCode}
+          statusTitle={statusTitle}
+          statusDetail={statusDetail}
+        />
+
+        <div className="prompt-home-map-card-footer">
+          <div className="prompt-home-map-card-selection">
+            <strong>{selectedRecord ? selectedRecord.asset.code : 'Map Scope'}</strong>
+            <p>
+              {selectedRecord
+                ? `${selectedRecord.asset.name} · ${formatAssetMapSource(selectedRecord)}`
+                : `${mapSummary.mappedCount} map-ready asset${mapSummary.mappedCount === 1 ? '' : 's'} are currently plotted in Home.`}
+            </p>
+            <p>
+              {selectedRecord
+                ? formatAssetMapPlacement(selectedRecord)
+                : hiddenAssetCount > 0
+                  ? `${hiddenAssetCount} asset${hiddenAssetCount === 1 ? '' : 's'} remain hidden until they gain map-ready coordinates or linked locations.`
+                  : 'All currently loaded assets meet the map-ready rules.'}
+            </p>
+          </div>
+          <button type="button" className="button button-secondary" onClick={onOpenMapWorkspace}>
+            Open Map Workspace
+          </button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function PromptHomeTimeframePanel({
+  currentTime,
+  timeDisplaySettings,
+  timeZoneOptions,
+  onTimeZoneChange,
+  assets,
+  locations,
+  spatialFeatures,
+  onOpenMapWorkspace,
+}: {
+  currentTime: Date
+  timeDisplaySettings: TimeDisplaySettings
+  timeZoneOptions: TimeDisplayTimeZoneOption[]
+  onTimeZoneChange: (nextTimeZone: string) => void
+  assets: AssetRecord[]
+  locations: LocationRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
+  onOpenMapWorkspace: () => void
+}) {
+  const timeframeExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe-panel', true)
+  const dayCardExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe.day-card', true)
+  const weekCardExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe.week-card', true)
+  const monthCardExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe.month-card', true)
+  const exchangeSessionsExpandedState = usePersistentCollapsibleCardState(
+    'prompt-home.timeframe.trading-hours',
+    false,
+  )
+  const resolvedTimeZone = resolveTimeDisplayTimeZone(timeDisplaySettings)
+  const timeZonePreferenceLabel = formatTimeDisplayTimeZonePreferenceLabel(timeDisplaySettings)
+  const zonedDateParts = getPromptHomeZonedDateParts(currentTime, resolvedTimeZone)
+  const currentClockLabel = formatPromptHomeClockTime(currentTime, resolvedTimeZone)
+  const currentMonthLabel = formatPromptHomeMonthLabel(currentTime, resolvedTimeZone)
+  const currentMonthDayLabel = formatPromptHomeMonthDayLabel(currentTime, resolvedTimeZone)
+  const currentSummaryMonthDayLabel = formatPromptHomeSummaryMonthDayLabel(currentTime, resolvedTimeZone)
+  const currentHourEndingLabel = formatHourEndingLabel(currentHourEnding(zonedDateParts))
+  const currentWeekdayLabel = PROMPT_HOME_WEEKDAY_FULL_LABELS[zonedDateParts.weekdayIndex]
+  const currentDayPercent = meterPercentForRatio(minutesIntoDay(zonedDateParts), PROMPT_HOME_DAY_MINUTES)
+  const currentWeekPercent = meterPercentForRatio(
+    zonedDateParts.weekdayIndex * PROMPT_HOME_DAY_MINUTES + minutesIntoDay(zonedDateParts),
+    PROMPT_HOME_WEEK_MINUTES,
+  )
+  const monthDayTotal = daysInMonth(zonedDateParts)
+  const timeframeCollapsedSummary = [
+    currentClockLabel,
+    currentHourEndingLabel,
+    currentWeekdayLabel,
+    currentSummaryMonthDayLabel,
+  ].join(' | ')
+  const currentMonthPercent = meterPercentForRatio(
+    (zonedDateParts.day - 1) * PROMPT_HOME_DAY_MINUTES + minutesIntoDay(zonedDateParts),
+    monthDayTotal * PROMPT_HOME_DAY_MINUTES,
+  )
+  const tradingWindowStartPercent = meterPercentForHourEnding(
+    PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING,
+  )
+  const tradingWindowEndPercent = meterPercentForHourEnding(
+    PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING,
+  )
+  const tradingWindowWidthPercent = tradingWindowEndPercent - tradingWindowStartPercent
+  const dayTicks: PromptHomeMeterTick[] = PROMPT_HOME_DAY_METER_TICKS.map((tick, index) => ({
+    key: String(tick),
+    label: formatHourEndingLabel(tick),
+    percent: meterPercentForHourEnding(tick),
+    align: index === 0 ? 'start' : index === PROMPT_HOME_DAY_METER_TICKS.length - 1 ? 'end' : 'center',
+  }))
+  const weekTicks = buildWeekMeterTicks()
+  const monthTicks = buildMonthMeterTicks(monthDayTotal)
+  const exchangeSessionLanes = PROMPT_HOME_MAJOR_EXCHANGE_SESSIONS.map((session) =>
+    buildPromptHomeExchangeSessionLane(session, resolvedTimeZone, currentTime),
+  )
+  const tradingMarkers: PromptHomeMeterMarker[] = [
+    {
+      key: 'open',
+      label: 'Trading opens',
+      detail: formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING),
+      percent: tradingWindowStartPercent,
+      align: 'start',
+    },
+    {
+      key: 'close',
+      label: 'Trading closes',
+      detail: formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING),
+      percent: tradingWindowEndPercent,
+      align: 'end',
+    },
+  ]
+  return (
+    <section className="prompt-home-timeframe-panel">
+      <div className="prompt-home-timeframe-panel-head">
+        <div className="prompt-home-timeframe-panel-toggle">
+          <div className="prompt-home-timeframe-panel-copy">
+            <span className="eyebrow">Desk Time</span>
+            <strong>Desk clocks and calendars</strong>
+            {timeframeExpandedState.expanded ? null : <p>{timeframeCollapsedSummary}</p>}
+          </div>
+        </div>
+
+        <div className="prompt-home-timeframe-panel-side">
+          <button
+            type="button"
+            className="prompt-home-timeframe-panel-toggle-action"
+            aria-expanded={timeframeExpandedState.expanded}
+            aria-controls={PROMPT_HOME_TIMEFRAME_PANEL_ID}
+            onClick={() => timeframeExpandedState.setExpanded((current) => !current)}
+          >
+            <div className="prompt-home-timeframe-panel-toggle-meta">
+              <small>{timeframeExpandedState.expanded ? 'Hide card' : 'Show card'}</small>
+              <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                {timeframeExpandedState.expanded ? '−' : '+'}
+              </span>
+            </div>
+          </button>
+
+          {timeframeExpandedState.expanded ? (
+            <label className="field prompt-home-timezone-field">
+              <span>Time zone</span>
+              <select
+                className="control"
+                aria-label="Preferred time zone"
+                value={timeDisplaySettings.timeZone}
+                onChange={(event) => onTimeZoneChange(event.target.value)}
+              >
+                {timeZoneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        id={PROMPT_HOME_TIMEFRAME_PANEL_ID}
+        className="prompt-home-timeframe-panel-body"
+        hidden={!timeframeExpandedState.expanded}
+      >
+        <div className="prompt-home-timeframe-grid">
+          <PromptHomeTimeMeterCard
+            panelId={PROMPT_HOME_DAY_PANEL_ID}
+            eyebrow="Day"
+            title={`${currentClockLabel} local`}
+            detail="Hour-ending day with the desk window and representative venue sessions marked."
+            badge={currentHourEndingLabel}
+            meta={`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}`}
+            collapsedSummary={`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)} · ${exchangeSessionLanes.length} venue sessions`}
+            ticks={dayTicks}
+            markers={tradingMarkers}
+            currentPercent={currentDayPercent}
+            highlightedWindowStartPercent={tradingWindowStartPercent}
+            highlightedWindowWidthPercent={tradingWindowWidthPercent}
+            ariaLabel={`Day meter in ${resolvedTimeZone}. Current local time ${currentClockLabel}, ${currentHourEndingLabel}. Desk trading hours run from ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}. Representative venue sessions for ICE Brent, LMEselect, LME Ring, SGX MSCI, CME WTI, EEX Power, and TOCOM Energy are also shown.`}
+            expanded={dayCardExpandedState.expanded}
+            onToggle={() => dayCardExpandedState.setExpanded((current) => !current)}
+          >
+            <div className="prompt-home-time-details">
+              <button
+                type="button"
+                className="prompt-home-time-details-toggle"
+                aria-expanded={exchangeSessionsExpandedState.expanded}
+                aria-controls={PROMPT_HOME_TRADING_HOURS_PANEL_ID}
+                onClick={() =>
+                  exchangeSessionsExpandedState.setExpanded((current) => !current)
+                }
+              >
+                <div className="prompt-home-time-details-toggle-copy">
+                  <strong>Representative trading hours</strong>
+                  <span>{exchangeSessionLanes.length} major venue sessions available</span>
+                </div>
+                <div className="prompt-home-time-details-toggle-meta">
+                  <small>{exchangeSessionsExpandedState.expanded ? 'Hide details' : 'Show details'}</small>
+                  <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                    {exchangeSessionsExpandedState.expanded ? '−' : '+'}
+                  </span>
+                </div>
+              </button>
+
+              <div
+                id={PROMPT_HOME_TRADING_HOURS_PANEL_ID}
+                className="prompt-home-session-board"
+                hidden={!exchangeSessionsExpandedState.expanded}
+              >
+                <p className="prompt-home-session-board-note">
+                  Representative venue sessions converted into {timeZonePreferenceLabel}.
+                </p>
+                <div className="prompt-home-session-lane-list">
+                  {exchangeSessionLanes.map((session) => (
+                    <div key={session.key} className={`prompt-home-session-lane is-${session.tone}`}>
+                      <div className="prompt-home-session-lane-copy">
+                        <strong>{session.label}</strong>
+                        <span>{session.displayWindowLabel}</span>
+                        <small>
+                          {session.detail} · {session.sourceWindowLabel}
+                        </small>
+                      </div>
+                      <div className="prompt-home-session-lane-track" aria-hidden="true">
+                        {session.segments.map((segment) => (
+                          <span
+                            key={segment.key}
+                            className="prompt-home-session-lane-segment"
+                            style={{
+                              left: `${segment.startPercent}%`,
+                              width: `${segment.widthPercent}%`,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </PromptHomeTimeMeterCard>
+          <PromptHomeTimeMeterCard
+            panelId={PROMPT_HOME_WEEK_PANEL_ID}
+            eyebrow="Week"
+            title={currentWeekdayLabel}
+            detail="Sunday through Saturday."
+            badge={currentMonthDayLabel}
+            meta={`Week progress ${Math.round(currentWeekPercent)}%`}
+            collapsedSummary={`Sunday through Saturday · Week progress ${Math.round(currentWeekPercent)}%`}
+            ticks={weekTicks}
+            currentPercent={currentWeekPercent}
+            ariaLabel={`Week meter in ${resolvedTimeZone}. Current day ${currentWeekdayLabel}. The week runs from Sunday through Saturday.`}
+            expanded={weekCardExpandedState.expanded}
+            onToggle={() => weekCardExpandedState.setExpanded((current) => !current)}
+          />
+          <PromptHomeTimeMeterCard
+            panelId={PROMPT_HOME_MONTH_PANEL_ID}
+            eyebrow="Month"
+            title={currentMonthLabel}
+            detail="1 through EOM."
+            badge={`Day ${formatOrdinal(zonedDateParts.day)}`}
+            meta={`${monthDayTotal} days this month`}
+            collapsedSummary={`1 through EOM · ${monthDayTotal} days this month`}
+            ticks={monthTicks}
+            currentPercent={currentMonthPercent}
+            ariaLabel={`Month meter in ${resolvedTimeZone}. Today is day ${zonedDateParts.day} of ${monthDayTotal}. The month runs from 1 through end of month.`}
+            expanded={monthCardExpandedState.expanded}
+            onToggle={() => monthCardExpandedState.setExpanded((current) => !current)}
+          />
+        </div>
+
+        <PromptHomeMapTile
+          assets={assets}
+          locations={locations}
+          spatialFeatures={spatialFeatures}
+          onOpenMapWorkspace={onOpenMapWorkspace}
+        />
+      </div>
+    </section>
+  )
+}
+
 export function PromptHomeWorkspace({
   authSession,
   health,
   counts,
+  assets = [],
+  locations = [],
+  spatialFeatures = [],
   onOpenView,
   onRefreshData,
   initialMessages = [],
 }: PromptHomeWorkspaceProps) {
+  const [currentTime, setCurrentTime] = useState(() => new Date())
+  const [timeDisplaySettings, setTimeDisplaySettings] = useState<TimeDisplaySettings>(() =>
+    getTimeDisplaySettingsSnapshot(),
+  )
   const [runtimeSettings, setRuntimeSettings] = useState<AssistantRuntimeSettings | null>(null)
   const [runtimeError, setRuntimeError] = useState('')
   const [draft, setDraft] = useState('')
@@ -315,18 +1301,67 @@ export function PromptHomeWorkspace({
   const [promptRouteRecommendationsError, setPromptRouteRecommendationsError] = useState('')
   const [tradeAttentionCandidates, setTradeAttentionCandidates] = useState<TradeAttentionCandidateRecord[]>([])
   const [invoiceIssueCandidates, setInvoiceIssueCandidates] = useState<InvoiceIssueCandidateRecord[]>([])
-  const [liveContextExpanded, setLiveContextExpanded] = useState(false)
-  const [supportPanels, setSupportPanels] = useState({
-    review: false,
-    recent: authSession !== null,
-    direct: false,
-  })
+  const [selectedPromptKitKey, setSelectedPromptKitKey] = useState<PromptHomePromptKit['key'] | null>(null)
+  const reviewPanelExpandedState = usePersistentCollapsibleCardState(
+    'prompt-home.support.review',
+    pendingActionRequests.length > 0 ||
+      Boolean(pendingActionRequestsError) ||
+      pendingActionRequestsLoading,
+  )
+  const recentPanelExpandedState = usePersistentCollapsibleCardState(
+    'prompt-home.support.recent',
+    authSession !== null,
+  )
+  const directPanelExpandedState = usePersistentCollapsibleCardState('prompt-home.support.direct', false)
   const promptResumeIntent = useSyncExternalStore(
     subscribePromptResumeIntent,
     getPromptResumeIntent,
     () => null,
   )
   const consumedPromptResumeKeyRef = useRef<string | null>(null)
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const timeZoneOptions = useMemo(() => listTimeDisplayTimeZoneOptions(), [])
+
+  useEffect(() => {
+    let timeoutId: number | null = null
+
+    const scheduleNextClockRefresh = (now: Date) => {
+      timeoutId = window.setTimeout(() => {
+        syncClockToCurrentMinute()
+      }, getPromptHomeNextClockTickDelay(now))
+    }
+
+    const syncClockToCurrentMinute = () => {
+      const now = new Date()
+      setCurrentTime(now)
+      scheduleNextClockRefresh(now)
+    }
+
+    const resyncClock = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
+      syncClockToCurrentMinute()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        resyncClock()
+      }
+    }
+
+    scheduleNextClockRefresh(new Date())
+    window.addEventListener('focus', resyncClock)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
+      window.removeEventListener('focus', resyncClock)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
 
   const operatorContext = useMemo(
     () =>
@@ -337,9 +1372,12 @@ export function PromptHomeWorkspace({
       }),
     [authSession?.user.display_name, counts, health],
   )
-  const contextualStarters = useMemo(
-    () => buildPromptHomeContextualStarters(counts),
-    [counts],
+  const selectedPromptKit = useMemo(
+    () =>
+      selectedPromptKitKey
+        ? PROMPT_HOME_PROMPT_KITS.find((promptKit) => promptKit.key === selectedPromptKitKey) ?? null
+        : null,
+    [selectedPromptKitKey],
   )
   const promotedRoutes = useMemo(
     () =>
@@ -500,51 +1538,6 @@ export function PromptHomeWorkspace({
       }
     })
   }, [authSession, promptRouteRecommendations])
-
-  useEffect(() => {
-    setSupportPanels((current) =>
-      current.recent === (authSession !== null)
-        ? current
-        : {
-            ...current,
-            recent: authSession !== null,
-          },
-    )
-  }, [authSession])
-
-  useEffect(() => {
-    if (
-      pendingActionRequests.length === 0 &&
-      !pendingActionRequestsError &&
-      !pendingActionRequestsLoading
-    ) {
-      return
-    }
-
-    setSupportPanels((current) => (current.review ? current : { ...current, review: true }))
-  }, [pendingActionRequests.length, pendingActionRequestsError, pendingActionRequestsLoading])
-
-  useEffect(() => {
-    if (
-      !authSession ||
-      (recentConversations.length === 0 &&
-        !conversationHistoryError &&
-        !conversationDetailError &&
-        !conversationHistoryLoading &&
-        !conversationDetailLoading)
-    ) {
-      return
-    }
-
-    setSupportPanels((current) => (current.recent ? current : { ...current, recent: true }))
-  }, [
-    authSession,
-    recentConversations.length,
-    conversationHistoryError,
-    conversationDetailError,
-    conversationHistoryLoading,
-    conversationDetailLoading,
-  ])
 
   async function loadRuntimeSettings(): Promise<AssistantRuntimeSettings> {
     if (runtimeSettings) {
@@ -744,26 +1737,17 @@ export function PromptHomeWorkspace({
     onOpenView('settings')
   }
 
-  function handleContextualStarterAsk(starter: PromptHomeContextualStarter) {
-    if (submitting) {
-      return
-    }
-
-    setDraft(starter.prompt)
+  function loadPromptDraft(nextDraft: string) {
+    setDraft(nextDraft)
     setSubmitError('')
     setConversationDetailError('')
 
-    if (!authSession) {
-      savePromptResumeIntent({
-        draft: starter.prompt,
-        summaryTargets: starter.summaryTargets,
-        submitAfterSignIn: true,
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        composerTextareaRef.current?.focus()
+        composerTextareaRef.current?.setSelectionRange(nextDraft.length, nextDraft.length)
       })
-      onOpenView('settings')
-      return
     }
-
-    void submitPrompt(starter.prompt, starter.summaryTargets ?? [])
   }
 
   function openNavigationIntent(
@@ -820,11 +1804,24 @@ export function PromptHomeWorkspace({
     })
   }
 
+  const supportPanels = {
+    review: reviewPanelExpandedState.expanded,
+    recent: recentPanelExpandedState.expanded,
+    direct: directPanelExpandedState.expanded,
+  }
+
   function toggleSupportPanel(panel: keyof typeof supportPanels) {
-    setSupportPanels((current) => ({
-      ...current,
-      [panel]: !current[panel],
-    }))
+    switch (panel) {
+      case 'review':
+        reviewPanelExpandedState.setExpanded((current) => !current)
+        break
+      case 'recent':
+        recentPanelExpandedState.setExpanded((current) => !current)
+        break
+      case 'direct':
+        directPanelExpandedState.setExpanded((current) => !current)
+        break
+    }
   }
 
   const handleActionRequestDecision = useCallback(
@@ -888,7 +1885,7 @@ export function PromptHomeWorkspace({
               ? `${recentConversations.length} recent prompt thread${recentConversations.length === 1 ? '' : 's'} available.`
               : 'No recent prompt threads yet.'
   const pendingActionReviewNote = !authSession
-    ? 'Sign in to review governed actions staged from Prompt Home.'
+    ? 'Sign in to review governed actions staged from Home.'
     : pendingActionRequestsLoading
       ? 'Refreshing the governed review queue.'
       : pendingActionRequestsError
@@ -912,7 +1909,7 @@ export function PromptHomeWorkspace({
         : 'No saved threads'
   const directPanelSummary = `${NAVIGATION_INTENTS.length} shortcuts`
   const promptRouteRecommendationNote = !authSession
-    ? 'Sign in to load promoted routes from accepted Prompt Home handoffs.'
+    ? 'Sign in to load promoted routes from accepted Home handoffs.'
     : promptRouteRecommendationsLoading
       ? 'Loading promoted routes.'
       : promptRouteRecommendationsError
@@ -924,32 +1921,26 @@ export function PromptHomeWorkspace({
       <section className="surface prompt-home-composer-panel">
         <div className="prompt-home-heading-row">
           <div className="prompt-home-heading">
-            <span className="eyebrow">Prompt Home</span>
-            <h3>Start with the job in front of you</h3>
-            <p>
-              Ask for the next best workspace, a grounded summary, or help deciding what
-              to do next without starting in the old console first.
-            </p>
+            <span className="eyebrow">Home</span>
           </div>
-          <div className="prompt-home-heading-actions">
-            <button
-              type="button"
-              className="button button-ghost prompt-home-live-context-toggle"
-              aria-expanded={liveContextExpanded}
-              aria-controls={PROMPT_HOME_LIVE_CONTEXT_PANEL_ID}
-              onClick={() => setLiveContextExpanded((expanded) => !expanded)}
-            >
-              {liveContextExpanded ? 'Hide live context' : 'Show live context'}
-            </button>
-            {authSession ? (
-              <button
-                type="button"
-                className="button button-ghost prompt-home-secondary-action"
-                onClick={() => onOpenView('assistant')}
-              >
-                Assistant Console
-              </button>
-            ) : (
+          <PromptHomeTimeframePanel
+            currentTime={currentTime}
+            timeDisplaySettings={timeDisplaySettings}
+            timeZoneOptions={timeZoneOptions}
+            assets={assets}
+            locations={locations}
+            spatialFeatures={spatialFeatures}
+            onTimeZoneChange={(nextTimeZone) => {
+              const savedSettings = saveTimeDisplaySettingsSnapshot({
+                ...timeDisplaySettings,
+                timeZone: nextTimeZone,
+              })
+              setTimeDisplaySettings(savedSettings)
+            }}
+            onOpenMapWorkspace={() => onOpenView('map')}
+          />
+          {!authSession ? (
+            <div className="prompt-home-heading-actions">
               <button
                 type="button"
                 className="button button-ghost prompt-home-secondary-action"
@@ -957,14 +1948,15 @@ export function PromptHomeWorkspace({
               >
                 Sign In
               </button>
-            )}
-          </div>
+            </div>
+          ) : null}
         </div>
 
         <form className="prompt-home-composer" onSubmit={handleSubmit}>
           <label className="field prompt-home-composer-field">
             <span>Operator prompt</span>
             <textarea
+              ref={composerTextareaRef}
               className="control prompt-home-textarea"
               value={draft}
               onChange={(event) => {
@@ -999,12 +1991,90 @@ export function PromptHomeWorkspace({
               key={prompt}
               type="button"
               className="entity-chip entity-chip-soft"
-              onClick={() => setDraft(prompt)}
+              onClick={() => loadPromptDraft(prompt)}
             >
               {prompt}
             </button>
           ))}
         </div>
+
+        <section className="prompt-home-prompt-kits" aria-label="Prompt kits">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Guided Prompts</span>
+              <h3>What are you trying to do?</h3>
+            </div>
+            <p>Pick a lane, then load a suggested prompt or jump straight to the right workspace.</p>
+          </div>
+
+          <div className="prompt-home-prompt-kit-picker" aria-label="Prompt kit categories">
+            {PROMPT_HOME_PROMPT_KITS.map((promptKit) => {
+              const isSelected = promptKit.key === selectedPromptKitKey
+
+              return (
+                <button
+                  key={promptKit.key}
+                  type="button"
+                  className={`prompt-home-prompt-kit-choice ${isSelected ? 'is-active' : ''}`}
+                  aria-pressed={isSelected}
+                  onClick={() =>
+                    setSelectedPromptKitKey((current) => (current === promptKit.key ? null : promptKit.key))
+                  }
+                >
+                  {promptKit.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {selectedPromptKit ? (
+            <article className="prompt-home-starter prompt-home-prompt-kit-panel">
+              <div className="prompt-home-prompt-kit-panel-head">
+                <h4>{selectedPromptKit.label}</h4>
+                <p>{selectedPromptKit.detail}</p>
+              </div>
+
+              <div className="prompt-home-prompt-kit-section">
+                <span className="eyebrow">Suggested prompts</span>
+                <div
+                  className="prompt-home-kit-examples"
+                  aria-label={`${selectedPromptKit.label} suggested prompts`}
+                >
+                  {selectedPromptKit.suggestedPrompts.map((suggestion) => (
+                    <button
+                      key={`${selectedPromptKit.key}-${suggestion.prompt}`}
+                      type="button"
+                      className="prompt-home-kit-example"
+                      onClick={() => loadPromptDraft(suggestion.prompt)}
+                    >
+                      {suggestion.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="prompt-home-prompt-kit-section">
+                <span className="eyebrow">Workspace links</span>
+                <div className="prompt-home-starter-actions">
+                  {selectedPromptKit.workspaceLinks.map((link) => (
+                    <button
+                      key={`${selectedPromptKit.key}-${link.view}`}
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => onOpenView(link.view)}
+                    >
+                      {link.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </article>
+          ) : (
+            <p className="form-note prompt-home-prompt-kits-empty">
+              Choose one to reveal a few suggested prompts and direct workspace links.
+            </p>
+          )}
+        </section>
 
         <section className="prompt-home-promoted-routes" aria-label="Promoted routes">
           <div className="section-head">
@@ -1080,51 +2150,6 @@ export function PromptHomeWorkspace({
           ) : null}
         </section>
 
-        <section
-          id={PROMPT_HOME_LIVE_CONTEXT_PANEL_ID}
-          className="prompt-home-starters"
-          aria-label="Contextual starting points"
-          hidden={!liveContextExpanded}
-        >
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Live Context</span>
-              <h3>Start from current work</h3>
-            </div>
-            <p>Use live counts when you want a more grounded opening prompt or a direct route.</p>
-          </div>
-
-          <div className="prompt-home-starter-list">
-            {contextualStarters.map((starter) => (
-              <article key={starter.key} className="prompt-home-starter">
-                <div className="prompt-home-starter-head">
-                  <span className="eyebrow">{starter.kicker}</span>
-                  <strong>{starter.metric}</strong>
-                </div>
-                <h4>{starter.title}</h4>
-                <p>{starter.detail}</p>
-                <div className="prompt-home-starter-actions">
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    aria-label={starter.askLabel}
-                    onClick={() => handleContextualStarterAsk(starter)}
-                    disabled={submitting}
-                  >
-                    Ask
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={() => openNavigationIntent(starter.intent, { includeHandoff: false })}
-                  >
-                    {promptNavigationIntentLabel(starter.intent)}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
       </section>
 
       <section className="prompt-home-grid">

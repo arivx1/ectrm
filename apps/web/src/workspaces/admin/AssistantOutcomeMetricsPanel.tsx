@@ -248,7 +248,7 @@ function renderRecentPromptNavigationRows(
     return (
       <div className="empty-state">
         <strong>No prompt-routing outcomes</strong>
-        <p>Accepted, dismissed, and failed Prompt Home handoffs will appear here.</p>
+        <p>Accepted, dismissed, and failed Home handoffs will appear here.</p>
       </div>
     )
   }
@@ -669,7 +669,7 @@ export function AssistantOutcomeMetricsPanel({
                   promptTargetRows,
                   loading,
                   'No prompt-routing destinations',
-                  'Prompt Home route outcomes will surface candidate, narrow, and pause signals here.',
+                  'Home route outcomes will surface candidate, narrow, and pause signals here.',
                 )}
               </div>
             </div>

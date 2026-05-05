@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.domains.operations.services.actualizations import (
     build_delivery_actualization_projection,
 )
-from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.audit_events import (
+    TradeAuditMutationContext,
+    append_trade_audit_event,
+)
 from apps.api.app.domains.operations.services.actualizations import delivery_targets_for_trade
 from apps.api.app.domains.operations.services.actualizations import list_trade_actualizations_by_delivery_id
 from apps.api.app.domains.operations.services.actualizations import load_delivery_target
@@ -1294,6 +1297,7 @@ def issue_trade_invoice(
     due_at: datetime | None = None,
     notes: object | None = None,
     now: Optional[datetime] = None,
+    mutation_context: TradeAuditMutationContext | None = None,
 ) -> TradeInvoiceOut:
     from apps.api.app.domains.accruals.services import (
         synchronize_trade_accruals,
@@ -1405,6 +1409,8 @@ def issue_trade_invoice(
         event_type="TradeInvoiceIssued",
         occurred_at=invoice_out.updated_at,
         causation_id=f"trade-invoice:{invoice_out.invoice_id}",
+        operation_key="settlement.issue_trade_invoice",
+        mutation_context=mutation_context,
         payload={
             "request": jsonable_encoder(
                 {
@@ -1593,6 +1599,7 @@ def void_trade_invoice(
     void_reason: object | None,
     notes: object | None = None,
     now: Optional[datetime] = None,
+    mutation_context: TradeAuditMutationContext | None = None,
 ) -> TradeInvoiceOut:
     from apps.api.app.domains.accruals.services import (
         synchronize_trade_accruals,
@@ -1701,6 +1708,8 @@ def void_trade_invoice(
         event_type="TradeInvoiceVoided",
         occurred_at=invoice_out.updated_at,
         causation_id=f"trade-invoice:void:{invoice_out.invoice_id}",
+        operation_key="settlement.void_trade_invoice",
+        mutation_context=mutation_context,
         payload={
             "request": jsonable_encoder(
                 {

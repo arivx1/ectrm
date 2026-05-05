@@ -596,6 +596,21 @@
   gap: 0.55rem;
 }
 
+.asset-map-filter-strip {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+}
+
+.asset-map-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  align-items: center;
+}
+
 .asset-map-canvas-shell,
 .asset-map-empty {
   position: relative;
@@ -634,6 +649,22 @@
   color: #9a4338;
 }
 
+.asset-map-overlay strong {
+  color: inherit;
+}
+
+.asset-map-overlay p {
+  margin: 0;
+  color: inherit;
+  line-height: 1.45;
+}
+
+.asset-map-overlay-info {
+  background: rgba(246, 249, 250, 0.95);
+  border-color: rgba(18, 42, 56, 0.14);
+  color: #30404d;
+}
+
 .asset-map-empty p {
   margin: 0;
   max-width: 34rem;
@@ -670,6 +701,11 @@
 .asset-map-gap-list span {
   color: #66717c;
   line-height: 1.45;
+}
+
+.map-workspace .asset-map-canvas-shell,
+.map-workspace .asset-map-canvas {
+  min-height: clamp(24rem, 62vh, 44rem);
 }
 
 .asset-map-marker {

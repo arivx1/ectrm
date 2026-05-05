@@ -694,7 +694,7 @@ function buildSettlementWindowNotices({
 const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = {
   prompt: {
     key: 'prompt',
-    label: 'Prompt Home',
+    label: 'Home',
     kicker: 'Ask',
     heroTitle: 'Start from the prompt',
     heroBody:
@@ -967,6 +967,9 @@ export const WORKSPACE_RENDERERS: Record<
           pendingSettlementTrades:
             context.workspaceData.workspaceBootstrapSummary?.trades.pending_settlement_count ?? null,
         }}
+        assets={context.workspaceData.assets}
+        locations={context.workspaceData.locations}
+        spatialFeatures={context.workspaceData.spatialFeatures}
         onOpenView={context.navigateToView}
         onRefreshData={context.workspaceData.loadData}
       />

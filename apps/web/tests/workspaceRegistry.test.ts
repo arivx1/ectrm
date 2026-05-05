@@ -28,7 +28,7 @@ describe('workspace registry', () => {
   })
 
   it('preserves labels and hero copy through the registry', () => {
-    expect(workspaceLabel('prompt')).toBe('Prompt Home')
+    expect(workspaceLabel('prompt')).toBe('Home')
     expect(workspaceLabel('map')).toBe('Map')
     expect(workspaceLabel('assistant')).toBe('Assistant Console')
     expect(HERO_TITLE_BY_VIEW.prompt).toBe('Start from the prompt')

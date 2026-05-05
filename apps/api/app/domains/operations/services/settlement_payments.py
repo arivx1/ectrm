@@ -9,7 +9,10 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.audit_events import (
+    TradeAuditMutationContext,
+    append_trade_audit_event,
+)
 from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
@@ -765,6 +768,7 @@ def create_trade_payment(
     received_at: datetime | None = None,
     notes: object | None = None,
     now: Optional[datetime] = None,
+    mutation_context: TradeAuditMutationContext | None = None,
 ) -> TradePaymentOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     row = db.execute(
@@ -845,6 +849,8 @@ def create_trade_payment(
         event_type="TradePaymentCreated",
         occurred_at=payment_out.updated_at,
         causation_id=f"trade-payment:{payment_out.payment_id}",
+        operation_key="settlement.create_trade_payment",
+        mutation_context=mutation_context,
         payload={
             "request": jsonable_encoder(
                 {
@@ -1113,6 +1119,7 @@ def reverse_trade_payment(
     reversed_at: datetime | None = None,
     notes: object | None = None,
     now: Optional[datetime] = None,
+    mutation_context: TradeAuditMutationContext | None = None,
 ) -> TradePaymentOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     row = db.execute(
@@ -1193,6 +1200,8 @@ def reverse_trade_payment(
         event_type="TradePaymentReversed",
         occurred_at=reversal_out.updated_at,
         causation_id=f"trade-payment:reverse:{reversal_out.payment_id}",
+        operation_key="settlement.reverse_trade_payment",
+        mutation_context=mutation_context,
         payload={
             "request": jsonable_encoder(
                 {

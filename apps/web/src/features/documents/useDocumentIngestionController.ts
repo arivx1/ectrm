@@ -19,6 +19,10 @@ import {
   uploadPdfDocument,
 } from '../../entities/documents/api'
 import { ApiError } from '../../shared/api'
+import {
+  getCollapsibleCardStateValue,
+  saveCollapsibleCardStateValue,
+} from '../../shared/collapsibleCardState'
 import { appConfig } from '../../shared/config'
 import type {
   DocumentExtractedFieldRecord,
@@ -128,6 +132,10 @@ export function useDocumentIngestionController({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepthRef = useRef(0)
 
+  function documentExpansionCardKey(documentId: string): string {
+    return `document-ingestion.review.${documentId}`
+  }
+
   const schemaByKind = useMemo(() => {
     const entries = schemaRegistry?.document_kinds ?? []
     return Object.fromEntries(entries.map((schema) => [schema.document_kind, schema])) as Record<string, DocumentKindSchemaRecord>
@@ -155,7 +163,6 @@ export function useDocumentIngestionController({
       setProcessorSettings(null)
       setReprocessProviderByDocument({})
       setSchemaRegistry(null)
-      setExpandedDocumentIds({})
       setLoadError('')
       setLoading(false)
       setUploadError('')
@@ -187,6 +194,18 @@ export function useDocumentIngestionController({
           setProcessorSettings(nextProcessorSettings)
           setSchemaRegistry(nextRegistry)
           setDocuments(nextDocuments)
+          setExpandedDocumentIds((current) => ({
+            ...current,
+            ...Object.fromEntries(
+              nextDocuments.map((document) => [
+                document.document_id,
+                getCollapsibleCardStateValue(
+                  documentExpansionCardKey(document.document_id),
+                  current[document.document_id] ?? false,
+                ),
+              ]),
+            ),
+          }))
           setSelectedProcessorProvider((current) => {
             const configuredProviders = new Set(
               nextProcessorSettings.providers.filter((provider) => provider.configured).map((provider) => provider.provider),
@@ -324,10 +343,14 @@ export function useDocumentIngestionController({
   }
 
   function toggleDocumentExpanded(documentId: string) {
-    setExpandedDocumentIds((current) => ({
-      ...current,
-      [documentId]: !current[documentId],
-    }))
+    setExpandedDocumentIds((current) => {
+      const nextExpanded = !current[documentId]
+      saveCollapsibleCardStateValue(documentExpansionCardKey(documentId), nextExpanded)
+      return {
+        ...current,
+        [documentId]: nextExpanded,
+      }
+    })
   }
 
   function setDocumentReprocessProvider(

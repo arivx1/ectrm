@@ -26,6 +26,7 @@ from apps.api.app.domains.operations.services.actualizations import (
     upsert_trade_actualization,
     void_trade_actualization,
 )
+from apps.api.app.domains.operations.services.audit_events import TradeAuditMutationContext
 from apps.api.app.domains.operations.services.shipments import append_delivery_event, reverse_delivery_event
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice, void_trade_invoice
 from apps.api.app.domains.operations.services.settlement_payments import (
@@ -1170,6 +1171,7 @@ def _execute_record_trade_actualization_action(
         notes=_optional_str_payload_value(record, "notes"),
         actor_id=actor_id,
         now=decided_at,
+        mutation_context=_assistant_trade_audit_mutation_context(record),
     )
     return jsonable_encoder(
         {
@@ -1210,6 +1212,7 @@ def _execute_void_trade_actualization_action(
             ),
             notes=_optional_str_payload_value(record, "notes"),
             now=decided_at,
+            mutation_context=_assistant_trade_audit_mutation_context(record),
         )
     except (HTTPException, LookupError, ValueError) as exc:
         detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
@@ -1518,6 +1521,7 @@ def _execute_issue_trade_invoice_action(
         due_at=_optional_datetime_payload_value(record, "due_at"),
         notes=_optional_str_payload_value(record, "notes"),
         now=decided_at,
+        mutation_context=_assistant_trade_audit_mutation_context(record),
     )
     return {
         "invoice_id": invoice.invoice_id,
@@ -1548,6 +1552,7 @@ def _execute_create_trade_payment_action(
         received_at=_optional_datetime_payload_value(record, "received_at"),
         notes=_optional_str_payload_value(record, "notes"),
         now=decided_at,
+        mutation_context=_assistant_trade_audit_mutation_context(record),
     )
     return {
         "payment_id": payment.payment_id,
@@ -1577,6 +1582,7 @@ def _execute_void_trade_invoice_action(
         void_reason=_optional_str_payload_value(record, "void_reason"),
         notes=_optional_str_payload_value(record, "notes"),
         now=decided_at,
+        mutation_context=_assistant_trade_audit_mutation_context(record),
     )
     return {
         "invoice_id": invoice.invoice_id,
@@ -1608,6 +1614,7 @@ def _execute_reverse_trade_payment_action(
         reversed_at=_optional_datetime_payload_value(record, "reversed_at"),
         notes=_optional_str_payload_value(record, "notes"),
         now=decided_at,
+        mutation_context=_assistant_trade_audit_mutation_context(record),
     )
     return {
         "payment_id": payment.payment_id,
@@ -1798,13 +1805,17 @@ def _assistant_trade_command_id(record: AssistantActionRequest, *, command_type:
     return f"assistant-action-request:{record.id}:{command_type}"
 
 
-def _assistant_trade_source_surface(record: AssistantActionRequest) -> str:
+def _assistant_action_execution_mode(record: AssistantActionRequest) -> str:
     payload = dict(record.payload or {})
     review_context = payload.get("review_context")
     if not isinstance(review_context, dict):
-        return "assistant.action_requests.execute"
+        return ""
 
-    execution_mode = str(review_context.get("execution_mode") or "").strip().upper()
+    return str(review_context.get("execution_mode") or "").strip().upper()
+
+
+def _assistant_trade_source_surface(record: AssistantActionRequest) -> str:
+    execution_mode = _assistant_action_execution_mode(record)
     if execution_mode == "AUTONOMOUS":
         return "assistant.action_requests.autonomous"
     if execution_mode == "REVIEW_REQUIRED":
@@ -1827,6 +1838,24 @@ def _assistant_trade_expected_last_event_id(record: AssistantActionRequest) -> s
         return None
     normalized = str(last_event_id).strip()
     return normalized or None
+
+
+def _assistant_trade_audit_mutation_context(record: AssistantActionRequest) -> TradeAuditMutationContext:
+    provenance_details = {
+        "action_request_id": record.id,
+        "assistant_run_id": record.run_id,
+        "assistant_action_type": record.action_type,
+    }
+    if record.agent_id:
+        provenance_details["assistant_agent_id"] = record.agent_id
+    execution_mode = _assistant_action_execution_mode(record)
+    if execution_mode:
+        provenance_details["execution_mode"] = execution_mode
+    return TradeAuditMutationContext(
+        source_surface=_assistant_trade_source_surface(record),
+        correlation_id=f"assistant-action-{record.id}",
+        provenance_details=provenance_details,
+    )
 
 
 def _append_assistant_trade_write_command(

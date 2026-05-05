@@ -11,7 +11,7 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     kicker: 'Start here',
     heroTitle: 'Start, learn, and orient quickly',
     heroBody:
-      'Use Prompt Home, the live desk, and the product guide as your first stop before diving into a specific workflow.',
+      'Use Home, the live desk, and the product guide as your first stop before diving into a specific workflow.',
     landingBody:
       'This section answers the first question new or returning operators have: where should I start for the job in front of me?',
     viewKeys: ['prompt', 'dashboard', 'guide'],
@@ -20,7 +20,7 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
         title: 'Ask the operator prompt',
         detail: 'Start from the job in front of you and let the assistant answer, clarify, or route you to the right workspace.',
         viewKey: 'prompt',
-        actionLabel: 'Open Prompt Home',
+        actionLabel: 'Open Home',
       },
       {
         title: 'Get oriented',

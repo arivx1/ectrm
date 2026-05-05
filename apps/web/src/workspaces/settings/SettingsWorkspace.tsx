@@ -26,6 +26,15 @@ import {
 } from '../../shared/tradeCaptureSettings'
 import { type StoredAuthSession } from '../../shared/mutation'
 import {
+  clearTimeDisplaySettingsSnapshot,
+  formatTimeDisplayTimeZonePreferenceLabel,
+  getTimeDisplaySettingsSnapshot,
+  listTimeDisplayTimeZoneOptions,
+  resolveTimeDisplayTimeZone,
+  saveTimeDisplaySettingsSnapshot,
+  type TimeDisplaySettings,
+} from '../../shared/timeDisplaySettings'
+import {
   optionStyleOptions,
   optionTypeOptions,
   pricingTypeOptions,
@@ -205,15 +214,20 @@ export function SettingsWorkspace({
     getClientRuntimeOverrideSnapshot(),
   )
   const [appearanceForm, setAppearanceForm] = useState<AppearanceSettings>(() => appearanceSettings)
+  const [timeDisplayForm, setTimeDisplayForm] = useState<TimeDisplaySettings>(() =>
+    getTimeDisplaySettingsSnapshot(),
+  )
   const [tradeCaptureForm, setTradeCaptureForm] = useState<TradeCaptureSettings>(() => tradeCaptureSettings)
   const [authFlash, setAuthFlash] = useState<FlashMessage | null>(null)
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [runtimeFlash, setRuntimeFlash] = useState<FlashMessage | null>(null)
   const [appearanceFlash, setAppearanceFlash] = useState<FlashMessage | null>(null)
+  const [timeDisplayFlash, setTimeDisplayFlash] = useState<FlashMessage | null>(null)
   const [tradeCaptureFlash, setTradeCaptureFlash] = useState<FlashMessage | null>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
+  const [timeZoneOptions] = useState(() => listTimeDisplayTimeZoneOptions())
 
   useEffect(() => {
     let cancelled = false
@@ -384,6 +398,25 @@ export function SettingsWorkspace({
     })
   }
 
+  function handleSaveTimeDisplaySettings(event: React.FormEvent) {
+    event.preventDefault()
+    const savedSettings = saveTimeDisplaySettingsSnapshot(timeDisplayForm)
+    setTimeDisplayForm(savedSettings)
+    setTimeDisplayFlash({
+      tone: 'success',
+      message: 'Time zone saved locally for this browser. Home meters will use it right away.',
+    })
+  }
+
+  function handleResetTimeDisplaySettings() {
+    const defaultSettings = clearTimeDisplaySettingsSnapshot()
+    setTimeDisplayForm(defaultSettings)
+    setTimeDisplayFlash({
+      tone: 'success',
+      message: 'Time zone reset to the system default for this browser.',
+    })
+  }
+
   function handleSaveTradeCaptureSettings(event: React.FormEvent) {
     event.preventDefault()
     const savedSettings = onTradeCaptureSettingsChange(tradeCaptureForm)
@@ -451,6 +484,9 @@ export function SettingsWorkspace({
   const authLoading = authAction !== null
   const runtimeOverrideCount = Object.values(runtimeOverrideForm).filter((value) => value.trim() !== '').length
   const activePalette = resolveAppearancePalette(appearanceSettings, resolvedColorMode)
+  const resolvedTimeZone = resolveTimeDisplayTimeZone(timeDisplayForm)
+  const timeZonePreferenceLabel = formatTimeDisplayTimeZonePreferenceLabel(timeDisplayForm)
+  const resolvedTimeZoneLabel = formatTimeDisplayTimeZonePreferenceLabel({ timeZone: resolvedTimeZone })
   const enabledTradeCaptureRuleCount = tradeCaptureForm.rules.filter((rule) => rule.enabled).length
   const visibilityOverrideRuleCount = tradeCaptureForm.rules.filter(
     (rule) => rule.visibility.optionDetails !== 'inherit' || rule.visibility.priceIndex !== 'inherit',
@@ -674,6 +710,63 @@ export function SettingsWorkspace({
             <p className={`form-note ${appearanceFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
               {appearanceFlash?.message ??
                 'Appearance settings are stored in this browser today. That gives us a solid first slice while we prepare user-profile persistence on the API.'}
+            </p>
+          </form>
+        </article>
+
+        <article className="surface">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Browser Settings</span>
+              <h3>Time Display</h3>
+            </div>
+            <p>Choose the timezone the Home workspace should use, then keep the day, week, and month meters aligned to that desk calendar.</p>
+          </div>
+
+          <div className="settings-summary-grid">
+            <article className="settings-summary-card">
+              <span>Saved preference</span>
+              <strong>{timeZonePreferenceLabel}</strong>
+              <p>Stored locally in this browser until the profile-backed settings API is ready.</p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Effective timezone</span>
+              <strong>{resolvedTimeZoneLabel}</strong>
+              <p>Home uses this timezone for the day, week, and month meters.</p>
+            </article>
+          </div>
+
+          <form className="stack-form settings-form" onSubmit={handleSaveTimeDisplaySettings}>
+            <label className="field">
+              <span>Timezone</span>
+              <select
+                className="control"
+                value={timeDisplayForm.timeZone}
+                onChange={(event) => {
+                  setTimeDisplayFlash(null)
+                  setTimeDisplayForm((current) => ({ ...current, timeZone: event.target.value }))
+                }}
+              >
+                {timeZoneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="toolbar settings-actions">
+              <button type="submit" className="button button-primary">
+                Apply Timezone
+              </button>
+              <button type="button" className="button button-ghost" onClick={handleResetTimeDisplaySettings}>
+                Use System Default
+              </button>
+            </div>
+
+            <p className={`form-note ${timeDisplayFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+              {timeDisplayFlash?.message ??
+                'This timezone setting is stored in this browser today so each user can keep Home aligned to their own desk clock.'}
             </p>
           </form>
         </article>

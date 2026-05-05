@@ -9,7 +9,10 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.audit_events import (
+    TradeAuditMutationContext,
+    append_trade_audit_event,
+)
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_leg import TradeLeg
@@ -530,6 +533,7 @@ def upsert_trade_actualization(
     notes: object | None,
     actor_id: str,
     now: datetime | None = None,
+    mutation_context: TradeAuditMutationContext | None = None,
 ) -> DeliveryActualizationOut:
     from apps.api.app.domains.accruals.services import synchronize_trade_accruals
     from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
@@ -579,6 +583,8 @@ def upsert_trade_actualization(
         event_type="TradeActualizationUpserted",
         occurred_at=actualization_out.updated_at,
         causation_id=f"trade-actualization:{actualization_out.actualization_id}",
+        operation_key="operations.upsert_trade_actualization",
+        mutation_context=mutation_context,
         payload=payload,
     )
     return actualization_out
@@ -593,6 +599,7 @@ def void_trade_actualization(
     void_reason: object | None,
     notes: object | None = None,
     now: datetime | None = None,
+    mutation_context: TradeAuditMutationContext | None = None,
 ) -> DeliveryActualizationOut:
     from apps.api.app.domains.accruals.services import synchronize_trade_accruals
     from apps.api.app.domains.operations.services.workflow_items import synchronize_trade_workflow_items
@@ -648,6 +655,8 @@ def void_trade_actualization(
         event_type="TradeActualizationVoided",
         occurred_at=actualization.updated_at,
         causation_id=f"trade-actualization:void:{actualization_out.actualization_id}",
+        operation_key="operations.void_trade_actualization",
+        mutation_context=mutation_context,
         payload=payload,
     )
     return actualization_out

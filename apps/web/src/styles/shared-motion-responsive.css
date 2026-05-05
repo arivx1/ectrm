@@ -149,6 +149,10 @@
     display: grid;
   }
 
+  .asset-map-filter-strip {
+    grid-template-columns: 1fr;
+  }
+
   .asset-map-stats {
     justify-content: flex-start;
   }

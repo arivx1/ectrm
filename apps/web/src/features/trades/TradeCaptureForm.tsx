@@ -694,6 +694,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
         />
 
         <TradeFormDisclosure
+          persistenceKey="trade-capture.desk-metadata"
           title="Desk Metadata"
           summary="External linkage and trader attribution"
           description="The common path is already above. Open this only when the ticket needs a source-system ID or explicit trader ownership."
@@ -818,6 +819,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
         </label>
 
         <TradeFormDisclosure
+          persistenceKey="trade-capture.schedule-overrides"
           title="Schedule Overrides"
           summary="Trade date and effective window"
           description="Execution date normally sets the trade day. Open this only when you need an explicit trade date or a separate effective range."
@@ -1091,6 +1093,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           </label>
         )}
         <TradeFormDisclosure
+          persistenceKey="trade-capture.workflow-defaults"
           title="Workflow Defaults"
           summary="Pricing and settlement status"
           description="Most tickets can keep the defaults shown in the overview. Open this only when the trade is already priced or settled on arrival."

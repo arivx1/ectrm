@@ -9,6 +9,10 @@ import {
 } from './api'
 import { loadGoogleIdentityScript } from './googleIdentity'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../app/api'
+import {
+  saveCollapsibleCardStateValue,
+  usePersistentCollapsibleCardState,
+} from '../../shared/collapsibleCardState'
 import { appConfig } from '../../shared/config'
 import { type StoredAuthSession } from '../../shared/mutation'
 
@@ -57,7 +61,12 @@ export function AuthGate({
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
   const [googleSignInReady, setGoogleSignInReady] = useState(false)
-  const [bootstrapExpanded, setBootstrapExpanded] = useState(false)
+  const bootstrapAdminHashTargeted =
+    typeof window !== 'undefined' &&
+    window.location.hash.replace(/^#/, '').trim() === 'bootstrap-admin'
+  const {
+    expanded: bootstrapExpanded,
+  } = usePersistentCollapsibleCardState('auth-gate.bootstrap-admin', bootstrapAdminHashTargeted)
   const googleSignInContainerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -97,7 +106,7 @@ export function AuthGate({
     const targetId = window.location.hash.replace(/^#/, '').trim()
     const shouldScrollToTarget = targetId.length > 0
     if (targetId === 'bootstrap-admin') {
-      setBootstrapExpanded(true)
+      saveCollapsibleCardStateValue('auth-gate.bootstrap-admin', true)
     }
 
     const frameId = window.requestAnimationFrame(() => {
@@ -399,7 +408,7 @@ export function AuthGate({
             <div className="feedback-banner feedback-banner-success">
               {pendingPromptResumeWillSubmit
                 ? `After sign-in, sending ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`
-                : `After sign-in, reopening Prompt Home with ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`}
+                : `After sign-in, reopening Home with ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`}
             </div>
           ) : null}
 

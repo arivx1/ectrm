@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
+import { usePersistentCollapsibleCardState } from '../collapsibleCardState'
 
 type GlobalWorkspaceFilterCardProps = {
   value: string
@@ -15,7 +16,8 @@ export function GlobalWorkspaceFilterCard({
   matchedCount,
   defaultCollapsed = true,
 }: GlobalWorkspaceFilterCardProps) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed)
+  const collapsedState = usePersistentCollapsibleCardState('global-workspace-filter', !defaultCollapsed)
+  const collapsed = !collapsedState.expanded
   const inputRef = useRef<HTMLInputElement | null>(null)
   const hasFilter = value.trim().length > 0
   const summary = hasFilter
@@ -39,7 +41,7 @@ export function GlobalWorkspaceFilterCard({
             aria-label="Open global workspace filter"
             aria-expanded={false}
             aria-controls="global-workspace-filter-panel"
-            onClick={() => setCollapsed(false)}
+            onClick={() => collapsedState.setExpanded(true)}
           >
             <div className="nav-section-copy nav-global-filter-collapsed-copy">
               <strong>Global Workspace Filter</strong>
@@ -53,7 +55,7 @@ export function GlobalWorkspaceFilterCard({
             aria-label={toggleActionLabel}
             aria-expanded={false}
             aria-controls="global-workspace-filter-panel"
-            onClick={() => setCollapsed(false)}
+            onClick={() => collapsedState.setExpanded(true)}
           >
             <span className="nav-section-indicator" aria-hidden="true">
               +
@@ -76,7 +78,7 @@ export function GlobalWorkspaceFilterCard({
               aria-label={toggleActionLabel}
               aria-expanded={true}
               aria-controls="global-workspace-filter-panel"
-              onClick={() => setCollapsed(true)}
+              onClick={() => collapsedState.setExpanded(false)}
             >
               <span className="nav-section-indicator" aria-hidden="true">
                 -

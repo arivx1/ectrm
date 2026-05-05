@@ -1281,7 +1281,7 @@ export function AssistantWorkspace({
             </div>
             <p>
               Use this secondary console for provider selection, managed agents, prompt preview,
-              run traces, feedback, and approval review. Operators can stay in Prompt Home for
+              run traces, feedback, and approval review. Operators can stay on Home for
               normal prompt-led work.
             </p>
           </div>

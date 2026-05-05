@@ -44,16 +44,56 @@ async function selectExactSearchValue(
 }
 
 async function signInFromPromptHome(page: Page): Promise<void> {
-  await expect(page.getByText('Start with the job in front of you')).toBeVisible()
+  await expect(page.getByLabel('Operator prompt')).toBeVisible()
   await page.getByRole('button', { name: 'Sign In', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Use local OPS_ADMIN session' })).toBeVisible()
   await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
   await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
 }
 
+async function signOutFromPromptHome(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Sign Out' }).click()
+  await expect(page.getByRole('button', { name: 'Sign In', exact: true })).toBeVisible()
+}
+
 async function expandPromptHomeLiveContext(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Show live context' }).click()
   await expect(page.getByRole('button', { name: 'Hide live context' })).toBeVisible()
+}
+
+async function expectLocatorsOnSameLine(first: Locator, second: Locator): Promise<void> {
+  const [firstBox, secondBox] = await Promise.all([first.boundingBox(), second.boundingBox()])
+  expect(firstBox).not.toBeNull()
+  expect(secondBox).not.toBeNull()
+  if (!firstBox || !secondBox) {
+    return
+  }
+
+  expect(Math.abs(firstBox.y - secondBox.y)).toBeLessThanOrEqual(10)
+}
+
+async function expectLocatorNearRightEdge(container: Locator, target: Locator, threshold = 40): Promise<void> {
+  const [containerBox, targetBox] = await Promise.all([container.boundingBox(), target.boundingBox()])
+  expect(containerBox).not.toBeNull()
+  expect(targetBox).not.toBeNull()
+  if (!containerBox || !targetBox) {
+    return
+  }
+
+  expect(containerBox.x + containerBox.width - (targetBox.x + targetBox.width)).toBeLessThanOrEqual(
+    threshold,
+  )
+}
+
+async function expectLocatorAbove(first: Locator, second: Locator, threshold = 12): Promise<void> {
+  const [firstBox, secondBox] = await Promise.all([first.boundingBox(), second.boundingBox()])
+  expect(firstBox).not.toBeNull()
+  expect(secondBox).not.toBeNull()
+  if (!firstBox || !secondBox) {
+    return
+  }
+
+  expect(firstBox.y).toBeLessThanOrEqual(secondBox.y + threshold)
 }
 
 test('dashboard smoke boots against the seeded browser harness', async ({ page }) => {
@@ -238,16 +278,201 @@ test('single-user smoke signs into the prompt home when one-click access is enab
     await expect(page.locator('.workspace-topbar-prompt')).toBeVisible()
     await expect(page.locator('.hero')).toHaveCount(0)
     await expect(page.locator('.nav-global-filter')).toHaveCount(0)
-    await expect(page.getByText('Start with the job in front of you')).toBeVisible()
+    await expect(page.getByLabel('Operator prompt')).toBeVisible()
     await expect(page.getByText('You can draft the prompt here. We will only send it after you sign in.')).toBeVisible()
     await signInFromPromptHome(page)
 
-    await expect(page.getByText('Start with the job in front of you')).toBeVisible()
+    await expect(page.getByLabel('Operator prompt')).toBeVisible()
     await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Assistant Console', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: /Recent blocker triage/ })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Show live context' })).toBeVisible()
     await expect(page.locator('.prompt-home-starter').filter({ hasText: 'Clear operations blockers' })).toBeHidden()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home prompt kits load guided prompts into the composer', async ({ page }) => {
+  const harness = await startSmokeHarness()
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const operatorPrompt = page.getByLabel('Operator prompt')
+
+    await expect(page.getByText('Choose one to reveal a few suggested prompts and direct workspace links.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Tell me updates about the Strait of Hormuz.' })).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'Trade', exact: true }).click()
+    await page.getByRole('button', { name: 'Walk me through building a trade draft.' }).click()
+    await expect(operatorPrompt).toHaveValue(/I would like to build a trade\./)
+    await expect(operatorPrompt).toHaveValue(/real or simulated/i)
+    await expect(operatorPrompt).toHaveValue(/look for arbitrage opportunities/i)
+
+    await page.getByRole('button', { name: 'Manage Risk', exact: true }).click()
+    await page.getByRole('button', { name: 'Tell me updates about the Strait of Hormuz.' }).click()
+    await expect(operatorPrompt).toHaveValue('Tell me updates about the Strait of Hormuz.')
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home desk time cards collapse and expand independently', async ({ page }) => {
+  const harness = await startSmokeHarness()
+
+  try {
+    await seedSignedInSession(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    const deskTimePanel = page.locator('#prompt-home-timeframe-panel')
+    const deskTimeHead = page.locator('.prompt-home-timeframe-panel-head')
+    const dayPanel = page.locator('#prompt-home-day-panel')
+    const weekPanel = page.locator('#prompt-home-week-panel')
+    const monthPanel = page.locator('#prompt-home-month-panel')
+    const mapPanel = page.locator('#prompt-home-map-panel')
+    const deskTimeToggle = page.locator('.prompt-home-timeframe-panel-toggle-action')
+    const deskTimeCopy = page.locator('.prompt-home-timeframe-panel-copy')
+    const mapToggle = page.locator('.prompt-home-map-card-toggle')
+    const mapToggleMeta = page.locator('.prompt-home-map-card-toggle-meta')
+    const dayCard = page.locator('.prompt-home-time-meter-card').filter({ has: dayPanel })
+    const weekCard = page.locator('.prompt-home-time-meter-card').filter({ has: weekPanel })
+    const monthCard = page.locator('.prompt-home-time-meter-card').filter({ has: monthPanel })
+    const dayToggle = page.locator('.prompt-home-time-meter-card:has(#prompt-home-day-panel) .prompt-home-time-meter-card-toggle')
+    const weekToggle = page.locator('.prompt-home-time-meter-card:has(#prompt-home-week-panel) .prompt-home-time-meter-card-toggle')
+    const monthToggle = page.locator('.prompt-home-time-meter-card:has(#prompt-home-month-panel) .prompt-home-time-meter-card-toggle')
+    const timeZoneSelect = page.getByLabel('Preferred time zone')
+
+    await expect(deskTimePanel).toBeVisible()
+    await expect(dayPanel).toBeVisible()
+    await expect(weekPanel).toBeVisible()
+    await expect(monthPanel).toBeVisible()
+    await expect(mapPanel).toBeHidden()
+    await expect(timeZoneSelect).toBeVisible()
+    await expectLocatorNearRightEdge(deskTimeHead, deskTimeToggle)
+
+    await dayToggle.click()
+    await expect(dayPanel).toBeHidden()
+    await expect(dayCard).toContainText('Desk window HE07 to HE22')
+    await expect(dayCard).toContainText('venue sessions')
+    await expectLocatorsOnSameLine(
+      dayCard.locator('.prompt-home-time-meter-card-collapsed-line strong'),
+      dayCard.locator('.prompt-home-time-meter-card-summary'),
+    )
+    await expectLocatorNearRightEdge(dayCard, dayCard.locator('.prompt-home-time-meter-card-toggle-meta'))
+    await expectLocatorAbove(
+      dayCard.locator('.prompt-home-time-meter-card-toggle-meta'),
+      dayCard.locator('.status-pill'),
+    )
+
+    await weekToggle.click()
+    await expect(weekPanel).toBeHidden()
+    await expect(weekCard).toContainText('Sunday through Saturday')
+    await expect(weekCard).toContainText('Week progress')
+    await expectLocatorsOnSameLine(
+      weekCard.locator('.prompt-home-time-meter-card-collapsed-line strong'),
+      weekCard.locator('.prompt-home-time-meter-card-summary'),
+    )
+    await expectLocatorNearRightEdge(weekCard, weekCard.locator('.prompt-home-time-meter-card-toggle-meta'))
+    await expectLocatorAbove(
+      weekCard.locator('.prompt-home-time-meter-card-toggle-meta'),
+      weekCard.locator('.status-pill'),
+    )
+
+    await monthToggle.click()
+    await expect(monthPanel).toBeHidden()
+    await expect(monthCard).toContainText('1 through EOM')
+    await expect(monthCard).toContainText('days this month')
+    await expectLocatorsOnSameLine(
+      monthCard.locator('.prompt-home-time-meter-card-collapsed-line strong'),
+      monthCard.locator('.prompt-home-time-meter-card-summary'),
+    )
+    await expectLocatorNearRightEdge(monthCard, monthCard.locator('.prompt-home-time-meter-card-toggle-meta'))
+    await expectLocatorAbove(
+      monthCard.locator('.prompt-home-time-meter-card-toggle-meta'),
+      monthCard.locator('.status-pill'),
+    )
+
+    await expect(mapToggleMeta).toContainText('Show card')
+    await mapToggle.click()
+    await expect(mapPanel).toBeVisible()
+    await expect(page.locator('.prompt-home-map-card .asset-map-canvas-shell')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open Map Workspace' })).toBeVisible()
+    await mapToggle.click()
+    await expect(mapPanel).toBeHidden()
+
+    await deskTimeToggle.click()
+    await expect(deskTimePanel).toBeHidden()
+    await expect(deskTimeToggle).toContainText('Show card')
+    await expect(deskTimeCopy).toContainText(
+      /\d{1,2}:\d{2}\s(?:AM|PM)\s\|\sHE\d{2}\s\|\s(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s\|\s[A-Z][a-z]{2}\s\d{2}/,
+    )
+    await expect(timeZoneSelect).toHaveCount(0)
+
+    await deskTimeToggle.click()
+    await expect(deskTimePanel).toBeVisible()
+    await expect(timeZoneSelect).toBeVisible()
+
+    await dayToggle.click()
+    await weekToggle.click()
+    await monthToggle.click()
+
+    await expect(dayPanel).toBeVisible()
+    await expect(weekPanel).toBeVisible()
+    await expect(monthPanel).toBeVisible()
+
+    assertNoHarnessRequestFailures(harness)
+  } finally {
+    await harness.close()
+  }
+})
+
+test('prompt home collapse state survives sign-out and sign-in', async ({ page }) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
+
+  try {
+    await seedApiBaseOverride(page, harness)
+    await page.goto(harness.origin, {
+      waitUntil: 'domcontentloaded',
+    })
+
+    await signInFromPromptHome(page)
+
+    const deskTimePanel = page.locator('#prompt-home-timeframe-panel')
+    const weekPanel = page.locator('#prompt-home-week-panel')
+    const deskTimeToggle = page.locator('.prompt-home-timeframe-panel-toggle-action')
+    const weekToggle = page.locator('.prompt-home-time-meter-card:has(#prompt-home-week-panel) .prompt-home-time-meter-card-toggle')
+    const timeZoneSelect = page.getByLabel('Preferred time zone')
+
+    await expect(deskTimePanel).toBeVisible()
+    await expect(weekPanel).toBeVisible()
+    await expect(timeZoneSelect).toBeVisible()
+
+    await weekToggle.click()
+    await expect(weekPanel).toBeHidden()
+
+    await deskTimeToggle.click()
+    await expect(deskTimePanel).toBeHidden()
+
+    await signOutFromPromptHome(page)
+    await signInFromPromptHome(page)
+
+    await expect(deskTimePanel).toBeHidden()
+    await expect(timeZoneSelect).toHaveCount(0)
+
+    await deskTimeToggle.click()
+    await expect(deskTimePanel).toBeVisible()
+    await expect(weekPanel).toBeHidden()
+    await expect(timeZoneSelect).toBeVisible()
 
     assertNoHarnessRequestFailures(harness)
   } finally {
@@ -264,7 +489,7 @@ test('signed-out prompt draft resumes and sends after sign-in', async ({ page })
       waitUntil: 'domcontentloaded',
     })
 
-    await expect(page.getByText('Start with the job in front of you')).toBeVisible()
+    await expect(page.getByLabel('Operator prompt')).toBeVisible()
     await page.getByLabel('Operator prompt').fill('Where should I handle the confirmation blocker?')
     await page.getByRole('button', { name: 'Sign In to Send Prompt' }).click()
 
@@ -744,7 +969,7 @@ test('prompt home fails closed for invalid workspace handoff payloads', async ({
 
     const assistantMessage = page.locator('.assistant-message-assistant').last()
     await expect(assistantMessage).toBeVisible()
-    await expect(assistantMessage).toContainText('Stay in Prompt Home for now while we confirm the route.')
+    await expect(assistantMessage).toContainText('Stay on Home for now while we confirm the route.')
     await expect(assistantMessage).toContainText(
       'A workspace handoff suggestion could not be applied and was ignored.',
     )

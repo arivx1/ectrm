@@ -2139,7 +2139,7 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      await page.getByText('Start with the job in front of you').waitFor()
+      await page.getByLabel('Operator prompt').waitFor()
       await page.getByRole('button', { name: 'Sign In', exact: true }).click()
 
       const authGate = page.locator('.auth-gate-stage')
@@ -2149,7 +2149,7 @@ test(
       await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
 
       await page.waitForFunction(() => !document.querySelector('.auth-gate-stage'))
-      await page.getByText('Start with the job in front of you').waitFor()
+      await page.getByLabel('Operator prompt').waitFor()
       await page.getByText('Signed in as Ops Admin').waitFor()
 
       assert.ok(

@@ -167,7 +167,7 @@ describe('prompt navigation intents', () => {
   it('fails closed for invalid navigation_intent blocks and raises a warning', () => {
     const parsed = parsePromptNavigationIntentsFromAssistantContent(
       [
-        'Stay in Prompt Home for now while we confirm the route.',
+        'Stay on Home for now while we confirm the route.',
         '```navigation_intent',
         JSON.stringify({
           kind: 'open_workspace',
@@ -178,7 +178,7 @@ describe('prompt navigation intents', () => {
       ].join('\n'),
     )
 
-    expect(parsed.content).toBe('Stay in Prompt Home for now while we confirm the route.')
+    expect(parsed.content).toBe('Stay on Home for now while we confirm the route.')
     expect(parsed.intents).toEqual([])
     expect(parsed.warnings).toEqual([
       'A workspace handoff suggestion could not be applied and was ignored.',

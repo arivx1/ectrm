@@ -139,7 +139,7 @@ function fallbackWorkspaceIntentFromRecommendation(
     rationale:
       recommendation.target_rationale ??
       recommendation.signal_reasons[0] ??
-      'Repeated accepted Prompt Home handoffs made this a proven route.',
+      'Repeated accepted Home handoffs made this a proven route.',
   }
 }
 
