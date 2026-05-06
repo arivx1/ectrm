@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  filterPrimaryNavigationSections,
   isPrimaryNavigationSectionKey,
   MAX_PRIMARY_NAV_SECTIONS,
   MOBILE_NAV_MEDIA_QUERY,
@@ -104,28 +103,6 @@ describe('mobile navigation helpers', () => {
     expect(primaryNavigationSectionForView('map').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('settings').key).toBe('administration')
-  })
-
-  it('filters navigation sections by matching workspace labels and section copy', () => {
-    expect(filterPrimaryNavigationSections('shipments')).toEqual([
-      expect.objectContaining({
-        key: 'execution',
-        views: [expect.objectContaining({ key: 'shipments' })],
-      }),
-    ])
-
-    expect(filterPrimaryNavigationSections('product guide')).toEqual([
-      expect.objectContaining({
-        key: 'overview',
-        views: expect.arrayContaining([
-          expect.objectContaining({ key: 'prompt' }),
-          expect.objectContaining({ key: 'dashboard' }),
-          expect.objectContaining({ key: 'guide' }),
-        ]),
-      }),
-    ])
-
-    expect(filterPrimaryNavigationSections('definitely not a workspace')).toEqual([])
   })
 
   it('recognizes supported primary navigation section keys', () => {

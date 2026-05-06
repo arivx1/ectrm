@@ -5,6 +5,7 @@ import type {
   WeatherIntelligenceOverviewRecord,
   WeatherLocationRecord,
   WeatherObservationRecord,
+  WeatherSyncStatusRecord,
 } from '../../shared/models'
 
 export type CreateWeatherLocationInput = {
@@ -51,6 +52,55 @@ export async function loadWeatherLocations(
   const queryString = params.toString()
   return fetchJson<WeatherLocationRecord[]>(
     `${apiBase}/admin/weather/locations${queryString ? `?${queryString}` : ''}`,
+    {
+      headers: options?.headers ?? undefined,
+      cache: 'no-store',
+    },
+  )
+}
+
+export async function loadTrackedWeatherLocations(
+  apiBase: string,
+  options?: { query?: string; headers?: HeadersInit | null },
+): Promise<WeatherLocationRecord[]> {
+  const params = new URLSearchParams()
+  if (options?.query?.trim()) {
+    params.set('q', options.query.trim())
+  }
+
+  const queryString = params.toString()
+  return fetchJson<WeatherLocationRecord[]>(
+    `${apiBase}/weather/locations${queryString ? `?${queryString}` : ''}`,
+    {
+      headers: options?.headers ?? undefined,
+      cache: 'no-store',
+    },
+  )
+}
+
+export async function loadWeatherSyncStatus(
+  apiBase: string,
+  options?: { headers?: HeadersInit | null },
+): Promise<WeatherSyncStatusRecord> {
+  return fetchJson<WeatherSyncStatusRecord>(
+    `${apiBase}/weather/sync/status`,
+    {
+      headers: options?.headers ?? undefined,
+      cache: 'no-store',
+    },
+  )
+}
+
+export async function loadAdminWeatherSyncStatus(
+  apiBase: string,
+  options?: { headers?: HeadersInit | null; includeInactive?: boolean },
+): Promise<WeatherSyncStatusRecord> {
+  const params = new URLSearchParams({
+    include_inactive: String(options?.includeInactive ?? false),
+  })
+
+  return fetchJson<WeatherSyncStatusRecord>(
+    `${apiBase}/admin/weather/sync/status?${params.toString()}`,
     {
       headers: options?.headers ?? undefined,
       cache: 'no-store',

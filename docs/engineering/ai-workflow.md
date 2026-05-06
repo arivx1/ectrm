@@ -48,6 +48,12 @@ read-only data tools to the model runtime. If the provider requests those
 tools, the API executes them server-side and returns a tool-call trace so the
 UI can show which live data lookups were actually used.
 
+Keep live-tool provenance explicit. When a tool answers with platform-loaded
+market data, the response should cite the synced records and freshness state
+already stored in ECTRM. When a tool answers with latest external headlines,
+the response should identify that the headlines were fetched live at response
+time instead of implying they are persisted platform records.
+
 ## Live Data Inventory Reference
 
 The runtime `Live Data Inventory` prompt section is generated from database

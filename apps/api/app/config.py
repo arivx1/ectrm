@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     ASSISTANT_TIMEOUT_SECONDS: int = Field(default=60, ge=5, le=300)
     ASSISTANT_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=128, le=8192)
     ASSISTANT_MAX_TOOL_ROUNDS: int = Field(default=4, ge=0, le=12)
+    MARKET_NEWS_RSS_BASE_URL: str = "https://news.google.com/rss/search"
+    MARKET_NEWS_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
     ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION: int = Field(default=100_000, ge=0, le=100_000_000)
     CODEX_TASKS_ENABLED: bool = False
     CODEX_GITHUB_REPOSITORY: str = ""

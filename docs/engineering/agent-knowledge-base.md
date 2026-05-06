@@ -83,6 +83,63 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-05 - Keep Loaded Market Data And Live News As Separate Tool Surfaces
+
+- Type: lesson
+- Domain: assistant live tools and external data provenance
+- Applies to: market briefings, pre-trade research, risk summaries, and any
+  future "latest" assistant tool
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/reference_data/services/external_data/market_context.py`,
+  and
+  `apps/api/app/domains/reference_data/services/external_data/market_news.py`
+- Lesson: when the assistant needs "latest" market context, keep synced
+  commodity prices and live headline fetches in separate read-only tools. That
+  preserves provenance so the model can distinguish data already loaded into
+  ECTRM from headlines fetched at response time.
+- Deterministic opportunity: centralize future freshness and provenance labels
+  for any live external read so new tools can reuse one typed contract instead
+  of inventing ad hoc wording.
+- Agent autonomy impact: agents can cite fresher market context without
+  implying that live headlines mutated platform data or silently backfilled the
+  external-data store.
+- Tests or evidence:
+  `apps/api/tests/test_assistant_tooling.py` and
+  `apps/api/tests/test_market_news_service.py`
+- Follow-up: if desk usage converges on a smaller approved news-provider set,
+  promote that provider selection into typed configuration instead of prompt
+  convention.
+
+### 2026-05-05 - Surface Local-First External Delivery Fallbacks In Runtime Settings
+
+- Type: lesson
+- Domain: integrations and admin runtime visibility
+- Applies to: projection-monitoring email delivery, future webhook or inbox
+  transports, and Settings/Admin runtime surfaces
+- Status: implemented
+- Source:
+  `apps/api/app/main.py`,
+  `apps/api/app/domains/admin/services/projection_monitoring.py`, and
+  `apps/web/src/workspaces/settings/SettingsWorkspace.tsx`
+- Lesson: when an integration has a safe local archive fallback, expose that
+  fallback explicitly through a server-owned runtime contract and UI instead of
+  leaving operators to infer behavior from missing environment variables. The
+  product should make it obvious whether a delivery path is still local-only or
+  actually pointed at an external transport such as Gmail SMTP.
+- Deterministic opportunity: centralize future integration readiness summaries
+  as typed runtime metadata so Admin and Settings surfaces can stay consistent
+  across email, chat, webhook, and inbox connectors.
+- Agent autonomy impact: agents stay out of transport configuration changes,
+  but they can now cite visible product state instead of guessing whether an
+  external delivery path is active.
+- Tests or evidence:
+  `apps/api/tests/test_auth_http.py` and
+  `apps/web/tests/projectionMonitoringEmailRuntime.test.ts`
+- Follow-up: whenever a new external channel lands, add the same explicit
+  runtime readiness surface before relying on that channel operationally.
+
 ### 2026-05-05 - Guided Home Prompt Kits Should Stay Visible and Deterministic
 
 - Type: lesson
@@ -2351,3 +2408,37 @@ proposal form until a human owner approves the domain rule.
   unsupported subdivisions and politically special geographies that Natural
   Earth does not resolve cleanly, then refresh the small residual set of assets
   still blocked on those locations.
+
+### 2026-05-05 - Asset Map Category Filters Collapse Raw Asset Taxonomy Into Operator Buckets
+
+- Type: algorithm-added
+- Domain: prompt-first map UX and governed reference asset presentation
+- Applies to: the second-row asset visibility filters on Prompt Home and the
+  full Map workspace
+- Status: implemented
+- Source:
+  `apps/web/src/features/reference-data/assetMap.ts`,
+  `apps/web/src/workspaces/reference-data/tabs/AssetMapPanel.tsx`,
+  `apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx`, and
+  `apps/web/tests/assetMap.test.ts`
+- Lesson: raw `asset_type` values are too granular for quick map scanning, so
+  the shared asset-map controls now collapse the governed asset taxonomy into a
+  stable operator-facing bucket list: `Upstream Oil & Gas`, `Pipeline`,
+  `Refinery`, `NG Processing`, `Petrochem`, `Storage`, `Power Generation`, and
+  `Other`.
+- Deterministic opportunity: keep future asset-map filtering anchored to a
+  single classifier that maps `asset_class` plus selected `asset_type`
+  exceptions into these display buckets. The current split treats
+  `PROCESSING/PETROCHEMICAL` as `Petrochem`, other `PROCESSING` rows as
+  `NG Processing`, `TERMINAL/LNG` as `NG Processing`, `TERMINAL/PIPELINE` as
+  `Pipeline`, and remaining unmatched classes as `Other`.
+- Agent autonomy impact: agents no longer need to infer ad hoc label groups or
+  expose long raw subtype lists when adjusting the asset map. The deterministic
+  classifier owns the display taxonomy and keeps Home and Map consistent.
+- Tests or evidence: `cd apps/web && npm test -- assetMap.test.ts
+  mapWorkspace.test.ts promptHomeWorkspace.test.ts` and
+  `cd apps/web && npm run test:smoke -- --grep "prompt home keeps the
+  simplified map visible while desk time cards collapse independently"`.
+- Follow-up: if operators want different commercial groupings later, change the
+  shared classifier and test expectations together instead of adding one-off UI
+  overrides in individual map surfaces.

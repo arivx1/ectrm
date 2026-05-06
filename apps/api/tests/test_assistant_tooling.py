@@ -993,6 +993,52 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["macro"][0]["series_code"], "FRED_DGS10")
         self.assertEqual(result.output["positioning"][0]["series_code"], "CFTC_WTI_MM_NET")
 
+    def test_tool_service_returns_latest_commodity_prices(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("get_latest_commodity_prices", {"commodity": "WTI", "limit": 5})
+
+        self.assertEqual(trace.tool_name, "get_latest_commodity_prices")
+        self.assertEqual(result.output["commodity"], "WTI")
+        self.assertEqual(result.output["count"], 1)
+        self.assertEqual(result.output["items"][0]["price_index_code"], "WTI_CUSHING_D")
+        self.assertEqual(result.output["items"][0]["value"], 66.1)
+        self.assertIn("Loaded 1 latest commodity price row(s) for WTI.", trace.summary)
+
+    @patch("apps.api.app.domains.assistant.services.tools.load_market_news_headlines")
+    def test_tool_service_returns_latest_market_news(self, mock_load_market_news_headlines) -> None:
+        mock_load_market_news_headlines.return_value = {
+            "generated_at": datetime(2026, 5, 5, 12, 0, tzinfo=timezone.utc),
+            "commodity": "WTI",
+            "search_query": "WTI crude oil when:2d",
+            "count": 2,
+            "items": [
+                {
+                    "title": "Crude rallies on supply risk",
+                    "source": "Reuters",
+                    "published_at": datetime(2026, 5, 5, 11, 0, tzinfo=timezone.utc),
+                    "link": "https://news.google.com/rss/articles/abc",
+                },
+                {
+                    "title": "OPEC watchers track prompt balances",
+                    "source": "Bloomberg",
+                    "published_at": datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc),
+                    "link": "https://news.google.com/rss/articles/def",
+                },
+            ],
+        }
+
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("get_latest_market_news", {"commodity": "WTI", "limit": 2})
+
+        self.assertEqual(trace.tool_name, "get_latest_market_news")
+        self.assertEqual(result.output["commodity"], "WTI")
+        self.assertEqual(result.output["count"], 2)
+        self.assertEqual(result.output["items"][0]["source"], "Reuters")
+        self.assertEqual(result.output["items"][0]["title"], "Crude rallies on supply risk")
+        self.assertEqual(trace.summary, "Loaded 2 recent headline(s) for WTI.")
+
     def test_tool_service_analyzes_pretrade_draft_against_latest_visible_saved_run(self) -> None:
         previous_run_id = self._seed_pretrade_recommendation_run(
             actor_id="trader_one",

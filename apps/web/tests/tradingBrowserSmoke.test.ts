@@ -76,6 +76,15 @@ const publicRuntimeSettings = {
     client_id: null,
     auto_create_users: false,
   },
+  projection_monitoring_email: {
+    transport: 'local_archive',
+    provider_hint: 'none',
+    smtp_host: null,
+    smtp_port: null,
+    sender: 'projection-monitoring@localhost',
+    recipient_count: 1,
+    auth_status: 'none',
+  },
   session_ttl_hours: 24,
   eia_base_url: 'https://api.eia.gov',
   eia_timeout_seconds: 30,
@@ -880,6 +889,16 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/weather/locations' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/weather/sync/status' && method === 'GET') {
+      writeJson(response, null)
+      return
+    }
+
     if (url.pathname === '/reference/books' && method === 'GET') {
       writeJson(response, books)
       return
@@ -1318,24 +1337,6 @@ async function waitForRecordedRequest(
     }
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
-}
-
-async function waitForGlobalWorkspaceFilter(page: Page, value: string): Promise<void> {
-  await page.waitForFunction((expectedValue) => {
-    const inputs = Array.from(document.querySelectorAll('input'))
-    const globalSearchInput = inputs.find(
-      (candidate) =>
-        candidate instanceof HTMLInputElement &&
-        candidate.placeholder === 'Workspace, trade, delivery, counterparty, book, or provider',
-    )
-
-    return globalSearchInput instanceof HTMLInputElement && globalSearchInput.value === expectedValue
-  }, value)
-}
-
-async function waitForCollapsedGlobalWorkspaceFilter(page: Page, value: string): Promise<void> {
-  await page.getByRole('button', { name: 'Show filter' }).waitFor()
-  await page.locator('.nav-global-filter-summary-value', { hasText: `"${value}"` }).waitFor()
 }
 
 async function triggerSessionExpiry(page: Page, mockApi: MockApiServer): Promise<void> {
@@ -1866,14 +1867,12 @@ test(
       await page
         .getByText('This workspace started focused on that trade so you can clear the matching queue items before widening back to the full book.')
         .waitFor()
-      await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
-      await waitForCollapsedGlobalWorkspaceFilter(page, 'T-AMEND-100')
 
       assert.match(page.url(), /\bview=operations\b/)
       assert.match(page.url(), /\bhandoff=events\b/)
       assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
       assert.match(page.url(), /\beventType=TradeAmended\b/)
-      assert.equal((await page.locator('.nav-global-filter-summary-value').textContent())?.trim(), '"T-AMEND-100"')
+      assert.equal(await page.locator('.nav-global-filter').count(), 0)
 
       assert.equal(
         mockApi.unexpectedRequests.length,
@@ -1935,14 +1934,12 @@ test(
       await page
         .getByText('This workspace started focused on that trade so invoice, payment, and dispute follow-through stay anchored to the same issue.')
         .waitFor()
-      await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
-      await waitForCollapsedGlobalWorkspaceFilter(page, 'T-AMEND-100')
 
       assert.match(page.url(), /\bview=settlement\b/)
       assert.match(page.url(), /\bhandoff=events\b/)
       assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
       assert.match(page.url(), /\beventType=TradeInvoiceUpdated\b/)
-      assert.equal((await page.locator('.nav-global-filter-summary-value').textContent())?.trim(), '"T-AMEND-100"')
+      assert.equal(await page.locator('.nav-global-filter').count(), 0)
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,

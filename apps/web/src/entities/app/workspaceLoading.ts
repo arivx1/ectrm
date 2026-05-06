@@ -16,6 +16,7 @@ export const EMPTY_GROUP_FLAGS: AppDataGroupFlags = {
   events: false,
   positions: false,
   reference: false,
+  weather: false,
   risk: false,
   deliveries: false,
   operations: false,
@@ -30,6 +31,7 @@ export const EMPTY_GROUP_ERRORS: AppDataGroupErrors = {
   events: '',
   positions: '',
   reference: '',
+  weather: '',
   risk: '',
   deliveries: '',
   operations: '',
@@ -38,10 +40,44 @@ export const EMPTY_GROUP_ERRORS: AppDataGroupErrors = {
   admin: '',
 }
 
+const WORKSPACE_GROUP_ISSUE_LABELS: Record<AppDataGroup, string> = {
+  core: 'Shell Error',
+  trades: 'Trade Data Error',
+  events: 'Event Data Error',
+  positions: 'Position Data Error',
+  reference: 'Reference Data Error',
+  weather: 'Weather Error',
+  risk: 'Risk Data Error',
+  deliveries: 'Delivery Data Error',
+  operations: 'Operations Error',
+  settlement: 'Settlement Error',
+  reports: 'Report Error',
+  admin: 'Admin Error',
+}
+
 export { VIEW_BLOCKING_GROUPS, VIEW_DATA_GROUPS } from './workspaceRegistry'
 
 export function isAuthenticationRequiredMessage(message: string): boolean {
   return /authentication is required|session expired|unauthorized/i.test(message)
+}
+
+export function summarizeWorkspaceIssueMessage(
+  message: string,
+  group?: AppDataGroup | null,
+): string {
+  if (!message.trim()) {
+    return ''
+  }
+
+  if (isAuthenticationRequiredMessage(message)) {
+    return 'Authentication required'
+  }
+
+  if (group) {
+    return WORKSPACE_GROUP_ISSUE_LABELS[group]
+  }
+
+  return 'Workspace Error'
 }
 
 type SettingsSignInStateArgs = {

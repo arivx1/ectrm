@@ -311,6 +311,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("analyze_pretrade_scenario_draft", pre_trade["default_tools"])
         self.assertIn("get_pretrade_recommendation_run", pre_trade["default_tools"])
 
+        market_research = next(row for row in payload if row["role_key"] == "market-research-agent")
+        self.assertIn("get_latest_commodity_prices", market_research["default_tools"])
+        self.assertIn("get_latest_market_news", market_research["default_tools"])
+
         trade_capture = next(row for row in payload if row["role_key"] == "trade-capture-agent")
         self.assertEqual(trade_capture["catalog_status"], "SEEDED")
         self.assertEqual(trade_capture["current_profile_ids"], ["trade-capture-agent"])

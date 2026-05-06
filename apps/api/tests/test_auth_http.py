@@ -86,6 +86,11 @@ class AuthHttpTests(unittest.TestCase):
         self._previous_google_auth_default_role = settings.GOOGLE_AUTH_DEFAULT_ROLE
         self._previous_google_auth_timeout_seconds = settings.GOOGLE_AUTH_TIMEOUT_SECONDS
         self._previous_google_auth_tokeninfo_url = settings.GOOGLE_AUTH_TOKENINFO_URL
+        self._previous_projection_monitoring_email_from = settings.PROJECTION_MONITORING_EMAIL_FROM
+        self._previous_projection_monitoring_email_smtp_host = settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST
+        self._previous_projection_monitoring_email_smtp_port = settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT
+        self._previous_projection_monitoring_email_smtp_username = settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME
+        self._previous_projection_monitoring_email_smtp_password = settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD
         settings.BOOTSTRAP_ADMIN_TOKEN = "bootstrap-secret"
         settings.SINGLE_USER_AUTH_ENABLED = False
         settings.SINGLE_USER_AUTH_USER_ID = "local_admin"
@@ -97,6 +102,11 @@ class AuthHttpTests(unittest.TestCase):
         settings.GOOGLE_AUTH_DEFAULT_ROLE = "TRADER"
         settings.GOOGLE_AUTH_TIMEOUT_SECONDS = 10
         settings.GOOGLE_AUTH_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+        settings.PROJECTION_MONITORING_EMAIL_FROM = "projection-monitoring@localhost"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST = ""
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT = 587
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME = ""
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD = ""
 
         with self.SessionLocal() as session:
             for table in reversed(Base.metadata.sorted_tables):
@@ -115,6 +125,11 @@ class AuthHttpTests(unittest.TestCase):
         settings.GOOGLE_AUTH_DEFAULT_ROLE = self._previous_google_auth_default_role
         settings.GOOGLE_AUTH_TIMEOUT_SECONDS = self._previous_google_auth_timeout_seconds
         settings.GOOGLE_AUTH_TOKENINFO_URL = self._previous_google_auth_tokeninfo_url
+        settings.PROJECTION_MONITORING_EMAIL_FROM = self._previous_projection_monitoring_email_from
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST = self._previous_projection_monitoring_email_smtp_host
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT = self._previous_projection_monitoring_email_smtp_port
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME = self._previous_projection_monitoring_email_smtp_username
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD = self._previous_projection_monitoring_email_smtp_password
 
     def _bootstrap_admin(self) -> dict[str, object]:
         response = self.client.post(
@@ -749,6 +764,30 @@ class AuthHttpTests(unittest.TestCase):
                 "enabled": True,
                 "client_id": "google-client-id.apps.googleusercontent.com",
                 "auto_create_users": True,
+            },
+        )
+
+    def test_public_settings_include_projection_monitoring_email_runtime(self) -> None:
+        settings.PROJECTION_MONITORING_EMAIL_FROM = "alerts@gmail.com"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST = "smtp.gmail.com"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT = 587
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME = "alerts@gmail.com"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD = "gmail-app-password"
+        self._bootstrap_admin()
+
+        response = self.client.get("/settings/public")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["projection_monitoring_email"],
+            {
+                "transport": "smtp",
+                "provider_hint": "gmail",
+                "smtp_host": "smtp.gmail.com",
+                "smtp_port": 587,
+                "sender": "alerts@gmail.com",
+                "recipient_count": 1,
+                "auth_status": "configured",
             },
         )
 

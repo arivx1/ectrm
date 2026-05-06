@@ -42,6 +42,10 @@ import {
   trades,
   userAccounts,
   units,
+  weatherForecastPeriodsByCode,
+  weatherLocations,
+  weatherObservationsByCode,
+  weatherSyncStatus,
 } from './smokeFixtures'
 
 type SmokeTradeRow = (typeof trades)[number]
@@ -1811,7 +1815,7 @@ async function startMockApiServer(
         return
       }
 
-      writeJson(response, [])
+      writeJson(response, weatherLocations)
       return
     }
 
@@ -1820,7 +1824,31 @@ async function startMockApiServer(
         return
       }
 
-      writeJson(response, null)
+      writeJson(response, weatherSyncStatus)
+      return
+    }
+
+    if (url.pathname === '/weather/locations' && method === 'GET') {
+      writeJson(response, weatherLocations)
+      return
+    }
+
+    if (url.pathname === '/weather/sync/status' && method === 'GET') {
+      writeJson(response, weatherSyncStatus)
+      return
+    }
+
+    const weatherForecastMatch = url.pathname.match(/^\/weather\/locations\/([^/]+)\/forecast-periods$/)
+    if (weatherForecastMatch && method === 'GET') {
+      const locationCode = decodeURIComponent(weatherForecastMatch[1] ?? '').toUpperCase()
+      writeJson(response, weatherForecastPeriodsByCode[locationCode as keyof typeof weatherForecastPeriodsByCode] ?? [])
+      return
+    }
+
+    const weatherObservationMatch = url.pathname.match(/^\/weather\/locations\/([^/]+)\/observations$/)
+    if (weatherObservationMatch && method === 'GET') {
+      const locationCode = decodeURIComponent(weatherObservationMatch[1] ?? '').toUpperCase()
+      writeJson(response, weatherObservationsByCode[locationCode as keyof typeof weatherObservationsByCode] ?? [])
       return
     }
 

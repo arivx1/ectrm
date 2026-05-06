@@ -28,7 +28,6 @@ export function useAppShellState(
   const [mobileNavState, setMobileNavState] = useState({ open: false, view: currentView })
   const [isMobileViewport, setIsMobileViewport] = useState(() => detectMobileViewport())
   const [eventFilter, setEventFilter] = useState('ALL')
-  const [globalFilter, setGlobalFilter] = useState('')
   const mobileNavOpen = mobileNavState.open && mobileNavState.view === currentView && isMobileViewport
 
   const setMobileNavOpen: Dispatch<SetStateAction<boolean>> = (value) => {
@@ -96,7 +95,6 @@ export function useAppShellState(
 
   return {
     eventFilter,
-    globalFilter,
     handleRoadmapPublished,
     inspectorTab,
     isMobileViewport,
@@ -105,7 +103,6 @@ export function useAppShellState(
     mobileNavToggleActionLabel: mobileNavigationToggleLabel(mobileNavOpen),
     roadmapRefreshVersion,
     setEventFilter,
-    setGlobalFilter,
     setInspectorTab,
     setMobileNavOpen,
   }

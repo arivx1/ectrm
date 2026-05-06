@@ -6,7 +6,13 @@ import {
   formatAssetMapSource,
 } from '../../features/reference-data/assetMap'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
-import type { AssetRecord, LocationRecord, SpatialFeatureRecord } from '../../shared/models'
+import type {
+  AssetRecord,
+  LocationRecord,
+  SpatialFeatureRecord,
+  WeatherLocationRecord,
+  WeatherSyncStatusRecord,
+} from '../../shared/models'
 import { DataSheet } from '../../shared/ui/DataSheet'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { AssetMapPanel } from '../reference-data/tabs/AssetMapPanel'
@@ -15,6 +21,11 @@ type MapWorkspaceProps = {
   assets: AssetRecord[]
   locations: LocationRecord[]
   spatialFeatures: SpatialFeatureRecord[]
+  weatherLocations: WeatherLocationRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
+  weatherDataLoaded?: boolean
+  weatherDataLoading?: boolean
+  weatherDataError?: string
   globalFilter: string
   onOpenReferenceData: () => void
   onPrepareReferenceAsset: (code: string) => void
@@ -78,6 +89,11 @@ export function MapWorkspace({
   assets,
   locations,
   spatialFeatures,
+  weatherLocations,
+  weatherSyncStatus,
+  weatherDataLoaded = false,
+  weatherDataLoading = false,
+  weatherDataError = '',
   globalFilter,
   onOpenReferenceData,
   onPrepareReferenceAsset,
@@ -189,6 +205,11 @@ export function MapWorkspace({
         assets={filteredAssets}
         locations={locations}
         spatialFeatures={spatialFeatures}
+        weatherLocations={weatherLocations}
+        weatherSyncStatus={weatherSyncStatus}
+        weatherDataLoaded={weatherDataLoaded}
+        weatherDataLoading={weatherDataLoading}
+        weatherLoadError={weatherDataError}
         selectedAssetCode={activeSelectedAssetCode}
         onSelectAsset={setSelectedAssetCode}
         filterControls={(

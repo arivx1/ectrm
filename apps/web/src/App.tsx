@@ -1,10 +1,10 @@
-import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import './App.css'
 import './appearance.css'
 import {
-  filterPrimaryNavigationSections,
   MOBILE_NAVIGATION_PANEL_ID,
+  PRIMARY_NAV_SECTIONS,
   type PrimaryNavigationSectionKey,
   primaryNavigationSectionByKey,
   primaryNavigationSectionForView,
@@ -30,6 +30,7 @@ import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
 import {
   deriveWorkspaceStatus,
   isAuthenticationRequiredMessage,
+  summarizeWorkspaceIssueMessage,
   VIEW_DATA_GROUPS,
 } from './entities/app/workspaceLoading'
 import { logoutCurrentSession } from './entities/auth/api'
@@ -40,10 +41,7 @@ import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import { appConfig } from './shared/config'
 import {
   describeAppRouteHandoff,
-  getAppRouteHandoffFilterValue,
-  getAppRouteHandoffKey,
   getAppRouteHandoffTradeId,
-  viewAppliesAppRouteHandoffFilter,
   type AppRouteHandoff,
 } from './shared/appRouteHandoff'
 import { getAuthInterruptionResumeSnapshot } from './shared/authInterruptionResume'
@@ -57,7 +55,6 @@ import {
   subscribePromptSignInReturnIntent,
 } from './shared/promptResumeIntent'
 import { commodityClassOrder } from './shared/trading'
-import { GlobalWorkspaceFilterCard } from './shared/ui/GlobalWorkspaceFilterCard'
 
 function WorkspaceLoadState({
   title,
@@ -137,12 +134,6 @@ function AuthenticatedWorkspaceShell({
   const activePrimarySection = route.activeNavigationSectionKey
     ? primaryNavigationSectionByKey(route.activeNavigationSectionKey)
     : primaryNavigationSectionForView(currentView)
-  const filteredNavSections = useMemo(
-    () => filterPrimaryNavigationSections(shell.globalFilter),
-    [shell.globalFilter],
-  )
-  const hasGlobalFilter = shell.globalFilter.trim().length > 0
-  const filteredNavViewCount = filteredNavSections.reduce((count, section) => count + section.views.length, 0)
   const routeHandoffBanner = useMemo(
     () => describeAppRouteHandoff(routeHandoff, currentView),
     [currentView, routeHandoff],
@@ -248,7 +239,7 @@ function AuthenticatedWorkspaceShell({
     locationStandards: workspaceData.locationStandards,
     counterpartyStandards: workspaceData.counterpartyStandards,
     commodityClassOrder,
-    externalReferenceSearch: shell.globalFilter,
+    externalReferenceSearch: '',
   })
 
   const {
@@ -270,12 +261,21 @@ function AuthenticatedWorkspaceShell({
   const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[currentView]
   const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[currentView]
   const isPromptHomeView = !showingNavigationSectionLanding && currentView === 'prompt'
-  const showPromptHomeFilterCard = !isPromptHomeView || hasGlobalFilter
   const hasAuthenticationIssue =
     isAuthenticationRequiredMessage(workspaceData.error) ||
     Object.values(workspaceData.groupErrors).some((message) => isAuthenticationRequiredMessage(message))
   const effectiveSystemStateLabel = !authSession && hasAuthenticationIssue ? 'Needs sign-in' : systemStateLabel
   const effectiveSystemStateTone = !authSession && hasAuthenticationIssue ? 'active' : systemStateTone
+  const workspaceShellErrorMessage = summarizeWorkspaceIssueMessage(workspaceData.error)
+  const workspaceWarningMessage = workspaceWarning
+    ? summarizeWorkspaceIssueMessage(workspaceData.groupErrors[workspaceWarning], workspaceWarning)
+    : ''
+  const blockingWorkspaceMessage = blockingWorkspaceError
+    ? summarizeWorkspaceIssueMessage(
+        workspaceData.groupErrors[blockingWorkspaceError],
+        blockingWorkspaceError,
+      )
+    : ''
   const selectedTrade = summary.selectedTrade
   const currentWorkspaceLabel = APP_VIEWS.find((view) => view.key === route.currentView)?.label ?? workspaceLabel(route.currentView)
 
@@ -353,18 +353,9 @@ function AuthenticatedWorkspaceShell({
           </span>
         </button>
 
-        {showPromptHomeFilterCard ? (
-          <GlobalWorkspaceFilterCard
-            value={shell.globalFilter}
-            onChange={shell.setGlobalFilter}
-            totalCount={APP_VIEWS.length}
-            matchedCount={filteredNavViewCount}
-          />
-        ) : null}
-
         <nav className="nav-stack" aria-label="Primary">
-          {filteredNavSections.map((section) => {
-            const expanded = hasGlobalFilter || isNavSectionOpen(section.key)
+          {PRIMARY_NAV_SECTIONS.map((section) => {
+            const expanded = isNavSectionOpen(section.key)
             const containsCurrentView =
               route.activeNavigationSectionKey === section.key ||
               (route.activeNavigationSectionKey === null && section.views.some((view) => view.key === route.currentView))
@@ -395,13 +386,7 @@ function AuthenticatedWorkspaceShell({
                     aria-expanded={expanded}
                     aria-controls={`nav-section-${section.key}`}
                     aria-label={`${expanded ? 'Collapse' : 'Expand'} ${section.label} section`}
-                    disabled={hasGlobalFilter}
-                    onClick={() => {
-                      if (hasGlobalFilter) {
-                        return
-                      }
-                      toggleNavSection(section.key)
-                    }}
+                    onClick={() => toggleNavSection(section.key)}
                   >
                     <span className="nav-section-indicator" aria-hidden="true">
                       {expanded ? '-' : '+'}
@@ -435,13 +420,6 @@ function AuthenticatedWorkspaceShell({
             )
           })}
         </nav>
-
-        {hasGlobalFilter && filteredNavSections.length === 0 ? (
-          <section className="surface empty-state nav-global-filter-empty">
-            <strong>No workspaces match the current global filter</strong>
-            <p>The current screen stays open, but the nav will stay empty until the filter changes.</p>
-          </section>
-        ) : null}
       </aside>
 
       <main className={`main-stage ${isPromptHomeView ? 'main-stage-prompt' : ''}`}>
@@ -531,10 +509,10 @@ function AuthenticatedWorkspaceShell({
         )}
 
         {!showingNavigationSectionLanding && workspaceData.error ? (
-          <div className="error-banner">{workspaceData.error}</div>
+          <div className="error-banner">{workspaceShellErrorMessage}</div>
         ) : null}
         {!showingNavigationSectionLanding && workspaceWarning ? (
-          <div className="error-banner">{workspaceData.groupErrors[workspaceWarning]}</div>
+          <div className="error-banner">{workspaceWarningMessage}</div>
         ) : null}
         {!showingNavigationSectionLanding && routeHandoffBanner && !currentWorkspaceOwnsHandoffBanner ? (
           <section className="feedback-banner workspace-handoff-banner" aria-live="polite">
@@ -590,7 +568,7 @@ function AuthenticatedWorkspaceShell({
         ) : blockingWorkspaceError && !workspaceLoading ? (
           <WorkspaceErrorState
             title={`${workspaceLabel(route.currentView)} needs attention`}
-            message={workspaceData.groupErrors[blockingWorkspaceError]}
+            message={blockingWorkspaceMessage}
             onRetry={() => {
               void workspaceData.loadData({
                 groups: VIEW_DATA_GROUPS[route.currentView],
@@ -669,10 +647,7 @@ export default function App() {
     setSelectedTradeId,
   } = route
   const dismissStartHere = startHere.dismissStartHere
-  const { inspectorTab, setGlobalFilter, setInspectorTab } = shell
-  const activeRouteHandoffFilterRef = useRef<string | null>(null)
-  const appliedRouteHandoffKeyRef = useRef<string | null>(null)
-  const routeHandoffKey = getAppRouteHandoffKey(routeHandoff)
+  const { inspectorTab, setInspectorTab } = shell
   const promptResumeIntent = useSyncExternalStore(
     subscribePromptResumeIntent,
     getPromptResumeIntent,
@@ -701,35 +676,7 @@ export default function App() {
     : primaryNavigationSectionForView(currentView)
 
   useEffect(() => {
-    const nextHandoffFilter =
-      routeHandoff && viewAppliesAppRouteHandoffFilter(currentView)
-        ? getAppRouteHandoffFilterValue(routeHandoff)
-        : null
     const routeHandoffTradeId = getAppRouteHandoffTradeId(routeHandoff)
-
-    if (routeHandoffKey === null) {
-      const previousHandoffFilter = activeRouteHandoffFilterRef.current
-      if (previousHandoffFilter !== null) {
-        setGlobalFilter((current) => (current === previousHandoffFilter ? '' : current))
-        activeRouteHandoffFilterRef.current = null
-      }
-      appliedRouteHandoffKeyRef.current = null
-      return
-    }
-
-    if (appliedRouteHandoffKeyRef.current === routeHandoffKey) {
-      return
-    }
-
-    const previousHandoffFilter = activeRouteHandoffFilterRef.current
-    if (previousHandoffFilter !== null && previousHandoffFilter !== nextHandoffFilter) {
-      setGlobalFilter((current) => (current === previousHandoffFilter ? '' : current))
-    }
-
-    if (nextHandoffFilter) {
-      setGlobalFilter((current) => (current === nextHandoffFilter ? current : nextHandoffFilter))
-    }
-    activeRouteHandoffFilterRef.current = nextHandoffFilter
 
     if (currentView === 'trades' && routeHandoffTradeId && selectedTradeId !== routeHandoffTradeId) {
       setSelectedTradeId(routeHandoffTradeId)
@@ -742,17 +689,13 @@ export default function App() {
     ) {
       setInspectorTab(routeHandoff.tradeInspectorTab)
     }
-
-    appliedRouteHandoffKeyRef.current = routeHandoffKey
   }, [
     currentView,
     inspectorTab,
     routeHandoff,
-    routeHandoffKey,
     selectedTradeId,
     setInspectorTab,
     setSelectedTradeId,
-    setGlobalFilter,
   ])
 
   const [signOutPending, setSignOutPending] = useState(false)

@@ -213,6 +213,8 @@ The most important settings are:
 - `GOOGLE_AUTH_AUTO_CREATE_USERS`: optionally create a local account the first
   time a valid Google user signs in
 - `GOOGLE_AUTH_DEFAULT_ROLE`: role assigned to auto-created Google users
+- `PROJECTION_MONITORING_EMAIL_*`: outbound email transport used when the
+  projection-monitoring policy includes the `EMAIL` delivery channel
 - `SESSION_TTL_HOURS`: how long sessions stay valid
 - `ASSISTANT_ENABLED`: global switch for assistant routing
 - `ASSISTANT_DEFAULT_PROVIDER`: which provider the API prefers by default
@@ -245,6 +247,27 @@ a visible failure to the backend request log quickly.
 - `KALSHI_BASE_URL`: points at the Kalshi REST API for public market data
 - `KALSHI_SYNC_INTERVAL_MINUTES`, `KALSHI_SYNC_SUCCESS_SLA_HOURS`: control
   when Kalshi is considered due and when the sync is considered stale
+
+## Gmail Inbox Delivery
+
+Projection monitoring already has an outbound email seam. If you want those
+alerts to land in a Gmail or Google Workspace inbox instead of the local email
+archive fallback, configure the API with:
+
+- `PROJECTION_MONITORING_EMAIL_SMTP_HOST=smtp.gmail.com`
+- `PROJECTION_MONITORING_EMAIL_SMTP_PORT=587`
+- `PROJECTION_MONITORING_EMAIL_FROM=<your-google-address>`
+- `PROJECTION_MONITORING_EMAIL_SMTP_USERNAME=<your-google-address>`
+- `PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD=<google-app-password>`
+
+Then make sure the target Gmail address is either:
+
+- listed in `PROJECTION_MONITORING_EMAIL_RECIPIENTS`, or
+- attached to an active admin-capable user account in ECTRM
+
+If `PROJECTION_MONITORING_EMAIL_SMTP_HOST` is blank, the `EMAIL` channel stays
+local-first and records delivery into the archived sink instead of sending to
+an external inbox.
 
 ## Implementation Shape
 

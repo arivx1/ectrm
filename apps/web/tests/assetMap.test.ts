@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  assetMapSubtypeLabelForAsset,
   buildAssetMapFeatureCollection,
   buildAssetMapSummary,
   buildSpatialFeatureMapFeatureCollection,
@@ -126,6 +127,44 @@ test('buildAssetMapSummary prefers asset geometry, then asset points, then linke
   assert.equal(summary.records.find((record) => record.asset.code === 'PIPE_01')?.placementStatus, 'asset_geometry')
   assert.equal(summary.records.find((record) => record.asset.code === 'STORE_01')?.placementStatus, 'asset_coordinates')
   assert.equal(summary.records.find((record) => record.asset.code === 'TERM_01')?.placementStatus, 'linked_location')
+})
+
+test('asset map subtype labels collapse raw asset taxonomy into operator-friendly map categories', () => {
+  assert.equal(
+    assetMapSubtypeLabelForAsset({
+      asset_class: 'UPSTREAM_PRODUCTION',
+      asset_type: 'OFFSHORE',
+    }),
+    'Upstream Oil & Gas',
+  )
+  assert.equal(
+    assetMapSubtypeLabelForAsset({
+      asset_class: 'PROCESSING',
+      asset_type: 'GAS_PLANT',
+    }),
+    'NG Processing',
+  )
+  assert.equal(
+    assetMapSubtypeLabelForAsset({
+      asset_class: 'PROCESSING',
+      asset_type: 'PETROCHEMICAL',
+    }),
+    'Petrochem',
+  )
+  assert.equal(
+    assetMapSubtypeLabelForAsset({
+      asset_class: 'TERMINAL',
+      asset_type: 'LNG',
+    }),
+    'NG Processing',
+  )
+  assert.equal(
+    assetMapSubtypeLabelForAsset({
+      asset_class: 'TERMINAL',
+      asset_type: 'MARINE',
+    }),
+    'Other',
+  )
 })
 
 test('asset map formatting explains spatial source and placement gaps', () => {

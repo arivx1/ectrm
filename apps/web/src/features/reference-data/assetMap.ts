@@ -46,6 +46,19 @@ export type AssetMapSummary = {
   inactiveCount: number
 }
 
+export const ASSET_MAP_SUBTYPE_LABELS = [
+  'Upstream Oil & Gas',
+  'Pipeline',
+  'Refinery',
+  'NG Processing',
+  'Petrochem',
+  'Storage',
+  'Power Generation',
+  'Other',
+] as const
+
+export type AssetMapSubtypeLabel = (typeof ASSET_MAP_SUBTYPE_LABELS)[number]
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
@@ -283,6 +296,38 @@ function placementSource(record: AssetMapRecord): AssetGeometrySource | null {
       return 'LINKED_LOCATION'
     default:
       return null
+  }
+}
+
+export function assetMapSubtypeLabelForAsset(
+  asset: Pick<AssetRecord, 'asset_class' | 'asset_type'>,
+): AssetMapSubtypeLabel {
+  const assetClass = asset.asset_class.trim().toUpperCase()
+  const assetType = asset.asset_type.trim().toUpperCase()
+
+  switch (assetClass) {
+    case 'UPSTREAM_PRODUCTION':
+      return 'Upstream Oil & Gas'
+    case 'PIPELINE':
+      return 'Pipeline'
+    case 'REFINERY':
+      return 'Refinery'
+    case 'PROCESSING':
+      return assetType === 'PETROCHEMICAL' ? 'Petrochem' : 'NG Processing'
+    case 'STORAGE':
+      return 'Storage'
+    case 'GENERATION':
+      return assetType === 'STORAGE' ? 'Storage' : 'Power Generation'
+    case 'TERMINAL':
+      if (assetType === 'PIPELINE') {
+        return 'Pipeline'
+      }
+      if (assetType === 'LNG') {
+        return 'NG Processing'
+      }
+      return 'Other'
+    default:
+      return 'Other'
   }
 }
 

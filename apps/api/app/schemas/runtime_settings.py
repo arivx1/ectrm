@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from apps.api.app.schemas.operations import DatabaseOverviewOut
@@ -19,6 +21,16 @@ class GoogleAuthRuntimeSettingsOut(BaseModel):
     auto_create_users: bool
 
 
+class ProjectionMonitoringEmailRuntimeSettingsOut(BaseModel):
+    transport: Literal["local_archive", "smtp"]
+    provider_hint: Literal["none", "gmail", "generic_smtp"]
+    smtp_host: str | None
+    smtp_port: int | None
+    sender: str
+    recipient_count: int
+    auth_status: Literal["none", "partial", "configured"]
+
+
 class PublicRuntimeSettingsOut(BaseModel):
     app_version: str
     database: DatabaseOverviewOut
@@ -27,6 +39,7 @@ class PublicRuntimeSettingsOut(BaseModel):
     bootstrap_admin_enabled: bool
     single_user_auth_enabled: bool
     google_auth: GoogleAuthRuntimeSettingsOut
+    projection_monitoring_email: ProjectionMonitoringEmailRuntimeSettingsOut
     session_ttl_hours: int
     eia_base_url: str
     eia_timeout_seconds: int

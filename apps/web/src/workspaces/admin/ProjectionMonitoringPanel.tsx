@@ -308,6 +308,11 @@ export function ProjectionMonitoringPanel({
               {flash.message}
             </div>
           ) : null}
+          {monitoringDraft?.alerting.channels.includes('EMAIL') ? (
+            <div className="feedback-banner feedback-banner-success">
+              Email digests use the server SMTP/runtime settings from Settings. If SMTP is not configured, deliveries stay in the local archive instead of going to an external inbox.
+            </div>
+          ) : null}
 
           <div className="admin-grid">
             <article className="admin-card">

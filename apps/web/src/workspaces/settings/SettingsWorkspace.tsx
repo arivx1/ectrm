@@ -46,6 +46,11 @@ import {
   tradeSideOptions,
   tradeStructureOptions,
 } from '../../shared/trading'
+import {
+  formatProjectionMonitoringEmailAuthLabel,
+  formatProjectionMonitoringEmailStatusLabel,
+  summarizeProjectionMonitoringEmail,
+} from './projectionMonitoringEmailRuntime'
 
 type SettingsWorkspaceProps = {
   health: string
@@ -1799,6 +1804,11 @@ export function SettingsWorkspace({
                   </p>
                 </article>
                 <article className="settings-summary-card">
+                  <span>Email delivery</span>
+                  <strong>{formatProjectionMonitoringEmailStatusLabel(serverSettings.projection_monitoring_email)}</strong>
+                  <p>{summarizeProjectionMonitoringEmail(serverSettings.projection_monitoring_email)}</p>
+                </article>
+                <article className="settings-summary-card">
                   <span>Assistant default</span>
                   <strong>{serverSettings.assistant.effective_default_provider ?? 'Not ready'}</strong>
                   <p>
@@ -1830,6 +1840,42 @@ export function SettingsWorkspace({
                 <SettingsValueRow
                   label="Session TTL"
                   value={`${serverSettings.session_ttl_hours}h`}
+                />
+                <SettingsValueRow
+                  label="Email transport"
+                  value={formatProjectionMonitoringEmailStatusLabel(serverSettings.projection_monitoring_email)}
+                  detail="Projection monitoring uses this path whenever the EMAIL alert channel is enabled."
+                />
+                <SettingsValueRow
+                  label="Email recipients"
+                  value={String(serverSettings.projection_monitoring_email.recipient_count)}
+                  detail="Resolved from the configured recipient list or the active admin accounts."
+                />
+                <SettingsValueRow
+                  label="Email sender"
+                  value={serverSettings.projection_monitoring_email.sender}
+                />
+                <SettingsValueRow
+                  label="SMTP host"
+                  value={
+                    serverSettings.projection_monitoring_email.smtp_host
+                      ? `${serverSettings.projection_monitoring_email.smtp_host}:${serverSettings.projection_monitoring_email.smtp_port ?? ''}`
+                      : 'Local archive fallback'
+                  }
+                  detail={
+                    serverSettings.projection_monitoring_email.provider_hint === 'gmail'
+                      ? 'Gmail delivery uses the server-owned SMTP path rather than browser-side mail access.'
+                      : 'Without an SMTP host, email alerts are archived locally for review.'
+                  }
+                />
+                <SettingsValueRow
+                  label="SMTP auth"
+                  value={formatProjectionMonitoringEmailAuthLabel(serverSettings.projection_monitoring_email)}
+                  detail={
+                    serverSettings.projection_monitoring_email.provider_hint === 'gmail'
+                      ? 'Gmail usually needs a full Google email address plus an app password on the API.'
+                      : 'Only readiness is surfaced here; secrets stay hidden on the server.'
+                  }
                 />
                 <SettingsValueRow label="EIA base URL" value={serverSettings.eia_base_url} />
                 <SettingsValueRow

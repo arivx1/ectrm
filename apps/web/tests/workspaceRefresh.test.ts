@@ -146,14 +146,14 @@ test('admin sync mutations stay scoped to the admin loader', () => {
   })
 })
 
-test('admin weather mutations stay scoped to the admin loader', () => {
+test('admin weather mutations refresh shared weather overlay data too', () => {
   const plan = buildTargetedMutationRefreshPlan({
     currentView: 'admin',
     mutation: 'admin-weather-sync',
   })
 
   assert.deepEqual(plan, {
-    groups: ['admin'],
+    groups: ['admin', 'weather'],
     collections: [],
   })
 })

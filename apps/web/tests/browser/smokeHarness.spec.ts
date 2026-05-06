@@ -56,11 +56,6 @@ async function signOutFromPromptHome(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: 'Sign In', exact: true })).toBeVisible()
 }
 
-async function expandPromptHomeLiveContext(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Show live context' }).click()
-  await expect(page.getByRole('button', { name: 'Hide live context' })).toBeVisible()
-}
-
 async function expectLocatorsOnSameLine(first: Locator, second: Locator): Promise<void> {
   const [firstBox, secondBox] = await Promise.all([first.boundingBox(), second.boundingBox()])
   expect(firstBox).not.toBeNull()
@@ -83,6 +78,47 @@ async function expectLocatorNearRightEdge(container: Locator, target: Locator, t
   expect(containerBox.x + containerBox.width - (targetBox.x + targetBox.width)).toBeLessThanOrEqual(
     threshold,
   )
+}
+
+async function expectMarkersInsideFrame(
+  page: Page,
+  frameSelector: string,
+  markerSelector: string,
+  expectedCount: number,
+): Promise<void> {
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        ({ frameSelector: nextFrameSelector, markerSelector: nextMarkerSelector }) => {
+          const frame = document.querySelector(nextFrameSelector)
+          if (!(frame instanceof HTMLElement)) {
+            return -1
+          }
+
+          const frameRect = frame.getBoundingClientRect()
+          return Array.from(document.querySelectorAll(nextMarkerSelector)).filter((node) => {
+            if (!(node instanceof HTMLElement)) {
+              return false
+            }
+
+            const rect = node.getBoundingClientRect()
+            const centerX = rect.left + rect.width / 2
+            const centerY = rect.top + rect.height / 2
+            return (
+              centerX >= frameRect.left &&
+              centerX <= frameRect.right &&
+              centerY >= frameRect.top &&
+              centerY <= frameRect.bottom
+            )
+          }).length
+        },
+        {
+          frameSelector,
+          markerSelector,
+        },
+      ),
+    )
+    .toBe(expectedCount)
 }
 
 async function expectLocatorAbove(first: Locator, second: Locator, threshold = 12): Promise<void> {
@@ -284,10 +320,13 @@ test('single-user smoke signs into the prompt home when one-click access is enab
 
     await expect(page.getByLabel('Operator prompt')).toBeVisible()
     await expect(page.getByText('Signed in as Ops Admin')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Assistant Console', exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: /Recent blocker triage/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Show live context' })).toBeVisible()
-    await expect(page.locator('.prompt-home-starter').filter({ hasText: 'Clear operations blockers' })).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Assistant Console', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Recent blocker triage/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Show live context' })).toHaveCount(0)
+    await expect(page.getByText('Contextual starting points')).toHaveCount(0)
+    await expect(page.getByText('Recent prompt threads')).toHaveCount(0)
+    await expect(page.locator('.prompt-home-map-card')).toContainText('1 plotted | 0 hidden | 1 overlays')
+    await expect(page.locator('.prompt-home-map-card')).not.toContainText('No map-ready assets yet.')
 
     assertNoHarnessRequestFailures(harness)
   } finally {
@@ -325,10 +364,15 @@ test('prompt home prompt kits load guided prompts into the composer', async ({ p
   }
 })
 
-test('prompt home desk time cards collapse and expand independently', async ({ page }) => {
+test('prompt home keeps the simplified map visible while desk time cards collapse independently', async ({ page }) => {
   const harness = await startSmokeHarness()
 
   try {
+    await page.context().grantPermissions(['geolocation'], { origin: harness.origin })
+    await page.context().setGeolocation({
+      latitude: 29.7604,
+      longitude: -95.3698,
+    })
     await seedSignedInSession(page, harness)
     await page.goto(harness.origin, {
       waitUntil: 'domcontentloaded',
@@ -343,7 +387,11 @@ test('prompt home desk time cards collapse and expand independently', async ({ p
     const deskTimeToggle = page.locator('.prompt-home-timeframe-panel-toggle-action')
     const deskTimeCopy = page.locator('.prompt-home-timeframe-panel-copy')
     const mapToggle = page.locator('.prompt-home-map-card-toggle')
-    const mapToggleMeta = page.locator('.prompt-home-map-card-toggle-meta')
+    const mapFrameSelector = '.prompt-home-map-card .asset-map-canvas-frame'
+    const myLocationToggle = page.getByRole('checkbox', { name: 'My Location' })
+    const assetsToggle = page.getByRole('checkbox', { name: 'Assets' })
+    const weatherToggle = page.getByRole('checkbox', { name: 'Weather' })
+    const weatherPreview = page.locator('.asset-map-weather-preview')
     const dayCard = page.locator('.prompt-home-time-meter-card').filter({ has: dayPanel })
     const weekCard = page.locator('.prompt-home-time-meter-card').filter({ has: weekPanel })
     const monthCard = page.locator('.prompt-home-time-meter-card').filter({ has: monthPanel })
@@ -356,7 +404,27 @@ test('prompt home desk time cards collapse and expand independently', async ({ p
     await expect(dayPanel).toBeVisible()
     await expect(weekPanel).toBeVisible()
     await expect(monthPanel).toBeVisible()
-    await expect(mapPanel).toBeHidden()
+    await expect(mapPanel).toBeVisible()
+    await expect(page.locator('.prompt-home-map-card')).not.toContainText('No map-ready assets yet.')
+    await expect(page.locator('.prompt-home-map-card')).not.toContainText('Asset footprint preview')
+    await expect(page.locator('.prompt-home-map-card')).not.toContainText('Preview map-ready assets and shared spatial overlays without leaving Home.')
+    await expect(page.locator('.prompt-home-map-card')).not.toContainText('Map Scope')
+    await expect(page.locator('.prompt-home-map-card')).not.toContainText('map-ready assets are currently plotted in Home.')
+    await expect(page.locator('.prompt-home-map-card')).not.toContainText('All currently loaded assets meet the map-ready rules.')
+    await expect(mapToggle).toContainText('Map')
+    await expect(mapToggle).toContainText('Hide card')
+    await expect(myLocationToggle).toBeVisible()
+    await expect(myLocationToggle).toBeChecked()
+    await expect(assetsToggle).toBeVisible()
+    await expect(assetsToggle).toBeChecked()
+    await expect(weatherToggle).toBeVisible()
+    await expect(weatherToggle).toBeChecked()
+    await expect(page.getByText('2 tracked weather points visible')).toBeVisible()
+    await expect(page.locator('.asset-map-weather-marker')).toHaveCount(2)
+    await expect(page.locator('.asset-map-weather-marker').first()).toContainText('Wx')
+    await expectMarkersInsideFrame(page, mapFrameSelector, '.asset-map-weather-marker', 2)
+    await expect(page.getByRole('button', { name: 'Where I am' })).toHaveCount(0)
+    await expect(page.locator('.asset-map-user-marker')).toBeVisible()
     await expect(timeZoneSelect).toBeVisible()
     await expectLocatorNearRightEdge(deskTimeHead, deskTimeToggle)
 
@@ -402,13 +470,37 @@ test('prompt home desk time cards collapse and expand independently', async ({ p
       monthCard.locator('.status-pill'),
     )
 
-    await expect(mapToggleMeta).toContainText('Show card')
-    await mapToggle.click()
-    await expect(mapPanel).toBeVisible()
     await expect(page.locator('.prompt-home-map-card .asset-map-canvas-shell')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Open Map Workspace' })).toBeVisible()
+    await expect(page.locator('.asset-map-user-marker')).toBeVisible()
+    await page.waitForFunction(() => document.querySelectorAll('.asset-map-marker').length > 0)
+    await page.locator('.asset-map-weather-marker').first().evaluate((node) => {
+      ;(node as HTMLButtonElement).click()
+    })
+    await expect(weatherPreview).toContainText('HOUSTON_GC')
+    await expect(weatherPreview).toContainText('Latest obs:')
+    await expect(weatherPreview).toContainText('Next forecast:')
+
+    await myLocationToggle.uncheck()
+    await expect(page.locator('.asset-map-user-marker')).toHaveCount(0)
+    await myLocationToggle.check()
+    await expect(page.locator('.asset-map-user-marker')).toBeVisible()
+
+    await assetsToggle.uncheck()
+    await expect(page.locator('.asset-map-marker')).toHaveCount(0)
+    await assetsToggle.check()
+    await page.waitForFunction(() => document.querySelectorAll('.asset-map-marker').length > 0)
+
+    await weatherToggle.uncheck()
+    await expect(page.locator('.asset-map-weather-marker')).toHaveCount(0)
+    await expect(weatherPreview).toHaveCount(0)
+    await weatherToggle.check()
+    await expect(page.locator('.asset-map-weather-marker')).toHaveCount(2)
+    await expectMarkersInsideFrame(page, mapFrameSelector, '.asset-map-weather-marker', 2)
+
     await mapToggle.click()
     await expect(mapPanel).toBeHidden()
+    await expect(mapToggle).toContainText('Show card')
 
     await deskTimeToggle.click()
     await expect(deskTimePanel).toBeHidden()
@@ -417,6 +509,11 @@ test('prompt home desk time cards collapse and expand independently', async ({ p
       /\d{1,2}:\d{2}\s(?:AM|PM)\s\|\sHE\d{2}\s\|\s(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s\|\s[A-Z][a-z]{2}\s\d{2}/,
     )
     await expect(timeZoneSelect).toHaveCount(0)
+    await expect(mapPanel).toBeHidden()
+
+    await mapToggle.click()
+    await expect(mapPanel).toBeVisible()
+    await expect(page.locator('.asset-map-user-marker')).toBeVisible()
 
     await deskTimeToggle.click()
     await expect(deskTimePanel).toBeVisible()
@@ -505,63 +602,6 @@ test('signed-out prompt draft resumes and sends after sign-in', async ({ page })
     await expect(page.locator('.assistant-message-assistant').getByText('Operations is the right place to continue')).toBeVisible()
     await expect(page.locator('.assistant-message-assistant')).not.toContainText('navigation_intent')
     await expect(page.locator('.prompt-home-handoff').filter({ hasText: 'Open Work Queue' })).toBeVisible()
-
-    assertNoHarnessRequestFailures(harness)
-  } finally {
-    await harness.close()
-  }
-})
-
-test('prompt home contextual starter asks from live context and hands off to operations', async ({ page }) => {
-  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
-
-  try {
-    await seedApiBaseOverride(page, harness)
-    await page.goto(harness.origin, {
-      waitUntil: 'domcontentloaded',
-    })
-
-    await signInFromPromptHome(page)
-    await expandPromptHomeLiveContext(page)
-
-    const operationsStarter = page.locator('.prompt-home-starter').filter({ hasText: 'Clear operations blockers' })
-    await expect(operationsStarter).toBeVisible()
-    await operationsStarter.getByRole('button', { name: 'Ask about operations blockers' }).click()
-
-    await expect(page.locator('.assistant-message-user').getByText('Summarize the open operations queue')).toBeVisible()
-    await expect(page.locator('.assistant-message-assistant').getByText('Operations is the right place to continue')).toBeVisible()
-
-    const assistantHandoff = page.locator('.prompt-home-handoff').filter({ hasText: 'Open Work Queue' })
-    await expect(assistantHandoff).toBeVisible()
-    await assistantHandoff.click()
-
-    await expect(page).toHaveURL(/view=operations/)
-    await expect(page).toHaveURL(/handoff=assistant/)
-    await expect(page.getByText('Assistant run #8801')).toBeVisible()
-
-    assertNoHarnessRequestFailures(harness)
-  } finally {
-    await harness.close()
-  }
-})
-
-test('prompt home contextual starter can open the old workspace directly', async ({ page }) => {
-  const harness = await startSmokeHarness()
-
-  try {
-    await seedSignedInSession(page, harness)
-    await page.goto(harness.origin, {
-      waitUntil: 'domcontentloaded',
-    })
-
-    await expandPromptHomeLiveContext(page)
-
-    const settlementStarter = page.locator('.prompt-home-starter').filter({ hasText: 'Review invoices and payments' })
-    await expect(settlementStarter).toBeVisible()
-    await settlementStarter.getByRole('button', { name: 'Open Settlement' }).click()
-
-    await expect(page).toHaveURL(/view=settlement/)
-    await expect(page.getByRole('heading', { name: 'Issue invoices, track cash, and clear disputes' })).toBeVisible()
 
     assertNoHarnessRequestFailures(harness)
   } finally {
@@ -776,31 +816,6 @@ test('prompt home accepts an assistant handoff into trade capture', async ({ pag
     await expect(page).not.toHaveURL(/handoff=assistant/)
     await expect(page).not.toHaveURL(/tradeTab=amend/)
     await expect(page.getByText('Assistant run #8801')).toBeHidden()
-
-    assertNoHarnessRequestFailures(harness)
-  } finally {
-    await harness.close()
-  }
-})
-
-test('prompt home reopens recent prompt threads without entering the assistant console', async ({ page }) => {
-  const harness = await startSmokeHarness({ singleUserAuthEnabled: true })
-
-  try {
-    await seedApiBaseOverride(page, harness)
-    await page.goto(harness.origin, {
-      waitUntil: 'domcontentloaded',
-    })
-
-    await signInFromPromptHome(page)
-
-    await page.getByRole('button', { name: /Recent blocker triage/ }).click()
-
-    await expect(page.locator('.assistant-message-user').getByText('Where should I handle the confirmation blocker?')).toBeVisible()
-    await expect(page.locator('.assistant-message-assistant').getByText('Operations is the right place to continue')).toBeVisible()
-    await expect(page.locator('.assistant-message-assistant')).not.toContainText('navigation_intent')
-    await expect(page.locator('.prompt-home-handoff').filter({ hasText: 'Open Work Queue' })).toBeVisible()
-    await expect(page).toHaveURL(/^(?!.*view=assistant).*$/)
 
     assertNoHarnessRequestFailures(harness)
   } finally {

@@ -1,7 +1,12 @@
 import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
 import type { TradeMetadata } from '../../shared/tradeMetadata'
-import { loadWeatherLocations } from '../weather/api'
+import {
+  loadAdminWeatherSyncStatus,
+  loadTrackedWeatherLocations,
+  loadWeatherLocations,
+  loadWeatherSyncStatus,
+} from '../weather/api'
 import type {
   AssetRecord,
   AssetStandards,
@@ -336,6 +341,11 @@ export type ReportsWorkspaceBootstrap = {
   counterpartyCreditReport: CounterpartyCreditReportRow[]
 }
 
+export type WeatherWorkspaceBootstrap = {
+  weatherLocations: WeatherLocationRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
+}
+
 export type AdminWorkspaceBootstrap = {
   externalDataRuns: ExternalDataRunRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
@@ -409,6 +419,15 @@ export type PublicRuntimeSettings = {
     client_id: string | null
     auto_create_users: boolean
   }
+  projection_monitoring_email: {
+    transport: 'local_archive' | 'smtp'
+    provider_hint: 'none' | 'gmail' | 'generic_smtp'
+    smtp_host: string | null
+    smtp_port: number | null
+    sender: string
+    recipient_count: number
+    auth_status: 'none' | 'partial' | 'configured'
+  }
   session_ttl_hours: number
   eia_base_url: string
   eia_timeout_seconds: number
@@ -422,6 +441,7 @@ export type PublicRuntimeSettings = {
 }
 
 type ReadWorkspaceOptions = {
+  adminHeaders?: HeadersInit | null
   readHeaders?: HeadersInit | null
 }
 
@@ -470,6 +490,31 @@ function withReadHeaders(
   return {
     ...(init ?? {}),
     headers: options.readHeaders,
+  }
+}
+
+function isMissingPublicWeatherRoute(error: unknown): boolean {
+  return (
+    (typeof error === 'object' &&
+      error !== null &&
+      'status' in error &&
+      (error as { status?: unknown }).status === 404) ||
+    (error instanceof Error && /request failed:\s*404|not found/i.test(error.message))
+  )
+}
+
+async function loadWeatherWithAdminFallback<T>(
+  primaryLoader: () => Promise<T>,
+  adminFallbackLoader?: (() => Promise<T>) | null,
+): Promise<T> {
+  try {
+    return await primaryLoader()
+  } catch (error) {
+    if (!adminFallbackLoader || !isMissingPublicWeatherRoute(error)) {
+      throw error
+    }
+
+    return adminFallbackLoader()
   }
 }
 
@@ -959,6 +1004,66 @@ export async function loadReportsWorkspaceBootstrap(
       `${apiBase}/reports/counterparty-credit`,
       withReadHeaders({ cache: 'no-store' }, options),
     ),
+  }
+}
+
+export async function loadWeatherWorkspaceBootstrap(
+  apiBase: string,
+  options?: ReadWorkspaceOptions,
+): Promise<WeatherWorkspaceBootstrap> {
+  let weatherLocations: WeatherLocationRecord[] = []
+  let weatherSyncStatus: WeatherSyncStatusRecord | null = null
+  const readHeaders = options?.readHeaders ?? undefined
+  const adminHeaders = options?.adminHeaders ?? undefined
+
+  const [weatherLocationsResult, weatherSyncStatusResult] = await Promise.allSettled([
+    loadWeatherWithAdminFallback(
+      () =>
+        loadTrackedWeatherLocations(apiBase, {
+          headers: readHeaders,
+        }),
+      adminHeaders
+        ? () =>
+            loadWeatherLocations(apiBase, {
+              headers: adminHeaders,
+              isActive: true,
+            })
+        : null,
+    ),
+    loadWeatherWithAdminFallback(
+      () =>
+        loadWeatherSyncStatus(apiBase, {
+          headers: readHeaders,
+        }),
+      adminHeaders
+        ? () =>
+            loadAdminWeatherSyncStatus(apiBase, {
+              headers: adminHeaders,
+              includeInactive: false,
+            })
+        : null,
+    ),
+  ])
+
+  if (weatherLocationsResult.status === 'rejected' && weatherSyncStatusResult.status === 'rejected') {
+    throw weatherLocationsResult.reason instanceof Error
+      ? weatherLocationsResult.reason
+      : weatherSyncStatusResult.reason instanceof Error
+        ? weatherSyncStatusResult.reason
+        : new Error('Could not load weather workspace data.')
+  }
+
+  if (weatherLocationsResult.status === 'fulfilled') {
+    weatherLocations = weatherLocationsResult.value
+  }
+
+  if (weatherSyncStatusResult.status === 'fulfilled') {
+    weatherSyncStatus = weatherSyncStatusResult.value
+  }
+
+  return {
+    weatherLocations,
+    weatherSyncStatus,
   }
 }
 

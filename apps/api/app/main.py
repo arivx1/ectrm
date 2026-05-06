@@ -29,6 +29,9 @@ from apps.api.app.core.query_params import (
 )
 from apps.api.app.deps.db import get_db
 from apps.api.app.db.engine import SessionLocal
+from apps.api.app.domains.admin.services.projection_monitoring import (
+    build_projection_monitoring_email_runtime_settings,
+)
 from apps.api.app.domains.http import include_http_routers
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError, build_assistant_runtime_settings
 from apps.api.app.domains.operations.services import build_database_overview
@@ -298,6 +301,7 @@ def public_runtime_settings(db: Session = Depends(get_db)) -> PublicRuntimeSetti
             client_id=google_auth_client_id,
             auto_create_users=settings.GOOGLE_AUTH_AUTO_CREATE_USERS,
         ),
+        projection_monitoring_email=build_projection_monitoring_email_runtime_settings(db),
         session_ttl_hours=settings.SESSION_TTL_HOURS,
         eia_base_url=settings.EIA_BASE_URL,
         eia_timeout_seconds=settings.EIA_TIMEOUT_SECONDS,

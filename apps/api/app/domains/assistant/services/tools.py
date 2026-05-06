@@ -55,7 +55,15 @@ from apps.api.app.domains.reports.services.pretrade_recommendations import (
     previous_recommendation_run_record,
     to_recommendation_run_out,
 )
-from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
+from apps.api.app.domains.reference_data.services.external_data.market_context import (
+    build_latest_price_snapshot,
+    build_market_context,
+)
+from apps.api.app.domains.reference_data.services.external_data.market_news import (
+    DEFAULT_MARKET_NEWS_LOOKBACK_DAYS,
+    MarketNewsClientError,
+    load_market_news_headlines,
+)
 from apps.api.app.domains.reference_data.services.records import list_reference_records, normalize_code
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
@@ -411,6 +419,67 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
                 "additionalProperties": False,
             },
             executor=_get_market_context,
+        ),
+        AssistantToolDefinition(
+            name="get_latest_commodity_prices",
+            description=(
+                "Load the latest commodity price observations already synced into ECTRM. Use this when the "
+                "user asks for the freshest loaded benchmark or hub prices and you need a compact price-only "
+                "answer with freshness metadata instead of the broader market-context bundle."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "commodity": {
+                        "type": "string",
+                        "description": "Optional commodity hint such as WTI, BRENT, HH, NATURAL_GAS, or POWER.",
+                    },
+                    "price_index_code": {
+                        "type": "string",
+                        "description": "Optional exact price index code such as WTI_CUSHING_D. Takes priority over commodity.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return. Defaults to 5 and is capped at 10.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_get_latest_commodity_prices,
+        ),
+        AssistantToolDefinition(
+            name="get_latest_market_news",
+            description=(
+                "Fetch recent commodity and market headlines from a live RSS search at response time. Use this "
+                "when the user asks for the latest news and you need current headlines, source names, publish "
+                "times, and links rather than only the platform's loaded data."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "commodity": {
+                        "type": "string",
+                        "description": "Optional commodity hint such as WTI, BRENT, HH, NATURAL_GAS, or POWER.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional extra search terms such as refinery outages, OPEC, LNG, or storm impacts.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum headlines to return. Defaults to 5 and is capped at 10.",
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": (
+                            "How many recent days to search. Defaults to "
+                            f"{DEFAULT_MARKET_NEWS_LOOKBACK_DAYS} and is capped at 14."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_get_latest_market_news,
         ),
         AssistantToolDefinition(
             name="analyze_pretrade_scenario_draft",
@@ -1304,6 +1373,80 @@ def _get_market_context(db: Session, arguments: dict[str, Any]) -> AssistantTool
         output=payload,
         summary=summary,
         record_count=price_count + power_count + macro_count + positioning_count,
+    )
+
+
+def _get_latest_commodity_prices(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    commodity = _optional_upper(arguments.get("commodity"))
+    price_index_code = _optional_upper(arguments.get("price_index_code"))
+    limit = _normalize_market_context_limit(arguments.get("limit"), default=5)
+    payload = build_latest_price_snapshot(
+        db,
+        commodity=commodity,
+        price_index_code=price_index_code,
+        limit=limit,
+    )
+    count = payload["count"]
+    stale_or_failed_count = sum(
+        1
+        for row in payload["items"]
+        if row["provider_health_status"] in {"stale", "failed", "unknown"}
+    )
+
+    if price_index_code:
+        if count:
+            summary = f"Loaded the latest commodity price for {price_index_code}."
+        else:
+            summary = f"No loaded commodity price matched price_index_code {price_index_code}."
+    elif commodity:
+        summary = f"Loaded {count} latest commodity price row(s) for {commodity}."
+    else:
+        summary = f"Loaded {count} latest commodity price row(s)."
+
+    if stale_or_failed_count:
+        summary += f" Freshness watch on {stale_or_failed_count} provider(s)."
+
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=count,
+    )
+
+
+def _get_latest_market_news(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    _ = db
+    commodity = _optional_upper(arguments.get("commodity"))
+    query = _optional_text(arguments.get("query"))
+    limit = _normalize_market_news_limit(arguments.get("limit"), default=5)
+    lookback_days = _normalize_market_news_lookback_days(
+        arguments.get("lookback_days"),
+        default=DEFAULT_MARKET_NEWS_LOOKBACK_DAYS,
+    )
+
+    try:
+        payload = load_market_news_headlines(
+            query=query,
+            commodity=commodity,
+            limit=limit,
+            lookback_days=lookback_days,
+        )
+    except MarketNewsClientError as exc:
+        raise AssistantToolServiceError(str(exc)) from exc
+
+    count = payload["count"]
+    if commodity and query:
+        summary = f"Loaded {count} recent headline(s) for {commodity} using query '{query}'."
+    elif commodity:
+        summary = f"Loaded {count} recent headline(s) for {commodity}."
+    elif query:
+        summary = f"Loaded {count} recent headline(s) using query '{query}'."
+    else:
+        summary = f"Loaded {count} recent market headline(s)."
+
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=count,
     )
 
 
@@ -2455,6 +2598,26 @@ def _normalize_market_context_limit(value: Any, *, default: int) -> int:
     except (TypeError, ValueError) as exc:
         raise AssistantToolServiceError("limit must be a whole number.") from exc
     return max(1, min(limit, 10))
+
+
+def _normalize_market_news_limit(value: Any, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AssistantToolServiceError("limit must be a whole number.") from exc
+    return max(1, min(limit, 10))
+
+
+def _normalize_market_news_lookback_days(value: Any, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        lookback_days = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AssistantToolServiceError("lookback_days must be a whole number.") from exc
+    return max(1, min(lookback_days, 14))
 
 
 def _normalize_section_limit(value: Any, *, default: int) -> int:

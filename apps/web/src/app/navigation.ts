@@ -1,5 +1,4 @@
 import { APP_VIEWS } from '../entities/app/appViews'
-import { matchesTextFilter } from '../shared/filtering'
 import type { ViewKey } from '../shared/models'
 
 export const MAX_PRIMARY_NAV_SECTIONS = 5
@@ -274,46 +273,6 @@ export function primaryNavigationSectionByKey(sectionKey: PrimaryNavigationSecti
 
 export function primaryNavigationSectionForView(view: ViewKey): PrimaryNavigationSection {
   return PRIMARY_NAV_SECTIONS.find((section) => section.views.some((entry) => entry.key === view)) ?? PRIMARY_NAV_SECTIONS[0]
-}
-
-function matchesPrimaryNavigationSectionSearch(section: PrimaryNavigationSection, query: string) {
-  return matchesTextFilter(query, [
-    section.key,
-    section.label,
-    section.kicker,
-    section.heroTitle,
-    section.heroBody,
-    section.landingBody,
-    ...section.startPaths.flatMap((path) => [path.title, path.detail, path.actionLabel, path.view.label, path.view.kicker]),
-  ])
-}
-
-function matchesPrimaryNavigationViewSearch(
-  section: PrimaryNavigationSection,
-  view: PrimaryNavigationSection['views'][number],
-  query: string,
-) {
-  return matchesTextFilter(query, [view.key, view.label, view.kicker, section.label, section.kicker])
-}
-
-export function filterPrimaryNavigationSections(query: string): PrimaryNavigationSection[] {
-  const normalizedQuery = query.trim()
-  if (normalizedQuery.length === 0) {
-    return PRIMARY_NAV_SECTIONS
-  }
-
-  return PRIMARY_NAV_SECTIONS.flatMap((section) => {
-    const sectionMatches = matchesPrimaryNavigationSectionSearch(section, normalizedQuery)
-    const views = sectionMatches
-      ? section.views
-      : section.views.filter((view) => matchesPrimaryNavigationViewSearch(section, view, normalizedQuery))
-
-    if (!sectionMatches && views.length === 0) {
-      return []
-    }
-
-    return [{ ...section, views }]
-  })
 }
 
 export function shouldHandleClientSideNavigation(event: ClientSideNavigationEvent) {

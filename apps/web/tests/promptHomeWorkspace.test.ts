@@ -4,6 +4,8 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { test } from 'vitest'
 
+import { shouldAutoEnsurePromptHomeData } from '../src/workspaces/prompt/promptHomeAutoLoad'
+import { summarizePromptHomeAvailableTokens } from '../src/workspaces/prompt/promptHomeAvailableTokens'
 import { PromptHomeWorkspace } from '../src/workspaces/prompt/PromptHomeWorkspace'
 
 const defaultCounts = {
@@ -19,7 +21,7 @@ const defaultCounts = {
   pendingSettlementTrades: 6,
 }
 
-test('prompt home hides live context starters by default', () => {
+test('prompt home renders guided prompts without legacy home actions', () => {
   const markup = renderToStaticMarkup(
     createElement(PromptHomeWorkspace, {
       authSession: null,
@@ -28,16 +30,15 @@ test('prompt home hides live context starters by default', () => {
       onOpenView: () => undefined,
     }),
   )
+  const deskTimeIndex = markup.indexOf('Desk Time')
+  const mapIndex = markup.indexOf('Open Map Workspace')
+  const operatorPromptIndex = markup.indexOf('Operator prompt')
 
-  assert.match(markup, /Show live context/)
-  assert.match(markup, /aria-expanded="false"/)
-  assert.match(
-    markup,
-    /id="prompt-home-live-context-panel" class="prompt-home-starters" aria-label="Contextual starting points" hidden=""/,
-  )
-  assert.match(markup, /Clear operations blockers/)
-  assert.match(markup, /Older unconfirmed and uninvoiced trades rise first/)
-  assert.match(markup, /Ready invoice work rises before blocked previews/)
+  assert.doesNotMatch(markup, /Show live context/)
+  assert.doesNotMatch(markup, />Assistant Console</)
+  assert.doesNotMatch(markup, /Contextual starting points/)
+  assert.doesNotMatch(markup, /Clear operations blockers/)
+  assert.doesNotMatch(markup, /Recent prompt threads/)
   assert.match(markup, /What are you trying to do\?/)
   assert.match(markup, /Choose one to reveal a few suggested prompts and direct workspace links\./)
   assert.match(markup, /Trade/)
@@ -50,13 +51,25 @@ test('prompt home hides live context starters by default', () => {
   assert.doesNotMatch(markup, /Help me build a simulated trade idea to hedge risk\./)
   assert.match(markup, /Review queue/)
   assert.match(markup, /Sign in to review/)
+  assert.match(markup, /Available Token Count/)
+  assert.match(markup, /Loading\.\.\./)
+  assert.ok(deskTimeIndex >= 0)
+  assert.ok(mapIndex > deskTimeIndex)
+  assert.ok(operatorPromptIndex > mapIndex)
   assert.match(markup, /Desk Time/)
   assert.match(markup, /aria-expanded="true" aria-controls="prompt-home-timeframe-panel"/)
   assert.match(markup, /id="prompt-home-timeframe-panel" class="prompt-home-timeframe-panel-body"/)
-  assert.match(markup, /Asset footprint preview/)
-  assert.match(markup, /0 plotted \| 0 hidden \| 0 overlays/)
-  assert.match(markup, /aria-expanded="false" aria-controls="prompt-home-map-panel"/)
-  assert.match(markup, /id="prompt-home-map-panel" class="prompt-home-map-card-body" hidden=""/)
+  assert.match(markup, /id="prompt-home-map-panel" class="prompt-home-map-card-body"/)
+  assert.doesNotMatch(markup, /Asset footprint preview/)
+  assert.doesNotMatch(markup, /0 plotted \| 0 hidden \| 0 overlays/)
+  assert.doesNotMatch(markup, /Preview map-ready assets and shared spatial overlays without leaving Home\./)
+  assert.doesNotMatch(markup, /Map Scope/)
+  assert.doesNotMatch(markup, /map-ready assets are currently plotted in Home\./)
+  assert.doesNotMatch(markup, /All currently loaded assets meet the map-ready rules\./)
+  assert.match(markup, /<strong>Map<\/strong>/)
+  assert.match(markup, /class="prompt-home-map-card-toggle"/)
+  assert.match(markup, /aria-expanded="true" aria-controls="prompt-home-map-panel"/)
+  assert.match(markup, /Open Map Workspace/)
   assert.match(markup, /Time zone/)
   assert.match(markup, /Preferred time zone/)
   assert.match(markup, /aria-expanded="true" aria-controls="prompt-home-day-panel"/)
@@ -120,4 +133,170 @@ test('prompt home shows the newest prompt thread messages first', () => {
   assert.ok(mostRecentCompletionIndex < mostRecentPromptIndex)
   assert.ok(mostRecentPromptIndex < earliestCompletionIndex)
   assert.ok(earliestCompletionIndex < earliestPromptIndex)
+})
+
+test('prompt home stops auto-loading weather after the first load error', () => {
+  assert.equal(
+    shouldAutoEnsurePromptHomeData({
+      hasSession: true,
+      dataLoaded: false,
+      dataLoading: false,
+      dataError: '',
+      hasEnsureHandler: true,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoEnsurePromptHomeData({
+      hasSession: true,
+      dataLoaded: false,
+      dataLoading: false,
+      dataError: 'Request failed: 404',
+      hasEnsureHandler: true,
+    }),
+    false,
+  )
+})
+
+test('prompt home token summary reports a single assistant budget', () => {
+  const summary = summarizePromptHomeAvailableTokens([
+    {
+      agent_id: 'ops-governor',
+      name: 'Ops Governor',
+      description: 'Governed assistant',
+      status: 'ACTIVE',
+      scope: 'TEAM',
+      provider: 'openai',
+      model: 'gpt-5.4',
+      role_key: 'trade-ops-copilot',
+      profile_kind: 'ROLE_DERIVED',
+      allowed_workspaces: ['assistant', 'trades'],
+      capabilities: ['READ'],
+      allowed_tools: [],
+      allowed_action_types: [],
+      token_budget: {
+        status: 'GREEN',
+        allocated_tokens: 50000,
+        used_tokens: 4200,
+        remaining_tokens: 45800,
+        percent_used: 8.4,
+        warning_threshold_percent: 80,
+        allocation_source: 'AGENT',
+        window_started_at: '2026-05-05T00:00:00Z',
+        reset_at: '2026-05-06T00:00:00Z',
+      },
+      effective_policy: {
+        allowed_tools: [],
+        blocked_tools: [],
+        allowed_actions: [],
+        blocked_actions: [],
+        policy_notes: [],
+      },
+      eval_gate: {
+        status: 'PASS',
+        role_key: 'trade-ops-copilot',
+        required_cases: [],
+        covered_cases: [],
+        missing_cases: [],
+        custom_case_count: 0,
+        notes: [],
+      },
+    },
+  ])
+
+  assert.equal(summary.value, '45,800')
+  assert.equal(summary.detail, 'Ops Governor remaining today.')
+})
+
+test('prompt home token summary combines multiple assistant budgets', () => {
+  const summary = summarizePromptHomeAvailableTokens([
+    {
+      agent_id: 'ops-governor',
+      name: 'Ops Governor',
+      description: 'Governed assistant',
+      status: 'ACTIVE',
+      scope: 'TEAM',
+      provider: 'openai',
+      model: 'gpt-5.4',
+      role_key: 'trade-ops-copilot',
+      profile_kind: 'ROLE_DERIVED',
+      allowed_workspaces: ['assistant'],
+      capabilities: ['READ'],
+      allowed_tools: [],
+      allowed_action_types: [],
+      token_budget: {
+        status: 'GREEN',
+        allocated_tokens: 50000,
+        used_tokens: 4200,
+        remaining_tokens: 45800,
+        percent_used: 8.4,
+        warning_threshold_percent: 80,
+        allocation_source: 'AGENT',
+        window_started_at: '2026-05-05T00:00:00Z',
+        reset_at: '2026-05-06T00:00:00Z',
+      },
+      effective_policy: {
+        allowed_tools: [],
+        blocked_tools: [],
+        allowed_actions: [],
+        blocked_actions: [],
+        policy_notes: [],
+      },
+      eval_gate: {
+        status: 'PASS',
+        role_key: 'trade-ops-copilot',
+        required_cases: [],
+        covered_cases: [],
+        missing_cases: [],
+        custom_case_count: 0,
+        notes: [],
+      },
+    },
+    {
+      agent_id: 'risk-analyst',
+      name: 'Risk Analyst',
+      description: 'Risk assistant',
+      status: 'ACTIVE',
+      scope: 'TEAM',
+      provider: 'openai',
+      model: 'gpt-5.4',
+      role_key: 'risk-analyst',
+      profile_kind: 'ROLE_DERIVED',
+      allowed_workspaces: ['assistant', 'risk'],
+      capabilities: ['READ'],
+      allowed_tools: [],
+      allowed_action_types: [],
+      token_budget: {
+        status: 'AMBER',
+        allocated_tokens: 25000,
+        used_tokens: 7000,
+        remaining_tokens: 18000,
+        percent_used: 28,
+        warning_threshold_percent: 80,
+        allocation_source: 'AGENT',
+        window_started_at: '2026-05-05T00:00:00Z',
+        reset_at: '2026-05-06T00:00:00Z',
+      },
+      effective_policy: {
+        allowed_tools: [],
+        blocked_tools: [],
+        allowed_actions: [],
+        blocked_actions: [],
+        policy_notes: [],
+      },
+      eval_gate: {
+        status: 'PASS',
+        role_key: 'risk-analyst',
+        required_cases: [],
+        covered_cases: [],
+        missing_cases: [],
+        custom_case_count: 0,
+        notes: [],
+      },
+    },
+  ])
+
+  assert.equal(summary.value, '63,800')
+  assert.equal(summary.detail, 'Combined across 2 published assistant budgets.')
 })

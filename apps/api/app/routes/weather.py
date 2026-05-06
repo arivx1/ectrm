@@ -95,6 +95,47 @@ def list_weather_observations(
     return [_to_observation_out(row) for row in rows]
 
 
+@router.get("/locations", response_model=list[WeatherLocationOut])
+def list_active_weather_locations(
+    q: Optional[str] = None,
+    limit: int = ADMIN_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[WeatherLocationOut]:
+    stmt = (
+        select(WeatherLocation)
+        .where(WeatherLocation.is_active.is_(True))
+        .order_by(WeatherLocation.code.asc())
+        .limit(limit)
+        .offset(offset)
+    )
+    if q:
+        pattern = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                WeatherLocation.code.ilike(pattern),
+                WeatherLocation.name.ilike(pattern),
+                WeatherLocation.reference_location_code.ilike(pattern),
+                WeatherLocation.station_id.ilike(pattern),
+            )
+        )
+    return [_to_weather_location_out(row) for row in db.execute(stmt).scalars().all()]
+
+
+@router.get("/sync/status", response_model=WeatherSyncStatusOut)
+def get_public_nws_sync_status(
+    db: Session = Depends(get_db),
+) -> WeatherSyncStatusOut:
+    payload = build_nws_sync_status(db, include_inactive=False)
+    latest_run = payload.pop("latest_run")
+    latest_success = payload.pop("latest_success")
+    return WeatherSyncStatusOut(
+        **payload,
+        latest_run=_to_run_out(latest_run) if latest_run is not None else None,
+        latest_success=_to_run_out(latest_success) if latest_success is not None else None,
+    )
+
+
 @admin_router.get("/locations", response_model=list[WeatherLocationOut])
 def list_weather_locations(
     q: Optional[str] = None,

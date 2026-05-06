@@ -23,6 +23,13 @@
   max-width: none;
 }
 
+.prompt-home-heading-side {
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+  justify-items: start;
+}
+
 .prompt-home-heading h3 {
   margin: 0.35rem 0 0.55rem;
   font-size: clamp(1.9rem, 3vw, 2.7rem);
@@ -34,6 +41,36 @@
   margin: 0;
   color: var(--color-copy-muted, #66717c);
   line-height: 1.6;
+}
+
+.prompt-home-token-card {
+  display: grid;
+  gap: 0.18rem;
+  min-width: min(100%, 17rem);
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.2);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.08), transparent),
+    rgba(255, 255, 255, 0.05);
+}
+
+.prompt-home-token-card-label {
+  color: var(--color-copy-muted, #66717c);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.prompt-home-token-card strong {
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  line-height: 1.05;
+}
+
+.prompt-home-token-card small {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.4;
 }
 
 .prompt-home-timeframe-panel {
@@ -232,7 +269,7 @@
   gap: 0.18rem;
 }
 
-.prompt-home-map-card .asset-map-canvas-shell,
+.prompt-home-map-card .asset-map-canvas-frame,
 .prompt-home-map-card .asset-map-canvas {
   min-height: clamp(15rem, 34vh, 22rem);
 }
@@ -243,6 +280,10 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.prompt-home-map-card-footer.is-actions-only {
+  justify-content: flex-end;
 }
 
 .prompt-home-time-meter-card {
@@ -306,7 +347,7 @@
 
 .prompt-home-time-meter-card-collapsed-line {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.2rem 0.6rem;
   min-width: 0;
@@ -317,8 +358,12 @@
 }
 
 .prompt-home-time-meter-card-summary {
+  min-width: 0;
   color: var(--color-copy-muted, #66717c);
   line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .prompt-home-time-meter-card-meta {
@@ -672,7 +717,6 @@
   justify-content: flex-start;
 }
 
-.prompt-home-live-context-toggle,
 .prompt-home-secondary-action {
   box-shadow: none;
 }
@@ -737,13 +781,6 @@
   background: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.1);
 }
 
-.prompt-home-starters {
-  display: grid;
-  gap: 0.9rem;
-  width: min(100%, 54rem);
-  margin: 0 auto;
-}
-
 .prompt-home-prompt-kits {
   display: grid;
   gap: 0.9rem;
@@ -756,14 +793,6 @@
   gap: 0.85rem;
   width: min(100%, 54rem);
   margin: 0 auto;
-}
-
-.prompt-home-starters[hidden] {
-  display: none;
-}
-
-.prompt-home-starters .section-head {
-  margin-bottom: 0;
 }
 
 .prompt-home-prompt-kits .section-head {
@@ -817,12 +846,6 @@
   margin: 0;
 }
 
-.prompt-home-starter-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
 .prompt-home-starter {
   display: grid;
   gap: 0.65rem;
@@ -831,19 +854,6 @@
   border: 1px solid rgba(18, 42, 56, 0.08);
   border-radius: 1rem;
   background: rgba(255, 255, 255, 0.04);
-}
-
-.prompt-home-starter-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.65rem;
-}
-
-.prompt-home-starter-head strong {
-  font-size: 1.45rem;
-  line-height: 1;
-  letter-spacing: -0.05em;
 }
 
 .prompt-home-starter h4,
@@ -916,8 +926,7 @@
 .prompt-home-chat,
 .prompt-home-sidecar,
 .prompt-home-destinations,
-.prompt-home-review-path,
-.prompt-home-recent {
+.prompt-home-review-path {
   display: grid;
   gap: 0.85rem;
 }
@@ -928,7 +937,6 @@
 
 .prompt-home-chat-log,
 .prompt-home-review-list,
-.prompt-home-thread-list,
 .prompt-home-destination-list,
 .prompt-home-handoff-list {
   display: grid;
@@ -1138,6 +1146,10 @@
     rgba(255, 255, 255, 0.78);
 }
 
+:root[data-color-mode='light'] .prompt-home-map-card {
+  background: rgba(255, 255, 255, 0.78);
+}
+
 :root[data-color-mode='light'] .prompt-home-time-details-toggle {
   background: rgba(255, 255, 255, 0.72);
 }
@@ -1233,6 +1245,21 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
+@media (min-width: 761px) {
+  .prompt-home-heading-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .prompt-home-heading-side {
+    justify-items: end;
+  }
+
+  .prompt-home-token-card {
+    text-align: right;
+  }
+}
+
 @media (max-width: 1180px) {
   .prompt-home-grid {
     grid-template-columns: 1fr;
@@ -1244,10 +1271,6 @@
 }
 
 @media (max-width: 760px) {
-  .prompt-home-starter-list {
-    grid-template-columns: 1fr;
-  }
-
   .prompt-home-timeframe-panel-head {
     grid-template-columns: 1fr;
   }
@@ -1333,6 +1356,11 @@
   }
 
   .prompt-home-heading-actions {
+    width: 100%;
+  }
+
+  .prompt-home-heading-side,
+  .prompt-home-token-card {
     width: 100%;
   }
 

@@ -7,6 +7,7 @@ import {
   EMPTY_GROUP_ERRORS,
   EMPTY_GROUP_FLAGS,
   isAuthenticationRequiredMessage,
+  summarizeWorkspaceIssueMessage,
   shouldPresentSettingsSignInState,
 } from '../src/entities/app/workspaceLoading.ts'
 
@@ -178,6 +179,29 @@ test('deriveWorkspaceStatus distinguishes partial non-blocking data from shell f
 test('isAuthenticationRequiredMessage matches the startup auth failure banner', () => {
   assert.equal(isAuthenticationRequiredMessage('Authentication is required for protected workspace data.'), true)
   assert.equal(isAuthenticationRequiredMessage('Could not reach API at http://127.0.0.1:8000.'), false)
+})
+
+test('summarizeWorkspaceIssueMessage keeps correlation ids out of workspace copy', () => {
+  assert.equal(
+    summarizeWorkspaceIssueMessage(
+      'Request failed: 404 Correlation ID: abc-123',
+      'weather',
+    ),
+    'Weather Error',
+  )
+
+  assert.equal(
+    summarizeWorkspaceIssueMessage(
+      'Authentication is required for protected workspace data. Correlation ID: abc-123',
+      'weather',
+    ),
+    'Authentication required',
+  )
+
+  assert.equal(
+    summarizeWorkspaceIssueMessage('Could not reach API at http://127.0.0.1:8000.'),
+    'Workspace Error',
+  )
 })
 
 test('shouldPresentSettingsSignInState treats auth redirects into Settings as a sign-in state, not a shell failure', () => {

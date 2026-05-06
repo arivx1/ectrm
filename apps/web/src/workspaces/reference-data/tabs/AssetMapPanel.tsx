@@ -3,6 +3,20 @@ import type { StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import {
+  loadWeatherForecastPeriods,
+  loadWeatherObservations,
+} from '../../../entities/weather/api'
+import {
+  formatWeatherAgeHours,
+  formatWeatherPeriodWindow,
+  summarizeWeatherForecast,
+  summarizeWeatherObservation,
+  weatherHealthLabel,
+  weatherHealthTone,
+} from '../../../entities/weather/presentation'
+import {
+  assetMapSubtypeLabelForAsset,
+  ASSET_MAP_SUBTYPE_LABELS,
   buildAssetMapFeatureCollection,
   buildAssetMapSummary,
   buildSpatialFeatureMapFeatureCollection,
@@ -11,12 +25,26 @@ import {
   formatAssetMapSource,
   type AssetMapRecord,
 } from '../../../features/reference-data/assetMap'
-import type { AssetRecord, LocationRecord, SpatialFeatureRecord } from '../../../shared/models'
+import { appConfig } from '../../../shared/config'
+import type {
+  AssetRecord,
+  LocationRecord,
+  SpatialFeatureRecord,
+  WeatherForecastPeriodRecord,
+  WeatherLocationRecord,
+  WeatherObservationRecord,
+  WeatherSyncStatusRecord,
+} from '../../../shared/models'
 
 type AssetMapPanelProps = {
   assets: AssetRecord[]
   locations: LocationRecord[]
   spatialFeatures: SpatialFeatureRecord[]
+  weatherLocations: WeatherLocationRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
+  weatherDataLoaded?: boolean
+  weatherDataLoading?: boolean
+  weatherLoadError?: string
   selectedAssetCode: string | null
   onSelectAsset: (code: string) => void
   filterControls?: ReactNode
@@ -81,9 +109,158 @@ function buildSpatialFeatureSignature(spatialFeatures: SpatialFeatureRecord[]): 
     .join('|')
 }
 
+function buildWeatherLocationSignature(weatherLocations: WeatherLocationRecord[]): string {
+  return weatherLocations
+    .map((location) =>
+      [
+        location.code,
+        location.latitude,
+        location.longitude,
+        location.is_active,
+        location.updated_at,
+      ].join(':'),
+    )
+    .join('|')
+}
+
+function buildWeatherStatusSignature(weatherSyncStatus: WeatherSyncStatusRecord | null): string {
+  return (weatherSyncStatus?.locations ?? [])
+    .map((location) =>
+      [
+        location.code,
+        location.health_status,
+        location.forecast_age_hours ?? 'na',
+        location.observation_age_hours ?? 'na',
+      ].join(':'),
+    )
+    .join('|')
+}
+
+export function sortedUniqueAssetSubtypes(records: AssetMapRecord[]): string[] {
+  const presentSubtypeLabels = new Set(
+    records.map((record) => assetMapSubtypeLabelForAsset(record.asset)),
+  )
+
+  return ASSET_MAP_SUBTYPE_LABELS.filter((subtypeLabel) => presentSubtypeLabels.has(subtypeLabel))
+}
+
+export function syncAssetSubtypeVisibilityState(
+  assetSubtypes: string[],
+  currentState: Record<string, boolean>,
+): Record<string, boolean> {
+  return assetSubtypes.reduce<Record<string, boolean>>((nextState, assetSubtype) => {
+    nextState[assetSubtype] = currentState[assetSubtype] ?? true
+    return nextState
+  }, {})
+}
+
+function assetSubtypeVisibilityStatesMatch(
+  left: Record<string, boolean>,
+  right: Record<string, boolean>,
+): boolean {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  return leftKeys.every((key) => left[key] === right[key])
+}
+
+function isAssetSubtypeVisible(
+  assetSubtypeVisibility: Record<string, boolean>,
+  assetSubtype: string,
+): boolean {
+  return assetSubtypeVisibility[assetSubtype] !== false
+}
+
+function buildVisiblePlacementCounts(records: AssetMapRecord[]): {
+  assetGeometryCount: number
+  assetPointCount: number
+  linkedLocationCount: number
+} {
+  return records.reduce(
+    (counts, record) => {
+      switch (record.placementStatus) {
+        case 'asset_geometry':
+          counts.assetGeometryCount += 1
+          break
+        case 'asset_coordinates':
+          counts.assetPointCount += 1
+          break
+        case 'linked_location':
+          counts.linkedLocationCount += 1
+          break
+        default:
+          break
+      }
+
+      return counts
+    },
+    {
+      assetGeometryCount: 0,
+      assetPointCount: 0,
+      linkedLocationCount: 0,
+    },
+  )
+}
+
+function formatGeolocationError(error: GeolocationPositionError): string {
+  switch (error.code) {
+    case error.PERMISSION_DENIED:
+      return 'Location permission is blocked for this browser session.'
+    case error.POSITION_UNAVAILABLE:
+      return 'Current location could not be determined right now.'
+    case error.TIMEOUT:
+      return 'Current location lookup timed out. Try again.'
+    default:
+      return 'Current location could not be determined.'
+  }
+}
+
+function formatWeatherLayerStatus(params: {
+  activeLocationCount: number
+  weatherDataLoaded: boolean
+  weatherDataLoading: boolean
+  weatherLoadError: string
+}): string {
+  const { activeLocationCount, weatherDataLoaded, weatherDataLoading, weatherLoadError } = params
+
+  if (weatherLoadError) {
+    return 'Weather Error'
+  }
+
+  if (weatherDataLoading || !weatherDataLoaded) {
+    return 'Loading tracked weather points...'
+  }
+
+  if (activeLocationCount > 0) {
+    return `${activeLocationCount} tracked weather point${activeLocationCount === 1 ? '' : 's'} visible`
+  }
+
+  return 'No tracked weather points loaded'
+}
+
+function logAssetMapError(scope: string, detail: string): void {
+  if (typeof console === 'undefined' || !detail.trim()) {
+    return
+  }
+
+  console.error(`[AssetMap] ${scope}: ${detail}`)
+}
+
 export function AssetMapCanvas({
   records,
   spatialFeatures,
+  weatherLocations,
+  weatherSyncStatus,
+  assetSubtypeOptions = [],
+  assetSubtypeVisibility = {},
+  weatherDataLoaded = false,
+  weatherDataLoading = false,
+  weatherLoadError = '',
+  onToggleAssetSubtype = () => undefined,
   selectedAssetCode,
   onSelectAsset,
   statusTitle,
@@ -91,6 +268,14 @@ export function AssetMapCanvas({
 }: {
   records: AssetMapRecord[]
   spatialFeatures: SpatialFeatureRecord[]
+  weatherLocations: WeatherLocationRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
+  assetSubtypeOptions: string[]
+  assetSubtypeVisibility: Record<string, boolean>
+  weatherDataLoaded?: boolean
+  weatherDataLoading?: boolean
+  weatherLoadError?: string
+  onToggleAssetSubtype: (assetSubtype: string) => void
   selectedAssetCode: string | null
   onSelectAsset: (code: string) => void
   statusTitle?: string | null
@@ -100,9 +285,95 @@ export function AssetMapCanvas({
   const mapRef = useRef<InstanceType<MapLibreModule['Map']> | null>(null)
   const runtimeRef = useRef<MapLibreModule | null>(null)
   const markersRef = useRef<Array<InstanceType<MapLibreModule['Marker']>>>([])
+  const weatherMarkersRef = useRef<Array<InstanceType<MapLibreModule['Marker']>>>([])
+  const userMarkerRef = useRef<InstanceType<MapLibreModule['Marker']> | null>(null)
+  const requestedUserLocationRef = useRef(false)
+  const hasCenteredOnUserRef = useRef(false)
   const [ready, setReady] = useState(false)
   const [loadError, setLoadError] = useState('')
-  const handleSelectAsset = useEffectEvent((code: string) => onSelectAsset(code))
+  const [geolocationError, setGeolocationError] = useState('')
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null)
+  const [showUserLocation, setShowUserLocation] = useState(true)
+  const [showAssets, setShowAssets] = useState(true)
+  const [showWeather, setShowWeather] = useState(true)
+  const [selectedWeatherLocationCode, setSelectedWeatherLocationCode] = useState<string | null>(null)
+  const [weatherPreviewLoading, setWeatherPreviewLoading] = useState(false)
+  const [weatherPreviewError, setWeatherPreviewError] = useState('')
+  const [weatherForecasts, setWeatherForecasts] = useState<WeatherForecastPeriodRecord[]>([])
+  const [weatherObservations, setWeatherObservations] = useState<WeatherObservationRecord[]>([])
+  const loggedWeatherLoadErrorRef = useRef('')
+  const loggedMapLoadErrorRef = useRef('')
+  const loggedGeolocationErrorRef = useRef('')
+  const loggedWeatherPreviewErrorRef = useRef('')
+  const handleSelectAsset = useEffectEvent((code: string) => {
+    setSelectedWeatherLocationCode(null)
+    onSelectAsset(code)
+  })
+  const activeWeatherLocations = useMemo(
+    () => weatherLocations.filter((location) => location.is_active),
+    [weatherLocations],
+  )
+  const weatherStatusByCode = useMemo(
+    () => new Map((weatherSyncStatus?.locations ?? []).map((location) => [location.code, location] as const)),
+    [weatherSyncStatus],
+  )
+  const weatherLocationSignature = useMemo(
+    () => buildWeatherLocationSignature(activeWeatherLocations),
+    [activeWeatherLocations],
+  )
+  const weatherStatusSignature = useMemo(
+    () => buildWeatherStatusSignature(weatherSyncStatus),
+    [weatherSyncStatus],
+  )
+  const selectedWeatherLocation = useMemo(
+    () =>
+      activeWeatherLocations.find((location) => location.code === selectedWeatherLocationCode) ?? null,
+    [activeWeatherLocations, selectedWeatherLocationCode],
+  )
+  const selectedWeatherStatus =
+    selectedWeatherLocation ? weatherStatusByCode.get(selectedWeatherLocation.code) ?? null : null
+  const weatherLayerStatus = formatWeatherLayerStatus({
+    activeLocationCount: activeWeatherLocations.length,
+    weatherDataLoaded,
+    weatherDataLoading,
+    weatherLoadError,
+  })
+
+  useEffect(() => {
+    if (!weatherLoadError || loggedWeatherLoadErrorRef.current === weatherLoadError) {
+      return
+    }
+
+    logAssetMapError('Weather layer error', weatherLoadError)
+    loggedWeatherLoadErrorRef.current = weatherLoadError
+  }, [weatherLoadError])
+
+  useEffect(() => {
+    if (!loadError || loggedMapLoadErrorRef.current === loadError) {
+      return
+    }
+
+    logAssetMapError('Map error', loadError)
+    loggedMapLoadErrorRef.current = loadError
+  }, [loadError])
+
+  useEffect(() => {
+    if (!geolocationError || loggedGeolocationErrorRef.current === geolocationError) {
+      return
+    }
+
+    logAssetMapError('My location error', geolocationError)
+    loggedGeolocationErrorRef.current = geolocationError
+  }, [geolocationError])
+
+  useEffect(() => {
+    if (!weatherPreviewError || loggedWeatherPreviewErrorRef.current === weatherPreviewError) {
+      return
+    }
+
+    logAssetMapError('Weather preview error', weatherPreviewError)
+    loggedWeatherPreviewErrorRef.current = weatherPreviewError
+  }, [weatherPreviewError])
 
   useEffect(() => {
     const container = containerRef.current
@@ -149,6 +420,12 @@ export function AssetMapCanvas({
       setReady(false)
       markersRef.current.forEach((marker) => marker.remove())
       markersRef.current = []
+      weatherMarkersRef.current.forEach((marker) => marker.remove())
+      weatherMarkersRef.current = []
+      userMarkerRef.current?.remove()
+      userMarkerRef.current = null
+      requestedUserLocationRef.current = false
+      hasCenteredOnUserRef.current = false
       mapRef.current?.remove()
       mapRef.current = null
       runtimeRef.current = null
@@ -176,14 +453,159 @@ export function AssetMapCanvas({
   )
 
   useEffect(() => {
+    if (showWeather) {
+      return
+    }
+
+    setSelectedWeatherLocationCode(null)
+  }, [showWeather])
+
+  useEffect(() => {
+    if (!selectedWeatherLocationCode) {
+      return
+    }
+
+    if (!showWeather || !activeWeatherLocations.some((location) => location.code === selectedWeatherLocationCode)) {
+      setSelectedWeatherLocationCode(null)
+    }
+  }, [activeWeatherLocations, selectedWeatherLocationCode, showWeather])
+
+  useEffect(() => {
+    if (!showWeather || !selectedWeatherLocation) {
+      setWeatherPreviewLoading(false)
+      setWeatherPreviewError('')
+      setWeatherForecasts([])
+      setWeatherObservations([])
+      return
+    }
+
+    let cancelled = false
+
+    async function loadWeatherPreview() {
+      setWeatherPreviewLoading(true)
+      setWeatherPreviewError('')
+      setWeatherForecasts([])
+      setWeatherObservations([])
+
+      try {
+        const [forecastResult, observationResult] = await Promise.all([
+          loadWeatherForecastPeriods(appConfig.apiBase, selectedWeatherLocation.code, 2),
+          loadWeatherObservations(appConfig.apiBase, selectedWeatherLocation.code, 2),
+        ])
+
+        if (!cancelled) {
+          setWeatherForecasts(forecastResult)
+          setWeatherObservations(observationResult)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setWeatherPreviewError(
+            error instanceof Error ? error.message : 'Unable to load weather location preview.',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setWeatherPreviewLoading(false)
+        }
+      }
+    }
+
+    void loadWeatherPreview()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedWeatherLocation, showWeather])
+
+  useEffect(() => {
     if (!ready || !mapRef.current || !runtimeRef.current) {
       return
     }
 
     const map = mapRef.current
     const runtime = runtimeRef.current
+    const hasVisibleAssetData =
+      showAssets && records.some((record) => record.extentCoordinates.length > 0)
+    const hasVisibleWeatherData = showWeather && activeWeatherLocations.length > 0
 
-    const featureCollection = buildAssetMapFeatureCollection(records)
+    if (!showUserLocation || !userLocation) {
+      userMarkerRef.current?.remove()
+      userMarkerRef.current = null
+      return
+    }
+
+    userMarkerRef.current?.remove()
+
+    const markerElement = document.createElement('div')
+    markerElement.className = 'asset-map-user-marker'
+    markerElement.setAttribute('aria-hidden', 'true')
+
+    userMarkerRef.current = new runtime.Marker({
+      element: markerElement,
+      anchor: 'center',
+    })
+      .setLngLat([userLocation.longitude, userLocation.latitude])
+      .addTo(map)
+
+    if (!hasCenteredOnUserRef.current && !hasVisibleAssetData && !hasVisibleWeatherData) {
+      map.easeTo({
+        center: [userLocation.longitude, userLocation.latitude],
+        zoom: Math.max(map.getZoom(), 8.5),
+        duration: 700,
+      })
+      hasCenteredOnUserRef.current = true
+    }
+  }, [activeWeatherLocations, ready, records, showAssets, showUserLocation, showWeather, userLocation])
+
+  useEffect(() => {
+    if (!ready || requestedUserLocationRef.current || !showUserLocation) {
+      return
+    }
+
+    requestedUserLocationRef.current = true
+
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeolocationError('Current location is not available in this browser.')
+      return
+    }
+
+    setGeolocationError('')
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        })
+      },
+      (error) => {
+        setGeolocationError(formatGeolocationError(error))
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000,
+      },
+    )
+  }, [ready, showUserLocation])
+
+  useEffect(() => {
+    if (!ready || !mapRef.current || !runtimeRef.current) {
+      return
+    }
+
+    const map = mapRef.current
+    const runtime = runtimeRef.current
+    const visibleRecords = showAssets ? records : []
+    const visibleSpatialFeatures = showAssets
+      ? spatialFeatures.filter((feature) => feature.is_active)
+      : []
+    const selectedWeatherLocationForFit =
+      showWeather
+        ? activeWeatherLocations.find((location) => location.code === selectedWeatherLocationCode) ?? null
+        : null
+
+    const featureCollection = buildAssetMapFeatureCollection(visibleRecords)
     const sourceData = {
       ...featureCollection,
       features: featureCollection.features.map((feature) => ({
@@ -250,8 +672,7 @@ export function AssetMapCanvas({
       })
     }
 
-    const activeSpatialFeatures = spatialFeatures.filter((feature) => feature.is_active)
-    const spatialFeatureCollection = buildSpatialFeatureMapFeatureCollection(activeSpatialFeatures)
+    const spatialFeatureCollection = buildSpatialFeatureMapFeatureCollection(visibleSpatialFeatures)
     const spatialFeatureSourceData = {
       ...spatialFeatureCollection,
       features: spatialFeatureCollection.features.map((feature) => ({
@@ -322,8 +743,10 @@ export function AssetMapCanvas({
 
     markersRef.current.forEach((marker) => marker.remove())
     markersRef.current = []
+    weatherMarkersRef.current.forEach((marker) => marker.remove())
+    weatherMarkersRef.current = []
 
-    records.forEach((record) => {
+    visibleRecords.forEach((record) => {
       if (record.latitude === null || record.longitude === null) {
         return
       }
@@ -353,43 +776,243 @@ export function AssetMapCanvas({
       markersRef.current.push(marker)
     })
 
+    if (showWeather) {
+      activeWeatherLocations.forEach((location) => {
+        const weatherStatus = weatherStatusByCode.get(location.code)
+        const markerElement = document.createElement('button')
+        const markerLabel = document.createElement('span')
+        markerLabel.className = 'asset-map-weather-marker-label'
+        markerLabel.textContent = 'Wx'
+        markerElement.type = 'button'
+        markerElement.className = [
+          'asset-map-weather-marker',
+          `is-${weatherStatus?.health_status ?? 'unknown'}`,
+          selectedWeatherLocationCode === location.code ? 'is-selected' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+        markerElement.setAttribute('aria-label', `Open weather location ${location.code}: ${location.name}`)
+        markerElement.title = `${location.code} · ${location.name}`
+        markerElement.append(markerLabel)
+        markerElement.addEventListener('click', () => {
+          setSelectedWeatherLocationCode(location.code)
+          map.easeTo({
+            center: [location.longitude, location.latitude],
+            zoom: Math.max(map.getZoom(), 6.5),
+            duration: 500,
+          })
+        })
+
+        const marker = new runtime.Marker({
+          element: markerElement,
+          anchor: 'center',
+        })
+          .setLngLat([location.longitude, location.latitude])
+          .addTo(map)
+
+        weatherMarkersRef.current.push(marker)
+      })
+    }
+
     map.resize()
 
-    const selectedRecord = records.find((record) => record.asset.code === selectedAssetCode) ?? null
-    const fitRecords = selectedRecord ? [selectedRecord] : records
-    const allCoordinates = fitRecords.flatMap((record) => record.extentCoordinates)
+    const weatherCoordinates = showWeather
+      ? activeWeatherLocations.map((location) => [location.longitude, location.latitude] as [number, number])
+      : []
 
-    if (allCoordinates.length === 1) {
-      const [longitude, latitude] = allCoordinates[0]
+    if (selectedWeatherLocationForFit) {
       map.easeTo({
-        center: [longitude, latitude],
-        zoom: Math.max(map.getZoom(), selectedRecord ? 6.2 : 5.2),
+        center: [selectedWeatherLocationForFit.longitude, selectedWeatherLocationForFit.latitude],
+        zoom: Math.max(map.getZoom(), 6.5),
         duration: 600,
       })
       return
     }
 
-    if (allCoordinates.length > 1) {
-      const bounds = new runtime.LngLatBounds(allCoordinates[0], allCoordinates[0])
-      allCoordinates.slice(1).forEach((coordinate) => bounds.extend(coordinate))
-      map.fitBounds(bounds, {
-        padding: selectedRecord ? 72 : 64,
+    const selectedRecord = showAssets
+      ? records.find((record) => record.asset.code === selectedAssetCode) ?? null
+      : null
+
+    if (selectedRecord) {
+      const selectedAssetCoordinates = selectedRecord.extentCoordinates
+
+      if (selectedAssetCoordinates.length === 1) {
+        const [longitude, latitude] = selectedAssetCoordinates[0]
+        map.easeTo({
+          center: [longitude, latitude],
+          zoom: Math.max(map.getZoom(), 6.2),
+          duration: 600,
+        })
+        return
+      }
+
+      if (selectedAssetCoordinates.length > 1) {
+        const bounds = new runtime.LngLatBounds(selectedAssetCoordinates[0], selectedAssetCoordinates[0])
+        selectedAssetCoordinates.slice(1).forEach((coordinate) => bounds.extend(coordinate))
+        map.fitBounds(bounds, {
+          padding: 72,
+          duration: 600,
+          maxZoom: 8,
+        })
+        return
+      }
+    }
+
+    const combinedCoordinates = [
+      ...visibleRecords.flatMap((record) => record.extentCoordinates),
+      ...weatherCoordinates,
+    ]
+
+    if (combinedCoordinates.length === 1) {
+      const [longitude, latitude] = combinedCoordinates[0]
+      map.easeTo({
+        center: [longitude, latitude],
+        zoom: Math.max(map.getZoom(), 5.4),
         duration: 600,
-        maxZoom: selectedRecord ? 8 : 6,
+      })
+      return
+    }
+
+    if (combinedCoordinates.length > 1) {
+      const bounds = new runtime.LngLatBounds(combinedCoordinates[0], combinedCoordinates[0])
+      combinedCoordinates.slice(1).forEach((coordinate) => bounds.extend(coordinate))
+      map.fitBounds(bounds, {
+        padding: 64,
+        duration: 600,
+        maxZoom: 6.2,
       })
     }
-  }, [ready, recordSignature, records, selectedAssetCode, spatialFeatureSignature, spatialFeatures])
+  }, [
+    activeWeatherLocations,
+    ready,
+    recordSignature,
+    records,
+    selectedAssetCode,
+    selectedWeatherLocationCode,
+    showAssets,
+    showWeather,
+    spatialFeatureSignature,
+    spatialFeatures,
+    weatherLocationSignature,
+    weatherStatusByCode,
+    weatherStatusSignature,
+  ])
 
   return (
     <div className="asset-map-canvas-shell">
-      <div ref={containerRef} className="asset-map-canvas" />
-      {loadError ? <div className="asset-map-overlay">{loadError}</div> : null}
-      {!loadError && statusTitle ? (
-        <div className="asset-map-overlay asset-map-overlay-info">
-          <strong>{statusTitle}</strong>
-          {statusDetail ? <p>{statusDetail}</p> : null}
+      <div className="asset-map-layer-controls" aria-label="Map layer visibility controls">
+        <span className="asset-map-layer-controls-label">Show</span>
+        <label className="asset-map-layer-toggle">
+          <input
+            type="checkbox"
+            checked={showUserLocation}
+            onChange={(event) => setShowUserLocation(event.target.checked)}
+          />
+          <span>My Location</span>
+        </label>
+        <label className="asset-map-layer-toggle">
+          <input type="checkbox" checked={showAssets} onChange={(event) => setShowAssets(event.target.checked)} />
+          <span>Assets</span>
+        </label>
+        <label className="asset-map-layer-toggle">
+          <input type="checkbox" checked={showWeather} onChange={(event) => setShowWeather(event.target.checked)} />
+          <span>Weather</span>
+        </label>
+        {showWeather ? (
+          <div className="asset-map-layer-status" aria-live="polite">
+            <span className="asset-map-weather-legend-marker" aria-hidden="true">
+              <span className="asset-map-weather-marker-label">Wx</span>
+            </span>
+            <span>{weatherLayerStatus}</span>
+          </div>
+        ) : null}
+      </div>
+
+      {showAssets && assetSubtypeOptions.length > 0 ? (
+        <div className="asset-map-subtype-controls" aria-label="Asset category visibility controls">
+          <span className="asset-map-subtype-controls-label">Asset Categories</span>
+          {assetSubtypeOptions.map((assetSubtype) => (
+            <label key={assetSubtype} className="asset-map-subtype-toggle">
+              <input
+                type="checkbox"
+                checked={isAssetSubtypeVisible(assetSubtypeVisibility, assetSubtype)}
+                onChange={() => onToggleAssetSubtype(assetSubtype)}
+              />
+              <span>{assetSubtype}</span>
+            </label>
+          ))}
         </div>
       ) : null}
+
+      <div className="asset-map-canvas-frame">
+        <div ref={containerRef} className="asset-map-canvas" />
+
+        {showWeather && selectedWeatherLocation ? (
+          <div className="asset-map-weather-preview">
+            <div className="asset-map-weather-preview-head">
+              <div>
+                <strong>{selectedWeatherLocation.code}</strong>
+                <p>{selectedWeatherLocation.name}</p>
+              </div>
+              <button
+                type="button"
+                className="asset-map-weather-preview-close"
+                aria-label={`Close weather preview for ${selectedWeatherLocation.code}`}
+                onClick={() => setSelectedWeatherLocationCode(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="asset-map-weather-preview-meta">
+              <span
+                className={`status-pill status-pill-${weatherHealthTone(selectedWeatherStatus?.health_status ?? 'unknown')}`}
+              >
+                {weatherHealthLabel(selectedWeatherStatus?.health_status ?? 'unknown')}
+              </span>
+              {selectedWeatherStatus ? (
+                <>
+                  <span className="entity-chip entity-chip-soft">
+                    Forecast {formatWeatherAgeHours(selectedWeatherStatus.forecast_age_hours)}
+                  </span>
+                  <span className="entity-chip entity-chip-soft">
+                    Observation {formatWeatherAgeHours(selectedWeatherStatus.observation_age_hours)}
+                  </span>
+                </>
+              ) : null}
+            </div>
+
+            {weatherPreviewError ? <p>Weather Error</p> : null}
+            {!weatherPreviewError && weatherPreviewLoading ? <p>Loading weather preview...</p> : null}
+            {!weatherPreviewError && !weatherPreviewLoading ? (
+              <>
+                <p>
+                  <strong>Latest obs:</strong>{' '}
+                  {weatherObservations[0]
+                    ? summarizeWeatherObservation(weatherObservations[0])
+                    : 'No recent observations are stored for this location yet.'}
+                </p>
+                <p>
+                  <strong>Next forecast:</strong>{' '}
+                  {weatherForecasts[0]
+                    ? `${formatWeatherPeriodWindow(weatherForecasts[0].start_at, weatherForecasts[0].end_at)} · ${summarizeWeatherForecast(weatherForecasts[0])}`
+                    : 'No current forecast periods are stored for this location yet.'}
+                </p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        {showUserLocation && geolocationError ? (
+          <div className="asset-map-control-feedback">My Location Error</div>
+        ) : null}
+        {loadError ? <div className="asset-map-overlay">Map Error</div> : null}
+        {!loadError && statusTitle ? (
+          <div className="asset-map-overlay asset-map-overlay-info">
+            <strong>{statusTitle}</strong>
+            {statusDetail ? <p>{statusDetail}</p> : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -398,26 +1021,82 @@ export function AssetMapPanel({
   assets,
   locations,
   spatialFeatures,
+  weatherLocations,
+  weatherSyncStatus,
+  weatherDataLoaded = false,
+  weatherDataLoading = false,
+  weatherLoadError = '',
   selectedAssetCode,
   onSelectAsset,
   filterControls,
 }: AssetMapPanelProps) {
   const mapSummary = useMemo(() => buildAssetMapSummary(assets, locations), [assets, locations])
-  const selectedRecord = mapSummary.mappedRecords.find((record) => record.asset.code === selectedAssetCode) ?? null
-  const selectedAsset = useMemo(
-    () => assets.find((asset) => asset.code === selectedAssetCode) ?? null,
-    [assets, selectedAssetCode],
+  const [assetSubtypeVisibility, setAssetSubtypeVisibility] = useState<Record<string, boolean>>({})
+  const assetSubtypeOptions = useMemo(
+    () => sortedUniqueAssetSubtypes(mapSummary.records),
+    [mapSummary.records],
   )
+  const visibleRecordCandidates = useMemo(
+    () =>
+      mapSummary.records.filter((record) =>
+        isAssetSubtypeVisible(assetSubtypeVisibility, assetMapSubtypeLabelForAsset(record.asset)),
+      ),
+    [assetSubtypeVisibility, mapSummary.records],
+  )
+  const visibleMappedRecords = useMemo(
+    () =>
+      mapSummary.mappedRecords.filter((record) =>
+        isAssetSubtypeVisible(assetSubtypeVisibility, assetMapSubtypeLabelForAsset(record.asset)),
+      ),
+    [assetSubtypeVisibility, mapSummary.mappedRecords],
+  )
+  const selectedRecord = visibleMappedRecords.find((record) => record.asset.code === selectedAssetCode) ?? null
+  const selectedAssetRecord = useMemo(
+    () => mapSummary.records.find((record) => record.asset.code === selectedAssetCode) ?? null,
+    [mapSummary.records, selectedAssetCode],
+  )
+  const selectedAsset = selectedAssetRecord?.asset ?? null
   const activeSpatialFeatures = useMemo(
     () => spatialFeatures.filter((feature) => feature.is_active),
     [spatialFeatures],
   )
-  const hiddenAssetCount = Math.max(0, assets.length - mapSummary.mappedCount)
-  const mapStatusTitle = mapSummary.mappedCount === 0 ? 'No filtered assets are map-ready yet.' : null
-  const mapStatusDetail =
-    mapSummary.mappedCount === 0
-      ? 'The base map is still available for zoom, pan, and rotate. Assets only plot once they have GeoJSON, direct coordinates, or linked location coordinates.'
+  const activeWeatherLocations = useMemo(
+    () => weatherLocations.filter((location) => location.is_active),
+    [weatherLocations],
+  )
+  const visiblePlacementCounts = useMemo(
+    () => buildVisiblePlacementCounts(visibleMappedRecords),
+    [visibleMappedRecords],
+  )
+  const subtypeHiddenCount = Math.max(0, mapSummary.records.length - visibleRecordCandidates.length)
+  const unmappedVisibleCount = Math.max(0, visibleRecordCandidates.length - visibleMappedRecords.length)
+  const hiddenAssetCount = subtypeHiddenCount + unmappedVisibleCount
+  const mapStatusTitle =
+    visibleMappedRecords.length === 0
+      ? visibleRecordCandidates.length === 0 && assetSubtypeOptions.length > 0
+        ? 'No selected asset categories are visible right now.'
+        : 'No filtered assets are map-ready yet.'
       : null
+  const mapStatusDetail =
+    visibleMappedRecords.length === 0
+      ? visibleRecordCandidates.length === 0 && assetSubtypeOptions.length > 0
+        ? 'Turn at least one asset category back on to restore plotted assets.'
+        : 'The base map is still available for zoom, pan, and rotate. Assets only plot once they have GeoJSON, direct coordinates, or linked location coordinates.'
+      : null
+
+  useEffect(() => {
+    setAssetSubtypeVisibility((currentState) => {
+      const nextState = syncAssetSubtypeVisibilityState(assetSubtypeOptions, currentState)
+      return assetSubtypeVisibilityStatesMatch(currentState, nextState) ? currentState : nextState
+    })
+  }, [assetSubtypeOptions])
+
+  function handleToggleAssetSubtype(assetSubtype: string) {
+    setAssetSubtypeVisibility((currentState) => ({
+      ...currentState,
+      [assetSubtype]: !isAssetSubtypeVisible(currentState, assetSubtype),
+    }))
+  }
 
   return (
     <section className="asset-map-shell">
@@ -432,11 +1111,14 @@ export function AssetMapPanel({
           </p>
         </div>
         <div className="asset-map-stats" aria-label="Asset map coverage">
-          <span className="entity-chip entity-chip-soft">{mapSummary.mappedCount} plotted</span>
-          <span className="entity-chip entity-chip-soft">{mapSummary.assetGeometryCount} geometry</span>
-          <span className="entity-chip entity-chip-soft">{mapSummary.assetPointCount} asset points</span>
-          <span className="entity-chip entity-chip-soft">{mapSummary.linkedLocationCount} linked locations</span>
+          <span className="entity-chip entity-chip-soft">{visibleMappedRecords.length} plotted</span>
+          <span className="entity-chip entity-chip-soft">{visiblePlacementCounts.assetGeometryCount} geometry</span>
+          <span className="entity-chip entity-chip-soft">{visiblePlacementCounts.assetPointCount} asset points</span>
+          <span className="entity-chip entity-chip-soft">{visiblePlacementCounts.linkedLocationCount} linked locations</span>
           <span className="entity-chip entity-chip-soft">{activeSpatialFeatures.length} shared overlays</span>
+          {activeWeatherLocations.length > 0 ? (
+            <span className="entity-chip entity-chip-soft">{activeWeatherLocations.length} weather points</span>
+          ) : null}
           <span className="entity-chip entity-chip-soft">{hiddenAssetCount} hidden</span>
         </div>
       </div>
@@ -444,8 +1126,16 @@ export function AssetMapPanel({
       {filterControls ? <div className="asset-map-filter-strip">{filterControls}</div> : null}
 
       <AssetMapCanvas
-        records={mapSummary.mappedRecords}
+        records={visibleMappedRecords}
         spatialFeatures={activeSpatialFeatures}
+        weatherLocations={weatherLocations}
+        weatherSyncStatus={weatherSyncStatus}
+        assetSubtypeOptions={assetSubtypeOptions}
+        assetSubtypeVisibility={assetSubtypeVisibility}
+        weatherDataLoaded={weatherDataLoaded}
+        weatherDataLoading={weatherDataLoading}
+        weatherLoadError={weatherLoadError}
+        onToggleAssetSubtype={handleToggleAssetSubtype}
         selectedAssetCode={selectedAssetCode}
         onSelectAsset={onSelectAsset}
         statusTitle={mapStatusTitle}
@@ -467,6 +1157,15 @@ export function AssetMapPanel({
               <p>{formatAssetMapSource(selectedRecord)}</p>
               <p>{formatAssetMapPlacement(selectedRecord)}</p>
             </>
+          ) : selectedAssetRecord &&
+            !isAssetSubtypeVisible(
+              assetSubtypeVisibility,
+              assetMapSubtypeLabelForAsset(selectedAssetRecord.asset),
+            ) ? (
+            <p>
+              {selectedAssetRecord.asset.code} is hidden by the current asset category filters.
+              Re-enable {assetMapSubtypeLabelForAsset(selectedAssetRecord.asset)} to plot it again.
+            </p>
           ) : selectedAsset ? (
             <p>
               {selectedAsset.code} is not map-ready yet. Only assets with GeoJSON, direct coordinates,
@@ -482,20 +1181,32 @@ export function AssetMapPanel({
             <strong>Map Scope</strong>
             <span className="entity-chip entity-chip-soft">{hiddenAssetCount}</span>
           </div>
-          {hiddenAssetCount > 0 ? (
+          {subtypeHiddenCount > 0 && unmappedVisibleCount > 0 ? (
             <p>
-              {hiddenAssetCount} filtered asset{hiddenAssetCount === 1 ? '' : 's'} are currently hidden from
+              {subtypeHiddenCount} filtered asset{subtypeHiddenCount === 1 ? '' : 's'} are hidden by
+              asset category filters, and {unmappedVisibleCount} visible category match
+              {unmappedVisibleCount === 1 ? '' : 'es'} still need GeoJSON, direct coordinates, or
+              linked location coordinates.
+            </p>
+          ) : subtypeHiddenCount > 0 ? (
+            <p>
+              {subtypeHiddenCount} filtered asset{subtypeHiddenCount === 1 ? '' : 's'} are hidden by
+              the current asset category filters.
+            </p>
+          ) : unmappedVisibleCount > 0 ? (
+            <p>
+              {unmappedVisibleCount} filtered asset{unmappedVisibleCount === 1 ? '' : 's'} are currently hidden from
               the map until they gain GeoJSON, direct coordinates, or linked location coordinates.
             </p>
           ) : (
-            <p>All filtered assets currently meet the map-ready rules.</p>
+            <p>All visible filtered assets currently meet the map-ready rules.</p>
           )}
         </div>
       </div>
 
-      {mapSummary.mappedRecords.length > 0 ? (
+      {visibleMappedRecords.length > 0 ? (
         <p className="form-note asset-map-footnote">
-          Example plotted asset: {formatAssetMapLocation(mapSummary.mappedRecords[0])}. Shared overlays stay visible for corridors, routes, and regions.
+          Example plotted asset: {formatAssetMapLocation(visibleMappedRecords[0])}. Shared overlays stay visible for corridors, routes, and regions.
         </p>
       ) : null}
     </section>

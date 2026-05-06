@@ -12,9 +12,8 @@ import {
 
 import {
   approveAssistantActionRequest,
-  getAssistantConversation,
   listAssistantActionRequests,
-  listAssistantConversations,
+  listAssistantAgents,
   listAssistantPromptRouteRecommendations,
   loadAssistantRuntimeSettings,
   rejectAssistantActionRequest,
@@ -46,8 +45,7 @@ import { usePersistentCollapsibleCardState } from '../../shared/collapsibleCardS
 import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   AssistantActionRequest,
-  AssistantConversation,
-  AssistantConversationSummary,
+  AssistantAgent,
   AssistantProvider,
   AssistantPromptRouteRecommendation,
   AssistantRuntimeSettings,
@@ -56,6 +54,8 @@ import type {
   LocationRecord,
   SpatialFeatureRecord,
   ViewKey,
+  WeatherLocationRecord,
+  WeatherSyncStatusRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
@@ -75,6 +75,7 @@ import {
   type TimeDisplayTimeZoneOption,
 } from '../../shared/timeDisplaySettings'
 import {
+  assetMapSubtypeLabelForAsset,
   buildAssetMapSummary,
   formatAssetMapPlacement,
   formatAssetMapSource,
@@ -82,6 +83,8 @@ import {
 import {
   type PromptHomeCounts,
 } from './promptHomeStarters'
+import { shouldAutoEnsurePromptHomeData } from './promptHomeAutoLoad'
+import { summarizePromptHomeAvailableTokens } from './promptHomeAvailableTokens'
 import {
   PROMPT_HOME_PROMPT_KITS,
   type PromptHomePromptKit,
@@ -90,7 +93,11 @@ import {
   getPromptHomeNextClockTickDelay,
 } from './promptHomeClock'
 import { buildPromptHomePromotedRoutes } from './promptPromotedRoutes'
-import { AssetMapCanvas } from '../reference-data/tabs/AssetMapPanel'
+import {
+  AssetMapCanvas,
+  sortedUniqueAssetSubtypes,
+  syncAssetSubtypeVisibilityState,
+} from '../reference-data/tabs/AssetMapPanel'
 
 type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -99,6 +106,15 @@ type PromptHomeWorkspaceProps = {
   assets?: AssetRecord[]
   locations?: LocationRecord[]
   spatialFeatures?: SpatialFeatureRecord[]
+  weatherLocations?: WeatherLocationRecord[]
+  weatherSyncStatus?: WeatherSyncStatusRecord | null
+  referenceDataLoaded?: boolean
+  referenceDataLoading?: boolean
+  onEnsureReferenceData?: () => Promise<void>
+  weatherDataLoaded?: boolean
+  weatherDataLoading?: boolean
+  weatherDataError?: string
+  onEnsureWeatherData?: () => Promise<void>
   onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
   onRefreshData?: () => Promise<void>
   initialMessages?: PromptHomeMessage[]
@@ -151,7 +167,6 @@ const NAVIGATION_INTENTS: PromptNavigationIntent[] = [
 ]
 
 const PROMPT_HOME_REVIEW_PANEL_ID = 'prompt-home-review-panel'
-const PROMPT_HOME_RECENT_PANEL_ID = 'prompt-home-recent-panel'
 const PROMPT_HOME_DIRECT_PANEL_ID = 'prompt-home-direct-panel'
 const PROMPT_HOME_TIMEFRAME_PANEL_ID = 'prompt-home-timeframe-panel'
 const PROMPT_HOME_DAY_PANEL_ID = 'prompt-home-day-panel'
@@ -661,14 +676,6 @@ function formatPromotedRouteSummary(
     : 'Repeated accepted Home handoffs will appear here once a route stabilizes.'
 }
 
-function summarizePromptConversation(conversation: AssistantConversationSummary): string {
-  const pieces = [conversation.provider, conversation.model]
-  if (conversation.agent_name) {
-    pieces.push(conversation.agent_name)
-  }
-  return pieces.join(' · ')
-}
-
 function resolveDefaultProvider(settings: AssistantRuntimeSettings): AssistantProvider | '' {
   return (
     settings.effective_default_provider ??
@@ -695,33 +702,6 @@ function buildPromptHomeContext(args: {
     'If the user needs to perform a business write, stage or describe the governed action path instead of claiming it has been executed.',
     'When opening an existing workspace would help, include a fenced navigation_intent JSON block after the user-facing answer. Use shape {"kind":"open_workspace","targetView":"operations","label":"Open Work Queue","rationale":"Why this is the right destination","focus":{"type":"trade","id":"TRD-1001","label":"TRD-1001"},"inspectorTab":"events"}. Navigation intents move the UI only and never execute business changes.',
   ].join('\n')
-}
-
-function promptMessagesFromConversation(conversation: AssistantConversation): PromptHomeMessage[] {
-  return conversation.messages.map((message) => {
-    const parsedResponse =
-      message.role === 'assistant'
-        ? parsePromptNavigationIntentsFromAssistantContent(message.content, {
-            sourceRunId: message.run_id,
-            sourceConversationId: conversation.conversation_id,
-          })
-        : { content: message.content, intents: [], warnings: [] }
-    const messageContent =
-      parsedResponse.intents.length > 0 || parsedResponse.warnings.length > 0
-        ? parsedResponse.content
-        : parsedResponse.content || message.content
-
-    return {
-      id: createPromptMessageId(),
-      role: message.role,
-      content: messageContent,
-      provider: message.provider ?? undefined,
-      model: message.model ?? undefined,
-      runId: message.run_id,
-      warnings: [...message.warnings, ...parsedResponse.warnings],
-      navigationIntents: parsedResponse.intents,
-    }
-  })
 }
 
 function replacePromptMessageActionRequest(
@@ -905,100 +885,150 @@ function PromptHomeMapTile({
   assets,
   locations,
   spatialFeatures,
+  weatherLocations,
+  weatherSyncStatus,
+  weatherDataLoaded,
+  weatherDataLoading,
+  weatherDataError,
   onOpenMapWorkspace,
 }: {
   assets: AssetRecord[]
   locations: LocationRecord[]
   spatialFeatures: SpatialFeatureRecord[]
+  weatherLocations: WeatherLocationRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
+  weatherDataLoaded?: boolean
+  weatherDataLoading?: boolean
+  weatherDataError?: string
   onOpenMapWorkspace: () => void
 }) {
-  const mapCardExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe.map-card', false)
+  const mapExpandedState = usePersistentCollapsibleCardState('prompt-home.map-card', true)
   const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(null)
+  const [assetSubtypeVisibility, setAssetSubtypeVisibility] = useState<Record<string, boolean>>({})
   const mapSummary = useMemo(() => buildAssetMapSummary(assets, locations), [assets, locations])
+  const assetSubtypeOptions = useMemo(
+    () => sortedUniqueAssetSubtypes(mapSummary.records),
+    [mapSummary.records],
+  )
+  const visibleRecordCandidates = useMemo(
+    () =>
+      mapSummary.records.filter(
+        (record) => assetSubtypeVisibility[assetMapSubtypeLabelForAsset(record.asset)] !== false,
+      ),
+    [assetSubtypeVisibility, mapSummary.records],
+  )
+  const visibleMappedRecords = useMemo(
+    () =>
+      mapSummary.mappedRecords.filter(
+        (record) => assetSubtypeVisibility[assetMapSubtypeLabelForAsset(record.asset)] !== false,
+      ),
+    [assetSubtypeVisibility, mapSummary.mappedRecords],
+  )
   const activeSpatialFeatures = useMemo(
     () => spatialFeatures.filter((feature) => feature.is_active),
     [spatialFeatures],
   )
-  const hiddenAssetCount = Math.max(0, assets.length - mapSummary.mappedCount)
+
+  useEffect(() => {
+    setAssetSubtypeVisibility((currentState) => {
+      const nextState = syncAssetSubtypeVisibilityState(assetSubtypeOptions, currentState)
+      const currentKeys = Object.keys(currentState)
+      const nextKeys = Object.keys(nextState)
+
+      if (
+        currentKeys.length === nextKeys.length &&
+        currentKeys.every((key) => currentState[key] === nextState[key])
+      ) {
+        return currentState
+      }
+
+      return nextState
+    })
+  }, [assetSubtypeOptions])
+
   const activeSelectedAssetCode = useMemo(
     () =>
-      selectedAssetCode && mapSummary.mappedRecords.some((record) => record.asset.code === selectedAssetCode)
+      selectedAssetCode && visibleMappedRecords.some((record) => record.asset.code === selectedAssetCode)
         ? selectedAssetCode
         : null,
-    [mapSummary.mappedRecords, selectedAssetCode],
+    [selectedAssetCode, visibleMappedRecords],
   )
   const selectedRecord = useMemo(
-    () => mapSummary.mappedRecords.find((record) => record.asset.code === activeSelectedAssetCode) ?? null,
-    [activeSelectedAssetCode, mapSummary.mappedRecords],
+    () => visibleMappedRecords.find((record) => record.asset.code === activeSelectedAssetCode) ?? null,
+    [activeSelectedAssetCode, visibleMappedRecords],
   )
-  const collapsedSummary = [
-    `${mapSummary.mappedCount} plotted`,
-    `${hiddenAssetCount} hidden`,
-    `${activeSpatialFeatures.length} overlays`,
-  ].join(' | ')
-  const statusTitle = mapSummary.mappedCount === 0 ? 'No map-ready assets yet.' : null
+  const statusTitle =
+    visibleMappedRecords.length === 0
+      ? visibleRecordCandidates.length === 0 && assetSubtypeOptions.length > 0
+        ? 'No selected asset categories are visible right now.'
+        : 'No map-ready assets yet.'
+      : null
   const statusDetail =
-    mapSummary.mappedCount === 0
-      ? 'The base map still loads here. Assets appear once they have GeoJSON, direct coordinates, or linked location coordinates.'
+    visibleMappedRecords.length === 0
+      ? visibleRecordCandidates.length === 0 && assetSubtypeOptions.length > 0
+        ? 'Turn at least one asset category back on to restore plotted assets.'
+        : 'The base map still loads here. Assets appear once they have GeoJSON, direct coordinates, or linked location coordinates.'
       : null
 
+  function handleToggleAssetSubtype(assetSubtype: string) {
+    setAssetSubtypeVisibility((currentState) => ({
+      ...currentState,
+      [assetSubtype]: currentState[assetSubtype] === false,
+    }))
+  }
+
   return (
-    <article className={`prompt-home-map-card ${mapCardExpandedState.expanded ? 'is-expanded' : 'is-collapsed'}`}>
+    <article className="prompt-home-map-card">
       <button
         type="button"
         className="prompt-home-map-card-toggle"
-        aria-expanded={mapCardExpandedState.expanded}
+        aria-expanded={mapExpandedState.expanded}
         aria-controls={PROMPT_HOME_MAP_PANEL_ID}
-        onClick={() => mapCardExpandedState.setExpanded((current) => !current)}
+        onClick={() => mapExpandedState.setExpanded((current) => !current)}
       >
         <div className="prompt-home-map-card-head">
           <div className="prompt-home-map-card-copy">
-            <span className="eyebrow">Map</span>
-            <strong>Asset footprint preview</strong>
-            <p>{collapsedSummary}</p>
+            <strong>Map</strong>
           </div>
           <div className="prompt-home-map-card-toggle-side">
             <div className="prompt-home-map-card-toggle-meta">
-              <small>{mapCardExpandedState.expanded ? 'Hide card' : 'Show card'}</small>
+              <small>{mapExpandedState.expanded ? 'Hide card' : 'Show card'}</small>
               <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
-                {mapCardExpandedState.expanded ? '−' : '+'}
+                {mapExpandedState.expanded ? '−' : '+'}
               </span>
             </div>
           </div>
         </div>
       </button>
 
-      <div id={PROMPT_HOME_MAP_PANEL_ID} className="prompt-home-map-card-body" hidden={!mapCardExpandedState.expanded}>
-        <div className="prompt-home-map-card-body-head">
-          <p>Preview map-ready assets and shared spatial overlays without leaving Home.</p>
-          <small>{collapsedSummary}</small>
-        </div>
-
+      <div id={PROMPT_HOME_MAP_PANEL_ID} className="prompt-home-map-card-body" hidden={!mapExpandedState.expanded}>
         <AssetMapCanvas
-          records={mapSummary.mappedRecords}
+          records={visibleMappedRecords}
           spatialFeatures={activeSpatialFeatures}
+          weatherLocations={weatherLocations}
+          weatherSyncStatus={weatherSyncStatus}
+          assetSubtypeOptions={assetSubtypeOptions}
+          assetSubtypeVisibility={assetSubtypeVisibility}
+          weatherDataLoaded={weatherDataLoaded}
+          weatherDataLoading={weatherDataLoading}
+          weatherLoadError={weatherDataError}
+          onToggleAssetSubtype={handleToggleAssetSubtype}
           selectedAssetCode={activeSelectedAssetCode}
           onSelectAsset={setSelectedAssetCode}
           statusTitle={statusTitle}
           statusDetail={statusDetail}
         />
 
-        <div className="prompt-home-map-card-footer">
-          <div className="prompt-home-map-card-selection">
-            <strong>{selectedRecord ? selectedRecord.asset.code : 'Map Scope'}</strong>
-            <p>
-              {selectedRecord
-                ? `${selectedRecord.asset.name} · ${formatAssetMapSource(selectedRecord)}`
-                : `${mapSummary.mappedCount} map-ready asset${mapSummary.mappedCount === 1 ? '' : 's'} are currently plotted in Home.`}
-            </p>
-            <p>
-              {selectedRecord
-                ? formatAssetMapPlacement(selectedRecord)
-                : hiddenAssetCount > 0
-                  ? `${hiddenAssetCount} asset${hiddenAssetCount === 1 ? '' : 's'} remain hidden until they gain map-ready coordinates or linked locations.`
-                  : 'All currently loaded assets meet the map-ready rules.'}
-            </p>
-          </div>
+        <div
+          className={`prompt-home-map-card-footer ${selectedRecord ? '' : 'is-actions-only'}`.trim()}
+        >
+          {selectedRecord ? (
+            <div className="prompt-home-map-card-selection">
+              <strong>{selectedRecord.asset.code}</strong>
+              <p>{`${selectedRecord.asset.name} · ${formatAssetMapSource(selectedRecord)}`}</p>
+              <p>{formatAssetMapPlacement(selectedRecord)}</p>
+            </div>
+          ) : null}
           <button type="button" className="button button-secondary" onClick={onOpenMapWorkspace}>
             Open Map Workspace
           </button>
@@ -1013,19 +1043,11 @@ function PromptHomeTimeframePanel({
   timeDisplaySettings,
   timeZoneOptions,
   onTimeZoneChange,
-  assets,
-  locations,
-  spatialFeatures,
-  onOpenMapWorkspace,
 }: {
   currentTime: Date
   timeDisplaySettings: TimeDisplaySettings
   timeZoneOptions: TimeDisplayTimeZoneOption[]
   onTimeZoneChange: (nextTimeZone: string) => void
-  assets: AssetRecord[]
-  locations: LocationRecord[]
-  spatialFeatures: SpatialFeatureRecord[]
-  onOpenMapWorkspace: () => void
 }) {
   const timeframeExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe-panel', true)
   const dayCardExpandedState = usePersistentCollapsibleCardState('prompt-home.timeframe.day-card', true)
@@ -1251,13 +1273,6 @@ function PromptHomeTimeframePanel({
             onToggle={() => monthCardExpandedState.setExpanded((current) => !current)}
           />
         </div>
-
-        <PromptHomeMapTile
-          assets={assets}
-          locations={locations}
-          spatialFeatures={spatialFeatures}
-          onOpenMapWorkspace={onOpenMapWorkspace}
-        />
       </div>
     </section>
   )
@@ -1270,6 +1285,15 @@ export function PromptHomeWorkspace({
   assets = [],
   locations = [],
   spatialFeatures = [],
+  weatherLocations = [],
+  weatherSyncStatus = null,
+  referenceDataLoaded = false,
+  referenceDataLoading = false,
+  onEnsureReferenceData,
+  weatherDataLoaded = false,
+  weatherDataLoading = false,
+  weatherDataError = '',
+  onEnsureWeatherData,
   onOpenView,
   onRefreshData,
   initialMessages = [],
@@ -1278,6 +1302,8 @@ export function PromptHomeWorkspace({
   const [timeDisplaySettings, setTimeDisplaySettings] = useState<TimeDisplaySettings>(() =>
     getTimeDisplaySettingsSnapshot(),
   )
+  const [assistantAgents, setAssistantAgents] = useState<AssistantAgent[] | null>(null)
+  const [assistantAgentsError, setAssistantAgentsError] = useState('')
   const [runtimeSettings, setRuntimeSettings] = useState<AssistantRuntimeSettings | null>(null)
   const [runtimeError, setRuntimeError] = useState('')
   const [draft, setDraft] = useState('')
@@ -1285,11 +1311,6 @@ export function PromptHomeWorkspace({
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  const [recentConversations, setRecentConversations] = useState<AssistantConversationSummary[]>([])
-  const [conversationHistoryLoading, setConversationHistoryLoading] = useState(false)
-  const [conversationHistoryError, setConversationHistoryError] = useState('')
-  const [conversationDetailLoading, setConversationDetailLoading] = useState(false)
-  const [conversationDetailError, setConversationDetailError] = useState('')
   const [actionRequestIdsInFlight, setActionRequestIdsInFlight] = useState<number[]>([])
   const [pendingActionRequests, setPendingActionRequests] = useState<AssistantActionRequest[]>([])
   const [pendingActionRequestsLoading, setPendingActionRequestsLoading] = useState(false)
@@ -1308,10 +1329,6 @@ export function PromptHomeWorkspace({
       Boolean(pendingActionRequestsError) ||
       pendingActionRequestsLoading,
   )
-  const recentPanelExpandedState = usePersistentCollapsibleCardState(
-    'prompt-home.support.recent',
-    authSession !== null,
-  )
   const directPanelExpandedState = usePersistentCollapsibleCardState('prompt-home.support.direct', false)
   const promptResumeIntent = useSyncExternalStore(
     subscribePromptResumeIntent,
@@ -1321,6 +1338,68 @@ export function PromptHomeWorkspace({
   const consumedPromptResumeKeyRef = useRef<string | null>(null)
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const timeZoneOptions = useMemo(() => listTimeDisplayTimeZoneOptions(), [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadAssistantBudgetsForHome() {
+      try {
+        const payload = await listAssistantAgents(appConfig.apiBase)
+        if (cancelled) {
+          return
+        }
+
+        setAssistantAgents(payload)
+        setAssistantAgentsError('')
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+
+        setAssistantAgents(null)
+        setAssistantAgentsError(
+          error instanceof Error ? error.message : 'Could not load published assistant budgets.',
+        )
+      }
+    }
+
+    void loadAssistantBudgetsForHome()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (
+      !shouldAutoEnsurePromptHomeData({
+        hasSession: Boolean(authSession),
+        dataLoaded: referenceDataLoaded,
+        dataLoading: referenceDataLoading,
+        hasEnsureHandler: Boolean(onEnsureReferenceData),
+      })
+    ) {
+      return
+    }
+
+    void onEnsureReferenceData().catch(() => undefined)
+  }, [authSession, onEnsureReferenceData, referenceDataLoaded, referenceDataLoading])
+
+  useEffect(() => {
+    if (
+      !shouldAutoEnsurePromptHomeData({
+        hasSession: Boolean(authSession),
+        dataLoaded: weatherDataLoaded,
+        dataLoading: weatherDataLoading,
+        dataError: weatherDataError,
+        hasEnsureHandler: Boolean(onEnsureWeatherData),
+      })
+    ) {
+      return
+    }
+
+    void onEnsureWeatherData().catch(() => undefined)
+  }, [authSession, onEnsureWeatherData, weatherDataError, weatherDataLoaded, weatherDataLoading])
 
   useEffect(() => {
     let timeoutId: number | null = null
@@ -1418,34 +1497,6 @@ export function PromptHomeWorkspace({
     },
     [authSession],
   )
-
-  const refreshRecentConversations = useCallback(async () => {
-    if (!authSession) {
-      setRecentConversations([])
-      setConversationHistoryError('')
-      return
-    }
-
-    setConversationHistoryLoading(true)
-    setConversationHistoryError('')
-    try {
-      const conversations = await listAssistantConversations(appConfig.apiBase, {
-        accessToken: authSession.accessToken,
-        limit: 4,
-      })
-      setRecentConversations(conversations)
-    } catch (error) {
-      setConversationHistoryError(
-        error instanceof Error ? error.message : 'Could not load recent prompt threads.',
-      )
-    } finally {
-      setConversationHistoryLoading(false)
-    }
-  }, [authSession])
-
-  useEffect(() => {
-    void refreshRecentConversations()
-  }, [refreshRecentConversations])
 
   const refreshPendingActionRequests = useCallback(async () => {
     if (!authSession) {
@@ -1640,7 +1691,6 @@ export function PromptHomeWorkspace({
           navigationIntents: parsedResponse.intents,
         },
       ])
-      void refreshRecentConversations()
       void refreshPendingActionRequests()
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Assistant request failed.')
@@ -1669,38 +1719,11 @@ export function PromptHomeWorkspace({
     clearPromptResumeIntent()
     setDraft(promptResumeIntent.draft)
     setSubmitError('')
-    setConversationDetailError('')
 
     if (promptResumeIntent.submitAfterSignIn) {
       submitResumedPrompt(promptResumeIntent.draft, promptResumeIntent.summaryTargets ?? [])
     }
   }, [authSession, promptResumeIntent])
-
-  async function resumeConversation(conversation: AssistantConversationSummary) {
-    if (!authSession || submitting || conversationDetailLoading) {
-      return
-    }
-
-    setConversationDetailLoading(true)
-    setConversationDetailError('')
-    setSubmitError('')
-    try {
-      const payload = await getAssistantConversation(
-        appConfig.apiBase,
-        conversation.conversation_id,
-        { accessToken: authSession.accessToken },
-      )
-      setConversationId(payload.conversation_id)
-      setMessages(promptMessagesFromConversation(payload))
-      setDraft('')
-    } catch (error) {
-      setConversationDetailError(
-        error instanceof Error ? error.message : 'Could not reopen that prompt thread.',
-      )
-    } finally {
-      setConversationDetailLoading(false)
-    }
-  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1740,7 +1763,6 @@ export function PromptHomeWorkspace({
   function loadPromptDraft(nextDraft: string) {
     setDraft(nextDraft)
     setSubmitError('')
-    setConversationDetailError('')
 
     if (typeof window !== 'undefined') {
       window.requestAnimationFrame(() => {
@@ -1806,7 +1828,6 @@ export function PromptHomeWorkspace({
 
   const supportPanels = {
     review: reviewPanelExpandedState.expanded,
-    recent: recentPanelExpandedState.expanded,
     direct: directPanelExpandedState.expanded,
   }
 
@@ -1814,9 +1835,6 @@ export function PromptHomeWorkspace({
     switch (panel) {
       case 'review':
         reviewPanelExpandedState.setExpanded((current) => !current)
-        break
-      case 'recent':
-        recentPanelExpandedState.setExpanded((current) => !current)
         break
       case 'direct':
         directPanelExpandedState.setExpanded((current) => !current)
@@ -1871,19 +1889,6 @@ export function PromptHomeWorkspace({
     : runtimeSettings
       ? `Using ${runtimeSettings.effective_default_provider ?? 'the first enabled provider'} when you send.`
       : 'Assistant runtime will be checked when you send the first prompt.'
-  const conversationHistoryNote = !authSession
-    ? 'Sign in to reopen recent prompt threads.'
-    : conversationHistoryLoading
-      ? 'Loading recent prompt threads.'
-      : conversationHistoryError
-        ? conversationHistoryError
-        : conversationDetailLoading
-          ? 'Reopening selected prompt thread.'
-          : conversationDetailError
-            ? conversationDetailError
-            : recentConversations.length > 0
-              ? `${recentConversations.length} recent prompt thread${recentConversations.length === 1 ? '' : 's'} available.`
-              : 'No recent prompt threads yet.'
   const pendingActionReviewNote = !authSession
     ? 'Sign in to review governed actions staged from Home.'
     : pendingActionRequestsLoading
@@ -1900,13 +1905,6 @@ export function PromptHomeWorkspace({
       : pendingActionRequests.length > 0
         ? `${pendingActionRequests.length} waiting`
         : 'No pending items'
-  const recentPanelSummary = !authSession
-    ? 'Sign in to resume'
-    : conversationHistoryLoading || conversationDetailLoading
-      ? 'Loading'
-      : recentConversations.length > 0
-        ? `${recentConversations.length} saved`
-        : 'No saved threads'
   const directPanelSummary = `${NAVIGATION_INTENTS.length} shortcuts`
   const promptRouteRecommendationNote = !authSession
     ? 'Sign in to load promoted routes from accepted Home handoffs.'
@@ -1915,6 +1913,17 @@ export function PromptHomeWorkspace({
       : promptRouteRecommendationsError
         ? promptRouteRecommendationsError
         : formatPromotedRouteSummary(promotedRoutes)
+  const availableTokenSummary = assistantAgentsError
+    ? {
+        value: 'Unavailable',
+        detail: assistantAgentsError,
+      }
+    : assistantAgents
+      ? summarizePromptHomeAvailableTokens(assistantAgents)
+      : {
+          value: 'Loading...',
+          detail: 'Checking published assistant budgets.',
+        }
 
   return (
     <div className="prompt-home">
@@ -1923,34 +1932,49 @@ export function PromptHomeWorkspace({
           <div className="prompt-home-heading">
             <span className="eyebrow">Home</span>
           </div>
-          <PromptHomeTimeframePanel
-            currentTime={currentTime}
-            timeDisplaySettings={timeDisplaySettings}
-            timeZoneOptions={timeZoneOptions}
-            assets={assets}
-            locations={locations}
-            spatialFeatures={spatialFeatures}
-            onTimeZoneChange={(nextTimeZone) => {
-              const savedSettings = saveTimeDisplaySettingsSnapshot({
-                ...timeDisplaySettings,
-                timeZone: nextTimeZone,
-              })
-              setTimeDisplaySettings(savedSettings)
-            }}
-            onOpenMapWorkspace={() => onOpenView('map')}
-          />
-          {!authSession ? (
-            <div className="prompt-home-heading-actions">
-              <button
-                type="button"
-                className="button button-ghost prompt-home-secondary-action"
-                onClick={handleSignIn}
-              >
-                Sign In
-              </button>
+          <div className="prompt-home-heading-side">
+            <div className="prompt-home-token-card" aria-live="polite">
+              <span className="prompt-home-token-card-label">Available Token Count</span>
+              <strong>{availableTokenSummary.value}</strong>
+              <small>{availableTokenSummary.detail}</small>
             </div>
-          ) : null}
+            {!authSession ? (
+              <div className="prompt-home-heading-actions">
+                <button
+                  type="button"
+                  className="button button-ghost prompt-home-secondary-action"
+                  onClick={handleSignIn}
+                >
+                  Sign In
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
+
+        <PromptHomeTimeframePanel
+          currentTime={currentTime}
+          timeDisplaySettings={timeDisplaySettings}
+          timeZoneOptions={timeZoneOptions}
+          onTimeZoneChange={(nextTimeZone) => {
+            const savedSettings = saveTimeDisplaySettingsSnapshot({
+              ...timeDisplaySettings,
+              timeZone: nextTimeZone,
+            })
+            setTimeDisplaySettings(savedSettings)
+          }}
+        />
+        <PromptHomeMapTile
+          assets={assets}
+          locations={locations}
+          spatialFeatures={spatialFeatures}
+          weatherLocations={weatherLocations}
+          weatherSyncStatus={weatherSyncStatus}
+          weatherDataLoaded={weatherDataLoaded}
+          weatherDataLoading={weatherDataLoading}
+          weatherDataError={weatherDataError}
+          onOpenMapWorkspace={() => onOpenView('map')}
+        />
 
         <form className="prompt-home-composer" onSubmit={handleSubmit}>
           <label className="field prompt-home-composer-field">
@@ -2336,72 +2360,6 @@ export function PromptHomeWorkspace({
               >
                 Open Assistant Console
               </button>
-            </div>
-          </section>
-
-          <section className="surface prompt-home-support-panel prompt-home-recent">
-            <button
-              type="button"
-              className="prompt-home-support-toggle"
-              aria-expanded={supportPanels.recent}
-              aria-controls={PROMPT_HOME_RECENT_PANEL_ID}
-              onClick={() => toggleSupportPanel('recent')}
-            >
-              <div className="prompt-home-support-toggle-copy">
-                <span className="eyebrow">Resume</span>
-                <h3>Recent prompt threads</h3>
-              </div>
-              <div className="prompt-home-support-toggle-meta">
-                <small>{recentPanelSummary}</small>
-                <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
-                  {supportPanels.recent ? '−' : '+'}
-                </span>
-              </div>
-            </button>
-
-            <div
-              id={PROMPT_HOME_RECENT_PANEL_ID}
-              className="prompt-home-support-body"
-              hidden={!supportPanels.recent}
-            >
-              <div className="prompt-home-support-body-head">
-                <p className={`form-note ${conversationHistoryError || conversationDetailError ? 'form-note-error' : ''}`}>
-                  {conversationHistoryNote}
-                </p>
-                <button
-                  type="button"
-                  className="button button-ghost"
-                  onClick={() => void refreshRecentConversations()}
-                  disabled={!authSession || conversationHistoryLoading}
-                >
-                  Refresh
-                </button>
-              </div>
-              {recentConversations.length > 0 ? (
-                <div className="prompt-home-thread-list">
-                  {recentConversations.map((conversation) => (
-                    <button
-                      key={conversation.conversation_id}
-                      type="button"
-                      className={`prompt-home-thread ${conversationId === conversation.conversation_id ? 'is-selected' : ''}`}
-                      onClick={() => void resumeConversation(conversation)}
-                      disabled={submitting || conversationDetailLoading}
-                    >
-                      <strong>{conversation.title}</strong>
-                      <span>
-                        {conversation.latest_user_message ??
-                          conversation.latest_assistant_message ??
-                          'Stored prompt thread.'}
-                      </span>
-                      <small>
-                        {summarizePromptConversation(conversation)} · {conversation.run_count} run
-                        {conversation.run_count === 1 ? '' : 's'} · Updated{' '}
-                        {formatPromptTimestamp(conversation.updated_at)}
-                      </small>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
           </section>
 

@@ -22,6 +22,7 @@ import {
   loadTradeWorkflowItemsWindow,
   loadRiskWorkspaceBootstrap,
   loadSettlementWorkspaceBootstrap,
+  loadWeatherWorkspaceBootstrap,
   type WorkspaceBootstrapSummary,
   type WorkspaceCollectionWindow,
   type OperationalResourceDescriptor,
@@ -285,6 +286,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setGroupErrors((current) => ({ ...current, [group]: message }))
   }
 
+  function logWorkspaceGroupError(group: AppDataGroup, message: string) {
+    if (typeof console === 'undefined' || !message.trim()) {
+      return
+    }
+
+    console.error(`[WorkspaceData] ${group} group error: ${message}`)
+  }
+
   function setCollectionWindow(key: WorkspaceCollectionKey, window: WorkspaceCollectionWindow) {
     setCollectionWindows((current) => ({ ...current, [key]: window }))
   }
@@ -509,6 +518,15 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setCounterpartyCreditReport(payload.counterpartyCreditReport as CounterpartyCreditReportRow[])
         markGroupLoaded('reports', true)
       },
+      weather: async () => {
+        const payload = await loadWeatherWorkspaceBootstrap(appConfig.apiBase, {
+          adminHeaders,
+          readHeaders,
+        })
+        setWeatherLocations(payload.weatherLocations as WeatherLocationRecord[])
+        setWeatherSyncStatus(payload.weatherSyncStatus as WeatherSyncStatusRecord | null)
+        markGroupLoaded('weather', true)
+      },
       admin: async () => {
         const payload = await loadAdminWorkspaceBootstrap(appConfig.apiBase, { adminHeaders })
         setExternalDataRuns(payload.externalDataRuns as ExternalDataRunRecord[])
@@ -536,6 +554,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           nextError instanceof Error
             ? nextError.message
             : `Could not load ${group === 'core' ? 'the app shell' : `${group} workspace data`}.`
+        logWorkspaceGroupError(group, message)
         setGroupError(group, message)
         if (group === 'core') {
           setError(message)

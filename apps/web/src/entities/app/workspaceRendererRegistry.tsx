@@ -147,6 +147,7 @@ export type AppDataGroup =
   | 'events'
   | 'positions'
   | 'reference'
+  | 'weather'
   | 'risk'
   | 'deliveries'
   | 'operations'
@@ -236,7 +237,7 @@ export type WorkspaceViewRenderContext = {
   selectedTradeId: ReturnType<typeof useAppRouteState>['selectedTradeId']
   setInspectorTab: ReturnType<typeof useAppShellState>['setInspectorTab']
   setSelectedTradeId: ReturnType<typeof useAppRouteState>['setSelectedTradeId']
-  shell: Pick<ReturnType<typeof useAppShellState>, 'eventFilter' | 'globalFilter' | 'inspectorTab' | 'setEventFilter'>
+  shell: Pick<ReturnType<typeof useAppShellState>, 'eventFilter' | 'inspectorTab' | 'setEventFilter'>
   summary: ReturnType<typeof useAppWorkspaceSummary>
   tradeActions: ReturnType<typeof useAppTradeActions>
   workspaceData: ReturnType<typeof useAppWorkspaceData>
@@ -248,6 +249,8 @@ type WorkspaceRendererDefinition = {
 }
 
 export type WorkspaceDescriptor = WorkspaceDescriptorConfig & WorkspaceRendererDefinition
+
+const GLOBAL_FILTER_DISABLED = ''
 
 function buildTradeCaptureFormProps(context: WorkspaceViewRenderContext) {
   const { captureForm, summary, tradeActions, workspaceData } = context
@@ -882,7 +885,7 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     heroTitle: 'Physical footprint and governed overlays',
     heroBody:
       'Review map-ready assets, linked locations, and shared routes or regions from one navigable spatial workspace.',
-    dataGroups: ['reference'],
+    dataGroups: ['reference', 'weather'],
     blockingGroups: ['reference'],
   },
   reference: {
@@ -914,7 +917,7 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
         collections: [],
       },
       'admin-weather-sync': {
-        groups: ['admin'],
+        groups: ['admin', 'weather'],
         collections: [],
       },
     },
@@ -970,6 +973,25 @@ export const WORKSPACE_RENDERERS: Record<
         assets={context.workspaceData.assets}
         locations={context.workspaceData.locations}
         spatialFeatures={context.workspaceData.spatialFeatures}
+        weatherLocations={context.workspaceData.weatherLocations}
+        weatherSyncStatus={context.workspaceData.weatherSyncStatus}
+        referenceDataLoaded={context.workspaceData.groupLoaded.reference}
+        referenceDataLoading={context.workspaceData.groupLoading.reference}
+        onEnsureReferenceData={() =>
+          context.workspaceData.loadData({
+            groups: ['reference'],
+            force: false,
+          })
+        }
+        weatherDataLoaded={context.workspaceData.groupLoaded.weather}
+        weatherDataLoading={context.workspaceData.groupLoading.weather}
+        weatherDataError={context.workspaceData.groupErrors.weather}
+        onEnsureWeatherData={() =>
+          context.workspaceData.loadData({
+            groups: ['weather'],
+            force: false,
+          })
+        }
         onOpenView={context.navigateToView}
         onRefreshData={context.workspaceData.loadData}
       />
@@ -990,7 +1012,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DashboardWorkspace
         authSession={context.workspaceData.authSession}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         onOpenView={context.navigateToView}
         onOpenTrade={context.navigateToTrade}
         appLoading={context.workspaceData.appLoading}
@@ -1049,7 +1071,7 @@ export const WORKSPACE_RENDERERS: Record<
         <TradingWorkspace
         authSession={context.workspaceData.authSession}
         routeHandoff={context.routeHandoff}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         tradeMetadataSource={context.workspaceData.tradeMetadataSource}
         tradeMetadataError={context.workspaceData.tradeMetadataError}
@@ -1204,7 +1226,7 @@ export const WORKSPACE_RENDERERS: Record<
         authSession={context.workspaceData.authSession}
         eventFilter={context.shell.eventFilter}
         eventsLoadedCount={context.workspaceData.events.length}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         selectedTradeId={context.selectedTradeId}
         setEventFilter={context.shell.setEventFilter}
         filteredEvents={context.summary.filteredEvents}
@@ -1234,7 +1256,7 @@ export const WORKSPACE_RENDERERS: Record<
       <RiskWorkspace
         authSession={context.workspaceData.authSession}
         routeHandoff={context.routeHandoff}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         trades={context.workspaceData.trades}
         activeTrades={context.summary.activeTrades}
         positionsByClass={context.summary.positionsByClass}
@@ -1259,7 +1281,7 @@ export const WORKSPACE_RENDERERS: Record<
         activeTrades={context.summary.activeTrades}
         authSession={context.workspaceData.authSession}
         routeHandoff={context.routeHandoff}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         onOpenRisk={() => context.navigateToView('risk')}
         onOpenTrade={context.navigateToTrade}
         positionsByClass={context.summary.positionsByClass}
@@ -1275,7 +1297,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DeliveryWorkspace
         authSession={context.workspaceData.authSession}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         deliveries={context.workspaceData.deliveries}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
@@ -1302,7 +1324,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <SchedulingWorkspace
         authSession={context.workspaceData.authSession}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         deliveries={context.workspaceData.deliveries}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
@@ -1327,7 +1349,7 @@ export const WORKSPACE_RENDERERS: Record<
       <OperationsWorkspace
         authSession={context.workspaceData.authSession}
         routeHandoff={context.routeHandoff}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         activeTrades={context.summary.activeTrades}
         confirmations={context.workspaceData.tradeConfirmations}
         deliveries={context.workspaceData.deliveries}
@@ -1366,7 +1388,7 @@ export const WORKSPACE_RENDERERS: Record<
       <SettlementWorkspace
         authSession={context.workspaceData.authSession}
         routeHandoff={context.routeHandoff}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         activeTrades={context.summary.activeTrades}
         invoices={context.workspaceData.tradeInvoices}
         payments={context.workspaceData.tradePayments}
@@ -1398,7 +1420,7 @@ export const WORKSPACE_RENDERERS: Record<
       <ReportsWorkspace
         activeTrades={context.summary.activeTrades}
         authSession={context.workspaceData.authSession}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         counterpartyCreditReport={context.workspaceData.counterpartyCreditReport}
         portfolios={context.workspaceData.portfolios}
         formatNumber={formatNumber}
@@ -1416,7 +1438,12 @@ export const WORKSPACE_RENDERERS: Record<
         assets={context.workspaceData.assets}
         locations={context.workspaceData.locations}
         spatialFeatures={context.workspaceData.spatialFeatures}
-        globalFilter={context.shell.globalFilter}
+        weatherLocations={context.workspaceData.weatherLocations}
+        weatherSyncStatus={context.workspaceData.weatherSyncStatus}
+        weatherDataLoaded={context.workspaceData.groupLoaded.weather}
+        weatherDataLoading={context.workspaceData.groupLoading.weather}
+        weatherDataError={context.workspaceData.groupErrors.weather}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         onOpenReferenceData={() => context.navigateToView('reference')}
         onPrepareReferenceAsset={context.referenceState.startEditAsset}
       />
@@ -1428,7 +1455,7 @@ export const WORKSPACE_RENDERERS: Record<
         controller={context.referenceState}
         formatCommodityClass={formatCommodityClass}
         formatDate={formatDate}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
       />
     ),
   },
@@ -1436,7 +1463,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <AdminWorkspace
         authSession={context.workspaceData.authSession}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         onOpenSettings={() => context.navigateToView('settings')}
         onRoadmapPublished={context.handleRoadmapPublished}
         selectedTrade={context.summary.selectedTrade}
@@ -1513,7 +1540,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <AssistantWorkspace
         authSession={context.workspaceData.authSession}
-        globalFilter={context.shell.globalFilter}
+        globalFilter={GLOBAL_FILTER_DISABLED}
         health={context.workspaceData.health}
         trades={context.workspaceData.trades}
         events={context.workspaceData.events}
@@ -1537,7 +1564,7 @@ const MUTATION_GROUPS: Record<WorkspaceMutationKind, AppDataGroup[]> = {
   payment: ['trades', 'settlement'],
   'admin-external-data': ['admin', 'operations'],
   'admin-counterparty-credit': ['admin', 'reference', 'reports', 'operations'],
-  'admin-weather-sync': ['admin', 'operations'],
+  'admin-weather-sync': ['admin', 'operations', 'weather'],
 }
 
 export const WORKSPACE_DESCRIPTORS: Record<ViewKey, WorkspaceDescriptor> = Object.fromEntries(

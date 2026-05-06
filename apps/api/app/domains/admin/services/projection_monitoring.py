@@ -37,6 +37,7 @@ from apps.api.app.schemas.projection_monitoring import (
     TradeProjectionMonitoringRuntimeOut,
     TradeProjectionMonitoringScheduleOut,
 )
+from apps.api.app.schemas.runtime_settings import ProjectionMonitoringEmailRuntimeSettingsOut
 
 
 MONITORING_DOCUMENT_KEY = "projection_integrity_monitoring"
@@ -108,6 +109,24 @@ def get_default_trade_projection_monitoring_document() -> TradeProjectionMonitor
 
 def get_default_trade_projection_monitoring_runtime() -> TradeProjectionMonitoringRuntimeOut:
     return TradeProjectionMonitoringRuntimeOut()
+
+
+def build_projection_monitoring_email_runtime_settings(
+    db: Session,
+) -> ProjectionMonitoringEmailRuntimeSettingsOut:
+    smtp_host = settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST.strip()
+    sender = settings.PROJECTION_MONITORING_EMAIL_FROM.strip() or "projection-monitoring@localhost"
+    recipients = _resolve_email_recipients(db)
+    transport = "smtp" if smtp_host else "local_archive"
+    return ProjectionMonitoringEmailRuntimeSettingsOut(
+        transport=transport,
+        provider_hint=_projection_monitoring_email_provider_hint(smtp_host),
+        smtp_host=smtp_host or None,
+        smtp_port=settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT if smtp_host else None,
+        sender=sender,
+        recipient_count=len(recipients),
+        auth_status=_projection_monitoring_email_auth_status(),
+    )
 
 
 def load_admin_trade_projection_monitoring(db: Session) -> TradeProjectionMonitoringAdminOut:
@@ -931,6 +950,25 @@ def _resolve_email_recipients(db: Session) -> list[str]:
         recipients.append(email)
         seen.add(email)
     return recipients
+
+
+def _projection_monitoring_email_provider_hint(smtp_host: str) -> str:
+    normalized_host = smtp_host.strip().lower()
+    if not normalized_host:
+        return "none"
+    if normalized_host in {"smtp.gmail.com", "smtp-relay.gmail.com"} or normalized_host.endswith(".gmail.com"):
+        return "gmail"
+    return "generic_smtp"
+
+
+def _projection_monitoring_email_auth_status() -> str:
+    username = settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME.strip()
+    password = settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD
+    if username and password:
+        return "configured"
+    if username or password:
+        return "partial"
+    return "none"
 
 
 def _build_delivery_title(alert: TradeProjectionMonitoringAlertOut) -> str:

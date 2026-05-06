@@ -56,6 +56,7 @@ import {
   loadReferenceWorkspaceBootstrap,
   loadRiskWorkspaceBootstrap,
   loadSettlementWorkspaceBootstrap,
+  loadWeatherWorkspaceBootstrap,
 } from '../src/entities/app/api.ts'
 
 beforeEach(() => {
@@ -1035,6 +1036,75 @@ test('loadAdminWorkspaceBootstrap returns empty admin data without an authentica
     weatherSyncStatus: null,
   })
   assert.equal(fetchJsonMock.mock.calls.length, 0)
+})
+
+test('loadWeatherWorkspaceBootstrap tolerates partial public weather endpoint failures', async () => {
+  fetchJsonMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/weather/locations')) {
+      return [{ code: 'HOUSTON_GC' }]
+    }
+    if (url.endsWith('/weather/sync/status')) {
+      throw new Error('sync unavailable')
+    }
+    throw new Error(`Unexpected URL: ${url}`)
+  })
+
+  const payload = await loadWeatherWorkspaceBootstrap('https://example.test/api', {
+    adminHeaders: authenticatedReadOptions.readHeaders,
+    readHeaders: authenticatedReadOptions.readHeaders,
+  })
+
+  assert.deepEqual(payload, {
+    weatherLocations: [{ code: 'HOUSTON_GC' }],
+    weatherSyncStatus: null,
+  })
+  assert.equal(fetchJsonMock.mock.calls.length, 2)
+})
+
+test('loadWeatherWorkspaceBootstrap falls back to admin weather routes when the public routes are missing', async () => {
+  fetchJsonMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/weather/locations')) {
+      const error = new Error('Request failed: 404')
+      ;(error as Error & { status?: number }).status = 404
+      error.name = 'ApiError'
+      throw error
+    }
+    if (url.endsWith('/weather/sync/status')) {
+      const error = new Error('Request failed: 404')
+      ;(error as Error & { status?: number }).status = 404
+      error.name = 'ApiError'
+      throw error
+    }
+    if (url.endsWith('/admin/weather/locations?is_active=true')) {
+      return [{ code: 'HOUSTON_GC' }]
+    }
+    if (url.endsWith('/admin/weather/sync/status?include_inactive=false')) {
+      return { locations: [{ code: 'HOUSTON_GC', health_status: 'HEALTHY' }] }
+    }
+    throw new Error(`Unexpected URL: ${url}`)
+  })
+
+  const payload = await loadWeatherWorkspaceBootstrap('https://example.test/api', {
+    adminHeaders: authenticatedReadOptions.readHeaders,
+    readHeaders: authenticatedReadOptions.readHeaders,
+  })
+
+  assert.deepEqual(payload, {
+    weatherLocations: [{ code: 'HOUSTON_GC' }],
+    weatherSyncStatus: { locations: [{ code: 'HOUSTON_GC', health_status: 'HEALTHY' }] },
+  })
+  assert.equal(fetchJsonMock.mock.calls.length, 4)
+})
+
+test('loadWeatherWorkspaceBootstrap surfaces a weather group failure when every endpoint fails', async () => {
+  fetchJsonMock.mockRejectedValue(new Error('weather unavailable'))
+
+  await assert.rejects(() =>
+    loadWeatherWorkspaceBootstrap('https://example.test/api', {
+      adminHeaders: authenticatedReadOptions.readHeaders,
+      readHeaders: authenticatedReadOptions.readHeaders,
+    }),
+  )
 })
 
 test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', async () => {
