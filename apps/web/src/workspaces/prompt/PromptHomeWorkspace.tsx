@@ -13,7 +13,6 @@ import {
 import {
   approveAssistantActionRequest,
   listAssistantActionRequests,
-  listAssistantAgents,
   listAssistantPromptRouteRecommendations,
   loadAssistantRuntimeSettings,
   rejectAssistantActionRequest,
@@ -45,7 +44,6 @@ import { usePersistentCollapsibleCardState } from '../../shared/collapsibleCardS
 import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import type {
   AssistantActionRequest,
-  AssistantAgent,
   AssistantProvider,
   AssistantPromptRouteRecommendation,
   AssistantRuntimeSettings,
@@ -84,7 +82,6 @@ import {
   type PromptHomeCounts,
 } from './promptHomeStarters'
 import { shouldAutoEnsurePromptHomeData } from './promptHomeAutoLoad'
-import { summarizePromptHomeAvailableTokens } from './promptHomeAvailableTokens'
 import {
   PROMPT_HOME_PROMPT_KITS,
   type PromptHomePromptKit,
@@ -910,41 +907,28 @@ function PromptHomeMapTile({
     () => sortedUniqueAssetSubtypes(mapSummary.records),
     [mapSummary.records],
   )
+  const normalizedAssetSubtypeVisibility = useMemo(
+    () => syncAssetSubtypeVisibilityState(assetSubtypeOptions, assetSubtypeVisibility),
+    [assetSubtypeOptions, assetSubtypeVisibility],
+  )
   const visibleRecordCandidates = useMemo(
     () =>
       mapSummary.records.filter(
-        (record) => assetSubtypeVisibility[assetMapSubtypeLabelForAsset(record.asset)] !== false,
+        (record) => normalizedAssetSubtypeVisibility[assetMapSubtypeLabelForAsset(record.asset)] !== false,
       ),
-    [assetSubtypeVisibility, mapSummary.records],
+    [mapSummary.records, normalizedAssetSubtypeVisibility],
   )
   const visibleMappedRecords = useMemo(
     () =>
       mapSummary.mappedRecords.filter(
-        (record) => assetSubtypeVisibility[assetMapSubtypeLabelForAsset(record.asset)] !== false,
+        (record) => normalizedAssetSubtypeVisibility[assetMapSubtypeLabelForAsset(record.asset)] !== false,
       ),
-    [assetSubtypeVisibility, mapSummary.mappedRecords],
+    [mapSummary.mappedRecords, normalizedAssetSubtypeVisibility],
   )
   const activeSpatialFeatures = useMemo(
     () => spatialFeatures.filter((feature) => feature.is_active),
     [spatialFeatures],
   )
-
-  useEffect(() => {
-    setAssetSubtypeVisibility((currentState) => {
-      const nextState = syncAssetSubtypeVisibilityState(assetSubtypeOptions, currentState)
-      const currentKeys = Object.keys(currentState)
-      const nextKeys = Object.keys(nextState)
-
-      if (
-        currentKeys.length === nextKeys.length &&
-        currentKeys.every((key) => currentState[key] === nextState[key])
-      ) {
-        return currentState
-      }
-
-      return nextState
-    })
-  }, [assetSubtypeOptions])
 
   const activeSelectedAssetCode = useMemo(
     () =>
@@ -971,10 +955,13 @@ function PromptHomeMapTile({
       : null
 
   function handleToggleAssetSubtype(assetSubtype: string) {
-    setAssetSubtypeVisibility((currentState) => ({
-      ...currentState,
-      [assetSubtype]: currentState[assetSubtype] === false,
-    }))
+    setAssetSubtypeVisibility((currentState) => {
+      const nextState = syncAssetSubtypeVisibilityState(assetSubtypeOptions, currentState)
+      return {
+        ...nextState,
+        [assetSubtype]: nextState[assetSubtype] === false,
+      }
+    })
   }
 
   return (
@@ -1008,7 +995,7 @@ function PromptHomeMapTile({
           weatherLocations={weatherLocations}
           weatherSyncStatus={weatherSyncStatus}
           assetSubtypeOptions={assetSubtypeOptions}
-          assetSubtypeVisibility={assetSubtypeVisibility}
+          assetSubtypeVisibility={normalizedAssetSubtypeVisibility}
           weatherDataLoaded={weatherDataLoaded}
           weatherDataLoading={weatherDataLoading}
           weatherLoadError={weatherDataError}
@@ -1302,8 +1289,6 @@ export function PromptHomeWorkspace({
   const [timeDisplaySettings, setTimeDisplaySettings] = useState<TimeDisplaySettings>(() =>
     getTimeDisplaySettingsSnapshot(),
   )
-  const [assistantAgents, setAssistantAgents] = useState<AssistantAgent[] | null>(null)
-  const [assistantAgentsError, setAssistantAgentsError] = useState('')
   const [runtimeSettings, setRuntimeSettings] = useState<AssistantRuntimeSettings | null>(null)
   const [runtimeError, setRuntimeError] = useState('')
   const [draft, setDraft] = useState('')
@@ -1338,37 +1323,6 @@ export function PromptHomeWorkspace({
   const consumedPromptResumeKeyRef = useRef<string | null>(null)
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const timeZoneOptions = useMemo(() => listTimeDisplayTimeZoneOptions(), [])
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadAssistantBudgetsForHome() {
-      try {
-        const payload = await listAssistantAgents(appConfig.apiBase)
-        if (cancelled) {
-          return
-        }
-
-        setAssistantAgents(payload)
-        setAssistantAgentsError('')
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setAssistantAgents(null)
-        setAssistantAgentsError(
-          error instanceof Error ? error.message : 'Could not load published assistant budgets.',
-        )
-      }
-    }
-
-    void loadAssistantBudgetsForHome()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   useEffect(() => {
     if (
@@ -1913,17 +1867,6 @@ export function PromptHomeWorkspace({
       : promptRouteRecommendationsError
         ? promptRouteRecommendationsError
         : formatPromotedRouteSummary(promotedRoutes)
-  const availableTokenSummary = assistantAgentsError
-    ? {
-        value: 'Unavailable',
-        detail: assistantAgentsError,
-      }
-    : assistantAgents
-      ? summarizePromptHomeAvailableTokens(assistantAgents)
-      : {
-          value: 'Loading...',
-          detail: 'Checking published assistant budgets.',
-        }
 
   return (
     <div className="prompt-home">
@@ -1932,24 +1875,17 @@ export function PromptHomeWorkspace({
           <div className="prompt-home-heading">
             <span className="eyebrow">Home</span>
           </div>
-          <div className="prompt-home-heading-side">
-            <div className="prompt-home-token-card" aria-live="polite">
-              <span className="prompt-home-token-card-label">Available Token Count</span>
-              <strong>{availableTokenSummary.value}</strong>
-              <small>{availableTokenSummary.detail}</small>
+          {!authSession ? (
+            <div className="prompt-home-heading-actions">
+              <button
+                type="button"
+                className="button button-ghost prompt-home-secondary-action"
+                onClick={handleSignIn}
+              >
+                Sign In
+              </button>
             </div>
-            {!authSession ? (
-              <div className="prompt-home-heading-actions">
-                <button
-                  type="button"
-                  className="button button-ghost prompt-home-secondary-action"
-                  onClick={handleSignIn}
-                >
-                  Sign In
-                </button>
-              </div>
-            ) : null}
-          </div>
+          ) : null}
         </div>
 
         <PromptHomeTimeframePanel

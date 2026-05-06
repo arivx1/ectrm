@@ -4,6 +4,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { test } from 'vitest'
 
+import { PromptHomeAvailableTokenBadge } from '../src/workspaces/prompt/PromptHomeAvailableTokenBadge'
 import { shouldAutoEnsurePromptHomeData } from '../src/workspaces/prompt/promptHomeAutoLoad'
 import { summarizePromptHomeAvailableTokens } from '../src/workspaces/prompt/promptHomeAvailableTokens'
 import { PromptHomeWorkspace } from '../src/workspaces/prompt/PromptHomeWorkspace'
@@ -51,8 +52,6 @@ test('prompt home renders guided prompts without legacy home actions', () => {
   assert.doesNotMatch(markup, /Help me build a simulated trade idea to hedge risk\./)
   assert.match(markup, /Review queue/)
   assert.match(markup, /Sign in to review/)
-  assert.match(markup, /Available Token Count/)
-  assert.match(markup, /Loading\.\.\./)
   assert.ok(deskTimeIndex >= 0)
   assert.ok(mapIndex > deskTimeIndex)
   assert.ok(operatorPromptIndex > mapIndex)
@@ -103,6 +102,14 @@ test('prompt home renders guided prompts without legacy home actions', () => {
   assert.match(markup, /EOM/)
   assert.match(markup, /aria-expanded="false" aria-controls="prompt-home-review-panel"/)
   assert.match(markup, /id="prompt-home-review-panel" class="prompt-home-support-body" hidden=""/)
+})
+
+test('prompt home topbar token badge renders a loading state before budgets resolve', () => {
+  const markup = renderToStaticMarkup(createElement(PromptHomeAvailableTokenBadge))
+
+  assert.match(markup, /Available Token Count/)
+  assert.match(markup, /Loading\.\.\./)
+  assert.match(markup, /Checking published assistant budgets\./)
 })
 
 test('prompt home shows the newest prompt thread messages first', () => {

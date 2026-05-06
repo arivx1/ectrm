@@ -55,6 +55,7 @@ import {
   subscribePromptSignInReturnIntent,
 } from './shared/promptResumeIntent'
 import { commodityClassOrder } from './shared/trading'
+import { PromptHomeAvailableTokenBadge } from './workspaces/prompt/PromptHomeAvailableTokenBadge'
 
 function WorkspaceLoadState({
   title,
@@ -438,6 +439,7 @@ function AuthenticatedWorkspaceShell({
               <strong>{currentWorkspaceLabel}</strong>
             </div>
             <div className="workspace-topbar-actions">
+              <PromptHomeAvailableTokenBadge />
               <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
                 {effectiveSystemStateLabel}
               </span>
