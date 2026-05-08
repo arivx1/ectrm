@@ -131,6 +131,7 @@ def _apply_document_action(
             invoice_amount=action_plan.payload.get("invoice_amount"),
             issued_at=_parse_datetime_candidate(action_plan.payload.get("invoice_date")),
             due_at=_parse_datetime_candidate(action_plan.payload.get("due_at")),
+            due_calendar_code=_optional_payload_value(action_plan.payload, "due_calendar_code"),
             notes=_execution_note(document),
             now=now,
         )
@@ -154,6 +155,7 @@ def _apply_document_action(
             payment_reference=_optional_payload_value(action_plan.payload, "payment_reference"),
             payment_amount=action_plan.payload.get("payment_amount"),
             due_at=_parse_datetime_candidate(action_plan.payload.get("due_at")),
+            due_calendar_code=_optional_payload_value(action_plan.payload, "due_calendar_code"),
             notes=_execution_note(document),
             now=now,
         )

@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Any, Literal, Optional, get_args
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_serializer
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_serializer, model_validator
 
 from apps.api.app.schemas._validation import normalize_optional_text, normalize_required_text
 
@@ -22,6 +22,10 @@ AssistantPromptSectionSource = Literal[
     "application",
     "agent",
 ]
+AssistantPromptSectionScope = Literal["SYSTEM", "GLOBAL", "USER", "AGENT", "REQUEST", "RUNTIME"]
+AssistantPromptSectionKind = Literal["IMMUTABLE", "GENERATED", "CONFIGURABLE"]
+AssistantPromptSectionFreshness = Literal["STATIC", "SESSION", "REQUEST", "LIVE"]
+AssistantPromptSectionMergeStrategy = Literal["APPEND", "APPEND_IF_PRESENT"]
 AssistantWorkspace = Literal[
     "dashboard",
     "guide",
@@ -56,10 +60,34 @@ AssistantWorkspaceSummaryTarget = Literal[
 AssistantAgentStatus = Literal["DRAFT", "ACTIVE", "PAUSED", "RETIRED"]
 AssistantAgentScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
 AssistantAgentCapability = Literal["READ", "EXPLAIN", "DRAFT", "ACTION"]
+AssistantAgentSkillKey = Literal[
+    "market_intelligence",
+    "pretrade_structuring",
+    "risk_monitoring",
+    "trade_lifecycle_management",
+    "trade_governance",
+    "trade_operations_coordination",
+    "settlement_operations",
+    "movement_control",
+    "accrual_control",
+    "accounting_posting",
+    "counterparty_state_sync",
+    "confirmation_control",
+    "workflow_control",
+    "invoice_control",
+    "document_triage",
+    "reporting_reconciliation",
+    "logistics_coordination",
+    "fee_accrual_management",
+    "counterparty_outreach",
+    "agent_supervision",
+    "inter_agent_consultation",
+]
 AssistantAgentTokenBudgetStatus = Literal["GREEN", "AMBER", "RED"]
 AssistantAgentTokenAllocationSource = Literal["AGENT", "DEFAULT"]
 AssistantAgentRoleCatalogStatus = Literal["SEEDED", "TEMPLATE", "PHASE_1", "PHASE_2_PLUS"]
 AssistantAgentProfileKind = Literal["CURATED", "ROLE_DERIVED", "CUSTOM"]
+AssistantAgentOrchestrationPattern = Literal["SINGLE", "MANAGER", "TRIAGE", "PARALLEL", "EVALUATOR"]
 AssistantAgentProfileRequestStatus = Literal["REQUESTED", "APPROVED", "REJECTED", "ACTIVATED"]
 AssistantAgentEvalRunStatus = Literal["PASS", "FAIL", "ERROR"]
 AssistantAgentAuthorityLevel = Literal["OBSERVE", "EXPLAIN", "DRAFT", "STAGE", "EXECUTE", "EXTERNAL_COMMIT"]
@@ -70,6 +98,7 @@ AssistantActionType = Literal[
     "create_trade",
     "amend_trade",
     "cancel_trade",
+    "create_settlement_report_preset",
     "record_delivery_event",
     "reverse_delivery_event",
     "create_manual_accrual_entry",
@@ -156,6 +185,12 @@ class AssistantToolDefinitionOut(BaseModel):
     description: str
 
 
+class AssistantAgentSkillDefinitionOut(BaseModel):
+    name: AssistantAgentSkillKey
+    label: str
+    description: str
+
+
 class AssistantActionDefinitionOut(BaseModel):
     name: AssistantActionType
     label: str
@@ -231,12 +266,30 @@ class AssistantPolicySimulationOut(BaseModel):
     simulation_notes: list[str] = Field(default_factory=list)
 
 
+class AssistantVoiceTranscriptionSettingsOut(BaseModel):
+    enabled: bool
+    provider: AssistantProvider
+    model: str
+    max_upload_bytes: int
+    requires_authentication: bool = True
+    supported_content_types: list[str] = Field(default_factory=list)
+
+
+class AssistantVoiceTranscriptionOut(BaseModel):
+    provider: AssistantProvider
+    model: str
+    text: str
+
+
 class AssistantRuntimeSettingsOut(BaseModel):
     enabled: bool
     default_provider: AssistantProvider
     effective_default_provider: Optional[AssistantProvider]
     configured_provider_count: int
+    default_daily_token_allocation: int
     providers: list[AssistantProviderStatusOut]
+    voice_transcription: AssistantVoiceTranscriptionSettingsOut
+    available_skills: list[AssistantAgentSkillDefinitionOut]
     available_tools: list[AssistantToolDefinitionOut]
     available_action_types: list[AssistantActionDefinitionOut]
 
@@ -1028,9 +1081,18 @@ class AssistantPromptResponse(BaseModel):
 
 
 class AssistantPromptSectionOut(BaseModel):
+    contract_key: Optional[str] = None
+    contract_version: int = 1
     key: str
     title: str
     source: AssistantPromptSectionSource
+    scope: AssistantPromptSectionScope = "RUNTIME"
+    kind: AssistantPromptSectionKind = "GENERATED"
+    owner: str = "unknown"
+    owner_reference: Optional[str] = None
+    freshness: AssistantPromptSectionFreshness = "STATIC"
+    merge_strategy: AssistantPromptSectionMergeStrategy = "APPEND"
+    uses_fallback: bool = False
     content: str
 
 
@@ -1066,9 +1128,14 @@ class AssistantAgentBase(BaseModel):
     human_owner_role: Optional[str] = Field(default=None, max_length=128)
     authority_ceiling: Optional[AssistantAgentAuthorityLevel] = None
     activation_notes: Optional[str] = Field(default=None, max_length=2_000)
+    orchestration_pattern: AssistantAgentOrchestrationPattern = "SINGLE"
+    parent_agent_id: Optional[str] = Field(default=None, max_length=64)
+    managed_agent_ids: list[str] = Field(default_factory=list, max_length=12)
+    delegation_guidance: Optional[str] = Field(default=None, max_length=2_000)
     profile_request_id: Optional[int] = Field(default=None, ge=1)
     allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
     capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
+    skills: list[AssistantAgentSkillKey] = Field(default_factory=list, max_length=24)
     allowed_tools: list[str] = Field(default_factory=list, max_length=16)
     allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
     daily_token_allocation: Optional[int] = Field(default=None, ge=0, le=100_000_000)
@@ -1114,6 +1181,33 @@ class AssistantAgentBase(BaseModel):
     def normalize_activation_notes(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="activation_notes")
 
+    @field_validator("parent_agent_id")
+    @classmethod
+    def normalize_parent_agent_id(cls, value: Optional[str]) -> Optional[str]:
+        normalized = normalize_optional_text(value, field_name="parent_agent_id", lowercase=True)
+        if normalized is None:
+            return None
+        if not AGENT_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("parent_agent_id must use lowercase letters, numbers, hyphens, or underscores")
+        return normalized
+
+    @field_validator("managed_agent_ids")
+    @classmethod
+    def normalize_managed_agent_ids(cls, value: list[str]) -> list[str]:
+        normalized = [
+            normalize_required_text(agent_id, field_name="managed_agent_ids", lowercase=True)
+            for agent_id in value
+        ]
+        for agent_id in normalized:
+            if not AGENT_ID_PATTERN.fullmatch(agent_id):
+                raise ValueError("managed_agent_ids must use lowercase letters, numbers, hyphens, or underscores")
+        return _ensure_distinct_values(normalized, field_name="managed_agent_ids")
+
+    @field_validator("delegation_guidance")
+    @classmethod
+    def normalize_delegation_guidance(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="delegation_guidance")
+
     @field_validator("system_prompt")
     @classmethod
     def normalize_system_prompt(cls, value: str) -> str:
@@ -1128,6 +1222,11 @@ class AssistantAgentBase(BaseModel):
     @classmethod
     def validate_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
         return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("skills")
+    @classmethod
+    def validate_skills(cls, value: list[AssistantAgentSkillKey]) -> list[AssistantAgentSkillKey]:
+        return _ensure_distinct_values(value, field_name="skills")
 
     @field_validator("allowed_tools")
     @classmethod
@@ -1152,6 +1251,14 @@ class AssistantAgentBase(BaseModel):
             raise ValueError("provider is required when model is set")
         return value
 
+    @model_validator(mode="after")
+    def validate_orchestration_configuration(self) -> "AssistantAgentBase":
+        if self.managed_agent_ids and self.orchestration_pattern == "SINGLE":
+            raise ValueError("managed_agent_ids require a non-SINGLE orchestration_pattern")
+        if self.parent_agent_id is not None and self.parent_agent_id in set(self.managed_agent_ids):
+            raise ValueError("parent_agent_id cannot also appear in managed_agent_ids")
+        return self
+
 
 class AssistantAgentCreate(AssistantAgentBase):
     agent_id: str = Field(..., min_length=2, max_length=64)
@@ -1169,6 +1276,14 @@ class AssistantAgentCreate(AssistantAgentBase):
     @classmethod
     def normalize_created_by(cls, value: str) -> str:
         return normalize_required_text(value, field_name="created_by")
+
+    @model_validator(mode="after")
+    def validate_agent_hierarchy(self) -> "AssistantAgentCreate":
+        if self.parent_agent_id == self.agent_id:
+            raise ValueError("parent_agent_id cannot match agent_id")
+        if self.agent_id in set(self.managed_agent_ids):
+            raise ValueError("managed_agent_ids cannot include agent_id")
+        return self
 
 
 class AssistantAgentUpdate(AssistantAgentBase):
@@ -1481,9 +1596,14 @@ class AssistantAgentOut(BaseModel):
     human_owner_role: Optional[str]
     authority_ceiling: Optional[AssistantAgentAuthorityLevel]
     activation_notes: Optional[str]
+    orchestration_pattern: AssistantAgentOrchestrationPattern = "SINGLE"
+    parent_agent_id: Optional[str] = None
+    managed_agent_ids: list[str] = Field(default_factory=list)
+    delegation_guidance: Optional[str] = None
     profile_request_id: Optional[int]
     allowed_workspaces: list[AssistantWorkspace]
     capabilities: list[AssistantAgentCapability]
+    skills: list[AssistantAgentSkillKey]
     allowed_tools: list[str]
     allowed_action_types: list[AssistantActionType]
     daily_token_allocation: Optional[int]
@@ -1542,6 +1662,7 @@ class AssistantAgentRoleArchetypeOut(BaseModel):
     allowed_workspaces: list[AssistantWorkspace]
     work_objects: list[str]
     capability_ceiling: list[AssistantAgentCapability]
+    skills: list[AssistantAgentSkillKey]
     default_tools: list[str]
     maximum_action_types: list[AssistantActionType]
     authority_ceiling: AssistantAgentAuthorityLevel
@@ -1551,6 +1672,10 @@ class AssistantAgentRoleArchetypeOut(BaseModel):
     required_eval_coverage: list[str]
     eval_gate: Optional[AssistantAgentEvalGateOut] = None
     base_prompt_guidance: list[str]
+    recommended_orchestration_pattern: AssistantAgentOrchestrationPattern = "SINGLE"
+    recommended_parent_role_keys: list[str] = Field(default_factory=list)
+    recommended_managed_role_keys: list[str] = Field(default_factory=list)
+    delegation_guidance: list[str] = Field(default_factory=list)
     current_profile_ids: list[str]
 
 
@@ -1564,6 +1689,7 @@ class AssistantAgentBuildDraftIn(BaseModel):
     model: Optional[str] = Field(default=None, max_length=160)
     allowed_workspaces: list[AssistantWorkspace] = Field(default_factory=list, max_length=16)
     capabilities: list[AssistantAgentCapability] = Field(default_factory=list, max_length=4)
+    skills: list[AssistantAgentSkillKey] = Field(default_factory=list, max_length=24)
     allowed_tools: list[str] = Field(default_factory=list, max_length=16)
     allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
     system_prompt: Optional[str] = Field(default=None, max_length=20_000)
@@ -1607,6 +1733,11 @@ class AssistantAgentBuildDraftIn(BaseModel):
     @classmethod
     def validate_optional_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
         return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("skills")
+    @classmethod
+    def validate_optional_skills(cls, value: list[AssistantAgentSkillKey]) -> list[AssistantAgentSkillKey]:
+        return _ensure_distinct_values(value, field_name="skills")
 
     @field_validator("allowed_tools")
     @classmethod
@@ -1653,6 +1784,7 @@ class AssistantAgentBuildSuggestionOut(BaseModel):
     model: str = Field(..., min_length=1, max_length=160)
     allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
     capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
+    skills: list[AssistantAgentSkillKey] = Field(default_factory=list, max_length=24)
     allowed_tools: list[str] = Field(default_factory=list, max_length=16)
     allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
     system_prompt: str = Field(..., min_length=1, max_length=20_000)
@@ -1698,6 +1830,11 @@ class AssistantAgentBuildSuggestionOut(BaseModel):
     def validate_build_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
         return _ensure_distinct_values(value, field_name="capabilities")
 
+    @field_validator("skills")
+    @classmethod
+    def validate_build_skills(cls, value: list[AssistantAgentSkillKey]) -> list[AssistantAgentSkillKey]:
+        return _ensure_distinct_values(value, field_name="skills")
+
     @field_validator("allowed_tools")
     @classmethod
     def normalize_build_allowed_tools(cls, value: list[str]) -> list[str]:
@@ -1718,6 +1855,7 @@ class AssistantAgentSelfUpdateSuggestionOut(BaseModel):
     description: str = Field(..., min_length=1, max_length=500)
     allowed_workspaces: list[AssistantWorkspace] = Field(..., min_length=1, max_length=16)
     capabilities: list[AssistantAgentCapability] = Field(..., min_length=1, max_length=4)
+    skills: list[AssistantAgentSkillKey] = Field(default_factory=list, max_length=24)
     allowed_tools: list[str] = Field(default_factory=list, max_length=16)
     allowed_action_types: list[AssistantActionType] = Field(default_factory=list, max_length=16)
     system_prompt: str = Field(..., min_length=1, max_length=20_000)
@@ -1740,6 +1878,11 @@ class AssistantAgentSelfUpdateSuggestionOut(BaseModel):
     @classmethod
     def validate_self_update_capabilities(cls, value: list[AssistantAgentCapability]) -> list[AssistantAgentCapability]:
         return _ensure_distinct_values(value, field_name="capabilities")
+
+    @field_validator("skills")
+    @classmethod
+    def validate_self_update_skills(cls, value: list[AssistantAgentSkillKey]) -> list[AssistantAgentSkillKey]:
+        return _ensure_distinct_values(value, field_name="skills")
 
     @field_validator("allowed_tools")
     @classmethod
@@ -1804,6 +1947,7 @@ class AssistantAgentSelfUpdateDraftOut(BaseModel):
     profile_request_id: Optional[int] = None
     allowed_workspaces: list[AssistantWorkspace] = Field(default_factory=list)
     capabilities: list[AssistantAgentCapability] = Field(default_factory=list)
+    skills: list[AssistantAgentSkillKey] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
     allowed_action_types: list[AssistantActionType] = Field(default_factory=list)
     daily_token_allocation: Optional[int] = None

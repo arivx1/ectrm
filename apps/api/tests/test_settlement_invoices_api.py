@@ -23,6 +23,10 @@ from apps.api.app.models import Base
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.reference_calendar import ReferenceCalendar
+from apps.api.app.models.reference_calendar_holiday import ReferenceCalendarHoliday
+from apps.api.app.models.reference_calendar_overlay import ReferenceCalendarOverlay
+from apps.api.app.models.reference_calendar_rule import ReferenceCalendarRule
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
@@ -70,6 +74,10 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             session.query(TradePayment).delete()
             session.query(TradeActualization).delete()
             session.query(TradeInvoice).delete()
+            session.query(ReferenceCalendarHoliday).delete()
+            session.query(ReferenceCalendarOverlay).delete()
+            session.query(ReferenceCalendarRule).delete()
+            session.query(ReferenceCalendar).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
@@ -193,6 +201,76 @@ class SettlementInvoicesApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def _seed_weekend_calendar(self, code: str = "US_SETTLE_TEST") -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                ReferenceCalendar(
+                    code=code,
+                    name="US Settlement Test",
+                    calendar_type="PAYMENT_SYSTEM",
+                    market=None,
+                    timezone="UTC",
+                    description=None,
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="settlement_admin",
+                    updated_at=self.now,
+                    updated_by="settlement_admin",
+                    version=1,
+                )
+            )
+            session.add_all(
+                [
+                    ReferenceCalendarRule(
+                        calendar_code=code,
+                        name="Saturday Weekend",
+                        rule_type="WEEKLY",
+                        closure_type="FULL_CLOSED",
+                        month=None,
+                        day=None,
+                        weekday=5,
+                        occurrence=None,
+                        offset_days=None,
+                        observance_shift="NONE",
+                        is_provisional=False,
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="settlement_admin",
+                        updated_at=self.now,
+                        updated_by="settlement_admin",
+                        version=1,
+                    ),
+                    ReferenceCalendarRule(
+                        calendar_code=code,
+                        name="Sunday Weekend",
+                        rule_type="WEEKLY",
+                        closure_type="FULL_CLOSED",
+                        month=None,
+                        day=None,
+                        weekday=6,
+                        occurrence=None,
+                        offset_days=None,
+                        observance_shift="NONE",
+                        is_provisional=False,
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="settlement_admin",
+                        updated_at=self.now,
+                        updated_by="settlement_admin",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
     def _seed_credit_approval_item(
         self,
         *,
@@ -275,6 +353,33 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             self.assertEqual(audit_event.actor_id, "settlement_admin")
             self.assertEqual(audit_event.payload["request"]["trade_id"], "T-INV-1")
             self.assertEqual(audit_event.payload["invoice"]["invoice_number"], "INV-1001")
+
+    def test_issue_invoice_rolls_due_date_to_next_business_day_when_calendar_is_supplied(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-CAL-1")
+        self._seed_weekend_calendar()
+        self._actualize_trade(admin_token, trade_id="T-INV-CAL-1", actual_quantity=1000)
+
+        response = self.client.post(
+            "/settlement/invoices",
+            json={
+                "trade_id": "T-INV-CAL-1",
+                "invoice_number": "INV-CAL-1001",
+                "invoice_amount": 79250,
+                "due_at": "2026-04-11T12:00:00Z",
+                "due_calendar_code": "US_SETTLE_TEST",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["due_at"], "2026-04-13T12:00:00Z")
+
+        with self.SessionLocal() as session:
+            invoice = session.get(TradeInvoice, body["invoice_id"])
+            assert invoice is not None
+            self.assertEqual(invoice.due_at.isoformat(), "2026-04-13T12:00:00")
 
     def test_void_invoice_marks_not_required_and_clears_unpaid_payment_rows(self) -> None:
         admin_token = self._bootstrap_admin()

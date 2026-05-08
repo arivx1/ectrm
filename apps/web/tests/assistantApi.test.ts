@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 import type { AssistantPromptRequest } from '../src/shared/models.ts'
 
-const { fetchJsonMock, patchJsonMock, postJsonMock, putJsonMock, requestOkMock } = vi.hoisted(() => ({
+const { fetchJsonMock, patchJsonMock, postFormDataMock, postJsonMock, putJsonMock, requestOkMock } = vi.hoisted(() => ({
   fetchJsonMock: vi.fn(),
   patchJsonMock: vi.fn(),
+  postFormDataMock: vi.fn(),
   postJsonMock: vi.fn(),
   putJsonMock: vi.fn(),
   requestOkMock: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('../src/shared/api.ts', () => ({
   fetchJson: fetchJsonMock,
   getResponseCorrelationId: (response: Pick<Response, 'headers'>) => response.headers.get('x-correlation-id'),
   patchJson: patchJsonMock,
+  postFormData: postFormDataMock,
   postJson: postJsonMock,
   putJson: putJsonMock,
   requestOk: requestOkMock,
@@ -39,6 +41,7 @@ import {
   acceptAdminAssistantAgentHealthWorkPackage,
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
+  createAssistantAgent,
   createAssistantAgentEval,
   createAssistantAgentProfileRequest,
   deleteAssistantAgentEval,
@@ -68,13 +71,16 @@ import {
   simulateAssistantAgentPolicy,
   streamAssistantResponse,
   submitAssistantPromptNavigationOutcome,
+  transcribeAssistantVoice,
   updateAdminAssistantAgentWorkPackage,
+  updateAssistantAgent,
   updateAssistantAgentEval,
 } from '../src/entities/assistant/api.ts'
 
 beforeEach(() => {
   fetchJsonMock.mockReset()
   patchJsonMock.mockReset()
+  postFormDataMock.mockReset()
   postJsonMock.mockReset()
   putJsonMock.mockReset()
   requestOkMock.mockReset()
@@ -127,6 +133,35 @@ test('listAssistantActionRequests centralizes query-string assembly for pending 
   assert.equal(url, 'http://api.test/assistant/action-requests?status=PENDING&limit=12&offset=3')
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer actions-token')
+})
+
+test('transcribeAssistantVoice uploads form data and auth headers to the voice endpoint', async () => {
+  const expected = {
+    provider: 'openai',
+    model: 'gpt-4o-mini-transcribe',
+    text: 'Summarize invoices due today.',
+  }
+  postFormDataMock.mockResolvedValueOnce(expected)
+
+  const payload = await transcribeAssistantVoice(
+    'http://api.test',
+    new Blob(['audio'], { type: 'audio/webm' }),
+    {
+      accessToken: 'voice-token',
+      filename: 'voice-note.webm',
+    },
+  )
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postFormDataMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/voice/transcriptions')
+  assert.ok(body instanceof FormData)
+  const uploadedFile = body.get('file')
+  assert.ok(uploadedFile instanceof File)
+  assert.equal(uploadedFile.name, 'voice-note.webm')
+  assert.equal(uploadedFile.type, 'audio/webm')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer voice-token')
 })
 
 test('listAdminAssistantActionRequests includes history filters and returns the page payload', async () => {
@@ -943,6 +978,65 @@ test('listAdminAssistantRoleArchetypes loads the server-owned role catalog with 
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })
 
+test('createAssistantAgent and updateAssistantAgent preserve hierarchy metadata', async () => {
+  const created = { agent_id: 'ops-manager', version: 1 }
+  const updated = { agent_id: 'ops-manager', version: 2 }
+  postJsonMock.mockResolvedValueOnce(created)
+  putJsonMock.mockResolvedValueOnce(updated)
+
+  const createPayload = {
+    agent_id: 'ops-manager',
+    name: 'Ops Manager',
+    description: 'Coordinates specialist agents.',
+    status: 'DRAFT',
+    scope: 'TEAM',
+    provider: null,
+    model: null,
+    role_key: 'trade-ops-copilot',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Manager role',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'STAGE',
+    activation_notes: 'Prompt reviewed.',
+    orchestration_pattern: 'MANAGER',
+    parent_agent_id: 'control-tower-agent',
+    managed_agent_ids: ['movement-controller-agent', 'workflow-controller-agent'],
+    delegation_guidance: 'Consult specialists before final synthesis.',
+    profile_request_id: null,
+    allowed_workspaces: ['assistant', 'operations'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+    skills: ['trade_operations_coordination', 'inter_agent_consultation'],
+    allowed_tools: ['get_workspace_summary', 'consult_managed_agent'],
+    allowed_action_types: [],
+    daily_token_allocation: 25000,
+    system_prompt: 'Coordinate specialists and summarize the blocker.',
+  } as const
+
+  const createdResult = await createAssistantAgent('http://api.test', createPayload)
+  const updatedResult = await updateAssistantAgent('http://api.test', 'ops-manager', {
+    ...createPayload,
+    name: 'Ops Manager v2',
+  })
+
+  assert.equal(createdResult, created)
+  assert.equal(updatedResult, updated)
+  const [createUrl, createBody, createInit] = postJsonMock.mock.calls[0]
+  assert.equal(createUrl, 'http://api.test/admin/assistant/agents')
+  assert.deepEqual(createBody, {
+    ...createPayload,
+    created_by: 'assistant_user',
+  })
+  assert.equal(new Headers((createInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer mutation-token')
+  const [updateUrl, updateBody, updateInit] = putJsonMock.mock.calls[0]
+  assert.equal(updateUrl, 'http://api.test/admin/assistant/agents/ops-manager')
+  assert.deepEqual(updateBody, {
+    ...createPayload,
+    name: 'Ops Manager v2',
+    updated_by: 'assistant_user',
+  })
+  assert.equal(new Headers((updateInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer mutation-token')
+})
+
 test('listAdminAssistantProfileRequests loads the admin request queue with mutation auth', async () => {
   const expected = [{ request_id: 10, status: 'REQUESTED' }]
   fetchJsonMock.mockResolvedValueOnce(expected)
@@ -1214,6 +1308,7 @@ test('buildAssistantAgentDraft posts the normalized current draft to the admin b
     model: 'gpt-5-mini',
     allowed_workspaces: ['assistant', 'operations'],
     capabilities: ['READ', 'EXPLAIN'],
+    skills: ['trade_operations_coordination'],
     allowed_tools: ['list_workflow_items'],
     allowed_action_types: [],
     system_prompt: 'Summarize the queue.',
@@ -1235,6 +1330,7 @@ test('buildAssistantAgentDraft posts the normalized current draft to the admin b
       model: '  ',
       allowed_workspaces: ['assistant', 'operations'],
       capabilities: ['READ', 'EXPLAIN'],
+      skills: ['trade_operations_coordination'],
       allowed_tools: ['list_workflow_items'],
       allowed_action_types: [],
       system_prompt: '  Summarize the queue.  ',
@@ -1254,6 +1350,7 @@ test('buildAssistantAgentDraft posts the normalized current draft to the admin b
       scope: 'TEAM',
       allowed_workspaces: ['assistant', 'operations'],
       capabilities: ['READ', 'EXPLAIN'],
+      skills: ['trade_operations_coordination'],
       allowed_tools: ['list_workflow_items'],
       allowed_action_types: [],
       system_prompt: 'Summarize the queue.',
@@ -1283,6 +1380,7 @@ test('generateAssistantAgentSelfUpdateDraft posts an optional normalized focus b
     profile_request_id: null,
     allowed_workspaces: ['assistant', 'operations'],
     capabilities: ['READ', 'EXPLAIN'],
+    skills: ['trade_operations_coordination'],
     allowed_tools: ['list_workflow_items'],
     allowed_action_types: [],
     daily_token_allocation: null,

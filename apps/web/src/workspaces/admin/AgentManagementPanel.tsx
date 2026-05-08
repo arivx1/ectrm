@@ -63,12 +63,15 @@ import type {
   AssistantAgentHealthReview,
   AssistantAgentRevision,
   AssistantAgentRevisionPayload,
+  AssistantAgentSkillDefinition,
+  AssistantAgentSkillKey,
   AssistantAgentSelfUpdateDraft,
   AssistantAgentWorkPackage,
   AssistantAgentWorkPackageStatus,
   AssistantAutonomyReviewBrief,
   AssistantAgentCapability,
   AssistantAgentEvalGateStatus,
+  AssistantAgentOrchestrationPattern,
   AssistantAgentProfileKind,
   AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
@@ -180,6 +183,13 @@ const AUTHORITY_OPTIONS: AssistantAgentAuthorityLevel[] = [
   'STAGE',
   'EXECUTE',
   'EXTERNAL_COMMIT',
+]
+const ORCHESTRATION_PATTERN_OPTIONS: AssistantAgentOrchestrationPattern[] = [
+  'SINGLE',
+  'MANAGER',
+  'TRIAGE',
+  'PARALLEL',
+  'EVALUATOR',
 ]
 const DEFAULT_AGENT_WORK_PACKAGE_FILTERS: AgentWorkPackageFilters = {
   status: '',
@@ -297,9 +307,14 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
     human_owner_role: agent.human_owner_role ?? '',
     authority_ceiling: agent.authority_ceiling ?? '',
     activation_notes: agent.activation_notes ?? '',
+    orchestration_pattern: agent.orchestration_pattern,
+    parent_agent_id: agent.parent_agent_id ?? '',
+    managed_agent_ids: [...agent.managed_agent_ids],
+    delegation_guidance: agent.delegation_guidance ?? '',
     profile_request_id: agent.profile_request_id ?? null,
     allowed_workspaces: [...agent.allowed_workspaces],
     capabilities: [...agent.capabilities],
+    skills: [...agent.skills],
     allowed_tools: [...agent.allowed_tools],
     allowed_action_types: [...agent.allowed_action_types],
     daily_token_allocation:
@@ -324,9 +339,14 @@ function toAgentFormFromSelfUpdateDraft(draft: AssistantAgentSelfUpdateDraft): A
     human_owner_role: draft.human_owner_role ?? null,
     authority_ceiling: draft.authority_ceiling ?? null,
     activation_notes: draft.activation_notes ?? null,
+    orchestration_pattern: draft.orchestration_pattern,
+    parent_agent_id: draft.parent_agent_id ?? null,
+    managed_agent_ids: [...draft.managed_agent_ids],
+    delegation_guidance: draft.delegation_guidance ?? null,
     profile_request_id: draft.profile_request_id ?? null,
     allowed_workspaces: [...draft.allowed_workspaces],
     capabilities: [...draft.capabilities],
+    skills: [...draft.skills],
     allowed_tools: [...draft.allowed_tools],
     allowed_action_types: [...draft.allowed_action_types],
     daily_token_allocation: draft.daily_token_allocation ?? null,
@@ -349,9 +369,14 @@ function toAgentFormFromRevisionPayload(payload: AssistantAgentRevisionPayload, 
     human_owner_role: payload.human_owner_role ?? '',
     authority_ceiling: payload.authority_ceiling ?? '',
     activation_notes: payload.activation_notes ?? '',
+    orchestration_pattern: payload.orchestration_pattern,
+    parent_agent_id: payload.parent_agent_id ?? '',
+    managed_agent_ids: [...payload.managed_agent_ids],
+    delegation_guidance: payload.delegation_guidance ?? '',
     profile_request_id: payload.profile_request_id ?? null,
     allowed_workspaces: [...payload.allowed_workspaces],
     capabilities: [...payload.capabilities],
+    skills: [...payload.skills],
     allowed_tools: [...payload.allowed_tools],
     allowed_action_types: [...payload.allowed_action_types],
     daily_token_allocation:
@@ -382,9 +407,14 @@ function toRevisionFromSelfUpdateDraft(draft: AssistantAgentSelfUpdateDraft): As
       human_owner_role: draft.human_owner_role ?? null,
       authority_ceiling: draft.authority_ceiling ?? null,
       activation_notes: draft.activation_notes ?? null,
+      orchestration_pattern: draft.orchestration_pattern,
+      parent_agent_id: draft.parent_agent_id ?? null,
+      managed_agent_ids: [...draft.managed_agent_ids],
+      delegation_guidance: draft.delegation_guidance ?? null,
       profile_request_id: draft.profile_request_id ?? null,
       allowed_workspaces: draft.allowed_workspaces,
       capabilities: draft.capabilities,
+      skills: draft.skills,
       allowed_tools: draft.allowed_tools,
       allowed_action_types: draft.allowed_action_types,
       daily_token_allocation: draft.daily_token_allocation ?? null,
@@ -418,9 +448,14 @@ function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
     human_owner_role: form.human_owner_role.trim() ? form.human_owner_role.trim() : null,
     authority_ceiling: form.authority_ceiling || null,
     activation_notes: form.activation_notes.trim() ? form.activation_notes.trim() : null,
+    orchestration_pattern: form.orchestration_pattern,
+    parent_agent_id: form.parent_agent_id.trim() ? form.parent_agent_id.trim() : null,
+    managed_agent_ids: form.managed_agent_ids,
+    delegation_guidance: form.delegation_guidance.trim() ? form.delegation_guidance.trim() : null,
     profile_request_id: form.profile_request_id,
     allowed_workspaces: form.allowed_workspaces,
     capabilities: form.capabilities,
+    skills: form.skills,
     allowed_tools: form.allowed_tools,
     allowed_action_types: form.allowed_action_types,
     daily_token_allocation: dailyTokenAllocation,
@@ -628,6 +663,293 @@ function findRoleForForm(
 ): AssistantAgentRoleArchetype | null {
   const roleKey = form.role_key.trim()
   return roleKey ? roleArchetypes.find((role) => role.role_key === roleKey) ?? null : null
+}
+
+function orchestrationPatternLabel(pattern: AssistantAgentOrchestrationPattern): string {
+  switch (pattern) {
+    case 'MANAGER':
+      return 'Manager'
+    case 'TRIAGE':
+      return 'Triage'
+    case 'PARALLEL':
+      return 'Parallel'
+    case 'EVALUATOR':
+      return 'Evaluator'
+    default:
+      return 'Single'
+  }
+}
+
+function agentHierarchyLabel(agent: Pick<AssistantAdminAgent, 'agent_id' | 'name' | 'role_key'>): string {
+  return `${agent.name} (${agent.agent_id})${agent.role_key ? ` · ${agent.role_key}` : ''}`
+}
+
+function findAgentLabelById(
+  agentId: string,
+  agentRecords: readonly Pick<AssistantAdminAgent, 'agent_id' | 'name' | 'role_key'>[],
+): string {
+  const record = agentRecords.find((agent) => agent.agent_id === agentId)
+  return record ? agentHierarchyLabel(record) : agentId
+}
+
+function describeRoleKeyList(roleKeys: readonly string[]): string {
+  return roleKeys.length > 0 ? roleKeys.map((roleKey) => titleFromAgentId(roleKey) || roleKey).join(' · ') : 'None'
+}
+
+function resolveRecommendedHierarchyAgents(
+  role: AssistantAgentRoleArchetype,
+  agentRecords: AssistantAdminAgent[],
+  currentAgentId: string,
+): {
+  parentAgent: AssistantAdminAgent | null
+  managedAgents: AssistantAdminAgent[]
+} {
+  const normalizedCurrentAgentId = currentAgentId.trim()
+  const availableAgents = agentRecords.filter((agent) => agent.agent_id !== normalizedCurrentAgentId)
+  const parentAgent =
+    role.recommended_parent_role_keys
+      .map((roleKey) => availableAgents.find((agent) => agent.role_key === roleKey) ?? null)
+      .find((agent) => agent !== null) ?? null
+  const seenManagedIds = new Set<string>()
+  const managedAgents: AssistantAdminAgent[] = []
+
+  for (const roleKey of role.recommended_managed_role_keys) {
+    for (const agent of availableAgents) {
+      if (agent.role_key !== roleKey || seenManagedIds.has(agent.agent_id)) {
+        continue
+      }
+      managedAgents.push(agent)
+      seenManagedIds.add(agent.agent_id)
+    }
+  }
+
+  return { parentAgent, managedAgents }
+}
+
+function applyRoleHierarchyRecommendations(
+  form: AgentForm,
+  role: AssistantAgentRoleArchetype,
+  agentRecords: AssistantAdminAgent[],
+): AgentForm {
+  const recommendation = resolveRecommendedHierarchyAgents(role, agentRecords, form.agent_id)
+  return {
+    ...form,
+    orchestration_pattern: role.recommended_orchestration_pattern,
+    parent_agent_id: recommendation.parentAgent?.agent_id ?? '',
+    managed_agent_ids: recommendation.managedAgents.map((agent) => agent.agent_id),
+    delegation_guidance: role.delegation_guidance.join(' '),
+  }
+}
+
+function describeHierarchyPlan(
+  form: AgentForm,
+  agentRecords: readonly Pick<AssistantAdminAgent, 'agent_id' | 'name' | 'role_key'>[],
+): string {
+  const segments = [orchestrationPatternLabel(form.orchestration_pattern)]
+  if (form.parent_agent_id.trim()) {
+    segments.push(`reports to ${findAgentLabelById(form.parent_agent_id.trim(), agentRecords)}`)
+  }
+  if (form.managed_agent_ids.length > 0) {
+    segments.push(
+      `${form.managed_agent_ids.length} managed subordinate${form.managed_agent_ids.length === 1 ? '' : 's'}`,
+    )
+  }
+  return segments.join(' · ')
+}
+
+type AgentHierarchyEditorProps = {
+  form: AgentForm
+  setForm: React.Dispatch<React.SetStateAction<AgentForm>>
+  role: AssistantAgentRoleArchetype | null
+  agentRecords: AssistantAdminAgent[]
+}
+
+function AgentHierarchyEditor({
+  form,
+  setForm,
+  role,
+  agentRecords,
+}: AgentHierarchyEditorProps) {
+  const selectableAgents = agentRecords.filter((agent) => agent.agent_id !== form.agent_id.trim())
+  const recommendedHierarchy = role
+    ? resolveRecommendedHierarchyAgents(role, agentRecords, form.agent_id)
+    : null
+
+  return (
+    <div className="assistant-builder-preview assistant-profile-panel">
+      <div className="assistant-admin-section-head">
+        <div>
+          <span className="eyebrow">Hierarchy</span>
+          <h4>{orchestrationPatternLabel(form.orchestration_pattern)} orchestration</h4>
+        </div>
+        <span>
+          {role
+            ? `Recommended ${orchestrationPatternLabel(role.recommended_orchestration_pattern)}`
+            : 'Optional for custom agents'}
+        </span>
+      </div>
+
+      <div className="assistant-admin-form-grid">
+        <label className="field">
+          <span>Orchestration Pattern</span>
+          <select
+            className="control"
+            value={form.orchestration_pattern}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                orchestration_pattern: event.target.value as AssistantAgentOrchestrationPattern,
+                managed_agent_ids:
+                  event.target.value === 'SINGLE' ? [] : current.managed_agent_ids,
+              }))
+            }
+          >
+            {ORCHESTRATION_PATTERN_OPTIONS.map((pattern) => (
+              <option key={pattern} value={pattern}>
+                {orchestrationPatternLabel(pattern)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Parent Agent</span>
+          <select
+            className="control"
+            value={form.parent_agent_id}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                parent_agent_id: event.target.value,
+              }))
+            }
+          >
+            <option value="">No parent agent</option>
+            {selectableAgents.map((agent) => (
+              <option key={agent.agent_id} value={agent.agent_id}>
+                {agentHierarchyLabel(agent)}
+              </option>
+            ))}
+          </select>
+          <small className="form-note">
+            Use a parent when this agent should report conclusions upward instead of owning final synthesis itself.
+          </small>
+        </label>
+      </div>
+
+      <div className="assistant-admin-option-group">
+        <strong>Managed subordinates</strong>
+        <p>
+          Pick the concrete agents this manager can consult. Save stays blocked if you keep subordinates on a
+          single-agent pattern.
+        </p>
+        <div className="chip-row">
+          {selectableAgents.map((agent) => (
+            <button
+              key={agent.agent_id}
+              type="button"
+              className={`entity-chip ${form.managed_agent_ids.includes(agent.agent_id) ? '' : 'entity-chip-soft'}`}
+              disabled={form.orchestration_pattern === 'SINGLE'}
+              onClick={() =>
+                setForm((current) => ({
+                  ...current,
+                  managed_agent_ids: toggleSelection(current.managed_agent_ids, agent.agent_id),
+                }))
+              }
+              title={agent.role_key ?? agent.agent_id}
+            >
+              {agent.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <label className="field">
+        <span>Delegation Guidance</span>
+        <textarea
+          className="control"
+          value={form.delegation_guidance}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              delegation_guidance: event.target.value,
+            }))
+          }
+          placeholder="Describe when this agent should delegate, what it still owns, and when it should stop."
+        />
+      </label>
+
+      <div className="assistant-builder-preview-grid">
+        <div className="assistant-sidebar-block">
+          <strong>Current plan</strong>
+          <p>{describeHierarchyPlan(form, agentRecords)}</p>
+          <small>
+            {form.managed_agent_ids.length > 0
+              ? form.managed_agent_ids.map((agentId) => findAgentLabelById(agentId, agentRecords)).join(' · ')
+              : 'No managed subordinates selected'}
+          </small>
+        </div>
+        <div className="assistant-sidebar-block">
+          <strong>Recommended topology</strong>
+          <p>
+            {role
+              ? `${orchestrationPatternLabel(role.recommended_orchestration_pattern)} · parent ${describeRoleKeyList(
+                  role.recommended_parent_role_keys,
+                )}`
+              : 'No role recommendation selected'}
+          </p>
+          <small>
+            {role
+              ? `Managed roles: ${describeRoleKeyList(role.recommended_managed_role_keys)}`
+              : 'Custom agents can stay single until a reusable delegation pattern proves out.'}
+          </small>
+        </div>
+        <div className="assistant-sidebar-block">
+          <strong>Resolved recommendations</strong>
+          <p>
+            {recommendedHierarchy?.parentAgent
+              ? `Parent: ${recommendedHierarchy.parentAgent.name}`
+              : 'No recommended parent agent loaded'}
+          </p>
+          <small>
+            {recommendedHierarchy && recommendedHierarchy.managedAgents.length > 0
+              ? recommendedHierarchy.managedAgents.map((agent) => agent.name).join(' · ')
+              : 'No recommended subordinate agents are currently loaded'}
+          </small>
+        </div>
+      </div>
+
+      {form.orchestration_pattern !== 'SINGLE' && !form.skills.includes('inter_agent_consultation') ? (
+        <small className="form-note">
+          Add the Inter-Agent Consultation skill before saving a multi-agent orchestration pattern.
+        </small>
+      ) : null}
+
+      {role ? (
+        <div className="toolbar settings-actions">
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={() => setForm((current) => applyRoleHierarchyRecommendations(current, role, agentRecords))}
+          >
+            Apply Role Hierarchy
+          </button>
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={() =>
+              setForm((current) => ({
+                ...current,
+                parent_agent_id: '',
+                managed_agent_ids: [],
+              }))
+            }
+          >
+            Clear Wiring
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function fitStatusLabel(status: AgentRoleProfileFitStatus): string {
@@ -888,14 +1210,20 @@ function hasActiveWorkPackageFilters(filters: AgentWorkPackageFilters): boolean 
 function PromptProfilePreview({
   form,
   role,
+  agentRecords,
 }: {
   form: AgentForm
   role: AssistantAgentRoleArchetype | null
+  agentRecords: AssistantAdminAgent[]
 }) {
   const previewLines = [
     `${describeProfileKind(form.profile_kind)}${role ? ` · ${role.name}` : ''}`,
+    'Build recipe: hierarchy + role + skills + capabilities + workspaces + tools + actions + prompt',
     form.human_owner_role ? `Owner: ${form.human_owner_role}` : null,
     form.authority_ceiling ? `Authority: ${form.authority_ceiling}` : null,
+    `Hierarchy: ${describeHierarchyPlan(form, agentRecords)}`,
+    form.delegation_guidance ? `Delegation: ${form.delegation_guidance}` : null,
+    form.skills.length > 0 ? `Skills: ${form.skills.join(' · ')}` : 'Skills: none selected',
     form.specialization_summary ? `Specialization: ${form.specialization_summary}` : null,
     form.system_prompt ? form.system_prompt : 'Prompt instructions are still blank.',
   ].filter(Boolean)
@@ -950,6 +1278,28 @@ function summarizeCapabilitySelection(values: readonly AssistantAgentCapability[
   return values.length > 0 ? values.join(' · ') : 'No capabilities selected'
 }
 
+function formatAssistantSkillLabel(
+  skill: AssistantAgentSkillKey,
+  definitionsByName: ReadonlyMap<AssistantAgentSkillKey, AssistantAgentSkillDefinition>,
+): string {
+  return (
+    definitionsByName.get(skill)?.label ??
+    skill
+      .split('_')
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ')
+  )
+}
+
+function summarizeSkillSelection(
+  values: readonly AssistantAgentSkillKey[],
+  definitionsByName: ReadonlyMap<AssistantAgentSkillKey, AssistantAgentSkillDefinition>,
+): string {
+  return values.length > 0
+    ? values.map((skill) => formatAssistantSkillLabel(skill, definitionsByName)).join(' · ')
+    : 'No explicit skill set'
+}
+
 function summarizeToolSelection(values: readonly string[]): string {
   return values.length > 0 ? `${values.length} explicit tool${values.length === 1 ? '' : 's'}` : 'No explicit tool subset'
 }
@@ -973,6 +1323,7 @@ export function AgentManagementPanel({
   const [agentRecords, setAgentRecords] = useState<AssistantAdminAgent[]>([])
   const [profileRequests, setProfileRequests] = useState<AssistantAgentProfileRequest[]>([])
   const [agentEvalRecords, setAgentEvalRecords] = useState<AssistantAgentEval[]>([])
+  const [availableSkills, setAvailableSkills] = useState<AssistantAgentSkillDefinition[]>([])
   const [availableTools, setAvailableTools] = useState<string[]>([])
   const [availableActionDefinitions, setAvailableActionDefinitions] = useState<AssistantActionDefinition[]>([])
   const [roleArchetypes, setRoleArchetypes] = useState<AssistantAgentRoleArchetype[]>([])
@@ -1121,14 +1472,20 @@ export function AgentManagementPanel({
     () => buildAssistantActionDefinitionMap(availableActionDefinitions),
     [availableActionDefinitions],
   )
+  const skillDefinitionsByName = useMemo(
+    () => new Map(availableSkills.map((skill) => [skill.name, skill])),
+    [availableSkills],
+  )
   const actionTypeOptions = useMemo(
     () => assistantActionTypeOptions(availableActionDefinitions),
     [availableActionDefinitions],
   )
   const createWorkspaceSummary = createForm.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')
   const createCapabilitySummary = createForm.capabilities.join(' · ')
+  const createSkillSummary = summarizeSkillSelection(createForm.skills, skillDefinitionsByName)
   const createLiveToolSummary = describeLiveToolPlan(createForm, availableTools)
   const createActionSummary = describeActionPlan(createForm)
+  const editSkillSummary = summarizeSkillSelection(editForm.skills, skillDefinitionsByName)
   const editActionSummary = describeActionPlan(editForm)
   const supervisionPolicyMessages = useMemo(
     () =>
@@ -1199,6 +1556,7 @@ export function AgentManagementPanel({
         setProfileRequests(nextProfileRequests)
         setAgentEvalRecords(nextAgentEvals)
         setRoleArchetypes(nextRoles)
+        setAvailableSkills(runtimeSettings.available_skills)
         setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
         setAvailableActionDefinitions(runtimeSettings.available_action_types)
         setOpenAiProviderStatus(
@@ -1227,6 +1585,7 @@ export function AgentManagementPanel({
         setProfileRequests([])
         setAgentEvalRecords([])
         setRoleArchetypes([])
+        setAvailableSkills([])
         setAvailableTools([])
         setAvailableActionDefinitions([])
         setOpenAiProviderStatus(null)
@@ -1587,7 +1946,7 @@ export function AgentManagementPanel({
     setBuilderWarnings([])
     setSelectedCreateTemplateKey(null)
     setSelectedCreateRoleKey(role.role_key)
-    setCreateForm(buildAgentBuilderDraftFromRole(role, availableTools))
+    setCreateForm(applyRoleHierarchyRecommendations(buildAgentBuilderDraftFromRole(role, availableTools), role, agentRecords))
     setBuilderBrief((current) =>
       current.trim()
         ? current
@@ -1600,8 +1959,9 @@ export function AgentManagementPanel({
     setBuilderWarnings([])
     setSelectedCreateTemplateKey(templateKey)
     const draft = buildAgentBuilderDraft(templateKey, availableTools)
+    const role = roleArchetypes.find((entry) => entry.role_key === draft.role_key)
     setSelectedCreateRoleKey(draft.role_key || null)
-    setCreateForm(draft)
+    setCreateForm(role ? applyRoleHierarchyRecommendations(draft, role, agentRecords) : draft)
     setBuilderBrief((current) =>
       current.trim()
         ? current
@@ -1683,6 +2043,7 @@ export function AgentManagementPanel({
           model: createForm.model || null,
           allowed_workspaces: createForm.allowed_workspaces,
           capabilities: createForm.capabilities,
+          skills: createForm.skills,
           allowed_tools: createForm.allowed_tools,
           allowed_action_types: createForm.allowed_action_types,
           system_prompt: createForm.system_prompt || undefined,
@@ -1703,9 +2064,14 @@ export function AgentManagementPanel({
         human_owner_role: createForm.human_owner_role,
         authority_ceiling: createForm.authority_ceiling,
         activation_notes: createForm.activation_notes,
+        orchestration_pattern: createForm.orchestration_pattern,
+        parent_agent_id: createForm.parent_agent_id,
+        managed_agent_ids: [...createForm.managed_agent_ids],
+        delegation_guidance: createForm.delegation_guidance,
         profile_request_id: createForm.profile_request_id,
         allowed_workspaces: [...suggestion.allowed_workspaces],
         capabilities: [...suggestion.capabilities],
+        skills: [...suggestion.skills],
         allowed_tools: [...suggestion.allowed_tools],
         allowed_action_types: [...suggestion.allowed_action_types],
         daily_token_allocation: createForm.daily_token_allocation,
@@ -1908,9 +2274,14 @@ export function AgentManagementPanel({
       activation_notes: request.approval_notes
         ? `Approved profile request #${request.request_id}: ${request.approval_notes}`
         : `Approved profile request #${request.request_id}.`,
+      orchestration_pattern: 'SINGLE',
+      parent_agent_id: '',
+      managed_agent_ids: [],
+      delegation_guidance: '',
       profile_request_id: request.request_id,
       allowed_workspaces: [...request.requested_workspaces],
       capabilities,
+      skills: [],
       allowed_tools: allowedTools,
       allowed_action_types: [],
       daily_token_allocation: '',
@@ -1993,9 +2364,14 @@ export function AgentManagementPanel({
           human_owner_role: payload.human_owner_role,
           authority_ceiling: payload.authority_ceiling,
           activation_notes: payload.activation_notes,
+          orchestration_pattern: payload.orchestration_pattern,
+          parent_agent_id: payload.parent_agent_id,
+          managed_agent_ids: payload.managed_agent_ids,
+          delegation_guidance: payload.delegation_guidance,
           profile_request_id: payload.profile_request_id,
           allowed_workspaces: payload.allowed_workspaces,
           capabilities: payload.capabilities,
+          skills: payload.skills,
           allowed_tools: payload.allowed_tools,
           allowed_action_types: payload.allowed_action_types,
           daily_token_allocation: payload.daily_token_allocation,
@@ -3284,8 +3660,13 @@ export function AgentManagementPanel({
                           {agent.scope}
                           {` · ${describeProfileKind(agent.profile_kind)}`}
                           {agent.role_key ? ` · ${agent.role_key}` : ''}
+                          {` · ${orchestrationPatternLabel(agent.orchestration_pattern)}`}
+                          {agent.managed_agent_ids.length > 0
+                            ? ` · ${agent.managed_agent_ids.length} managed`
+                            : ''}
                           {agent.provider ? ` · ${agent.provider}` : ' · inherited provider'}
                           {agent.model ? ` · ${agent.model}` : ''}
+                          {agent.skills.length > 0 ? ` · ${agent.skills.length} skills` : ''}
                           {agent.allowed_tools.length > 0 ? ` · ${agent.allowed_tools.length} live tools` : ''}
                           {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
                         </small>
@@ -3343,6 +3724,10 @@ export function AgentManagementPanel({
                         <small>
                           {role.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
                         </small>
+                        <small>
+                          {orchestrationPatternLabel(role.recommended_orchestration_pattern)} · manages{' '}
+                          {role.recommended_managed_role_keys.length}
+                        </small>
                         <small>{roleCatalogSyncSummary(role)}</small>
                       </button>
                     ))}
@@ -3368,6 +3753,19 @@ export function AgentManagementPanel({
                         <strong>Default tools</strong>
                         <p>{listSummary(selectedCreateRole.default_tools, 'No default live tools')}</p>
                         <small>{selectedCreateRole.capability_ceiling.join(' · ')}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Skills + recipe</strong>
+                        <p>{summarizeSkillSelection(selectedCreateRole.skills, skillDefinitionsByName)}</p>
+                        <small>Role + skills + capabilities + tools + actions + prompt guidance</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Hierarchy</strong>
+                        <p>{orchestrationPatternLabel(selectedCreateRole.recommended_orchestration_pattern)}</p>
+                        <small>
+                          Parent roles: {describeRoleKeyList(selectedCreateRole.recommended_parent_role_keys)} ·
+                          managed roles: {describeRoleKeyList(selectedCreateRole.recommended_managed_role_keys)}
+                        </small>
                       </div>
                       <div className="assistant-sidebar-block">
                         <strong>Actions</strong>
@@ -3458,6 +3856,18 @@ export function AgentManagementPanel({
                           <strong>Workspace coverage</strong>
                           <p>{createWorkspaceSummary}</p>
                           <small>{createCapabilitySummary}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Skill plan</strong>
+                          <p>{createSkillSummary}</p>
+                          <small>Make the specialization visible before anyone reads the prompt.</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Hierarchy plan</strong>
+                          <p>{describeHierarchyPlan(createForm, agentRecords)}</p>
+                          <small>
+                            {createForm.delegation_guidance || 'No delegation guidance drafted yet.'}
+                          </small>
                         </div>
                         <div className="assistant-sidebar-block">
                           <strong>Live tool plan</strong>
@@ -3843,8 +4253,15 @@ export function AgentManagementPanel({
                     />
                   </label>
 
+                  <AgentHierarchyEditor
+                    form={createForm}
+                    setForm={setCreateForm}
+                    role={createFormRole}
+                    agentRecords={agentRecords}
+                  />
+
                   <RoleProfileFitSummary fit={createProfileFit} />
-                  <PromptProfilePreview form={createForm} role={createFormRole} />
+                  <PromptProfilePreview form={createForm} role={createFormRole} agentRecords={agentRecords} />
 
                   {createFormRole ? (
                     <div className="toolbar settings-actions">
@@ -3895,6 +4312,52 @@ export function AgentManagementPanel({
                           onClick={() => setCreateForm((current) => toggleCapability(current, capability))}
                         >
                           {capability}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="assistant-admin-option-group">
+                    <strong>Skills</strong>
+                    <p>Make the agent's build recipe explicit: which reusable specialties should users expect?</p>
+                    <div className="chip-row">
+                      {availableSkills.map((skill) => (
+                        <button
+                          key={skill.name}
+                          type="button"
+                          className={`entity-chip ${createForm.skills.includes(skill.name) ? '' : 'entity-chip-soft'}`}
+                          onClick={() =>
+                            setCreateForm((current) => ({
+                              ...current,
+                              skills: toggleSelection(current.skills, skill.name),
+                            }))
+                          }
+                          title={skill.description}
+                        >
+                          {skill.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="assistant-admin-option-group">
+                    <strong>Skills</strong>
+                    <p>Keep the specialization explicit so users can see how this agent is built.</p>
+                    <div className="chip-row">
+                      {availableSkills.map((skill) => (
+                        <button
+                          key={skill.name}
+                          type="button"
+                          className={`entity-chip ${editForm.skills.includes(skill.name) ? '' : 'entity-chip-soft'}`}
+                          onClick={() =>
+                            setEditForm((current) => ({
+                              ...current,
+                              skills: toggleSelection(current.skills, skill.name),
+                            }))
+                          }
+                          title={skill.description}
+                        >
+                          {skill.label}
                         </button>
                       ))}
                     </div>
@@ -4081,6 +4544,16 @@ export function AgentManagementPanel({
                           )}
                         </p>
                         <small>{summarizeCapabilitySelection(editForm.capabilities)}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Skills</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeSkillSelection(selectedAgent.skills, skillDefinitionsByName),
+                            summarizeSkillSelection(editForm.skills, skillDefinitionsByName),
+                          )}
+                        </p>
+                        <small>{editSkillSummary}</small>
                       </div>
                       <div className="assistant-sidebar-block">
                         <strong>Live tools</strong>
@@ -4997,7 +5470,7 @@ export function AgentManagementPanel({
                         <div className="assistant-builder-warning-list">
                           {selfUpdateDraft.diff_summary.map((entry) => (
                             <small key={`${entry.field_key}-${entry.next_value}`} className="form-note">
-                              {entry.label}: {entry.current_value} -> {entry.next_value}
+                              {entry.label}: {entry.current_value}{' -> '}{entry.next_value}
                             </small>
                           ))}
                         </div>
@@ -5323,8 +5796,15 @@ export function AgentManagementPanel({
                     />
                   </label>
 
+                  <AgentHierarchyEditor
+                    form={editForm}
+                    setForm={setEditForm}
+                    role={editFormRole}
+                    agentRecords={agentRecords}
+                  />
+
                   <RoleProfileFitSummary fit={editProfileFit} />
-                  <PromptProfilePreview form={editForm} role={editFormRole} />
+                  <PromptProfilePreview form={editForm} role={editFormRole} agentRecords={agentRecords} />
 
                   {editFormRole ? (
                     <div className="toolbar settings-actions">
@@ -5332,7 +5812,11 @@ export function AgentManagementPanel({
                         type="button"
                         className="button button-ghost"
                         onClick={() => {
-                          const roleDraft = buildAgentBuilderDraftFromRole(editFormRole, availableTools)
+                          const roleDraft = applyRoleHierarchyRecommendations(
+                            buildAgentBuilderDraftFromRole(editFormRole, availableTools),
+                            editFormRole,
+                            agentRecords,
+                          )
                           setEditForm((current) => ({
                             ...current,
                             profile_kind: 'ROLE_DERIVED',
@@ -5341,10 +5825,15 @@ export function AgentManagementPanel({
                             human_owner_role: roleDraft.human_owner_role,
                             authority_ceiling: roleDraft.authority_ceiling,
                             activation_notes: current.activation_notes || roleDraft.activation_notes,
+                            orchestration_pattern: roleDraft.orchestration_pattern,
+                            parent_agent_id: roleDraft.parent_agent_id,
+                            managed_agent_ids: [...roleDraft.managed_agent_ids],
+                            delegation_guidance: roleDraft.delegation_guidance,
                             specialization_summary:
                               current.specialization_summary || roleDraft.specialization_summary,
                             allowed_workspaces: roleDraft.allowed_workspaces,
                             capabilities: roleDraft.capabilities,
+                            skills: roleDraft.skills,
                             allowed_tools: roleDraft.allowed_tools,
                             allowed_action_types: roleDraft.allowed_action_types,
                             system_prompt: current.system_prompt.trim() ? current.system_prompt : roleDraft.system_prompt,

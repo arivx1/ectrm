@@ -1,6 +1,8 @@
 import { fetchJson, patchJson, postFormData, postJson, requestOk } from '../../shared/api'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type {
+  DocumentGmailInboxBrowseResultRecord,
+  DocumentGmailInboxMessageDetailRecord,
   DocumentIngestionRecord,
   DocumentProcessorRuntimeSettingsRecord,
   DocumentSchemaRegistryRecord,
@@ -36,6 +38,38 @@ export type UpdateDocumentPageInput = {
   table_blocks?: DocumentTableBlockInput[]
   review_status?: string | null
   review_notes?: string | null
+}
+
+export type ImportGmailInboxDocumentsInput = {
+  query?: string | null
+  max_messages?: number | null
+}
+
+export type GmailImportedDocument = {
+  document_id: string
+  display_name: string
+  original_filename: string
+  gmail_message_id: string
+  gmail_thread_id: string | null
+  gmail_subject: string | null
+  gmail_sender: string | null
+}
+
+export type GmailInboxImportResult = {
+  query: string
+  requested_max_messages: number
+  matched_message_count: number
+  matched_attachment_count: number
+  imported_count: number
+  skipped_count: number
+  imported_documents: GmailImportedDocument[]
+  warnings: string[]
+}
+
+export type ListGmailInboxMessagesInput = {
+  query?: string | null
+  page_size?: number | null
+  page_token?: string | null
 }
 
 function documentHeaders(session: StoredAuthSession): Headers {
@@ -137,6 +171,54 @@ export async function reprocessDocumentIngestion(
       headers: documentHeaders(session),
     },
   )
+}
+
+export async function importGmailInboxDocuments(
+  apiBase: string,
+  session: StoredAuthSession,
+  payload: ImportGmailInboxDocumentsInput = {},
+): Promise<GmailInboxImportResult> {
+  return postJson<GmailInboxImportResult>(
+    `${apiBase}/documents/imports/gmail`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function listGmailInboxMessages(
+  apiBase: string,
+  session: StoredAuthSession,
+  payload: ListGmailInboxMessagesInput = {},
+): Promise<DocumentGmailInboxBrowseResultRecord> {
+  const searchParams = new URLSearchParams()
+  if (payload.query?.trim()) {
+    searchParams.set('query', payload.query.trim())
+  }
+  if (typeof payload.page_size === 'number' && Number.isFinite(payload.page_size)) {
+    searchParams.set('page_size', String(payload.page_size))
+  }
+  if (payload.page_token?.trim()) {
+    searchParams.set('page_token', payload.page_token.trim())
+  }
+  const querySuffix = searchParams.size > 0 ? `?${searchParams.toString()}` : ''
+
+  return fetchJson<DocumentGmailInboxBrowseResultRecord>(`${apiBase}/documents/gmail/messages${querySuffix}`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
+}
+
+export async function getGmailInboxMessageDetail(
+  apiBase: string,
+  session: StoredAuthSession,
+  messageId: string,
+): Promise<DocumentGmailInboxMessageDetailRecord> {
+  return fetchJson<DocumentGmailInboxMessageDetailRecord>(`${apiBase}/documents/gmail/messages/${encodeURIComponent(messageId)}`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
 }
 
 export async function executeDocumentActionPlan(

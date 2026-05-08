@@ -2,9 +2,11 @@ import type {
   AssistantActionType,
   AssistantAgentCapability,
   AssistantAgentAuthorityLevel,
+  AssistantAgentOrchestrationPattern,
   AssistantAgentProfileKind,
   AssistantAgentRoleArchetype,
   AssistantAgentScope,
+  AssistantAgentSkillKey,
   AssistantAgentStatus,
   AssistantProvider,
   ViewKey,
@@ -24,9 +26,14 @@ export type AgentBuilderDraft = {
   human_owner_role: string
   authority_ceiling: AssistantAgentAuthorityLevel | ''
   activation_notes: string
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id: string
+  managed_agent_ids: string[]
+  delegation_guidance: string
   profile_request_id: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
   daily_token_allocation: string
@@ -76,7 +83,12 @@ type AgentBuilderTemplateDefinition = Omit<
   | 'human_owner_role'
   | 'authority_ceiling'
   | 'activation_notes'
+  | 'orchestration_pattern'
+  | 'parent_agent_id'
+  | 'managed_agent_ids'
+  | 'delegation_guidance'
   | 'profile_request_id'
+  | 'skills'
   | 'allowed_tools'
   | 'allowed_action_types'
   | 'daily_token_allocation'
@@ -99,6 +111,11 @@ type AgentBuilderTemplateProfile = Pick<
   | 'human_owner_role'
   | 'authority_ceiling'
   | 'activation_notes'
+>
+
+type AgentBuilderHierarchyDefaults = Pick<
+  AgentBuilderDraft,
+  'orchestration_pattern' | 'parent_agent_id' | 'managed_agent_ids' | 'delegation_guidance'
 >
 
 export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
@@ -134,6 +151,8 @@ const PROFILE_KIND_LABELS: Record<AgentBuilderDraft['profile_kind'], string> = {
   ROLE_DERIVED: 'Role specialization',
   CUSTOM: 'Custom draft',
 }
+
+const INTER_AGENT_CONSULTATION_SKILL: AssistantAgentSkillKey = 'inter_agent_consultation'
 
 function renderPromptSection(title: string, lines: string[]): string {
   return `${title}:\n${lines.map((line) => `- ${line}`).join('\n')}`
@@ -171,6 +190,54 @@ function buildRoleSystemPrompt(role: AssistantAgentRoleArchetype): string {
         : 'Do not stage or execute governed actions for this profile.',
     ]),
   ].join('\n\n')
+}
+
+function createHierarchyDefaults(
+  overrides: Partial<AgentBuilderHierarchyDefaults> = {},
+): AgentBuilderHierarchyDefaults {
+  return {
+    orchestration_pattern: 'SINGLE',
+    parent_agent_id: '',
+    managed_agent_ids: [],
+    delegation_guidance: '',
+    ...overrides,
+  }
+}
+
+function buildRoleHierarchyDefaults(role: AssistantAgentRoleArchetype): AgentBuilderHierarchyDefaults {
+  return createHierarchyDefaults({
+    orchestration_pattern: role.recommended_orchestration_pattern,
+    delegation_guidance: role.delegation_guidance.join(' '),
+  })
+}
+
+function buildTemplateHierarchyDefaults(
+  templateKey: AgentBuilderTemplateKey,
+): AgentBuilderHierarchyDefaults {
+  switch (templateKey) {
+    case 'trade-ops-copilot':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'MANAGER',
+      })
+    case 'settlement-copilot':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'MANAGER',
+      })
+    case 'trade-capture-agent':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'MANAGER',
+      })
+    case 'market-research-agent':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'PARALLEL',
+      })
+    case 'control-tower-agent':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'TRIAGE',
+      })
+    default:
+      return createHierarchyDefaults()
+  }
 }
 
 const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuilderTemplateProfile> = {
@@ -536,12 +603,15 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       'list_trade_attention_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
+      'get_settlement_report_filter_options',
+      'list_settlement_report_presets',
       'list_accrual_lots',
       'get_accrual_reconciliation',
       'list_workflow_items',
       'get_workspace_summary',
     ],
     recommended_action_types: [
+      'create_settlement_report_preset',
       'issue_trade_invoice',
       'void_trade_invoice',
       'create_trade_payment',
@@ -1121,6 +1191,66 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
 
 export const AGENT_BUILDER_TEMPLATES = AGENT_BUILDER_TEMPLATE_DEFINITIONS
 
+const AGENT_BUILDER_TEMPLATE_SKILLS: Record<AgentBuilderTemplateKey, AssistantAgentSkillKey[]> = {
+  'market-research-agent': ['market_intelligence', 'inter_agent_consultation'],
+  'pre-trade-structuring-agent': ['pretrade_structuring', 'market_intelligence', 'inter_agent_consultation'],
+  'document-agent': ['document_triage', 'trade_operations_coordination', 'inter_agent_consultation'],
+  'trade-ops-copilot': [
+    'trade_operations_coordination',
+    'confirmation_control',
+    'workflow_control',
+    'movement_control',
+    'document_triage',
+    'inter_agent_consultation',
+  ],
+  'settlement-copilot': [
+    'settlement_operations',
+    'invoice_control',
+    'accrual_control',
+    'reporting_reconciliation',
+    'inter_agent_consultation',
+  ],
+  'trade-governor': ['trade_governance', 'trade_lifecycle_management', 'inter_agent_consultation'],
+  'trade-capture-agent': ['trade_lifecycle_management', 'trade_governance', 'inter_agent_consultation'],
+  'movement-controller-agent': ['movement_control', 'logistics_coordination', 'workflow_control', 'inter_agent_consultation'],
+  'accrual-controller-agent': ['accrual_control', 'settlement_operations', 'inter_agent_consultation'],
+  'accounting-posting-agent': ['accounting_posting', 'reporting_reconciliation', 'inter_agent_consultation'],
+  'counterparty-state-sync-agent': [
+    'counterparty_state_sync',
+    'confirmation_control',
+    'workflow_control',
+    'inter_agent_consultation',
+  ],
+  'confirmation-controller-agent': [
+    'confirmation_control',
+    'workflow_control',
+    'counterparty_state_sync',
+    'inter_agent_consultation',
+  ],
+  'workflow-controller-agent': ['workflow_control', 'trade_operations_coordination', 'inter_agent_consultation'],
+  'invoice-controller-agent': ['invoice_control', 'settlement_operations', 'inter_agent_consultation'],
+  'counterparty-outreach-agent': ['counterparty_outreach', 'counterparty_state_sync', 'inter_agent_consultation'],
+  'control-tower-agent': ['agent_supervision', 'reporting_reconciliation', 'inter_agent_consultation'],
+}
+
+const INTER_AGENT_COORDINATION_TOOLS = ['consult_managed_agent', 'enlist_managed_agent'] as const
+
+function withInterAgentCoordinationTools(
+  toolNames: readonly string[],
+  skills: readonly AssistantAgentSkillKey[],
+): string[] {
+  if (!skills.includes(INTER_AGENT_CONSULTATION_SKILL)) {
+    return [...toolNames]
+  }
+  const nextToolNames = [...toolNames]
+  for (const toolName of INTER_AGENT_COORDINATION_TOOLS) {
+    if (!nextToolNames.includes(toolName)) {
+      nextToolNames.push(toolName)
+    }
+  }
+  return nextToolNames
+}
+
 export function createEmptyAgentBuilderDraft(): AgentBuilderDraft {
   return {
     agent_id: '',
@@ -1136,9 +1266,14 @@ export function createEmptyAgentBuilderDraft(): AgentBuilderDraft {
     human_owner_role: '',
     authority_ceiling: '',
     activation_notes: '',
+    orchestration_pattern: 'SINGLE',
+    parent_agent_id: '',
+    managed_agent_ids: [],
+    delegation_guidance: '',
     profile_request_id: null,
     allowed_workspaces: ['assistant'],
     capabilities: ['READ', 'EXPLAIN'],
+    skills: [],
     allowed_tools: [],
     allowed_action_types: [],
     daily_token_allocation: '',
@@ -1171,11 +1306,14 @@ export function buildAgentBuilderDraft(
 ): AgentBuilderDraft {
   const template = getAgentBuilderTemplate(templateKey)
   const profile = AGENT_BUILDER_TEMPLATE_PROFILE[templateKey]
+  const hierarchyDefaults = buildTemplateHierarchyDefaults(templateKey)
+  const skills = AGENT_BUILDER_TEMPLATE_SKILLS[templateKey]
+  const recommendedTools = withInterAgentCoordinationTools(template.recommended_tools, skills)
   const availableToolSet = new Set(availableTools.map((toolName) => toolName.trim().toLowerCase()))
   const allowedTools =
     availableToolSet.size === 0
       ? []
-      : template.recommended_tools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
+      : recommendedTools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
 
   return {
     agent_id: template.agent_id,
@@ -1191,9 +1329,14 @@ export function buildAgentBuilderDraft(
     human_owner_role: profile.human_owner_role,
     authority_ceiling: profile.authority_ceiling,
     activation_notes: profile.activation_notes,
+    orchestration_pattern: hierarchyDefaults.orchestration_pattern,
+    parent_agent_id: hierarchyDefaults.parent_agent_id,
+    managed_agent_ids: [...hierarchyDefaults.managed_agent_ids],
+    delegation_guidance: hierarchyDefaults.delegation_guidance,
     profile_request_id: null,
     allowed_workspaces: [...template.allowed_workspaces],
     capabilities: [...template.capabilities],
+    skills: [...skills],
     allowed_tools: allowedTools,
     allowed_action_types: [...template.recommended_action_types],
     daily_token_allocation: '',
@@ -1205,11 +1348,13 @@ export function buildAgentBuilderDraftFromRole(
   role: AssistantAgentRoleArchetype,
   availableTools: string[],
 ): AgentBuilderDraft {
+  const hierarchyDefaults = buildRoleHierarchyDefaults(role)
+  const roleDefaultTools = withInterAgentCoordinationTools(role.default_tools, role.skills)
   const availableToolSet = new Set(availableTools.map((toolName) => toolName.trim().toLowerCase()))
   const allowedTools =
     availableToolSet.size === 0
       ? []
-      : role.default_tools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
+      : roleDefaultTools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
   const profileName = `${role.name} Specialization`
 
   return {
@@ -1226,9 +1371,14 @@ export function buildAgentBuilderDraftFromRole(
     human_owner_role: role.human_owner_role,
     authority_ceiling: role.authority_ceiling,
     activation_notes: `Drafted from the ${role.name} role catalog entry.`,
+    orchestration_pattern: hierarchyDefaults.orchestration_pattern,
+    parent_agent_id: hierarchyDefaults.parent_agent_id,
+    managed_agent_ids: [...hierarchyDefaults.managed_agent_ids],
+    delegation_guidance: hierarchyDefaults.delegation_guidance,
     profile_request_id: null,
     allowed_workspaces: [...role.allowed_workspaces],
     capabilities: [...role.capability_ceiling],
+    skills: [...role.skills],
     allowed_tools: allowedTools,
     allowed_action_types: [...role.maximum_action_types],
     daily_token_allocation: '',
@@ -1264,14 +1414,41 @@ export function evaluateAgentRoleProfileFit(
   if (form.allowed_tools.length > 0 && !form.capabilities.includes('READ')) {
     errors.push('Live tools require READ capability.')
   }
+  if (
+    form.allowed_tools.some((toolName) => INTER_AGENT_COORDINATION_TOOLS.includes(toolName as (typeof INTER_AGENT_COORDINATION_TOOLS)[number])) &&
+    !form.skills.includes(INTER_AGENT_CONSULTATION_SKILL)
+  ) {
+    errors.push('Inter-agent coordination tools require the Inter-Agent Consultation skill.')
+  }
+  if (form.orchestration_pattern !== 'SINGLE' && !form.skills.includes(INTER_AGENT_CONSULTATION_SKILL)) {
+    errors.push(
+      `${form.orchestration_pattern} orchestration requires the Inter-Agent Consultation skill.`,
+    )
+  }
   if (form.allowed_action_types.length > 0 && !form.capabilities.includes('ACTION')) {
     errors.push('Governed actions require ACTION capability.')
   }
   if (form.capabilities.includes('ACTION') && form.allowed_action_types.length === 0) {
     errors.push('ACTION-capable profiles need at least one explicit governed action.')
   }
+  if (form.managed_agent_ids.length > 0 && form.orchestration_pattern === 'SINGLE') {
+    errors.push('Managed subordinates require a non-SINGLE orchestration pattern.')
+  }
+  if (
+    form.parent_agent_id &&
+    form.managed_agent_ids.includes(form.parent_agent_id)
+  ) {
+    errors.push('Parent agent cannot also appear in managed subordinates.')
+  }
+  if (form.agent_id.trim() && form.parent_agent_id.trim() === form.agent_id.trim()) {
+    errors.push('Parent agent cannot match the current agent id.')
+  }
+  if (form.agent_id.trim() && form.managed_agent_ids.includes(form.agent_id.trim())) {
+    errors.push('Managed subordinates cannot include the current agent id.')
+  }
 
   if (role) {
+    const roleDefaultTools = withInterAgentCoordinationTools(role.default_tools, role.skills)
     const workspaceSection = compareSubset(
       'Workspaces',
       form.allowed_workspaces,
@@ -1284,15 +1461,25 @@ export function evaluateAgentRoleProfileFit(
       role.capability_ceiling,
       (values) => values.join(' · '),
     )
+    const skillSection = compareSubset(
+      'Skills',
+      form.skills,
+      role.skills,
+      (values) => `${values.length} role skill${values.length === 1 ? '' : 's'}`,
+      {
+        emptyStatus: 'inherited',
+        emptyDetail: `${role.skills.length} role skill${role.skills.length === 1 ? '' : 's'} inherited on save`,
+      },
+    )
     const toolSection = compareSubset(
       'Live tools',
       form.allowed_tools,
-      role.default_tools,
+      roleDefaultTools,
       (values) => `${values.length} role default tool${values.length === 1 ? '' : 's'}`,
       {
         emptyStatus: form.capabilities.includes('READ') ? 'inherited' : 'customized',
         emptyDetail: form.capabilities.includes('READ')
-          ? `${role.default_tools.length} role default tool${role.default_tools.length === 1 ? '' : 's'} inherited on save`
+          ? `${roleDefaultTools.length} role default tool${roleDefaultTools.length === 1 ? '' : 's'} inherited on save`
           : 'READ disabled, so no live tools are available',
       },
     )
@@ -1309,8 +1496,17 @@ export function evaluateAgentRoleProfileFit(
       },
     )
     const authoritySection = compareAuthority(form.authority_ceiling, role.authority_ceiling)
+    const hierarchySection = compareHierarchy(form, role)
 
-    sections.push(workspaceSection, capabilitySection, toolSection, actionSection, authoritySection)
+    sections.push(
+      workspaceSection,
+      capabilitySection,
+      skillSection,
+      toolSection,
+      actionSection,
+      authoritySection,
+      hierarchySection,
+    )
 
     for (const section of sections) {
       if (section.status === 'expanded') {
@@ -1336,6 +1532,9 @@ export function evaluateAgentRoleProfileFit(
 
     if (role.catalog_status === 'PHASE_2_PLUS') {
       warnings.push(`${role.name} is marked ${role.catalog_status}; confirm domain readiness before activation.`)
+    }
+    if (form.skills.length === 0) {
+      warnings.push('Blank role-derived skills inherit role defaults on save.')
     }
     if (form.allowed_tools.length === 0 && form.capabilities.includes('READ')) {
       warnings.push('Blank role-derived live tools inherit role defaults on save.')
@@ -1454,5 +1653,37 @@ function compareAuthority(
     label: 'Authority',
     status: 'narrowed',
     detail: `${current} below role ceiling ${baseline}`,
+  }
+}
+
+function compareHierarchy(
+  form: AgentBuilderDraft,
+  role: AssistantAgentRoleArchetype,
+): AgentRoleProfileFitSection {
+  const recommendedManagedCount = role.recommended_managed_role_keys.length
+  const currentManagedCount = form.managed_agent_ids.length
+  const recommendationDetail =
+    recommendedManagedCount > 0
+      ? `${role.recommended_orchestration_pattern} with ${recommendedManagedCount} recommended subordinate role${recommendedManagedCount === 1 ? '' : 's'}`
+      : role.recommended_orchestration_pattern
+
+  if (form.orchestration_pattern === role.recommended_orchestration_pattern) {
+    const managedDetail =
+      currentManagedCount > 0
+        ? ` · ${currentManagedCount} managed agent${currentManagedCount === 1 ? '' : 's'} selected`
+        : role.recommended_managed_role_keys.length > 0
+          ? ' · subordinate wiring still needs concrete agent ids'
+          : ''
+    return {
+      label: 'Hierarchy',
+      status: 'inherited',
+      detail: `${recommendationDetail}${managedDetail}`,
+    }
+  }
+
+  return {
+    label: 'Hierarchy',
+    status: 'customized',
+    detail: `${form.orchestration_pattern} selected · recommended ${recommendationDetail}`,
   }
 }

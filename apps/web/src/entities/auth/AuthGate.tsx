@@ -66,6 +66,7 @@ export function AuthGate({
     window.location.hash.replace(/^#/, '').trim() === 'bootstrap-admin'
   const {
     expanded: bootstrapExpanded,
+    setExpanded: setBootstrapExpanded,
   } = usePersistentCollapsibleCardState('auth-gate.bootstrap-admin', bootstrapAdminHashTargeted)
   const googleSignInContainerRef = useRef<HTMLDivElement | null>(null)
 

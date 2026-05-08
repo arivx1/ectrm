@@ -363,6 +363,22 @@
   line-height: 1.4;
 }
 
+.prompt-home-time-meter-card-calendar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: fit-content;
+  color: var(--color-copy-muted, #66717c);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.prompt-home-time-meter-card-calendar-toggle input {
+  margin: 0;
+  accent-color: rgb(var(--theme-highlight-rgb, 78 167 255));
+}
+
 .prompt-home-time-meter-card-body {
   display: grid;
   gap: 0.65rem;
@@ -400,6 +416,10 @@
 .prompt-home-time-meter-marker strong {
   color: inherit;
   font-size: 0.84rem;
+}
+
+.prompt-home-time-meter-marker.is-calendar {
+  color: rgb(12 138 105 / 0.9);
 }
 
 .prompt-home-time-meter-marker.is-start {
@@ -449,6 +469,11 @@
   box-shadow: 0 0 0 1px rgba(10, 18, 24, 0.06);
 }
 
+.prompt-home-time-meter-boundary.is-calendar {
+  height: 1.35rem;
+  background: rgb(12 138 105 / 0.78);
+}
+
 .prompt-home-time-meter-boundary::after {
   content: '';
   position: absolute;
@@ -460,6 +485,12 @@
   background: rgb(255 255 255 / 0.95);
   border: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.85);
   transform: translate(-50%, -50%);
+}
+
+.prompt-home-time-meter-boundary.is-calendar::after {
+  width: 0.44rem;
+  height: 0.44rem;
+  border-color: rgb(12 138 105 / 0.82);
 }
 
 .prompt-home-time-meter-now {
@@ -584,6 +615,68 @@
   margin: 0;
   color: var(--color-copy-muted, #66717c);
   line-height: 1.45;
+}
+
+.prompt-home-calendar-agenda,
+.prompt-home-calendar-agenda-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.prompt-home-calendar-agenda {
+  padding: 0.05rem 0 0;
+}
+
+.prompt-home-calendar-agenda-head {
+  display: grid;
+  gap: 0.14rem;
+}
+
+.prompt-home-calendar-agenda-head strong {
+  font-size: 0.96rem;
+  line-height: 1.2;
+}
+
+.prompt-home-calendar-agenda-head span,
+.prompt-home-calendar-agenda-copy p,
+.prompt-home-calendar-agenda-copy span,
+.prompt-home-calendar-agenda-note {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.45;
+}
+
+.prompt-home-calendar-agenda-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.72rem 0.78rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.prompt-home-calendar-agenda-copy,
+.prompt-home-calendar-agenda-meta {
+  display: grid;
+  gap: 0.14rem;
+}
+
+.prompt-home-calendar-agenda-copy strong {
+  font-size: 0.94rem;
+  line-height: 1.2;
+}
+
+.prompt-home-calendar-agenda-copy p,
+.prompt-home-calendar-agenda-copy span,
+.prompt-home-calendar-agenda-note {
+  margin: 0;
+}
+
+.prompt-home-calendar-agenda-meta {
+  justify-items: end;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 .prompt-home-session-lane-list {
@@ -821,8 +914,7 @@
 
 .prompt-home-starter h4,
 .prompt-home-starter p,
-.prompt-home-action-banner p,
-.prompt-home-review-note {
+.prompt-home-action-banner p {
   margin: 0;
 }
 
@@ -832,11 +924,8 @@
 
 .prompt-home-starter p,
 .prompt-home-handoff span,
-.prompt-home-thread span,
-.prompt-home-thread small,
 .prompt-home-destination span,
-.prompt-home-destination small,
-.prompt-home-review-note {
+.prompt-home-destination small {
   color: var(--color-copy-muted, #66717c);
   line-height: 1.5;
 }
@@ -888,8 +977,7 @@
 
 .prompt-home-chat,
 .prompt-home-sidecar,
-.prompt-home-destinations,
-.prompt-home-review-path {
+.prompt-home-destinations {
   display: grid;
   gap: 0.85rem;
 }
@@ -899,7 +987,6 @@
 }
 
 .prompt-home-chat-log,
-.prompt-home-review-list,
 .prompt-home-destination-list,
 .prompt-home-handoff-list {
   display: grid;
@@ -921,22 +1008,6 @@
   display: grid;
   gap: 0.85rem;
   margin-top: 0.75rem;
-}
-
-.prompt-home-review-item {
-  gap: 0.45rem;
-}
-
-.prompt-home-review-item-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.65rem;
-}
-
-.prompt-home-review-item-head strong {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .prompt-home-destination-head {
@@ -1033,7 +1104,6 @@
 }
 
 .prompt-home-handoff,
-.prompt-home-thread,
 .prompt-home-destination {
   display: grid;
   gap: 0.35rem;
@@ -1063,7 +1133,6 @@
   justify-self: end;
 }
 
-.prompt-home-thread,
 .prompt-home-destination {
   border: 1px solid rgba(18, 42, 56, 0.08);
   background: rgba(255, 255, 255, 0.04);
@@ -1086,9 +1155,6 @@
 
 .prompt-home-handoff:hover,
 .prompt-home-handoff:focus-visible,
-.prompt-home-thread:hover,
-.prompt-home-thread:focus-visible,
-.prompt-home-thread.is-selected,
 .prompt-home-destination:hover,
 .prompt-home-destination:focus-visible {
   transform: translateY(-1px);
@@ -1130,7 +1196,6 @@
 :root[data-color-mode='light'] .prompt-home-quick-prompts button,
 :root[data-color-mode='light'] .prompt-home-time-meter-card,
 :root[data-color-mode='light'] .prompt-home-starter,
-:root[data-color-mode='light'] .prompt-home-thread,
 :root[data-color-mode='light'] .prompt-home-destination {
   background: rgba(255, 255, 255, 0.72);
 }
@@ -1162,6 +1227,7 @@
 :root[data-color-mode='dark'] .prompt-home-time-meter-card-body-head small,
 :root[data-color-mode='dark'] .prompt-home-time-meter-card-meta,
 :root[data-color-mode='dark'] .prompt-home-time-meter-card-toggle-meta small,
+:root[data-color-mode='dark'] .prompt-home-time-meter-card-calendar-toggle,
 :root[data-color-mode='dark'] .prompt-home-time-meter-marker,
 :root[data-color-mode='dark'] .prompt-home-time-meter-ticks,
 :root[data-color-mode='dark'] .prompt-home-prompt-kits-empty,
@@ -1173,11 +1239,8 @@
 :root[data-color-mode='dark'] .prompt-home-starter p,
 :root[data-color-mode='dark'] .prompt-home-support-toggle-meta small,
 :root[data-color-mode='dark'] .prompt-home-handoff span,
-:root[data-color-mode='dark'] .prompt-home-thread span,
-:root[data-color-mode='dark'] .prompt-home-thread small,
 :root[data-color-mode='dark'] .prompt-home-destination span,
-:root[data-color-mode='dark'] .prompt-home-destination small,
-:root[data-color-mode='dark'] .prompt-home-review-note {
+:root[data-color-mode='dark'] .prompt-home-destination small {
   color: #b7c7d9;
 }
 
@@ -1291,6 +1354,10 @@
 
   .prompt-home-time-meter-card-toggle-side {
     justify-items: end;
+  }
+
+  .prompt-home-time-meter-card-calendar-toggle {
+    width: 100%;
   }
 
   .prompt-home-time-meter-card-collapsed-line {

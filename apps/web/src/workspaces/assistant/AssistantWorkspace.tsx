@@ -13,6 +13,7 @@ import {
   previewAssistantPromptContext,
   streamAssistantResponse,
   submitAssistantRunFeedback,
+  transcribeAssistantVoice,
 } from '../../entities/assistant/api'
 import {
   AssistantActionRequestList,
@@ -48,6 +49,7 @@ import type {
   Trade,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { useVoiceComposer } from '../../shared/voiceComposer'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 
 type AssistantWorkspaceProps = {
@@ -493,6 +495,36 @@ export function AssistantWorkspace({
   const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [runDetailError, setRunDetailError] = useState('')
   const [screenFilter, setScreenFilter] = useState('')
+  const transcribeVoiceNote = useCallback(
+    async (audioFile: File) => {
+      if (!authSession) {
+        throw new Error('Sign in to use recorded voice transcription.')
+      }
+
+      const transcript = await transcribeAssistantVoice(appConfig.apiBase, audioFile, {
+        accessToken: authSession.accessToken,
+        filename: audioFile.name,
+      })
+      return transcript.text
+    },
+    [authSession],
+  )
+  const voiceComposer = useVoiceComposer({
+    draft,
+    onDraftChange: setDraft,
+    backendTranscription: {
+      enabled: Boolean(authSession && runtimeSettings?.voice_transcription.enabled),
+      supportedContentTypes: runtimeSettings?.voice_transcription.supported_content_types ?? [],
+      transcribeAudio: transcribeVoiceNote,
+      unavailableMessage: !authSession
+        ? 'Sign in to use recorded voice transcription when browser dictation is unavailable.'
+        : runtimeSettings
+          ? runtimeSettings.voice_transcription.enabled
+            ? ''
+            : 'Backend voice transcription is not configured on this API.'
+          : 'Checking whether backend voice transcription is available.',
+    },
+  })
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
 
   const contextSummary = buildAssistantContext({
@@ -912,6 +944,7 @@ export function AssistantWorkspace({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    voiceComposer.cancelListening()
     const trimmedDraft = draft.trim()
     if (!trimmedDraft || !selectedProvider || !authSession) {
       return
@@ -1411,7 +1444,9 @@ export function AssistantWorkspace({
                       </div>
                       <small>{describeAssistantTokenBudget(agent.token_budget)}</small>
                       <small>
+                        {agent.role_key ? `${agent.role_key} · ` : ''}
                         {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
+                        {agent.skills.length > 0 ? `· ${agent.skills.length} skills ` : ''}
                         {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
                         {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
                       </small>
@@ -1695,6 +1730,7 @@ export function AssistantWorkspace({
                 className="control assistant-textarea"
                 value={draft}
                 onChange={(event) => {
+                  voiceComposer.cancelListening()
                   setSubmitError('')
                   setDraft(event.target.value)
                 }}
@@ -1704,9 +1740,21 @@ export function AssistantWorkspace({
 
             <div className="toolbar settings-actions">
               <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => {
+                  setSubmitError('')
+                  voiceComposer.toggleListening()
+                }}
+                disabled={!voiceComposer.canToggle || submitting}
+                aria-pressed={voiceComposer.listening}
+              >
+                {voiceComposer.buttonLabel}
+              </button>
+              <button
                 type="submit"
                 className="button button-primary"
-                disabled={!assistantReady || !draft.trim() || submitting}
+                disabled={!assistantReady || !draft.trim() || submitting || voiceComposer.listening}
               >
                 {submitting ? 'Sending...' : 'Send Prompt'}
               </button>
@@ -1717,6 +1765,9 @@ export function AssistantWorkspace({
 
             <p className={`form-note ${submitError ? 'form-note-error' : ''}`}>
               {submitError || assistantReadinessNote}
+            </p>
+            <p className={`form-note ${voiceComposer.statusTone === 'error' ? 'form-note-error' : ''}`}>
+              {voiceComposer.statusMessage}
             </p>
           </form>
         </article>

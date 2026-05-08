@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import unittest
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 if not hasattr(enum, "StrEnum"):
     class _CompatStrEnum(str, enum.Enum):
@@ -20,10 +21,15 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.event import Event
+from apps.api.app.models.position import Position
+from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
+from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 
@@ -65,8 +71,11 @@ class ReportsApiTests(unittest.TestCase):
             session.query(ReportPreset).delete()
             session.query(UserSession).delete()
             session.query(UserAccount).delete()
+            session.query(TradeWorkflowItem).delete()
+            session.query(TradeAccrualLot).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
+            session.query(Position).delete()
             session.query(Event).delete()
             session.query(Trade).delete()
             session.commit()
@@ -114,6 +123,8 @@ class ReportsApiTests(unittest.TestCase):
         book: str,
         portfolio: str = "PROMPT",
         trade_currency_code: str = "USD",
+        pricing_status: str = "PRICED",
+        price_index_code: str | None = None,
         invoice_status: str = "ISSUED",
         payment_status: str = "PENDING",
         settlement_status: str = "INVOICED",
@@ -151,11 +162,11 @@ class ReportsApiTests(unittest.TestCase):
                     commodity_class="CRUDE_OIL",
                     commodity="WTI",
                     pricing_type="FIXED",
-                    pricing_status="PRICED",
+                    pricing_status=pricing_status,
                     confirmation_status="CONFIRMED",
                     nomination_status="NOMINATED",
                     allocation_status="ALLOCATED",
-                    price_index_code=None,
+                    price_index_code=price_index_code,
                     price=80,
                     volume=1000,
                     invoice_status=invoice_status,
@@ -164,6 +175,201 @@ class ReportsApiTests(unittest.TestCase):
                     trader_user="trader.alpha",
                     status="ACTIVE",
                     last_event_id=f"evt-{trade_id.lower()}",
+                )
+            )
+            session.commit()
+
+    def _seed_price_observation(
+        self,
+        *,
+        price_index_code: str,
+        observation_date: date,
+        value: float,
+        unit_code: str = "BBL",
+        currency_code: str = "USD",
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                PriceIndexObservation(
+                    price_index_code=price_index_code,
+                    observation_date=observation_date,
+                    value=Decimal(str(value)),
+                    unit_code=unit_code,
+                    currency_code=currency_code,
+                    source_provider="TEST",
+                    source_series_id=f"{price_index_code}-TEST",
+                    source_frequency="DAILY",
+                    source_published_at=self.now,
+                    source_revision=None,
+                    downloaded_at=self.now,
+                    run_id=1,
+                    raw_payload={"value": value},
+                    created_at=self.now,
+                    updated_at=self.now,
+                )
+            )
+            session.commit()
+
+    def _seed_trade_event(
+        self,
+        *,
+        trade_id: str,
+        event_id: str | None = None,
+        event_type: str = "TradeCreated",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        with self.SessionLocal() as session:
+            event_payload = payload
+            if event_payload is None:
+                trade = session.get(Trade, trade_id)
+                if trade is None:
+                    raise LookupError(f"Trade '{trade_id}' was not found for event seeding.")
+                event_payload = {
+                    "instrument_type": trade.instrument_type,
+                    "trade_structure": trade.trade_structure,
+                    "book": trade.book,
+                    "portfolio": trade.portfolio,
+                    "commodity_class": trade.commodity_class,
+                    "pricing_type": trade.pricing_type,
+                    "price_index_code": trade.price_index_code,
+                    "trade_currency_code": trade.trade_currency_code,
+                    "price_unit_code": trade.price_unit_code,
+                    "trade_side": trade.trade_side,
+                    "price": float(trade.price) if trade.price is not None else None,
+                    "volume": float(trade.volume) if trade.volume is not None else None,
+                    "settlement_status": trade.settlement_status,
+                    "status": trade.status,
+                }
+            session.add(
+                Event(
+                    event_id=event_id or f"evt-{trade_id.lower()}",
+                    aggregate_type="trade",
+                    aggregate_id=trade_id,
+                    event_type=event_type,
+                    occurred_at=self.now,
+                    recorded_at=self.now,
+                    actor_id="trader.alpha",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload=event_payload,
+                )
+            )
+            session.commit()
+
+    def _seed_workflow_item(
+        self,
+        *,
+        trade_id: str,
+        workflow_type: str,
+        status: str,
+        owner: str | None = None,
+        due_at: datetime | None = None,
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                TradeWorkflowItem(
+                    trade_id=trade_id,
+                    workflow_type=workflow_type,
+                    status=status,
+                    owner=owner,
+                    due_at=due_at,
+                    notes=None,
+                    created_at=self.now,
+                    created_by="ops.user",
+                    updated_at=self.now,
+                    updated_by="ops.user",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_confirmation(
+        self,
+        *,
+        trade_id: str,
+        status: str = "CONFIRMED",
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                TradeConfirmation(
+                    trade_id=trade_id,
+                    source_document_id=None,
+                    confirmation_number=f"CNF-{trade_id}",
+                    status=status,
+                    sent_at=self.now,
+                    confirmed_at=self.now if status == "CONFIRMED" else None,
+                    issue_count=0,
+                    last_issued_at=self.now,
+                    last_issued_by="ops.user",
+                    last_issue_method="EMAIL",
+                    last_issue_recipient="ops@example.com",
+                    last_issue_note=None,
+                    receipt_status="CONFIRMED" if status == "CONFIRMED" else "PENDING",
+                    received_at=self.now if status == "CONFIRMED" else None,
+                    received_by="ops.user" if status == "CONFIRMED" else None,
+                    response_method="EMAIL" if status == "CONFIRMED" else None,
+                    response_reference=None,
+                    response_note=None,
+                    dispute_reason=None,
+                    notes=None,
+                    comparison_waiver_note=None,
+                    comparison_waived_at=None,
+                    comparison_waived_by=None,
+                    created_at=self.now,
+                    created_by="ops.user",
+                    updated_at=self.now,
+                    updated_by="ops.user",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_accrual_lot(
+        self,
+        *,
+        accrual_lot_id: str,
+        trade_id: str,
+        book: str,
+        counterparty: str,
+        actualized_quantity: float,
+        billed_quantity: float,
+        accrued_amount: float,
+        billed_amount: float,
+        collected_amount: float,
+        disputed_amount: float = 0,
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                TradeAccrualLot(
+                    accrual_lot_id=accrual_lot_id,
+                    trade_id=trade_id,
+                    delivery_id=f"DEL-{trade_id}",
+                    leg_no=1,
+                    book=book,
+                    portfolio="PROMPT",
+                    counterparty=counterparty,
+                    commodity_class="CRUDE_OIL",
+                    commodity="WTI",
+                    trade_currency_code="USD",
+                    accrual_currency_code="USD",
+                    quantity_unit_code="BBL",
+                    planned_quantity=Decimal(str(actualized_quantity)),
+                    actualized_quantity=Decimal(str(actualized_quantity)),
+                    billed_quantity=Decimal(str(billed_quantity)),
+                    accrued_amount=Decimal(str(accrued_amount)),
+                    billed_amount=Decimal(str(billed_amount)),
+                    collected_amount=Decimal(str(collected_amount)),
+                    disputed_amount=Decimal(str(disputed_amount)),
+                    status="ACCRUED",
+                    opened_at=self.now,
+                    closed_at=None,
+                    notes=None,
+                    created_at=self.now,
+                    created_by="settlement.ops",
+                    updated_at=self.now,
+                    updated_by="settlement.ops",
+                    version=1,
                 )
             )
             session.commit()
@@ -793,3 +999,152 @@ class ReportsApiTests(unittest.TestCase):
         self.assertEqual(beta_list_after_delete.status_code, 200)
         beta_names_after_delete = {row["name"] for row in beta_list_after_delete.json()}
         self.assertEqual(beta_names_after_delete, {"Midwest cash watch"})
+
+    def test_trading_eod_report_rolls_blocked_and_warning_checks(self) -> None:
+        self._seed_trade(
+            trade_id="T-EOD-BLOCKED",
+            counterparty="BP_TRADING",
+            book="CRUDE_PHYS",
+            pricing_status="PENDING",
+            invoice_status="DISPUTED",
+            payment_status="PENDING",
+            settlement_status="DISPUTED",
+        )
+        self._seed_invoice(
+            trade_id="T-EOD-BLOCKED",
+            invoice_number="INV-EOD-BLOCKED",
+            invoice_amount=700,
+            due_at=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            status="DISPUTED",
+        )
+        self._seed_workflow_item(
+            trade_id="T-EOD-BLOCKED",
+            workflow_type="INVOICE",
+            status="ISSUED",
+            owner="settlement.ops",
+            due_at=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+        )
+        self._seed_accrual_lot(
+            accrual_lot_id="LOT-EOD-BLOCKED",
+            trade_id="T-EOD-BLOCKED",
+            book="CRUDE_PHYS",
+            counterparty="BP_TRADING",
+            actualized_quantity=1000,
+            billed_quantity=750,
+            accrued_amount=500,
+            billed_amount=250,
+            collected_amount=0,
+        )
+
+        response = self.client.get(
+            "/reports/trading-eod?business_date=2026-04-06&as_of=2026-04-06",
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["business_date"], "2026-04-06")
+        self.assertEqual(payload["as_of"], "2026-04-06")
+        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertEqual(payload["blocked_check_count"], 2)
+        self.assertEqual(payload["warning_check_count"], 2)
+        self.assertEqual(payload["ready_check_count"], 0)
+        self.assertIn("live projections", payload["basis"])
+        self.assertEqual(payload["trade_summary"]["pending_pricing_count"], 1)
+        self.assertEqual(payload["settlement_summary"]["blocked_exception_count"], 2)
+        self.assertEqual(payload["projection_summary"]["structural_issue_count"], 1)
+        self.assertEqual(payload["accrual_summary"]["row_count"], 1)
+        self.assertEqual(payload["accrual_summary"]["unbilled_amount_total"], 250.0)
+
+        checks_by_key = {row["key"]: row for row in payload["checks"]}
+        self.assertEqual(checks_by_key["pricing_readiness"]["status"], "WARNING")
+        self.assertEqual(checks_by_key["workflow_pressure"]["status"], "WARNING")
+        self.assertEqual(checks_by_key["settlement_posture"]["status"], "BLOCKED")
+        self.assertEqual(checks_by_key["projection_integrity"]["status"], "BLOCKED")
+
+    def test_trading_eod_report_can_return_ready_status(self) -> None:
+        self._seed_trade(
+            trade_id="T-EOD-READY",
+            counterparty="SHELL_TRADING",
+            book="CRUDE_PHYS",
+            pricing_status="PRICED",
+            price_index_code="WTI_TEST",
+            invoice_status="APPROVED",
+            payment_status="PAID",
+            settlement_status="SETTLED",
+        )
+        self._seed_trade_event(trade_id="T-EOD-READY")
+        self._seed_price_observation(
+            price_index_code="WTI_TEST",
+            observation_date=date(2026, 4, 6),
+            value=90,
+        )
+        self._seed_confirmation(trade_id="T-EOD-READY", status="CONFIRMED")
+        self._seed_workflow_item(
+            trade_id="T-EOD-READY",
+            workflow_type="CONFIRMATION",
+            status="CONFIRMED",
+            owner="ops.user",
+            due_at=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+        )
+        paid_invoice_id = self._seed_invoice(
+            trade_id="T-EOD-READY",
+            invoice_number="INV-EOD-READY",
+            invoice_amount=400,
+            due_at=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            status="APPROVED",
+        )
+        self._seed_payment(
+            trade_id="T-EOD-READY",
+            invoice_id=paid_invoice_id,
+            payment_amount=400,
+            due_at=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            status="PAID",
+            received_at=datetime(2026, 4, 5, 15, 0, tzinfo=timezone.utc),
+        )
+        self._seed_workflow_item(
+            trade_id="T-EOD-READY",
+            workflow_type="PAYMENT",
+            status="PAID",
+            owner="settlement.ops",
+            due_at=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+        )
+        self._seed_accrual_lot(
+            accrual_lot_id="LOT-EOD-READY",
+            trade_id="T-EOD-READY",
+            book="CRUDE_PHYS",
+            counterparty="SHELL_TRADING",
+            actualized_quantity=1000,
+            billed_quantity=1000,
+            accrued_amount=400,
+            billed_amount=400,
+            collected_amount=400,
+        )
+
+        response = self.client.get(
+            "/reports/trading-eod?business_date=2026-04-06",
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "READY")
+        self.assertEqual(payload["blocked_check_count"], 0)
+        self.assertEqual(payload["warning_check_count"], 0)
+        self.assertEqual(payload["ready_check_count"], 4)
+        self.assertEqual(payload["trade_summary"]["active_trade_count"], 1)
+        self.assertEqual(payload["projection_summary"]["structural_issue_count"], 0)
+        self.assertEqual(payload["projection_summary"]["invariant_issue_count"], 0)
+        self.assertEqual(payload["settlement_summary"]["blocked_exception_count"], 0)
+
+        checks_by_key = {row["key"]: row for row in payload["checks"]}
+        self.assertTrue(all(row["status"] == "READY" for row in checks_by_key.values()))
+
+    def test_trading_eod_report_rejects_as_of_before_business_date(self) -> None:
+        response = self.client.get(
+            "/reports/trading-eod?business_date=2026-04-07&as_of=2026-04-06",
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "as_of must be on or after business_date")

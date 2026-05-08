@@ -60,6 +60,7 @@ class TradeInvoiceCreate(BaseModel):
     invoice_amount: Optional[float] = None
     issued_at: Optional[datetime] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -70,6 +71,7 @@ class TradeInvoiceUpdate(BaseModel):
     status: Optional[str] = None
     issued_at: Optional[datetime] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     dispute_reason: Optional[str] = None
     notes: Optional[str] = None
 
@@ -162,6 +164,7 @@ class TradePaymentCreate(BaseModel):
     payment_amount: Optional[float] = None
     status: Optional[str] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
 
@@ -172,6 +175,7 @@ class TradePaymentUpdate(BaseModel):
     payment_amount: Optional[float] = None
     status: Optional[str] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
 

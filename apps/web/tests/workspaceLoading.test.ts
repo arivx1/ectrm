@@ -200,7 +200,7 @@ test('summarizeWorkspaceIssueMessage keeps correlation ids out of workspace copy
 
   assert.equal(
     summarizeWorkspaceIssueMessage('Could not reach API at http://127.0.0.1:8000.'),
-    'Workspace Error',
+    'API unavailable. Check that the backend is running at 127.0.0.1:8000, or update API Base Override in Settings.',
   )
 })
 

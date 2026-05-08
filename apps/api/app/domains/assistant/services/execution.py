@@ -34,6 +34,7 @@ from apps.api.app.domains.assistant.services.prompt_context import (
     AssistantPromptEnvelope,
     AssistantPromptSection,
     AssistantPromptUser,
+    build_prompt_section,
     build_prompt_context,
     render_prompt_sections,
 )
@@ -793,24 +794,34 @@ def _build_tool_prefetch_section(
     summary: str,
     output: dict[str, object],
 ) -> AssistantPromptSection:
-    return AssistantPromptSection(
+    return build_prompt_section(
+        contract_key="tool-prefetch",
         key=key,
         title=f"Live Tool Prefetch: {tool_name}",
-        source="tool",
         content=(
             f"tool: {tool_name}\n"
             f"arguments: {json_dumps(arguments)}\n"
             f"summary: {summary}\n"
             f"output: {json_dumps(output)}"
         ),
+        owner_reference=tool_name,
     )
 
 
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:
     return AssistantPromptSectionOut(
+        contract_key=section.contract_key,
+        contract_version=section.contract_version,
         key=section.key,
         title=section.title,
         source=section.source,
+        scope=section.scope,
+        kind=section.kind,
+        owner=section.owner,
+        owner_reference=section.owner_reference,
+        freshness=section.freshness,
+        merge_strategy=section.merge_strategy,
+        uses_fallback=section.uses_fallback,
         content=section.content,
     )
 

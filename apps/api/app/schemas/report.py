@@ -407,3 +407,89 @@ class SettlementReportPresetOut(BaseModel):
     updated_by: str
     version: int
     can_edit: bool
+
+
+TradingEodStatus = Literal["READY", "WARNING", "BLOCKED"]
+
+
+class TradingEodCheck(BaseModel):
+    key: str
+    title: str
+    status: TradingEodStatus
+    owner_role: str
+    reason: str
+    supporting_metrics: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class TradingEodTradeSummary(BaseModel):
+    active_trade_count: int
+    priced_active_count: int
+    pending_pricing_count: int
+    pending_settlement_count: int
+    tracked_book_count: int
+    total_active_volume: float
+
+
+class TradingEodPnlSummary(BaseModel):
+    basis: str
+    methodology: str
+    total_pnl: float
+    realized_pnl: float
+    unrealized_pnl: float
+    priced_trade_count: int
+    realized_trade_count: int
+    unrealized_trade_count: int
+
+
+class TradingEodOperationsSummary(BaseModel):
+    open_work_item_count: int
+    operations_queue_count: int
+    settlement_queue_count: int
+    attention_count: int
+    stale_pricing_count: int
+    incomplete_ops_data_count: int
+
+
+class TradingEodSettlementSummary(BaseModel):
+    invoice_count: int
+    overdue_invoice_count: int
+    disputed_invoice_count: int
+    blocked_exception_count: int
+    warning_exception_count: int
+    payment_due_count: int
+    invoice_pending_count: int
+
+
+class TradingEodProjectionSummary(BaseModel):
+    structural_issue_count: int
+    invariant_issue_count: int
+    impacted_trade_count: int
+
+
+class TradingEodAccrualSummary(BaseModel):
+    row_count: int
+    lot_count: int
+    unbilled_amount_total: float
+    billed_uncollected_amount_total: float
+    net_open_amount_total: float
+    coverage_basis: str
+
+
+class TradingEodReport(BaseModel):
+    generated_at: datetime
+    business_date: date
+    as_of: date
+    evaluation_timestamp: datetime
+    basis: str
+    status: TradingEodStatus
+    blocked_check_count: int
+    warning_check_count: int
+    ready_check_count: int
+    checks: list[TradingEodCheck]
+    coverage_notes: list[str] = Field(default_factory=list)
+    trade_summary: TradingEodTradeSummary
+    pnl_summary: TradingEodPnlSummary
+    operations_summary: TradingEodOperationsSummary
+    settlement_summary: TradingEodSettlementSummary
+    projection_summary: TradingEodProjectionSummary
+    accrual_summary: TradingEodAccrualSummary

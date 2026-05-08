@@ -24,6 +24,8 @@ This project is a good fit for:
   [docs/engineering/core-platform-roadmap.md](docs/engineering/core-platform-roadmap.md)
 - AI workflow and prompt-management notes:
   [docs/engineering/ai-workflow.md](docs/engineering/ai-workflow.md)
+- Agent context and configuration work packages:
+  [docs/engineering/agent-context-work-packages.md](docs/engineering/agent-context-work-packages.md)
 - Agent autonomy rubric:
   [docs/engineering/agent-autonomy-rubric.md](docs/engineering/agent-autonomy-rubric.md)
 - Agent platform Phase 1 roadmap:
@@ -190,6 +192,7 @@ dependencies.
 - [Governed core trade command model](docs/engineering/core-platform-trade-command-model.md)
 - [Governed core platform work packages](docs/engineering/core-platform-work-packages.md)
 - [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)
+- [Trading EOD work packages](docs/engineering/trading-eod-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)
 - [Trading source candidates](docs/engineering/trading-source-candidates.csv)
@@ -200,6 +203,7 @@ dependencies.
 - [Future-ready Wave 0 tickets](docs/engineering/future-ready-wave-0-tickets.md)
 - [Agent platform Phase 1 tickets](docs/engineering/agent-platform-phase-1-tickets.md)
 - [Prompt-first operator experience work packages](docs/engineering/prompt-first-operator-experience-work-packages.md)
+- [ChatGPT MCP work packages](docs/engineering/chatgpt-mcp-work-packages.md)
 - [Agent role catalog](docs/engineering/agent-role-catalog.md)
 - [Human-agent authority matrix](docs/engineering/human-agent-authority-matrix.md)
 - [Canonical work object inventory](docs/engineering/canonical-work-object-inventory.md)

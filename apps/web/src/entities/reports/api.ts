@@ -11,6 +11,7 @@ import type {
   SettlementReportPresetRecord,
   SettlementExceptionReport,
   SettlementAgingReport,
+  TradingEodReport,
 } from '../../shared/models'
 
 type LoadPnlHistoryReportOptions = {
@@ -23,6 +24,11 @@ type LoadPnlHistoryReportOptions = {
 }
 
 type LoadSettlementReportOptions = SettlementReportFilters & {
+  asOf?: string
+}
+
+type LoadTradingEodReportOptions = {
+  businessDate?: string
   asOf?: string
 }
 
@@ -152,6 +158,26 @@ export async function loadPnlComparisonReport(
 
 export async function loadReportingOverview(apiBase: string, accessToken?: string): Promise<ReportingOverview> {
   return fetchJson<ReportingOverview>(`${apiBase}/reports/overview`, {
+    cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
+  })
+}
+
+export async function loadTradingEodReport(
+  apiBase: string,
+  options: LoadTradingEodReportOptions = {},
+  accessToken?: string,
+): Promise<TradingEodReport> {
+  const params = new URLSearchParams()
+  if (options.businessDate) {
+    params.set('business_date', options.businessDate)
+  }
+  if (options.asOf) {
+    params.set('as_of', options.asOf)
+  }
+
+  const queryString = params.toString()
+  return fetchJson<TradingEodReport>(`${apiBase}/reports/trading-eod${queryString ? `?${queryString}` : ''}`, {
     cache: 'no-store',
     ...authenticatedRequestInit(accessToken),
   })

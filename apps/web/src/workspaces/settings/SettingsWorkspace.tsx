@@ -51,6 +51,7 @@ import {
   formatProjectionMonitoringEmailStatusLabel,
   summarizeProjectionMonitoringEmail,
 } from './projectionMonitoringEmailRuntime'
+import { GoogleCalendarPanel } from './GoogleCalendarPanel'
 
 type SettingsWorkspaceProps = {
   health: string
@@ -1800,7 +1801,9 @@ export function SettingsWorkspace({
                       ? serverSettings.google_auth.auto_create_users
                         ? 'Google sign-in is enabled and can auto-provision local users.'
                         : 'Google sign-in is enabled for linked local users.'
-                      : 'Google sign-in is not enabled on the server.'}
+                      : serverSettings.google_auth.client_id
+                        ? 'Google sign-in is off, but the browser still has a Google client ID for optional readonly calendar access.'
+                        : 'Google sign-in is not enabled on the server.'}
                   </p>
                 </article>
                 <article className="settings-summary-card">
@@ -1937,6 +1940,13 @@ export function SettingsWorkspace({
             </div>
           )}
         </article>
+
+        <GoogleCalendarPanel
+          googleClientId={serverSettings?.google_auth.client_id ?? null}
+          googleAuthEnabled={Boolean(serverSettings?.google_auth.enabled)}
+          runtimeSettingsLoading={serverSettingsLoading}
+          runtimeSettingsError={serverSettingsError}
+        />
 
         <article className="surface">
           <div className="section-head">

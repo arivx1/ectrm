@@ -6,6 +6,7 @@ from fastapi import APIRouter, FastAPI
 
 from apps.api.app.domains.accruals.routes import router as accruals_router
 from apps.api.app.domains.operations.routes import router as operations_router
+from apps.api.app.domains.mcp.routes import router as mcp_router
 from apps.api.app.domains.reports.routes import router as reports_router
 from apps.api.app.domains.settlement.routes import router as settlement_router
 from apps.api.app.routes.admin_data import admin_router as admin_data_router
@@ -52,6 +53,7 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="admin", name="external-data-admin", router=external_data_admin_router),
     HttpRouteRegistration(domain="assistant", name="assistant", router=assistant_router),
     HttpRouteRegistration(domain="assistant", name="assistant-admin", router=assistant_admin_router),
+    HttpRouteRegistration(domain="mcp", name="mcp-status", router=mcp_router),
     HttpRouteRegistration(domain="codex", name="codex-admin", router=codex_router),
     HttpRouteRegistration(domain="codex", name="codex-callback", router=codex_callback_router),
     HttpRouteRegistration(domain="trading", name="trades", router=trades_router),

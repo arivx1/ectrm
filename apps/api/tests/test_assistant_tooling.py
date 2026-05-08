@@ -4,6 +4,7 @@ import enum
 import json
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 if not hasattr(enum, "StrEnum"):
@@ -18,6 +19,7 @@ from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.chat import AssistantService
+from apps.api.app.domains.assistant.services.registry import to_managed_agent
 from apps.api.app.domains.reports.services.pretrade_recommendations import (
     build_recommendation_run_payload,
     prepare_pretrade_recommendation_evaluation,
@@ -41,18 +43,28 @@ from apps.api.app.models.reference_counterparty_external_credit_snapshot import 
 )
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.report_preset import ReportPreset
+from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_action_request import AssistantActionRequest
+from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.models.user_account import UserAccount
+from apps.api.app.schemas.document import (
+    DocumentGmailInboxAttachmentOut,
+    DocumentGmailInboxBrowseResultOut,
+    DocumentGmailInboxMessageDetailOut,
+    DocumentGmailInboxMessageSummaryOut,
+)
 from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationSourceProvenance,
     PreTradeRecommendationSourceSnapshot,
     PreTradeScenarioDraft,
 )
-from apps.api.app.schemas.assistant import AssistantPromptRequest
+from apps.api.app.schemas.assistant import AssistantMessageOut, AssistantPromptRequest, AssistantPromptResponse, AssistantUsageOut
 
 
 class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
@@ -94,6 +106,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.query(ExternalDataRun).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
+            session.query(AssistantAgent).delete()
             session.query(DeliveryEvent).delete()
             session.query(TradeActualization).delete()
             session.query(DeliveryObligation).delete()
@@ -104,6 +117,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.query(ReportPreset).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
+            session.query(UserAccount).delete()
             session.add(
                 Event(
                     event_id="evt-1001",
@@ -1039,6 +1053,100 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["items"][0]["title"], "Crude rallies on supply risk")
         self.assertEqual(trace.summary, "Loaded 2 recent headline(s) for WTI.")
 
+    def test_tool_service_loads_settlement_report_filter_options(self) -> None:
+        now = datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                TradeInvoice(
+                    id=701,
+                    trade_id="T-1001",
+                    delivery_id=None,
+                    leg_no=None,
+                    invoice_number="INV-1001",
+                    invoice_currency_code="USD",
+                    billed_quantity=1000,
+                    quantity_unit_code="MMBTU",
+                    invoice_amount=3250,
+                    status="ISSUED",
+                    issued_at=now,
+                    due_at=now,
+                    dispute_reason=None,
+                    notes="Settlement tool test invoice",
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            service = AssistantToolService(session, actor_id="trader_one")
+            result, trace = service.execute_tool("get_settlement_report_filter_options", {})
+
+        self.assertIn("GAS-US", result.output["books"])
+        self.assertIn("ACME", result.output["counterparties"])
+        self.assertIn("USD", result.output["currencies"])
+        self.assertEqual(trace.tool_name, "get_settlement_report_filter_options")
+        self.assertIn("settlement report filter options", trace.summary.lower())
+
+    def test_tool_service_lists_visible_settlement_report_presets_for_actor(self) -> None:
+        now = datetime(2026, 4, 22, 13, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    ReportPreset(
+                        preset_key="settlement",
+                        scope="PERSONAL",
+                        scope_owner_key="trader_one",
+                        name="Trader One Cash",
+                        name_key="trader one cash",
+                        filters_json={"book": "GAS-US", "currency": "USD"},
+                        created_at=now,
+                        created_by="trader_one",
+                        updated_at=now,
+                        updated_by="trader_one",
+                        version=1,
+                    ),
+                    ReportPreset(
+                        preset_key="settlement",
+                        scope="SHARED",
+                        scope_owner_key="__shared__",
+                        name="Desk Exceptions",
+                        name_key="desk exceptions",
+                        filters_json={"severity": "blocked"},
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                    ReportPreset(
+                        preset_key="settlement",
+                        scope="PERSONAL",
+                        scope_owner_key="trader_two",
+                        name="Hidden Preset",
+                        name_key="hidden preset",
+                        filters_json={"currency": "EUR"},
+                        created_at=now,
+                        created_by="trader_two",
+                        updated_at=now,
+                        updated_by="trader_two",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
+            service = AssistantToolService(session, actor_id="trader_one")
+            result, trace = service.execute_tool("list_settlement_report_presets", {})
+
+        self.assertEqual(result.output["count"], 2)
+        preset_names = {item["name"] for item in result.output["items"]}
+        self.assertEqual(preset_names, {"Trader One Cash", "Desk Exceptions"})
+        self.assertEqual(trace.tool_name, "list_settlement_report_presets")
+        self.assertIn("settlement report preset", trace.summary.lower())
+
     def test_tool_service_analyzes_pretrade_draft_against_latest_visible_saved_run(self) -> None:
         previous_run_id = self._seed_pretrade_recommendation_run(
             actor_id="trader_one",
@@ -1955,6 +2063,107 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list_trace.tool_name, "list_documents")
         self.assertEqual(detail_trace.tool_name, "get_document_ingestion")
 
+    def test_tool_service_lists_gmail_messages_and_loads_message_detail(self) -> None:
+        browse_result = DocumentGmailInboxBrowseResultOut(
+            query="from:backoffice@example.com",
+            page_size=2,
+            next_page_token="gmail-next-page",
+            messages=[
+                DocumentGmailInboxMessageSummaryOut(
+                    message_id="gmail-msg-1",
+                    thread_id="gmail-thread-1",
+                    subject="May Settlement Package",
+                    sender="backoffice@example.com",
+                    received_at=datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc),
+                    snippet="Attached is the May settlement package.",
+                    unread=True,
+                    attachment_count=2,
+                    pdf_attachment_count=1,
+                    imported_pdf_attachment_count=1,
+                ),
+                DocumentGmailInboxMessageSummaryOut(
+                    message_id="gmail-msg-2",
+                    thread_id="gmail-thread-2",
+                    subject="Storage Invoice Backup",
+                    sender="ops@example.com",
+                    received_at=datetime(2026, 5, 7, 9, 30, tzinfo=timezone.utc),
+                    snippet="Backup copy attached.",
+                    unread=False,
+                    attachment_count=1,
+                    pdf_attachment_count=1,
+                    imported_pdf_attachment_count=0,
+                ),
+            ],
+        )
+        message_detail = DocumentGmailInboxMessageDetailOut(
+            message_id="gmail-msg-1",
+            thread_id="gmail-thread-1",
+            subject="May Settlement Package",
+            sender="backoffice@example.com",
+            to_recipients="ops@example.com",
+            received_at=datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc),
+            snippet="Attached is the May settlement package.",
+            unread=True,
+            body_text="Please review the attached settlement package.",
+            body_truncated=False,
+            attachments=[
+                DocumentGmailInboxAttachmentOut(
+                    filename="settlement.pdf",
+                    mime_type="application/pdf",
+                    size_bytes=2048,
+                    part_token="attachment-1",
+                    attachment_id="attachment-1",
+                    importable=True,
+                    already_imported=True,
+                ),
+                DocumentGmailInboxAttachmentOut(
+                    filename="notes.txt",
+                    mime_type="text/plain",
+                    size_bytes=256,
+                    part_token="attachment-2",
+                    attachment_id="attachment-2",
+                    importable=False,
+                    already_imported=False,
+                ),
+            ],
+        )
+
+        with self.SessionLocal() as session:
+            with patch(
+                "apps.api.app.domains.assistant.services.tools.load_gmail_inbox_messages",
+                return_value=browse_result,
+            ) as list_mock, patch(
+                "apps.api.app.domains.assistant.services.tools.load_gmail_inbox_message_detail",
+                return_value=message_detail,
+            ) as detail_mock:
+                service = AssistantToolService(session)
+                list_result, list_trace = service.execute_tool(
+                    "list_gmail_inbox_messages",
+                    {"query": "from:backoffice@example.com", "limit": 2},
+                )
+                detail_result, detail_trace = service.execute_tool(
+                    "get_gmail_inbox_message",
+                    {"message_id": "gmail-msg-1"},
+                )
+
+        list_mock.assert_called_once_with(
+            session,
+            query_override="from:backoffice@example.com",
+            page_size=2,
+            page_token=None,
+        )
+        detail_mock.assert_called_once_with(session, message_id="gmail-msg-1")
+        self.assertEqual(list_result.output["count"], 2)
+        self.assertEqual(list_result.output["items"][0]["message_id"], "gmail-msg-1")
+        self.assertEqual(list_result.output["next_page_token"], "gmail-next-page")
+        self.assertTrue(detail_result.output["found"])
+        self.assertEqual(detail_result.output["message"]["message_id"], "gmail-msg-1")
+        self.assertTrue(detail_result.output["message"]["attachments"][0]["already_imported"])
+        self.assertEqual(list_trace.tool_name, "list_gmail_inbox_messages")
+        self.assertIn("More messages are available", list_trace.summary)
+        self.assertEqual(detail_trace.tool_name, "get_gmail_inbox_message")
+        self.assertIn("1 importable PDF attachment", detail_trace.summary)
+
     def test_tool_service_loads_workspace_summary(self) -> None:
         with self.SessionLocal() as session:
             service = AssistantToolService(session)
@@ -1965,6 +2174,530 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output["payments"]["total_count"], 1)
         self.assertEqual(result.output["deliveries"]["total_count"], 1)
         self.assertIn("Workspace summary loaded", trace.summary)
+
+    def test_tool_service_lists_managed_agents_and_loads_agent_profile(self) -> None:
+        now = datetime(2026, 5, 7, 18, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id="ops_admin",
+                    email="ops-admin@example.com",
+                    google_subject=None,
+                    display_name="Ops Admin",
+                    role="OPS_ADMIN",
+                    password_hash=None,
+                    is_active=True,
+                    last_login_at=None,
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            session.add_all(
+                [
+                    AssistantAgent(
+                        agent_id="control-tower-agent",
+                        name="Control Tower Agent",
+                        description="Supervises managed agents.",
+                        status="ACTIVE",
+                        scope="ORGANIZATION",
+                        provider=None,
+                        model=None,
+                        role_key="control-tower-agent",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Supervisory manager.",
+                        human_owner_role="Admin or Platform Owner",
+                        authority_ceiling="DRAFT",
+                        activation_notes="Seeded for roster introspection tests.",
+                        orchestration_pattern="TRIAGE",
+                        parent_agent_id=None,
+                        managed_agent_ids=["settlement-copilot", "market-research-agent"],
+                        delegation_guidance="Route roster questions to the right specialist before summarizing.",
+                        allowed_workspaces=["assistant", "admin"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT"],
+                        skills=["agent_supervision", "inter_agent_consultation"],
+                        allowed_tools=["get_workspace_summary"],
+                        allowed_action_types=[],
+                        daily_token_allocation=None,
+                        system_prompt="Supervise managed agents.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                    AssistantAgent(
+                        agent_id="settlement-copilot",
+                        name="Settlement Copilot",
+                        description="Settlement specialist.",
+                        status="ACTIVE",
+                        scope="TEAM",
+                        provider=None,
+                        model=None,
+                        role_key="settlement-copilot",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Settlement manager.",
+                        human_owner_role="Settlement Lead",
+                        authority_ceiling="EXECUTE",
+                        activation_notes="Seeded for roster introspection tests.",
+                        orchestration_pattern="MANAGER",
+                        parent_agent_id="control-tower-agent",
+                        managed_agent_ids=[],
+                        delegation_guidance="Keep settlement synthesis here.",
+                        allowed_workspaces=["assistant", "settlement"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT", "ACTION"],
+                        skills=["settlement_operations", "inter_agent_consultation"],
+                        allowed_tools=["get_trade_settlement_summary"],
+                        allowed_action_types=["issue_trade_invoice"],
+                        daily_token_allocation=None,
+                        system_prompt="Handle settlement.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                    AssistantAgent(
+                        agent_id="market-research-agent",
+                        name="Market Research Agent",
+                        description="Market specialist.",
+                        status="ACTIVE",
+                        scope="TEAM",
+                        provider=None,
+                        model=None,
+                        role_key="market-research-agent",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Research manager.",
+                        human_owner_role="Desk Lead",
+                        authority_ceiling="DRAFT",
+                        activation_notes="Seeded for roster introspection tests.",
+                        orchestration_pattern="PARALLEL",
+                        parent_agent_id="control-tower-agent",
+                        managed_agent_ids=[],
+                        delegation_guidance="Fan out research.",
+                        allowed_workspaces=["assistant", "reports"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT"],
+                        skills=["market_intelligence", "inter_agent_consultation"],
+                        allowed_tools=["get_market_context"],
+                        allowed_action_types=[],
+                        daily_token_allocation=None,
+                        system_prompt="Handle market research.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
+            service = AssistantToolService(session, actor_id="ops_admin")
+            list_result, list_trace = service.execute_tool("list_managed_agents", {})
+            profile_result, profile_trace = service.execute_tool(
+                "get_managed_agent_profile",
+                {"agent_id": "control-tower-agent"},
+            )
+
+        self.assertEqual(list_trace.tool_name, "list_managed_agents")
+        self.assertEqual(list_result.output["count"], 3)
+        control_tower = next(
+            item for item in list_result.output["items"] if item["agent_id"] == "control-tower-agent"
+        )
+        self.assertEqual(
+            control_tower["build_recipe"],
+            "role + skills + capabilities + workspaces + live tools + governed actions + system prompt",
+        )
+        self.assertIn("settlement-copilot", control_tower["managed_agent_ids"])
+        self.assertIn("market-research-agent", control_tower["managed_agent_ids"])
+        self.assertIn("manages settlement-copilot, market-research-agent", control_tower["relationship_summary"])
+
+        self.assertEqual(profile_trace.tool_name, "get_managed_agent_profile")
+        self.assertTrue(profile_result.output["found"])
+        self.assertEqual(profile_result.output["agent"]["agent_id"], "control-tower-agent")
+        self.assertEqual(profile_result.output["build_recipe"]["orchestration_pattern"], "TRIAGE")
+        self.assertTrue(profile_result.output["build_recipe"]["system_prompt_visible"])
+        self.assertEqual(profile_result.output["build_recipe"]["system_prompt"], "Supervise managed agents.")
+        self.assertEqual(profile_result.output["role_archetype"]["role_key"], "control-tower-agent")
+        self.assertEqual(
+            profile_result.output["relationships"]["managed_agent_ids"],
+            ["settlement-copilot", "market-research-agent"],
+        )
+        self.assertEqual(
+            {row["agent_id"] for row in profile_result.output["relationships"]["related_agents"]},
+            {"settlement-copilot", "market-research-agent"},
+        )
+
+    async def test_app_introspection_tools_expose_catalog_schema_and_codebase(self) -> None:
+        with self.SessionLocal() as session:
+            service = AssistantToolService(session, actor_id="ops_admin")
+            catalog_result, catalog_trace = service.execute_tool("get_application_catalog", {})
+            schema_result, schema_trace = service.execute_tool(
+                "get_data_schema_catalog",
+                {"table_name": "assistant_agents"},
+            )
+            search_result, search_trace = service.execute_tool(
+                "search_codebase",
+                {
+                    "query": "build_application_access_summary",
+                    "scope": "api",
+                    "path_prefix": "apps/api/app/domains/assistant/services",
+                },
+            )
+            read_result, read_trace = service.execute_tool(
+                "read_codebase_file",
+                {
+                    "path": "apps/api/app/domains/assistant/services/app_context_catalog.py",
+                    "start_line": 1,
+                    "end_line": 24,
+                },
+            )
+
+        self.assertEqual(catalog_trace.tool_name, "get_application_catalog")
+        self.assertGreater(catalog_result.output["route_group_count"], 0)
+        self.assertIn("assistant", {row["domain"] for row in catalog_result.output["route_groups"]})
+        self.assertIn(
+            "docs/engineering/ai-workflow.md",
+            set(catalog_result.output["documentation_entry_points"]),
+        )
+
+        self.assertEqual(schema_trace.tool_name, "get_data_schema_catalog")
+        self.assertTrue(schema_result.output["found"])
+        self.assertEqual(schema_result.output["table"]["table_name"], "assistant_agents")
+        self.assertEqual(schema_result.output["table"]["model_name"], "AssistantAgent")
+        self.assertIn("agent_id", schema_result.output["table"]["primary_key"])
+
+        self.assertEqual(search_trace.tool_name, "search_codebase")
+        self.assertGreaterEqual(search_result.output["count"], 1)
+        self.assertTrue(
+            any(
+                row["path"] == "apps/api/app/domains/assistant/services/app_context_catalog.py"
+                for row in search_result.output["items"]
+            )
+        )
+
+        self.assertEqual(read_trace.tool_name, "read_codebase_file")
+        self.assertEqual(
+            read_result.output["path"],
+            "apps/api/app/domains/assistant/services/app_context_catalog.py",
+        )
+        self.assertIn("APP_CONTEXT_INTROSPECTION_TOOL_NAMES", read_result.output["content"])
+
+    async def test_consult_managed_agent_limits_manager_to_configured_subordinates(self) -> None:
+        now = datetime(2026, 5, 7, 18, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id="ops_admin",
+                    email="ops-admin@example.com",
+                    google_subject=None,
+                    display_name="Ops Admin",
+                    role="OPS_ADMIN",
+                    password_hash=None,
+                    is_active=True,
+                    last_login_at=None,
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            session.add_all(
+                [
+                    AssistantAgent(
+                        agent_id="control-tower-agent",
+                        name="Control Tower Agent",
+                        description="Supervises managed agents.",
+                        status="ACTIVE",
+                        scope="ORGANIZATION",
+                        provider=None,
+                        model=None,
+                        role_key="control-tower-agent",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Supervisory manager.",
+                        human_owner_role="Admin or Platform Owner",
+                        authority_ceiling="DRAFT",
+                        activation_notes="Seeded for hierarchy tests.",
+                        orchestration_pattern="TRIAGE",
+                        parent_agent_id=None,
+                        managed_agent_ids=["settlement-copilot"],
+                        delegation_guidance="Consult only configured domain managers before escalating.",
+                        allowed_workspaces=["assistant", "admin"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT"],
+                        skills=["agent_supervision", "inter_agent_consultation"],
+                        allowed_tools=["consult_managed_agent", "get_workspace_summary"],
+                        allowed_action_types=[],
+                        daily_token_allocation=None,
+                        system_prompt="Supervise managed agents.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                    AssistantAgent(
+                        agent_id="settlement-copilot",
+                        name="Settlement Copilot",
+                        description="Settlement specialist.",
+                        status="ACTIVE",
+                        scope="TEAM",
+                        provider=None,
+                        model=None,
+                        role_key="settlement-copilot",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Settlement manager.",
+                        human_owner_role="Settlement Lead",
+                        authority_ceiling="EXECUTE",
+                        activation_notes="Seeded for hierarchy tests.",
+                        orchestration_pattern="MANAGER",
+                        parent_agent_id="control-tower-agent",
+                        managed_agent_ids=[],
+                        delegation_guidance="Keep settlement synthesis here.",
+                        allowed_workspaces=["assistant", "settlement"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT", "ACTION"],
+                        skills=["settlement_operations"],
+                        allowed_tools=["get_trade_settlement_summary"],
+                        allowed_action_types=["issue_trade_invoice"],
+                        daily_token_allocation=None,
+                        system_prompt="Handle settlement.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                    AssistantAgent(
+                        agent_id="market-research-agent",
+                        name="Market Research Agent",
+                        description="Market specialist.",
+                        status="ACTIVE",
+                        scope="TEAM",
+                        provider=None,
+                        model=None,
+                        role_key="market-research-agent",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Research manager.",
+                        human_owner_role="Desk Lead",
+                        authority_ceiling="DRAFT",
+                        activation_notes="Seeded for hierarchy tests.",
+                        orchestration_pattern="PARALLEL",
+                        parent_agent_id="control-tower-agent",
+                        managed_agent_ids=[],
+                        delegation_guidance="Fan out research.",
+                        allowed_workspaces=["assistant", "reports"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT"],
+                        skills=["market_intelligence"],
+                        allowed_tools=["get_market_context"],
+                        allowed_action_types=[],
+                        daily_token_allocation=None,
+                        system_prompt="Handle market research.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
+            manager_record = session.get(AssistantAgent, "control-tower-agent")
+            assert manager_record is not None
+            service = AssistantToolService(
+                session,
+                actor_id="ops_admin",
+                caller_agent=to_managed_agent(manager_record),
+            )
+
+            async def fake_generate_response(self, payload, agent_definition=None, prompt_context=None):
+                del self, payload, prompt_context
+                return SimpleNamespace(
+                    message=SimpleNamespace(content=f"{agent_definition.name} advisory answer."),
+                    warnings=[],
+                    tool_calls=[],
+                )
+
+            with patch.object(AssistantService, "generate_response", new=fake_generate_response):
+                allowed_result, allowed_trace = await service.execute_tool_async(
+                    "consult_managed_agent",
+                    {
+                        "agent_id": "settlement-copilot",
+                        "question": "What should I look at first in the settlement queue?",
+                    },
+                )
+
+                self.assertTrue(allowed_result.output["ok"])
+                self.assertTrue(allowed_result.output["advisory_only"])
+                self.assertEqual(allowed_result.output["agent_id"], "settlement-copilot")
+                self.assertEqual(allowed_result.output["build_recipe"]["orchestration_pattern"], "MANAGER")
+                self.assertEqual(allowed_trace.tool_name, "consult_managed_agent")
+
+                with self.assertRaises(AssistantToolServiceError) as exc:
+                    await service.execute_tool_async(
+                        "consult_managed_agent",
+                        {
+                            "agent_id": "market-research-agent",
+                            "question": "Give me a market view.",
+                        },
+                    )
+
+        self.assertIn("configured managed agents", str(exc.exception))
+
+    async def test_enlist_managed_agent_records_delegated_run_and_executes_governed_action(self) -> None:
+        now = datetime(2026, 5, 7, 18, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id="ops_admin",
+                    email="ops-admin@example.com",
+                    google_subject=None,
+                    display_name="Ops Admin",
+                    role="OPS_ADMIN",
+                    password_hash=None,
+                    is_active=True,
+                    last_login_at=None,
+                    created_at=now,
+                    created_by="test-suite",
+                    updated_at=now,
+                    updated_by="test-suite",
+                    version=1,
+                )
+            )
+            session.add_all(
+                [
+                    AssistantAgent(
+                        agent_id="control-tower-agent",
+                        name="Control Tower Agent",
+                        description="Supervises managed agents.",
+                        status="ACTIVE",
+                        scope="ORGANIZATION",
+                        provider=None,
+                        model=None,
+                        role_key="control-tower-agent",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Supervisory manager.",
+                        human_owner_role="Admin or Platform Owner",
+                        authority_ceiling="DRAFT",
+                        activation_notes="Seeded for delegated execution tests.",
+                        orchestration_pattern="TRIAGE",
+                        parent_agent_id=None,
+                        managed_agent_ids=["trade-capture-agent"],
+                        delegation_guidance="Route lifecycle work to the trade capture lane when execution is warranted.",
+                        allowed_workspaces=["assistant", "admin"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT"],
+                        skills=["agent_supervision", "inter_agent_consultation"],
+                        allowed_tools=["enlist_managed_agent", "get_workspace_summary"],
+                        allowed_action_types=[],
+                        daily_token_allocation=None,
+                        system_prompt="Supervise managed agents.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                    AssistantAgent(
+                        agent_id="trade-capture-agent",
+                        name="Trade Capture Agent",
+                        description="Captures governed trade lifecycle changes.",
+                        status="ACTIVE",
+                        scope="TEAM",
+                        provider=None,
+                        model=None,
+                        role_key="trade-capture-agent",
+                        profile_kind="ROLE_DERIVED",
+                        specialization_summary="Trade execution specialist.",
+                        human_owner_role="Trader",
+                        authority_ceiling="EXECUTE",
+                        activation_notes="Seeded for delegated execution tests.",
+                        orchestration_pattern="SINGLE",
+                        parent_agent_id="control-tower-agent",
+                        managed_agent_ids=[],
+                        delegation_guidance="Handle direct governed trade lifecycle work here.",
+                        allowed_workspaces=["assistant", "trades"],
+                        capabilities=["READ", "EXPLAIN", "DRAFT", "ACTION"],
+                        skills=["trade_lifecycle_management"],
+                        allowed_tools=["get_trade_by_id"],
+                        allowed_action_types=["cancel_trade"],
+                        daily_token_allocation=None,
+                        system_prompt="Use the governed trade action contract when the request is explicit.",
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
+            manager_record = session.get(AssistantAgent, "control-tower-agent")
+            assert manager_record is not None
+            service = AssistantToolService(
+                session,
+                actor_id="ops_admin",
+                caller_agent=to_managed_agent(manager_record),
+            )
+
+            async def fake_generate_response(self, payload, agent_definition=None, prompt_context=None):
+                del self, payload, prompt_context
+                return AssistantPromptResponse(
+                    agent_id=agent_definition.agent_id if agent_definition is not None else None,
+                    agent_name=agent_definition.name if agent_definition is not None else None,
+                    agent_role_key=agent_definition.role_key if agent_definition is not None else None,
+                    agent_profile_kind=agent_definition.profile_kind if agent_definition is not None else None,
+                    provider="openai",
+                    model="gpt-5-mini",
+                    message=AssistantMessageOut(
+                        content=f"{agent_definition.name} handled the delegated trade lifecycle task."
+                    ),
+                    usage=AssistantUsageOut(input_tokens=12, output_tokens=10),
+                    warnings=[],
+                    tool_calls=[],
+                    action_requests=[],
+                )
+
+            with patch.object(AssistantService, "generate_response", new=fake_generate_response):
+                result, trace = await service.execute_tool_async(
+                    "enlist_managed_agent",
+                    {
+                        "agent_id": "trade-capture-agent",
+                        "task": "Cancel trade T-1001 if it is still active and report the outcome.",
+                    },
+                )
+
+            self.assertEqual(trace.tool_name, "enlist_managed_agent")
+            self.assertTrue(result.output["ok"])
+            self.assertTrue(result.output["delegated"])
+            self.assertFalse(result.output["advisory_only"])
+            self.assertEqual(result.output["agent_id"], "trade-capture-agent")
+            self.assertEqual(result.output["executed_action_count"], 1)
+            self.assertEqual(result.output["pending_action_count"], 0)
+            self.assertEqual(result.output["failed_action_count"], 0)
+            self.assertEqual(len(result.output["action_requests"]), 1)
+            self.assertEqual(result.output["action_requests"][0]["action_type"], "cancel_trade")
+            self.assertEqual(result.output["action_requests"][0]["status"], "EXECUTED")
+            self.assertIn("Executed 1 governed action", trace.summary)
+
+            delegated_run = session.query(AssistantRun).order_by(AssistantRun.id.desc()).first()
+            delegated_request = session.query(AssistantActionRequest).order_by(AssistantActionRequest.id.desc()).first()
+            cancelled_trade = session.get(Trade, "T-1001")
+
+        assert delegated_run is not None
+        assert delegated_request is not None
+        assert cancelled_trade is not None
+        self.assertIsNone(delegated_run.conversation_id)
+        self.assertEqual(delegated_run.agent_id, "trade-capture-agent")
+        self.assertEqual(delegated_request.run_id, delegated_run.id)
+        self.assertEqual(delegated_request.status, "EXECUTED")
+        self.assertEqual(cancelled_trade.status, "CANCELLED")
+        self.assertEqual(
+            delegated_request.payload["review_context"]["delegated_by_agent"]["agent_id"],
+            "control-tower-agent",
+        )
 
     async def test_openai_response_executes_tool_call_and_returns_trace(self) -> None:
         captured_payloads: list[dict[str, object]] = []

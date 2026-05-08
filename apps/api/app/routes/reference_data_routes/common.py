@@ -9,12 +9,17 @@ from sqlalchemy.orm import Session
 from apps.api.app.domains.reference_data.services.records import normalize_code
 from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_calendar import ReferenceCalendar
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_pipeline_path import ReferencePipelinePath
+from apps.api.app.models.reference_pipeline_point import ReferencePipelinePoint
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_rail_line import ReferenceRailLine
+from apps.api.app.models.reference_rail_route import ReferenceRailRoute
 from apps.api.app.models.reference_spatial_feature import ReferenceSpatialFeature
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
@@ -23,13 +28,18 @@ ModelT = TypeVar(
     "ModelT",
     ReferenceBook,
     ReferenceAsset,
+    ReferenceCalendar,
     ReferenceCommodity,
     ReferenceCounterparty,
     ReferenceCurrency,
     ReferenceUnit,
     ReferenceLocation,
+    ReferencePipelinePath,
+    ReferencePipelinePoint,
     ReferencePortfolio,
     ReferencePriceIndex,
+    ReferenceRailLine,
+    ReferenceRailRoute,
     ReferenceSpatialFeature,
 )
 
@@ -156,6 +166,10 @@ def to_out(record: ModelT, schema_cls):
     )
     if isinstance(record, ReferenceCommodity):
         payload["commodity_class"] = record.commodity_class
+    if isinstance(record, ReferenceCalendar):
+        payload["calendar_type"] = record.calendar_type
+        payload["market"] = record.market
+        payload["timezone"] = record.timezone
     if isinstance(record, ReferenceAsset):
         payload["asset_class"] = record.asset_class
         payload["asset_type"] = record.asset_type
@@ -207,6 +221,40 @@ def to_out(record: ModelT, schema_cls):
         payload["longitude"] = record.longitude
         payload["region"] = record.region
         payload["timezone"] = record.timezone
+    if isinstance(record, ReferencePipelinePath):
+        payload["pipeline_code"] = record.pipeline_code
+        payload["receipt_location_code"] = record.receipt_location_code
+        payload["delivery_location_code"] = record.delivery_location_code
+        payload["receipt_point_code"] = record.receipt_point_code
+        payload["delivery_point_code"] = record.delivery_point_code
+        payload["path_direction"] = record.path_direction
+        payload["cycle_timezone"] = record.cycle_timezone
+    if isinstance(record, ReferencePipelinePoint):
+        payload["pipeline_code"] = record.pipeline_code
+        payload["location_code"] = record.location_code
+        payload["point_role"] = record.point_role
+        payload["operator_point_code"] = record.operator_point_code
+        payload["operator_zone"] = record.operator_zone
+        payload["connected_pipeline_code"] = record.connected_pipeline_code
+        payload["is_tradable"] = record.is_tradable
+        payload["is_pricing_point"] = record.is_pricing_point
+        payload["is_scheduling_point"] = record.is_scheduling_point
+        payload["sort_order"] = record.sort_order
+    if isinstance(record, ReferenceRailLine):
+        payload["railroad_code"] = record.railroad_code
+        payload["operator_name"] = record.operator_name
+        payload["default_timezone"] = record.default_timezone
+    if isinstance(record, ReferenceRailRoute):
+        payload["rail_line_code"] = record.rail_line_code
+        payload["origin_location_code"] = record.origin_location_code
+        payload["destination_location_code"] = record.destination_location_code
+        payload["service_calendar_code"] = record.service_calendar_code
+        payload["route_direction"] = record.route_direction
+        payload["schedule_timezone"] = record.schedule_timezone
+        payload["placement_cutoff_time_local"] = record.placement_cutoff_time_local
+        payload["release_cutoff_time_local"] = record.release_cutoff_time_local
+        payload["placement_free_time_hours"] = record.placement_free_time_hours
+        payload["release_free_time_hours"] = record.release_free_time_hours
     if isinstance(record, ReferencePortfolio):
         payload["book_code"] = record.book_code
         payload["owner"] = record.owner
@@ -346,6 +394,95 @@ def ensure_active_location_exists(db: Session, code: str) -> str:
     return normalized_code
 
 
+def ensure_active_pipeline_asset_exists(db: Session, code: str) -> str:
+    normalized_code = normalize_code(code)
+    reference_asset = db.execute(
+        select(ReferenceAsset).where(
+            ReferenceAsset.code == normalized_code,
+            ReferenceAsset.is_active.is_(True),
+            ReferenceAsset.asset_class == "PIPELINE",
+        )
+    ).scalars().first()
+    if reference_asset is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Pipeline asset '{normalized_code}' is not an active PIPELINE asset",
+        )
+    return normalized_code
+
+
+def ensure_active_rail_line_exists(db: Session, code: str) -> str:
+    normalized_code = normalize_code(code)
+    reference_rail_line = db.execute(
+        select(ReferenceRailLine).where(
+            ReferenceRailLine.code == normalized_code,
+            ReferenceRailLine.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_rail_line is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Rail line '{normalized_code}' is not active in reference data",
+        )
+    return normalized_code
+
+
+def get_active_pipeline_point(db: Session, code: str) -> ReferencePipelinePoint:
+    normalized_code = normalize_code(code)
+    reference_point = db.execute(
+        select(ReferencePipelinePoint).where(
+            ReferencePipelinePoint.code == normalized_code,
+            ReferencePipelinePoint.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_point is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Pipeline point '{normalized_code}' is not active in reference data",
+        )
+    return reference_point
+
+
+def ensure_active_pipeline_point_exists(db: Session, code: str) -> str:
+    return get_active_pipeline_point(db, code).code
+
+
+def ensure_active_pipeline_point_belongs_to_pipeline(
+    db: Session,
+    *,
+    point_code: str,
+    pipeline_code: str,
+    field_name: str,
+) -> str:
+    normalized_pipeline_code = normalize_code(pipeline_code)
+    reference_point = get_active_pipeline_point(db, point_code)
+    if reference_point.pipeline_code != normalized_pipeline_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{field_name} '{reference_point.code}' must belong to pipeline "
+                f"'{normalized_pipeline_code}'"
+            ),
+        )
+    return reference_point.code
+
+
+def ensure_active_calendar_exists(db: Session, code: str) -> str:
+    normalized_code = normalize_code(code)
+    reference_calendar = db.execute(
+        select(ReferenceCalendar).where(
+            ReferenceCalendar.code == normalized_code,
+            ReferenceCalendar.is_active.is_(True),
+        )
+    ).scalars().first()
+    if reference_calendar is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Calendar '{normalized_code}' is not active in reference data",
+        )
+    return normalized_code
+
+
 def ensure_currency_not_in_active_use(db: Session, code: str) -> None:
     active_price_index_count = db.execute(
         select(func.count()).select_from(ReferencePriceIndex).where(
@@ -411,4 +548,18 @@ def ensure_price_index_not_in_active_use(db: Session, code: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Price index cannot be deactivated while active trades reference it",
+        )
+
+
+def ensure_calendar_not_in_active_use(db: Session, code: str) -> None:
+    active_price_index_count = db.execute(
+        select(func.count()).select_from(ReferencePriceIndex).where(
+            ReferencePriceIndex.calendar_code == code,
+            ReferencePriceIndex.is_active.is_(True),
+        )
+    ).scalar_one()
+    if active_price_index_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Calendar cannot be deactivated while active price indices reference it",
         )

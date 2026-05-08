@@ -330,7 +330,7 @@ class WeatherDataApiTests(unittest.TestCase):
             )
             session.commit()
 
-        with patch("apps.api.app.routes.weather.datetime") as datetime_mock:
+        with patch("apps.api.app.domains.weather.services.sync_status.datetime") as datetime_mock:
             datetime_mock.now.return_value = datetime(2026, 3, 16, 12, 30, tzinfo=timezone.utc)
             with self.SessionLocal() as session:
                 payload = get_public_nws_sync_status(db=session)

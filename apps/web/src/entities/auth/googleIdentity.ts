@@ -2,9 +2,31 @@ export type GoogleCredentialResponse = {
   credential: string
 }
 
+export type GoogleTokenResponse = {
+  access_token?: string
+  expires_in?: number
+  error?: string
+  error_description?: string
+  scope?: string
+  token_type?: string
+}
+
+export type GoogleOAuthErrorResponse = {
+  type: string
+  message?: string
+}
+
 type GoogleCredentialCallback = (response: GoogleCredentialResponse) => void
+type GoogleTokenCallback = (response: GoogleTokenResponse) => void
+type GoogleTokenErrorCallback = (response: GoogleOAuthErrorResponse) => void
 
 type GoogleButtonOptions = Record<string, string | number | boolean>
+
+export type GoogleTokenClient = {
+  requestAccessToken: (options?: {
+    prompt?: '' | 'consent'
+  }) => void
+}
 
 declare global {
   interface Window {
@@ -18,6 +40,15 @@ declare global {
           }) => void
           renderButton: (parent: HTMLElement, options: GoogleButtonOptions) => void
         }
+        oauth2?: {
+          initTokenClient: (options: {
+            client_id: string
+            scope: string
+            callback: GoogleTokenCallback
+            error_callback?: GoogleTokenErrorCallback
+          }) => GoogleTokenClient
+          revoke: (token: string, callback?: () => void) => void
+        }
       }
     }
   }
@@ -30,7 +61,7 @@ export function loadGoogleIdentityScript(): Promise<void> {
     return Promise.reject(new Error('Google sign-in is only available in the browser.'))
   }
 
-  if (window.google?.accounts?.id) {
+  if (window.google?.accounts?.id || window.google?.accounts?.oauth2) {
     return Promise.resolve()
   }
 
@@ -43,7 +74,7 @@ export function loadGoogleIdentityScript(): Promise<void> {
     const script = existingScript ?? document.createElement('script')
 
     const handleLoad = () => {
-      if (window.google?.accounts?.id) {
+      if (window.google?.accounts?.id || window.google?.accounts?.oauth2) {
         resolve()
         return
       }

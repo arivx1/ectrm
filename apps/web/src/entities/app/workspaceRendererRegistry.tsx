@@ -1427,6 +1427,7 @@ export const WORKSPACE_RENDERERS: Record<
         formatMoney={formatMoney}
         formatDate={formatDate}
         formatDateOnly={formatDateOnly}
+        onOpenPrompt={() => context.navigateToView('prompt')}
         onOpenSettlement={() => context.navigateToView('settlement')}
         onOpenTrade={context.navigateToTrade}
       />

@@ -2043,6 +2043,7 @@ async function startMockApiServer(
         default_provider: 'openai',
         effective_default_provider: 'openai',
         configured_provider_count: 1,
+        default_daily_token_allocation: 100000,
         providers: [
           {
             provider: 'openai',

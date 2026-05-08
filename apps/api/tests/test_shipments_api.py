@@ -20,15 +20,21 @@ from apps.api.app.domains.operations.services.shipments import list_delivery_obl
 from apps.api.app.domains.operations.services.shipments import append_delivery_event
 from apps.api.app.domains.operations.services.shipments import reverse_delivery_event
 from apps.api.app.domains.operations.services.shipments import synchronize_delivery_obligations_from_trades
+from apps.api.app.domains.operations.services.shipments import update_delivery_rail_detail
 from apps.api.app.models import Base, Trade
-from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
-from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetail
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
+from apps.api.app.models.delivery_rail_detail import DeliveryRailDetail
+from apps.api.app.models.reference_calendar import ReferenceCalendar
+from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_rail_line import ReferenceRailLine
+from apps.api.app.models.reference_rail_route import ReferenceRailRoute
 from apps.api.app.models.trade_actualization import TradeActualization
+from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
+from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 
@@ -59,7 +65,12 @@ class DeliveriesApiTests(unittest.TestCase):
             session.query(DeliveryLogisticsDetail).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DeliveryPowerDetail).delete()
+            session.query(DeliveryRailDetail).delete()
             session.query(DeliveryObligation).delete()
+            session.query(ReferenceRailRoute).delete()
+            session.query(ReferenceRailLine).delete()
+            session.query(ReferenceCalendar).delete()
+            session.query(ReferenceLocation).delete()
             session.query(TradeLeg).delete()
             session.query(Trade).delete()
             session.commit()
@@ -371,6 +382,132 @@ class DeliveriesApiTests(unittest.TestCase):
             )
             session.commit()
 
+    def _seed_rail_route(
+        self,
+        *,
+        route_code: str = "BNSF_MIDLAND_TO_CUSHING",
+        rail_line_code: str = "BNSF_SOUTHERN_TRANSCON",
+        railroad_code: str = "BNSF",
+        origin_location_code: str = "MIDLAND",
+        destination_location_code: str = "CUSHING",
+        route_direction: str = "EASTBOUND",
+        schedule_timezone: str = "America/Chicago",
+        service_calendar_code: str = "US_FED_BANK",
+        route_is_active: bool = True,
+        line_is_active: bool = True,
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    ReferenceCalendar(
+                        code=service_calendar_code,
+                        name="US Rail Service Calendar",
+                        calendar_type="OPERATIONS",
+                        market="US_RAIL",
+                        timezone=schedule_timezone,
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        created_by="ops.seed",
+                        updated_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        updated_by="ops.seed",
+                        version=1,
+                    ),
+                    ReferenceLocation(
+                        code=origin_location_code,
+                        parent_location_code=None,
+                        name=origin_location_code.replace("_", " ").title(),
+                        location_kind="POINT",
+                        location_type="TERMINAL",
+                        market=None,
+                        city=None,
+                        subdivision_code=None,
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=None,
+                        longitude=None,
+                        region=None,
+                        timezone="America/Chicago",
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        created_by="ops.seed",
+                        updated_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        updated_by="ops.seed",
+                        version=1,
+                    ),
+                    ReferenceLocation(
+                        code=destination_location_code,
+                        parent_location_code=None,
+                        name=destination_location_code.replace("_", " ").title(),
+                        location_kind="POINT",
+                        location_type="TERMINAL",
+                        market=None,
+                        city=None,
+                        subdivision_code=None,
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=None,
+                        longitude=None,
+                        region=None,
+                        timezone="America/Chicago",
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        created_by="ops.seed",
+                        updated_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        updated_by="ops.seed",
+                        version=1,
+                    ),
+                    ReferenceRailLine(
+                        code=rail_line_code,
+                        railroad_code=railroad_code,
+                        operator_name="BNSF Railway",
+                        default_timezone="America/Chicago",
+                        name="BNSF Southern Transcon",
+                        description=None,
+                        is_active=line_is_active,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        created_by="ops.seed",
+                        updated_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        updated_by="ops.seed",
+                        version=1,
+                    ),
+                    ReferenceRailRoute(
+                        code=route_code,
+                        rail_line_code=rail_line_code,
+                        origin_location_code=origin_location_code,
+                        destination_location_code=destination_location_code,
+                        service_calendar_code=service_calendar_code,
+                        route_direction=route_direction,
+                        schedule_timezone=schedule_timezone,
+                        placement_cutoff_time_local="14:00",
+                        release_cutoff_time_local="10:00",
+                        placement_free_time_hours=48,
+                        release_free_time_hours=24,
+                        name="Midland to Cushing",
+                        description=None,
+                        is_active=route_is_active,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        created_by="ops.seed",
+                        updated_at=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+                        updated_by="ops.seed",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
     def test_list_deliveries_builds_cross_mode_delivery_obligations(self) -> None:
         with self.SessionLocal() as session:
             payload = list_delivery_obligations_for_operations(
@@ -590,6 +727,186 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(logistics.carrier_name, "Acme Trucking")
         self.assertEqual(logistics.asset_reference, "TRUCK-17")
         self.assertNotIn("Explicit transport mode is missing for discrete logistics delivery.", logistics.blockers)
+
+    def test_route_bound_rail_delivery_requires_route_and_station_details(self) -> None:
+        with self.SessionLocal() as session:
+            synchronize_delivery_obligations_from_trades(
+                session,
+                actor_id="ops.sync",
+                now=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            )
+            logistics_delivery = session.get(DeliveryObligation, "DLV-T-LOG-1")
+            self.assertIsNotNone(logistics_delivery)
+            if logistics_delivery is None:
+                raise AssertionError("Expected synchronized logistics delivery to exist.")
+            logistics_delivery.transport_mode = "RAIL"
+            logistics_delivery.transport_mode_source = "EXPLICIT"
+            logistics_delivery.mode_family = "LOGISTICS"
+            logistics_delivery.delivery_profile = "LOAD_DISCHARGE_WINDOW"
+            logistics_delivery.updated_at = datetime(2026, 4, 5, 13, 0, tzinfo=timezone.utc)
+            logistics_delivery.updated_by = "ops.dispatch"
+            logistics_delivery.version += 1
+            session.commit()
+
+        with self.SessionLocal() as session:
+            payload = list_delivery_obligations_for_operations(
+                session,
+                now=datetime(2026, 4, 5, 14, 0, tzinfo=timezone.utc),
+            )
+
+        logistics = next(delivery for delivery in payload if delivery.delivery_id == "DLV-T-LOG-1")
+        self.assertIn("Rail route selection is missing.", logistics.blockers)
+        self.assertIn("Rail origin station is missing.", logistics.blockers)
+        self.assertIn("Rail destination station is missing.", logistics.blockers)
+
+        self._seed_rail_route()
+        with self.SessionLocal() as session:
+            logistics_detail = session.get(DeliveryLogisticsDetail, "DLV-T-LOG-1")
+            self.assertIsNotNone(logistics_detail)
+            if logistics_detail is None:
+                raise AssertionError("Expected synchronized logistics detail to exist.")
+            logistics_detail.origin_location_code = "HOUSTON"
+            logistics_detail.origin_location_code_source = "MANUAL"
+            logistics_detail.updated_at = datetime(2026, 4, 5, 15, 0, tzinfo=timezone.utc)
+            logistics_detail.updated_by = "ops.dispatch"
+            logistics_detail.version += 1
+
+            update_delivery_rail_detail(
+                session,
+                delivery_id="DLV-T-LOG-1",
+                actor_id="ops.dispatch",
+                changes={
+                    "rail_route_code": "BNSF_MIDLAND_TO_CUSHING",
+                    "origin_station_code": "MIDLAND_YARD",
+                    "destination_station_code": "CUSHING_TERM",
+                },
+                now=datetime(2026, 4, 5, 15, 5, tzinfo=timezone.utc),
+            )
+            session.commit()
+
+        with self.SessionLocal() as session:
+            payload = list_delivery_obligations_for_operations(
+                session,
+                now=datetime(2026, 4, 5, 16, 0, tzinfo=timezone.utc),
+            )
+
+        logistics = next(delivery for delivery in payload if delivery.delivery_id == "DLV-T-LOG-1")
+        self.assertEqual(logistics.rail_route_code, "BNSF_MIDLAND_TO_CUSHING")
+        self.assertEqual(logistics.rail_line_code, "BNSF_SOUTHERN_TRANSCON")
+        self.assertEqual(logistics.railroad_code, "BNSF")
+        self.assertEqual(logistics.rail_route_direction, "EASTBOUND")
+        self.assertEqual(logistics.rail_schedule_timezone, "America/Chicago")
+        self.assertEqual(logistics.rail_service_calendar_code, "US_FED_BANK")
+        self.assertEqual(logistics.rail_placement_cutoff_time_local, "14:00")
+        self.assertEqual(logistics.rail_release_cutoff_time_local, "10:00")
+        self.assertEqual(logistics.rail_placement_free_time_hours, 48)
+        self.assertEqual(logistics.rail_release_free_time_hours, 24)
+        self.assertIn(
+            "Rail origin location does not match selected route origin 'MIDLAND'.",
+            logistics.blockers,
+        )
+
+        with self.SessionLocal() as session:
+            logistics_detail = session.get(DeliveryLogisticsDetail, "DLV-T-LOG-1")
+            self.assertIsNotNone(logistics_detail)
+            if logistics_detail is None:
+                raise AssertionError("Expected synchronized logistics detail to exist.")
+            logistics_detail.origin_location_code = "MIDLAND"
+            logistics_detail.origin_location_code_source = "MANUAL"
+            logistics_detail.updated_at = datetime(2026, 4, 5, 16, 5, tzinfo=timezone.utc)
+            logistics_detail.updated_by = "ops.dispatch"
+            logistics_detail.version += 1
+            session.commit()
+
+        with self.SessionLocal() as session:
+            payload = list_delivery_obligations_for_operations(
+                session,
+                now=datetime(2026, 4, 5, 17, 0, tzinfo=timezone.utc),
+            )
+
+        logistics = next(delivery for delivery in payload if delivery.delivery_id == "DLV-T-LOG-1")
+        self.assertEqual(logistics.status, "READY")
+        self.assertNotIn("Rail route selection is missing.", logistics.blockers)
+        self.assertNotIn("Rail origin station is missing.", logistics.blockers)
+        self.assertNotIn("Rail destination station is missing.", logistics.blockers)
+        self.assertNotIn(
+            "Rail origin location does not match selected route origin 'MIDLAND'.",
+            logistics.blockers,
+        )
+
+    def test_route_bound_rail_delivery_flags_inactive_route_and_waybill_gaps(self) -> None:
+        self._seed_rail_route()
+        with self.SessionLocal() as session:
+            synchronize_delivery_obligations_from_trades(
+                session,
+                actor_id="ops.sync",
+                now=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            )
+            logistics_delivery = session.get(DeliveryObligation, "DLV-T-LOG-1")
+            self.assertIsNotNone(logistics_delivery)
+            if logistics_delivery is None:
+                raise AssertionError("Expected synchronized logistics delivery to exist.")
+            logistics_delivery.transport_mode = "RAIL"
+            logistics_delivery.transport_mode_source = "EXPLICIT"
+            logistics_delivery.mode_family = "LOGISTICS"
+            logistics_delivery.delivery_profile = "LOAD_DISCHARGE_WINDOW"
+            logistics_delivery.updated_at = datetime(2026, 4, 5, 13, 0, tzinfo=timezone.utc)
+            logistics_delivery.updated_by = "ops.dispatch"
+            logistics_delivery.version += 1
+
+            logistics_detail = session.get(DeliveryLogisticsDetail, "DLV-T-LOG-1")
+            self.assertIsNotNone(logistics_detail)
+            if logistics_detail is None:
+                raise AssertionError("Expected synchronized logistics detail to exist.")
+            logistics_detail.origin_location_code = "MIDLAND"
+            logistics_detail.origin_location_code_source = "MANUAL"
+            logistics_detail.updated_at = datetime(2026, 4, 5, 13, 0, tzinfo=timezone.utc)
+            logistics_detail.updated_by = "ops.dispatch"
+            logistics_detail.version += 1
+            session.commit()
+
+        with self.SessionLocal() as session:
+            update_delivery_rail_detail(
+                session,
+                delivery_id="DLV-T-LOG-1",
+                actor_id="ops.dispatch",
+                changes={
+                    "rail_route_code": "BNSF_MIDLAND_TO_CUSHING",
+                    "origin_station_code": "MIDLAND_YARD",
+                    "destination_station_code": "CUSHING_TERM",
+                },
+                now=datetime(2026, 4, 5, 14, 0, tzinfo=timezone.utc),
+            )
+            trade = session.get(Trade, "T-LOG-1")
+            self.assertIsNotNone(trade)
+            if trade is None:
+                raise AssertionError("Expected logistics trade to exist.")
+            trade.nomination_status = "NOMINATED"
+            trade.updated_at = datetime(2026, 4, 5, 14, 5, tzinfo=timezone.utc)
+
+            rail_route = session.get(ReferenceRailRoute, "BNSF_MIDLAND_TO_CUSHING")
+            self.assertIsNotNone(rail_route)
+            if rail_route is None:
+                raise AssertionError("Expected rail route to exist.")
+            rail_route.is_active = False
+            rail_route.updated_at = datetime(2026, 4, 5, 14, 5, tzinfo=timezone.utc)
+            rail_route.updated_by = "ops.reference"
+            rail_route.version += 1
+            session.commit()
+
+        with self.SessionLocal() as session:
+            payload = list_delivery_obligations_for_operations(
+                session,
+                now=datetime(2026, 4, 5, 15, 0, tzinfo=timezone.utc),
+            )
+
+        logistics = next(delivery for delivery in payload if delivery.delivery_id == "DLV-T-LOG-1")
+        self.assertEqual(logistics.status, "BLOCKED")
+        self.assertIn(
+            "Selected rail route 'BNSF_MIDLAND_TO_CUSHING' is inactive in reference data.",
+            logistics.blockers,
+        )
+        self.assertIn("Waybill reference is missing after rail scheduling started.", logistics.blockers)
 
     def test_sync_preserves_manual_shared_overrides_and_refreshes_trade_derived_fields(self) -> None:
         with self.SessionLocal() as session:

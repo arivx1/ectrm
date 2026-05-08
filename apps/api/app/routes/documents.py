@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,12 @@ from apps.api.app.core.http import require_actor_role
 from apps.api.app.core.http import require_authenticated_actor
 from apps.api.app.core.http import VALIDATION_ERROR_STATUS_CODES
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.integrations.services.gmail_inbox import (
+    GmailInboxIntegrationError,
+    get_gmail_inbox_message_detail,
+    import_gmail_inbox_documents,
+    list_gmail_inbox_messages,
+)
 from apps.api.app.domains.documents.services.document_action_execution import execute_document_action_plan
 from apps.api.app.domains.documents.services.ingestion import get_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import get_document_page_preview_path
@@ -25,6 +31,10 @@ from apps.api.app.domains.documents.services.ingestion import run_document_proce
 from apps.api.app.domains.documents.services.ingestion import update_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import update_document_ingestion_page
 from apps.api.app.schemas.document import DocumentIngestionOut
+from apps.api.app.schemas.document import DocumentGmailInboxBrowseResultOut
+from apps.api.app.schemas.document import DocumentGmailInboxMessageDetailOut
+from apps.api.app.schemas.document import DocumentGmailInboxImportRequest
+from apps.api.app.schemas.document import DocumentGmailInboxImportResultOut
 from apps.api.app.schemas.document import DocumentIngestionPageUpdate
 from apps.api.app.schemas.document import DocumentIngestionProcessRequest
 from apps.api.app.schemas.document import DocumentProcessorSelection
@@ -64,6 +74,52 @@ def get_documents(
 ) -> list[DocumentIngestionOut]:
     require_authenticated_actor(request)
     return list_document_ingestions(db, limit=limit, offset=offset)
+
+
+@router.get("/gmail/messages", response_model=DocumentGmailInboxBrowseResultOut)
+def get_gmail_messages(
+    request: Request,
+    query: str | None = Query(default=None, max_length=500),
+    page_size: int = Query(default=20, ge=1, le=50),
+    page_token: str | None = Query(default=None, max_length=500),
+    db: Session = Depends(get_db),
+) -> DocumentGmailInboxBrowseResultOut:
+    require_authenticated_actor(request)
+
+    try:
+        return list_gmail_inbox_messages(
+            db,
+            query_override=query,
+            page_size=page_size,
+            page_token=page_token,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except GmailInboxIntegrationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get("/gmail/messages/{message_id}", response_model=DocumentGmailInboxMessageDetailOut)
+def get_gmail_message_detail(
+    message_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentGmailInboxMessageDetailOut:
+    require_authenticated_actor(request)
+
+    try:
+        return get_gmail_inbox_message_detail(
+            db,
+            message_id=message_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except GmailInboxIntegrationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.get("/{document_id}", response_model=DocumentIngestionOut)
@@ -235,6 +291,40 @@ def post_document_reprocess(
         document_id=document_id,
     )
     return document
+
+
+@router.post("/imports/gmail", response_model=DocumentGmailInboxImportResultOut, status_code=status.HTTP_202_ACCEPTED)
+def post_gmail_document_import(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    payload: DocumentGmailInboxImportRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> DocumentGmailInboxImportResultOut:
+    actor_id = require_authenticated_actor(request)
+    changes = payload.model_dump(exclude_unset=True) if payload is not None else {}
+
+    try:
+        result = import_gmail_inbox_documents(
+            db,
+            actor_id=actor_id,
+            query_override=changes.get("query"),
+            max_messages_override=changes.get("max_messages"),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except GmailInboxIntegrationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    for imported_document in result.imported_documents:
+        background_tasks.add_task(
+            run_document_processing_job,
+            request.app.state.session_factory,
+            document_id=imported_document.document_id,
+        )
+    return result
 
 
 @router.post("/{document_id}/execute-action-plan", response_model=DocumentIngestionOut)

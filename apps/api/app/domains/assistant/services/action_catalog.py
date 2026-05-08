@@ -61,6 +61,20 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         planner_priority=10,
     ),
     AssistantActionCatalogEntry(
+        name="create_settlement_report_preset",
+        label="Create settlement report preset",
+        description=(
+            "Create a settlement report filter preset through the typed reports preset service when the user "
+            "asks to save a named settlement lens for later reuse."
+        ),
+        policy_key="assistant.actions.settlement_report_preset_create.v1",
+        risk_level="LOW",
+        max_scope="TEAM",
+        reviewer_roles=("TRADER", "DESK_LEAD", "OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "reports"),
+        planner_priority=66,
+    ),
+    AssistantActionCatalogEntry(
         name="record_delivery_event",
         label="Record delivery event",
         description=(

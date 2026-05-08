@@ -7,6 +7,7 @@ from apps.api.app.routes.reference_data_routes.assets import (
     create_asset,
     deactivate_asset,
     get_asset,
+    get_asset_map_scope_summary,
     list_asset_standards,
     list_assets,
     router as assets_router,
@@ -21,6 +22,38 @@ from apps.api.app.routes.reference_data_routes.books import (
     router as books_router,
     update_book,
 )
+from apps.api.app.routes.reference_data_routes.calendars import (
+    activate_calendar_overlay,
+    activate_calendar_rule,
+    activate_calendar,
+    activate_calendar_holiday,
+    add_calendar_business_days,
+    count_calendar_business_days,
+    create_calendar,
+    create_calendar_holiday,
+    import_calendar_holidays,
+    create_calendar_overlay,
+    create_calendar_rule,
+    deactivate_calendar,
+    deactivate_calendar_holiday,
+    deactivate_calendar_overlay,
+    deactivate_calendar_rule,
+    get_calendar,
+    get_calendar_business_day_status,
+    get_calendar_holiday,
+    get_calendar_overlay,
+    get_calendar_rule,
+    get_next_calendar_business_day,
+    list_calendar_holidays,
+    list_calendars,
+    list_calendar_overlays,
+    list_calendar_rules,
+    router as calendars_router,
+    update_calendar_overlay,
+    update_calendar_rule,
+    update_calendar,
+    update_calendar_holiday,
+)
 from apps.api.app.routes.reference_data_routes.commodities import (
     activate_commodity,
     create_commodity,
@@ -32,11 +65,14 @@ from apps.api.app.routes.reference_data_routes.commodities import (
 )
 from apps.api.app.routes.reference_data_routes.common import (
     ensure_active_book_exists,
+    ensure_active_calendar_exists,
     ensure_active_commodity_exists,
     ensure_active_currency_exists,
     ensure_active_location_exists,
+    ensure_active_rail_line_exists,
     ensure_active_unit_exists,
     ensure_book_not_in_active_use,
+    ensure_calendar_not_in_active_use,
     ensure_commodity_not_in_active_use,
     ensure_currency_not_in_active_use,
     ensure_location_not_in_active_use,
@@ -77,6 +113,55 @@ from apps.api.app.routes.reference_data_routes.locations import (
     router as locations_router,
     update_location,
 )
+from apps.api.app.routes.reference_data_routes.pipeline_details import (
+    activate_pipeline_detail,
+    create_pipeline_detail,
+    deactivate_pipeline_detail,
+    get_pipeline_detail,
+    list_pipeline_detail_standards,
+    list_pipeline_details,
+    router as pipeline_details_router,
+    update_pipeline_detail,
+)
+from apps.api.app.routes.reference_data_routes.pipeline_paths import (
+    activate_pipeline_path,
+    create_pipeline_path,
+    deactivate_pipeline_path,
+    get_pipeline_path,
+    list_pipeline_path_standards,
+    list_pipeline_paths,
+    router as pipeline_paths_router,
+    update_pipeline_path,
+)
+from apps.api.app.routes.reference_data_routes.rail_lines import (
+    activate_rail_line,
+    create_rail_line,
+    deactivate_rail_line,
+    get_rail_line,
+    list_rail_lines,
+    router as rail_lines_router,
+    update_rail_line,
+)
+from apps.api.app.routes.reference_data_routes.rail_routes import (
+    activate_rail_route,
+    create_rail_route,
+    deactivate_rail_route,
+    get_rail_route,
+    list_rail_route_standards,
+    list_rail_routes,
+    router as rail_routes_router,
+    update_rail_route,
+)
+from apps.api.app.routes.reference_data_routes.pipeline_points import (
+    activate_pipeline_point,
+    create_pipeline_point,
+    deactivate_pipeline_point,
+    get_pipeline_point,
+    list_pipeline_point_standards,
+    list_pipeline_points,
+    router as pipeline_points_router,
+    update_pipeline_point,
+)
 from apps.api.app.routes.reference_data_routes.portfolios import (
     activate_portfolio,
     create_portfolio,
@@ -116,6 +201,7 @@ from apps.api.app.routes.reference_data_routes.units import (
 )
 from apps.api.app.schemas.reference_data import (
     AssetCreate,
+    AssetMapScopeSummaryOut,
     AssetOut,
     AssetStandardsOut,
     AssetStatusUpdate,
@@ -124,6 +210,28 @@ from apps.api.app.schemas.reference_data import (
     BookOut,
     BookStatusUpdate,
     BookUpdate,
+    CalendarBusinessDayCountOut,
+    CalendarBusinessDayDateOut,
+    CalendarBusinessDayMatchOut,
+    CalendarBusinessDayStatusOut,
+    CalendarCreate,
+    CalendarHolidayCreate,
+    CalendarHolidayImportRequest,
+    CalendarHolidayImportSummaryOut,
+    CalendarHolidayOut,
+    CalendarHolidayStatusUpdate,
+    CalendarHolidayUpdate,
+    CalendarOverlayCreate,
+    CalendarOverlayOut,
+    CalendarOverlayStatusUpdate,
+    CalendarOverlayUpdate,
+    CalendarOut,
+    CalendarRuleCreate,
+    CalendarRuleOut,
+    CalendarRuleStatusUpdate,
+    CalendarRuleUpdate,
+    CalendarStatusUpdate,
+    CalendarUpdate,
     CommodityCreate,
     CommodityOut,
     CommodityStatusUpdate,
@@ -146,6 +254,30 @@ from apps.api.app.schemas.reference_data import (
     LocationStandardsOut,
     LocationStatusUpdate,
     LocationUpdate,
+    PipelineDetailCreate,
+    PipelineDetailOut,
+    PipelineDetailStandardsOut,
+    PipelineDetailStatusUpdate,
+    PipelineDetailUpdate,
+    PipelinePathCreate,
+    PipelinePathOut,
+    PipelinePathStandardsOut,
+    PipelinePathStatusUpdate,
+    PipelinePathUpdate,
+    RailLineCreate,
+    RailLineOut,
+    RailLineStatusUpdate,
+    RailLineUpdate,
+    RailRouteCreate,
+    RailRouteOut,
+    RailRouteStandardsOut,
+    RailRouteStatusUpdate,
+    RailRouteUpdate,
+    PipelinePointCreate,
+    PipelinePointOut,
+    PipelinePointStandardsOut,
+    PipelinePointStatusUpdate,
+    PipelinePointUpdate,
     PriceIndexCreate,
     PriceIndexOut,
     PriceIndexStatusUpdate,
@@ -168,11 +300,17 @@ from apps.api.app.schemas.reference_data import (
 router = APIRouter(prefix="/reference", tags=["reference-data"])
 router.include_router(assets_router)
 router.include_router(books_router)
+router.include_router(calendars_router)
 router.include_router(commodities_router)
 router.include_router(counterparties_router)
 router.include_router(currencies_router)
 router.include_router(units_router)
 router.include_router(locations_router)
+router.include_router(pipeline_details_router)
+router.include_router(pipeline_paths_router)
+router.include_router(rail_lines_router)
+router.include_router(rail_routes_router)
+router.include_router(pipeline_points_router)
 router.include_router(portfolios_router)
 router.include_router(price_indices_router)
 router.include_router(spatial_features_router)

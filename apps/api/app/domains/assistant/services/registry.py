@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.agent_revisions import has_unpublished_agent_revision
 from apps.api.app.domains.assistant.services.policies import build_effective_policy_for_agent
+from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype, resolved_role_default_tools
+from apps.api.app.domains.assistant.services.skills import INTER_AGENT_CONSULTATION_SKILL
+from apps.api.app.domains.assistant.services.tools import augment_managed_agent_introspection_tools
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.schemas.assistant import (
@@ -38,8 +41,13 @@ class ManagedAssistantAgent:
     human_owner_role: str | None
     authority_ceiling: str | None
     activation_notes: str | None
+    orchestration_pattern: str
+    parent_agent_id: str | None
+    managed_agent_ids: tuple[str, ...]
+    delegation_guidance: str | None
     allowed_workspaces: tuple[AssistantWorkspace, ...]
     capabilities: tuple[str, ...]
+    skills: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     allowed_action_types: tuple[str, ...]
     system_prompt: str
@@ -100,6 +108,7 @@ def to_public_agent_out(
     token_budget: AssistantAgentTokenBudgetOut | None = None,
     eval_gate: AssistantAgentEvalGateOut | None = None,
 ) -> AssistantAgentOut:
+    effective_skills, effective_allowed_tools = _resolve_effective_agent_profile(record)
     return AssistantAgentOut(
         agent_id=record.agent_id,
         name=record.name,
@@ -114,10 +123,15 @@ def to_public_agent_out(
         human_owner_role=record.human_owner_role,
         authority_ceiling=record.authority_ceiling,
         activation_notes=record.activation_notes,
+        orchestration_pattern=record.orchestration_pattern or "SINGLE",
+        parent_agent_id=record.parent_agent_id,
+        managed_agent_ids=list(record.managed_agent_ids or []),
+        delegation_guidance=record.delegation_guidance,
         profile_request_id=record.profile_request_id,
         allowed_workspaces=list(record.allowed_workspaces or []),
         capabilities=list(record.capabilities or []),
-        allowed_tools=list(record.allowed_tools or []),
+        skills=list(effective_skills),
+        allowed_tools=list(effective_allowed_tools),
         allowed_action_types=list(record.allowed_action_types or []),
         daily_token_allocation=record.daily_token_allocation,
         token_budget=token_budget or _build_empty_token_budget(record),
@@ -132,6 +146,7 @@ def to_admin_agent_out(
     token_budget: AssistantAgentTokenBudgetOut | None = None,
     eval_gate: AssistantAgentEvalGateOut | None = None,
 ) -> AssistantAgentAdminOut:
+    effective_skills, effective_allowed_tools = _resolve_effective_agent_profile(record)
     return AssistantAgentAdminOut(
         agent_id=record.agent_id,
         name=record.name,
@@ -146,10 +161,15 @@ def to_admin_agent_out(
         human_owner_role=record.human_owner_role,
         authority_ceiling=record.authority_ceiling,
         activation_notes=record.activation_notes,
+        orchestration_pattern=record.orchestration_pattern or "SINGLE",
+        parent_agent_id=record.parent_agent_id,
+        managed_agent_ids=list(record.managed_agent_ids or []),
+        delegation_guidance=record.delegation_guidance,
         profile_request_id=record.profile_request_id,
         allowed_workspaces=list(record.allowed_workspaces or []),
         capabilities=list(record.capabilities or []),
-        allowed_tools=list(record.allowed_tools or []),
+        skills=list(effective_skills),
+        allowed_tools=list(effective_allowed_tools),
         allowed_action_types=list(record.allowed_action_types or []),
         daily_token_allocation=record.daily_token_allocation,
         token_budget=token_budget or _build_empty_token_budget(record),
@@ -170,6 +190,7 @@ def to_admin_agent_out(
 
 
 def to_managed_agent(record: AssistantAgent) -> ManagedAssistantAgent:
+    effective_skills, effective_allowed_tools = _resolve_effective_agent_profile(record)
     return ManagedAssistantAgent(
         agent_id=record.agent_id,
         name=record.name,
@@ -184,12 +205,43 @@ def to_managed_agent(record: AssistantAgent) -> ManagedAssistantAgent:
         human_owner_role=record.human_owner_role,
         authority_ceiling=record.authority_ceiling,
         activation_notes=record.activation_notes,
+        orchestration_pattern=record.orchestration_pattern or "SINGLE",
+        parent_agent_id=record.parent_agent_id,
+        managed_agent_ids=tuple(record.managed_agent_ids or []),
+        delegation_guidance=record.delegation_guidance,
         allowed_workspaces=tuple(record.allowed_workspaces or []),
         capabilities=tuple(record.capabilities or []),
-        allowed_tools=tuple(record.allowed_tools or []),
+        skills=effective_skills,
+        allowed_tools=effective_allowed_tools,
         allowed_action_types=tuple(record.allowed_action_types or []),
         system_prompt=record.system_prompt,
     )
+
+
+def _resolve_effective_agent_profile(record: AssistantAgent) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    role = get_role_archetype(record.role_key) if record.role_key else None
+    effective_skills = tuple(record.skills or [])
+    if not effective_skills and role is not None:
+        effective_skills = tuple(role.skills)
+
+    effective_allowed_tools = tuple(record.allowed_tools or [])
+    normalized_capabilities = {str(capability).upper() for capability in record.capabilities or []}
+    if role is not None and (record.profile_kind or "CUSTOM").upper() == "ROLE_DERIVED":
+        if not effective_allowed_tools and "READ" in normalized_capabilities:
+            effective_allowed_tools = tuple(resolved_role_default_tools(role))
+        elif INTER_AGENT_CONSULTATION_SKILL in set(effective_skills):
+            next_allowed_tools = list(effective_allowed_tools)
+            for tool_name in ("consult_managed_agent", "enlist_managed_agent"):
+                if tool_name not in set(next_allowed_tools):
+                    next_allowed_tools.append(tool_name)
+            effective_allowed_tools = tuple(next_allowed_tools)
+
+    effective_allowed_tools = augment_managed_agent_introspection_tools(
+        effective_allowed_tools,
+        capabilities=tuple(record.capabilities or ()),
+    )
+
+    return effective_skills, effective_allowed_tools
 
 
 def _current_budget_window(now: datetime | None = None) -> tuple[datetime, datetime]:

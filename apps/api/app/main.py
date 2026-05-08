@@ -34,6 +34,8 @@ from apps.api.app.domains.admin.services.projection_monitoring import (
 )
 from apps.api.app.domains.http import include_http_routers
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError, build_assistant_runtime_settings
+from apps.api.app.domains.mcp.services import MCP_MOUNT_PATH
+from apps.api.app.domains.mcp.services import mount_mcp_http_app
 from apps.api.app.domains.operations.services import build_database_overview
 from apps.api.app.schemas.runtime_settings import (
     GoogleAuthRuntimeSettingsOut,
@@ -60,6 +62,7 @@ app.state.session_factory = SessionLocal
 app.state.started_at = datetime.now(timezone.utc)
 
 include_http_routers(app)
+mount_mcp_http_app(app)
 
 PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 PUBLIC_WRITE_PATHS = frozenset(
@@ -191,6 +194,10 @@ def _is_public_write_path(request_path: str) -> bool:
     )
 
 
+def _is_mcp_transport_path(request_path: str) -> bool:
+    return request_path == MCP_MOUNT_PATH or request_path.startswith(f"{MCP_MOUNT_PATH}/")
+
+
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
@@ -212,7 +219,12 @@ async def add_correlation_id(request: Request, call_next):
             principal = resolve_session_principal(db, request.headers.get("authorization"))
         except AuthError as exc:
             request_path = request.url.path
-            protected_write = request.method.upper() in PROTECTED_METHODS and not _is_public_write_path(request_path)
+            mcp_transport_path = _is_mcp_transport_path(request_path)
+            protected_write = (
+                request.method.upper() in PROTECTED_METHODS
+                and not _is_public_write_path(request_path)
+                and not mcp_transport_path
+            )
             protected_read = _requires_authenticated_read(request)
             admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
             if protected_write or protected_read or admin_path:
@@ -236,7 +248,12 @@ async def add_correlation_id(request: Request, call_next):
 
     try:
         request_path = request.url.path
-        protected_write = request.method.upper() in PROTECTED_METHODS and not _is_public_write_path(request_path)
+        mcp_transport_path = _is_mcp_transport_path(request_path)
+        protected_write = (
+            request.method.upper() in PROTECTED_METHODS
+            and not _is_public_write_path(request_path)
+            and not mcp_transport_path
+        )
         protected_read = _requires_authenticated_read(request)
         admin_path = request_path.startswith(ADMIN_PATH_PREFIXES)
 

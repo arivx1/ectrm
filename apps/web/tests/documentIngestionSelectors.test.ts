@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
+import { DocumentGmailInboxBrowser } from '../src/features/documents/DocumentGmailInboxBrowser'
 import { DocumentIngestionDocumentCard } from '../src/features/documents/DocumentIngestionDocumentCard'
 import { DocumentIngestionUploadForm } from '../src/features/documents/DocumentIngestionUploadForm'
 import type { DocumentIngestionController } from '../src/features/documents/useDocumentIngestionController'
@@ -12,6 +13,15 @@ const PROCESSOR_SETTINGS = {
   default_provider: 'openai',
   effective_default_provider: 'openai',
   configured_provider_count: 1,
+  gmail_inbox: {
+    enabled: true,
+    configured: true,
+    provider: 'gmail_api',
+    account_email: 'ops-inbox@example.com',
+    query: 'has:attachment filename:pdf in:inbox',
+    max_messages_per_import: 10,
+    auth_status: 'configured',
+  },
   providers: [
     {
       provider: 'openai',
@@ -82,6 +92,18 @@ function buildController(
     loadError: '',
     uploading: false,
     uploadError: '',
+    gmailImporting: false,
+    gmailImportError: '',
+    gmailImportSummary: '',
+    gmailMessageQuery: 'has:attachment filename:pdf in:inbox',
+    gmailMessages: [],
+    gmailMessagesLoading: false,
+    gmailMessagesError: '',
+    gmailNextPageToken: null,
+    selectedGmailMessageId: null,
+    selectedGmailMessage: null,
+    selectedGmailMessageLoading: false,
+    selectedGmailMessageError: '',
     displayName: '',
     selectedProcessorProvider: '',
     selectedFile: null,
@@ -105,6 +127,11 @@ function buildController(
     handleDropzoneDragLeave: () => undefined,
     handleDropzoneDrop: () => undefined,
     handleSubmit: async () => undefined,
+    handleImportGmailInbox: async () => undefined,
+    setGmailMessageQuery: () => undefined,
+    handleRefreshGmailMessages: async () => undefined,
+    handleLoadMoreGmailMessages: async () => undefined,
+    handleSelectGmailMessage: async () => undefined,
     updateDocumentDraft: () => undefined,
     updatePageDraft: () => undefined,
     handleSaveDocument: async () => undefined,
@@ -141,6 +168,10 @@ describe('document ingestion selectors', () => {
         schemaRegistry: null,
         uploading: false,
         uploadError: '',
+        gmailInboxSettings: PROCESSOR_SETTINGS.gmail_inbox,
+        gmailImporting: false,
+        gmailImportError: '',
+        gmailImportSummary: '',
         isDragActive: false,
         fileInputRef: { current: null },
         onDisplayNameChange: () => undefined,
@@ -153,12 +184,79 @@ describe('document ingestion selectors', () => {
         onDropzoneDragLeave: () => undefined,
         onDropzoneDrop: () => undefined,
         onSubmit: async () => undefined,
+        onImportGmailInbox: async () => undefined,
       }),
     )
 
     expect(markup).toContain('Built-in Parser Only')
     expect(markup).toContain('OpenAI API (gpt-5-mini)')
     expect(markup).toContain('Built-in parsing only will run for this upload.')
+    expect(markup).toContain('Import Gmail PDFs')
+    expect(markup).toContain('Gmail inbox import is ready for ops-inbox@example.com')
+  })
+
+  it('renders the Gmail inbox browser with message detail and attachment status', () => {
+    const markup = renderToStaticMarkup(
+      createElement(DocumentGmailInboxBrowser, {
+        compact: false,
+        gmailInboxSettings: PROCESSOR_SETTINGS.gmail_inbox,
+        gmailMessageQuery: 'label:inbox newer_than:7d',
+        gmailMessages: [
+          {
+            message_id: 'gmail-msg-1',
+            thread_id: 'gmail-thread-1',
+            subject: 'May Settlement Package',
+            sender: 'backoffice@example.com',
+            received_at: '2026-05-07T12:00:00Z',
+            snippet: 'Settlement statement attached.',
+            unread: true,
+            attachment_count: 2,
+            pdf_attachment_count: 1,
+            imported_pdf_attachment_count: 1,
+          },
+        ],
+        gmailMessagesLoading: false,
+        gmailMessagesError: '',
+        gmailNextPageToken: 'next-page-token',
+        selectedGmailMessageId: 'gmail-msg-1',
+        selectedGmailMessage: {
+          message_id: 'gmail-msg-1',
+          thread_id: 'gmail-thread-1',
+          subject: 'May Settlement Package',
+          sender: 'backoffice@example.com',
+          to_recipients: 'ops-inbox@example.com',
+          received_at: '2026-05-07T12:00:00Z',
+          snippet: 'Settlement statement attached.',
+          unread: true,
+          body_text: 'Settlement statement attached.\nPlease review by EOD.',
+          body_truncated: false,
+          attachments: [
+            {
+              filename: 'settlement.pdf',
+              mime_type: 'application/pdf',
+              size_bytes: 2048,
+              part_token: 'attachment-1',
+              attachment_id: 'attachment-1',
+              importable: true,
+              already_imported: true,
+            },
+          ],
+        },
+        selectedGmailMessageLoading: false,
+        selectedGmailMessageError: '',
+        formatDate: () => 'May 7, 2026 12:00 PM',
+        onGmailMessageQueryChange: () => undefined,
+        onRefreshGmailMessages: async () => undefined,
+        onLoadMoreGmailMessages: async () => undefined,
+        onSelectGmailMessage: async () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Browse Inbox')
+    expect(markup).toContain('May Settlement Package')
+    expect(markup).toContain('Settlement statement attached.')
+    expect(markup).toContain('Already Imported')
+    expect(markup).toContain('Load More')
   })
 
   it('keeps the current processor chip separate from a draft built-in reprocess selection', () => {

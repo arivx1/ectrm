@@ -71,6 +71,16 @@ class AssistantEvalAgentFixture:
     allowed_workspaces: tuple[str, ...] = ("assistant",)
     allowed_tools: tuple[str, ...] = ()
     allowed_action_types: tuple[str, ...] = ()
+    skills: tuple[str, ...] = ()
+    role_key: str | None = None
+    profile_kind: str = "CUSTOM"
+    specialization_summary: str | None = None
+    human_owner_role: str | None = None
+    authority_ceiling: str | None = None
+    orchestration_pattern: str = "SINGLE"
+    parent_agent_id: str | None = None
+    managed_agent_ids: tuple[str, ...] = ()
+    delegation_guidance: str | None = None
     status: str = "ACTIVE"
     scope: str = "TEAM"
     provider: str | None = "openai"
@@ -167,6 +177,7 @@ class AssistantEvalCase:
     name: str
     request_payload: dict[str, Any]
     agent: AssistantEvalAgentFixture | None = None
+    agents: tuple[AssistantEvalAgentFixture, ...] = ()
     request_user: AssistantEvalUserFixture | None = None
     trades: tuple[AssistantEvalTradeFixture, ...] = ()
     invoices: tuple[AssistantEvalInvoiceFixture, ...] = ()
@@ -281,6 +292,8 @@ class AssistantApiEvalHarness(unittest.TestCase):
 
         if case.agent is not None:
             self._create_agent(case.agent)
+        for agent in case.agents:
+            self._create_agent(agent)
         for trade in case.trades:
             self._create_trade_with_event(trade)
         for invoice in case.invoices:
@@ -628,8 +641,18 @@ class AssistantApiEvalHarness(unittest.TestCase):
                     scope=fixture.scope,
                     provider=fixture.provider,
                     model=fixture.model,
+                    role_key=fixture.role_key,
+                    profile_kind=fixture.profile_kind,
+                    specialization_summary=fixture.specialization_summary,
+                    human_owner_role=fixture.human_owner_role,
+                    authority_ceiling=fixture.authority_ceiling,
+                    orchestration_pattern=fixture.orchestration_pattern,
+                    parent_agent_id=fixture.parent_agent_id,
+                    managed_agent_ids=list(fixture.managed_agent_ids),
+                    delegation_guidance=fixture.delegation_guidance,
                     allowed_workspaces=list(fixture.allowed_workspaces),
                     capabilities=list(fixture.capabilities),
+                    skills=list(fixture.skills),
                     allowed_tools=list(fixture.allowed_tools),
                     allowed_action_types=allowed_action_types,
                     system_prompt=fixture.system_prompt or f"System prompt for {fixture.name}.",

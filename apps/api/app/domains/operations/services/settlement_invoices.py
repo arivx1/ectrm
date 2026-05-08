@@ -43,6 +43,10 @@ from apps.api.app.domains.operations.services.resource_views import (
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
 )
+from apps.api.app.domains.operations.services.settlement_due_dates import (
+    SettlementDueDateResolution,
+    resolve_settlement_due_at,
+)
 from apps.api.app.domains.operations.services.settlement_payments import (
     derive_invoice_payment_projection,
 )
@@ -342,11 +346,25 @@ def _normalize_issued_at(
     return _coerce_utc(value) or _default_issued_at(due_at=due_at, fallback=fallback)
 
 
-def _normalize_due_at(value: datetime | None, *, trade: Trade, issued_at: datetime) -> datetime:
+def _normalize_due_at(
+    db: Session,
+    value: datetime | None,
+    *,
+    trade: Trade,
+    issued_at: datetime,
+    due_calendar_code: str | None = None,
+) -> SettlementDueDateResolution:
     normalized = _coerce_utc(value) or _default_due_at(trade, issued_at=issued_at)
     if normalized < issued_at:
         raise ValueError("Invoice due date must be on or after the issued timestamp.")
-    return normalized
+    resolution = resolve_settlement_due_at(
+        db,
+        due_at=normalized,
+        due_calendar_code=due_calendar_code,
+    )
+    if resolution.due_at < issued_at:
+        raise ValueError("Invoice due date must be on or after the issued timestamp.")
+    return resolution
 
 
 def _validate_invoice_status(status: object | None) -> str:
@@ -700,6 +718,7 @@ def preview_trade_invoice_issue(
     invoice_amount: object | None = None,
     issued_at: datetime | None = None,
     due_at: datetime | None = None,
+    due_calendar_code: str | None = None,
     now: Optional[datetime] = None,
 ) -> dict[str, object]:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
@@ -772,7 +791,14 @@ def preview_trade_invoice_issue(
             due_at=due_at,
             fallback=reference_time,
         )
-        normalized_due_at = _normalize_due_at(due_at, trade=trade, issued_at=normalized_issued_at)
+        due_resolution = _normalize_due_at(
+            db,
+            due_at,
+            trade=trade,
+            issued_at=normalized_issued_at,
+            due_calendar_code=due_calendar_code,
+        )
+        normalized_due_at = due_resolution.due_at
         normalized_invoice_amount = _normalize_invoice_amount(
             invoice_amount,
             trade=trade,
@@ -812,6 +838,12 @@ def preview_trade_invoice_issue(
         assumptions.append("Issued timestamp will default to the approval execution time.")
     if due_at is None:
         assumptions.append("Due timestamp will default from delivery/trade dates or five days after issue.")
+    if due_resolution.due_calendar_code is not None:
+        assumptions.append(
+            f"Due timestamp will be validated against calendar {due_resolution.due_calendar_code}."
+        )
+    if due_resolution.was_adjusted and due_resolution.adjustment_reason is not None:
+        assumptions.append(due_resolution.adjustment_reason)
 
     return {
         "preview_type": "issue_trade_invoice",
@@ -1295,6 +1327,7 @@ def issue_trade_invoice(
     invoice_amount: object | None = None,
     issued_at: datetime | None = None,
     due_at: datetime | None = None,
+    due_calendar_code: str | None = None,
     notes: object | None = None,
     now: Optional[datetime] = None,
     mutation_context: TradeAuditMutationContext | None = None,
@@ -1344,6 +1377,13 @@ def issue_trade_invoice(
         due_at=due_at,
         fallback=reference_time,
     )
+    due_resolution = _normalize_due_at(
+        db,
+        due_at,
+        trade=trade,
+        issued_at=normalized_issued_at,
+        due_calendar_code=due_calendar_code,
+    )
     invoice = TradeInvoice(
         trade_id=trade.trade_id,
         delivery_id=scope.delivery_id,
@@ -1363,7 +1403,7 @@ def issue_trade_invoice(
         ),
         status=InvoiceStatus.ISSUED.value,
         issued_at=normalized_issued_at,
-        due_at=_normalize_due_at(due_at, trade=trade, issued_at=normalized_issued_at),
+        due_at=due_resolution.due_at,
         dispute_reason=None,
         notes=_normalize_optional_text(notes),
         created_at=reference_time,
@@ -1424,6 +1464,7 @@ def issue_trade_invoice(
                         "invoice_amount": invoice_amount,
                         "issued_at": issued_at,
                         "due_at": due_at,
+                        "due_calendar_code": due_calendar_code,
                         "notes": notes,
                     }.items()
                     if value is not None
@@ -1474,6 +1515,7 @@ def update_trade_invoice(
     next_status = invoice.status
     next_issued_at = _coerce_utc(invoice.issued_at) or reference_time
     next_due_at = _coerce_utc(invoice.due_at) or next_issued_at
+    next_due_calendar_code = None
     next_dispute_reason = invoice.dispute_reason
     next_notes = invoice.notes
 
@@ -1500,10 +1542,24 @@ def update_trade_invoice(
             due_at=next_due_at,
             fallback=next_issued_at,
         )
+    if "due_calendar_code" in changes:
+        next_due_calendar_code = str(changes.get("due_calendar_code") or "").strip() or None
     if "due_at" in changes:
-        next_due_at = _normalize_due_at(changes.get("due_at"), trade=trade, issued_at=next_issued_at)  # type: ignore[arg-type]
+        next_due_at = _normalize_due_at(
+            db,
+            changes.get("due_at"),  # type: ignore[arg-type]
+            trade=trade,
+            issued_at=next_issued_at,
+            due_calendar_code=next_due_calendar_code,
+        ).due_at
     else:
-        next_due_at = _normalize_due_at(next_due_at, trade=trade, issued_at=next_issued_at)
+        next_due_at = _normalize_due_at(
+            db,
+            next_due_at,
+            trade=trade,
+            issued_at=next_issued_at,
+            due_calendar_code=next_due_calendar_code,
+        ).due_at
     if "dispute_reason" in changes:
         next_dispute_reason = _normalize_optional_text(changes.get("dispute_reason"))
     if "notes" in changes:

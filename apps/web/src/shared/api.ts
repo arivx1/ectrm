@@ -26,24 +26,38 @@ function formatApiErrorMessage(message: string, correlationId?: string | null): 
   return `${normalizedMessage} ${suffix}`
 }
 
-function resolveLoopbackFallbackUrls(url: string): string[] {
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+}
+
+function appendUniqueUrl(urls: string[], candidate: string): void {
+  if (!urls.includes(candidate)) {
+    urls.push(candidate)
+  }
+}
+
+function resolveApiFallbackUrls(url: string): string[] {
   if (typeof window === 'undefined') {
     return []
   }
 
   try {
     const parsedUrl = new URL(url, window.location.href)
-    if (parsedUrl.hostname === 'localhost') {
-      parsedUrl.hostname = '127.0.0.1'
-      return [parsedUrl.toString()]
+    const fallbackUrls: string[] = []
+
+    if (isLoopbackHost(parsedUrl.hostname)) {
+      const alternateLoopbackUrl = new URL(parsedUrl.toString())
+      alternateLoopbackUrl.hostname = parsedUrl.hostname === 'localhost' ? '127.0.0.1' : 'localhost'
+      appendUniqueUrl(fallbackUrls, alternateLoopbackUrl.toString())
     }
 
-    if (parsedUrl.hostname === '127.0.0.1') {
-      parsedUrl.hostname = 'localhost'
-      return [parsedUrl.toString()]
+    if (isLoopbackHost(parsedUrl.hostname) && !isLoopbackHost(window.location.hostname)) {
+      const browserHostnameUrl = new URL(parsedUrl.toString())
+      browserHostnameUrl.hostname = window.location.hostname
+      appendUniqueUrl(fallbackUrls, browserHostnameUrl.toString())
     }
 
-    return []
+    return fallbackUrls
   } catch {
     return []
   }
@@ -53,7 +67,7 @@ async function fetchWithApiFallback(url: string, init?: RequestInit): Promise<Re
   try {
     return await fetch(url, init)
   } catch (error) {
-    const fallbackUrls = resolveLoopbackFallbackUrls(url)
+    const fallbackUrls = resolveApiFallbackUrls(url)
     for (const fallbackUrl of fallbackUrls) {
       try {
         return await fetch(fallbackUrl, init)

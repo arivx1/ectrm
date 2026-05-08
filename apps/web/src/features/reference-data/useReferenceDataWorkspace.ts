@@ -20,6 +20,7 @@ import type {
   PortfolioRecord,
   PriceIndexForm,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
   ReferenceTab,
   SpatialFeatureForm,
@@ -192,6 +193,7 @@ type UseReferenceDataWorkspaceArgs = {
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  railRoutes: RailRouteRecord[]
   spatialFeatures: SpatialFeatureRecord[]
   assetStandards: AssetStandards
   spatialFeatureStandards: SpatialFeatureStandards
@@ -216,6 +218,7 @@ export function useReferenceDataWorkspace({
   currencies,
   units,
   locations,
+  railRoutes,
   spatialFeatures,
   assetStandards,
   spatialFeatureStandards,
@@ -530,6 +533,7 @@ export function useReferenceDataWorkspace({
   )
 
   const activeAssets = useMemo(() => assets.filter((asset) => asset.is_active), [assets])
+  const activeRailRoutes = useMemo(() => railRoutes.filter((route) => route.is_active), [railRoutes])
 
   function startCreateBook() {
     setBookFormMode('create')
@@ -780,6 +784,7 @@ export function useReferenceDataWorkspace({
     setReferenceSearch,
     assets,
     locations,
+    railRoutes,
     spatialFeatures,
     selectedBookCode: resolvedSelectedBookCode,
     setSelectedBookCode,
@@ -863,6 +868,7 @@ export function useReferenceDataWorkspace({
     filteredPortfolios,
     selectablePriceIndexUnits,
     activeAssets,
+    activeRailRoutes,
     startCreateBook,
     startEditBook,
     startCreateAsset,

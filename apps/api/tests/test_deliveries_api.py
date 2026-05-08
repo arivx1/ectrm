@@ -25,7 +25,12 @@ from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetai
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
+from apps.api.app.models.delivery_rail_detail import DeliveryRailDetail
 from apps.api.app.models.event import Event
+from apps.api.app.models.reference_calendar import ReferenceCalendar
+from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_rail_line import ReferenceRailLine
+from apps.api.app.models.reference_rail_route import ReferenceRailRoute
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_leg import TradeLeg
@@ -75,7 +80,12 @@ class DeliveriesApiTests(unittest.TestCase):
             session.query(DeliveryLogisticsDetail).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DeliveryPowerDetail).delete()
+            session.query(DeliveryRailDetail).delete()
             session.query(DeliveryObligation).delete()
+            session.query(ReferenceRailRoute).delete()
+            session.query(ReferenceRailLine).delete()
+            session.query(ReferenceCalendar).delete()
+            session.query(ReferenceLocation).delete()
             session.query(TradeActualization).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(TradeLeg).delete()
@@ -272,6 +282,132 @@ class DeliveriesApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         self.assertEqual(response.status_code, 200)
+
+    def _seed_rail_route(
+        self,
+        *,
+        route_code: str = "BNSF_MIDLAND_TO_CUSHING",
+        rail_line_code: str = "BNSF_SOUTHERN_TRANSCON",
+        railroad_code: str = "BNSF",
+        origin_location_code: str = "MIDLAND",
+        destination_location_code: str = "CUSHING",
+        route_direction: str = "EASTBOUND",
+        schedule_timezone: str = "America/Chicago",
+        service_calendar_code: str = "US_FED_BANK",
+        route_is_active: bool = True,
+        line_is_active: bool = True,
+    ) -> None:
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    ReferenceCalendar(
+                        code=service_calendar_code,
+                        name="US Rail Service Calendar",
+                        calendar_type="OPERATIONS",
+                        market="US_RAIL",
+                        timezone=schedule_timezone,
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="delivery_admin",
+                        updated_at=self.now,
+                        updated_by="delivery_admin",
+                        version=1,
+                    ),
+                    ReferenceLocation(
+                        code=origin_location_code,
+                        parent_location_code=None,
+                        name=origin_location_code.replace("_", " ").title(),
+                        location_kind="POINT",
+                        location_type="TERMINAL",
+                        market=None,
+                        city=None,
+                        subdivision_code=None,
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=None,
+                        longitude=None,
+                        region=None,
+                        timezone="America/Chicago",
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="delivery_admin",
+                        updated_at=self.now,
+                        updated_by="delivery_admin",
+                        version=1,
+                    ),
+                    ReferenceLocation(
+                        code=destination_location_code,
+                        parent_location_code=None,
+                        name=destination_location_code.replace("_", " ").title(),
+                        location_kind="POINT",
+                        location_type="TERMINAL",
+                        market=None,
+                        city=None,
+                        subdivision_code=None,
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=None,
+                        longitude=None,
+                        region=None,
+                        timezone="America/Chicago",
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="delivery_admin",
+                        updated_at=self.now,
+                        updated_by="delivery_admin",
+                        version=1,
+                    ),
+                    ReferenceRailLine(
+                        code=rail_line_code,
+                        railroad_code=railroad_code,
+                        operator_name="BNSF Railway",
+                        default_timezone="America/Chicago",
+                        name="BNSF Southern Transcon",
+                        description=None,
+                        is_active=line_is_active,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="delivery_admin",
+                        updated_at=self.now,
+                        updated_by="delivery_admin",
+                        version=1,
+                    ),
+                    ReferenceRailRoute(
+                        code=route_code,
+                        rail_line_code=rail_line_code,
+                        origin_location_code=origin_location_code,
+                        destination_location_code=destination_location_code,
+                        service_calendar_code=service_calendar_code,
+                        route_direction=route_direction,
+                        schedule_timezone=schedule_timezone,
+                        placement_cutoff_time_local="14:00",
+                        release_cutoff_time_local="10:00",
+                        placement_free_time_hours=48,
+                        release_free_time_hours=24,
+                        name="Midland to Cushing",
+                        description=None,
+                        is_active=route_is_active,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="delivery_admin",
+                        updated_at=self.now,
+                        updated_by="delivery_admin",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
 
     def test_patch_delivery_sets_explicit_transport_mode(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -514,6 +650,98 @@ class DeliveriesApiTests(unittest.TestCase):
                 audit_event.payload["delivery"]["asset_reference"],
                 "TRUCK-17",
             )
+
+    def test_patch_rail_details_updates_projection(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trades()
+        self._sync_deliveries(admin_token)
+        self._seed_rail_route()
+        self.client.patch(
+            "/deliveries/DLV-T-LOG-1",
+            json={"transport_mode": "RAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        response = self.client.patch(
+            "/deliveries/DLV-T-LOG-1/rail-details",
+            json={
+                "rail_route_code": "BNSF_MIDLAND_TO_CUSHING",
+                "origin_station_code": "MIDLAND_YARD",
+                "destination_station_code": "CUSHING_TERM",
+                "waybill_reference": "WB-1007",
+                "release_number": "REL-22",
+                "unit_train_id": "UT-ALPHA",
+                "railcar_count": 102,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["rail_route_code"], "BNSF_MIDLAND_TO_CUSHING")
+        self.assertEqual(body["rail_route_code_source"], "MANUAL")
+        self.assertEqual(body["rail_line_code"], "BNSF_SOUTHERN_TRANSCON")
+        self.assertEqual(body["railroad_code"], "BNSF")
+        self.assertEqual(body["rail_route_direction"], "EASTBOUND")
+        self.assertEqual(body["rail_schedule_timezone"], "America/Chicago")
+        self.assertEqual(body["rail_service_calendar_code"], "US_FED_BANK")
+        self.assertEqual(body["rail_placement_cutoff_time_local"], "14:00")
+        self.assertEqual(body["rail_release_cutoff_time_local"], "10:00")
+        self.assertEqual(body["rail_placement_free_time_hours"], 48)
+        self.assertEqual(body["rail_release_free_time_hours"], 24)
+        self.assertEqual(body["origin_station_code"], "MIDLAND_YARD")
+        self.assertEqual(body["origin_station_code_source"], "MANUAL")
+        self.assertEqual(body["destination_station_code"], "CUSHING_TERM")
+        self.assertEqual(body["destination_station_code_source"], "MANUAL")
+        self.assertEqual(body["waybill_reference"], "WB-1007")
+        self.assertEqual(body["waybill_reference_source"], "MANUAL")
+        self.assertEqual(body["release_number"], "REL-22")
+        self.assertEqual(body["release_number_source"], "MANUAL")
+        self.assertEqual(body["unit_train_id"], "UT-ALPHA")
+        self.assertEqual(body["unit_train_id_source"], "MANUAL")
+        self.assertEqual(body["railcar_count"], 102)
+        self.assertEqual(body["railcar_count_source"], "MANUAL")
+        self.assertEqual(body["status"], "READY")
+        self.assertNotIn("Rail route selection is missing.", body["blockers"])
+
+        with self.SessionLocal() as session:
+            rail_detail = session.get(DeliveryRailDetail, "DLV-T-LOG-1")
+            self.assertIsNotNone(rail_detail)
+            self.assertEqual(rail_detail.rail_route_code, "BNSF_MIDLAND_TO_CUSHING")
+            self.assertEqual(rail_detail.origin_station_code, "MIDLAND_YARD")
+            self.assertEqual(rail_detail.destination_station_code, "CUSHING_TERM")
+            self.assertEqual(rail_detail.waybill_reference, "WB-1007")
+            self.assertEqual(rail_detail.release_number, "REL-22")
+            self.assertEqual(rail_detail.unit_train_id, "UT-ALPHA")
+            self.assertEqual(rail_detail.railcar_count, 102)
+            audit_event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-LOG-1",
+                    Event.event_type == "TradeDeliveryRailUpdated",
+                )
+                .one()
+            )
+            self.assertEqual(audit_event.payload["requested_changes"]["railcar_count"], 102)
+            self.assertEqual(audit_event.payload["delivery"]["waybill_reference"], "WB-1007")
+
+    def test_patch_rail_details_rejects_unknown_route_code(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trades()
+        self._sync_deliveries(admin_token)
+        self.client.patch(
+            "/deliveries/DLV-T-LOG-1",
+            json={"transport_mode": "RAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        response = self.client.patch(
+            "/deliveries/DLV-T-LOG-1/rail-details",
+            json={"rail_route_code": "missing_route"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Rail route 'MISSING_ROUTE' was not found", response.json()["detail"])
 
     def test_patch_pipeline_details_updates_projection(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -796,3 +1024,22 @@ class DeliveriesApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertIn("not a logistics obligation", response.json()["detail"])
+
+    def test_rail_detail_patch_rejects_non_rail_transport_mode(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trades()
+        self._sync_deliveries(admin_token)
+        self.client.patch(
+            "/deliveries/DLV-T-LOG-1",
+            json={"transport_mode": "TRUCK"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        response = self.client.patch(
+            "/deliveries/DLV-T-LOG-1/rail-details",
+            json={"waybill_reference": "WB-FAIL"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("not a rail obligation", response.json()["detail"])

@@ -34,6 +34,7 @@ class AssistantAgentMutationInput:
     model: str | None
     allowed_workspaces: tuple[str, ...]
     capabilities: tuple[str, ...]
+    skills: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     allowed_action_types: tuple[str, ...]
     system_prompt: str
@@ -43,6 +44,10 @@ class AssistantAgentMutationInput:
     human_owner_role: str | None = None
     authority_ceiling: str | None = None
     activation_notes: str | None = None
+    orchestration_pattern: str = "SINGLE"
+    parent_agent_id: str | None = None
+    managed_agent_ids: tuple[str, ...] = ()
+    delegation_guidance: str | None = None
     profile_request_id: int | None = None
     daily_token_allocation: int | None = None
 
@@ -122,9 +127,14 @@ def upsert_admin_assistant_agent(
             human_owner_role=definition.human_owner_role,
             authority_ceiling=definition.authority_ceiling,
             activation_notes=definition.activation_notes,
+            orchestration_pattern=definition.orchestration_pattern,
+            parent_agent_id=definition.parent_agent_id,
+            managed_agent_ids=list(definition.managed_agent_ids),
+            delegation_guidance=definition.delegation_guidance,
             profile_request_id=definition.profile_request_id,
             allowed_workspaces=list(definition.allowed_workspaces),
             capabilities=list(definition.capabilities),
+            skills=list(definition.skills),
             allowed_tools=list(definition.allowed_tools),
             allowed_action_types=list(definition.allowed_action_types),
             daily_token_allocation=definition.daily_token_allocation,
@@ -188,6 +198,7 @@ def _definition_from_create(payload: AssistantAgentCreate) -> AssistantAgentMuta
         role_key=payload.role_key,
         profile_kind=payload.profile_kind,
         capabilities=capabilities,
+        skills=tuple(payload.skills),
         allowed_tools=tuple(payload.allowed_tools),
         allowed_action_types=tuple(payload.allowed_action_types),
     )
@@ -205,9 +216,14 @@ def _definition_from_create(payload: AssistantAgentCreate) -> AssistantAgentMuta
         human_owner_role=payload.human_owner_role,
         authority_ceiling=payload.authority_ceiling,
         activation_notes=payload.activation_notes,
+        orchestration_pattern=payload.orchestration_pattern,
+        parent_agent_id=payload.parent_agent_id,
+        managed_agent_ids=tuple(payload.managed_agent_ids),
+        delegation_guidance=payload.delegation_guidance,
         profile_request_id=payload.profile_request_id,
         allowed_workspaces=tuple(payload.allowed_workspaces),
         capabilities=capabilities,
+        skills=defaults.skills,
         allowed_tools=defaults.allowed_tools,
         allowed_action_types=defaults.allowed_action_types,
         daily_token_allocation=payload.daily_token_allocation,
@@ -225,6 +241,7 @@ def _definition_from_update(
         role_key=payload.role_key,
         profile_kind=payload.profile_kind,
         capabilities=capabilities,
+        skills=tuple(payload.skills),
         allowed_tools=tuple(payload.allowed_tools),
         allowed_action_types=tuple(payload.allowed_action_types),
     )
@@ -242,9 +259,14 @@ def _definition_from_update(
         human_owner_role=payload.human_owner_role,
         authority_ceiling=payload.authority_ceiling,
         activation_notes=payload.activation_notes,
+        orchestration_pattern=payload.orchestration_pattern,
+        parent_agent_id=payload.parent_agent_id,
+        managed_agent_ids=tuple(payload.managed_agent_ids),
+        delegation_guidance=payload.delegation_guidance,
         profile_request_id=payload.profile_request_id,
         allowed_workspaces=tuple(payload.allowed_workspaces),
         capabilities=capabilities,
+        skills=defaults.skills,
         allowed_tools=defaults.allowed_tools,
         allowed_action_types=defaults.allowed_action_types,
         daily_token_allocation=payload.daily_token_allocation,
@@ -256,14 +278,19 @@ def _validate_agent_policy_definition(definition: AssistantAgentMutationInput) -
     try:
         validate_agent_profile_definition(
             agent_name=definition.name,
+            agent_id=definition.agent_id,
             role_key=definition.role_key,
             profile_kind=definition.profile_kind,
             scope=definition.scope,
             allowed_workspaces=definition.allowed_workspaces,
             capabilities=definition.capabilities,
+            skills=definition.skills,
             allowed_tools=definition.allowed_tools,
             allowed_action_types=definition.allowed_action_types,
             authority_ceiling=definition.authority_ceiling,
+            orchestration_pattern=definition.orchestration_pattern,
+            parent_agent_id=definition.parent_agent_id,
+            managed_agent_ids=definition.managed_agent_ids,
         )
     except AssistantAgentProfilePolicyError as exc:
         raise AssistantServiceError(
@@ -334,9 +361,14 @@ def _apply_agent_definition(
         "human_owner_role": definition.human_owner_role,
         "authority_ceiling": definition.authority_ceiling,
         "activation_notes": definition.activation_notes,
+        "orchestration_pattern": definition.orchestration_pattern,
+        "parent_agent_id": definition.parent_agent_id,
+        "managed_agent_ids": list(definition.managed_agent_ids),
+        "delegation_guidance": definition.delegation_guidance,
         "profile_request_id": definition.profile_request_id,
         "allowed_workspaces": list(definition.allowed_workspaces),
         "capabilities": list(definition.capabilities),
+        "skills": list(definition.skills),
         "allowed_tools": list(definition.allowed_tools),
         "allowed_action_types": list(definition.allowed_action_types),
         "daily_token_allocation": definition.daily_token_allocation,
@@ -395,6 +427,7 @@ def _record_agent_provenance(
             "profile_request_id": record.profile_request_id,
             "workspace_count": len(record.allowed_workspaces or []),
             "capability_count": len(record.capabilities or []),
+            "skill_count": len(record.skills or []),
             "tool_count": len(record.allowed_tools or []),
             "action_type_count": len(record.allowed_action_types or []),
         },

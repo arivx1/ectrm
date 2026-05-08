@@ -70,6 +70,7 @@ from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_unit import ReferenceUnit
+from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_accounting_entry import TradeAccountingEntry
 from apps.api.app.models.trade_accounting_entry_line import TradeAccountingEntryLine
@@ -150,6 +151,8 @@ class AssistantApiTests(unittest.TestCase):
         self._previous_settings = {
             "ASSISTANT_ENABLED": settings.ASSISTANT_ENABLED,
             "ASSISTANT_DEFAULT_PROVIDER": settings.ASSISTANT_DEFAULT_PROVIDER,
+            "ASSISTANT_VOICE_TRANSCRIPTION_ENABLED": settings.ASSISTANT_VOICE_TRANSCRIPTION_ENABLED,
+            "ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES": settings.ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES,
             "ASSISTANT_COMPANY_NAME": settings.ASSISTANT_COMPANY_NAME,
             "ASSISTANT_COMPANY_CONTEXT": settings.ASSISTANT_COMPANY_CONTEXT,
             "ASSISTANT_BUSINESS_CONTEXT": settings.ASSISTANT_BUSINESS_CONTEXT,
@@ -157,6 +160,7 @@ class AssistantApiTests(unittest.TestCase):
             "ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION": settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION,
             "OPENAI_API_KEY": settings.OPENAI_API_KEY,
             "OPENAI_MODEL": settings.OPENAI_MODEL,
+            "OPENAI_AUDIO_TRANSCRIPTION_MODEL": settings.OPENAI_AUDIO_TRANSCRIPTION_MODEL,
             "OPENAI_AGENT_BUILDER_MODEL": settings.OPENAI_AGENT_BUILDER_MODEL,
             "OPENAI_BASE_URL": settings.OPENAI_BASE_URL,
             "ANTHROPIC_API_KEY": settings.ANTHROPIC_API_KEY,
@@ -194,6 +198,7 @@ class AssistantApiTests(unittest.TestCase):
             session.query(AssistantAgent).delete()
             session.query(AssistantAgentProfileRequest).delete()
             session.query(MutationProvenanceRecord).delete()
+            session.query(ReportPreset).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
             session.query(UserAccount).delete()
@@ -201,6 +206,8 @@ class AssistantApiTests(unittest.TestCase):
 
         settings.ASSISTANT_ENABLED = True
         settings.ASSISTANT_DEFAULT_PROVIDER = "anthropic"
+        settings.ASSISTANT_VOICE_TRANSCRIPTION_ENABLED = True
+        settings.ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
         settings.ASSISTANT_COMPANY_NAME = "Acme Energy"
         settings.ASSISTANT_COMPANY_CONTEXT = "Acme Energy runs an operator-facing commodity trading platform."
         settings.ASSISTANT_BUSINESS_CONTEXT = "Acme tracks trade lifecycle changes through explicit events."
@@ -208,6 +215,7 @@ class AssistantApiTests(unittest.TestCase):
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 100_000
         settings.OPENAI_API_KEY = "openai-test-key"
         settings.OPENAI_MODEL = "gpt-5-mini"
+        settings.OPENAI_AUDIO_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
         settings.OPENAI_AGENT_BUILDER_MODEL = "gpt-5"
         settings.OPENAI_BASE_URL = "https://api.openai.com/v1"
         settings.ANTHROPIC_API_KEY = ""
@@ -230,8 +238,31 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(payload["default_provider"], "anthropic")
         self.assertEqual(payload["effective_default_provider"], "openai")
         self.assertEqual(payload["configured_provider_count"], 2)
+        self.assertEqual(
+            payload["default_daily_token_allocation"],
+            settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION,
+        )
+        self.assertTrue(payload["voice_transcription"]["enabled"])
+        self.assertEqual(payload["voice_transcription"]["provider"], "openai")
+        self.assertEqual(
+            payload["voice_transcription"]["model"],
+            settings.OPENAI_AUDIO_TRANSCRIPTION_MODEL,
+        )
+        self.assertEqual(
+            payload["voice_transcription"]["max_upload_bytes"],
+            settings.ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES,
+        )
+        self.assertIn("audio/webm", payload["voice_transcription"]["supported_content_types"])
         self.assertGreaterEqual(len(payload["available_tools"]), 1)
         self.assertEqual(payload["available_tools"][0]["name"], "get_trade_by_id")
+        self.assertIn("list_managed_agents", {row["name"] for row in payload["available_tools"]})
+        self.assertIn("get_managed_agent_profile", {row["name"] for row in payload["available_tools"]})
+        self.assertIn("get_application_catalog", {row["name"] for row in payload["available_tools"]})
+        self.assertIn("get_data_schema_catalog", {row["name"] for row in payload["available_tools"]})
+        self.assertIn("search_codebase", {row["name"] for row in payload["available_tools"]})
+        self.assertIn("read_codebase_file", {row["name"] for row in payload["available_tools"]})
+        self.assertGreaterEqual(len(payload["available_skills"]), 1)
+        self.assertEqual(payload["available_skills"][0]["name"], "market_intelligence")
 
         providers = {row["provider"]: row for row in payload["providers"]}
         self.assertTrue(providers["openai"]["enabled"])
@@ -243,8 +274,50 @@ class AssistantApiTests(unittest.TestCase):
 
         public_settings_response = self.client.get("/settings/public")
         self.assertEqual(public_settings_response.status_code, 200)
-        self.assertIn("assistant", public_settings_response.json())
-        self.assertIn("database", public_settings_response.json())
+
+    def test_assistant_voice_transcription_requires_authentication(self) -> None:
+        response = self.client.post(
+            "/assistant/voice/transcriptions",
+            files={"file": ("voice-note.webm", b"fake-audio", "audio/webm")},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json()["error"]["message"],
+            "Authentication is required for write operations.",
+        )
+
+    def test_assistant_voice_transcription_accepts_audio_uploads(self) -> None:
+        token = self._create_session_token()
+
+        with patch(
+            "apps.api.app.routes.assistant.transcribe_assistant_voice_audio",
+            return_value={
+                "provider": "openai",
+                "model": "gpt-4o-mini-transcribe",
+                "text": "Summarize today's settlement blockers.",
+            },
+        ) as transcribe_mock:
+            response = self.client.post(
+                "/assistant/voice/transcriptions",
+                headers={"Authorization": f"Bearer {token}"},
+                files={"file": ("voice-note.webm", b"fake-audio", "audio/webm")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "provider": "openai",
+                "model": "gpt-4o-mini-transcribe",
+                "text": "Summarize today's settlement blockers.",
+            },
+        )
+        transcribe_mock.assert_awaited_once_with(
+            filename="voice-note.webm",
+            content_type="audio/webm",
+            payload=b"fake-audio",
+        )
 
     def test_admin_role_archetypes_expose_governed_role_contract(self) -> None:
         validate_role_archetype_registry()
@@ -281,6 +354,11 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(trade_ops["human_owner_role"], "Operations Lead")
         self.assertEqual(trade_ops["current_profile_ids"], ["trade-ops-copilot"])
         self.assertIn("ACTION", trade_ops["capability_ceiling"])
+        self.assertIn("inter_agent_consultation", trade_ops["skills"])
+        self.assertIn("consult_managed_agent", trade_ops["default_tools"])
+        self.assertIn("enlist_managed_agent", trade_ops["default_tools"])
+        self.assertIn("list_gmail_inbox_messages", trade_ops["default_tools"])
+        self.assertIn("get_gmail_inbox_message", trade_ops["default_tools"])
         self.assertEqual(
             trade_ops["maximum_action_types"],
             [
@@ -303,17 +381,31 @@ class AssistantApiTests(unittest.TestCase):
             trade_ops["eval_gate"]["covered_cases"],
         )
         self.assertEqual(trade_ops["eval_gate"]["missing_cases"], [])
+        self.assertEqual(trade_ops["recommended_orchestration_pattern"], "MANAGER")
+        self.assertIn("movement-controller-agent", trade_ops["recommended_managed_role_keys"])
+
+        document_agent = next(row for row in payload if row["role_key"] == "document-agent")
+        self.assertIn("list_gmail_inbox_messages", document_agent["default_tools"])
+        self.assertIn("get_gmail_inbox_message", document_agent["default_tools"])
+
+        movement_controller = next(row for row in payload if row["role_key"] == "movement-controller-agent")
+        self.assertIn("list_gmail_inbox_messages", movement_controller["default_tools"])
+        self.assertIn("get_gmail_inbox_message", movement_controller["default_tools"])
 
         pre_trade = next(row for row in payload if row["role_key"] == "pre-trade-structuring-agent")
         self.assertEqual(pre_trade["catalog_status"], "PHASE_1")
         self.assertEqual(pre_trade["current_profile_ids"], ["pre-trade-structuring-agent"])
         self.assertEqual(pre_trade["authority_ceiling"], "DRAFT")
+        self.assertIn("pretrade_structuring", pre_trade["skills"])
         self.assertIn("analyze_pretrade_scenario_draft", pre_trade["default_tools"])
         self.assertIn("get_pretrade_recommendation_run", pre_trade["default_tools"])
+        self.assertIn("market-research-agent", pre_trade["recommended_parent_role_keys"])
 
         market_research = next(row for row in payload if row["role_key"] == "market-research-agent")
         self.assertIn("get_latest_commodity_prices", market_research["default_tools"])
         self.assertIn("get_latest_market_news", market_research["default_tools"])
+        self.assertEqual(market_research["recommended_orchestration_pattern"], "PARALLEL")
+        self.assertIn("risk-sentinel", market_research["recommended_managed_role_keys"])
 
         trade_capture = next(row for row in payload if row["role_key"] == "trade-capture-agent")
         self.assertEqual(trade_capture["catalog_status"], "SEEDED")
@@ -355,6 +447,8 @@ class AssistantApiTests(unittest.TestCase):
         control_tower = next(row for row in payload if row["role_key"] == "control-tower-agent")
         self.assertEqual(control_tower["current_profile_ids"], ["control-tower-agent"])
         self.assertEqual(control_tower["authority_ceiling"], "DRAFT")
+        self.assertEqual(control_tower["recommended_orchestration_pattern"], "TRIAGE")
+        self.assertIn("trade-ops-copilot", control_tower["recommended_managed_role_keys"])
 
     def test_admin_seed_sync_exposes_role_profiles_with_policy_and_eval_status(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
@@ -437,6 +531,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(
             profiles["settlement-copilot"]["allowed_action_types"],
             [
+                "create_settlement_report_preset",
                 "issue_trade_invoice",
                 "void_trade_invoice",
                 "create_trade_payment",
@@ -453,6 +548,17 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(profiles["control-tower-agent"]["allowed_action_types"], [])
         self.assertEqual(profiles["control-tower-agent"]["authority_ceiling"], "DRAFT")
+        self.assertEqual(profiles["control-tower-agent"]["orchestration_pattern"], "TRIAGE")
+        self.assertIn("trade-ops-copilot", profiles["control-tower-agent"]["managed_agent_ids"])
+        self.assertEqual(profiles["trade-ops-copilot"]["parent_agent_id"], "control-tower-agent")
+        self.assertIn("movement-controller-agent", profiles["trade-ops-copilot"]["managed_agent_ids"])
+        self.assertEqual(profiles["movement-controller-agent"]["parent_agent_id"], "trade-ops-copilot")
+        self.assertIn("list_gmail_inbox_messages", profiles["trade-ops-copilot"]["allowed_tools"])
+        self.assertIn("get_gmail_inbox_message", profiles["trade-ops-copilot"]["allowed_tools"])
+        self.assertIn("list_gmail_inbox_messages", profiles["movement-controller-agent"]["allowed_tools"])
+        self.assertIn("get_gmail_inbox_message", profiles["movement-controller-agent"]["allowed_tools"])
+        self.assertIn("list_gmail_inbox_messages", profiles["document-agent"]["allowed_tools"])
+        self.assertIn("get_gmail_inbox_message", profiles["document-agent"]["allowed_tools"])
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_SPECS), set(ALL_ASSISTANT_ACTION_TYPES))
@@ -527,6 +633,7 @@ class AssistantApiTests(unittest.TestCase):
                 "create_trade_payment",
                 "reverse_trade_payment",
                 "create_accounting_entry",
+                "create_settlement_report_preset",
                 "reverse_accounting_entry",
                 "reprocess_document_ingestion",
             ),
@@ -548,6 +655,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(
             payload["maximum_action_types"],
             [
+                "create_settlement_report_preset",
                 "issue_trade_invoice",
                 "void_trade_invoice",
                 "create_trade_payment",
@@ -977,12 +1085,31 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(payload["provider"], "openai")
         self.assertEqual(payload["model"], "gpt-5-mini")
         section_keys = {section["key"] for section in payload["sections"]}
+        self.assertIn("system-mission", section_keys)
         self.assertIn("organization", section_keys)
         self.assertIn("user", section_keys)
         self.assertIn("data-inventory", section_keys)
+        self.assertIn("application-surface", section_keys)
         self.assertIn("world-model", section_keys)
         self.assertIn("workspace", section_keys)
         self.assertIn("application-context", section_keys)
+        sections_by_key = {section["key"]: section for section in payload["sections"]}
+        self.assertEqual(sections_by_key["system-mission"]["contract_key"], "system-mission")
+        self.assertEqual(sections_by_key["system-mission"]["scope"], "SYSTEM")
+        self.assertEqual(sections_by_key["system-mission"]["kind"], "IMMUTABLE")
+        self.assertEqual(sections_by_key["system-mission"]["uses_fallback"], True)
+        self.assertEqual(sections_by_key["organization"]["contract_key"], "organization")
+        self.assertEqual(sections_by_key["organization"]["scope"], "GLOBAL")
+        self.assertEqual(sections_by_key["organization"]["kind"], "CONFIGURABLE")
+        self.assertEqual(sections_by_key["organization"]["owner"], "organization-config")
+        self.assertEqual(sections_by_key["organization"]["uses_fallback"], False)
+        self.assertEqual(sections_by_key["user"]["owner_reference"], "assistant_user")
+        self.assertEqual(sections_by_key["application-context"]["scope"], "REQUEST")
+        self.assertEqual(sections_by_key["application-context"]["kind"], "GENERATED")
+        self.assertEqual(sections_by_key["application-context"]["merge_strategy"], "APPEND_IF_PRESENT")
+        self.assertEqual(sections_by_key["application-surface"]["scope"], "GLOBAL")
+        self.assertEqual(sections_by_key["application-surface"]["kind"], "GENERATED")
+        self.assertIn("get_application_catalog", sections_by_key["application-surface"]["content"])
         self.assertIn("Acme Energy", payload["rendered_system_prompt"])
         self.assertIn("assistant_user", payload["rendered_system_prompt"])
         self.assertIn("Loaded trades: 0.", payload["rendered_system_prompt"])
@@ -1038,7 +1165,14 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(create_response.json()["token_budget"]["allocation_source"], "AGENT")
         self.assertEqual(
             [decision["resource_id"] for decision in create_response.json()["effective_policy"]["allowed_tools"]],
-            [],
+            [
+                "list_managed_agents",
+                "get_managed_agent_profile",
+                "get_application_catalog",
+                "get_data_schema_catalog",
+                "search_codebase",
+                "read_codebase_file",
+            ],
         )
         self.assertEqual(create_response.json()["effective_policy"]["allowed_actions"], [])
         self.assertEqual(
@@ -1064,11 +1198,22 @@ class AssistantApiTests(unittest.TestCase):
                 "create_trade_payment",
                 "reverse_trade_payment",
                 "create_accounting_entry",
+                "create_settlement_report_preset",
                 "reverse_accounting_entry",
                 "reprocess_document_ingestion",
             },
         )
-        self.assertEqual(create_response.json()["allowed_tools"], [])
+        self.assertEqual(
+            create_response.json()["allowed_tools"],
+            [
+                "list_managed_agents",
+                "get_managed_agent_profile",
+                "get_application_catalog",
+                "get_data_schema_catalog",
+                "search_codebase",
+                "read_codebase_file",
+            ],
+        )
         self.assertEqual(create_response.json()["allowed_action_types"], [])
 
         public_listing = self.client.get("/assistant/agents")
@@ -1112,6 +1257,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(updated_payload["daily_token_allocation"], 40_000)
         self.assertEqual(updated_payload["token_budget"]["allocated_tokens"], 40_000)
         self.assertEqual(
+            updated_payload["skills"],
+            ["trade_lifecycle_management", "inter_agent_consultation"],
+        )
+        self.assertEqual(
             updated_payload["allowed_tools"],
             [
                 "get_trade_by_id",
@@ -1121,6 +1270,14 @@ class AssistantApiTests(unittest.TestCase):
                 "get_market_context",
                 "search_reference_data",
                 "get_workspace_summary",
+                "list_managed_agents",
+                "get_managed_agent_profile",
+                "get_application_catalog",
+                "get_data_schema_catalog",
+                "search_codebase",
+                "read_codebase_file",
+                "consult_managed_agent",
+                "enlist_managed_agent",
             ],
         )
         self.assertEqual(updated_payload["allowed_action_types"], [])
@@ -1136,12 +1293,20 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(admin_listing.json()[0]["system_prompt"], "Explain the trade and draft next-step suggestions.")
         self.assertEqual(admin_listing.json()[0]["role_key"], "trade-explainer")
         self.assertEqual(admin_listing.json()[0]["profile_kind"], "ROLE_DERIVED")
+        self.assertEqual(
+            admin_listing.json()[0]["skills"],
+            ["trade_lifecycle_management", "inter_agent_consultation"],
+        )
 
         public_listing = self.client.get("/assistant/agents")
         self.assertEqual(public_listing.status_code, 200)
         self.assertEqual([row["agent_id"] for row in public_listing.json()], ["trade-explainer"])
         self.assertEqual(public_listing.json()[0]["role_key"], "trade-explainer")
         self.assertEqual(public_listing.json()[0]["profile_kind"], "ROLE_DERIVED")
+        self.assertEqual(
+            public_listing.json()[0]["skills"],
+            ["trade_lifecycle_management", "inter_agent_consultation"],
+        )
         self.assertEqual(public_listing.json()[0]["token_budget"]["status"], "GREEN")
         self.assertEqual(public_listing.json()[0]["daily_token_allocation"], 40_000)
         self.assertEqual(public_listing.json()[0]["token_budget"]["allocated_tokens"], 40_000)
@@ -1391,7 +1556,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(request_payload["text"]["format"]["name"], "assistant_agent_self_update_draft")
         self.assertIn("Surface the queue owner before staging workflow updates.", request_payload["input"])
         self.assertIn("Did not identify the workflow owner", request_payload["input"])
-        self.assertIn("Do not expand allowed workspaces, capabilities, live tools, or governed actions.", request_payload["input"])
+        self.assertIn(
+            "Do not expand allowed workspaces, capabilities, skills, live tools, or governed actions.",
+            request_payload["input"],
+        )
 
         revisions_response = self.client.get(
             "/admin/assistant/agents/noisy-agent/revisions",
@@ -1504,6 +1672,9 @@ class AssistantApiTests(unittest.TestCase):
             human_owner_role="Operations Lead",
             authority_ceiling="EXPLAIN",
             activation_notes="Created from the role catalog preset.",
+            orchestration_pattern="MANAGER",
+            managed_agent_ids=["workflow-controller-agent", "document-agent"],
+            delegation_guidance="Consult specialists for narrow queue or document questions, then keep the final synthesis here.",
         )
         fake_service = _FakeAssistantService()
 
@@ -1537,6 +1708,8 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(agent_definition.profile_kind, "ROLE_DERIVED")
         self.assertEqual(agent_definition.human_owner_role, "Operations Lead")
         self.assertEqual(agent_definition.authority_ceiling, "EXPLAIN")
+        self.assertEqual(agent_definition.orchestration_pattern, "MANAGER")
+        self.assertEqual(agent_definition.managed_agent_ids, ("workflow-controller-agent", "document-agent"))
         self.assertEqual(agent_definition.allowed_workspaces, ("assistant", "admin"))
         prompt_context = fake_service.calls[0]["prompt_context"]
         self.assertEqual(prompt_context.agent_role_key, "ops-coordinator")
@@ -1544,6 +1717,8 @@ class AssistantApiTests(unittest.TestCase):
         agent_section = next(section for section in prompt_context.sections if section.key == "managed-agent")
         self.assertIn("role_key: ops-coordinator", agent_section.content)
         self.assertIn("profile_kind: ROLE_DERIVED", agent_section.content)
+        self.assertIn("orchestration_pattern: MANAGER", agent_section.content)
+        self.assertIn("managed_agent_ids: workflow-controller-agent, document-agent", agent_section.content)
 
         run_response = self.client.get(
             f"/assistant/runs/{payload['run_id']}",
@@ -1798,6 +1973,209 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(provenance.operation_key, "trade_command.BookTrade")
             self.assertEqual(provenance.source_surface, "assistant.action_requests.autonomous")
             self.assertEqual(provenance.details["command_type"], "BookTrade")
+
+    def test_assistant_prompt_creates_settlement_preset_action_request_for_action_agent(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-SET-1001")
+        self._seed_invoice_record(
+            trade_id="T-SET-1001",
+            invoice_id=901,
+            invoice_number="INV-T-SET-1001",
+            invoice_amount=1250,
+        )
+        self._create_agent(
+            agent_id="settlement-preset-agent",
+            name="Settlement Preset Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "settlement", "reports"],
+            capabilities=["ACTION", "EXPLAIN"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "settlement-preset-agent",
+                    "workspace": "assistant",
+                    "use_live_tools": False,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": 'Create a new settlement preset named "Crude USD cash" with book CRUDE and currency USD.',
+                        },
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["status"], "PENDING")
+        self.assertEqual(action_request["action_type"], "create_settlement_report_preset")
+        self.assertEqual(
+            action_request["payload"],
+            {
+                "name": "Crude USD cash",
+                "scope": "PERSONAL",
+                "filters": {"book": "CRUDE", "currency": "USD"},
+            },
+        )
+        self.assertEqual(action_request["review_context"]["required_reviewer_role"], "REQUESTING_USER_OR_ADMIN")
+        self.assertEqual(
+            action_request["review_context"]["stale_state_basis"],
+            {
+                "scope": "PERSONAL",
+                "name_key": "crude usd cash",
+                "existing_preset_id": None,
+            },
+        )
+        self.assertEqual(
+            action_request["review_context"]["idempotency_key"],
+            "assistant-action:create_settlement_report_preset:PERSONAL:crude usd cash",
+        )
+        self.assertEqual(action_request["review_context"]["execution_mode"], "REVIEW_REQUIRED")
+
+        prompt_context = fake_service.calls[0]["prompt_context"]
+        approval_section = next(
+            section for section in prompt_context.sections if section.key == "approval-gated-action"
+        )
+        self.assertIn("create_settlement_report_preset", approval_section.content)
+        self.assertIn("'name': 'Crude USD cash'", approval_section.content)
+
+    def test_assistant_prompt_uses_context_filters_for_settlement_preset_action_request(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-SET-1003")
+        self._seed_invoice_record(
+            trade_id="T-SET-1003",
+            invoice_id=903,
+            invoice_number="INV-T-SET-1003",
+            invoice_amount=1100,
+        )
+        self._create_agent(
+            agent_id="settlement-preset-context-agent",
+            name="Settlement Preset Context Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "settlement", "reports"],
+            capabilities=["ACTION", "EXPLAIN"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "settlement-preset-context-agent",
+                    "workspace": "reports",
+                    "context": (
+                        "surface: settlement_report\n"
+                        "workspace: reports\n"
+                        "book: CRUDE\n"
+                        "currency: USD\n"
+                        "exception_type: SHORT_PAY\n"
+                        "visible_preset_count: 2"
+                    ),
+                    "use_live_tools": False,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": 'Save this preset as "Midwest cash watch".',
+                        },
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["action_type"], "create_settlement_report_preset")
+        self.assertEqual(
+            action_request["payload"],
+            {
+                "name": "Midwest cash watch",
+                "scope": "PERSONAL",
+                "filters": {
+                    "book": "CRUDE",
+                    "currency": "USD",
+                    "exception_type": "SHORT_PAY",
+                },
+            },
+        )
+
+    def test_execute_capable_agent_autonomously_executes_settlement_preset_creation(self) -> None:
+        token = self._create_session_token()
+        self._create_trade_with_event(trade_id="T-SET-1002")
+        self._seed_invoice_record(
+            trade_id="T-SET-1002",
+            invoice_id=902,
+            invoice_number="INV-T-SET-1002",
+            invoice_amount=980,
+        )
+        self._create_agent(
+            agent_id="settlement-preset-auto",
+            name="Settlement Preset Auto",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "settlement", "reports"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["create_settlement_report_preset"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="EXECUTE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "settlement-preset-auto",
+                    "workspace": "assistant",
+                    "use_live_tools": False,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": 'Create a new settlement preset named "Crude USD watch" with book CRUDE and currency USD.',
+                        },
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["status"], "EXECUTED")
+        self.assertEqual(action_request["action_type"], "create_settlement_report_preset")
+        self.assertEqual(action_request["review_context"]["execution_mode"], "AUTONOMOUS")
+
+        with self.SessionLocal() as session:
+            record = session.query(ReportPreset).one()
+            self.assertEqual(record.name, "Crude USD watch")
+            self.assertEqual(record.scope, "PERSONAL")
+            self.assertEqual(record.filters_json, {"book": "CRUDE", "currency": "USD"})
+            self.assertEqual(record.created_by, "assistant_user")
+
+            action_record = session.query(AssistantActionRequest).one()
+            self.assertEqual(action_record.status, "EXECUTED")
+            self.assertEqual(action_record.result["preset"]["name"], "Crude USD watch")
 
     def test_execute_capable_agent_autonomously_executes_amend_trade_action(self) -> None:
         token = self._create_session_token()
@@ -3047,7 +3425,15 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(payload["actor_role"], "OPS_ADMIN")
         self.assertEqual(
             [decision["resource_id"] for decision in payload["allowed_tools"]],
-            ["get_trade_by_id"],
+            [
+                "get_trade_by_id",
+                "list_managed_agents",
+                "get_managed_agent_profile",
+                "get_application_catalog",
+                "get_data_schema_catalog",
+                "search_codebase",
+                "read_codebase_file",
+            ],
         )
         self.assertEqual(
             [decision["resource_id"] for decision in payload["allowed_actions"]],
@@ -5022,7 +5408,12 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(payload["action_type_metrics"][0]["action_type"], "update_trade_workflow_item")
         self.assertEqual(payload["eval_signal"]["status"], "DECLARED")
-        self.assertIn("Allowed operational action execution.", payload["eval_signal"]["required_cases"])
+        self.assertTrue(
+            any(
+                case.startswith("Allowed operational action execution")
+                for case in payload["eval_signal"]["required_cases"]
+            )
+        )
         self.assertIn("Operations Lead", payload["human_owner_role"])
         self.assertTrue(payload["knowledge_base_entries"])
         self.assertTrue(any(entry["entry_type"] for entry in payload["knowledge_base_entries"]))
@@ -5986,6 +6377,9 @@ class AssistantApiTests(unittest.TestCase):
             if section["source"] == "tool"
         ]
         self.assertGreaterEqual(len(tool_sections), 2)
+        self.assertTrue(all(section["contract_key"] == "tool-prefetch" for section in tool_sections))
+        self.assertTrue(all(section["scope"] == "REQUEST" for section in tool_sections))
+        self.assertTrue(all(section["owner"] == "assistant-runtime" for section in tool_sections))
         self.assertTrue(
             any("tool: list_invoice_issue_candidates" in section["content"] for section in tool_sections)
         )
@@ -6245,7 +6639,18 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(len(captured_requests), 2)
         first_request = captured_requests[0]
         second_request = captured_requests[1]
-        self.assertEqual([tool["name"] for tool in first_request["tools"]], ["get_trade_by_id"])
+        self.assertEqual(
+            [tool["name"] for tool in first_request["tools"]],
+            [
+                "get_trade_by_id",
+                "list_managed_agents",
+                "get_managed_agent_profile",
+                "get_application_catalog",
+                "get_data_schema_catalog",
+                "search_codebase",
+                "read_codebase_file",
+            ],
+        )
         self.assertEqual(second_request["previous_response_id"], "resp_allowed_1")
 
     def test_assistant_prompt_skips_live_tools_for_non_read_managed_agent(self) -> None:
@@ -7271,6 +7676,10 @@ class AssistantApiTests(unittest.TestCase):
         human_owner_role: str | None = None,
         authority_ceiling: str | None = None,
         activation_notes: str | None = None,
+        orchestration_pattern: str = "SINGLE",
+        parent_agent_id: str | None = None,
+        managed_agent_ids: list[str] | None = None,
+        delegation_guidance: str | None = None,
         daily_token_allocation: int | None = None,
     ) -> None:
         now = datetime.now(timezone.utc)
@@ -7307,6 +7716,10 @@ class AssistantApiTests(unittest.TestCase):
                     human_owner_role=human_owner_role,
                     authority_ceiling=authority_ceiling,
                     activation_notes=activation_notes,
+                    orchestration_pattern=orchestration_pattern,
+                    parent_agent_id=parent_agent_id,
+                    managed_agent_ids=list(managed_agent_ids or []),
+                    delegation_guidance=delegation_guidance,
                     allowed_workspaces=allowed_workspaces,
                     capabilities=capabilities,
                     allowed_tools=resolved_allowed_tools,

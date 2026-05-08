@@ -12,9 +12,9 @@ from apps.api.app.core.auth import (
     bootstrap_admin_token,
     create_user_session,
     hash_password,
+    provision_single_user_auth_user,
     resolve_session_principal,
     revoke_user_session,
-    single_user_auth_config,
     touch_user_session,
 )
 from apps.api.app.deps.db import get_db
@@ -105,52 +105,7 @@ def create_session(
 
 @router.post("/single-user-session", response_model=SessionOut)
 def create_single_user_session(db: Session = Depends(get_db)) -> SessionOut:
-    config = single_user_auth_config()
-    if config is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Single-user authentication is not configured on this API.",
-        )
-
-    now = datetime.now(timezone.utc)
-    user = db.get(UserAccount, config.user_id)
-
-    if user is None:
-        email_owner = db.execute(select(UserAccount).where(UserAccount.email == config.email)).scalars().first()
-        if email_owner is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Single-user authentication email is already assigned to another account.",
-            )
-
-        user = UserAccount(
-            user_id=config.user_id,
-            email=config.email,
-            display_name=config.display_name,
-            role=config.role,
-            password_hash=None,
-            is_active=True,
-            last_login_at=now,
-            created_at=now,
-            created_by="single-user-auth",
-            updated_at=now,
-            updated_by="single-user-auth",
-            version=1,
-        )
-        db.add(user)
-    else:
-        user.email = config.email
-        user.display_name = config.display_name
-        user.role = config.role
-        user.is_active = True
-        user.last_login_at = now
-        user.updated_at = now
-        user.updated_by = config.user_id
-        user.version += 1
-
-    db.commit()
-    db.refresh(user)
-
+    user = provision_single_user_auth_user(db)
     session_record, access_token = create_user_session(db, user)
     return SessionOut(
         session_id=session_record.session_id,

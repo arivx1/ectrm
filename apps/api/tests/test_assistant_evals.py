@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from unittest.mock import patch
 
+from apps.api.app.domains.assistant.services.app_context_catalog import APP_CONTEXT_INTROSPECTION_TOOL_NAMES
+from apps.api.app.domains.assistant.services.tools import MANAGED_AGENT_INTROSPECTION_TOOL_NAMES
+from apps.api.app.schemas.document import (
+    DocumentGmailInboxBrowseResultOut,
+    DocumentGmailInboxMessageSummaryOut,
+)
 from apps.api.tests.assistant_eval_harness import (
     AssistantApiEvalHarness,
     AssistantEvalAgentFixture,
@@ -15,6 +22,10 @@ from apps.api.tests.assistant_eval_harness import (
     AssistantEvalTradeFixture,
     AssistantEvalUserFixture,
 )
+
+
+def _provider_tool_names_with_managed_agent_introspection(*tool_names: str) -> tuple[str, ...]:
+    return (*tool_names, *MANAGED_AGENT_INTROSPECTION_TOOL_NAMES, *APP_CONTEXT_INTROSPECTION_TOOL_NAMES)
 
 
 MANAGED_AGENT_EVAL_CASES = (
@@ -45,7 +56,7 @@ MANAGED_AGENT_EVAL_CASES = (
             tool_names=(),
             action_request_types=(),
             action_request_statuses=(),
-            prompt_section_keys=("workspace", "application-context"),
+            prompt_section_keys=("workspace", "application-context", "application-surface"),
             prompt_section_absent_keys=("managed-agent", "approval-gated-action"),
             provider_request_count=1,
             provider_tool_names=(),
@@ -147,10 +158,102 @@ MANAGED_AGENT_EVAL_CASES = (
             tool_names=("get_trade_by_id",),
             action_request_types=(),
             action_request_statuses=(),
-            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_keys=("managed-agent", "workspace", "application-context", "application-surface"),
             prompt_section_absent_keys=("approval-gated-action",),
             provider_request_count=2,
-            provider_tool_names=("get_trade_by_id",),
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                "get_trade_by_id"
+            ),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="manager-agent-enlists-subordinate-for-governed-execution",
+        agent=AssistantEvalAgentFixture(
+            agent_id="ops-manager",
+            name="Ops Manager",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            skills=("trade_operations_coordination", "inter_agent_consultation"),
+            allowed_tools=("enlist_managed_agent",),
+            orchestration_pattern="MANAGER",
+            managed_agent_ids=("trade-capture-specialist",),
+            system_prompt="Delegate bounded trade capture tasks to configured specialists when they own the lane.",
+        ),
+        agents=(
+            AssistantEvalAgentFixture(
+                agent_id="trade-capture-specialist",
+                name="Trade Capture Specialist",
+                capabilities=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+                allowed_workspaces=("assistant", "trades"),
+                allowed_tools=("get_trade_by_id",),
+                allowed_action_types=("cancel_trade",),
+                skills=("trade_lifecycle_management",),
+                authority_ceiling="EXECUTE",
+                system_prompt="Use the governed trade action contract when the request is explicit and the trade is active.",
+            ),
+        ),
+        trades=(AssistantEvalTradeFixture(trade_id="T-2606"),),
+        request_payload={
+            "agent_id": "ops-manager",
+            "workspace": "assistant",
+            "context": "Selected trade:\n- trade_id: T-2606\n- commodity: WTI",
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Cancel the selected trade by routing it to the right specialist and tell me the outcome."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-manager-delegate-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_manager_delegate_1",
+                        "call_id": "call_eval_manager_delegate_1",
+                        "name": "enlist_managed_agent",
+                        "arguments": json.dumps(
+                            {
+                                "agent_id": "trade-capture-specialist",
+                                "task": "Cancel trade T-2606 if it is still active and report what happened.",
+                                "context": "Selected trade:\n- trade_id: T-2606\n- commodity: WTI",
+                            }
+                        ),
+                    }
+                ],
+                "usage": {"input_tokens": 20, "output_tokens": 12},
+            },
+            {
+                "id": "eval-manager-delegate-subordinate-1",
+                "output_text": "I handled the trade cancellation in the trade capture lane and stayed within the governed action contract.",
+                "usage": {"input_tokens": 14, "output_tokens": 18},
+            },
+            {
+                "id": "eval-manager-delegate-2",
+                "output_text": "Trade Capture Specialist handled trade T-2606 in its own lane, and the governed cancellation executed through the platform contract.",
+                "usage": {"input_tokens": 11, "output_tokens": 19},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="ops-manager",
+            agent_name="Ops Manager",
+            message_contains=("Trade Capture Specialist", "trade T-2606", "executed through the platform contract"),
+            warning_count=0,
+            tool_names=("enlist_managed_agent",),
+            tool_call_summary_contains=("Executed 1 governed action",),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=3,
+            provider_tool_names=(
+                "list_managed_agents",
+                "get_managed_agent_profile",
+                "get_application_catalog",
+                "get_data_schema_catalog",
+                "search_codebase",
+                "read_codebase_file",
+                "enlist_managed_agent",
+            ),
             provider_tools_key_present=True,
         ),
     ),
@@ -218,8 +321,70 @@ MANAGED_AGENT_EVAL_CASES = (
             prompt_section_keys=("managed-agent", "workspace", "application-context"),
             prompt_section_absent_keys=("approval-gated-action",),
             provider_request_count=2,
-            provider_tool_names=("list_invoice_issue_candidates",),
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                "list_invoice_issue_candidates"
+            ),
             provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="action-agent-stages-settlement-preset-creation",
+        agent=AssistantEvalAgentFixture(
+            agent_id="settlement-preset-stager",
+            name="Settlement Preset Stager",
+            capabilities=("ACTION", "EXPLAIN"),
+            allowed_workspaces=("assistant", "reports", "settlement"),
+            allowed_action_types=("create_settlement_report_preset",),
+            system_prompt="Stage typed settlement preset requests when the user asks to save a reusable filter lens.",
+        ),
+        trades=(AssistantEvalTradeFixture(trade_id="T-SET-EVAL-1"),),
+        invoices=(
+            AssistantEvalInvoiceFixture(
+                trade_id="T-SET-EVAL-1",
+                invoice_id=501,
+                invoice_number="INV-T-SET-EVAL-1",
+                invoice_amount=1250,
+            ),
+        ),
+        request_payload={
+            "agent_id": "settlement-preset-stager",
+            "workspace": "assistant",
+            "use_live_tools": False,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": 'Create a new settlement preset named "Desk USD Lens" with book CRUDE and currency USD.',
+                },
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-settlement-preset-1",
+                "output_text": "I staged a settlement preset request for review.",
+                "usage": {"input_tokens": 19, "output_tokens": 10},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="settlement-preset-stager",
+            agent_name="Settlement Preset Stager",
+            message_contains=("settlement preset request",),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=("create_settlement_report_preset",),
+            action_request_statuses=("PENDING",),
+            action_request_payloads=(
+                {
+                    "name": "Desk USD Lens",
+                    "scope": "PERSONAL",
+                    "filters": {"book": "CRUDE", "currency": "USD"},
+                },
+            ),
+            prompt_section_keys=("managed-agent", "approval-gated-action", "workspace"),
+            prompt_section_content_contains=(
+                ("approval-gated-action", ("create_settlement_report_preset", "Desk USD Lens")),
+            ),
+            provider_request_count=1,
+            provider_tools_key_present=False,
         ),
     ),
     AssistantEvalCase(
@@ -286,7 +451,9 @@ MANAGED_AGENT_EVAL_CASES = (
             prompt_section_keys=("managed-agent", "workspace", "application-context"),
             prompt_section_absent_keys=("approval-gated-action",),
             provider_request_count=2,
-            provider_tool_names=("list_trade_attention_candidates",),
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                "list_trade_attention_candidates"
+            ),
             provider_tools_key_present=True,
         ),
     ),
@@ -373,7 +540,9 @@ MANAGED_AGENT_EVAL_CASES = (
             prompt_section_keys=("managed-agent", "workspace", "application-context"),
             prompt_section_absent_keys=("approval-gated-action",),
             provider_request_count=2,
-            provider_tool_names=("get_pretrade_recommendation_run",),
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                "get_pretrade_recommendation_run"
+            ),
             provider_tools_key_present=True,
         ),
     ),
@@ -526,7 +695,9 @@ MANAGED_AGENT_EVAL_CASES = (
             prompt_section_keys=("managed-agent", "workspace", "application-context"),
             prompt_section_absent_keys=("approval-gated-action",),
             provider_request_count=2,
-            provider_tool_names=("analyze_pretrade_scenario_draft",),
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                "analyze_pretrade_scenario_draft"
+            ),
             provider_tools_key_present=True,
         ),
     ),
@@ -679,7 +850,9 @@ MANAGED_AGENT_EVAL_CASES = (
             prompt_section_keys=("managed-agent", "workspace", "application-context"),
             prompt_section_absent_keys=("approval-gated-action",),
             provider_request_count=2,
-            provider_tool_names=("analyze_pretrade_scenario_draft",),
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                "analyze_pretrade_scenario_draft"
+            ),
             provider_tools_key_present=True,
         ),
     ),
@@ -751,7 +924,9 @@ MANAGED_AGENT_EVAL_CASES = (
                 ),
             ),
             provider_request_count=2,
-            provider_tool_names=("get_trade_by_id",),
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                "get_trade_by_id"
+            ),
             provider_tools_key_present=True,
         ),
     ),
@@ -785,16 +960,15 @@ MANAGED_AGENT_EVAL_CASES = (
             agent_id="trade-reader-no-tools",
             agent_name="Trade Reader No Tools",
             message_contains=("could not verify", "provided context"),
-            warning_count=1,
-            warning_contains=("has no enabled live tools on this API worker",),
+            warning_count=0,
             tool_names=(),
             action_request_types=(),
             action_request_statuses=(),
             prompt_section_keys=("managed-agent", "workspace", "application-context"),
             prompt_section_absent_keys=("approval-gated-action",),
             provider_request_count=1,
-            provider_tool_names=(),
-            provider_tools_key_present=False,
+            provider_tool_names=_provider_tool_names_with_managed_agent_introspection(),
+            provider_tools_key_present=True,
         ),
     ),
     AssistantEvalCase(
@@ -1508,3 +1682,111 @@ class AssistantManagedAgentEvalTests(AssistantApiEvalHarness):
         for case in MANAGED_AGENT_EVAL_CASES:
             with self.subTest(case=case.name):
                 self.run_eval_case(case)
+
+    def test_managed_read_agent_can_list_gmail_inbox_messages(self) -> None:
+        gmail_browse_result = DocumentGmailInboxBrowseResultOut(
+            query="from:backoffice@example.com",
+            page_size=5,
+            next_page_token=None,
+            messages=[
+                DocumentGmailInboxMessageSummaryOut(
+                    message_id="gmail-msg-1",
+                    thread_id="gmail-thread-1",
+                    subject="May Settlement Package",
+                    sender="backoffice@example.com",
+                    received_at=datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc),
+                    snippet="Attached is the May settlement package.",
+                    unread=True,
+                    attachment_count=2,
+                    pdf_attachment_count=1,
+                    imported_pdf_attachment_count=1,
+                )
+            ],
+        )
+        case = AssistantEvalCase(
+            name="managed-read-agent-lists-gmail-inbox-messages",
+            agent=AssistantEvalAgentFixture(
+                agent_id="gmail-reader",
+                name="Gmail Reader",
+                capabilities=("READ", "EXPLAIN"),
+                allowed_tools=("list_gmail_inbox_messages",),
+                system_prompt="Use the configured Gmail inbox browse tool when the user asks about inbox messages.",
+            ),
+            request_payload={
+                "agent_id": "gmail-reader",
+                "workspace": "assistant",
+                "context": "Inbox scope:\n- Document intake mailbox for settlement attachments",
+                "use_live_tools": True,
+                "messages": [
+                    {"role": "user", "content": "Check whether anything new arrived from backoffice@example.com."},
+                ],
+            },
+            provider_responses=(
+                {
+                    "id": "eval-gmail-read-1",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "id": "fc_eval_gmail_read_1",
+                            "call_id": "call_eval_gmail_read_1",
+                            "name": "list_gmail_inbox_messages",
+                            "arguments": '{"query":"from:backoffice@example.com","limit":5}',
+                        }
+                    ],
+                    "usage": {"input_tokens": 16, "output_tokens": 7},
+                },
+                {
+                    "id": "eval-gmail-read-2",
+                    "output_text": "Yes. The live Gmail inbox read found May Settlement Package from backoffice@example.com and it includes one PDF already imported into Document Intake.",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "Yes. The live Gmail inbox read found May Settlement Package from backoffice@example.com and it includes one PDF already imported into Document Intake.",
+                                }
+                            ],
+                        }
+                    ],
+                    "usage": {"input_tokens": 10, "output_tokens": 24},
+                },
+            ),
+            expectations=AssistantEvalExpectations(
+                agent_id="gmail-reader",
+                agent_name="Gmail Reader",
+                message_contains=("May Settlement Package", "already imported into Document Intake"),
+                warning_count=0,
+                tool_names=("list_gmail_inbox_messages",),
+                tool_call_summary_contains=("Loaded 1 Gmail inbox message(s).",),
+                action_request_types=(),
+                action_request_statuses=(),
+                prompt_section_keys=("managed-agent", "workspace", "application-context"),
+                prompt_section_absent_keys=("approval-gated-action",),
+                provider_request_count=2,
+                provider_tool_names=_provider_tool_names_with_managed_agent_introspection(
+                    "list_gmail_inbox_messages"
+                ),
+                provider_tools_key_present=True,
+            ),
+        )
+
+        with patch(
+            "apps.api.app.domains.assistant.services.tools.load_gmail_inbox_messages",
+            return_value=gmail_browse_result,
+        ) as gmail_list_mock:
+            result = self.run_eval_case(case)
+
+        gmail_list_mock.assert_called_once()
+        self.assertEqual(
+            gmail_list_mock.call_args.kwargs,
+            {
+                "query_override": "from:backoffice@example.com",
+                "page_size": 5,
+                "page_token": None,
+            },
+        )
+        self.assertEqual(
+            result.response_payload["tool_calls"][0]["arguments"],
+            {"query": "from:backoffice@example.com", "limit": 5},
+        )

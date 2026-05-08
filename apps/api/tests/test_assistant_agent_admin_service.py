@@ -79,7 +79,20 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
             self.assertEqual(record.created_by, "ops-admin")
             self.assertEqual(
                 record.allowed_tools,
-                ["get_trade_by_id", "list_trade_events", "get_trade_workbench", "list_workflow_items"],
+                [
+                    "get_trade_by_id",
+                    "list_trade_events",
+                    "get_trade_workbench",
+                    "list_workflow_items",
+                    "list_managed_agents",
+                    "get_managed_agent_profile",
+                    "get_application_catalog",
+                    "get_data_schema_catalog",
+                    "search_codebase",
+                    "read_codebase_file",
+                    "consult_managed_agent",
+                    "enlist_managed_agent",
+                ],
             )
             self.assertEqual(record.allowed_action_types, ["cancel_trade"])
             self.assertEqual(record.version, 1)
@@ -171,6 +184,7 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
             activation_notes="Seeded by test fixture.",
             allowed_workspaces=("assistant", "settlement"),
             capabilities=("READ", "EXPLAIN", "ACTION"),
+            skills=(),
             allowed_tools=("list_trade_invoices", "list_trade_payments"),
             allowed_action_types=("issue_trade_invoice",),
             system_prompt="Explain settlement status and stage the smallest justified next step.",
@@ -240,6 +254,7 @@ class AssistantAgentAdminServiceTests(unittest.TestCase):
                         activation_notes="Seeded by test fixture.",
                         allowed_workspaces=("assistant",),
                         capabilities=("READ", "EXPLAIN"),
+                        skills=(),
                         allowed_tools=(),
                         allowed_action_types=("cancel_trade",),
                         system_prompt="Explain the selected trade state.",

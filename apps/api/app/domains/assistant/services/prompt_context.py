@@ -8,12 +8,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.domains.assistant.services.app_context_catalog import build_application_access_summary
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_calendar import ReferenceCalendar
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_currency import ReferenceCurrency
@@ -28,7 +30,14 @@ from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.weather_forecast_period import WeatherForecastPeriod
 from apps.api.app.models.weather_location import WeatherLocation
 from apps.api.app.models.weather_observation import WeatherObservation
-from apps.api.app.schemas.assistant import AssistantPromptContextRequest, AssistantPromptSectionSource
+from apps.api.app.schemas.assistant import (
+    AssistantPromptContextRequest,
+    AssistantPromptSectionFreshness,
+    AssistantPromptSectionKind,
+    AssistantPromptSectionMergeStrategy,
+    AssistantPromptSectionScope,
+    AssistantPromptSectionSource,
+)
 
 
 @dataclass(frozen=True)
@@ -43,9 +52,18 @@ class AssistantPromptUser:
 
 @dataclass(frozen=True)
 class AssistantPromptSection:
+    contract_key: str | None
     key: str
     title: str
     source: AssistantPromptSectionSource
+    scope: AssistantPromptSectionScope
+    kind: AssistantPromptSectionKind
+    owner: str
+    owner_reference: str | None
+    freshness: AssistantPromptSectionFreshness
+    merge_strategy: AssistantPromptSectionMergeStrategy
+    contract_version: int
+    uses_fallback: bool
     content: str
 
 
@@ -59,6 +77,191 @@ class AssistantPromptEnvelope:
     system_prompt: str
     sections: tuple[AssistantPromptSection, ...]
     warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class AssistantPromptSectionContract:
+    contract_key: str
+    default_title: str
+    source: AssistantPromptSectionSource
+    scope: AssistantPromptSectionScope
+    kind: AssistantPromptSectionKind
+    owner: str
+    freshness: AssistantPromptSectionFreshness
+    merge_strategy: AssistantPromptSectionMergeStrategy = "APPEND"
+    contract_version: int = 1
+
+
+PROMPT_SECTION_CONTRACTS: dict[str, AssistantPromptSectionContract] = {
+    "system-mission": AssistantPromptSectionContract(
+        contract_key="system-mission",
+        default_title="System Mission",
+        source="system",
+        scope="SYSTEM",
+        kind="IMMUTABLE",
+        owner="platform",
+        freshness="STATIC",
+    ),
+    "organization": AssistantPromptSectionContract(
+        contract_key="organization",
+        default_title="Organization Context",
+        source="organization",
+        scope="GLOBAL",
+        kind="CONFIGURABLE",
+        owner="organization-config",
+        freshness="STATIC",
+    ),
+    "user": AssistantPromptSectionContract(
+        contract_key="user",
+        default_title="Authenticated User",
+        source="user",
+        scope="USER",
+        kind="GENERATED",
+        owner="authenticated-user",
+        freshness="SESSION",
+    ),
+    "business-model": AssistantPromptSectionContract(
+        contract_key="business-model",
+        default_title="Business Operating Model",
+        source="business",
+        scope="GLOBAL",
+        kind="CONFIGURABLE",
+        owner="organization-config",
+        freshness="STATIC",
+    ),
+    "data-semantics": AssistantPromptSectionContract(
+        contract_key="data-semantics",
+        default_title="Data Landscape",
+        source="data",
+        scope="GLOBAL",
+        kind="IMMUTABLE",
+        owner="platform",
+        freshness="STATIC",
+    ),
+    "data-inventory": AssistantPromptSectionContract(
+        contract_key="data-inventory",
+        default_title="Live Data Inventory",
+        source="data",
+        scope="RUNTIME",
+        kind="GENERATED",
+        owner="assistant-runtime",
+        freshness="LIVE",
+    ),
+    "application-surface": AssistantPromptSectionContract(
+        contract_key="application-surface",
+        default_title="Application Access Surface",
+        source="application",
+        scope="GLOBAL",
+        kind="GENERATED",
+        owner="assistant-runtime",
+        freshness="STATIC",
+    ),
+    "world-model": AssistantPromptSectionContract(
+        contract_key="world-model",
+        default_title="World And Time",
+        source="world",
+        scope="RUNTIME",
+        kind="GENERATED",
+        owner="assistant-runtime",
+        freshness="REQUEST",
+    ),
+    "managed-agent": AssistantPromptSectionContract(
+        contract_key="managed-agent",
+        default_title="Managed Agent Profile",
+        source="agent",
+        scope="AGENT",
+        kind="CONFIGURABLE",
+        owner="managed-agent-profile",
+        freshness="STATIC",
+        merge_strategy="APPEND_IF_PRESENT",
+    ),
+    "workspace": AssistantPromptSectionContract(
+        contract_key="workspace",
+        default_title="Current Workspace",
+        source="workspace",
+        scope="REQUEST",
+        kind="GENERATED",
+        owner="request-payload",
+        freshness="REQUEST",
+        merge_strategy="APPEND_IF_PRESENT",
+    ),
+    "workspace-summary-focus": AssistantPromptSectionContract(
+        contract_key="workspace-summary-focus",
+        default_title="Requested Workspace Summary Focus",
+        source="application",
+        scope="REQUEST",
+        kind="GENERATED",
+        owner="request-payload",
+        freshness="REQUEST",
+        merge_strategy="APPEND_IF_PRESENT",
+    ),
+    "application-context": AssistantPromptSectionContract(
+        contract_key="application-context",
+        default_title="Application Context",
+        source="application",
+        scope="REQUEST",
+        kind="GENERATED",
+        owner="request-payload",
+        freshness="REQUEST",
+        merge_strategy="APPEND_IF_PRESENT",
+    ),
+    "approval-gated-action": AssistantPromptSectionContract(
+        contract_key="approval-gated-action",
+        default_title="Governed action candidate",
+        source="agent",
+        scope="REQUEST",
+        kind="GENERATED",
+        owner="assistant-action-runtime",
+        freshness="REQUEST",
+        merge_strategy="APPEND_IF_PRESENT",
+    ),
+    "tool-prefetch": AssistantPromptSectionContract(
+        contract_key="tool-prefetch",
+        default_title="Live Tool Prefetch",
+        source="tool",
+        scope="REQUEST",
+        kind="GENERATED",
+        owner="assistant-runtime",
+        freshness="REQUEST",
+        merge_strategy="APPEND_IF_PRESENT",
+    ),
+}
+
+
+def resolve_prompt_section_contract(contract_key: str) -> AssistantPromptSectionContract:
+    contract = PROMPT_SECTION_CONTRACTS.get(contract_key)
+    if contract is None:
+        raise RuntimeError(f"Unknown assistant prompt section contract '{contract_key}'")
+    return contract
+
+
+def build_prompt_section(
+    *,
+    contract_key: str,
+    content: str,
+    key: str | None = None,
+    title: str | None = None,
+    owner_reference: str | None = None,
+    freshness: AssistantPromptSectionFreshness | None = None,
+    merge_strategy: AssistantPromptSectionMergeStrategy | None = None,
+    uses_fallback: bool = False,
+) -> AssistantPromptSection:
+    contract = resolve_prompt_section_contract(contract_key)
+    return AssistantPromptSection(
+        contract_key=contract.contract_key,
+        key=key or contract.contract_key,
+        title=title or contract.default_title,
+        source=contract.source,
+        scope=contract.scope,
+        kind=contract.kind,
+        owner=contract.owner,
+        owner_reference=owner_reference,
+        freshness=freshness or contract.freshness,
+        merge_strategy=merge_strategy or contract.merge_strategy,
+        contract_version=contract.contract_version,
+        uses_fallback=uses_fallback,
+        content=content,
+    )
 
 
 def build_prompt_context(
@@ -76,6 +279,7 @@ def build_prompt_context(
         _build_business_section(),
         _build_data_semantics_section(),
         _build_data_inventory_section(db),
+        _build_application_surface_section(),
         _build_world_section(generated_at),
     ]
 
@@ -87,10 +291,8 @@ def build_prompt_context(
         sections.append(_build_workspace_summary_focus_section(payload.summary_targets))
     if payload.context:
         sections.append(
-            AssistantPromptSection(
-                key="application-context",
-                title="Application Context",
-                source="application",
+            build_prompt_section(
+                contract_key="application-context",
                 content=payload.context,
             )
         )
@@ -116,36 +318,36 @@ def render_prompt_sections(sections: list[AssistantPromptSection] | tuple[Assist
 
 
 def _build_system_section() -> AssistantPromptSection:
-    return AssistantPromptSection(
-        key="system-mission",
-        title="System Mission",
-        source="system",
-        content=settings.ASSISTANT_SYSTEM_PROMPT.strip(),
+    system_prompt = settings.ASSISTANT_SYSTEM_PROMPT.strip()
+    return build_prompt_section(
+        contract_key="system-mission",
+        content=system_prompt,
+        uses_fallback=_uses_setting_default("ASSISTANT_SYSTEM_PROMPT", system_prompt),
     )
 
 
 def _build_organization_section() -> AssistantPromptSection:
     company_name = settings.ASSISTANT_COMPANY_NAME.strip() or "ECTRM"
     company_context = settings.ASSISTANT_COMPANY_CONTEXT.strip()
-    return AssistantPromptSection(
-        key="organization",
-        title="Organization Context",
-        source="organization",
+    return build_prompt_section(
+        contract_key="organization",
         content=(
             f"Company name: {company_name}\n"
             f"{company_context}\n"
             "Primary user personas include trading, operations, risk, reference-data stewardship, "
             "and administrative support."
         ).strip(),
+        uses_fallback=(
+            _uses_setting_default("ASSISTANT_COMPANY_NAME", company_name)
+            or _uses_setting_default("ASSISTANT_COMPANY_CONTEXT", company_context)
+        ),
     )
 
 
 def _build_user_section(user: AssistantPromptUser) -> AssistantPromptSection:
     expires_at = user.session_expires_at.isoformat() if user.session_expires_at is not None else "unknown"
-    return AssistantPromptSection(
-        key="user",
-        title="Authenticated User",
-        source="user",
+    return build_prompt_section(
+        contract_key="user",
         content=(
             f"user_id: {user.user_id}\n"
             f"display_name: {user.display_name}\n"
@@ -155,27 +357,26 @@ def _build_user_section(user: AssistantPromptUser) -> AssistantPromptSection:
             f"session_expires_at: {expires_at}\n"
             "Treat the role as workflow context, not as permission to invent approvals or completed actions."
         ),
+        owner_reference=user.user_id,
     )
 
 
 def _build_business_section() -> AssistantPromptSection:
-    return AssistantPromptSection(
-        key="business-model",
-        title="Business Operating Model",
-        source="business",
+    business_context = settings.ASSISTANT_BUSINESS_CONTEXT.strip()
+    return build_prompt_section(
+        contract_key="business-model",
         content=(
-            f"{settings.ASSISTANT_BUSINESS_CONTEXT.strip()}\n"
+            f"{business_context}\n"
             "Key operator workflows: capture trades, amend or cancel trades through explicit events, "
             "review event timelines, monitor positions, maintain reference data, and oversee data loads."
         ).strip(),
+        uses_fallback=_uses_setting_default("ASSISTANT_BUSINESS_CONTEXT", business_context),
     )
 
 
 def _build_data_semantics_section() -> AssistantPromptSection:
-    return AssistantPromptSection(
-        key="data-semantics",
-        title="Data Landscape",
-        source="data",
+    return build_prompt_section(
+        contract_key="data-semantics",
         content=(
             "Reference or master data defines governed lists such as books, commodities, price indices, "
             "currencies, units, locations, counterparties, and portfolios.\n"
@@ -207,32 +408,42 @@ def _build_data_inventory_section(db: Session) -> AssistantPromptSection:
             *governance_lines,
         ]
     )
-    return AssistantPromptSection(
-        key="data-inventory",
-        title="Live Data Inventory",
-        source="data",
+    return build_prompt_section(
+        contract_key="data-inventory",
         content=content,
     )
 
 
 def _build_world_section(generated_at: datetime) -> AssistantPromptSection:
-    return AssistantPromptSection(
-        key="world-model",
-        title="World And Time",
-        source="world",
+    return build_prompt_section(
+        contract_key="world-model",
         content=(
             f"Current UTC timestamp: {generated_at.isoformat()}\n"
             "Live external facts are time-sensitive. Prefer the application context and loaded market or weather "
             "data over model memory.\n"
             "If the system does not contain a current external fact, say so clearly instead of guessing."
         ),
+        freshness="REQUEST",
+    )
+
+
+def _build_application_surface_section() -> AssistantPromptSection:
+    return build_prompt_section(
+        contract_key="application-surface",
+        content=build_application_access_summary(),
     )
 
 
 def _build_agent_section(agent_definition: ManagedAssistantAgent) -> AssistantPromptSection:
     capabilities = ", ".join(agent_definition.capabilities)
+    skills = ", ".join(agent_definition.skills) if agent_definition.skills else "none"
     workspaces = ", ".join(agent_definition.allowed_workspaces)
     allowed_tools = ", ".join(agent_definition.allowed_tools) if agent_definition.allowed_tools else "all published read-only tools"
+    allowed_actions = (
+        ", ".join(agent_definition.allowed_action_types)
+        if agent_definition.allowed_action_types
+        else "none"
+    )
     profile_lines = [
         f"agent_id: {agent_definition.agent_id}",
         f"name: {agent_definition.name}",
@@ -245,32 +456,40 @@ def _build_agent_section(agent_definition: ManagedAssistantAgent) -> AssistantPr
         profile_lines.append(f"human_owner_role: {agent_definition.human_owner_role}")
     if agent_definition.authority_ceiling:
         profile_lines.append(f"authority_ceiling: {agent_definition.authority_ceiling}")
+    profile_lines.append(f"orchestration_pattern: {agent_definition.orchestration_pattern}")
+    if agent_definition.parent_agent_id:
+        profile_lines.append(f"parent_agent_id: {agent_definition.parent_agent_id}")
+    if agent_definition.managed_agent_ids:
+        profile_lines.append(f"managed_agent_ids: {', '.join(agent_definition.managed_agent_ids)}")
     if agent_definition.specialization_summary:
         profile_lines.append(f"specialization_summary: {agent_definition.specialization_summary}")
     if agent_definition.activation_notes:
         profile_lines.append(f"activation_notes: {agent_definition.activation_notes}")
+    if agent_definition.delegation_guidance:
+        profile_lines.append(f"delegation_guidance: {agent_definition.delegation_guidance}")
     profile_lines.extend(
         [
+            "build_recipe: role + skills + capabilities + workspaces + live tools + governed actions + system prompt",
             f"capabilities: {capabilities}",
+            f"skills: {skills}",
             f"allowed_workspaces: {workspaces}",
             f"allowed_tools: {allowed_tools}",
+            f"allowed_actions: {allowed_actions}",
             f"instructions:\n{agent_definition.system_prompt}",
         ]
     )
-    return AssistantPromptSection(
-        key="managed-agent",
-        title="Managed Agent Profile",
-        source="agent",
+    return build_prompt_section(
+        contract_key="managed-agent",
         content="\n".join(profile_lines),
+        owner_reference=agent_definition.agent_id,
     )
 
 
 def _build_workspace_section(workspace: str) -> AssistantPromptSection:
-    return AssistantPromptSection(
-        key="workspace",
-        title="Current Workspace",
-        source="workspace",
+    return build_prompt_section(
+        contract_key="workspace",
         content=f"The current workspace is {workspace}. Tailor explanations and next steps to that surface.",
+        owner_reference=workspace,
     )
 
 
@@ -280,12 +499,17 @@ def _build_workspace_summary_focus_section(summary_targets: list[str]) -> Assist
         *[f"- {target}" for target in summary_targets],
         "Prefer the matching candidate reads before inferring missing ledger rows from those summary counts.",
     ]
-    return AssistantPromptSection(
-        key="workspace-summary-focus",
-        title="Requested Workspace Summary Focus",
-        source="application",
+    return build_prompt_section(
+        contract_key="workspace-summary-focus",
         content="\n".join(lines),
     )
+
+
+def _uses_setting_default(field_name: str, value: str) -> bool:
+    default_value = type(settings).model_fields[field_name].default
+    if not isinstance(default_value, str):
+        return False
+    return value.strip() == default_value.strip()
 
 
 def _render_reference_inventory(db: Session) -> list[str]:
@@ -301,6 +525,7 @@ def _render_reference_inventory(db: Session) -> list[str]:
             _safe_count_active(db, ReferenceCounterparty),
             _safe_count(db, ReferenceCounterparty),
         ),
+        _format_active_total("Calendars", _safe_count_active(db, ReferenceCalendar), _safe_count(db, ReferenceCalendar)),
         _format_active_total(
             "Portfolios",
             _safe_count_active(db, ReferencePortfolio),

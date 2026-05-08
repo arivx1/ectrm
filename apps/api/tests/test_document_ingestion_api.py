@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import enum
 import io
 import json
@@ -41,6 +42,7 @@ from apps.api.app.models import Base
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
+from apps.api.app.models.gmail_inbox_import_receipt import GmailInboxImportReceipt
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.user_account import UserAccount
@@ -59,11 +61,14 @@ class _FakeHttpxClient:
     def __init__(
         self,
         *,
+        get_responses: list[httpx.Response | Exception] | None = None,
         post_responses: list[httpx.Response | Exception] | None = None,
         delete_responses: list[httpx.Response | Exception] | None = None,
     ) -> None:
+        self.get_responses = list(get_responses or [])
         self.post_responses = list(post_responses or [])
         self.delete_responses = list(delete_responses or [])
+        self.get_calls: list[tuple[str, dict[str, object]]] = []
         self.post_calls: list[tuple[str, dict[str, object]]] = []
         self.delete_calls: list[tuple[str, dict[str, object]]] = []
 
@@ -75,6 +80,15 @@ class _FakeHttpxClient:
 
     def close(self) -> None:
         return None
+
+    def get(self, url: str, **kwargs: object) -> httpx.Response:
+        self.get_calls.append((url, dict(kwargs)))
+        if not self.get_responses:
+            raise AssertionError(f"Unexpected GET request for {url}")
+        response = self.get_responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
     def post(self, url: str, **kwargs: object) -> httpx.Response:
         self.post_calls.append((url, dict(kwargs)))
@@ -140,6 +154,16 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self._previous_openai_model = settings.OPENAI_MODEL
         self._previous_anthropic_api_key = settings.ANTHROPIC_API_KEY
         self._previous_google_api_key = settings.GOOGLE_API_KEY
+        self._previous_gmail_inbox_enabled = settings.GMAIL_INBOX_ENABLED
+        self._previous_gmail_inbox_client_id = settings.GMAIL_INBOX_CLIENT_ID
+        self._previous_gmail_inbox_client_secret = settings.GMAIL_INBOX_CLIENT_SECRET
+        self._previous_gmail_inbox_refresh_token = settings.GMAIL_INBOX_REFRESH_TOKEN
+        self._previous_gmail_inbox_account_email = settings.GMAIL_INBOX_ACCOUNT_EMAIL
+        self._previous_gmail_inbox_query = settings.GMAIL_INBOX_QUERY
+        self._previous_gmail_inbox_max_messages_per_import = settings.GMAIL_INBOX_MAX_MESSAGES_PER_IMPORT
+        self._previous_gmail_inbox_timeout_seconds = settings.GMAIL_INBOX_TIMEOUT_SECONDS
+        self._previous_gmail_inbox_token_url = settings.GMAIL_INBOX_TOKEN_URL
+        self._previous_gmail_inbox_api_base_url = settings.GMAIL_INBOX_API_BASE_URL
         settings.BOOTSTRAP_ADMIN_TOKEN = "bootstrap-secret"
         settings.DOCUMENT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
         settings.DOCUMENT_AI_ENABLED = True
@@ -152,11 +176,22 @@ class DocumentIngestionApiTests(unittest.TestCase):
         settings.OPENAI_MODEL = "gpt-5-mini"
         settings.ANTHROPIC_API_KEY = ""
         settings.GOOGLE_API_KEY = ""
+        settings.GMAIL_INBOX_ENABLED = False
+        settings.GMAIL_INBOX_CLIENT_ID = ""
+        settings.GMAIL_INBOX_CLIENT_SECRET = ""
+        settings.GMAIL_INBOX_REFRESH_TOKEN = ""
+        settings.GMAIL_INBOX_ACCOUNT_EMAIL = ""
+        settings.GMAIL_INBOX_QUERY = "has:attachment filename:pdf in:inbox"
+        settings.GMAIL_INBOX_MAX_MESSAGES_PER_IMPORT = 10
+        settings.GMAIL_INBOX_TIMEOUT_SECONDS = 20
+        settings.GMAIL_INBOX_TOKEN_URL = "https://oauth2.googleapis.com/token"
+        settings.GMAIL_INBOX_API_BASE_URL = "https://gmail.googleapis.com/gmail/v1"
         self._storage_tempdir = tempfile.TemporaryDirectory()
         settings.DOCUMENT_STORAGE_ROOT = Path(self._storage_tempdir.name)
 
         with self.SessionLocal() as session:
             session.query(DocumentRecordLink).delete()
+            session.query(GmailInboxImportReceipt).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
             session.query(UserSession).delete()
@@ -177,6 +212,16 @@ class DocumentIngestionApiTests(unittest.TestCase):
         settings.OPENAI_MODEL = self._previous_openai_model
         settings.ANTHROPIC_API_KEY = self._previous_anthropic_api_key
         settings.GOOGLE_API_KEY = self._previous_google_api_key
+        settings.GMAIL_INBOX_ENABLED = self._previous_gmail_inbox_enabled
+        settings.GMAIL_INBOX_CLIENT_ID = self._previous_gmail_inbox_client_id
+        settings.GMAIL_INBOX_CLIENT_SECRET = self._previous_gmail_inbox_client_secret
+        settings.GMAIL_INBOX_REFRESH_TOKEN = self._previous_gmail_inbox_refresh_token
+        settings.GMAIL_INBOX_ACCOUNT_EMAIL = self._previous_gmail_inbox_account_email
+        settings.GMAIL_INBOX_QUERY = self._previous_gmail_inbox_query
+        settings.GMAIL_INBOX_MAX_MESSAGES_PER_IMPORT = self._previous_gmail_inbox_max_messages_per_import
+        settings.GMAIL_INBOX_TIMEOUT_SECONDS = self._previous_gmail_inbox_timeout_seconds
+        settings.GMAIL_INBOX_TOKEN_URL = self._previous_gmail_inbox_token_url
+        settings.GMAIL_INBOX_API_BASE_URL = self._previous_gmail_inbox_api_base_url
         self._storage_tempdir.cleanup()
 
     def _openai_provider_config(self) -> DocumentProcessorProviderConfig:
@@ -238,6 +283,16 @@ class DocumentIngestionApiTests(unittest.TestCase):
         buffer = io.BytesIO()
         writer.write(buffer)
         return buffer.getvalue()
+
+    def _configure_gmail_inbox(self) -> None:
+        settings.GMAIL_INBOX_ENABLED = True
+        settings.GMAIL_INBOX_CLIENT_ID = "gmail-client-id"
+        settings.GMAIL_INBOX_CLIENT_SECRET = "gmail-client-secret"
+        settings.GMAIL_INBOX_REFRESH_TOKEN = "gmail-refresh-token"
+        settings.GMAIL_INBOX_ACCOUNT_EMAIL = "ops-inbox@example.com"
+        settings.GMAIL_INBOX_QUERY = "has:attachment filename:pdf in:inbox"
+        settings.GMAIL_INBOX_MAX_MESSAGES_PER_IMPORT = 10
+        settings.GMAIL_INBOX_TIMEOUT_SECONDS = 5
 
     def _upload_document(self, admin_token: str, *, filename: str = "invoice-batch.pdf", page_count: int = 1) -> dict[str, object]:
         response = self.client.post(
@@ -547,6 +602,396 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertFalse(providers["anthropic"]["configured"])
         self.assertTrue(providers["anthropic"]["is_default"])
         self.assertEqual(providers["google"]["setup_env_var"], "GOOGLE_API_KEY")
+
+    def test_document_processor_settings_include_gmail_inbox_runtime(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._configure_gmail_inbox()
+
+        response = self.client.get(
+            "/documents/settings",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("gmail_inbox", payload)
+        self.assertEqual(
+            payload["gmail_inbox"],
+            {
+                "enabled": True,
+                "configured": True,
+                "provider": "gmail_api",
+                "account_email": "ops-inbox@example.com",
+                "query": "has:attachment filename:pdf in:inbox",
+                "max_messages_per_import": 10,
+                "auth_status": "configured",
+            },
+        )
+
+    def test_gmail_message_browser_lists_recent_messages(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._configure_gmail_inbox()
+
+        with self.SessionLocal() as session:
+            session.add(
+                GmailInboxImportReceipt(
+                    gmail_message_id="gmail-msg-1",
+                    gmail_thread_id="gmail-thread-1",
+                    gmail_part_token="attachment-1",
+                    gmail_attachment_id="attachment-1",
+                    gmail_subject="May Settlement Package",
+                    gmail_sender="backoffice@example.com",
+                    gmail_received_at=datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc),
+                    document_id="DOC-IMPORTED-1",
+                    imported_at=datetime(2026, 5, 7, 12, 5, tzinfo=timezone.utc),
+                    imported_by="doc_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        fake_client = _FakeHttpxClient(
+            post_responses=[
+                _httpx_json_response(
+                    "POST",
+                    settings.GMAIL_INBOX_TOKEN_URL,
+                    200,
+                    {"access_token": "gmail-access-token"},
+                )
+            ],
+            get_responses=[
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages",
+                    200,
+                    {
+                        "messages": [
+                            {"id": "gmail-msg-1", "threadId": "gmail-thread-1"},
+                            {"id": "gmail-msg-2", "threadId": "gmail-thread-2"},
+                        ],
+                        "nextPageToken": "next-page-token",
+                    },
+                ),
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages/gmail-msg-1",
+                    200,
+                    {
+                        "id": "gmail-msg-1",
+                        "threadId": "gmail-thread-1",
+                        "snippet": "May settlement package attached.",
+                        "internalDate": "1746612345000",
+                        "labelIds": ["INBOX", "UNREAD"],
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": "May Settlement Package"},
+                                {"name": "From", "value": "backoffice@example.com"},
+                            ],
+                            "parts": [
+                                {
+                                    "partId": "1",
+                                    "filename": "settlement.pdf",
+                                    "mimeType": "application/pdf",
+                                    "body": {"attachmentId": "attachment-1", "size": 1024},
+                                },
+                                {
+                                    "partId": "2",
+                                    "filename": "terminal.png",
+                                    "mimeType": "image/png",
+                                    "body": {"attachmentId": "attachment-2", "size": 256},
+                                },
+                            ],
+                        },
+                    },
+                ),
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages/gmail-msg-2",
+                    200,
+                    {
+                        "id": "gmail-msg-2",
+                        "threadId": "gmail-thread-2",
+                        "snippet": "Reminder about hedging review.",
+                        "internalDate": "1746615345000",
+                        "labelIds": ["INBOX"],
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": "Hedging Review Reminder"},
+                                {"name": "From", "value": "risk@example.com"},
+                            ],
+                            "parts": [],
+                        },
+                    },
+                ),
+            ],
+        )
+
+        with patch(
+            "apps.api.app.domains.integrations.services.gmail_inbox.httpx.Client",
+            return_value=fake_client,
+        ):
+            response = self.client.get(
+                "/documents/gmail/messages",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                params={"page_size": 2},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["query"], "has:attachment filename:pdf in:inbox")
+        self.assertEqual(payload["page_size"], 2)
+        self.assertEqual(payload["next_page_token"], "next-page-token")
+        self.assertEqual(len(payload["messages"]), 2)
+        self.assertEqual(payload["messages"][0]["message_id"], "gmail-msg-1")
+        self.assertEqual(payload["messages"][0]["subject"], "May Settlement Package")
+        self.assertEqual(payload["messages"][0]["sender"], "backoffice@example.com")
+        self.assertTrue(payload["messages"][0]["unread"])
+        self.assertEqual(payload["messages"][0]["attachment_count"], 2)
+        self.assertEqual(payload["messages"][0]["pdf_attachment_count"], 1)
+        self.assertEqual(payload["messages"][0]["imported_pdf_attachment_count"], 1)
+        self.assertEqual(payload["messages"][1]["message_id"], "gmail-msg-2")
+        self.assertEqual(payload["messages"][1]["attachment_count"], 0)
+        self.assertFalse(payload["messages"][1]["unread"])
+
+    def test_gmail_message_browser_returns_message_detail_with_body_and_attachment_status(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._configure_gmail_inbox()
+        body_text = "Settlement statement attached.\nPlease review by EOD."
+        inline_body = base64.urlsafe_b64encode(body_text.encode("utf-8")).decode("ascii").rstrip("=")
+
+        with self.SessionLocal() as session:
+            session.add(
+                GmailInboxImportReceipt(
+                    gmail_message_id="gmail-msg-1",
+                    gmail_thread_id="gmail-thread-1",
+                    gmail_part_token="attachment-1",
+                    gmail_attachment_id="attachment-1",
+                    gmail_subject="May Settlement Package",
+                    gmail_sender="backoffice@example.com",
+                    gmail_received_at=datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc),
+                    document_id="DOC-IMPORTED-1",
+                    imported_at=datetime(2026, 5, 7, 12, 5, tzinfo=timezone.utc),
+                    imported_by="doc_admin",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        fake_client = _FakeHttpxClient(
+            post_responses=[
+                _httpx_json_response(
+                    "POST",
+                    settings.GMAIL_INBOX_TOKEN_URL,
+                    200,
+                    {"access_token": "gmail-access-token"},
+                )
+            ],
+            get_responses=[
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages/gmail-msg-1",
+                    200,
+                    {
+                        "id": "gmail-msg-1",
+                        "threadId": "gmail-thread-1",
+                        "snippet": "Settlement statement attached.",
+                        "internalDate": "1746612345000",
+                        "labelIds": ["INBOX", "UNREAD"],
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": "May Settlement Package"},
+                                {"name": "From", "value": "backoffice@example.com"},
+                                {"name": "To", "value": "ops-inbox@example.com"},
+                            ],
+                            "parts": [
+                                {
+                                    "partId": "0",
+                                    "mimeType": "text/plain",
+                                    "body": {"data": inline_body},
+                                },
+                                {
+                                    "partId": "1",
+                                    "filename": "settlement.pdf",
+                                    "mimeType": "application/pdf",
+                                    "body": {"attachmentId": "attachment-1", "size": 2048},
+                                },
+                                {
+                                    "partId": "2",
+                                    "filename": "cover-note.txt",
+                                    "mimeType": "text/plain",
+                                    "body": {"attachmentId": "attachment-2", "size": 128},
+                                },
+                            ],
+                        },
+                    },
+                )
+            ],
+        )
+
+        with patch(
+            "apps.api.app.domains.integrations.services.gmail_inbox.httpx.Client",
+            return_value=fake_client,
+        ):
+            response = self.client.get(
+                "/documents/gmail/messages/gmail-msg-1",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["message_id"], "gmail-msg-1")
+        self.assertEqual(payload["subject"], "May Settlement Package")
+        self.assertEqual(payload["sender"], "backoffice@example.com")
+        self.assertEqual(payload["to_recipients"], "ops-inbox@example.com")
+        self.assertTrue(payload["unread"])
+        self.assertEqual(payload["body_text"], body_text)
+        self.assertFalse(payload["body_truncated"])
+        self.assertEqual(len(payload["attachments"]), 2)
+        self.assertEqual(payload["attachments"][0]["filename"], "settlement.pdf")
+        self.assertTrue(payload["attachments"][0]["importable"])
+        self.assertTrue(payload["attachments"][0]["already_imported"])
+        self.assertEqual(payload["attachments"][1]["filename"], "cover-note.txt")
+        self.assertFalse(payload["attachments"][1]["importable"])
+        self.assertFalse(payload["attachments"][1]["already_imported"])
+
+    def test_gmail_import_route_imports_pdf_attachments_once(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._configure_gmail_inbox()
+        inline_pdf = base64.urlsafe_b64encode(self._build_pdf_bytes(page_count=1)).decode("ascii").rstrip("=")
+
+        first_client = _FakeHttpxClient(
+            post_responses=[
+                _httpx_json_response(
+                    "POST",
+                    settings.GMAIL_INBOX_TOKEN_URL,
+                    200,
+                    {"access_token": "gmail-access-token"},
+                )
+            ],
+            get_responses=[
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages",
+                    200,
+                    {"messages": [{"id": "gmail-msg-1", "threadId": "gmail-thread-1"}]},
+                ),
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages/gmail-msg-1",
+                    200,
+                    {
+                        "id": "gmail-msg-1",
+                        "threadId": "gmail-thread-1",
+                        "internalDate": "1746612345000",
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": "May Settlement Package"},
+                                {"name": "From", "value": "backoffice@example.com"},
+                            ],
+                            "parts": [
+                                {
+                                    "partId": "1",
+                                    "filename": "settlement.pdf",
+                                    "mimeType": "application/pdf",
+                                    "body": {"data": inline_pdf},
+                                }
+                            ],
+                        },
+                    },
+                ),
+            ],
+        )
+
+        with patch(
+            "apps.api.app.domains.integrations.services.gmail_inbox.httpx.Client",
+            return_value=first_client,
+        ):
+            first_response = self.client.post(
+                "/documents/imports/gmail",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        self.assertEqual(first_response.status_code, 202)
+        first_payload = first_response.json()
+        self.assertEqual(first_payload["query"], "has:attachment filename:pdf in:inbox")
+        self.assertEqual(first_payload["matched_message_count"], 1)
+        self.assertEqual(first_payload["matched_attachment_count"], 1)
+        self.assertEqual(first_payload["imported_count"], 1)
+        self.assertEqual(first_payload["skipped_count"], 0)
+        self.assertEqual(len(first_payload["imported_documents"]), 1)
+        self.assertEqual(first_payload["imported_documents"][0]["display_name"], "Gmail · May Settlement Package · settlement.pdf")
+        self.assertEqual(first_payload["imported_documents"][0]["gmail_message_id"], "gmail-msg-1")
+        self.assertEqual(first_payload["warnings"], [])
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(DocumentIngestion).count(), 1)
+            self.assertEqual(session.query(GmailInboxImportReceipt).count(), 1)
+            receipt = session.query(GmailInboxImportReceipt).one()
+            self.assertEqual(receipt.gmail_message_id, "gmail-msg-1")
+            self.assertEqual(receipt.gmail_part_token, "inline:1")
+            self.assertEqual(receipt.document_id, first_payload["imported_documents"][0]["document_id"])
+
+        second_client = _FakeHttpxClient(
+            post_responses=[
+                _httpx_json_response(
+                    "POST",
+                    settings.GMAIL_INBOX_TOKEN_URL,
+                    200,
+                    {"access_token": "gmail-access-token"},
+                )
+            ],
+            get_responses=[
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages",
+                    200,
+                    {"messages": [{"id": "gmail-msg-1", "threadId": "gmail-thread-1"}]},
+                ),
+                _httpx_json_response(
+                    "GET",
+                    f"{settings.GMAIL_INBOX_API_BASE_URL}/users/me/messages/gmail-msg-1",
+                    200,
+                    {
+                        "id": "gmail-msg-1",
+                        "threadId": "gmail-thread-1",
+                        "internalDate": "1746612345000",
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": "May Settlement Package"},
+                                {"name": "From", "value": "backoffice@example.com"},
+                            ],
+                            "parts": [
+                                {
+                                    "partId": "1",
+                                    "filename": "settlement.pdf",
+                                    "mimeType": "application/pdf",
+                                    "body": {"data": inline_pdf},
+                                }
+                            ],
+                        },
+                    },
+                ),
+            ],
+        )
+
+        with patch(
+            "apps.api.app.domains.integrations.services.gmail_inbox.httpx.Client",
+            return_value=second_client,
+        ):
+            second_response = self.client.post(
+                "/documents/imports/gmail",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+        self.assertEqual(second_response.status_code, 202)
+        second_payload = second_response.json()
+        self.assertEqual(second_payload["imported_count"], 0)
+        self.assertEqual(second_payload["skipped_count"], 1)
+        self.assertEqual(second_payload["warnings"], [])
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(DocumentIngestion).count(), 1)
+            self.assertEqual(session.query(GmailInboxImportReceipt).count(), 1)
 
     def test_openai_document_processor_uses_strict_json_schema_format(self) -> None:
         text_format = _build_openai_text_format()

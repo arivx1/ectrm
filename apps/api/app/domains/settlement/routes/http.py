@@ -136,6 +136,7 @@ def post_trade_invoice(
             invoice_amount=payload.invoice_amount,
             issued_at=payload.issued_at,
             due_at=payload.due_at,
+            due_calendar_code=payload.due_calendar_code,
             notes=payload.notes,
         )
     )
@@ -220,6 +221,7 @@ def post_trade_payment(
             payment_amount=payload.payment_amount,
             status=payload.status,
             due_at=payload.due_at,
+            due_calendar_code=payload.due_calendar_code,
             received_at=payload.received_at,
             notes=payload.notes,
         )

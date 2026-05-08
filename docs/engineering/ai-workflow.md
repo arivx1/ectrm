@@ -16,6 +16,8 @@ This keeps prompts explainable, reviewable, and ready for future governance.
 
 Related governance:
 
+- [Agent Context And Configuration Work Packages](./agent-context-work-packages.md)
+- [ChatGPT MCP Work Packages](./chatgpt-mcp-work-packages.md)
 - [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
 - [Agent Platform Phase 1 Tickets](./agent-platform-phase-1-tickets.md)
 - [Agent Action Request Contract](./agent-action-request-contract.md)
@@ -36,10 +38,11 @@ envelope with these sections:
 4. `Business Operating Model`
 5. `Data Landscape`
 6. `Live Data Inventory`
-7. `World And Time`
-8. `Managed Agent Profile` when an agent is selected
-9. `Current Workspace` when provided
-10. `Application Context` when provided
+7. `Application Access Surface`
+8. `World And Time`
+9. `Managed Agent Profile` when an agent is selected
+10. `Current Workspace` when provided
+11. `Application Context` when provided
 
 The rendered system prompt is then passed to the configured model provider.
 
@@ -47,6 +50,17 @@ When `use_live_tools` is enabled on `/assistant/respond`, the API can expose
 read-only data tools to the model runtime. If the provider requests those
 tools, the API executes them server-side and returns a tool-call trace so the
 UI can show which live data lookups were actually used.
+
+The published read-only tool catalog now covers more than business data. The
+assistant can also inspect:
+
+- application topology, route groups, workspaces, and documentation anchors
+- database table, column, and relationship metadata
+- managed-agent construction and hierarchy
+- published repo code and docs under the app-owned source roots
+
+Use these explicit tools instead of hiding platform knowledge in prompt prose
+or expecting the model to remember stale code layout details.
 
 Keep live-tool provenance explicit. When a tool answers with platform-loaded
 market data, the response should cite the synced records and freshness state
@@ -107,9 +121,14 @@ Assistant agents are the first prompt-management surface.
 Each agent carries:
 
 - identity and description
+- role mapping, specialization summary, and explicit skills
 - scope and allowed workspaces
-- capability tags
-- explicit `allowed_tools` governance for live read-only tool access
+- capability tags and authority ceiling
+- explicit `allowed_tools` governance for live read and inter-agent
+  coordination access
+- explicit `allowed_action_types` governance for typed business mutations
+- optional hierarchy metadata such as `orchestration_pattern`,
+  `parent_agent_id`, `managed_agent_ids`, and `delegation_guidance`
 - optional provider and model defaults
 - an agent-specific `system_prompt`
 
@@ -118,6 +137,26 @@ Agents layer on top of the global prompt foundation instead of replacing it.
 When an agent is tagged with `READ`, the admin surface can now pin that agent
 to a subset of the published live tools. This prevents newly added or
 unreviewed tools from becoming available to every managed agent by default.
+
+Some read-only introspection tools are always added for `READ` agents even when
+the admin-selected tool subset is narrow. This keeps core explainability
+surfaces consistently available for app topology, schema, code, and
+managed-agent roster questions without forcing every role definition to repeat
+them manually.
+
+When an agent includes the `inter_agent_consultation` skill and the matching
+tool policy, it can coordinate other managed agents through two explicit
+runtime tools:
+
+- `consult_managed_agent` for advisory-only specialist help
+- `enlist_managed_agent` for bounded delegated execution that still stays
+  inside the enlisted agent's own tools, action types, authority ceiling, and
+  typed action-request or autonomous-execution lanes
+
+This makes the build recipe explainable to users: a managed agent is assembled
+from role, skills, capabilities, workspaces, live tools, governed action
+types, hierarchy metadata, and system prompt instead of a single hidden prompt
+string.
 
 ## Prompt Preview
 

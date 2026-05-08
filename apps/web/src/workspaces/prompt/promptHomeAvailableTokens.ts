@@ -7,10 +7,20 @@ type PromptHomeAvailableTokenSummary = {
 }
 
 export function summarizePromptHomeAvailableTokens(
-  agents: AssistantAgent[],
+  args: {
+    agents: AssistantAgent[]
+    defaultDailyTokenAllocation?: number
+  },
 ): PromptHomeAvailableTokenSummary {
-  const assistantScopedAgents = agents.filter((agent) => agent.allowed_workspaces.includes('assistant'))
+  const assistantScopedAgents = args.agents.filter((agent) => agent.allowed_workspaces.includes('assistant'))
   if (assistantScopedAgents.length === 0) {
+    if (typeof args.defaultDailyTokenAllocation === 'number') {
+      return {
+        value: formatTokenCount(args.defaultDailyTokenAllocation),
+        detail: 'Default daily assistant allocation available on Home.',
+      }
+    }
+
     return {
       value: 'Not tracked',
       detail: 'No published assistant budget is currently available on Home.',

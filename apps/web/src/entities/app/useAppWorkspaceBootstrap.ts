@@ -83,6 +83,7 @@ import type {
   DeliveryRecord,
   PortfolioRecord,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureRecord,
   SpatialFeatureStandards,
@@ -185,6 +186,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [units, setUnits] = useState<UnitRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
   const [locationStandards, setLocationStandards] = useState<LocationStandards>(DEFAULT_LOCATION_STANDARDS)
+  const [railRoutes, setRailRoutes] = useState<RailRouteRecord[]>([])
   const [spatialFeatures, setSpatialFeatures] = useState<SpatialFeatureRecord[]>([])
   const [spatialFeatureStandards, setSpatialFeatureStandards] = useState<SpatialFeatureStandards>(
     DEFAULT_SPATIAL_FEATURE_STANDARDS,
@@ -323,6 +325,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setUnits([])
     setLocations([])
     setLocationStandards(DEFAULT_LOCATION_STANDARDS)
+    setRailRoutes([])
     setSpatialFeatures([])
     setSpatialFeatureStandards(DEFAULT_SPATIAL_FEATURE_STANDARDS)
     setAssets([])
@@ -457,6 +460,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setUnits(payload.units as UnitRecord[])
         setLocations(payload.locations as LocationRecord[])
         setLocationStandards(payload.locationStandards as LocationStandards)
+        setRailRoutes(payload.railRoutes as RailRouteRecord[])
         setSpatialFeatures(payload.spatialFeatures as SpatialFeatureRecord[])
         setSpatialFeatureStandards(payload.spatialFeatureStandards as SpatialFeatureStandards)
         setAssets(payload.assets as AssetRecord[])
@@ -1051,6 +1055,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     portfolios,
     positions,
     priceIndices,
+    railRoutes,
     refreshMutationData,
     operationalResourceDescriptors,
     spatialFeatures,

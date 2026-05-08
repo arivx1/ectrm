@@ -33,6 +33,13 @@ from apps.api.app.domains.operations.services.settlement_payments import (
     create_trade_payment,
     reverse_trade_payment,
 )
+from apps.api.app.domains.reports.services.settlement_presets import (
+    SettlementReportPresetConflictError,
+    create_settlement_report_preset,
+    find_settlement_preset_by_scope_name,
+    settlement_preset_name_key,
+    to_settlement_preset_out,
+)
 from apps.api.app.domains.operations.services.trade_confirmations import issue_trade_confirmation
 from apps.api.app.domains.operations.services.trade_confirmations import record_trade_confirmation_response
 from apps.api.app.domains.operations.services.workflow_items import update_trade_workflow_item
@@ -63,6 +70,7 @@ from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.schemas.report import SettlementReportPresetCreate
 
 __all__ = [
     "ACTION_HANDLERS",
@@ -182,6 +190,45 @@ class CancelTradeActionHandler(NonIdempotentActionHandler):
         return {
             "status": trade.status,
             "last_event_id": trade.last_event_id,
+        }
+
+
+class CreateSettlementReportPresetActionHandler(NonIdempotentActionHandler):
+    action_type = "create_settlement_report_preset"
+
+    def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
+        return _execute_create_settlement_report_preset_action(
+            db=context.db,
+            record=context.record,
+            actor_role=context.actor_role,
+        )
+
+    def current_stale_state(
+        self,
+        *,
+        db: Session,
+        record: AssistantActionRequest,
+    ) -> dict[str, object | None]:
+        name = _required_str_payload_value(
+            record,
+            "name",
+            "The settlement preset request is missing a name.",
+        )
+        scope = _required_str_payload_value(
+            record,
+            "scope",
+            "The settlement preset request is missing a scope.",
+        )
+        existing = find_settlement_preset_by_scope_name(
+            db,
+            owner_user_id=record.user_id,
+            scope=scope,
+            name=name,
+        )
+        return {
+            "scope": scope,
+            "name_key": settlement_preset_name_key(name),
+            "existing_preset_id": existing.id if existing is not None else None,
         }
 
 
@@ -871,6 +918,7 @@ ACTION_HANDLER_SEQUENCE: tuple[AssistantActionHandler, ...] = (
     CreateTradeActionHandler(),
     AmendTradeActionHandler(),
     CancelTradeActionHandler(),
+    CreateSettlementReportPresetActionHandler(),
     RecordDeliveryEventActionHandler(),
     ReverseDeliveryEventActionHandler(),
     CreateManualAccrualEntryActionHandler(),
@@ -961,6 +1009,49 @@ def _execute_cancel_trade_action(
         "trade_id": trade_id,
         "trade_status": trade.status,
         "last_event_id": trade.last_event_id,
+    }
+
+
+def _execute_create_settlement_report_preset_action(
+    *,
+    db: Session,
+    record: AssistantActionRequest,
+    actor_role: str | None,
+) -> dict[str, object]:
+    try:
+        payload = SettlementReportPresetCreate.model_validate(
+            {
+                "name": _required_str_payload_value(
+                    record,
+                    "name",
+                    "The settlement preset request is missing a name.",
+                ),
+                "scope": _required_str_payload_value(
+                    record,
+                    "scope",
+                    "The settlement preset request is missing a scope.",
+                ),
+                "filters": dict((record.payload or {}).get("filters") or {}),
+            }
+        )
+    except Exception as exc:
+        raise AssistantActionRequestError(str(exc)) from exc
+
+    try:
+        preset = create_settlement_report_preset(
+            db,
+            owner_user_id=record.user_id,
+            payload=payload,
+        )
+    except SettlementReportPresetConflictError as exc:
+        raise AssistantActionRequestError(str(exc)) from exc
+
+    return {
+        "preset": to_settlement_preset_out(
+            preset,
+            actor_id=record.user_id,
+            actor_role=actor_role,
+        ).model_dump(mode="json"),
     }
 
 
@@ -1519,6 +1610,7 @@ def _execute_issue_trade_invoice_action(
         invoice_amount=_optional_numeric_payload_value(record, "invoice_amount"),
         issued_at=_optional_datetime_payload_value(record, "issued_at"),
         due_at=_optional_datetime_payload_value(record, "due_at"),
+        due_calendar_code=_optional_str_payload_value(record, "due_calendar_code"),
         notes=_optional_str_payload_value(record, "notes"),
         now=decided_at,
         mutation_context=_assistant_trade_audit_mutation_context(record),
@@ -1549,6 +1641,7 @@ def _execute_create_trade_payment_action(
         payment_amount=_optional_numeric_payload_value(record, "payment_amount"),
         status=_optional_str_payload_value(record, "status"),
         due_at=_optional_datetime_payload_value(record, "due_at"),
+        due_calendar_code=_optional_str_payload_value(record, "due_calendar_code"),
         received_at=_optional_datetime_payload_value(record, "received_at"),
         notes=_optional_str_payload_value(record, "notes"),
         now=decided_at,

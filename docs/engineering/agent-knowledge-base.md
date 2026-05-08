@@ -36,14 +36,14 @@ Before increasing autonomy or adding a new action type:
 
 Use one of these types:
 
-| Type | Use when |
-| --- | --- |
-| `lesson` | A reusable practice or boundary was learned. |
-| `algorithm-candidate` | A recurring judgment should probably become deterministic logic. |
-| `algorithm-added` | Deterministic logic was implemented or promoted. |
-| `stop-condition` | Future agents should pause, narrow authority, or ask for review. |
-| `promotion-signal` | Evidence suggests an agent behavior may be safe to promote. |
-| `retirement-signal` | Evidence suggests an agent behavior should be paused, narrowed, or removed. |
+| Type                  | Use when                                                                    |
+| --------------------- | --------------------------------------------------------------------------- |
+| `lesson`              | A reusable practice or boundary was learned.                                |
+| `algorithm-candidate` | A recurring judgment should probably become deterministic logic.            |
+| `algorithm-added`     | Deterministic logic was implemented or promoted.                            |
+| `stop-condition`      | Future agents should pause, narrow authority, or ask for review.            |
+| `promotion-signal`    | Evidence suggests an agent behavior may be safe to promote.                 |
+| `retirement-signal`   | Evidence suggests an agent behavior should be paused, narrowed, or removed. |
 
 ## Entry Template
 
@@ -82,6 +82,492 @@ permissions, reference data, policy, or external commitments, keep it in
 proposal form until a human owner approves the domain rule.
 
 ## Lessons
+
+### 2026-05-08 - External ChatGPT Access Should Start As A Governed Remote MCP Transport
+
+- Type: lesson
+- Domain: external ChatGPT integration, MCP transport, and assistant
+  governance
+- Applies to: personal ChatGPT account access, remote MCP app design, future
+  ChatGPT app rollout, and any write-capable external tool exposure
+- Status: accepted
+- Source: [ChatGPT MCP Work Packages](./chatgpt-mcp-work-packages.md),
+  [Agent Action Request Contract](./agent-action-request-contract.md),
+  [Human-Agent Authority Matrix](./human-agent-authority-matrix.md), and
+  [AI Workflow](./ai-workflow.md)
+- Lesson: when ECTRM is exposed to a user's own ChatGPT account, treat the
+  remote MCP server as a transport over governed ECTRM services rather than as
+  a second assistant runtime with looser rules. Start with read-only
+  `search` and `fetch` over curated, permission-aware read models, prove auth,
+  provenance, and citation behavior first, and only then consider narrow
+  write-capable tools that map to typed services or approval-gated action
+  requests.
+- Deterministic opportunity: centralize tool metadata such as read-only
+  posture, schemas, ownership, and publication status so the internal
+  assistant and external MCP surface do not drift into separate governance
+  models.
+- Agent autonomy impact: external ChatGPT access can broaden where users
+  interact with ECTRM, but it should not broaden what an agent may do beyond
+  the existing authority matrix or action-request contract.
+- Tests or evidence: [ChatGPT MCP Work Packages](./chatgpt-mcp-work-packages.md)
+  requires focused backend tests for schema and auth, explicit MCP verification
+  coverage, and `make api-assistant-evals` updates whenever governed action
+  behavior changes.
+- Follow-up: implement Wave 0 before any public or write-capable rollout, and
+  treat shared tool-catalog governance as a prerequisite for broader external
+  exposure.
+
+### 2026-05-08 - Prove The External MCP Seam With A Docs-Only Read Surface First
+
+- Type: lesson
+- Domain: MCP transport scaffolding, rollout sequencing, and local developer
+  safety
+- Applies to: first remote MCP implementation, ChatGPT developer-mode
+  connection prep, and future expansion from docs retrieval into governed
+  business tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/mcp/services/server.py`,
+  `apps/api/app/domains/mcp/services/docs_catalog.py`,
+  `apps/api/app/domains/mcp/routes/http.py`,
+  `apps/api/tests/test_mcp_api.py`, and
+  `docs/engineering/chatgpt-mcp-work-packages.md`
+- Lesson: when adding a brand-new external MCP transport to ECTRM, first prove
+  transport reachability, tool discovery, and citation shape with a read-only
+  docs catalog mounted behind a config flag in the existing FastAPI service.
+  Starting with standard `search` and `fetch` over checked-in repo documents
+  keeps the surface useful for local and developer-mode testing without opening
+  protected business reads or creating a second write path.
+- Deterministic opportunity: centralize document-catalog metadata and
+  canonical citation URL construction so internal assistants and external MCP
+  tools can share the same provenance rules.
+- Agent autonomy impact: a no-auth docs-only MCP surface is acceptable as a
+  local development shortcut, but it should not be mistaken for the hosted auth
+  design needed for durable personal-account or team use.
+- Tests or evidence: focused MCP startup, tool-discovery, and route-registry
+  tests live in `apps/api/tests/test_mcp_api.py` and
+  `apps/api/tests/test_http_router_registry.py`.
+- Follow-up: land WP-03 before exposing protected business reads through the
+  external MCP surface, then replace repo-doc retrieval with curated,
+  permission-aware ECTRM read models.
+
+### 2026-05-08 - MCP OAuth Should Resolve To Existing User Sessions, Not A Parallel Identity Model
+
+- Type: lesson
+- Domain: external MCP auth, identity mapping, and governed transport reuse
+- Applies to: ChatGPT developer-mode OAuth, other OAuth-capable MCP clients,
+  and future business-data tools exposed through the remote MCP surface
+- Status: implemented
+- Source:
+  `apps/api/app/domains/mcp/services/oauth.py`,
+  `apps/api/app/core/auth.py`,
+  `apps/api/app/main.py`,
+  `apps/api/tests/test_mcp_oauth.py`, and
+  `docs/engineering/chatgpt-mcp-work-packages.md`
+- Lesson: the MCP OAuth bridge should terminate in the same ECTRM `UserAccount`
+  and `UserSession` concepts the rest of the product already trusts. OAuth
+  access and refresh tokens can be MCP-specific, but they should still anchor
+  to revocable ECTRM sessions and project the resulting actor into request
+  context so future tool handlers can reuse the same permission and audit seams
+  as the web app and internal assistant.
+- Deterministic opportunity: centralize token-to-actor resolution so external
+  MCP calls, internal assistant tools, and future background automations all
+  share one actor-projection path into request context.
+- Agent autonomy impact: external transport changes where a request originates,
+  but not who it is acting as; every MCP tool call should still run as an
+  explicit ECTRM principal or not at all.
+- Tests or evidence: `apps/api/tests/test_mcp_oauth.py` covers dynamic client
+  registration, browser authorization, token exchange, identity resolution, and
+  authenticated MCP tool discovery over mounted HTTP.
+- Follow-up: reuse the same actor projection when MCP handlers start calling
+  governed business read services, then extend the pattern into approval-gated
+  write tools instead of introducing separate auth plumbing there.
+
+### 2026-05-08 - Expose Managed-Agent Construction Through Read-Only Roster Tools
+
+- Type: lesson
+- Domain: assistant roster introspection and managed-agent explainability
+- Applies to: chat questions about agent construction, specialization,
+  hierarchy, and managed-agent relationships
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/assistant/services/role_archetypes.py`,
+  `apps/api/app/domains/assistant/services/registry.py`,
+  `apps/api/app/domains/assistant/services/chat.py`,
+  `apps/api/tests/test_assistant_api.py`,
+  `apps/api/tests/test_assistant_tooling.py`, and
+  `apps/api/tests/test_assistant_evals.py`
+- Lesson: when users ask the assistant how managed agents are built or how
+  they relate to each other, expose that information through explicit read-only
+  live tools instead of relying on hidden prompt knowledge or stale docs. The
+  roster tool surface should return the managed-agent build recipe, role and
+  skill metadata, workspace and tool policy, and parent or subordinate
+  relationships in a form the assistant can cite back safely.
+- Deterministic opportunity: keep the managed-agent graph and build recipe in a
+  single typed payload contract so future admin UI, control-tower summaries,
+  and chat explanations all read from the same server-owned structure.
+- Agent autonomy impact: read-capable agents can explain the managed-agent
+  roster and hierarchy without widening mutation authority or bypassing action
+  governance.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_assistant_api
+  apps.api.tests.test_assistant_tooling` and `make api-assistant-evals`
+- Follow-up: if users start asking for graphical org-chart or dependency views,
+  publish a dedicated roster summary service instead of expanding prompt-only
+  formatting instructions.
+
+### 2026-05-08 - Publish Whole-App Read Access Through Explicit Introspection Tools
+
+- Type: lesson
+- Domain: assistant platform introspection, schema explainability, and codebase
+  grounding
+- Applies to: chat questions about app topology, routes, workspaces, database
+  schema, source code, engineering docs, and read-capable managed-agent
+  visibility
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/app_context_catalog.py`,
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/assistant/services/prompt_context.py`,
+  `apps/api/app/domains/assistant/services/chat.py`,
+  `docs/engineering/ai-workflow.md`,
+  `apps/api/tests/test_assistant_api.py`,
+  `apps/api/tests/test_assistant_tooling.py`, and
+  `apps/api/tests/test_assistant_evals.py`
+- Lesson: when users ask how ECTRM is built or where logic lives, expose
+  application topology, schema metadata, and published repo code through
+  explicit read-only tools instead of relying on stale prompt memory. The core
+  surface should include an application catalog, a schema catalog, code search,
+  and bounded file reads, and the prompt foundation should advertise those
+  surfaces as governed context rather than hidden prompt prose.
+- Deterministic opportunity: keep route registration, workspace inventory,
+  schema metadata, and published code roots in one server-owned catalog so
+  assistant chat, managed agents, and future remote MCP transports share the
+  same explainability contract.
+- Agent autonomy impact: `READ` agents can inspect more of the platform without
+  widening mutation authority. Keep writes behind typed services and
+  approval-gated action paths even when the assistant can now inspect the whole
+  app.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_assistant_tooling
+  apps.api.tests.test_assistant_agent_admin_service
+  apps.api.tests.test_assistant_api
+  apps.api.tests.test_assistant_evals` and `make api-assistant-evals`
+- Follow-up: if these same introspection payloads need to power admin UI
+  diagrams or external MCP discovery, publish the shared catalog directly
+  rather than duplicating route or schema summaries in separate prompt text.
+
+### 2026-05-08 - Keep Raw Gmail Inbox Reads As Explicit Assistant Live Tools
+
+- Type: lesson
+- Domain: assistant live tools and document intake integrations
+- Applies to: Gmail inbox browsing, inbox summarization in chat, and document
+  intake workflows that already import Gmail attachments
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/integrations/services/gmail_inbox.py`,
+  `apps/api/tests/test_assistant_tooling.py`,
+  `apps/api/tests/test_assistant_evals.py`, and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: when chat needs access to a configured external inbox, expose
+  read-only mailbox browse and detail operations as explicit assistant live
+  tools that reuse the existing integration service. Do not treat raw inbox
+  mail as prompt context, and do not conflate it with already imported
+  document-ingestion records.
+- Deterministic opportunity: centralize future mailbox-tool provenance and
+  runtime-availability phrasing so new inbox connectors consistently
+  distinguish raw messages from imported documents.
+- Agent autonomy impact: agents can search and summarize Gmail messages when
+  live tools are enabled, but inbox access remains read-only and distinct from
+  document import or outbound email actions.
+- Tests or evidence:
+  `apps/api/tests/test_assistant_tooling.py`,
+  `apps/api/tests/test_assistant_evals.py`, and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Follow-up: if specific managed roles should browse inbox content by default,
+  update their allowlists deliberately instead of assuming all existing
+  managed-agent profiles inherit newly published tools.
+
+### 2026-05-08 - Keep Multi-Agent Control Shallow And Supervisor-Led
+
+- Type: lesson
+- Domain: managed agent hierarchy and inter-agent consultation
+- Applies to: control-tower supervision, domain-manager agents, specialist
+  agent consultation, and future multi-agent routing work
+- Status: implemented
+- Source:
+  [Agent Hierarchy Contract](./agent-hierarchy-contract.md),
+  `apps/api/app/models/assistant_agent.py`,
+  `apps/api/app/domains/assistant/services/role_archetypes.py`, and
+  `apps/api/app/domains/assistant/services/tools.py`
+- Lesson: when ECTRM needs agents that manage other agents, default to a
+  shallow supervisor or manager tree with explicit parent and subordinate
+  metadata instead of peer-to-peer swarms. One manager should own final
+  synthesis, specialist consultations should stay advisory-only, and runtime
+  consultation should fail closed to configured subordinate agents when a
+  manager declares them.
+- Deterministic opportunity: if the same manager repeatedly routes the same
+  request types to the same specialists, promote that routing rule into typed
+  workflow or intent logic instead of keeping it as prompt-only delegation.
+- Agent autonomy impact: managers can coordinate bounded specialist help
+  without widening mutation authority or bypassing the approval-gated action
+  contract.
+- Tests or evidence:
+  `apps/api/tests/test_assistant_api.py`,
+  `apps/api/tests/test_assistant_tooling.py`, and
+  `make api-assistant-evals` for future consultation or hierarchy behavior
+  changes.
+- Follow-up: add outcome metrics for consultation frequency, failed
+  consultations, and manager-to-specialist routing quality before promoting any
+  hierarchy toward broader autonomous execution.
+
+### 2026-05-08 - Keep Managed-Agent Delegated Execution Inside The Existing Action Gateway
+
+- Type: lesson
+- Domain: managed agent delegation, action governance, and autonomous
+  execution
+- Applies to: manager agents enlisting specialist agents to help execute
+  bounded operational tasks
+- Status: implemented
+- Source:
+  [Agent Hierarchy Contract](./agent-hierarchy-contract.md),
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/assistant/services/chat.py`,
+  `apps/api/app/domains/assistant/services/policies.py`,
+  `apps/api/tests/test_assistant_tooling.py`, and
+  `apps/api/tests/test_assistant_evals.py`
+- Lesson: when one managed agent needs another agent to help complete work,
+  use an explicit delegation tool instead of hiding a second task inside prompt
+  prose or widening the manager's own authority. The enlisted agent should run
+  as its own managed-agent execution, inherit the original user context, and
+  remain constrained by its own skills, tool allowlist, action types, and
+  authority ceiling.
+- Deterministic opportunity: if the same manager repeatedly enlists the same
+  subordinate for the same intent pattern, promote that routing into typed
+  workflow or intent logic rather than keeping it as open-ended prompt
+  delegation.
+- Agent autonomy impact: managers can coordinate bounded subordinate execution
+  without gaining blanket write access, because any resulting mutation still
+  becomes a typed action request and only self-executes when the enlisted
+  profile is already approved for bounded execution.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest
+  apps.api.tests.test_assistant_tooling.AssistantToolingTests.test_enlist_managed_agent_records_delegated_run_and_executes_governed_action`,
+  `apps.api.tests.test_assistant_evals`, and
+  `make api-assistant-evals`
+- Follow-up: add runtime metrics for delegation depth, enlistment frequency,
+  and repeated manager-to-specialist routing so product owners can decide which
+  flows should graduate into deterministic orchestration.
+
+### 2026-05-08 - Treat Agent Context As Governed Metadata, Not Hidden Prompt State
+
+- Type: lesson
+- Domain: assistant prompt foundation and user-configurable context
+- Applies to: organization context, user preferences, workspace context,
+  managed-agent context, and future team or organization context profiles
+- Status: accepted
+- Source: [AI Workflow](./ai-workflow.md),
+  [User Extensibility Initiative](./user-extensibility-initiative.md), and
+  [Agent Context And Configuration Work Packages](./agent-context-work-packages.md)
+- Lesson: when the assistant needs richer context, add it through server-owned
+  typed context definitions with scope, lifecycle, provenance, and policy
+  boundaries instead of appending more hidden prompt prose or letting users edit
+  unrestricted system prompts. Identity, authority, workspace focus,
+  organization glossary, and user preferences should be separable context
+  layers with explicit ownership.
+- Deterministic opportunity: promote repeated routing, alias, or context-focus
+  behavior into typed context providers, glossaries, or published context
+  profiles instead of repeatedly compensating in prompt wording.
+- Agent autonomy impact: agents can receive richer context and safer
+  personalization without widening authority, bypassing policy, or hiding why a
+  given answer was shaped a certain way.
+- Tests or evidence: [AI Workflow](./ai-workflow.md),
+  [Agent Context And Configuration Work Packages](./agent-context-work-packages.md),
+  and `make api-assistant-evals` as the required verification lane when these
+  packages become implementation work.
+- Follow-up: implement the context contract and preview or diff packages before
+  exposing end-user context configuration or shared profile publishing.
+
+### 2026-05-08 - Make Rail Scheduling Readiness Route-Bound And Deterministic
+
+- Type: algorithm-added
+- Domain: operations rail scheduling and delivery-readiness projection
+- Applies to: rail delivery obligations, scheduling blocker derivation,
+  scheduling workspace filters, and any future rail-focused agent drafting
+- Status: implemented
+- Source:
+  `docs/engineering/rail-delivery-schema.md`,
+  `apps/api/app/domains/operations/services/shipments.py`,
+  `apps/api/app/models/reference_rail_line.py`,
+  `apps/api/app/models/reference_rail_route.py`, and
+  `apps/api/app/models/delivery_rail_detail.py`,
+  `apps/api/tests/test_deliveries_api.py`, and
+  `apps/api/tests/test_shipments_api.py`
+- Lesson: rail reference data only becomes scheduler-grade when each rail
+  delivery binds to a curated route and the shared delivery projection derives
+  readiness and blocker reasons from typed rail completeness checks. Freeform
+  notes can explain context, but they should not be the only place route
+  choice, station consistency, or waybill/release readiness exists.
+- Deterministic opportunity: add delivery-bound `rail_route_code`, keep line
+  membership derived through the reference hierarchy, and evaluate reason-coded
+  blockers such as route-not-selected, station-missing, route-station-mismatch,
+  and post-submission waybill or release gaps inside the shipment scheduling
+  projection.
+- Agent autonomy impact: agents can summarize what is missing for rail
+  scheduling and propose next actions from typed blocker results, but they
+  should not infer a route, clear a blocker, or claim a movement is ready from
+  prose alone.
+- Tests or evidence:
+  `apps/api/tests/test_deliveries_api.py` and
+  `apps/api/tests/test_shipments_api.py`
+- Follow-up: use the derived `rail_route_code`, `rail_line_code`, and
+  `railroad_code` fields when the scheduling workspace adds route-aware queue
+  filters or rail-specific readiness views.
+
+### 2026-05-08 - Store Rail Operating Clocks On Curated Routes Before Adding Demurrage Logic
+
+- Type: lesson
+- Domain: operations rail scheduling, reference data ownership, and delivery
+  projection design
+- Applies to: rail route master data, delivery scheduling views, future
+  cutoff-aware blockers, and demurrage-risk heuristics
+- Status: implemented
+- Source:
+  `docs/engineering/rail-delivery-schema.md`,
+  `apps/api/app/models/reference_rail_route.py`,
+  `apps/api/app/routes/reference_data_routes/rail_routes.py`,
+  `apps/api/app/domains/admin/services/seed_reference_data.py`, and
+  `apps/api/app/domains/operations/services/shipments.py`
+- Lesson: the first useful rail service-window slice should live on the
+  curated route, not on each delivery. Service calendar selection, local
+  placement or release cutoffs, and starter free-time assumptions are reusable
+  lane metadata. They should be maintained once in reference data and then
+  projected onto each route-bound delivery as derived scheduling context.
+- Deterministic opportunity: use the projected route clock for calendar-aware
+  cutoff checks, free-time countdowns, and demurrage-risk warnings before
+  introducing facility-specific overrides or richer rail milestone economics.
+- Agent autonomy impact: agents can explain why a route's operating clock
+  matters and summarize missing scheduling context from typed fields, but they
+  should not invent service calendars, cutoff times, or free-time assumptions
+  from notes alone.
+- Tests or evidence:
+  `apps/api/tests/test_reference_data.py`,
+  `apps/api/tests/test_admin_seed_api.py`,
+  `apps/api/tests/test_deliveries_api.py`, and
+  `apps/api/tests/test_shipments_api.py`
+- Follow-up: once operators are using these fields, promote missing or expired
+  route-clock data into explicit readiness blockers and add calendar-aware
+  milestone and demurrage projections.
+
+### 2026-05-07 - Make Agent Specialization Explicit Through Skills And A Build Recipe
+
+- Type: lesson
+- Domain: managed agent construction, operator trust, and governed
+  specialization
+- Applies to: managed agent profiles, role-derived agent setup, agent builder
+  UX, self-update drafts, and prompt context rendering
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/skills.py`,
+  `apps/api/app/domains/assistant/services/chat.py`,
+  `apps/api/app/domains/assistant/services/prompt_context.py`,
+  `apps/api/app/domains/assistant/services/registry.py`, and
+  `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`
+- Lesson: users should not have to infer what an agent is from a hidden system
+  prompt alone. A managed agent is now expressed as an explicit recipe:
+  `role + skills + capabilities + workspaces + live tools + governed actions +
+  system prompt`. Skills are first-class metadata that describe the agent's
+  specialty, and inter-agent consultation is only available when the profile
+  explicitly carries the `inter_agent_consultation` skill.
+- Deterministic opportunity: when the same skill bundle keeps appearing for a
+  role, preserve it in the governed role archetype and builder defaults rather
+  than re-explaining specialization through freeform prompt text each time.
+- Agent autonomy impact: agents become easier to review and safer to narrow
+  because users, reviewers, and the runtime can all see the same explicit
+  specialization contract before an agent reads, consults, stages, or acts.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_assistant_api apps.api.tests.test_assistant_tooling`
+  and `npm --prefix apps/web test -- --run assistantAgentBuilder.test.ts
+  assistantApi.test.ts`
+- Follow-up: if consultation routing patterns stabilize, promote them into
+  typed manager or workflow rules instead of expanding skill lists or prompt
+  prose ad hoc.
+
+### 2026-05-07 - Treat Trading EOD Readiness As A Deterministic Governed Decision
+
+- Type: algorithm-candidate
+- Domain: trading EOD governance and close-readiness classification
+- Applies to: trading close runs, desk close packs, sign-off gates, waivers,
+  and any future reporting or reconciliation agent that explains whether the
+  desk is closed
+- Status: proposed
+- Source:
+  `docs/engineering/trading-eod-work-packages.md`,
+  `apps/api/app/domains/reports/routes/http.py`,
+  `apps/api/app/domains/reports/services/trading_eod.py`,
+  `apps/api/app/domains/operations/routes/operations.py`, and
+  `apps/api/app/domains/admin/services/projection_monitoring.py`
+- Lesson: whether the trading day is `READY`, `WARNING`, or `BLOCKED` should
+  come from typed close checks over report basis, freshness, projection
+  integrity, workflow backlog, settlement posture, and accrual coverage rather
+  than from freeform assistant prose. Humans may sign off or waive specific
+  checks under policy, but the platform should own the rule table and stale
+  state semantics.
+- Deterministic opportunity: add an EOD run service that records one close
+  basis for the business date, evaluates check families into reason-coded
+  results, rolls them into a run-level status, and preserves waiver and
+  sign-off audit data behind typed services.
+- Agent autonomy impact: agents can draft desk packs, summarize blockers, and
+  explain carry-forward work from typed EOD results, but they should not
+  declare the official trading day closed or waive blockers through prompt-only
+  reasoning.
+- Tests or evidence: the repo now has a first read-only implementation in
+  `apps/api/app/domains/reports/services/trading_eod.py` with focused API
+  coverage in `apps/api/tests/test_reports_api.py`; future promotion beyond
+  the v0 read surface should still add broader service tests, web coverage for
+  close rendering and sign-off state, and `make api-assistant-evals` coverage
+  for no-overclaim behavior.
+- Follow-up: implement `TEOD-01` through `TEOD-04` first so the close workflow
+  has a stable basis, rule set, and summary surface before adding automation or
+  agent drafting.
+
+### 2026-05-07 - Agent-Created Filter Presets Must Use Typed Server-Owned Services
+
+- Type: lesson
+- Domain: assistant action governance and saved report filters
+- Applies to: settlement report presets, future chat-created saved views, and
+  any agent-authored filter preset that should be reusable across sessions or
+  users
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reports/services/settlement_presets.py`,
+  `apps/api/app/domains/assistant/services/action_planners.py`,
+  `apps/api/app/domains/assistant/services/action_handlers.py`,
+  `apps/api/app/domains/assistant/services/tools.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Lesson: when a user asks the assistant to save a named filter preset, keep
+  the durable write behind a typed domain service plus an approval-governed
+  assistant action. Agents may read filter options and visible presets, and
+  they may translate natural language into typed filter payloads, but the
+  assistant should not write presets through browser-local storage or pass
+  freeform model output straight into business state mutation.
+- Deterministic opportunity: centralize future preset translation logic around
+  typed option catalogs, conflict checks, scope rules, idempotency keys, and
+  stale-state rechecks so new preset actions reuse one governed pattern instead
+  of inventing prompt-only save behavior.
+- Agent autonomy impact: agents can help users create reusable settlement
+  lenses with low-risk autonomy while preserving review, visibility scope, and
+  audit expectations for durable saved state.
+- Tests or evidence:
+  `apps/api/tests/test_assistant_tooling.py`,
+  `apps/api/tests/test_assistant_api.py`,
+  `apps/api/tests/test_assistant_evals.py`, and
+  `apps/web/tests/assistantAgentBuilder.test.ts`
+- Follow-up: if users need the same workflow for other filter-heavy surfaces
+  such as asset maps, first move those presets into a server-owned typed
+  service before exposing a chat-driven create or update action.
 
 ### 2026-05-05 - Keep Loaded Market Data And Live News As Separate Tool Surfaces
 
@@ -1215,6 +1701,7 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: use generated brief recommendations and deterministic candidates
   during agent health review, then promote repeated candidates into governed
   policy or service work packages.
+
 ### 2026-04-22 - Codex Dispatch Smoke Tests Stay Two-Stage
 
 - Type: lesson
@@ -1914,7 +2401,7 @@ proposal form until a human owner approves the domain rule.
 - Lesson: route-specific Prompt Home promotions should not silently disappear
   when the live object they need is temporarily missing. Keep the promoted card
   visible with an explicit readiness state such as `Ready`, `Not ready right
-  now`, or `Cooling off`, show when it last succeeded, and offer the generic
+now`, or `Cooling off`, show when it last succeeded, and offer the generic
   legacy workspace as fallback when no focused handoff is currently honest.
 - Deterministic opportunity: treat promotion readiness as a typed product rule,
   not prompt behavior. The route recommendation service should expose recency
@@ -2120,13 +2607,13 @@ proposal form until a human owner approves the domain rule.
   same command-owned seam, either through action requests or later typed
   command services, instead of appending trade lifecycle events directly.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_commands_service
-  apps.api.tests.test_event_writes_service
-  apps.api.tests.test_admin_provenance_api`,
+apps.api.tests.test_trade_commands_service
+apps.api.tests.test_event_writes_service
+apps.api.tests.test_admin_provenance_api`,
   `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`,
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`,
   `cd apps/web && npx eslint src/entities/trade/api.ts src/entities/app/useAppTradeActions.ts`,
   and `cd apps/web && npm run build`.
 - Follow-up: enforce stale-state checks in the command service, then move more
@@ -2154,13 +2641,13 @@ proposal form until a human owner approves the domain rule.
   `last_event_id` basis in action requests and execution calls, so approval-time
   stale-state rechecks and execution-time stale-state guards stay aligned.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_commands_service
-  apps.api.tests.test_event_writes_service
-  apps.api.tests.test_admin_provenance_api`
+apps.api.tests.test_trade_commands_service
+apps.api.tests.test_event_writes_service
+apps.api.tests.test_admin_provenance_api`
   and `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
 - Follow-up: require and expose this stale-state basis consistently across more
   callers as the raw `/events` compatibility path is retired.
 
@@ -2190,16 +2677,16 @@ proposal form until a human owner approves the domain rule.
   the same actor-role, stale-state, reference-data, and lifecycle-policy
   contract as the manual web path.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_commands_service
-  apps.api.tests.test_event_writes_service
-  apps.api.tests.test_admin_provenance_api`,
+apps.api.tests.test_trade_commands_service
+apps.api.tests.test_event_writes_service
+apps.api.tests.test_admin_provenance_api`,
   `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`,
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`,
   and `.venv/bin/python -m unittest
-  apps.api.tests.test_auth_http.AuthHttpTests.test_trade_writes_require_session_and_use_session_actor
-  apps.api.tests.test_auth_http.AuthHttpTests.test_trade_http_rejects_duplicate_create_and_missing_amend`.
+apps.api.tests.test_auth_http.AuthHttpTests.test_trade_writes_require_session_and_use_session_actor
+apps.api.tests.test_auth_http.AuthHttpTests.test_trade_http_rejects_duplicate_create_and_missing_amend`.
 - Follow-up: move the remaining deterministic trade validations that are still
   buried inside projection application into reusable command-layer helpers, and
   then decide whether command-specific role rules should tighten beyond the
@@ -2231,11 +2718,11 @@ proposal form until a human owner approves the domain rule.
   meet at command time is the same behavior that projection application uses to
   accept and materialize the event.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_commands_service` and
+apps.api.tests.test_trade_commands_service` and
   `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
 - Follow-up: route more mutation entry points through explicit command services,
   then decide whether the shared validator should start returning richer write
   plans for settlement and workflow side effects as those seams move under the
@@ -2266,14 +2753,14 @@ proposal form until a human owner approves the domain rule.
   trade write seam as manual and approval-driven trade changes, with distinct
   `source_surface` values for reviewer-approved vs autonomous execution.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_trade_cancellation
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_create_trade_action
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_amend_trade_action`
+apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_trade_cancellation
+apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_create_trade_action
+apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_amend_trade_action`
   and `.venv/bin/python -m unittest
-  apps.api.tests.test_trade_commands_service
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
-  apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
+apps.api.tests.test_trade_commands_service
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_created_defaults_source_system_and_persists_quality_and_unit
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_trade_workflow_statuses_default_and_persist_on_amendment
+apps.api.tests.test_trade_event_workflow.TradeEventWorkflowTests.test_closed_option_cannot_be_amended_or_cancelled`.
 - Follow-up: move non-trade governed assistant mutations toward the same
   pattern of typed application services with explicit source-surface and stale
   basis propagation, then measure autonomous execution outcomes by command seam
@@ -2311,13 +2798,13 @@ proposal form until a human owner approves the domain rule.
   and reviewer-approved assistant actions now remain distinguishable in
   mutation provenance without adding assistant-only write paths.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_void_trade_actualization_action
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_void_trade_invoice_handler_records_assistant_mutation_context
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_reverse_trade_payment_action
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_invoice_issue
-  apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_payment_creation
-  apps.api.tests.test_settlement_invoices_api.SettlementInvoicesApiTests.test_void_invoice_marks_not_required_and_clears_unpaid_payment_rows
-  apps.api.tests.test_settlement_payments_api.SettlementPaymentsApiTests.test_reverse_paid_payment_creates_offsetting_entry_and_reopens_invoice_balance`
+apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_void_trade_actualization_action
+apps.api.tests.test_assistant_api.AssistantApiTests.test_void_trade_invoice_handler_records_assistant_mutation_context
+apps.api.tests.test_assistant_api.AssistantApiTests.test_execute_capable_agent_autonomously_executes_reverse_trade_payment_action
+apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_invoice_issue
+apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_action_request_approval_executes_payment_creation
+apps.api.tests.test_settlement_invoices_api.SettlementInvoicesApiTests.test_void_invoice_marks_not_required_and_clears_unpaid_payment_rows
+apps.api.tests.test_settlement_payments_api.SettlementPaymentsApiTests.test_reverse_paid_payment_creates_offsetting_entry_and_reopens_invoice_balance`
   and `make api-assistant-evals`.
 - Follow-up: extend the same governed mutation-context pattern to remaining
   high-trust assistant domains like confirmations, workflow mutations, delivery
@@ -2351,11 +2838,11 @@ proposal form until a human owner approves the domain rule.
   placement. The deterministic adapter owns matching rules and geometry
   conversion.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_asset_spatial_enrichment
-  apps.api.tests.test_asset_catalog_import
-  apps.api.tests.test_asset_reference_normalization
-  apps.api.tests.test_reference_data
-  apps.api.tests.test_admin_seed_api` and repeated live runs of
+apps.api.tests.test_asset_spatial_enrichment
+apps.api.tests.test_asset_catalog_import
+apps.api.tests.test_asset_reference_normalization
+apps.api.tests.test_reference_data
+apps.api.tests.test_admin_seed_api` and repeated live runs of
   `PYTHONPATH=. ./.venv/bin/python apps/api/scripts/enrich_reference_asset_spatial_fields.py --requested-by codex`
   with the second run returning `updated_asset_count = 0`.
 - Follow-up: replace public-clone HIFLD adapters with the exact archived source
@@ -2394,12 +2881,12 @@ proposal form until a human owner approves the domain rule.
   geography, while the client consistently loads the linked reference rows that
   the asset map logic depends on.
 - Tests or evidence: `.venv/bin/python -m unittest
-  apps.api.tests.test_location_spatial_enrichment
-  apps.api.tests.test_asset_spatial_enrichment
-  apps.api.tests.test_asset_catalog_import
-  apps.api.tests.test_asset_reference_normalization
-  apps.api.tests.test_reference_data
-  apps.api.tests.test_admin_seed_api`,
+apps.api.tests.test_location_spatial_enrichment
+apps.api.tests.test_asset_spatial_enrichment
+apps.api.tests.test_asset_catalog_import
+apps.api.tests.test_asset_reference_normalization
+apps.api.tests.test_reference_data
+apps.api.tests.test_admin_seed_api`,
   `cd apps/web && npm test -- --run appBootstrapLoaders.test.ts referenceDataAssetsTab.test.ts referenceDataCharacterization.test.ts`,
   and repeated live runs of
   `PYTHONPATH=. ./.venv/bin/python apps/api/scripts/enrich_reference_location_spatial_fields.py --requested-by codex`
@@ -2436,9 +2923,216 @@ proposal form until a human owner approves the domain rule.
   expose long raw subtype lists when adjusting the asset map. The deterministic
   classifier owns the display taxonomy and keeps Home and Map consistent.
 - Tests or evidence: `cd apps/web && npm test -- assetMap.test.ts
-  mapWorkspace.test.ts promptHomeWorkspace.test.ts` and
+mapWorkspace.test.ts promptHomeWorkspace.test.ts` and
   `cd apps/web && npm run test:smoke -- --grep "prompt home keeps the
-  simplified map visible while desk time cards collapse independently"`.
+simplified map visible while desk time cards collapse independently"`.
 - Follow-up: if operators want different commercial groupings later, change the
   shared classifier and test expectations together instead of adding one-off UI
   overrides in individual map surfaces.
+
+### 2026-05-05 - Asset Map Geography Filters Use Shared Broad-Region Classification
+
+- Type: algorithm-added
+- Domain: prompt-first map UX, weather overlay filtering, and governed spatial
+  review
+- Applies to: the geography filter row on Prompt Home and the full Map
+  workspace
+- Status: implemented
+- Source:
+  `apps/web/src/features/reference-data/assetMap.ts`,
+  `apps/web/src/workspaces/reference-data/tabs/AssetMapPanel.tsx`,
+  `apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx`, and
+  `apps/web/tests/assetMap.test.ts`
+- Lesson: the shared map now exposes a stable broad-region filter with four
+  operator-facing buckets: `North America`, `South America`, `EMEA`, and
+  `APAC`. The classifier prefers governed location metadata when present,
+  using `region`, then `country_code`, then `continent_code`, and finally
+  falls back to deterministic latitude/longitude bands so Home and Map do not
+  drift on geography labeling.
+- Deterministic opportunity: keep future map-region filtering anchored to the
+  shared classifier instead of letting individual workspaces infer geography
+  ad hoc from labels, overlays, or view state. The current rule special-cases
+  Middle East country codes into `EMEA`, treats `NA` and `SA` continent codes
+  as the two Americas buckets, maps `EU` and `AF` to `EMEA`, maps remaining
+  `AS` and `OC` to `APAC`, and then falls back to fixed longitude/latitude
+  bands for coordinates-only records and weather points.
+- Agent autonomy impact: agents can safely add or refine map filtering without
+  inventing new geography buckets in each surface. The deterministic classifier
+  owns the broad-region taxonomy and keeps asset markers, weather markers, and
+  map-record summaries aligned.
+- Tests or evidence: `cd apps/web && npm test -- assetMap.test.ts
+mapWorkspace.test.ts promptHomeWorkspace.test.ts` and
+  `cd apps/web && npm run test:smoke -- --grep "prompt home keeps the
+simplified map visible while desk time cards collapse independently"`.
+- Follow-up: if operators later want more precise commercial splits, extend the
+  shared geography classifier and its tests together rather than adding
+  workspace-specific exceptions.
+
+### 2026-05-07 - Asset Map Activity Filters Use Shared Operational Buckets
+
+- Type: algorithm-added
+- Domain: prompt-first map UX and governed reference asset presentation
+- Applies to: the Activity filter row on Prompt Home and the full Map
+  workspace
+- Status: implemented
+- Source:
+  `apps/web/src/features/reference-data/assetMap.ts`,
+  `apps/web/src/workspaces/reference-data/tabs/AssetMapPanel.tsx`,
+  `apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx`, and
+  `apps/web/tests/assetMap.test.ts`
+- Lesson: the shared map now exposes a stable activity filter with three
+  operator-facing buckets: `Positions`, `Shipments`, and `Inventory`. The map
+  does not yet receive direct activity-tagged asset metadata, so both Home and
+  the full Map workspace rely on one deterministic classifier instead of
+  inferring activity relevance ad hoc in each surface.
+- Deterministic opportunity: keep future activity filtering anchored to the
+  shared classifier until governed activity metadata exists on asset records.
+  The current rule maps `UPSTREAM_PRODUCTION` and `REFINERY` to `Positions`
+  plus `Inventory`; `PIPELINE` to `Positions` plus `Shipments`; `PROCESSING`
+  and `STORAGE` to all three buckets; `TERMINAL/LNG` to all three buckets;
+  `TERMINAL/PIPELINE` to `Positions` plus `Shipments`; remaining `TERMINAL`
+  rows to `Shipments` plus `Inventory`; and `GENERATION`, `CONSUMPTION`, plus
+  unmatched classes to `Positions`.
+- Agent autonomy impact: agents can add or refine map filtering without
+  inventing new activity semantics in Prompt Home, the Map workspace, or saved
+  presets. The deterministic classifier owns the first-pass operational bucket
+  mapping until the product introduces explicit activity metadata.
+- Tests or evidence: `cd apps/web && npm test -- assetMap.test.ts
+mapWorkspace.test.ts promptHomeWorkspace.test.ts
+assetMapFilterPresets.test.ts` and `cd apps/web && npm run test:smoke -- --grep
+"prompt home keeps the simplified map visible while desk time cards collapse
+independently"`.
+- Follow-up: if users want activity buckets driven by live positions,
+  deliveries, or future inventory objects instead of asset-class heuristics,
+  replace this classifier with governed activity metadata rather than layering
+  workspace-specific overrides on top.
+
+### 2026-05-07 - Gmail Inbox Intake Should Stage Attachments Through Document Ingestion
+
+- Type: lesson
+- Domain: document ingestion and external inbox integrations
+- Applies to: Gmail inbox imports, email attachment intake, and future inbound
+  mailbox automations
+- Status: accepted
+- Source:
+  `apps/api/app/domains/integrations/services/gmail_inbox.py`,
+  `apps/api/app/routes/documents.py`, and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: inbound mailbox integrations should not write business records
+  directly. The first Gmail inbox slice reads Gmail in a bounded way, imports
+  PDF attachments into `document_ingestion`, and lets the existing review,
+  routing, action-plan, and approval seams govern any downstream mutations.
+  Read-only inbox browsing can live in the product, but it should stay
+  observational and reuse the same staged import seam when users decide a
+  message needs operational follow-through.
+- Deterministic opportunity: keep mailbox intake centered on typed runtime
+  settings, explicit message-level dedupe receipts, and the existing document
+  pipeline so future inbox sources reuse one governed import contract instead
+  of inventing new email-specific write paths.
+- Agent autonomy impact: agents can propose or trigger inbox imports when the
+  runtime is configured, but durable operational changes still flow through the
+  deterministic document workflow and its approval boundaries.
+- Tests or evidence: run
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api -q`
+  and `npm --prefix apps/web run test -- documentIngestionSelectors.test.ts`.
+- Follow-up: if operators need auto-polling later, add a scheduler or admin
+  control that calls the same import service and preserves the receipt-based
+  dedupe contract.
+
+### 2026-05-07 - Calendar Business-Day Logic Should Stay Data-Driven Through Rules And Overlays
+
+- Type: algorithm-added
+- Domain: reference data, settlement calendars, and deterministic date math
+- Applies to: holiday calendars, payment-system calendars, exchange calendars,
+  port calendars, and any future workflow that needs governed business-day
+  calculations
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reference_data/services/calendar_business_days.py`,
+  `apps/api/app/routes/reference_data_routes/calendars.py`,
+  `apps/api/app/domains/admin/services/seed_reference_data.py`, and
+  `apps/api/tests/test_calendar_seed_catalog.py`
+- Lesson: business-day calculations should not be hidden in prompts or
+  duplicated ad hoc across workflows. The calendar subsystem now evaluates
+  business days deterministically from governed reference data: explicit holiday
+  rows, reusable recurring rule rows, and overlay relationships that let one
+  calendar inherit another without copying every holiday definition.
+- Deterministic opportunity: keep future weekend profiles, observed-holiday
+  rules, exchange early-close handling, and provisional announcement logic in
+  the same typed calendar services rather than scattering date math across
+  settlement, pricing, logistics, or assistant prompts.
+- Agent autonomy impact: agents can read, explain, and seed calendar behavior,
+  but durable holiday truth remains reference data owned by reviewed rows and
+  services instead of freeform model output.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_reference_data apps.api.tests.test_calendar_seed_catalog`
+- Follow-up: before using any newly seeded calendar for externally committed
+  settlement or market timing, confirm the specific rule pack with the relevant
+  operations or market owner and extend the data model when short-day or
+  provisional logic becomes operationally material.
+
+### 2026-05-08 - Settlement Due Dates Should Only Roll Through Explicit Calendar Instructions
+
+- Type: algorithm-added
+- Domain: settlement timing, invoice due dates, payment due dates, and
+  reference calendars
+- Applies to: settlement invoice issuance, settlement payment creation or
+  updates, assistant-gated settlement actions, and bulk calendar exception
+  stewardship
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/settlement_due_dates.py`,
+  `apps/api/app/domains/operations/services/settlement_invoices.py`,
+  `apps/api/app/domains/operations/services/settlement_payments.py`,
+  `apps/api/app/domains/reference_data/services/calendar_imports.py`, and
+  `apps/api/tests/test_settlement_invoices_api.py`
+- Lesson: settlement workflows should not guess a bank calendar from currency,
+  counterparty, or geography. The deterministic path now rolls invoice and
+  payment due dates to the next open business day only when a caller supplies
+  an explicit `due_calendar_code`, which keeps the timing rule governed and
+  auditable without introducing speculative market mappings.
+- Deterministic opportunity: keep future settlement terms, cash cutoffs, and
+  market-specific grace periods behind typed settlement timing helpers that
+  consume governed calendar codes instead of encoding assumptions in prompts or
+  route handlers.
+- Agent autonomy impact: agents can pass an explicit settlement calendar when
+  staging or executing governed invoice and payment actions, but they should
+  not infer one on their own for production commitments without human-owned
+  product rules.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_reference_data apps.api.tests.test_settlement_invoices_api apps.api.tests.test_settlement_payments_api`
+- Follow-up: if domain owners want default settlement calendars by book,
+  currency, or counterparty, add that mapping as reviewed reference data or a
+  typed policy layer before enabling implicit due-date normalization.
+
+### 2026-05-08 - Keep Rail Map Geometry In Spatial Features, Not On The Route Header
+
+- Type: lesson
+- Domain: rail reference data, map overlays, and shared workspace rendering
+- Applies to: rail route visualization, future corridor overlays, and any
+  reference entity that needs both business semantics and renderable geometry
+- Status: implemented
+- Source:
+  `apps/api/app/domains/admin/services/seed_reference_data.py`,
+  `apps/api/app/routes/reference_data_routes/spatial_features.py`,
+  `apps/web/src/workspaces/reference-data/tabs/AssetMapPanel.tsx`, and
+  `docs/engineering/rail-delivery-schema.md`
+- Lesson: rail routes should remain the governed business record, while the map
+  should render linked `reference_spatial_features` rows. This keeps route
+  scheduling metadata and drawable geometry decoupled, lets the UI toggle rail
+  corridors independently, and gives us a clean place to improve geometry
+  fidelity later without turning route headers into GeoJSON blobs.
+- Deterministic opportunity: when another reference entity needs a map
+  footprint, prefer a typed entity link from `reference_spatial_features`
+  rather than embedding presentation geometry onto the operational record
+  itself.
+- Agent autonomy impact: agents can seed or propose overlay geometry, but the
+  durable pattern stays governed by typed reference rows and existing map
+  services rather than ad hoc frontend-only shapes.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_reference_data apps.api.tests.test_admin_seed_api.AdminSeedApiTests.test_reference_seed_populates_master_data apps.api.tests.test_calendar_seed_catalog`
+  and
+  `./node_modules/.bin/vitest run tests/appBootstrapLoaders.test.ts tests/assetMapFilterPresets.test.ts tests/mapWorkspace.test.ts tests/referenceDataSpatialFeaturesTab.test.ts`
+- Follow-up: if operations wants true track geometry, interchange branches, or
+  embargo detours, add higher-fidelity spatial feature sources while keeping
+  the route header as the business anchor.

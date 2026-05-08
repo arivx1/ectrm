@@ -61,6 +61,8 @@ DocumentLinkageStatus = Literal["READY", "CANDIDATE", "CREATE", "MANUAL_REVIEW"]
 DocumentLinkageAction = Literal["ATTACH", "REVIEW", "CREATE", "MANUAL_REVIEW"]
 DocumentActionPlanStatus = Literal["READY", "REVIEW", "BLOCKED"]
 DocumentActionType = Literal["ATTACH_EXISTING_RECORD", "CREATE_RECORD_FROM_DOCUMENT", "MANUAL_REVIEW"]
+DocumentGmailInboxProvider = Literal["gmail_api"]
+DocumentGmailInboxAuthStatus = Literal["none", "partial", "configured"]
 
 FIELD_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
@@ -215,12 +217,23 @@ class DocumentProcessorProviderStatusOut(BaseModel):
     setup_env_var: str
 
 
+class DocumentGmailInboxRuntimeSettingsOut(BaseModel):
+    enabled: bool
+    configured: bool
+    provider: DocumentGmailInboxProvider = "gmail_api"
+    account_email: Optional[str] = None
+    query: str
+    max_messages_per_import: int
+    auth_status: DocumentGmailInboxAuthStatus = "none"
+
+
 class DocumentProcessorRuntimeSettingsOut(BaseModel):
     enabled: bool
     default_provider: DocumentProcessorProvider
     effective_default_provider: Optional[DocumentProcessorProvider]
     configured_provider_count: int
     providers: list[DocumentProcessorProviderStatusOut]
+    gmail_inbox: Optional[DocumentGmailInboxRuntimeSettingsOut] = None
 
 
 class DocumentProcessorTraceOut(BaseModel):
@@ -425,6 +438,81 @@ class DocumentIngestionPageUpdate(BaseModel):
     @classmethod
     def normalize_review_notes(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="review_notes")
+
+
+class DocumentGmailInboxImportRequest(BaseModel):
+    query: Optional[str] = Field(default=None, max_length=500)
+    max_messages: Optional[int] = Field(default=None, ge=1, le=100)
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="query")
+
+
+class DocumentGmailImportedDocumentOut(BaseModel):
+    document_id: str
+    display_name: str
+    original_filename: str
+    gmail_message_id: str
+    gmail_thread_id: Optional[str] = None
+    gmail_subject: Optional[str] = None
+    gmail_sender: Optional[str] = None
+
+
+class DocumentGmailInboxAttachmentOut(BaseModel):
+    filename: str
+    mime_type: str
+    size_bytes: int = 0
+    part_token: str
+    attachment_id: Optional[str] = None
+    importable: bool = False
+    already_imported: bool = False
+
+
+class DocumentGmailInboxMessageSummaryOut(BaseModel):
+    message_id: str
+    thread_id: Optional[str] = None
+    subject: Optional[str] = None
+    sender: Optional[str] = None
+    received_at: Optional[datetime] = None
+    snippet: Optional[str] = None
+    unread: bool = False
+    attachment_count: int = 0
+    pdf_attachment_count: int = 0
+    imported_pdf_attachment_count: int = 0
+
+
+class DocumentGmailInboxBrowseResultOut(BaseModel):
+    query: str
+    page_size: int
+    next_page_token: Optional[str] = None
+    messages: list[DocumentGmailInboxMessageSummaryOut] = Field(default_factory=list)
+
+
+class DocumentGmailInboxMessageDetailOut(BaseModel):
+    message_id: str
+    thread_id: Optional[str] = None
+    subject: Optional[str] = None
+    sender: Optional[str] = None
+    to_recipients: Optional[str] = None
+    received_at: Optional[datetime] = None
+    snippet: Optional[str] = None
+    unread: bool = False
+    body_text: Optional[str] = None
+    body_truncated: bool = False
+    attachments: list[DocumentGmailInboxAttachmentOut] = Field(default_factory=list)
+
+
+class DocumentGmailInboxImportResultOut(BaseModel):
+    query: str
+    requested_max_messages: int
+    matched_message_count: int = 0
+    matched_attachment_count: int = 0
+    imported_count: int = 0
+    skipped_count: int = 0
+    imported_documents: list[DocumentGmailImportedDocumentOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DocumentIngestionUpdate(BaseModel):

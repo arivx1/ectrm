@@ -24,6 +24,8 @@ from apps.api.app.domains.operations.services.settlement_payments import preview
 from apps.api.app.domains.operations.services.shipments import preview_delivery_event_reversal
 from apps.api.app.domains.operations.services.workflow_items import evaluate_trade_workflow_item_update_policy
 from apps.api.app.domains.operations.services.workflow_items import workflow_allowed_statuses
+from apps.api.app.domains.reports.services.settlement import build_settlement_filter_options
+from apps.api.app.domains.reports.services.settlement_presets import settlement_preset_name_key
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion import DocumentIngestion
@@ -36,6 +38,8 @@ from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.schemas.report import SettlementReportFilters
+from apps.api.app.schemas.report import SettlementReportPresetCreate
 from apps.api.app.shared.enums import DeliveryEventType
 
 TRADE_ID_PATTERN = re.compile(r"\b([A-Za-z][A-Za-z0-9]{0,5}-\d{2,})\b")
@@ -369,6 +373,18 @@ class CreateTradePaymentActionPlanner:
         )
 
 
+class CreateSettlementReportPresetActionPlanner:
+    action_type = "create_settlement_report_preset"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_create_settlement_report_preset(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
 class VoidTradeInvoiceActionPlanner:
     action_type = "void_trade_invoice"
 
@@ -449,6 +465,7 @@ ACTION_PLANNER_SEQUENCE: tuple[AssistantActionPlanner, ...] = (
     CreateTradePaymentActionPlanner(),
     ReverseTradePaymentActionPlanner(),
     CreateAccountingEntryActionPlanner(),
+    CreateSettlementReportPresetActionPlanner(),
     ReverseAccountingEntryActionPlanner(),
     ReprocessDocumentIngestionActionPlanner(),
 )
@@ -530,6 +547,243 @@ def _first_present_value(fields: dict[str, str], *keys: str) -> str | None:
         if value:
             return value
     return None
+
+
+def _normalized_lookup_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
+
+
+def _resolve_unique_option_match(
+    normalized_message: str,
+    options: list[str],
+    *,
+    field_label: str,
+) -> tuple[str | None, str | None]:
+    if not options:
+        return None, None
+
+    padded_message = f" {normalized_message} "
+    matches = [
+        option
+        for option in options
+        if (option_key := _normalized_lookup_key(option))
+        and (
+            f" {option_key} " in padded_message
+            or (not option_key.endswith("s") and f" {option_key}s " in padded_message)
+        )
+    ]
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        return None, f"The preset request mentioned multiple {field_label} values. Please narrow it to one."
+    return None, None
+
+
+def _mentions_create_settlement_report_preset(message_lower: str) -> bool:
+    if "preset" not in message_lower:
+        return False
+    return any(
+        phrase in message_lower
+        for phrase in (
+            "create",
+            "save",
+            "add",
+            "make",
+            "new",
+            "enter",
+        )
+    )
+
+
+def _resolve_settlement_preset_name(message: str, context_fields: dict[str, str]) -> str | None:
+    preset_name = _first_present_value(context_fields, "preset_name", "name")
+    if preset_name:
+        return preset_name.strip() or None
+
+    patterns = (
+        re.compile(
+            r'(?:preset|save(?:\s+this)?(?:\s+preset)?\s+as)(?:\s+(?:named|called))?\s+"([^"\n]{1,120})"',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:preset|save(?:\s+this)?(?:\s+preset)?\s+as)(?:\s+(?:named|called))?\s+'([^'\n]{1,120})'",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:preset|filter preset|settlement preset)\s+(?:named|called)\s+([A-Za-z0-9][A-Za-z0-9 _-]{0,118}?)(?:\s+with\b|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"save(?:\s+this)?(?:\s+preset)?\s+as\s+([A-Za-z0-9][A-Za-z0-9 _-]{0,118}?)(?:\s+with\b|$)",
+            re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(message)
+        if match is not None:
+            candidate = match.group(1).strip()
+            if candidate:
+                return candidate
+    return None
+
+
+def _resolve_settlement_preset_scope(message_lower: str, context_fields: dict[str, str]) -> str:
+    scope_value = _first_present_value(context_fields, "preset_scope", "scope")
+    if scope_value:
+        normalized_scope = scope_value.strip().upper()
+        if normalized_scope in {"PERSONAL", "SHARED"}:
+            return normalized_scope
+
+    if "shared preset" in message_lower or "shared settlement preset" in message_lower:
+        return "SHARED"
+    return "PERSONAL"
+
+
+def _summarize_settlement_filters(filters: SettlementReportFilters) -> str:
+    parts: list[str] = []
+    if filters.book:
+        parts.append(f"book {filters.book}")
+    if filters.counterparty:
+        parts.append(f"counterparty {filters.counterparty}")
+    if filters.currency:
+        parts.append(f"currency {filters.currency}")
+    if filters.exception_type:
+        parts.append(filters.exception_type.replace("_", " ").lower())
+    if filters.severity:
+        parts.append(f"{filters.severity} severity")
+    if not parts:
+        return "no filters"
+    return ", ".join(parts)
+
+
+def _plan_create_settlement_report_preset(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_create_settlement_report_preset(message_lower):
+        return None
+
+    preset_name = _resolve_settlement_preset_name(message, context_fields)
+    if not preset_name:
+        return AssistantActionPlanningCandidate(
+            warning="Name the new settlement preset so it can be saved safely."
+        )
+
+    filter_options = build_settlement_filter_options(db)
+    normalized_message = _normalized_lookup_key(message)
+    filters_payload: dict[str, object] = {}
+    assumptions: list[str] = []
+
+    scope = _resolve_settlement_preset_scope(message_lower, context_fields)
+    if scope == "PERSONAL" and "shared preset" not in message_lower:
+        assumptions.append(
+            "Scope defaulted to PERSONAL because the request did not explicitly ask for a shared preset."
+        )
+
+    for field_key, option_key, field_label in (
+        ("book", "books", "book"),
+        ("counterparty", "counterparties", "counterparty"),
+        ("currency", "currencies", "currency"),
+        ("exception_type", "exception_types", "exception type"),
+        ("severity", "severities", "severity"),
+    ):
+        matched_value, match_warning = _resolve_unique_option_match(
+            normalized_message,
+            list(filter_options[option_key]),
+            field_label=field_label,
+        )
+        if match_warning:
+            return AssistantActionPlanningCandidate(warning=match_warning)
+        if matched_value is not None:
+            filters_payload[field_key] = matched_value
+            continue
+
+        context_value = context_fields.get(field_key)
+        if context_value:
+            filters_payload[field_key] = context_value
+
+    if not filters_payload:
+        return AssistantActionPlanningCandidate(
+            warning=(
+                "I couldn't resolve any supported settlement filters from that preset request. "
+                "Name at least one settlement filter such as book, counterparty, currency, exception type, or severity."
+            )
+        )
+
+    try:
+        payload = SettlementReportPresetCreate(
+            name=preset_name,
+            scope=scope,
+            filters=SettlementReportFilters.model_validate(filters_payload),
+        )
+    except Exception as exc:
+        return AssistantActionPlanningCandidate(
+            warning=f"The preset request could not be translated into valid settlement filters: {exc}"
+        )
+
+    filters_summary = _summarize_settlement_filters(payload.filters)
+    name_key = settlement_preset_name_key(payload.name)
+    proposal_payload = _with_review_context(
+        {
+            "name": payload.name,
+            "scope": payload.scope,
+            "filters": payload.filters.model_dump(exclude_none=True),
+        },
+        owning_work_object={
+            "type": "settlement_report_preset",
+            "id": f"{payload.scope}:{name_key}",
+            "label": f"Settlement preset {payload.name}",
+        },
+        required_reviewer_role="REQUESTING_USER_OR_ADMIN",
+        business_rationale=(
+            f'The user asked to save a settlement preset named "{payload.name}" with {filters_summary}.'
+        ),
+        proposed_mutation={
+            "operation": "create_settlement_report_preset",
+            "name": payload.name,
+            "scope": payload.scope,
+            "filters": payload.filters.model_dump(exclude_none=True),
+        },
+        supporting_records=(
+            _supporting_record(
+                "settlement_filter_catalog",
+                "current",
+                (
+                    "Validated against the current settlement filter catalog with "
+                    f"{len(filter_options['books'])} book(s), "
+                    f"{len(filter_options['counterparties'])} counterparty option(s), and "
+                    f"{len(filter_options['currencies'])} currency option(s)."
+                ),
+                label="Current settlement filter catalog",
+            ),
+        ),
+        assumptions=tuple(assumptions),
+        expected_downstream_effects=(
+            "Create a persisted settlement report preset row.",
+            "Expose the preset in the settlement preset picker for the requesting user.",
+            "Reapply the saved settlement filters whenever the preset is selected later.",
+        ),
+        stale_state_basis={
+            "scope": payload.scope,
+            "name_key": name_key,
+            "existing_preset_id": None,
+        },
+        idempotency_key=f"assistant-action:create_settlement_report_preset:{payload.scope}:{name_key}",
+    )
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="create_settlement_report_preset",
+            summary=f'Create settlement preset "{payload.name}"',
+            description=(
+                f"Create a {payload.scope.lower()} settlement report preset named "
+                f'"{payload.name}" with {filters_summary}.'
+            ),
+            payload=proposal_payload,
+        )
+    )
 
 
 def _resolve_int_id(
@@ -2381,6 +2635,7 @@ def _plan_issue_trade_invoice(
 
     invoice_number = _first_present_value(context_fields, "invoice_number")
     invoice_currency_code = _first_present_value(context_fields, "invoice_currency_code", "currency_code")
+    due_calendar_code = _first_present_value(context_fields, "due_calendar_code", "calendar_code")
     notes = _first_present_value(context_fields, "notes")
     leg_no = _parse_optional_int_value(_first_present_value(context_fields, "leg_no"))
     invoice_payload = {
@@ -2392,6 +2647,7 @@ def _plan_issue_trade_invoice(
         **({"invoice_amount": invoice_amount} if invoice_amount is not None else {}),
         **({"issued_at": issued_at} if issued_at else {}),
         **({"due_at": due_at} if due_at else {}),
+        **({"due_calendar_code": due_calendar_code} if due_calendar_code else {}),
         **({"notes": notes} if notes else {}),
     }
     action_preview = preview_trade_invoice_issue(
@@ -2404,6 +2660,7 @@ def _plan_issue_trade_invoice(
         invoice_amount=invoice_payload.get("invoice_amount"),
         issued_at=_preview_datetime_value(issued_at),
         due_at=_preview_datetime_value(due_at),
+        due_calendar_code=due_calendar_code,
     )
 
     return AssistantActionPlanningCandidate(
@@ -2501,6 +2758,7 @@ def _plan_create_trade_payment(
     payment_status = _resolve_payment_status(message_lower, context_fields)
     payment_reference = _first_present_value(context_fields, "payment_reference")
     payment_currency_code = _first_present_value(context_fields, "payment_currency_code", "currency_code")
+    due_calendar_code = _first_present_value(context_fields, "due_calendar_code", "calendar_code")
     notes = _first_present_value(context_fields, "notes")
 
     return AssistantActionPlanningCandidate(
@@ -2519,6 +2777,7 @@ def _plan_create_trade_payment(
                     **({"payment_amount": payment_amount} if payment_amount is not None else {}),
                     **({"status": payment_status} if payment_status else {}),
                     **({"due_at": due_at} if due_at else {}),
+                    **({"due_calendar_code": due_calendar_code} if due_calendar_code else {}),
                     **({"received_at": received_at} if received_at else {}),
                     **({"notes": notes} if notes else {}),
                 },
@@ -2934,8 +3193,17 @@ def _mentions_delivery_event(message_lower: str, context_fields: dict[str, str])
 
 
 def _mentions_trade_actualization_void(message_lower: str, context_fields: dict[str, str]) -> bool:
-    if any(key in context_fields for key in ("void_reason", "reason")) and (
-        "void" in message_lower or "clear" in message_lower or "undo" in message_lower
+    if (
+        any(key in context_fields for key in ("void_reason", "reason"))
+        and any(
+            key in context_fields
+            for key in ("trade_id", "delivery_id", "actualization_id", "leg_no")
+        )
+        and (
+            "void" in message_lower
+            or "clear" in message_lower
+            or "undo" in message_lower
+        )
     ):
         return True
     return any(

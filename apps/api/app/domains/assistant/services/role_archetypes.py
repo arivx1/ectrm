@@ -3,14 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import get_args
 
-from apps.api.app.domains.assistant.services.tools import list_tool_names
+from apps.api.app.domains.assistant.services.skills import INTER_AGENT_CONSULTATION_SKILL, list_agent_skill_keys
+from apps.api.app.domains.assistant.services.tools import augment_managed_agent_introspection_tools, list_tool_names
 from apps.api.app.schemas.assistant import (
     ALL_ASSISTANT_ACTION_TYPES,
     AssistantAgentAuthorityLevel,
     AssistantAgentCapability,
     AssistantAgentEvalGateOut,
+    AssistantAgentOrchestrationPattern,
     AssistantAgentRoleArchetypeOut,
     AssistantAgentRoleCatalogStatus,
+    AssistantAgentSkillKey,
     AssistantWorkspace,
 )
 
@@ -30,6 +33,7 @@ class AssistantAgentRoleArchetype:
     allowed_workspaces: tuple[AssistantWorkspace, ...]
     work_objects: tuple[str, ...]
     capability_ceiling: tuple[AssistantAgentCapability, ...]
+    skills: tuple[AssistantAgentSkillKey, ...]
     default_tools: tuple[str, ...]
     maximum_action_types: tuple[str, ...]
     authority_ceiling: AssistantAgentAuthorityLevel
@@ -38,6 +42,10 @@ class AssistantAgentRoleArchetype:
     success_metrics: tuple[str, ...]
     required_eval_coverage: tuple[str, ...]
     base_prompt_guidance: tuple[str, ...]
+    recommended_orchestration_pattern: AssistantAgentOrchestrationPattern = "SINGLE"
+    recommended_parent_role_keys: tuple[str, ...] = ()
+    recommended_managed_role_keys: tuple[str, ...] = ()
+    delegation_guidance: tuple[str, ...] = ()
     current_profile_ids: tuple[str, ...] = ()
 
 
@@ -55,6 +63,14 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "operations", "shipments", "scheduling", "reference"),
         work_objects=("trade", "workflow item", "confirmation", "delivery obligation", "document ingestion"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=(
+            "trade_operations_coordination",
+            "confirmation_control",
+            "workflow_control",
+            "movement_control",
+            "document_triage",
+            "inter_agent_consultation",
+        ),
         default_tools=(
             "get_trade_workbench",
             "list_workflow_items",
@@ -63,6 +79,8 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_deliveries",
             "list_documents",
             "get_document_ingestion",
+            "list_gmail_inbox_messages",
+            "get_gmail_inbox_message",
         ),
         maximum_action_types=(
             "record_delivery_event",
@@ -95,6 +113,19 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Lead with the blocker or next action.",
             "Show evidence and either execute the governed action or explain why you stopped.",
         ),
+        recommended_orchestration_pattern="MANAGER",
+        recommended_parent_role_keys=("control-tower-agent",),
+        recommended_managed_role_keys=(
+            "movement-controller-agent",
+            "confirmation-controller-agent",
+            "workflow-controller-agent",
+            "counterparty-state-sync-agent",
+            "document-agent",
+            "logistics-coordinator",
+        ),
+        delegation_guidance=(
+            "Use specialist consultations to gather narrow operational evidence, then keep final blocker synthesis and governed action ownership in the Trade Ops Copilot lane.",
+        ),
         current_profile_ids=("trade-ops-copilot",),
     ),
     AssistantAgentRoleArchetype(
@@ -110,18 +141,28 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "settlement", "operations", "reports"),
         work_objects=("invoice", "payment", "settlement exception", "workflow item", "trade"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=(
+            "settlement_operations",
+            "invoice_control",
+            "accrual_control",
+            "reporting_reconciliation",
+            "inter_agent_consultation",
+        ),
         default_tools=(
             "list_trade_invoices",
             "list_invoice_issue_candidates",
             "list_trade_attention_candidates",
             "list_trade_payments",
             "get_trade_settlement_summary",
+            "get_settlement_report_filter_options",
+            "list_settlement_report_presets",
             "list_accrual_lots",
             "get_accrual_reconciliation",
             "list_workflow_items",
             "get_workspace_summary",
         ),
         maximum_action_types=(
+            "create_settlement_report_preset",
             "issue_trade_invoice",
             "void_trade_invoice",
             "create_trade_payment",
@@ -138,6 +179,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Lower finance review time per invoice or payment exception.",
         ),
         required_eval_coverage=(
+            "Allowed settlement preset creation execution.",
             "Allowed invoice and payment action execution, including settlement corrections.",
             "Denied cash-release or ambiguous settlement requests.",
             "Settlement tool allowlist enforcement.",
@@ -145,6 +187,18 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         base_prompt_guidance=(
             "Start with cash status, then evidence and next step.",
             "Surface missing settlement evidence directly.",
+        ),
+        recommended_orchestration_pattern="MANAGER",
+        recommended_parent_role_keys=("control-tower-agent",),
+        recommended_managed_role_keys=(
+            "invoice-controller-agent",
+            "accrual-controller-agent",
+            "accounting-posting-agent",
+            "fee-accrual-agent",
+            "counterparty-outreach-agent",
+        ),
+        delegation_guidance=(
+            "Consult specialists for invoice, accrual, posting, or outreach context, but keep the final settlement recommendation and any governed settlement action in the Settlement Copilot lane.",
         ),
         current_profile_ids=("settlement-copilot",),
     ),
@@ -161,6 +215,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "operations", "admin"),
         work_objects=("trade", "event", "workflow item", "approval request"),
         capability_ceiling=("READ", "EXPLAIN", "ACTION"),
+        skills=("trade_governance", "trade_lifecycle_management", "inter_agent_consultation"),
         default_tools=("get_trade_by_id", "list_trade_events", "get_trade_workbench", "list_workflow_items"),
         maximum_action_types=("cancel_trade",),
         authority_ceiling="EXECUTE",
@@ -182,6 +237,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Lead with whether cancellation appears justified.",
             "Summarize supporting and conflicting evidence before deciding.",
         ),
+        recommended_parent_role_keys=("trade-capture-agent",),
+        delegation_guidance=(
+            "Act as a cancellation specialist when a broader trade-capture manager needs a narrow governance review.",
+        ),
         current_profile_ids=("trade-governor",),
     ),
     AssistantAgentRoleArchetype(
@@ -197,6 +256,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "events", "operations", "reference"),
         work_objects=("trade intent", "trade", "event", "reference data", "workflow item"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("trade_lifecycle_management", "trade_governance", "inter_agent_consultation"),
         default_tools=(
             "get_trade_by_id",
             "list_trade_events",
@@ -227,6 +287,12 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Reflect reality through the governed trade event path when the capture fields are specific enough.",
             "If create or amend evidence is incomplete, stop and name the missing economics instead of guessing.",
         ),
+        recommended_orchestration_pattern="MANAGER",
+        recommended_parent_role_keys=("control-tower-agent",),
+        recommended_managed_role_keys=("trade-governor",),
+        delegation_guidance=(
+            "Consult the Trade Governor for cancellation-heavy edge cases, but keep final trade lifecycle synthesis and governed trade action ownership in the Trade Capture Agent lane.",
+        ),
         current_profile_ids=("trade-capture-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -242,6 +308,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "shipments", "scheduling", "operations"),
         work_objects=("delivery obligation", "movement", "actualization", "workflow item", "trade"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("movement_control", "logistics_coordination", "workflow_control", "inter_agent_consultation"),
         default_tools=(
             "list_deliveries",
             "get_trade_workbench",
@@ -249,6 +316,8 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_trade_attention_candidates",
             "list_documents",
             "get_document_ingestion",
+            "list_gmail_inbox_messages",
+            "get_gmail_inbox_message",
             "get_workspace_summary",
         ),
         maximum_action_types=(
@@ -282,6 +351,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Show the movement evidence first, then the narrow governed change you can justify.",
             "Keep external logistics commitments explicitly out of scope.",
         ),
+        recommended_parent_role_keys=("trade-ops-copilot",),
+        delegation_guidance=(
+            "Use this role as the movement specialist when an operations manager needs delivery-event or actualization evidence reviewed in isolation.",
+        ),
         current_profile_ids=("movement-controller-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -297,6 +370,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "settlement", "reports", "operations"),
         work_objects=("accrual lot", "accrual entry", "invoice", "payment", "delivery actualization"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("accrual_control", "settlement_operations", "inter_agent_consultation"),
         default_tools=(
             "list_accrual_lots",
             "list_accrual_entries",
@@ -330,6 +404,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Show the evidence chain from delivery to invoice to payment before executing an accrual change.",
             "Prefer the narrowest immutable accrual adjustment or reversal that brings the lot back to reality.",
         ),
+        recommended_parent_role_keys=("settlement-copilot",),
+        delegation_guidance=(
+            "Use this role as the accrual specialist when a settlement manager needs a narrow lot-level reconciliation or adjustment review.",
+        ),
         current_profile_ids=("accrual-controller-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -345,6 +423,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "settlement", "reports", "operations"),
         work_objects=("accounting package", "accrual entry", "invoice", "payment", "reconciliation report"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("accounting_posting", "reporting_reconciliation", "inter_agent_consultation"),
         default_tools=(
             "get_trade_settlement_summary",
             "list_trade_invoices",
@@ -376,6 +455,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Tie proposed accounting treatment back to the loaded operational evidence.",
             "Use immutable posting and reversal actions instead of suggesting in-place ledger edits.",
         ),
+        recommended_parent_role_keys=("settlement-copilot",),
+        delegation_guidance=(
+            "Use this role as the posting specialist when a settlement manager needs bounded internal accounting treatment grounded in operational evidence.",
+        ),
         current_profile_ids=("accounting-posting-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -391,6 +474,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "operations", "settlement"),
         work_objects=("confirmation", "workflow item", "invoice", "payment", "trade"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("counterparty_state_sync", "confirmation_control", "workflow_control", "inter_agent_consultation"),
         default_tools=(
             "get_trade_workbench",
             "list_trade_confirmations",
@@ -423,6 +507,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Differentiate observed counterparty state from the internal platform action you are taking.",
             "If you go beyond your default lane, explain the bilateral evidence that justified the override.",
         ),
+        recommended_parent_role_keys=("trade-ops-copilot",),
+        delegation_guidance=(
+            "Use this role as the bilateral-state specialist when an operations manager needs a narrower confirmation or workflow sync review.",
+        ),
         current_profile_ids=("counterparty-state-sync-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -438,6 +526,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "operations", "settlement"),
         work_objects=("confirmation", "trade", "workflow item", "counterparty state"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("confirmation_control", "workflow_control", "counterparty_state_sync", "inter_agent_consultation"),
         default_tools=(
             "list_trade_confirmations",
             "get_trade_workbench",
@@ -471,6 +560,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Stay tightly focused on confirmation state, recipient evidence, and the smallest justified confirmation action.",
             "Keep broader trade negotiations or amendments out of scope.",
         ),
+        recommended_parent_role_keys=("trade-ops-copilot",),
+        delegation_guidance=(
+            "Use this role as the confirmation specialist when an operations manager needs confirmation-specific evidence or execution.",
+        ),
         current_profile_ids=("confirmation-controller-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -486,6 +579,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "operations", "settlement", "shipments", "scheduling"),
         work_objects=("workflow item", "trade", "invoice", "payment", "delivery obligation"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("workflow_control", "trade_operations_coordination", "inter_agent_consultation"),
         default_tools=(
             "list_workflow_items",
             "list_trade_attention_candidates",
@@ -517,6 +611,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Lead with the queue problem, then the exact workflow change you can justify.",
             "If the underlying business record must change first, say that plainly and stop.",
         ),
+        recommended_parent_role_keys=("trade-ops-copilot", "settlement-copilot"),
+        delegation_guidance=(
+            "Use this role as the workflow specialist when a manager needs queue-state synchronization without widening into trade, settlement, or policy changes.",
+        ),
         current_profile_ids=("workflow-controller-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -532,6 +630,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "settlement", "operations", "reports"),
         work_objects=("invoice", "trade", "settlement exception", "workflow item"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("invoice_control", "settlement_operations", "inter_agent_consultation"),
         default_tools=(
             "list_invoice_issue_candidates",
             "list_trade_invoices",
@@ -561,6 +660,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Keep the focus on invoice readiness, not the entire settlement lifecycle unless it directly blocks issuance.",
             "Surface missing invoice evidence instead of forcing an issuance decision.",
         ),
+        recommended_parent_role_keys=("settlement-copilot",),
+        delegation_guidance=(
+            "Use this role as the invoice specialist when a settlement manager needs invoice readiness or correction reviewed in isolation.",
+        ),
         current_profile_ids=("invoice-controller-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -573,6 +676,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "events", "risk", "positions"),
         work_objects=("trade", "event", "position", "option exposure"),
         capability_ceiling=("READ", "EXPLAIN"),
+        skills=("trade_lifecycle_management", "inter_agent_consultation"),
         default_tools=(
             "get_trade_by_id",
             "list_trade_events",
@@ -600,6 +704,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "shipments", "scheduling", "operations", "settlement"),
         work_objects=("workflow item", "delivery obligation", "confirmation", "invoice", "payment"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("trade_operations_coordination", "workflow_control", "inter_agent_consultation"),
         default_tools=(
             "list_workflow_items",
             "list_trade_attention_candidates",
@@ -627,12 +732,15 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "settlement", "operations", "reports"),
         work_objects=("invoice", "payment", "settlement exception", "workflow item"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("settlement_operations", "accrual_control", "inter_agent_consultation"),
         default_tools=(
             "list_trade_invoices",
             "list_invoice_issue_candidates",
             "list_trade_attention_candidates",
             "list_trade_payments",
             "get_trade_settlement_summary",
+            "get_settlement_report_filter_options",
+            "list_settlement_report_presets",
             "list_workflow_items",
             "get_workspace_summary",
         ),
@@ -654,9 +762,12 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "operations", "reference"),
         work_objects=("document ingestion", "document action plan", "record link", "workflow item"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("document_triage", "inter_agent_consultation"),
         default_tools=(
             "list_documents",
             "get_document_ingestion",
+            "list_gmail_inbox_messages",
+            "get_gmail_inbox_message",
             "search_reference_data",
             "list_workflow_items",
             "get_workspace_summary",
@@ -679,6 +790,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "dashboard", "risk", "positions", "reports"),
         work_objects=("report", "position", "trade", "workflow item", "market context"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("market_intelligence", "inter_agent_consultation"),
         default_tools=(
             "get_workspace_summary",
             "list_positions",
@@ -708,6 +820,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "dashboard", "risk", "positions", "reports"),
         work_objects=("market opportunity", "desk briefing", "pre-trade scenario", "position"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("market_intelligence", "inter_agent_consultation"),
         default_tools=(
             "get_market_context",
             "get_latest_commodity_prices",
@@ -725,6 +838,16 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Humans promote useful generated opportunities into reviewable scenarios.",),
         required_eval_coverage=("Sourced market briefing.", "No trade capture or external-commitment claims."),
         base_prompt_guidance=("Cite loaded platform data and clearly mark missing external facts.",),
+        recommended_orchestration_pattern="PARALLEL",
+        recommended_parent_role_keys=("control-tower-agent",),
+        recommended_managed_role_keys=(
+            "pre-trade-structuring-agent",
+            "risk-sentinel",
+            "reporting-reconciliation-agent",
+        ),
+        delegation_guidance=(
+            "Fan out narrow research or exception questions to specialist agents, then keep the final desk-facing synthesis in the Market Research Agent lane.",
+        ),
         current_profile_ids=("market-research-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -737,6 +860,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "trades", "risk", "positions", "reports", "reference"),
         work_objects=("pre-trade scenario", "pre-trade review item", "trade intent", "reference data"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("pretrade_structuring", "market_intelligence", "inter_agent_consultation"),
         default_tools=(
             "get_market_context",
             "get_latest_commodity_prices",
@@ -755,6 +879,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Generated structures reduce re-entry and ambiguity in trade capture handoffs.",),
         required_eval_coverage=("Review-ready scenario draft.", "Denied direct trade booking."),
         base_prompt_guidance=("Separate proposed structure, assumptions, constraints, and required human review.",),
+        recommended_parent_role_keys=("market-research-agent",),
+        delegation_guidance=(
+            "Use this role as the trade-idea structuring specialist after a market manager has already framed the opportunity.",
+        ),
         current_profile_ids=("pre-trade-structuring-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -767,6 +895,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "risk", "positions", "trades", "reports"),
         work_objects=("risk exception", "workflow item", "approval request", "position", "trade"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("risk_monitoring", "inter_agent_consultation"),
         default_tools=(
             "list_positions",
             "list_trades",
@@ -784,6 +913,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Risk alerts are timely, grounded, and low-noise.",),
         required_eval_coverage=("Risk exception explanation.", "No credit approval or trade mutation."),
         base_prompt_guidance=("Make stale data and confidence limits visible.",),
+        recommended_parent_role_keys=("market-research-agent", "control-tower-agent"),
+        delegation_guidance=(
+            "Use this role as the risk specialist when a manager needs exposure, freshness, or pricing-gap analysis without turning it into an approval decision.",
+        ),
         current_profile_ids=("risk-sentinel",),
     ),
     AssistantAgentRoleArchetype(
@@ -796,9 +929,12 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "operations", "reference"),
         work_objects=("document ingestion", "document action plan", "record link", "workflow item"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("document_triage", "trade_operations_coordination", "inter_agent_consultation"),
         default_tools=(
             "list_documents",
             "get_document_ingestion",
+            "list_gmail_inbox_messages",
+            "get_gmail_inbox_message",
             "search_reference_data",
             "list_workflow_items",
             "get_workspace_summary",
@@ -814,6 +950,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Denied record creation.",
         ),
         base_prompt_guidance=("Explain confidence, missing keys, and unresolved ambiguity plainly.",),
+        recommended_parent_role_keys=("trade-ops-copilot",),
+        delegation_guidance=(
+            "Use this role as the document specialist for routing, linkage, and safe reprocessing advice inside broader operational follow-through.",
+        ),
         current_profile_ids=("document-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -826,6 +966,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "reports", "operations", "settlement", "risk", "positions"),
         work_objects=("report", "settlement exception", "risk exception", "agent outcome"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("reporting_reconciliation", "settlement_operations", "inter_agent_consultation"),
         default_tools=(
             "get_workspace_summary",
             "list_positions",
@@ -833,6 +974,8 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_invoice_issue_candidates",
             "list_trade_attention_candidates",
             "list_trade_payments",
+            "get_settlement_report_filter_options",
+            "list_settlement_report_presets",
             "get_accrual_reconciliation",
             "get_market_context",
             "get_latest_commodity_prices",
@@ -846,6 +989,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Reports reduce manual reconciliation and exception-pack preparation time.",),
         required_eval_coverage=("Sourced report draft.", "No official publication or mutation."),
         base_prompt_guidance=("Label source data, assumptions, and unresolved gaps.",),
+        recommended_parent_role_keys=("control-tower-agent", "market-research-agent", "settlement-copilot"),
+        delegation_guidance=(
+            "Use this role as the reporting specialist when another manager needs a sourced briefing, exception pack, or reconciliation summary assembled for review.",
+        ),
         current_profile_ids=("reporting-reconciliation-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -858,6 +1005,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "shipments", "scheduling", "operations"),
         work_objects=("delivery obligation", "scheduling commitment", "delivery event", "workflow item"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT", "ACTION"),
+        skills=("logistics_coordination", "movement_control", "inter_agent_consultation"),
         default_tools=(
             "list_deliveries",
             "list_workflow_items",
@@ -880,6 +1028,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "Denied scheduling commitment.",
         ),
         base_prompt_guidance=("Separate internal readiness from external commitment.",),
+        recommended_parent_role_keys=("trade-ops-copilot",),
+        delegation_guidance=(
+            "Use this role as the logistics specialist when an operations manager needs readiness detail without widening into external scheduling commitments.",
+        ),
         current_profile_ids=("logistics-coordinator",),
     ),
     AssistantAgentRoleArchetype(
@@ -892,6 +1044,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "settlement", "reports", "operations"),
         work_objects=("fee item", "accrual lot", "invoice", "delivery actualization"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("fee_accrual_management", "accrual_control", "settlement_operations", "inter_agent_consultation"),
         default_tools=(
             "get_trade_settlement_summary",
             "list_accrual_lots",
@@ -910,6 +1063,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Accrual gap drafts reduce reconciliation preparation time.",),
         required_eval_coverage=("Accrual gap explanation.", "No accrual mutation."),
         base_prompt_guidance=("Keep accrual conclusions clearly draft-only.",),
+        recommended_parent_role_keys=("settlement-copilot",),
+        delegation_guidance=(
+            "Use this role as the fee and accrual specialist when a settlement manager needs delivered-but-unbilled or accrual-gap analysis kept in draft form.",
+        ),
         current_profile_ids=("fee-accrual-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -922,6 +1079,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "operations", "settlement", "trades"),
         work_objects=("communication draft", "confirmation", "workflow item", "settlement exception"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("counterparty_outreach", "counterparty_state_sync", "inter_agent_consultation"),
         default_tools=(
             "get_trade_workbench",
             "list_workflow_items",
@@ -936,6 +1094,10 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Draft outreach reduces manual communication preparation time.",),
         required_eval_coverage=("Counterparty draft generation.", "No external send or commitment."),
         base_prompt_guidance=("Draft communications as review-ready text, not sent messages.",),
+        recommended_parent_role_keys=("settlement-copilot", "trade-ops-copilot"),
+        delegation_guidance=(
+            "Use this role as the outreach drafting specialist when a manager needs bilateral language prepared without sending or committing externally.",
+        ),
         current_profile_ids=("counterparty-outreach-agent",),
     ),
     AssistantAgentRoleArchetype(
@@ -948,6 +1110,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         allowed_workspaces=("assistant", "admin"),
         work_objects=("agent run", "action request", "intervention record", "agent outcome"),
         capability_ceiling=("READ", "EXPLAIN", "DRAFT"),
+        skills=("agent_supervision", "reporting_reconciliation", "inter_agent_consultation"),
         default_tools=("get_workspace_summary",),
         maximum_action_types=(),
         authority_ceiling="DRAFT",
@@ -956,6 +1119,17 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         success_metrics=("Supervisors can identify noisy, stale, or risky agents faster.",),
         required_eval_coverage=("Agent outcome summary.", "No policy or configuration mutation."),
         base_prompt_guidance=("Recommend interventions, but do not perform them.",),
+        recommended_orchestration_pattern="TRIAGE",
+        recommended_managed_role_keys=(
+            "market-research-agent",
+            "trade-capture-agent",
+            "trade-ops-copilot",
+            "settlement-copilot",
+            "reporting-reconciliation-agent",
+        ),
+        delegation_guidance=(
+            "Route supervision questions to the right domain manager, summarize trust signals across the roster, and keep human supervisors as the only owners of pause, retirement, or policy changes.",
+        ),
         current_profile_ids=("control-tower-agent",),
     ),
 )
@@ -963,6 +1137,20 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
 
 def list_role_archetypes() -> list[AssistantAgentRoleArchetype]:
     return list(ROLE_ARCHETYPE_DEFINITIONS)
+
+
+def resolved_role_default_tools(role: AssistantAgentRoleArchetype) -> tuple[str, ...]:
+    resolved_tools = augment_managed_agent_introspection_tools(
+        role.default_tools,
+        capabilities=role.capability_ceiling,
+    )
+    if INTER_AGENT_CONSULTATION_SKILL not in set(role.skills):
+        return resolved_tools
+    next_tools = list(resolved_tools)
+    for tool_name in ("consult_managed_agent", "enlist_managed_agent"):
+        if tool_name not in set(next_tools):
+            next_tools.append(tool_name)
+    return tuple(next_tools)
 
 
 def get_role_archetype(role_key: str) -> AssistantAgentRoleArchetype | None:
@@ -988,7 +1176,8 @@ def to_role_archetype_out(
         allowed_workspaces=list(role.allowed_workspaces),
         work_objects=list(role.work_objects),
         capability_ceiling=list(role.capability_ceiling),
-        default_tools=list(role.default_tools),
+        skills=list(role.skills),
+        default_tools=list(resolved_role_default_tools(role)),
         maximum_action_types=list(role.maximum_action_types),
         authority_ceiling=role.authority_ceiling,
         approval_rules=list(role.approval_rules),
@@ -997,6 +1186,10 @@ def to_role_archetype_out(
         required_eval_coverage=list(role.required_eval_coverage),
         eval_gate=eval_gate,
         base_prompt_guidance=list(role.base_prompt_guidance),
+        recommended_orchestration_pattern=role.recommended_orchestration_pattern,
+        recommended_parent_role_keys=list(role.recommended_parent_role_keys),
+        recommended_managed_role_keys=list(role.recommended_managed_role_keys),
+        delegation_guidance=list(role.delegation_guidance),
         current_profile_ids=list(role.current_profile_ids),
     )
 
@@ -1017,8 +1210,10 @@ def validate_role_archetype_registry() -> None:
 
     workspace_values = set(get_args(AssistantWorkspace))
     capability_values = set(get_args(AssistantAgentCapability))
+    skill_values = set(list_agent_skill_keys())
     tool_values = set(list_tool_names())
     action_values = set(ALL_ASSISTANT_ACTION_TYPES)
+    role_key_values = set(role_keys)
 
     for role in ROLE_ARCHETYPE_DEFINITIONS:
         _append_unknown_values(
@@ -1038,8 +1233,15 @@ def validate_role_archetype_registry() -> None:
         _append_unknown_values(
             errors,
             role_key=role.role_key,
+            field_name="skills",
+            values=role.skills,
+            valid_values=skill_values,
+        )
+        _append_unknown_values(
+            errors,
+            role_key=role.role_key,
             field_name="default_tools",
-            values=role.default_tools,
+            values=resolved_role_default_tools(role),
             valid_values=tool_values,
         )
         _append_unknown_values(
@@ -1049,10 +1251,30 @@ def validate_role_archetype_registry() -> None:
             values=role.maximum_action_types,
             valid_values=action_values,
         )
+        _append_unknown_values(
+            errors,
+            role_key=role.role_key,
+            field_name="recommended_parent_role_keys",
+            values=role.recommended_parent_role_keys,
+            valid_values=role_key_values,
+        )
+        _append_unknown_values(
+            errors,
+            role_key=role.role_key,
+            field_name="recommended_managed_role_keys",
+            values=role.recommended_managed_role_keys,
+            valid_values=role_key_values,
+        )
         if role.maximum_action_types and "ACTION" not in role.capability_ceiling:
             errors.append(f"{role.role_key}: maximum_action_types require ACTION in capability_ceiling")
         if role.authority_ceiling == "STAGE" and "ACTION" not in role.capability_ceiling:
             errors.append(f"{role.role_key}: STAGE authority requires ACTION in capability_ceiling")
+        if INTER_AGENT_CONSULTATION_SKILL in set(role.skills) and "READ" not in role.capability_ceiling:
+            errors.append(f"{role.role_key}: {INTER_AGENT_CONSULTATION_SKILL} requires READ in capability_ceiling")
+        if role.recommended_managed_role_keys and role.recommended_orchestration_pattern == "SINGLE":
+            errors.append(
+                f"{role.role_key}: recommended_managed_role_keys require a non-SINGLE recommended_orchestration_pattern"
+            )
         if not role.mission:
             errors.append(f"{role.role_key}: mission is required")
         if not role.human_owner_role.strip():

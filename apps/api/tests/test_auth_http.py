@@ -804,6 +804,20 @@ class AuthHttpTests(unittest.TestCase):
         self.assertIsInstance(payload["database"]["size_bytes"], int)
         self.assertGreater(payload["database"]["size_bytes"], 0)
 
+    def test_public_settings_tolerate_missing_managed_tables(self) -> None:
+        missing_table = Base.metadata.tables["gmail_inbox_import_receipts"]
+        missing_table.drop(bind=self.engine, checkfirst=True)
+
+        try:
+            response = self.client.get("/settings/public")
+            payload = response.json()
+        finally:
+            missing_table.create(bind=self.engine, checkfirst=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["database"]["table_count"], len(Base.metadata.sorted_tables) - 1)
+        self.assertEqual(payload["database"]["record_count"], 0)
+
     def test_trade_writes_require_session_and_use_session_actor(self) -> None:
         self._seed_trade_reference_data()
         bootstrap = self._bootstrap_admin()

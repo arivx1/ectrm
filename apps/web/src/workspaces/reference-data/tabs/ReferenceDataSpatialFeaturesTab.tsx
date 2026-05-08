@@ -65,6 +65,7 @@ export function ReferenceDataSpatialFeaturesEditor({ controller, formatDate }: R
     setSpatialFeatureForm,
     spatialFeatureStandards,
     activeAssets,
+    activeRailRoutes,
     activeLocations,
     startCreateSpatialFeature,
     handleSaveSpatialFeature,
@@ -76,6 +77,8 @@ export function ReferenceDataSpatialFeaturesEditor({ controller, formatDate }: R
   const linkedEntityOptions =
     spatialFeatureForm.entity_type === 'ASSET'
       ? activeAssets.map((asset) => ({ code: asset.code, name: asset.name }))
+      : spatialFeatureForm.entity_type === 'RAIL_ROUTE'
+        ? activeRailRoutes.map((route) => ({ code: route.code, name: route.name }))
       : spatialFeatureForm.entity_type === 'LOCATION'
         ? activeLocations.map((location) => ({ code: location.code, name: location.name }))
         : []

@@ -10,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.reference_data.services.records import normalize_code
 from apps.api.app.domains.operations.services.actualizations import (
     build_delivery_actualization_projection,
 )
@@ -61,7 +62,10 @@ from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetai
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
+from apps.api.app.models.delivery_rail_detail import DeliveryRailDetail
 from apps.api.app.models.delivery_event import DeliveryEvent
+from apps.api.app.models.reference_rail_line import ReferenceRailLine
+from apps.api.app.models.reference_rail_route import ReferenceRailRoute
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_leg import TradeLeg
@@ -175,6 +179,15 @@ RESETTABLE_PIPELINE_DETAIL_FIELDS = {
     "pipeline_cycle_code",
     "nomination_reference",
 }
+RESETTABLE_RAIL_DETAIL_FIELDS = {
+    "rail_route_code",
+    "origin_station_code",
+    "destination_station_code",
+    "waybill_reference",
+    "release_number",
+    "unit_train_id",
+    "railcar_count",
+}
 RESETTABLE_POWER_DETAIL_FIELDS = {
     "market_operator",
     "pricing_node_code",
@@ -203,6 +216,15 @@ PIPELINE_DETAIL_FIELD_MAP = {
     "pipeline_contract_number": "contract_number",
     "pipeline_cycle_code": "cycle_code",
     "nomination_reference": "nomination_reference",
+}
+RAIL_DETAIL_FIELD_MAP = {
+    "rail_route_code": "rail_route_code",
+    "origin_station_code": "origin_station_code",
+    "destination_station_code": "destination_station_code",
+    "waybill_reference": "waybill_reference",
+    "release_number": "release_number",
+    "unit_train_id": "unit_train_id",
+    "railcar_count": "railcar_count",
 }
 POWER_DETAIL_FIELD_MAP = {
     "market_operator": "market_operator",
@@ -253,6 +275,9 @@ class DeliveryListContext:
     persisted_deliveries_by_id: dict[str, DeliveryObligation]
     logistics_details_by_id: dict[str, DeliveryLogisticsDetail]
     pipeline_details_by_id: dict[str, DeliveryPipelineDetail]
+    rail_details_by_id: dict[str, DeliveryRailDetail]
+    rail_routes_by_code: dict[str, ReferenceRailRoute]
+    rail_lines_by_code: dict[str, ReferenceRailLine]
     power_details_by_id: dict[str, DeliveryPowerDetail]
     delivery_events_by_id: dict[str, list[DeliveryEvent]]
     credit_hold_states: dict[str, TradeCreditHoldState]
@@ -474,6 +499,23 @@ def _normalize_optional_positive_int(value: object | None, *, label: str) -> int
     if normalized <= 0:
         raise ValueError(f"{label} must be greater than zero.")
     return normalized
+
+
+def _normalize_optional_active_rail_route_code(
+    db: Session,
+    value: object | None,
+) -> str | None:
+    normalized_text = _normalize_optional_text(value)
+    if normalized_text is None:
+        return None
+
+    normalized_code = normalize_code(normalized_text)
+    rail_route = db.get(ReferenceRailRoute, normalized_code)
+    if rail_route is None:
+        raise ValueError(f"Rail route '{normalized_code}' was not found in reference data.")
+    if not rail_route.is_active:
+        raise ValueError(f"Rail route '{normalized_code}' is inactive in reference data.")
+    return normalized_code
 
 
 def _validate_delivery_execution_status(value: object | None) -> DeliveryExecutionStatus:
@@ -875,6 +917,18 @@ def _pipeline_detail_defaults(
     }
 
 
+def _rail_detail_defaults() -> dict[str, tuple[object | None, DeliveryFieldSource]]:
+    return {
+        "rail_route_code": (None, DeliveryFieldSource.SYSTEM_GENERATED),
+        "origin_station_code": (None, DeliveryFieldSource.SYSTEM_GENERATED),
+        "destination_station_code": (None, DeliveryFieldSource.SYSTEM_GENERATED),
+        "waybill_reference": (None, DeliveryFieldSource.SYSTEM_GENERATED),
+        "release_number": (None, DeliveryFieldSource.SYSTEM_GENERATED),
+        "unit_train_id": (None, DeliveryFieldSource.SYSTEM_GENERATED),
+        "railcar_count": (None, DeliveryFieldSource.SYSTEM_GENERATED),
+    }
+
+
 def _power_detail_defaults(
     delivery: DeliveryObligation,
 ) -> dict[str, tuple[object | None, DeliveryFieldSource]]:
@@ -920,10 +974,11 @@ def _persisted_delivery_context_by_id(
     dict[str, DeliveryObligation],
     dict[str, DeliveryLogisticsDetail],
     dict[str, DeliveryPipelineDetail],
+    dict[str, DeliveryRailDetail],
     dict[str, DeliveryPowerDetail],
 ]:
     if not trade_ids:
-        return {}, {}, {}, {}
+        return {}, {}, {}, {}, {}
 
     persisted_deliveries = db.execute(
         select(DeliveryObligation)
@@ -931,13 +986,16 @@ def _persisted_delivery_context_by_id(
     ).scalars().all()
     delivery_ids = [delivery.delivery_id for delivery in persisted_deliveries]
     if not delivery_ids:
-        return {}, {}, {}, {}
+        return {}, {}, {}, {}, {}
 
     logistics_details = db.execute(
         select(DeliveryLogisticsDetail).where(DeliveryLogisticsDetail.delivery_id.in_(delivery_ids))
     ).scalars().all()
     pipeline_details = db.execute(
         select(DeliveryPipelineDetail).where(DeliveryPipelineDetail.delivery_id.in_(delivery_ids))
+    ).scalars().all()
+    rail_details = db.execute(
+        select(DeliveryRailDetail).where(DeliveryRailDetail.delivery_id.in_(delivery_ids))
     ).scalars().all()
     power_details = db.execute(
         select(DeliveryPowerDetail).where(DeliveryPowerDetail.delivery_id.in_(delivery_ids))
@@ -947,8 +1005,45 @@ def _persisted_delivery_context_by_id(
         {delivery.delivery_id: delivery for delivery in persisted_deliveries},
         {detail.delivery_id: detail for detail in logistics_details},
         {detail.delivery_id: detail for detail in pipeline_details},
+        {detail.delivery_id: detail for detail in rail_details},
         {detail.delivery_id: detail for detail in power_details},
     )
+
+
+def _rail_reference_context_by_code(
+    db: Session,
+    *,
+    rail_details_by_id: dict[str, DeliveryRailDetail],
+) -> tuple[dict[str, ReferenceRailRoute], dict[str, ReferenceRailLine]]:
+    rail_route_codes = sorted(
+        {
+            normalize_code(detail.rail_route_code)
+            for detail in rail_details_by_id.values()
+            if (detail.rail_route_code or "").strip()
+        }
+    )
+    if not rail_route_codes:
+        return {}, {}
+
+    rail_routes = db.execute(
+        select(ReferenceRailRoute).where(ReferenceRailRoute.code.in_(rail_route_codes))
+    ).scalars().all()
+    rail_routes_by_code = {route.code: route for route in rail_routes}
+
+    rail_line_codes = sorted(
+        {
+            route.rail_line_code
+            for route in rail_routes
+            if (route.rail_line_code or "").strip()
+        }
+    )
+    if not rail_line_codes:
+        return rail_routes_by_code, {}
+
+    rail_lines = db.execute(
+        select(ReferenceRailLine).where(ReferenceRailLine.code.in_(rail_line_codes))
+    ).scalars().all()
+    return rail_routes_by_code, {line.code: line for line in rail_lines}
 
 
 def _load_active_delivery_record(
@@ -986,10 +1081,12 @@ def _ensure_delivery_mode_detail_shape(
 ) -> tuple[
     DeliveryLogisticsDetail | None,
     DeliveryPipelineDetail | None,
+    DeliveryRailDetail | None,
     DeliveryPowerDetail | None,
 ]:
     logistics_detail = db.get(DeliveryLogisticsDetail, delivery.delivery_id)
     pipeline_detail = db.get(DeliveryPipelineDetail, delivery.delivery_id)
+    rail_detail = db.get(DeliveryRailDetail, delivery.delivery_id)
     power_detail = db.get(DeliveryPowerDetail, delivery.delivery_id)
     mode_family = _current_mode_family(delivery)
 
@@ -1021,10 +1118,38 @@ def _ensure_delivery_mode_detail_shape(
         ):
             _touch_audited_record(logistics_detail, actor_id=actor_id, reference_time=reference_time)
 
+        if _coerce_transport_mode(delivery.transport_mode, TransportMode.UNSPECIFIED) == TransportMode.RAIL:
+            rail_snapshot = _resolve_mode_detail_snapshot(
+                rail_detail,
+                defaults=_rail_detail_defaults(),
+            )
+            if rail_detail is None:
+                rail_detail = DeliveryRailDetail(
+                    delivery_id=delivery.delivery_id,
+                    created_at=reference_time,
+                    created_by=actor_id,
+                    updated_at=reference_time,
+                    updated_by=actor_id,
+                    version=1,
+                    **rail_snapshot,
+                )
+                db.add(rail_detail)
+            elif _apply_model_changes(
+                rail_detail,
+                rail_snapshot,
+            ):
+                _touch_audited_record(rail_detail, actor_id=actor_id, reference_time=reference_time)
+        elif rail_detail is not None:
+            db.delete(rail_detail)
+            rail_detail = None
+
     if mode_family == DeliveryModeFamily.NETWORK_FLOW:
         if logistics_detail is not None:
             db.delete(logistics_detail)
             logistics_detail = None
+        if rail_detail is not None:
+            db.delete(rail_detail)
+            rail_detail = None
         if power_detail is not None:
             db.delete(power_detail)
             power_detail = None
@@ -1056,6 +1181,9 @@ def _ensure_delivery_mode_detail_shape(
         if pipeline_detail is not None:
             db.delete(pipeline_detail)
             pipeline_detail = None
+        if rail_detail is not None:
+            db.delete(rail_detail)
+            rail_detail = None
         power_snapshot = _resolve_mode_detail_snapshot(
             power_detail,
             defaults=_power_detail_defaults(delivery),
@@ -1077,7 +1205,7 @@ def _ensure_delivery_mode_detail_shape(
         ):
             _touch_audited_record(power_detail, actor_id=actor_id, reference_time=reference_time)
 
-    return logistics_detail, pipeline_detail, power_detail
+    return logistics_detail, pipeline_detail, rail_detail, power_detail
 
 
 def _require_delivery_mode_family(
@@ -1094,10 +1222,123 @@ def _require_delivery_mode_family(
         )
 
 
+def _require_transport_mode(
+    delivery: DeliveryObligation,
+    *,
+    expected: TransportMode,
+    detail_label: str,
+) -> None:
+    current_transport_mode = _coerce_transport_mode(delivery.transport_mode, TransportMode.UNSPECIFIED)
+    if current_transport_mode != expected:
+        raise ValueError(
+            f"Delivery '{delivery.delivery_id}' is not a {detail_label} obligation. "
+            f"It is currently {current_transport_mode.value}. Update the transport mode first."
+        )
+
+
 def _days_until_delivery_start(delivery_start: date | None, reference_time: datetime) -> int | None:
     if delivery_start is None:
         return None
     return (delivery_start - reference_time.date()).days
+
+
+def _rail_scheduling_started(
+    *,
+    trade: Trade,
+    execution_status: str,
+) -> bool:
+    return trade.nomination_status in {
+        NominationStatus.SCHEDULED.value,
+        NominationStatus.NOMINATED.value,
+        NominationStatus.COMPLETED.value,
+    } or execution_status in {
+        DeliveryExecutionStatus.SCHEDULED.value,
+        DeliveryExecutionStatus.IN_PROGRESS.value,
+        DeliveryExecutionStatus.COMPLETED.value,
+    }
+
+
+def _build_rail_blockers(
+    *,
+    trade: Trade,
+    execution_status: str,
+    logistics_detail: DeliveryLogisticsDetail | None,
+    rail_detail: DeliveryRailDetail | None,
+    rail_route: ReferenceRailRoute | None,
+    rail_line: ReferenceRailLine | None,
+) -> list[str]:
+    blockers: list[str] = []
+    rail_route_code = _normalize_optional_text(
+        rail_detail.rail_route_code if rail_detail is not None else None
+    )
+    origin_station_code = _normalize_optional_text(
+        rail_detail.origin_station_code if rail_detail is not None else None
+    )
+    destination_station_code = _normalize_optional_text(
+        rail_detail.destination_station_code if rail_detail is not None else None
+    )
+    waybill_reference = _normalize_optional_text(
+        rail_detail.waybill_reference if rail_detail is not None else None
+    )
+    release_number = _normalize_optional_text(
+        rail_detail.release_number if rail_detail is not None else None
+    )
+    unit_train_id = _normalize_optional_text(
+        rail_detail.unit_train_id if rail_detail is not None else None
+    )
+    origin_location_code = _normalize_optional_text(
+        logistics_detail.origin_location_code if logistics_detail is not None else None
+    )
+    destination_location_code = _normalize_optional_text(
+        logistics_detail.destination_location_code if logistics_detail is not None else None
+    )
+
+    if rail_route_code is None:
+        blockers.append("Rail route selection is missing.")
+    elif rail_route is None:
+        blockers.append(f"Selected rail route '{rail_route_code}' does not exist in reference data.")
+    else:
+        if not rail_route.is_active:
+            blockers.append(f"Selected rail route '{rail_route.code}' is inactive in reference data.")
+        if rail_line is None:
+            blockers.append(f"Selected rail line '{rail_route.rail_line_code}' does not exist in reference data.")
+        elif not rail_line.is_active:
+            blockers.append(f"Selected rail line '{rail_line.code}' is inactive in reference data.")
+
+        if (
+            rail_route.origin_location_code
+            and origin_location_code
+            and origin_location_code != rail_route.origin_location_code
+        ):
+            blockers.append(
+                f"Rail origin location does not match selected route origin '{rail_route.origin_location_code}'."
+            )
+        if (
+            rail_route.destination_location_code
+            and destination_location_code
+            and destination_location_code != rail_route.destination_location_code
+        ):
+            blockers.append(
+                "Rail destination location does not match selected route destination "
+                f"'{rail_route.destination_location_code}'."
+            )
+
+    if origin_station_code is None:
+        blockers.append("Rail origin station is missing.")
+    if destination_station_code is None:
+        blockers.append("Rail destination station is missing.")
+
+    if _rail_scheduling_started(trade=trade, execution_status=execution_status) and waybill_reference is None:
+        blockers.append("Waybill reference is missing after rail scheduling started.")
+    if waybill_reference is not None and _rail_scheduling_started(
+        trade=trade,
+        execution_status=execution_status,
+    ) and release_number is None:
+        blockers.append("Release number is missing for the captured rail waybill.")
+    if unit_train_id is not None and rail_detail is not None and rail_detail.railcar_count is None:
+        blockers.append("Railcar count is missing for the captured unit train.")
+
+    return blockers
 
 
 def _build_blockers(
@@ -1110,7 +1351,12 @@ def _build_blockers(
     location_code: str | None,
     delivery_start: date | None,
     delivery_end: date | None,
+    execution_status: str,
     credit_hold_reason: str | None,
+    logistics_detail: DeliveryLogisticsDetail | None,
+    rail_detail: DeliveryRailDetail | None,
+    rail_route: ReferenceRailRoute | None,
+    rail_line: ReferenceRailLine | None,
     reference_time: datetime,
 ) -> list[str]:
     blockers: list[str] = []
@@ -1159,6 +1405,17 @@ def _build_blockers(
         blockers.append("Price unit is missing for scheduled power delivery.")
     if classification.mode_family == DeliveryModeFamily.LOGISTICS and classification.transport_mode == TransportMode.UNSPECIFIED:
         blockers.append("Explicit transport mode is missing for discrete logistics delivery.")
+    if classification.mode_family == DeliveryModeFamily.LOGISTICS and classification.transport_mode == TransportMode.RAIL:
+        blockers.extend(
+            _build_rail_blockers(
+                trade=trade,
+                execution_status=execution_status,
+                logistics_detail=logistics_detail,
+                rail_detail=rail_detail,
+                rail_route=rail_route,
+                rail_line=rail_line,
+            )
+        )
 
     return blockers
 
@@ -1329,6 +1586,9 @@ def _build_delivery_obligation(
     persisted_delivery: DeliveryObligation | None = None,
     logistics_detail: DeliveryLogisticsDetail | None = None,
     pipeline_detail: DeliveryPipelineDetail | None = None,
+    rail_detail: DeliveryRailDetail | None = None,
+    rail_route: ReferenceRailRoute | None = None,
+    rail_line: ReferenceRailLine | None = None,
     power_detail: DeliveryPowerDetail | None = None,
     delivery_events: list[DeliveryEvent] | None = None,
 ) -> DeliveryObligationOut:
@@ -1429,6 +1689,39 @@ def _build_delivery_obligation(
     if booked_at is None:
         booked_at = derived_booked_at
     classification = _classification_for_persisted_record(persisted_delivery, derived_classification)
+    rail_route_code = rail_detail.rail_route_code if rail_detail is not None else None
+    rail_route_code_source = (
+        _resolved_mode_detail_field_source(
+            rail_detail,
+            source_field_name="rail_route_code_source",
+            fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+        ).value
+        if rail_detail is not None
+        else None
+    )
+    rail_line_code = rail_route.rail_line_code if rail_route is not None else None
+    railroad_code = rail_line.railroad_code if rail_line is not None else None
+    rail_route_direction = rail_route.route_direction if rail_route is not None else None
+    rail_schedule_timezone = (
+        rail_route.schedule_timezone
+        if rail_route is not None and (rail_route.schedule_timezone or "").strip()
+        else rail_line.default_timezone
+        if rail_line is not None
+        else None
+    )
+    rail_service_calendar_code = rail_route.service_calendar_code if rail_route is not None else None
+    rail_placement_cutoff_time_local = (
+        rail_route.placement_cutoff_time_local if rail_route is not None else None
+    )
+    rail_release_cutoff_time_local = (
+        rail_route.release_cutoff_time_local if rail_route is not None else None
+    )
+    rail_placement_free_time_hours = (
+        rail_route.placement_free_time_hours if rail_route is not None else None
+    )
+    rail_release_free_time_hours = (
+        rail_route.release_free_time_hours if rail_route is not None else None
+    )
     blockers = _build_blockers(
         trade=trade,
         classification=classification,
@@ -1438,7 +1731,12 @@ def _build_delivery_obligation(
         location_code=location_code,
         delivery_start=delivery_start,
         delivery_end=delivery_end,
+        execution_status=execution_status,
         credit_hold_reason=credit_hold_reason,
+        logistics_detail=logistics_detail,
+        rail_detail=rail_detail,
+        rail_route=rail_route,
+        rail_line=rail_line,
         reference_time=reference_time,
     )
     status = _status_for_delivery(
@@ -1459,7 +1757,7 @@ def _build_delivery_obligation(
         workflow_items=scheduling_work_items,
     )
     persisted_updated_at = _coerce_utc(persisted_delivery.updated_at) if persisted_delivery is not None else None
-    detail_updated_at = _detail_updated_at(logistics_detail, pipeline_detail, power_detail)
+    detail_updated_at = _detail_updated_at(logistics_detail, pipeline_detail, rail_detail, power_detail)
     event_updated_at = _detail_updated_at(*(delivery_events or []))
     last_updated_at = max(
         candidate
@@ -1639,6 +1937,77 @@ def _build_delivery_obligation(
                 fallback=DeliveryFieldSource.SYSTEM_GENERATED,
             ).value
             if logistics_detail is not None
+            else None
+        ),
+        rail_route_code=rail_route_code,
+        rail_route_code_source=rail_route_code_source,
+        rail_line_code=rail_line_code,
+        railroad_code=railroad_code,
+        rail_route_direction=rail_route_direction,
+        rail_schedule_timezone=rail_schedule_timezone,
+        rail_service_calendar_code=rail_service_calendar_code,
+        rail_placement_cutoff_time_local=rail_placement_cutoff_time_local,
+        rail_release_cutoff_time_local=rail_release_cutoff_time_local,
+        rail_placement_free_time_hours=rail_placement_free_time_hours,
+        rail_release_free_time_hours=rail_release_free_time_hours,
+        origin_station_code=rail_detail.origin_station_code if rail_detail is not None else None,
+        origin_station_code_source=(
+            _resolved_mode_detail_field_source(
+                rail_detail,
+                source_field_name="origin_station_code_source",
+                fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+            ).value
+            if rail_detail is not None
+            else None
+        ),
+        destination_station_code=rail_detail.destination_station_code if rail_detail is not None else None,
+        destination_station_code_source=(
+            _resolved_mode_detail_field_source(
+                rail_detail,
+                source_field_name="destination_station_code_source",
+                fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+            ).value
+            if rail_detail is not None
+            else None
+        ),
+        waybill_reference=rail_detail.waybill_reference if rail_detail is not None else None,
+        waybill_reference_source=(
+            _resolved_mode_detail_field_source(
+                rail_detail,
+                source_field_name="waybill_reference_source",
+                fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+            ).value
+            if rail_detail is not None
+            else None
+        ),
+        release_number=rail_detail.release_number if rail_detail is not None else None,
+        release_number_source=(
+            _resolved_mode_detail_field_source(
+                rail_detail,
+                source_field_name="release_number_source",
+                fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+            ).value
+            if rail_detail is not None
+            else None
+        ),
+        unit_train_id=rail_detail.unit_train_id if rail_detail is not None else None,
+        unit_train_id_source=(
+            _resolved_mode_detail_field_source(
+                rail_detail,
+                source_field_name="unit_train_id_source",
+                fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+            ).value
+            if rail_detail is not None
+            else None
+        ),
+        railcar_count=rail_detail.railcar_count if rail_detail is not None else None,
+        railcar_count_source=(
+            _resolved_mode_detail_field_source(
+                rail_detail,
+                source_field_name="railcar_count_source",
+                fallback=DeliveryFieldSource.SYSTEM_GENERATED,
+            ).value
+            if rail_detail is not None
             else None
         ),
         receipt_location_code=pipeline_detail.receipt_location_code if pipeline_detail is not None else None,
@@ -1900,12 +2269,20 @@ def _load_delivery_context(
         persisted_deliveries_by_id,
         logistics_details_by_id,
         pipeline_details_by_id,
+        rail_details_by_id,
         power_details_by_id,
     ) = _persisted_delivery_context_by_id(db, trade_ids=trade_ids)
+    rail_routes_by_code, rail_lines_by_code = _rail_reference_context_by_code(
+        db,
+        rail_details_by_id=rail_details_by_id,
+    )
     return DeliveryListContext(
         persisted_deliveries_by_id=persisted_deliveries_by_id,
         logistics_details_by_id=logistics_details_by_id,
         pipeline_details_by_id=pipeline_details_by_id,
+        rail_details_by_id=rail_details_by_id,
+        rail_routes_by_code=rail_routes_by_code,
+        rail_lines_by_code=rail_lines_by_code,
         power_details_by_id=power_details_by_id,
         delivery_events_by_id=_delivery_events_by_delivery_id(db, delivery_ids=delivery_ids),
         credit_hold_states=build_trade_credit_hold_lookup(db, trade_ids=trade_ids),
@@ -1929,6 +2306,18 @@ def _build_delivery_list_item(
         if credit_hold_state is not None and credit_hold_state.hold_active
         else None
     )
+    rail_detail = context.rail_details_by_id.get(row.delivery_id)
+    rail_route_code = (
+        normalize_code(rail_detail.rail_route_code)
+        if rail_detail is not None and (rail_detail.rail_route_code or "").strip()
+        else None
+    )
+    rail_route = context.rail_routes_by_code.get(rail_route_code) if rail_route_code is not None else None
+    rail_line = (
+        context.rail_lines_by_code.get(rail_route.rail_line_code)
+        if rail_route is not None
+        else None
+    )
     return _build_delivery_obligation(
         trade=row.trade,
         leg=row.leg,
@@ -1939,6 +2328,9 @@ def _build_delivery_list_item(
         persisted_delivery=context.persisted_deliveries_by_id.get(row.delivery_id),
         logistics_detail=context.logistics_details_by_id.get(row.delivery_id),
         pipeline_detail=context.pipeline_details_by_id.get(row.delivery_id),
+        rail_detail=rail_detail,
+        rail_route=rail_route,
+        rail_line=rail_line,
         power_detail=context.power_details_by_id.get(row.delivery_id),
         delivery_events=context.delivery_events_by_id.get(row.delivery_id, []),
     )
@@ -1965,6 +2357,7 @@ DELIVERY_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
         "update",
         "update_logistics_detail",
         "update_pipeline_detail",
+        "update_rail_detail",
         "update_power_detail",
         "append_event",
     ),
@@ -1991,13 +2384,19 @@ DELIVERY_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
             OperationalResourceSurfaceAction(
                 key="update_logistics_detail",
                 label="Update Logistics Detail",
-                detail="Persist truck, vessel, or rail specific execution detail for the selected obligation.",
+                detail="Persist shared truck, vessel, barge, storage, or rail execution detail for the selected obligation.",
                 permission_message="Sign in to sync delivery projections and edit execution detail.",
             ),
             OperationalResourceSurfaceAction(
                 key="update_pipeline_detail",
                 label="Update Pipeline Detail",
                 detail="Persist pipeline scheduling and balancing detail for the selected obligation.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="update_rail_detail",
+                label="Update Rail Detail",
+                detail="Persist waybill, station, unit-train, and railcar summary detail for rail obligations.",
                 permission_message="Sign in to sync delivery projections and edit execution detail.",
             ),
             OperationalResourceSurfaceAction(
@@ -2421,7 +2820,7 @@ def update_delivery_logistics_detail(
         expected=DeliveryModeFamily.LOGISTICS,
         detail_label="logistics",
     )
-    logistics_detail, _pipeline_detail, _power_detail = _ensure_delivery_mode_detail_shape(
+    logistics_detail, _pipeline_detail, _rail_detail, _power_detail = _ensure_delivery_mode_detail_shape(
         db,
         delivery=delivery,
         actor_id=actor_id,
@@ -2484,7 +2883,7 @@ def update_delivery_pipeline_detail(
         expected=DeliveryModeFamily.NETWORK_FLOW,
         detail_label="pipeline",
     )
-    _logistics_detail, pipeline_detail, _power_detail = _ensure_delivery_mode_detail_shape(
+    _logistics_detail, pipeline_detail, _rail_detail, _power_detail = _ensure_delivery_mode_detail_shape(
         db,
         delivery=delivery,
         actor_id=actor_id,
@@ -2522,6 +2921,85 @@ def update_delivery_pipeline_detail(
     return delivery_out
 
 
+def update_delivery_rail_detail(
+    db: Session,
+    *,
+    delivery_id: str,
+    actor_id: str,
+    changes: dict[str, object | None],
+    now: Optional[datetime] = None,
+) -> DeliveryObligationOut:
+    requested_changes = dict(changes)
+    raw_changes = dict(changes)
+    reset_fields = _normalize_named_reset_fields(
+        raw_changes.pop("reset_fields", None),
+        allowed_fields=RESETTABLE_RAIL_DETAIL_FIELDS,
+        label="rail details",
+    )
+    if not raw_changes and not reset_fields:
+        raise ValueError("At least one rail detail field must be provided.")
+
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    delivery, _trade, _trade_leg = _load_active_delivery_record(db, delivery_id=delivery_id)
+    _require_delivery_mode_family(
+        delivery,
+        expected=DeliveryModeFamily.LOGISTICS,
+        detail_label="rail",
+    )
+    _require_transport_mode(
+        delivery,
+        expected=TransportMode.RAIL,
+        detail_label="rail",
+    )
+    _logistics_detail, _pipeline_detail, rail_detail, _power_detail = _ensure_delivery_mode_detail_shape(
+        db,
+        delivery=delivery,
+        actor_id=actor_id,
+        reference_time=reference_time,
+    )
+    if rail_detail is None:
+        raise LookupError(f"Rail details for delivery '{delivery_id}' could not be prepared.")
+
+    detail_changes: dict[str, object | None] = {}
+    defaults = _rail_detail_defaults()
+    for request_field_name in reset_fields:
+        model_field_name = RAIL_DETAIL_FIELD_MAP[request_field_name]
+        default_value, default_source = defaults[model_field_name]
+        detail_changes[model_field_name] = default_value
+        detail_changes[f"{model_field_name}_source"] = default_source.value
+
+    for request_field_name, raw_value in raw_changes.items():
+        model_field_name = RAIL_DETAIL_FIELD_MAP[request_field_name]
+        if request_field_name == "railcar_count":
+            detail_changes[model_field_name] = _normalize_optional_positive_int(
+                raw_value,
+                label="Railcar count",
+            )
+        elif request_field_name == "rail_route_code":
+            detail_changes[model_field_name] = _normalize_optional_active_rail_route_code(
+                db,
+                raw_value,
+            )
+        else:
+            detail_changes[model_field_name] = _normalize_optional_text(raw_value)
+        detail_changes[f"{model_field_name}_source"] = DeliveryFieldSource.MANUAL.value
+
+    if _apply_model_changes(rail_detail, detail_changes):
+        _touch_audited_record(rail_detail, actor_id=actor_id, reference_time=reference_time)
+
+    db.flush()
+    delivery_out = get_delivery_obligation_for_operations(db, delivery_id=delivery_id, now=reference_time)
+    _append_delivery_trade_audit(
+        db,
+        delivery=delivery_out,
+        actor_id=actor_id,
+        event_type="TradeDeliveryRailUpdated",
+        causation_id=f"delivery:{delivery_out.delivery_id}",
+        requested_changes=requested_changes,
+    )
+    return delivery_out
+
+
 def update_delivery_power_detail(
     db: Session,
     *,
@@ -2547,7 +3025,7 @@ def update_delivery_power_detail(
         expected=DeliveryModeFamily.POWER_SCHEDULE,
         detail_label="power",
     )
-    _logistics_detail, _pipeline_detail, power_detail = _ensure_delivery_mode_detail_shape(
+    _logistics_detail, _pipeline_detail, _rail_detail, power_detail = _ensure_delivery_mode_detail_shape(
         db,
         delivery=delivery,
         actor_id=actor_id,
@@ -2953,6 +3431,10 @@ def synchronize_delivery_obligations_from_trades(
         detail.delivery_id: detail
         for detail in db.execute(select(DeliveryPipelineDetail)).scalars().all()
     }
+    existing_rail = {
+        detail.delivery_id: detail
+        for detail in db.execute(select(DeliveryRailDetail)).scalars().all()
+    }
     existing_power = {
         detail.delivery_id: detail
         for detail in db.execute(select(DeliveryPowerDetail)).scalars().all()
@@ -3154,6 +3636,11 @@ def synchronize_delivery_obligations_from_trades(
                 if stale_pipeline is not None:
                     db.delete(stale_pipeline)
                     details_changed = True
+            if effective_classification.transport_mode != TransportMode.RAIL:
+                stale_rail = existing_rail.pop(delivery_id, None)
+                if stale_rail is not None:
+                    db.delete(stale_rail)
+                    details_changed = True
             if effective_classification.mode_family != DeliveryModeFamily.POWER_SCHEDULE:
                 stale_power = existing_power.pop(delivery_id, None)
                 if stale_power is not None:
@@ -3185,6 +3672,32 @@ def synchronize_delivery_obligations_from_trades(
                 ):
                     _touch_audited_record(logistics_detail, actor_id=actor_id, reference_time=reference_time)
                     details_changed = True
+
+                if effective_classification.transport_mode == TransportMode.RAIL:
+                    rail_detail = existing_rail.get(delivery_id)
+                    rail_snapshot = _resolve_mode_detail_snapshot(
+                        rail_detail,
+                        defaults=_rail_detail_defaults(),
+                    )
+                    if rail_detail is None:
+                        rail_detail = DeliveryRailDetail(
+                            delivery_id=delivery_id,
+                            created_at=reference_time,
+                            created_by=actor_id,
+                            updated_at=reference_time,
+                            updated_by=actor_id,
+                            version=1,
+                            **rail_snapshot,
+                        )
+                        db.add(rail_detail)
+                        existing_rail[delivery_id] = rail_detail
+                        details_changed = True
+                    elif _apply_model_changes(
+                        rail_detail,
+                        rail_snapshot,
+                    ):
+                        _touch_audited_record(rail_detail, actor_id=actor_id, reference_time=reference_time)
+                        details_changed = True
 
             if effective_classification.mode_family == DeliveryModeFamily.NETWORK_FLOW:
                 pipeline_detail = existing_pipeline.get(delivery_id)
@@ -3253,11 +3766,14 @@ def synchronize_delivery_obligations_from_trades(
             db.delete(existing_event)
         logistics_detail = existing_logistics.pop(obsolete_delivery.delivery_id, None)
         pipeline_detail = existing_pipeline.pop(obsolete_delivery.delivery_id, None)
+        rail_detail = existing_rail.pop(obsolete_delivery.delivery_id, None)
         power_detail = existing_power.pop(obsolete_delivery.delivery_id, None)
         if logistics_detail is not None:
             db.delete(logistics_detail)
         if pipeline_detail is not None:
             db.delete(pipeline_detail)
+        if rail_detail is not None:
+            db.delete(rail_detail)
         if power_detail is not None:
             db.delete(power_detail)
         db.delete(obsolete_delivery)

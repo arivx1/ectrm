@@ -31,6 +31,26 @@ same entrypoints.
 uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+If you are testing the first ChatGPT MCP scaffold locally, enable
+`MCP_ENABLED=true` in `apps/api/.env` before starting the API. The mounted MCP
+endpoint will then be available at:
+
+```text
+http://127.0.0.1:8000/mcp/
+```
+
+To test the new ChatGPT-ready OAuth bridge locally, also set:
+
+```text
+MCP_AUTH_MODE=oauth
+MCP_OAUTH_ISSUER_URL=http://127.0.0.1:8000/mcp
+MCP_OAUTH_SIGNING_SECRET=<strong-random-secret>
+```
+
+That enables the browser-side authorization handoff at `/mcp/login` and the
+debug identity probe at `/mcp/whoami`. The current login page supports ECTRM
+password sign-in and optional single-user auth only.
+
 ### Web
 
 ```bash

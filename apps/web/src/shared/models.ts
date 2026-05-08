@@ -225,6 +225,29 @@ export type DeliveryRecord = {
   load_reference_source: DeliveryFieldSource | null
   discharge_reference: string | null
   discharge_reference_source: DeliveryFieldSource | null
+  rail_route_code: string | null
+  rail_route_code_source: DeliveryFieldSource | null
+  rail_line_code: string | null
+  railroad_code: string | null
+  rail_route_direction: string | null
+  rail_schedule_timezone: string | null
+  rail_service_calendar_code: string | null
+  rail_placement_cutoff_time_local: string | null
+  rail_release_cutoff_time_local: string | null
+  rail_placement_free_time_hours: number | null
+  rail_release_free_time_hours: number | null
+  origin_station_code: string | null
+  origin_station_code_source: DeliveryFieldSource | null
+  destination_station_code: string | null
+  destination_station_code_source: DeliveryFieldSource | null
+  waybill_reference: string | null
+  waybill_reference_source: DeliveryFieldSource | null
+  release_number: string | null
+  release_number_source: DeliveryFieldSource | null
+  unit_train_id: string | null
+  unit_train_id_source: DeliveryFieldSource | null
+  railcar_count: number | null
+  railcar_count_source: DeliveryFieldSource | null
   receipt_location_code: string | null
   receipt_location_code_source: DeliveryFieldSource | null
   delivery_location_code: string | null
@@ -790,12 +813,67 @@ export type DocumentProcessorProviderStatusRecord = {
   setup_env_var: string
 }
 
+export type DocumentGmailInboxRuntimeSettingsRecord = {
+  enabled: boolean
+  configured: boolean
+  provider: 'gmail_api'
+  account_email: string | null
+  query: string
+  max_messages_per_import: number
+  auth_status: 'none' | 'partial' | 'configured'
+}
+
+export type DocumentGmailInboxAttachmentRecord = {
+  filename: string
+  mime_type: string
+  size_bytes: number
+  part_token: string
+  attachment_id: string | null
+  importable: boolean
+  already_imported: boolean
+}
+
+export type DocumentGmailInboxMessageSummaryRecord = {
+  message_id: string
+  thread_id: string | null
+  subject: string | null
+  sender: string | null
+  received_at: string | null
+  snippet: string | null
+  unread: boolean
+  attachment_count: number
+  pdf_attachment_count: number
+  imported_pdf_attachment_count: number
+}
+
+export type DocumentGmailInboxBrowseResultRecord = {
+  query: string
+  page_size: number
+  next_page_token: string | null
+  messages: DocumentGmailInboxMessageSummaryRecord[]
+}
+
+export type DocumentGmailInboxMessageDetailRecord = {
+  message_id: string
+  thread_id: string | null
+  subject: string | null
+  sender: string | null
+  to_recipients: string | null
+  received_at: string | null
+  snippet: string | null
+  unread: boolean
+  body_text: string | null
+  body_truncated: boolean
+  attachments: DocumentGmailInboxAttachmentRecord[]
+}
+
 export type DocumentProcessorRuntimeSettingsRecord = {
   enabled: boolean
   default_provider: 'openai' | 'anthropic' | 'google'
   effective_default_provider: 'openai' | 'anthropic' | 'google' | null
   configured_provider_count: number
   providers: DocumentProcessorProviderStatusRecord[]
+  gmail_inbox?: DocumentGmailInboxRuntimeSettingsRecord | null
 }
 
 export type ReferenceRecord = {
@@ -843,6 +921,19 @@ export type SpatialFeatureRecord = ReferenceRecord & {
   source_url?: string | null
   confidence?: number | null
   notes?: string | null
+}
+
+export type RailRouteRecord = ReferenceRecord & {
+  rail_line_code: string
+  origin_location_code?: string | null
+  destination_location_code?: string | null
+  service_calendar_code?: string | null
+  route_direction: string
+  schedule_timezone?: string | null
+  placement_cutoff_time_local?: string | null
+  release_cutoff_time_local?: string | null
+  placement_free_time_hours?: number | null
+  release_free_time_hours?: number | null
 }
 
 export type PriceIndexRecord = ReferenceRecord & {
@@ -966,7 +1057,7 @@ export const DEFAULT_SPATIAL_FEATURE_STANDARDS: SpatialFeatureStandards = {
   default_feature_kind: 'REGION',
   feature_kinds: ['AREA', 'BASIN', 'CORRIDOR', 'FOOTPRINT', 'PIPELINE', 'REGION', 'ROUTE', 'TERRITORY'],
   geometry_types: ['AREA', 'LINE', 'MIXED', 'POINT'],
-  entity_types: ['ASSET', 'LOCATION'],
+  entity_types: ['ASSET', 'LOCATION', 'RAIL_ROUTE'],
 }
 
 export type CounterpartyRecord = ReferenceRecord & {
@@ -1188,6 +1279,91 @@ export type ReportingOverview = {
   gross_net_volume: number
   exposure: ExposureSummaryRow[]
   activity: ActivitySummaryRow[]
+}
+
+export type TradingEodStatus = 'READY' | 'WARNING' | 'BLOCKED'
+
+export type TradingEodCheck = {
+  key: string
+  title: string
+  status: TradingEodStatus
+  owner_role: string
+  reason: string
+  supporting_metrics: Record<string, string | number | boolean>
+}
+
+export type TradingEodTradeSummary = {
+  active_trade_count: number
+  priced_active_count: number
+  pending_pricing_count: number
+  pending_settlement_count: number
+  tracked_book_count: number
+  total_active_volume: number
+}
+
+export type TradingEodPnlSummary = {
+  basis: string
+  methodology: string
+  total_pnl: number
+  realized_pnl: number
+  unrealized_pnl: number
+  priced_trade_count: number
+  realized_trade_count: number
+  unrealized_trade_count: number
+}
+
+export type TradingEodOperationsSummary = {
+  open_work_item_count: number
+  operations_queue_count: number
+  settlement_queue_count: number
+  attention_count: number
+  stale_pricing_count: number
+  incomplete_ops_data_count: number
+}
+
+export type TradingEodSettlementSummary = {
+  invoice_count: number
+  overdue_invoice_count: number
+  disputed_invoice_count: number
+  blocked_exception_count: number
+  warning_exception_count: number
+  payment_due_count: number
+  invoice_pending_count: number
+}
+
+export type TradingEodProjectionSummary = {
+  structural_issue_count: number
+  invariant_issue_count: number
+  impacted_trade_count: number
+}
+
+export type TradingEodAccrualSummary = {
+  row_count: number
+  lot_count: number
+  unbilled_amount_total: number
+  billed_uncollected_amount_total: number
+  net_open_amount_total: number
+  coverage_basis: string
+}
+
+export type TradingEodReport = {
+  generated_at: string
+  business_date: string
+  as_of: string
+  evaluation_timestamp: string
+  basis: string
+  status: TradingEodStatus
+  blocked_check_count: number
+  warning_check_count: number
+  ready_check_count: number
+  checks: TradingEodCheck[]
+  coverage_notes: string[]
+  trade_summary: TradingEodTradeSummary
+  pnl_summary: TradingEodPnlSummary
+  operations_summary: TradingEodOperationsSummary
+  settlement_summary: TradingEodSettlementSummary
+  projection_summary: TradingEodProjectionSummary
+  accrual_summary: TradingEodAccrualSummary
 }
 
 export type PnlHistoryPoint = {
@@ -2193,6 +2369,28 @@ export type AssistantMessageRole = 'user' | 'assistant'
 export type AssistantAgentStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'RETIRED'
 export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
 export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
+export type AssistantAgentSkillKey =
+  | 'market_intelligence'
+  | 'pretrade_structuring'
+  | 'risk_monitoring'
+  | 'trade_lifecycle_management'
+  | 'trade_governance'
+  | 'trade_operations_coordination'
+  | 'settlement_operations'
+  | 'movement_control'
+  | 'accrual_control'
+  | 'accounting_posting'
+  | 'counterparty_state_sync'
+  | 'confirmation_control'
+  | 'workflow_control'
+  | 'invoice_control'
+  | 'document_triage'
+  | 'reporting_reconciliation'
+  | 'logistics_coordination'
+  | 'fee_accrual_management'
+  | 'counterparty_outreach'
+  | 'agent_supervision'
+  | 'inter_agent_consultation'
 export type AssistantAgentRoleCatalogStatus = 'SEEDED' | 'TEMPLATE' | 'PHASE_1' | 'PHASE_2_PLUS'
 export type AssistantAgentProfileKind = 'CURATED' | 'ROLE_DERIVED' | 'CUSTOM'
 export type AssistantAgentProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
@@ -2208,6 +2406,7 @@ export const ASSISTANT_ACTION_TYPES = [
   'create_trade',
   'amend_trade',
   'cancel_trade',
+  'create_settlement_report_preset',
   'record_delivery_event',
   'reverse_delivery_event',
   'create_manual_accrual_entry',
@@ -2256,6 +2455,12 @@ export type AssistantProviderStatus = {
 
 export type AssistantToolDefinition = {
   name: string
+  description: string
+}
+
+export type AssistantAgentSkillDefinition = {
+  name: AssistantAgentSkillKey
+  label: string
   description: string
 }
 
@@ -2327,15 +2532,40 @@ export type AssistantRuntimeSettings = {
   default_provider: AssistantProvider
   effective_default_provider: AssistantProvider | null
   configured_provider_count: number
+  default_daily_token_allocation?: number
   providers: AssistantProviderStatus[]
+  voice_transcription: AssistantVoiceTranscriptionSettings
+  available_skills: AssistantAgentSkillDefinition[]
   available_tools: AssistantToolDefinition[]
   available_action_types: AssistantActionDefinition[]
+}
+
+export type AssistantVoiceTranscriptionSettings = {
+  enabled: boolean
+  provider: AssistantProvider
+  model: string
+  max_upload_bytes: number
+  requires_authentication: boolean
+  supported_content_types: string[]
+}
+
+export type AssistantVoiceTranscription = {
+  provider: AssistantProvider
+  model: string
+  text: string
 }
 
 export type AssistantMessage = {
   role: AssistantMessageRole
   content: string
 }
+
+export type AssistantAgentOrchestrationPattern =
+  | 'SINGLE'
+  | 'MANAGER'
+  | 'TRIAGE'
+  | 'PARALLEL'
+  | 'EVALUATOR'
 
 export type AssistantAgent = {
   agent_id: string
@@ -2351,9 +2581,14 @@ export type AssistantAgent = {
   human_owner_role?: string | null
   authority_ceiling?: AssistantAgentAuthorityLevel | null
   activation_notes?: string | null
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id?: string | null
+  managed_agent_ids: string[]
+  delegation_guidance?: string | null
   profile_request_id?: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
   daily_token_allocation?: number | null
@@ -2404,9 +2639,14 @@ export type AssistantAgentRevisionPayload = {
   human_owner_role?: string | null
   authority_ceiling?: AssistantAgentAuthorityLevel | null
   activation_notes?: string | null
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id?: string | null
+  managed_agent_ids: string[]
+  delegation_guidance?: string | null
   profile_request_id?: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
   daily_token_allocation?: number | null
@@ -2459,9 +2699,14 @@ export type AssistantAgentSelfUpdateDraft = {
   human_owner_role?: string | null
   authority_ceiling?: AssistantAgentAuthorityLevel | null
   activation_notes?: string | null
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id?: string | null
+  managed_agent_ids: string[]
+  delegation_guidance?: string | null
   profile_request_id?: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
   daily_token_allocation?: number | null
@@ -2489,6 +2734,7 @@ export type AssistantAgentRoleArchetype = {
   allowed_workspaces: ViewKey[]
   work_objects: string[]
   capability_ceiling: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   default_tools: string[]
   maximum_action_types: AssistantActionType[]
   authority_ceiling: AssistantAgentAuthorityLevel
@@ -2498,6 +2744,10 @@ export type AssistantAgentRoleArchetype = {
   required_eval_coverage: string[]
   eval_gate?: AssistantAgentEvalGate | null
   base_prompt_guidance: string[]
+  recommended_orchestration_pattern: AssistantAgentOrchestrationPattern
+  recommended_parent_role_keys: string[]
+  recommended_managed_role_keys: string[]
+  delegation_guidance: string[]
   current_profile_ids: string[]
 }
 

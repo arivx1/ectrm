@@ -19,7 +19,7 @@ SPATIAL_FEATURE_KINDS = frozenset(
 )
 DEFAULT_SPATIAL_FEATURE_KIND = "REGION"
 
-SPATIAL_FEATURE_ENTITY_TYPES = frozenset({"ASSET", "LOCATION"})
+SPATIAL_FEATURE_ENTITY_TYPES = frozenset({"ASSET", "LOCATION", "RAIL_ROUTE"})
 
 
 def _validation_error(detail: str) -> HTTPException:

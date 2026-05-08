@@ -136,6 +136,8 @@ function projectedStatusForEventType(
       return resumeStatusForDelivery(delivery)
     case 'CANCELLED':
       return 'CANCELLED'
+    default:
+      return 'PLANNED'
   }
 }
 

@@ -121,6 +121,29 @@ class DeliveryObligationOut(BaseModel):
     load_reference_source: Optional[str] = None
     discharge_reference: Optional[str] = None
     discharge_reference_source: Optional[str] = None
+    rail_route_code: Optional[str] = None
+    rail_route_code_source: Optional[str] = None
+    rail_line_code: Optional[str] = None
+    railroad_code: Optional[str] = None
+    rail_route_direction: Optional[str] = None
+    rail_schedule_timezone: Optional[str] = None
+    rail_service_calendar_code: Optional[str] = None
+    rail_placement_cutoff_time_local: Optional[str] = None
+    rail_release_cutoff_time_local: Optional[str] = None
+    rail_placement_free_time_hours: Optional[int] = None
+    rail_release_free_time_hours: Optional[int] = None
+    origin_station_code: Optional[str] = None
+    origin_station_code_source: Optional[str] = None
+    destination_station_code: Optional[str] = None
+    destination_station_code_source: Optional[str] = None
+    waybill_reference: Optional[str] = None
+    waybill_reference_source: Optional[str] = None
+    release_number: Optional[str] = None
+    release_number_source: Optional[str] = None
+    unit_train_id: Optional[str] = None
+    unit_train_id_source: Optional[str] = None
+    railcar_count: Optional[int] = None
+    railcar_count_source: Optional[str] = None
     receipt_location_code: Optional[str] = None
     receipt_location_code_source: Optional[str] = None
     delivery_location_code: Optional[str] = None
@@ -237,6 +260,17 @@ class DeliveryPipelineDetailUpdate(BaseModel):
     pipeline_contract_number: Optional[str] = None
     pipeline_cycle_code: Optional[str] = None
     nomination_reference: Optional[str] = None
+    reset_fields: Optional[list[str]] = None
+
+
+class DeliveryRailDetailUpdate(BaseModel):
+    rail_route_code: Optional[str] = None
+    origin_station_code: Optional[str] = None
+    destination_station_code: Optional[str] = None
+    waybill_reference: Optional[str] = None
+    release_number: Optional[str] = None
+    unit_train_id: Optional[str] = None
+    railcar_count: Optional[int] = None
     reset_fields: Optional[list[str]] = None
 
 

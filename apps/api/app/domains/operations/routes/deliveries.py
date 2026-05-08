@@ -15,6 +15,7 @@ from apps.api.app.domains.operations.services.shipments import update_delivery_l
 from apps.api.app.domains.operations.services.shipments import update_delivery_obligation
 from apps.api.app.domains.operations.services.shipments import update_delivery_pipeline_detail
 from apps.api.app.domains.operations.services.shipments import update_delivery_power_detail
+from apps.api.app.domains.operations.services.shipments import update_delivery_rail_detail
 from apps.api.app.schemas.shipment import DeliveryEventReverseWrite
 from apps.api.app.schemas.shipment import DeliveryEventWrite
 from apps.api.app.schemas.shipment import DeliveryLogisticsDetailUpdate
@@ -22,6 +23,7 @@ from apps.api.app.schemas.shipment import DeliveryObligationOut
 from apps.api.app.schemas.shipment import DeliveryObligationUpdate
 from apps.api.app.schemas.shipment import DeliveryPipelineDetailUpdate
 from apps.api.app.schemas.shipment import DeliveryPowerDetailUpdate
+from apps.api.app.schemas.shipment import DeliveryRailDetailUpdate
 from apps.api.app.schemas.shipment import DeliverySyncResultOut
 from .framework import execute_operational_mutation
 from .framework import execute_operational_patch_mutation
@@ -189,6 +191,28 @@ def patch_delivery_pipeline_details(
     )
 
 
+@router.patch("/{delivery_id}/rail-details", response_model=DeliveryObligationOut)
+def patch_delivery_rail_details(
+    delivery_id: str,
+    payload: DeliveryRailDetailUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DeliveryObligationOut:
+    return execute_operational_patch_mutation(
+        DELIVERY_MUTATION_SPEC,
+        payload,
+        request,
+        db,
+        lambda actor, changes: update_delivery_rail_detail(
+            db,
+            delivery_id=delivery_id,
+            actor_id=actor.actor_id,
+            changes=changes,
+        ),
+        empty_detail="At least one rail detail field must be provided.",
+    )
+
+
 @router.patch("/{delivery_id}/power-details", response_model=DeliveryObligationOut)
 def patch_delivery_power_details(
     delivery_id: str,
@@ -220,5 +244,6 @@ __all__ = [
     "patch_delivery",
     "patch_delivery_logistics_details",
     "patch_delivery_pipeline_details",
+    "patch_delivery_rail_details",
     "patch_delivery_power_details",
 ]

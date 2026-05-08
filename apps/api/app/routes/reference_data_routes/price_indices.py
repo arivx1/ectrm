@@ -18,6 +18,7 @@ from apps.api.app.schemas.reference_data import (
 
 from .common import (
     ensure_active_commodity_exists,
+    ensure_active_calendar_exists,
     ensure_active_currency_exists,
     ensure_active_location_exists,
     ensure_active_unit_exists,
@@ -47,7 +48,11 @@ def _build_price_index_create_values(db: Session, payload: PriceIndexCreate) -> 
             if payload.location_code
             else None
         ),
-        "calendar_code": clean_optional_code(payload.calendar_code),
+        "calendar_code": (
+            ensure_active_calendar_exists(db, payload.calendar_code)
+            if payload.calendar_code
+            else None
+        ),
     }
 
 
@@ -77,6 +82,8 @@ def _validate_price_index_update(db: Session, payload: PriceIndexUpdate) -> None
         ensure_active_unit_exists(db, payload.unit_code)
     if "location_code" in payload.model_fields_set and payload.location_code:
         ensure_active_location_exists(db, payload.location_code)
+    if "calendar_code" in payload.model_fields_set and payload.calendar_code:
+        ensure_active_calendar_exists(db, payload.calendar_code)
 
 
 PRICE_INDEX_SPEC = ReferenceDataCrudSpec(

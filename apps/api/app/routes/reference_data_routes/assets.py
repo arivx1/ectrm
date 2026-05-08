@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reference_data.services.asset_map_scope import (
+    AssetMapScopeFilters,
+    summarize_asset_map_scope,
+)
 from apps.api.app.domains.reference_data.services.asset_standards import (
     DEFAULT_ASSET_CLASS,
     DEFAULT_ASSET_REALITY,
@@ -27,6 +31,7 @@ from apps.api.app.domains.reference_data.services.spatial_geometry import normal
 from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.schemas.reference_data import (
     AssetCreate,
+    AssetMapScopeSummaryOut,
     AssetOut,
     AssetStandardsOut,
     AssetStatusUpdate,
@@ -266,6 +271,33 @@ def list_assets(
             ReferenceAsset.source_url,
             ReferenceAsset.notes,
         ],
+    )
+
+
+@router.get("/assets/map-scope-summary", response_model=AssetMapScopeSummaryOut)
+def get_asset_map_scope_summary(
+    hidden_geography: Annotated[list[str] | None, Query()] = None,
+    selected_country_code: Optional[str] = None,
+    selected_subdivision_code: Optional[str] = None,
+    hidden_activity: Annotated[list[str] | None, Query()] = None,
+    hidden_subtype: Annotated[list[str] | None, Query()] = None,
+    db: Session = Depends(get_db),
+) -> AssetMapScopeSummaryOut:
+    summary = summarize_asset_map_scope(
+        db,
+        filters=AssetMapScopeFilters(
+            hidden_geographies=frozenset(hidden_geography or []),
+            selected_country_code=selected_country_code,
+            selected_subdivision_code=selected_subdivision_code,
+            hidden_activities=frozenset(hidden_activity or []),
+            hidden_subtypes=frozenset(hidden_subtype or []),
+        ),
+    )
+    return AssetMapScopeSummaryOut(
+        total_count=summary.total_count,
+        total_map_ready_count=summary.total_map_ready_count,
+        filtered_total_count=summary.filtered_total_count,
+        filtered_map_ready_count=summary.filtered_map_ready_count,
     )
 
 

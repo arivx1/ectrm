@@ -14,6 +14,11 @@ from apps.api.app.domains.assistant.services.action_catalog import ASSISTANT_ACT
 from apps.api.app.domains.assistant.services.policies import evaluate_tool_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptEnvelope
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
+from apps.api.app.domains.assistant.services.skills import (
+    INTER_AGENT_CONSULTATION_SKILL,
+    list_agent_skill_definitions,
+    list_agent_skill_keys,
+)
 from apps.api.app.domains.assistant.services.tools import (
     AssistantToolCallTrace,
     AssistantToolDefinition,
@@ -23,12 +28,16 @@ from apps.api.app.domains.assistant.services.tools import (
     build_tool_definitions,
     json_dumps,
 )
+from apps.api.app.domains.assistant.services.voice import (
+    build_assistant_voice_transcription_settings,
+)
 from apps.api.app.schemas.assistant import (
     AssistantActionDefinitionOut,
     AssistantActionType,
     AssistantAgentBuildRequest,
     AssistantAgentBuildSuggestionOut,
     AssistantAgentCapability,
+    AssistantAgentSkillKey,
     AssistantAgentScope,
     AssistantAgentSelfUpdateSuggestionOut,
     AssistantMessageIn,
@@ -104,9 +113,23 @@ class AssistantServiceError(Exception):
 
 
 class AssistantService:
-    def __init__(self, db: Session | None = None, *, actor_id: str | None = None) -> None:
+    def __init__(
+        self,
+        db: Session | None = None,
+        *,
+        actor_id: str | None = None,
+        delegation_depth: int = 0,
+    ) -> None:
         self._tool_definitions = build_tool_definitions()
-        self._tool_service = AssistantToolService(db, actor_id=actor_id) if db is not None else None
+        self._tool_service = (
+            AssistantToolService(
+                db,
+                actor_id=actor_id,
+                delegation_depth=delegation_depth,
+            )
+            if db is not None
+            else None
+        )
 
     async def generate_response(
         self,
@@ -114,6 +137,8 @@ class AssistantService:
         agent_definition: ManagedAssistantAgent | None = None,
         prompt_context: AssistantPromptEnvelope | None = None,
     ) -> AssistantPromptResponse:
+        if self._tool_service is not None:
+            self._tool_service.set_caller_agent(agent_definition)
         provider, model, warnings = resolve_effective_runtime(payload, agent_definition)
         tool_definitions, tool_warnings = self._resolve_tooling(payload, agent_definition)
         system_prompt = (
@@ -217,6 +242,7 @@ class AssistantService:
                         },
                         "workspace_options": list(get_args(AssistantWorkspace)),
                         "capability_options": list(get_args(AssistantAgentCapability)),
+                        "skill_options": list(list_agent_skill_keys()),
                         "action_type_options": list(get_args(AssistantActionType)),
                         "tool_catalog": [
                             {
@@ -260,6 +286,18 @@ class AssistantService:
                     "OpenAI suggested live tools without the READ capability, so the tool allowlist was cleared."
                 )
             generated_payload["allowed_tools"] = []
+        if (
+            {"consult_managed_agent", "enlist_managed_agent"} & set(generated_payload.get("allowed_tools", []))
+            and INTER_AGENT_CONSULTATION_SKILL not in set(generated_payload.get("skills", []))
+        ):
+            warnings.append(
+                "OpenAI suggested inter-agent coordination tools without the inter_agent_consultation skill, so those tools were removed."
+            )
+            generated_payload["allowed_tools"] = [
+                tool_name
+                for tool_name in generated_payload.get("allowed_tools", [])
+                if tool_name not in {"consult_managed_agent", "enlist_managed_agent"}
+            ]
         if "ACTION" not in {capability.upper() for capability in generated_payload.get("capabilities", [])}:
             if generated_payload.get("allowed_action_types"):
                 warnings.append(
@@ -281,6 +319,7 @@ class AssistantService:
             model=runtime_model,
             allowed_workspaces=generated_payload["allowed_workspaces"],
             capabilities=generated_payload["capabilities"],
+            skills=generated_payload.get("skills", []),
             allowed_tools=generated_payload["allowed_tools"],
             allowed_action_types=generated_payload["allowed_action_types"],
             system_prompt=str(generated_payload["system_prompt"]),
@@ -327,6 +366,7 @@ class AssistantService:
                             "authority_ceiling": agent_definition.authority_ceiling,
                             "allowed_workspaces": list(agent_definition.allowed_workspaces),
                             "capabilities": list(agent_definition.capabilities),
+                            "skills": list(agent_definition.skills),
                             "allowed_tools": list(agent_definition.allowed_tools),
                             "allowed_action_types": list(agent_definition.allowed_action_types),
                             "system_prompt": agent_definition.system_prompt,
@@ -357,6 +397,7 @@ class AssistantService:
         allowed_tools = list(generated_payload.get("allowed_tools", []))
         allowed_action_types = list(generated_payload.get("allowed_action_types", []))
         capabilities = [str(capability) for capability in generated_payload.get("capabilities", [])]
+        skills = [cast(AssistantAgentSkillKey, str(skill)) for skill in generated_payload.get("skills", [])]
 
         if "READ" not in {capability.upper() for capability in capabilities}:
             if allowed_tools:
@@ -374,6 +415,18 @@ class AssistantService:
             allowed_tools = [
                 tool_name for tool_name in allowed_tools if tool_name in set(published_tool_names)
             ]
+        if (
+            {"consult_managed_agent", "enlist_managed_agent"} & set(allowed_tools)
+            and INTER_AGENT_CONSULTATION_SKILL not in set(skills)
+        ):
+            warnings.append(
+                "The self-update draft removed inter_agent_consultation, so the inter-agent coordination tools were cleared."
+            )
+            allowed_tools = [
+                tool_name
+                for tool_name in allowed_tools
+                if tool_name not in {"consult_managed_agent", "enlist_managed_agent"}
+            ]
         if "ACTION" not in {capability.upper() for capability in capabilities}:
             if allowed_action_types:
                 warnings.append(
@@ -385,6 +438,7 @@ class AssistantService:
             description=str(generated_payload["description"]),
             allowed_workspaces=generated_payload["allowed_workspaces"],
             capabilities=capabilities,
+            skills=skills,
             allowed_tools=allowed_tools,
             allowed_action_types=allowed_action_types,
             system_prompt=str(generated_payload["system_prompt"]),
@@ -480,7 +534,7 @@ class AssistantService:
                 previous_response_id = _require_response_id(response_payload, provider.label)
                 current_input = []
                 for pending_call in pending_calls:
-                    result, trace = self._execute_pending_tool_call(pending_call)
+                    result, trace = await self._execute_pending_tool_call(pending_call)
                     tool_calls.append(trace)
                     current_input.append(
                         {
@@ -606,7 +660,7 @@ class AssistantService:
 
                 tool_result_blocks: list[dict[str, Any]] = []
                 for pending_call in pending_calls:
-                    result, trace = self._execute_pending_tool_call(pending_call)
+                    result, trace = await self._execute_pending_tool_call(pending_call)
                     tool_calls.append(trace)
                     tool_result_block: dict[str, Any] = {
                         "type": "tool_result",
@@ -765,7 +819,7 @@ class AssistantService:
 
                 tool_response_parts: list[dict[str, Any]] = []
                 for pending_call in pending_calls:
-                    result, trace = self._execute_pending_tool_call(pending_call)
+                    result, trace = await self._execute_pending_tool_call(pending_call)
                     tool_calls.append(trace)
                     tool_response_parts.append(
                         {
@@ -864,7 +918,7 @@ class AssistantService:
         )
         return [], warnings
 
-    def _execute_pending_tool_call(
+    async def _execute_pending_tool_call(
         self,
         pending_call: PendingToolCall,
     ) -> tuple[AssistantToolExecutionResult, AssistantToolCallTrace]:
@@ -905,7 +959,7 @@ class AssistantService:
             return result, trace
 
         try:
-            return self._tool_service.execute_tool(pending_call.tool_name, pending_call.arguments)
+            return await self._tool_service.execute_tool_async(pending_call.tool_name, pending_call.arguments)
         except AssistantToolServiceError as exc:
             result = AssistantToolExecutionResult(
                 output={
@@ -929,11 +983,13 @@ def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
     provider_configs = list_provider_configs()
     effective_default_provider = determine_effective_default_provider(provider_configs)
     available_tools = build_tool_definitions()
+    available_skills = list_agent_skill_definitions()
     return AssistantRuntimeSettingsOut(
         enabled=bool(settings.ASSISTANT_ENABLED and effective_default_provider),
         default_provider=normalize_default_provider(settings.ASSISTANT_DEFAULT_PROVIDER),
         effective_default_provider=effective_default_provider,
         configured_provider_count=sum(1 for config in provider_configs if config.configured),
+        default_daily_token_allocation=settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION,
         providers=[
             AssistantProviderStatusOut(
                 provider=config.provider,
@@ -947,6 +1003,8 @@ def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
             )
             for config in provider_configs
         ],
+        voice_transcription=build_assistant_voice_transcription_settings(),
+        available_skills=[definition.to_out() for definition in available_skills],
         available_tools=[
             {"name": tool.name, "description": tool.description}
             for tool in available_tools
@@ -1094,7 +1152,17 @@ def build_system_prompt(
     base_prompt = settings.ASSISTANT_SYSTEM_PROMPT.strip()
     if base_prompt:
         prompt_parts.append(base_prompt)
+    prompt_parts.append(
+        "If the user asks how managed agents are constructed, specialized, or related to each other, "
+        "inspect the roster with list_managed_agents or get_managed_agent_profile instead of guessing."
+    )
+    prompt_parts.append(
+        "If the user asks how ECTRM is wired, where logic lives, what the database schema looks like, or which "
+        "routes and workspaces exist, inspect get_application_catalog, get_data_schema_catalog, search_codebase, "
+        "or read_codebase_file instead of guessing."
+    )
     if agent_definition is not None:
+        skill_list = ", ".join(agent_definition.skills) if agent_definition.skills else "none"
         allowed_tools = ", ".join(agent_definition.allowed_tools) if agent_definition.allowed_tools else "all published read-only tools"
         allowed_action_types = (
             ", ".join(agent_definition.allowed_action_types)
@@ -1109,12 +1177,36 @@ def build_system_prompt(
             "Managed agent profile:\n"
             f"- id: {agent_definition.agent_id}\n"
             f"- name: {agent_definition.name}\n"
+            f"- role: {agent_definition.role_key or 'custom'}\n"
             f"- scope: {agent_definition.scope}\n"
+            f"- build recipe: role + skills + capabilities + workspaces + live tools + governed actions + system prompt\n"
             f"- capabilities: {', '.join(agent_definition.capabilities)}\n"
+            f"- skills: {skill_list}\n"
             f"- allowed workspaces: {', '.join(agent_definition.allowed_workspaces)}\n"
             f"- allowed live tools: {allowed_tools}\n"
-            f"- allowed actions: {allowed_action_types}"
+            f"- allowed actions: {allowed_action_types}\n"
+            f"- orchestration pattern: {agent_definition.orchestration_pattern}"
         )
+        if agent_definition.parent_agent_id:
+            prompt_parts.append(f"Hierarchy: this agent reports to {agent_definition.parent_agent_id}.")
+        if agent_definition.managed_agent_ids:
+            prompt_parts.append(
+                "Hierarchy: this agent may consult only these managed agents: "
+                f"{', '.join(agent_definition.managed_agent_ids)}."
+            )
+        if agent_definition.delegation_guidance:
+            prompt_parts.append(f"Delegation guidance: {agent_definition.delegation_guidance}")
+        if "consult_managed_agent" in set(agent_definition.allowed_tools):
+            prompt_parts.append(
+                "Use consult_managed_agent for advisory-only specialist input when you need another managed "
+                "agent's judgment but will keep the final synthesis and action ownership here."
+            )
+        if "enlist_managed_agent" in set(agent_definition.allowed_tools):
+            prompt_parts.append(
+                "Use enlist_managed_agent when a configured managed agent should own a bounded subtask and may "
+                "need to stage or execute a governed action inside its own lane. Keep the final user-facing "
+                "synthesis and accountability here."
+            )
         prompt_parts.append(f"Agent instructions:\n{agent_definition.system_prompt}")
     if payload.workspace:
         prompt_parts.append(f"Current workspace: {payload.workspace}.")
@@ -1129,9 +1221,11 @@ def _build_openai_agent_builder_instructions() -> str:
             "You are designing a managed assistant agent for the ECTRM operator console.",
             "Return only JSON that matches the requested schema.",
             "Generate a concise agent_id using lowercase letters, numbers, and hyphens.",
+            "Choose the smallest explicit skill set that makes the agent's domain specialization obvious to an operator.",
             "Choose the smallest workspace list and live-tool subset that still lets the agent do its job well.",
             "If the role does not need live reads, omit READ and return an empty allowed_tools array.",
             "If the role needs all published read-only tools, keep READ and still return an empty allowed_tools array.",
+            "Only include consult_managed_agent or enlist_managed_agent when the skills array also includes inter_agent_consultation.",
             "If the role does not need approval-gated mutations, omit ACTION and return an empty allowed_action_types array.",
             "If the role needs all published approval-gated mutations, keep ACTION and still return an empty allowed_action_types array.",
             "Write a concrete system_prompt that explains mission, evidence standards, style, and guardrails.",
@@ -1146,6 +1240,7 @@ def _build_openai_agent_self_update_instructions() -> str:
             "You are revising a managed assistant agent for the ECTRM operator console after it learned from mistakes.",
             "Return only JSON that matches the requested schema.",
             "Preserve or narrow the current agent scope. Never expand workspaces, capabilities, live tools, or governed actions.",
+            "Preserve or narrow the current explicit skills. Do not introduce new skills in a self-update draft.",
             "Focus on safer behavior: clearer evidence standards, stronger stop conditions, narrower permissions, and better reviewer context.",
             "Do not change immutable identity or governance metadata such as agent_id, provider, model, scope, role ownership, or authority ceiling.",
             "If recent mistakes involve unsupported or low-quality actions, prefer narrowing ACTION scope or removing ACTION entirely.",
@@ -1196,6 +1291,7 @@ def _collect_agent_builder_warnings(
 def _build_openai_agent_self_update_schema(agent_definition: ManagedAssistantAgent) -> dict[str, Any]:
     current_workspaces = list(agent_definition.allowed_workspaces)
     current_capabilities = list(agent_definition.capabilities)
+    current_skills = list(agent_definition.skills)
     current_tools = list(agent_definition.allowed_tools)
     current_action_types = list(agent_definition.allowed_action_types)
     return {
@@ -1226,6 +1322,20 @@ def _build_openai_agent_self_update_schema(agent_definition: ManagedAssistantAge
                     "type": "string",
                     "enum": current_capabilities,
                 },
+            },
+            "skills": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": len(current_skills),
+                "uniqueItems": True,
+                "items": (
+                    {
+                        "type": "string",
+                        "enum": current_skills,
+                    }
+                    if current_skills
+                    else {"type": "string"}
+                ),
             },
             "allowed_tools": {
                 "type": "array",
@@ -1276,6 +1386,7 @@ def _build_openai_agent_self_update_schema(agent_definition: ManagedAssistantAge
             "description",
             "allowed_workspaces",
             "capabilities",
+            "skills",
             "allowed_tools",
             "allowed_action_types",
             "system_prompt",
@@ -1338,6 +1449,15 @@ def _build_openai_agent_builder_schema(published_tool_names: list[str]) -> dict[
                     "enum": list(get_args(AssistantAgentCapability)),
                 },
             },
+            "skills": {
+                "type": "array",
+                "maxItems": 24,
+                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "enum": list(list_agent_skill_keys()),
+                },
+            },
             "allowed_tools": {
                 "type": "array",
                 "maxItems": 16,
@@ -1366,6 +1486,7 @@ def _build_openai_agent_builder_schema(published_tool_names: list[str]) -> dict[
             "scope",
             "allowed_workspaces",
             "capabilities",
+            "skills",
             "allowed_tools",
             "allowed_action_types",
             "system_prompt",

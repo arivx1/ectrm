@@ -6,6 +6,7 @@ import {
   loadExposureSummary,
   loadPnlHistoryReport,
   loadReportingOverview,
+  loadTradingEodReport,
 } from '../../entities/reports/api'
 import { appConfig } from '../../shared/config'
 import { formatCurrencyAmount } from '../../shared/format'
@@ -22,6 +23,7 @@ import type {
   PortfolioRecord,
   ReportingOverview,
   Trade,
+  TradingEodReport,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { matchesTextFilter } from '../../shared/filtering'
@@ -32,6 +34,7 @@ import { TileLayout } from '../../shared/ui/TileLayout'
 import { reportErrorState } from './reportTileScaffold'
 import { buildSettlementReportTiles } from './settlementReportTiles'
 import { ALL_FILTER_VALUE } from './settlementReportLens'
+import { TradingEodSummaryPanel } from './TradingEodSummaryPanel'
 import {
   deltaTone,
   formatCodeLabel,
@@ -51,6 +54,7 @@ type ReportsWorkspaceProps = {
   formatMoney: (value: number | null) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
+  onOpenPrompt: () => void
   onOpenSettlement: () => void
   onOpenTrade: (tradeId: string) => void
 }
@@ -322,12 +326,14 @@ export function ReportsWorkspace({
   formatMoney,
   formatDate,
   formatDateOnly,
+  onOpenPrompt,
   onOpenSettlement,
   onOpenTrade,
 }: ReportsWorkspaceProps) {
   const reportAccessToken = authSession?.accessToken
   const hasGlobalFilter = globalFilter.trim().length > 0
   const [overview, setOverview] = useState<ReportingOverview | null>(null)
+  const [tradingEod, setTradingEod] = useState<TradingEodReport | null>(null)
   const [exposureSummary, setExposureSummary] = useState<ExposureSummaryRow[]>([])
   const [activitySummary, setActivitySummary] = useState<ActivitySummaryRow[]>([])
   const [pnlHistory, setPnlHistory] = useState<PnlHistoryReport | null>(null)
@@ -356,11 +362,13 @@ export function ReportsWorkspace({
       try {
         const [
           nextOverview,
+          nextTradingEod,
           nextExposureSummary,
           nextActivitySummary,
           nextPnlHistory,
         ] = await Promise.all([
           loadReportingOverview(appConfig.apiBase, reportAccessToken),
+          loadTradingEodReport(appConfig.apiBase, {}, reportAccessToken),
           loadExposureSummary(appConfig.apiBase, reportAccessToken),
           loadActivitySummary(appConfig.apiBase, reportAccessToken),
           loadPnlHistoryReport(appConfig.apiBase, {}, reportAccessToken),
@@ -371,6 +379,7 @@ export function ReportsWorkspace({
         }
 
         setOverview(nextOverview)
+        setTradingEod(nextTradingEod)
         setExposureSummary(nextExposureSummary)
         setActivitySummary(nextActivitySummary)
         setPnlHistory(nextPnlHistory)
@@ -809,6 +818,38 @@ export function ReportsWorkspace({
             <div className="empty-state">
               <strong>No reporting overview</strong>
               <p>The reporting service has not produced an overview yet.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'reports-trading-eod',
+          eyebrow: 'Close',
+          title: 'Trading EOD',
+          description: 'Desk-wide end-of-day posture rolled up from pricing, workflow, settlement, projection-integrity, and accrual evidence.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: loading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : error ? (
+            reportErrorState(error)
+          ) : tradingEod ? (
+            <TradingEodSummaryPanel
+              report={tradingEod}
+              hasGlobalFilter={hasGlobalFilter}
+              formatDate={formatDate}
+              formatDateOnly={formatDateOnly}
+              formatMoney={formatMoney}
+              formatNumber={formatNumber}
+              onOpenPrompt={onOpenPrompt}
+              onOpenSettlement={onOpenSettlement}
+            />
+          ) : (
+            <div className="empty-state">
+              <strong>No trading EOD report yet</strong>
+              <p>The desk-wide close posture will appear here once the reporting service produces a trading EOD summary.</p>
             </div>
           ),
         },
@@ -1395,6 +1436,7 @@ export function ReportsWorkspace({
           formatNumber,
           formatDate,
           formatDateOnly,
+          onOpenPrompt,
           onOpenSettlement,
           onOpenTrade,
         }),

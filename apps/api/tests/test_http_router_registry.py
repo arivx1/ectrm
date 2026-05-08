@@ -16,6 +16,7 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn(("reports", "reports"), registrations)
         self.assertIn(("accruals", "accruals"), registrations)
         self.assertIn(("pretrade", "pretrade"), registrations)
+        self.assertIn(("mcp", "mcp-status"), registrations)
         self.assertIn(("codex", "codex-admin"), registrations)
         self.assertIn(("codex", "codex-callback"), registrations)
 
@@ -36,6 +37,7 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn("/settlement/invoices", paths)
         self.assertIn("/settlement/invoice-issue-candidates", paths)
         self.assertIn("/reports/overview", paths)
+        self.assertIn("/reports/trading-eod", paths)
         self.assertIn("/accruals/reconciliation", paths)
         self.assertIn("/pretrade/scenarios", paths)
         self.assertIn("/assistant/settings", paths)
@@ -43,6 +45,9 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn("/assistant/action-requests", paths)
         self.assertIn("/assistant/prompt-navigation-outcomes", paths)
         self.assertIn("/assistant/prompt-route-recommendations", paths)
+        self.assertIn("/mcp/login", paths)
+        self.assertIn("/mcp-status", paths)
+        self.assertIn("/mcp/whoami", paths)
         self.assertIn("/admin/codex/tasks", paths)
         self.assertIn("/codex/tasks/{task_id}/callback", paths)
 

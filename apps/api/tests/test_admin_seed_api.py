@@ -19,13 +19,23 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
 from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_calendar import ReferenceCalendar
+from apps.api.app.models.reference_calendar_holiday import ReferenceCalendarHoliday
+from apps.api.app.models.reference_calendar_overlay import ReferenceCalendarOverlay
+from apps.api.app.models.reference_calendar_rule import ReferenceCalendarRule
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_pipeline_detail import ReferencePipelineDetail
+from apps.api.app.models.reference_pipeline_path import ReferencePipelinePath
+from apps.api.app.models.reference_pipeline_point import ReferencePipelinePoint
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
+from apps.api.app.models.reference_rail_line import ReferenceRailLine
+from apps.api.app.models.reference_rail_route import ReferenceRailRoute
+from apps.api.app.models.reference_spatial_feature import ReferenceSpatialFeature
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
@@ -70,7 +80,17 @@ class AdminSeedApiTests(unittest.TestCase):
             session.query(Event).delete()
             session.query(ReferencePriceIndexSource).delete()
             session.query(ReferencePriceIndex).delete()
+            session.query(ReferenceSpatialFeature).delete()
+            session.query(ReferenceRailRoute).delete()
+            session.query(ReferenceRailLine).delete()
+            session.query(ReferenceCalendarOverlay).delete()
+            session.query(ReferenceCalendarRule).delete()
+            session.query(ReferenceCalendarHoliday).delete()
+            session.query(ReferenceCalendar).delete()
             session.query(ReferencePortfolio).delete()
+            session.query(ReferencePipelinePath).delete()
+            session.query(ReferencePipelinePoint).delete()
+            session.query(ReferencePipelineDetail).delete()
             session.query(ReferenceAsset).delete()
             session.query(ReferenceCounterparty).delete()
             session.query(ReferenceLocation).delete()
@@ -139,12 +159,18 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(governor.created_by, "ops-admin")
             self.assertEqual(governor.version, 1)
 
-            self.assertEqual(session.get(AssistantAgent, "document-agent").status, "ACTIVE")
+            document_agent = session.get(AssistantAgent, "document-agent")
+            self.assertEqual(document_agent.status, "ACTIVE")
+            self.assertIn("list_gmail_inbox_messages", document_agent.allowed_tools)
+            self.assertIn("get_gmail_inbox_message", document_agent.allowed_tools)
             self.assertEqual(session.get(AssistantAgent, "pre-trade-structuring-agent").status, "ACTIVE")
             self.assertEqual(session.get(AssistantAgent, "market-research-agent").status, "ACTIVE")
-            self.assertEqual(session.get(AssistantAgent, "movement-controller-agent").authority_ceiling, "EXECUTE")
+            movement_controller = session.get(AssistantAgent, "movement-controller-agent")
+            self.assertEqual(movement_controller.authority_ceiling, "EXECUTE")
+            self.assertIn("list_gmail_inbox_messages", movement_controller.allowed_tools)
+            self.assertIn("get_gmail_inbox_message", movement_controller.allowed_tools)
             self.assertEqual(
-                session.get(AssistantAgent, "movement-controller-agent").allowed_action_types,
+                movement_controller.allowed_action_types,
                 [
                     "record_delivery_event",
                     "reverse_delivery_event",
@@ -153,6 +179,9 @@ class AdminSeedApiTests(unittest.TestCase):
                     "update_trade_workflow_item",
                 ],
             )
+            trade_ops = session.get(AssistantAgent, "trade-ops-copilot")
+            self.assertIn("list_gmail_inbox_messages", trade_ops.allowed_tools)
+            self.assertIn("get_gmail_inbox_message", trade_ops.allowed_tools)
             self.assertEqual(
                 session.get(AssistantAgent, "trade-capture-agent").allowed_action_types,
                 ["create_trade", "amend_trade", "cancel_trade"],
@@ -172,6 +201,7 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(
                 session.get(AssistantAgent, "settlement-copilot").allowed_action_types,
                 [
+                    "create_settlement_report_preset",
                     "issue_trade_invoice",
                     "void_trade_invoice",
                     "create_trade_payment",
@@ -234,26 +264,159 @@ class AdminSeedApiTests(unittest.TestCase):
             )
 
             self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
-            self.assertEqual(payload.entity_counts["commodities"], 11)
-            self.assertEqual(payload.entity_counts["locations"], 514)
-            self.assertEqual(payload.entity_counts["assets"], 8)
+            self.assertEqual(payload.entity_counts["commodities"], 14)
+            self.assertEqual(payload.entity_counts["locations"], 528)
+            self.assertEqual(payload.entity_counts["rail_lines"], 5)
+            self.assertEqual(payload.entity_counts["rail_routes"], 6)
+            self.assertEqual(payload.entity_counts["spatial_features"], 6)
+            self.assertEqual(payload.entity_counts["assets"], 18)
+            self.assertEqual(payload.entity_counts["pipeline_details"], 10)
+            self.assertEqual(payload.entity_counts["pipeline_points"], 33)
+            self.assertEqual(payload.entity_counts["pipeline_paths"], 12)
             self.assertEqual(payload.entity_counts["counterparties"], 1516)
+            self.assertEqual(payload.entity_counts["calendars"], 73)
+            self.assertGreaterEqual(payload.entity_counts["calendar_overlays"], 20)
+            self.assertGreaterEqual(payload.entity_counts["calendar_rules"], 130)
             self.assertEqual(payload.entity_counts["price_indices"], 7)
             self.assertEqual(payload.entity_counts["price_index_sources"], 6)
+            calendar_codes = {
+                row.code
+                for row in session.query(ReferenceCalendar).all()
+            }
+            self.assertEqual(len(calendar_codes), payload.entity_counts["calendars"])
+            self.assertTrue(
+                calendar_codes.issuperset(
+                    {
+                        "AE_PUBLIC",
+                        "AU_BANK_NATIONAL",
+                        "AU_NSW_BANK",
+                        "AU_QLD_BANK",
+                        "AU_VIC_BANK",
+                        "AU_WA_BANK",
+                        "CA_LYNX",
+                        "CME_ENERGY",
+                        "DE_BADEN_WUERTTEMBERG_PUBLIC",
+                        "DE_BAVARIA_PUBLIC",
+                        "ERCOT",
+                        "EUR_TARGET",
+                        "FUJAIRAH_PORT",
+                        "HK_BANK_NATIONAL",
+                        "HKEX",
+                        "ICE_EU",
+                        "ICE_US",
+                        "IESO",
+                        "JPX",
+                        "LME",
+                        "MISO",
+                        "MX_SPEI",
+                        "NAESB_GAS",
+                        "NASDAQ",
+                        "NYSE",
+                        "NYISO",
+                        "PJM",
+                        "SGX",
+                        "SINGAPORE_PORT",
+                        "SPP",
+                        "UK_CHAPS",
+                        "US_CHIPS",
+                        "US_FEDWIRE",
+                        "USGC_PORT",
+                    }
+                )
+            )
+            self.assertTrue(
+                calendar_codes.issuperset(
+                    {
+                        "AZ_BANK_NATIONAL",
+                        "BR_BANK_NATIONAL",
+                        "CA_BANK_AB_BC_NS_ON",
+                        "CA_BANK_NATIONAL",
+                        "CA_BANK_QC",
+                        "CN_BANK_NATIONAL",
+                        "CO_BANK_NATIONAL",
+                        "CZ_BANK_NATIONAL",
+                        "DE_PUBLIC_NATIONAL",
+                        "EUR_TARGET",
+                        "FI_BANK",
+                        "FR_BANK_PLACE",
+                        "HU_BANK_NATIONAL",
+                        "IL_ZAHAV",
+                        "IN_RBI_BENGALURU",
+                        "IN_RBI_CHENNAI",
+                        "IN_RBI_HYDERABAD",
+                        "IN_RBI_KOLKATA",
+                        "IN_RBI_MUMBAI",
+                        "IN_RBI_NEW_DELHI",
+                        "IT_PUBLIC",
+                        "JP_BANK_NATIONAL",
+                        "KR_BANK_NATIONAL",
+                        "MX_BANK_CNBV",
+                        "NL_PUBLIC",
+                        "NO_NBO",
+                        "SG_BANK_NATIONAL",
+                        "TH_BANK_NATIONAL",
+                        "TW_BANK_NATIONAL",
+                        "UA_BANK_NATIONAL",
+                        "UK_BANK_EW",
+                        "UK_BANK_NI",
+                        "UK_BANK_SCOTLAND",
+                        "US_FED_BANK",
+                        "VN_BANK_NATIONAL",
+                        "ZA_BANK_NATIONAL",
+                    }
+                )
+            )
+            self.assertEqual(
+                {
+                    row.code
+                    for row in session.query(ReferenceRailLine).all()
+                },
+                {
+                    "BNSF_SOUTHERN_TRANSCON",
+                    "UP_GULF_COAST_CORRIDOR",
+                    "CN_GREAT_LAKES_CORRIDOR",
+                    "CPKC_MIDCONTINENT_GULF",
+                    "NS_ATLANTIC_TERMINAL_CORRIDOR",
+                },
+            )
+            self.assertEqual(
+                {
+                    row.code
+                    for row in session.query(ReferenceRailRoute).all()
+                },
+                {
+                    "BNSF_WAHA_TO_HSC",
+                    "UP_MIDLAND_TO_CUSHING",
+                    "CPKC_CUSHING_TO_HSC",
+                    "CN_AECO_TO_DAWN",
+                    "NS_DAWN_TO_NYH",
+                    "BNSF_HSC_TO_WAHA_BACKHAUL",
+                },
+            )
             self.assertEqual(
                 {
                     row.code
                     for row in session.query(ReferenceAsset).all()
                 },
                 {
+                    "COLONIAL_USA",
+                    "DIXIE_USA",
+                    "EXPLORER_USA",
+                    "FLANAGAN_SOUTH_USA",
+                    "OASIS_TX",
+                    "SEAWAY_USA",
                     "SIM_WAHA_GATHERING",
                     "SIM_ERCOT_CCGT",
-                    "SIM_USGC_REFINERY",
-                    "SIM_MIDLAND_FIELD",
-                    "SIM_HSC_LNG_EXPORT",
                     "SIM_HENRY_CAVERN",
-                    "SIM_USGC_TERMINAL",
+                    "SIM_HSC_LNG_EXPORT",
+                    "SIM_MIDLAND_FIELD",
                     "SIM_PJM_DATA_CENTER",
+                    "SIM_USGC_REFINERY",
+                    "SIM_USGC_TERMINAL",
+                    "TGP_USA",
+                    "TRANSCO_USA",
+                    "TRANS_PECOS_TX",
+                    "WAHA_HEADER_TX",
                 },
             )
             self.assertEqual(
@@ -261,7 +424,7 @@ class AdminSeedApiTests(unittest.TestCase):
                     row.asset_reality
                     for row in session.query(ReferenceAsset).all()
                 },
-                {"SIMULATED"},
+                {"REAL", "SIMULATED"},
             )
             self.assertEqual(
                 {
@@ -289,7 +452,10 @@ class AdminSeedApiTests(unittest.TestCase):
                         "COUNTRY_US",
                         "CUSHING",
                         "ERCOT_NORTH",
+                        "KATY",
+                        "LEIDY",
                         "MIDLAND",
+                        "MONT_BELVIEU",
                         "SUBDIVISION_US_TX",
                         "SUBDIVISION_ZA_GP",
                         "WAHA",
@@ -308,13 +474,74 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertAlmostEqual(cushing.latitude or 0.0, 35.9853)
             self.assertEqual(usgc.location_kind, "REGION")
             self.assertEqual(usgc.city, "New Orleans")
+            bnsf_line = session.get(ReferenceRailLine, "BNSF_SOUTHERN_TRANSCON")
+            bnsf_route = session.get(ReferenceRailRoute, "BNSF_WAHA_TO_HSC")
+            backhaul_route = session.get(ReferenceRailRoute, "BNSF_HSC_TO_WAHA_BACKHAUL")
+            bnsf_overlay = session.get(ReferenceSpatialFeature, "BNSF_WAHA_TO_HSC_OVERLAY")
+            self.assertIsNotNone(bnsf_line)
+            self.assertIsNotNone(bnsf_route)
+            self.assertIsNotNone(backhaul_route)
+            self.assertIsNotNone(bnsf_overlay)
+            assert bnsf_line is not None
+            assert bnsf_route is not None
+            assert backhaul_route is not None
+            assert bnsf_overlay is not None
+            self.assertEqual(bnsf_line.railroad_code, "BNSF")
+            self.assertEqual(bnsf_line.default_timezone, "America/Chicago")
+            self.assertEqual(bnsf_route.rail_line_code, "BNSF_SOUTHERN_TRANSCON")
+            self.assertEqual(bnsf_route.origin_location_code, "WAHA")
+            self.assertEqual(bnsf_route.destination_location_code, "HOUSTON_SHIP_CHANNEL")
+            self.assertEqual(bnsf_route.service_calendar_code, "USGC_PORT")
+            self.assertEqual(bnsf_route.route_direction, "FORWARD")
+            self.assertEqual(bnsf_route.placement_cutoff_time_local, "15:00")
+            self.assertEqual(bnsf_route.release_cutoff_time_local, "11:00")
+            self.assertEqual(bnsf_route.placement_free_time_hours, 48)
+            self.assertEqual(bnsf_route.release_free_time_hours, 24)
+            self.assertEqual(backhaul_route.route_direction, "REVERSE")
+            self.assertEqual(backhaul_route.service_calendar_code, "USGC_PORT")
+            self.assertEqual(backhaul_route.placement_free_time_hours, 24)
+            self.assertEqual(bnsf_overlay.entity_type, "RAIL_ROUTE")
+            self.assertEqual(bnsf_overlay.entity_code, "BNSF_WAHA_TO_HSC")
+            self.assertEqual(bnsf_overlay.feature_kind, "ROUTE")
+            self.assertEqual(bnsf_overlay.geometry_type, "LINE")
+            self.assertTrue(bnsf_overlay.is_primary)
+            self.assertEqual(bnsf_overlay.source_name, "Curated Rail Route Seed")
+            self.assertEqual(bnsf_overlay.notes, "Straight-line overlay seeded from rail route endpoint locations.")
+            self.assertEqual(session.query(ReferencePipelineDetail).count(), 10)
+            self.assertEqual(session.query(ReferencePipelinePoint).count(), 33)
+            self.assertEqual(session.query(ReferencePipelinePath).count(), 12)
             sim_refinery = session.get(ReferenceAsset, "SIM_USGC_REFINERY")
+            transco_asset = session.get(ReferenceAsset, "TRANSCO_USA")
+            oasis_detail = session.get(ReferencePipelineDetail, "OASIS_TX")
+            colonial_linden_point = session.get(ReferencePipelinePoint, "COLONIAL_LINDEN")
+            oasis_path = session.get(ReferencePipelinePath, "OASIS_WAHA_TO_KATY")
             self.assertIsNotNone(sim_refinery)
+            self.assertIsNotNone(transco_asset)
+            self.assertIsNotNone(oasis_detail)
+            self.assertIsNotNone(colonial_linden_point)
+            self.assertIsNotNone(oasis_path)
             assert sim_refinery is not None
+            assert transco_asset is not None
+            assert oasis_detail is not None
+            assert colonial_linden_point is not None
+            assert oasis_path is not None
             self.assertEqual(sim_refinery.asset_class, "REFINERY")
             self.assertEqual(sim_refinery.asset_type, "CONVERSION")
             self.assertEqual(sim_refinery.asset_reality, "SIMULATED")
             self.assertEqual(sim_refinery.location_code, "USGC")
+            self.assertEqual(transco_asset.asset_class, "PIPELINE")
+            self.assertEqual(transco_asset.asset_reality, "REAL")
+            self.assertEqual(transco_asset.commodity_code, "NATURAL_GAS")
+            self.assertEqual(transco_asset.location_code, "LEIDY")
+            self.assertEqual(oasis_detail.jurisdiction_type, "INTRASTATE")
+            self.assertEqual(oasis_detail.topology_model, "POINT_TO_POINT")
+            self.assertEqual(oasis_detail.market_hub_location_code, "WAHA")
+            self.assertTrue(oasis_detail.is_bidirectional)
+            self.assertEqual(colonial_linden_point.location_code, "LINDEN_JUNCTION")
+            self.assertTrue(colonial_linden_point.is_pricing_point)
+            self.assertEqual(oasis_path.receipt_point_code, "OASIS_WAHA_HUB")
+            self.assertEqual(oasis_path.delivery_point_code, "OASIS_KATY_HUB")
+            self.assertEqual(oasis_path.delivery_location_code, "KATY")
             self.assertEqual(usgc.continent_code, "NA")
             country_us = session.get(ReferenceLocation, "COUNTRY_US")
             subdivision_us_tx = session.get(ReferenceLocation, "SUBDIVISION_US_TX")

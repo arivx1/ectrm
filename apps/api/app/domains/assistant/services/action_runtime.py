@@ -17,7 +17,10 @@ from apps.api.app.domains.assistant.services.policies import (
     authority_allows_execution,
     evaluate_action_policy,
 )
-from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptSection
+from apps.api.app.domains.assistant.services.prompt_context import (
+    AssistantPromptSection,
+    build_prompt_section,
+)
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
 from apps.api.app.schemas.assistant import AssistantPromptRequest
 
@@ -138,10 +141,8 @@ def _build_action_prompt_section(
         if autonomous_execution
         else "The application can stage an approval-gated action for explicit confirmation.\n"
     )
-    return AssistantPromptSection(
-        key="approval-gated-action",
-        title="Governed action candidate",
-        source="agent",
+    return build_prompt_section(
+        contract_key="approval-gated-action",
         content=(
             intro
             + f"action_type: {proposal.action_type}\n"
@@ -150,6 +151,7 @@ def _build_action_prompt_section(
             + f"payload: {prompt_payload}\n"
             + f"{execution_note}"
         ),
+        owner_reference=proposal.action_type,
     )
 
 

@@ -192,8 +192,12 @@ def _build_settlement_summary(db: Session, *, now: datetime) -> dict[str, object
     }
 
 
-def build_workspace_bootstrap_summary(db: Session) -> dict[str, object]:
-    now = datetime.now(timezone.utc)
+def build_workspace_bootstrap_summary(
+    db: Session,
+    *,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    now = now or datetime.now(timezone.utc)
     total_trade_count = _count_rows(db, Trade)
     active_trade_count = int(
         db.execute(select(func.count()).select_from(Trade).where(Trade.status == ACTIVE_TRADE_STATUS)).scalar_one()

@@ -101,6 +101,7 @@ async def generate_assistant_agent_self_update_draft(
         "profile_request_id": record.profile_request_id,
         "allowed_workspaces": list(suggestion.allowed_workspaces),
         "capabilities": list(suggestion.capabilities),
+        "skills": list(suggestion.skills),
         "allowed_tools": list(suggestion.allowed_tools),
         "allowed_action_types": list(suggestion.allowed_action_types),
         "daily_token_allocation": record.daily_token_allocation,
@@ -138,6 +139,7 @@ async def generate_assistant_agent_self_update_draft(
         profile_request_id=record.profile_request_id,
         allowed_workspaces=list(suggestion.allowed_workspaces),
         capabilities=list(suggestion.capabilities),
+        skills=list(suggestion.skills),
         allowed_tools=list(suggestion.allowed_tools),
         allowed_action_types=list(suggestion.allowed_action_types),
         daily_token_allocation=record.daily_token_allocation,
@@ -172,7 +174,7 @@ def _build_self_update_brief(
     parts = [
         f"Revise the managed assistant agent {record.name} ({record.agent_id}) after recent mistakes.",
         "Preserve identity and governance metadata. Keep agent_id, status, scope, provider, model, role mapping, owner role, authority ceiling, and token allocation unchanged.",
-        "Do not expand allowed workspaces, capabilities, live tools, or governed actions. Preserve or narrow only.",
+        "Do not expand allowed workspaces, capabilities, skills, live tools, or governed actions. Preserve or narrow only.",
         "Prefer concrete prompt changes that improve evidence quality, stop conditions, reviewer clarity, and safe fallback behavior.",
     ]
     if operator_brief:
@@ -183,6 +185,7 @@ def _build_self_update_brief(
         f"- description: {record.description}\n"
         f"- allowed workspaces: {', '.join(record.allowed_workspaces or []) or 'none'}\n"
         f"- capabilities: {', '.join(record.capabilities or []) or 'none'}\n"
+        f"- skills: {', '.join(record.skills or []) or 'none'}\n"
         f"- allowed live tools: {', '.join(record.allowed_tools or []) or 'none'}\n"
         f"- allowed governed actions: {', '.join(record.allowed_action_types or []) or 'none'}"
     )

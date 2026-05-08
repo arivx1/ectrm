@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field
@@ -74,6 +75,28 @@ class Settings(BaseSettings):
     ASSISTANT_TIMEOUT_SECONDS: int = Field(default=60, ge=5, le=300)
     ASSISTANT_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=128, le=8192)
     ASSISTANT_MAX_TOOL_ROUNDS: int = Field(default=4, ge=0, le=12)
+    ASSISTANT_VOICE_TRANSCRIPTION_ENABLED: bool = True
+    ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES: int = Field(
+        default=25 * 1024 * 1024,
+        ge=1,
+        le=25 * 1024 * 1024,
+    )
+    MCP_ENABLED: bool = False
+    MCP_AUTH_MODE: Literal["none", "oauth"] = "none"
+    MCP_SERVER_NAME: str = "ECTRM MCP"
+    MCP_SERVER_INSTRUCTIONS: str = (
+        "Use search and fetch to inspect read-only ECTRM product and engineering documentation. "
+        "This MCP surface does not mutate business records."
+    )
+    MCP_DOCS_RESULT_LIMIT: int = Field(default=8, ge=1, le=25)
+    MCP_DOCS_REPO_URL_OVERRIDE: str = ""
+    MCP_OAUTH_ISSUER_URL: str = "http://127.0.0.1:8000/mcp"
+    MCP_OAUTH_SERVICE_DOCUMENTATION_URL: str = ""
+    MCP_OAUTH_SIGNING_SECRET: str = ""
+    MCP_OAUTH_REQUIRED_SCOPES: str = "mcp:tools"
+    MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS: int = Field(default=3600, ge=300, le=86400)
+    MCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS: int = Field(default=7 * 24 * 3600, ge=3600, le=30 * 24 * 3600)
+    MCP_OAUTH_AUTHORIZATION_CODE_TTL_SECONDS: int = Field(default=600, ge=60, le=3600)
     MARKET_NEWS_RSS_BASE_URL: str = "https://news.google.com/rss/search"
     MARKET_NEWS_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
     ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION: int = Field(default=100_000, ge=0, le=100_000_000)
@@ -91,6 +114,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_AUDIO_TRANSCRIPTION_MODEL: str = "gpt-4o-mini-transcribe"
     OPENAI_AGENT_BUILDER_MODEL: str = ""
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
@@ -98,6 +122,16 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     GOOGLE_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
     GOOGLE_MODEL: str = "gemini-2.5-flash"
+    GMAIL_INBOX_ENABLED: bool = False
+    GMAIL_INBOX_CLIENT_ID: str = ""
+    GMAIL_INBOX_CLIENT_SECRET: str = ""
+    GMAIL_INBOX_REFRESH_TOKEN: str = ""
+    GMAIL_INBOX_ACCOUNT_EMAIL: str = ""
+    GMAIL_INBOX_QUERY: str = "has:attachment filename:pdf in:inbox"
+    GMAIL_INBOX_MAX_MESSAGES_PER_IMPORT: int = Field(default=10, ge=1, le=100)
+    GMAIL_INBOX_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    GMAIL_INBOX_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GMAIL_INBOX_API_BASE_URL: str = "https://gmail.googleapis.com/gmail/v1"
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

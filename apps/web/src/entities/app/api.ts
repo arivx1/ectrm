@@ -27,6 +27,7 @@ import type {
   PortfolioRecord,
   PositionRow,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureRecord,
   SpatialFeatureStandards,
@@ -95,6 +96,13 @@ export type WorkspaceDashboardAttentionSummary = {
 export type WorkspaceDashboardSummary = {
   positions: WorkspaceDashboardPositionSummary
   attention: WorkspaceDashboardAttentionSummary
+}
+
+export type AssetMapScopeSummary = {
+  total_count: number
+  total_map_ready_count: number
+  filtered_total_count: number
+  filtered_map_ready_count: number
 }
 
 export type WorkspaceSettlementBreakdownSummaryRow = {
@@ -326,6 +334,7 @@ export type ReferenceWorkspaceBootstrap = {
   units: UnitRecord[]
   locations: LocationRecord[]
   locationStandards: LocationStandards
+  railRoutes: RailRouteRecord[]
   spatialFeatures: SpatialFeatureRecord[]
   spatialFeatureStandards: SpatialFeatureStandards
   assets: AssetRecord[]
@@ -477,6 +486,47 @@ function withQueryString(
     return path
   }
   return `${path}${path.includes('?') ? '&' : '?'}${queryString}`
+}
+
+function withAssetMapScopeSummaryQuery(args?: {
+  hiddenGeographies?: string[]
+  selectedCountryCode?: string | null
+  selectedSubdivisionCode?: string | null
+  hiddenActivities?: string[]
+  hiddenSubtypes?: string[]
+}): string {
+  const query = new URLSearchParams()
+
+  for (const geography of args?.hiddenGeographies ?? []) {
+    if (geography.trim()) {
+      query.append('hidden_geography', geography)
+    }
+  }
+
+  if (args?.selectedCountryCode?.trim()) {
+    query.set('selected_country_code', args.selectedCountryCode)
+  }
+
+  if (args?.selectedSubdivisionCode?.trim()) {
+    query.set('selected_subdivision_code', args.selectedSubdivisionCode)
+  }
+
+  for (const activity of args?.hiddenActivities ?? []) {
+    if (activity.trim()) {
+      query.append('hidden_activity', activity)
+    }
+  }
+
+  for (const subtype of args?.hiddenSubtypes ?? []) {
+    if (subtype.trim()) {
+      query.append('hidden_subtype', subtype)
+    }
+  }
+
+  const queryString = query.toString()
+  return queryString
+    ? `/reference/assets/map-scope-summary?${queryString}`
+    : '/reference/assets/map-scope-summary'
 }
 
 function withReadHeaders(
@@ -714,6 +764,23 @@ export async function loadInvoiceIssueCandidates(
   )
 }
 
+export async function loadAssetMapScopeSummary(
+  apiBase: string,
+  args?: {
+    hiddenGeographies?: string[]
+    selectedCountryCode?: string | null
+    selectedSubdivisionCode?: string | null
+    hiddenActivities?: string[]
+    hiddenSubtypes?: string[]
+  },
+  options?: ReadWorkspaceOptions,
+): Promise<AssetMapScopeSummary> {
+  return fetchJson<AssetMapScopeSummary>(
+    `${apiBase}${withAssetMapScopeSummaryQuery(args)}`,
+    withReadHeaders({ cache: 'no-store' }, options),
+  )
+}
+
 async function loadWorkspaceBootstrapSummary(
   apiBase: string,
   options?: ReadWorkspaceOptions,
@@ -886,6 +953,7 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    railRoutes,
     spatialFeatures,
     spatialFeatureStandards,
     assets,
@@ -920,6 +988,10 @@ export async function loadReferenceWorkspaceBootstrap(
     ),
     fetchJson<LocationStandards>(
       `${apiBase}/reference/locations/standards`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<RailRouteRecord[]>(
+      `${apiBase}${withLimit('/reference/rail-routes', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<SpatialFeatureRecord[]>(
@@ -983,6 +1055,7 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    railRoutes,
     spatialFeatures,
     spatialFeatureStandards,
     assets,

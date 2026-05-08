@@ -8,7 +8,11 @@ from apps.api.app.domains.assistant.services.action_catalog import (
     ASSISTANT_ACTION_CATALOG,
     AssistantActionCatalogEntry,
 )
-from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
+from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype, resolved_role_default_tools
+from apps.api.app.domains.assistant.services.skills import (
+    INTER_AGENT_CONSULTATION_SKILL,
+    list_agent_skill_keys,
+)
 from apps.api.app.domains.assistant.services.tools import build_tool_definitions
 from apps.api.app.schemas.assistant import (
     AssistantAgentEffectivePolicyOut,
@@ -25,6 +29,7 @@ class PolicyAgent(Protocol):
     authority_ceiling: str | None
     allowed_workspaces: tuple[str, ...]
     capabilities: tuple[str, ...]
+    skills: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     allowed_action_types: tuple[str, ...]
 
@@ -45,6 +50,7 @@ class AssistantCapabilityPolicy:
 
 @dataclass(frozen=True)
 class AssistantAgentProfilePolicyDefaults:
+    skills: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     allowed_action_types: tuple[str, ...]
 
@@ -99,21 +105,29 @@ def resolve_agent_profile_policy_defaults(
     role_key: str | None,
     profile_kind: str,
     capabilities: tuple[str, ...],
+    skills: tuple[str, ...],
     allowed_tools: tuple[str, ...],
     allowed_action_types: tuple[str, ...],
 ) -> AssistantAgentProfilePolicyDefaults:
     role = get_role_archetype(role_key) if role_key else None
     normalized_capabilities = _normalized_set(capabilities)
+    next_skills = tuple(skills)
+
+    if not next_skills and role is not None:
+        next_skills = tuple(role.skills)
 
     next_allowed_tools = tuple(allowed_tools)
     if not next_allowed_tools and "READ" in normalized_capabilities:
         if role is not None:
             published_tools = {tool.name for tool in build_tool_definitions()}
-            next_allowed_tools = tuple(tool_name for tool_name in role.default_tools if tool_name in published_tools)
+            next_allowed_tools = tuple(
+                tool_name for tool_name in resolved_role_default_tools(role) if tool_name in published_tools
+            )
 
     next_allowed_action_types = tuple(allowed_action_types)
 
     return AssistantAgentProfilePolicyDefaults(
+        skills=next_skills,
         allowed_tools=next_allowed_tools,
         allowed_action_types=next_allowed_action_types,
     )
@@ -122,18 +136,24 @@ def resolve_agent_profile_policy_defaults(
 def validate_agent_profile_definition(
     *,
     agent_name: str,
+    agent_id: str | None = None,
     role_key: str | None,
     profile_kind: str,
     scope: str,
     allowed_workspaces: tuple[str, ...],
     capabilities: tuple[str, ...],
+    skills: tuple[str, ...],
     allowed_tools: tuple[str, ...],
     allowed_action_types: tuple[str, ...],
     authority_ceiling: str | None,
+    orchestration_pattern: str = "SINGLE",
+    parent_agent_id: str | None = None,
+    managed_agent_ids: tuple[str, ...] = (),
 ) -> None:
     errors: list[str] = []
     normalized_profile_kind = profile_kind.strip().upper()
     normalized_capabilities = _normalized_set(capabilities)
+    normalized_skills = _normalized_set(skills)
     role = get_role_archetype(role_key) if role_key else None
 
     if normalized_profile_kind in {"CURATED", "ROLE_DERIVED"} and role_key is None:
@@ -141,6 +161,12 @@ def validate_agent_profile_definition(
     if role_key is not None and role is None:
         errors.append(f"{agent_name} references unknown role archetype '{role_key}'.")
 
+    _append_unknown_values(
+        errors,
+        field_name="skills",
+        values=skills,
+        valid_values=set(list_agent_skill_keys()),
+    )
     _append_unknown_values(
         errors,
         field_name="allowed_tools",
@@ -156,10 +182,29 @@ def validate_agent_profile_definition(
 
     if allowed_tools and "READ" not in normalized_capabilities:
         errors.append(f"{agent_name} cannot allow live tools without READ capability.")
+    if (
+        {"consult_managed_agent", "enlist_managed_agent"} & set(allowed_tools)
+        and INTER_AGENT_CONSULTATION_SKILL.upper() not in normalized_skills
+    ):
+        errors.append(
+            f"{agent_name} must include the {INTER_AGENT_CONSULTATION_SKILL} skill before it can coordinate other agents."
+        )
     if allowed_action_types and "ACTION" not in normalized_capabilities:
         errors.append("allowed_action_types can only be set for agents with the ACTION capability.")
     if "ACTION" in normalized_capabilities and not allowed_action_types:
         errors.append(f"{agent_name} has ACTION capability and must declare explicit allowed_action_types.")
+    if managed_agent_ids and orchestration_pattern == "SINGLE":
+        errors.append(f"{agent_name} cannot manage other agents with orchestration_pattern SINGLE.")
+    if orchestration_pattern != "SINGLE" and INTER_AGENT_CONSULTATION_SKILL.upper() not in normalized_skills:
+        errors.append(
+            f"{agent_name} must include the {INTER_AGENT_CONSULTATION_SKILL} skill for {orchestration_pattern} orchestration."
+        )
+    if parent_agent_id is not None and parent_agent_id in set(managed_agent_ids):
+        errors.append(f"{agent_name} cannot list the same agent as both parent and managed subordinate.")
+    if agent_id is not None and parent_agent_id == agent_id:
+        errors.append(f"{agent_name} cannot report to itself.")
+    if agent_id is not None and agent_id in set(managed_agent_ids):
+        errors.append(f"{agent_name} cannot manage itself.")
 
     if role is not None:
         _append_subset_errors(
@@ -181,9 +226,17 @@ def validate_agent_profile_definition(
         _append_subset_errors(
             errors,
             agent_name=agent_name,
+            field_name="skills",
+            values=skills,
+            valid_values=set(role.skills),
+            role_key=role.role_key,
+        )
+        _append_subset_errors(
+            errors,
+            agent_name=agent_name,
             field_name="allowed_tools",
             values=allowed_tools,
-            valid_values=set(role.default_tools),
+            valid_values=set(resolved_role_default_tools(role)),
             role_key=role.role_key,
         )
         _append_subset_errors(
@@ -250,6 +303,16 @@ def evaluate_tool_policy(
             return _decision(rule, tool_id, allowed=False, reason=f"{agent.name} does not have READ capability.")
         if tool_id not in set(agent.allowed_tools):
             return _decision(rule, tool_id, allowed=False, reason=f"{agent.name} does not allow tool {tool_id}.")
+        if (
+            tool_id in {"consult_managed_agent", "enlist_managed_agent"}
+            and INTER_AGENT_CONSULTATION_SKILL not in set(agent.skills)
+        ):
+            return _decision(
+                rule,
+                tool_id,
+                allowed=False,
+                reason=f"{agent.name} does not have the {INTER_AGENT_CONSULTATION_SKILL} skill.",
+            )
         role_decision = _evaluate_role_resource_policy(
             agent=agent,
             resource_type="tool",

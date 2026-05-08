@@ -131,9 +131,14 @@ def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_user_session(db: Session, user: UserAccount) -> tuple[UserSession, str]:
+def create_user_session(
+    db: Session,
+    user: UserAccount,
+    *,
+    expires_at: datetime | None = None,
+) -> tuple[UserSession, str]:
     issued_at = datetime.now(timezone.utc)
-    expires_at = issued_at + timedelta(hours=settings.SESSION_TTL_HOURS)
+    session_expires_at = expires_at or (issued_at + timedelta(hours=settings.SESSION_TTL_HOURS))
     access_token = secrets.token_urlsafe(32)
     session = UserSession(
         session_id=str(uuid.uuid4()),
@@ -141,7 +146,7 @@ def create_user_session(db: Session, user: UserAccount) -> tuple[UserSession, st
         token_hash=hash_session_token(access_token),
         role=user.role,
         created_at=issued_at,
-        expires_at=expires_at,
+        expires_at=session_expires_at,
         last_seen_at=issued_at,
         revoked_at=None,
     )
@@ -447,6 +452,55 @@ def single_user_auth_config() -> SingleUserAuthConfig | None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Single-user authentication is misconfigured: {exc}",
         ) from exc
+
+
+def provision_single_user_auth_user(db: Session) -> UserAccount:
+    config = single_user_auth_config()
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Single-user authentication is not configured on this API.",
+        )
+
+    now = datetime.now(timezone.utc)
+    user = db.get(UserAccount, config.user_id)
+
+    if user is None:
+        email_owner = db.execute(select(UserAccount).where(UserAccount.email == config.email)).scalars().first()
+        if email_owner is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Single-user authentication email is already assigned to another account.",
+            )
+
+        user = UserAccount(
+            user_id=config.user_id,
+            email=config.email,
+            display_name=config.display_name,
+            role=config.role,
+            password_hash=None,
+            is_active=True,
+            last_login_at=now,
+            created_at=now,
+            created_by="single-user-auth",
+            updated_at=now,
+            updated_by="single-user-auth",
+            version=1,
+        )
+        db.add(user)
+    else:
+        user.email = config.email
+        user.display_name = config.display_name
+        user.role = config.role
+        user.is_active = True
+        user.last_login_at = now
+        user.updated_at = now
+        user.updated_by = config.user_id
+        user.version += 1
+
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def google_auth_config() -> GoogleAuthConfig | None:

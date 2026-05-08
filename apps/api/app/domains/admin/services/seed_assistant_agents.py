@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
+from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype, resolved_role_default_tools
 from apps.api.app.domains.assistant.services.tools import build_tool_definitions
 from apps.api.app.models.assistant_agent import AssistantAgent
 
@@ -20,6 +20,7 @@ class AssistantAgentSeedDefinition:
     scope: str
     allowed_workspaces: tuple[str, ...]
     capabilities: tuple[str, ...]
+    skills: tuple[str, ...]
     recommended_tools: tuple[str, ...]
     allowed_action_types: tuple[str, ...]
     system_prompt: str
@@ -28,6 +29,10 @@ class AssistantAgentSeedDefinition:
     human_owner_role: str | None = None
     authority_ceiling: str | None = None
     activation_notes: str | None = None
+    orchestration_pattern: str = "SINGLE"
+    parent_agent_id: str | None = None
+    managed_agent_ids: tuple[str, ...] = ()
+    delegation_guidance: str | None = None
     provider: str | None = None
     model: str | None = None
 
@@ -72,6 +77,7 @@ def _build_role_system_prompt(*, role_key: str, name: str) -> str:
         mission=role.mission,
         workflow=(
             *role.base_prompt_guidance,
+            *role.delegation_guidance,
             "Use the governed workspaces, tools, and authority boundary defined by the role profile as your default lane.",
             (
                 "If current evidence shows the platform record is behind real-world state and your authority ceiling is EXECUTE, "
@@ -115,7 +121,8 @@ def _seed_definition_from_role(
         scope=scope,
         allowed_workspaces=role.allowed_workspaces,
         capabilities=capabilities or role.capability_ceiling,
-        recommended_tools=role.default_tools,
+        skills=role.skills,
+        recommended_tools=resolved_role_default_tools(role),
         allowed_action_types=allowed_action_types if allowed_action_types is not None else role.maximum_action_types,
         system_prompt=_build_role_system_prompt(role_key=role.role_key, name=role.name),
         profile_kind="ROLE_DERIVED",
@@ -123,6 +130,10 @@ def _seed_definition_from_role(
         human_owner_role=role.human_owner_role,
         authority_ceiling=resolved_authority,
         activation_notes=activation_notes or f"Pilot profile synchronized from the {role.name} role catalog entry.",
+        orchestration_pattern=role.recommended_orchestration_pattern,
+        parent_agent_id=role.recommended_parent_role_keys[0] if role.recommended_parent_role_keys else None,
+        managed_agent_ids=role.recommended_managed_role_keys,
+        delegation_guidance=role.delegation_guidance[0] if role.delegation_guidance else None,
     )
 
 
@@ -188,8 +199,13 @@ def seed_assistant_agents(
                     human_owner_role=profile_metadata["human_owner_role"],
                     authority_ceiling=profile_metadata["authority_ceiling"],
                     activation_notes=profile_metadata["activation_notes"],
+                    orchestration_pattern=definition.orchestration_pattern,
+                    parent_agent_id=definition.parent_agent_id,
+                    managed_agent_ids=list(definition.managed_agent_ids),
+                    delegation_guidance=definition.delegation_guidance,
                     allowed_workspaces=list(definition.allowed_workspaces),
                     capabilities=list(definition.capabilities),
+                    skills=list(definition.skills),
                     allowed_tools=allowed_tools,
                     allowed_action_types=list(definition.allowed_action_types),
                     system_prompt=definition.system_prompt,
@@ -233,6 +249,7 @@ def _apply_definition(
 ) -> bool:
     next_allowed_workspaces = list(definition.allowed_workspaces)
     next_capabilities = list(definition.capabilities)
+    next_skills = list(definition.skills)
     next_allowed_action_types = list(definition.allowed_action_types)
 
     changed = any(
@@ -249,8 +266,13 @@ def _apply_definition(
             record.human_owner_role != profile_metadata["human_owner_role"],
             record.authority_ceiling != profile_metadata["authority_ceiling"],
             record.activation_notes != profile_metadata["activation_notes"],
+            (record.orchestration_pattern or "SINGLE") != definition.orchestration_pattern,
+            record.parent_agent_id != definition.parent_agent_id,
+            list(record.managed_agent_ids or []) != list(definition.managed_agent_ids),
+            record.delegation_guidance != definition.delegation_guidance,
             list(record.allowed_workspaces or []) != next_allowed_workspaces,
             list(record.capabilities or []) != next_capabilities,
+            list(record.skills or []) != next_skills,
             list(record.allowed_tools or []) != allowed_tools,
             list(record.allowed_action_types or []) != next_allowed_action_types,
             record.system_prompt != definition.system_prompt,
@@ -271,8 +293,13 @@ def _apply_definition(
     record.human_owner_role = profile_metadata["human_owner_role"]
     record.authority_ceiling = profile_metadata["authority_ceiling"]
     record.activation_notes = profile_metadata["activation_notes"]
+    record.orchestration_pattern = definition.orchestration_pattern
+    record.parent_agent_id = definition.parent_agent_id
+    record.managed_agent_ids = list(definition.managed_agent_ids)
+    record.delegation_guidance = definition.delegation_guidance
     record.allowed_workspaces = next_allowed_workspaces
     record.capabilities = next_capabilities
+    record.skills = next_skills
     record.allowed_tools = allowed_tools
     record.allowed_action_types = next_allowed_action_types
     record.system_prompt = definition.system_prompt

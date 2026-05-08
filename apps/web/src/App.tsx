@@ -224,6 +224,7 @@ function AuthenticatedWorkspaceShell({
     currencies: workspaceData.currencies,
     units: workspaceData.units,
     locations: workspaceData.locations,
+    railRoutes: workspaceData.railRoutes,
     spatialFeatures: workspaceData.spatialFeatures,
     counterparties: workspaceData.counterparties,
     counterpartyCreditProfiles: workspaceData.counterpartyCreditProfiles,

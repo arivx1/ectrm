@@ -144,3 +144,93 @@ test('assistant action request list renders blocked invoice preview blockers', (
   assert.match(markup, /already in use/)
   assert.match(markup, /Dry Run Preview Blocked/)
 })
+
+test('assistant action request list renders structured settlement preset proposals', () => {
+  const markup = renderToStaticMarkup(
+    createElement(AssistantActionRequestList, {
+      actionRequests: [
+        {
+          action_request_id: 2026,
+          run_id: 88,
+          user_id: 'trader.alpha',
+          status: 'PENDING',
+          workspace: 'reports',
+          agent_id: 'settlement-copilot',
+          agent_name: 'Settlement Copilot',
+          action_type: 'create_settlement_report_preset',
+          summary: 'Create settlement preset "Midwest cash watch"',
+          description: 'Stage a saved settlement lens for review.',
+          payload: {
+            name: 'Midwest cash watch',
+            scope: 'SHARED',
+            filters: {
+              book: 'CRUDE',
+              currency: 'USD',
+              exception_type: 'SHORT_PAY',
+            },
+          },
+          review_context: {
+            owning_work_object: {
+              type: 'settlement_report_preset',
+              id: 'SHARED:midwest cash watch',
+              label: 'Settlement preset Midwest cash watch',
+            },
+            required_reviewer_role: 'REQUESTING_USER_OR_ADMIN',
+            business_rationale:
+              'The user asked to save the current settlement filters as a named lens.',
+            proposed_mutation: {
+              operation: 'create_settlement_report_preset',
+              name: 'Midwest cash watch',
+              scope: 'SHARED',
+              filters: {
+                book: 'CRUDE',
+                currency: 'USD',
+                exception_type: 'SHORT_PAY',
+              },
+            },
+            supporting_records: [],
+            assumptions: ['Scope was requested explicitly.'],
+            missing_evidence: [],
+            expected_downstream_effects: [
+              'Expose the preset in the settlement preset picker for the desk.',
+            ],
+            stale_state_basis: {
+              scope: 'SHARED',
+              name_key: 'midwest cash watch',
+              existing_preset_id: null,
+            },
+          },
+          lifecycle: {
+            stage: 'AWAITING_REVIEW',
+            label: 'Awaiting review',
+            tone: 'attention',
+            is_terminal: false,
+            can_approve: true,
+            can_reject: true,
+            reviewer_action_label: 'Review evidence, then approve or reject',
+            decided_label: null,
+            review_risk_flags: ['APPROVAL_GATED_ACTION'],
+          },
+          result: null,
+          error_detail: null,
+          review_outcome: null,
+          decision_note: null,
+          correction_summary: null,
+          correction_fields: [],
+          created_at: '2026-05-08T08:00:00Z',
+          decided_at: null,
+          decided_by: null,
+        },
+      ],
+      formatDate: (value: string | null | undefined) => value ?? 'n/a',
+    }),
+  )
+
+  assert.match(markup, /Preset proposal/)
+  assert.match(markup, /Name: Midwest cash watch/)
+  assert.match(markup, /Scope: Shared/)
+  assert.match(markup, /Book: CRUDE/)
+  assert.match(markup, /Currency: USD/)
+  assert.match(markup, /Exception Type: SHORT_PAY/)
+  assert.match(markup, /Name Key: midwest cash watch/)
+})

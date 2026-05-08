@@ -3,6 +3,7 @@ import {
   fetchJson,
   getResponseCorrelationId,
   patchJson,
+  postFormData,
   postJson,
   putJson,
   requestOk,
@@ -47,6 +48,7 @@ import type {
   AssistantRunAuditTrace,
   AssistantRunSummary,
   AssistantRuntimeSettings,
+  AssistantVoiceTranscription,
   ViewKey,
 } from '../../shared/models'
 
@@ -64,9 +66,14 @@ export type CreateAssistantAgentInput = {
   human_owner_role?: AssistantAdminAgent['human_owner_role']
   authority_ceiling?: AssistantAdminAgent['authority_ceiling']
   activation_notes?: AssistantAdminAgent['activation_notes']
+  orchestration_pattern?: AssistantAdminAgent['orchestration_pattern']
+  parent_agent_id?: AssistantAdminAgent['parent_agent_id']
+  managed_agent_ids?: AssistantAdminAgent['managed_agent_ids']
+  delegation_guidance?: AssistantAdminAgent['delegation_guidance']
   profile_request_id?: AssistantAdminAgent['profile_request_id']
   allowed_workspaces: AssistantAdminAgent['allowed_workspaces']
   capabilities: AssistantAdminAgent['capabilities']
+  skills: AssistantAdminAgent['skills']
   allowed_tools: AssistantAdminAgent['allowed_tools']
   allowed_action_types: AssistantAdminAgent['allowed_action_types']
   daily_token_allocation?: AssistantAdminAgent['daily_token_allocation']
@@ -108,6 +115,7 @@ export type BuildAssistantAgentDraftInput = {
     model?: AssistantAdminAgent['model']
     allowed_workspaces?: AssistantAdminAgent['allowed_workspaces']
     capabilities?: AssistantAdminAgent['capabilities']
+    skills?: AssistantAdminAgent['skills']
     allowed_tools?: AssistantAdminAgent['allowed_tools']
     allowed_action_types?: AssistantAdminAgent['allowed_action_types']
     system_prompt?: string
@@ -523,6 +531,20 @@ export async function requestAssistantResponse(
     `${apiBase}/assistant/respond`,
     payload as unknown as Record<string, unknown>,
     { headers: assistantReadHeaders(init?.accessToken) },
+  )
+}
+
+export async function transcribeAssistantVoice(
+  apiBase: string,
+  file: Blob,
+  init: { accessToken?: string; filename?: string },
+): Promise<AssistantVoiceTranscription> {
+  const formData = new FormData()
+  formData.append('file', file, init.filename?.trim() || 'voice-note.webm')
+  return postFormData<AssistantVoiceTranscription>(
+    `${apiBase}/assistant/voice/transcriptions`,
+    formData,
+    { headers: assistantReadHeaders(init.accessToken) },
   )
 }
 
@@ -1143,6 +1165,7 @@ export async function buildAssistantAgentDraft(
         ...(payload.current_draft.model?.trim() ? { model: payload.current_draft.model.trim() } : {}),
         allowed_workspaces: payload.current_draft.allowed_workspaces ?? [],
         capabilities: payload.current_draft.capabilities ?? [],
+        skills: payload.current_draft.skills ?? [],
         allowed_tools: payload.current_draft.allowed_tools ?? [],
         allowed_action_types: payload.current_draft.allowed_action_types ?? [],
         ...(payload.current_draft.system_prompt?.trim()

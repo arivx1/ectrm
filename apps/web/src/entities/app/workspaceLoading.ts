@@ -61,6 +61,47 @@ export function isAuthenticationRequiredMessage(message: string): boolean {
   return /authentication is required|session expired|unauthorized/i.test(message)
 }
 
+function isApiReachabilityMessage(message: string): boolean {
+  return /could not reach api/i.test(message)
+}
+
+function extractApiReachabilityTargets(message: string): string[] {
+  const explicitTargetsMatch = message.match(/could not reach api at\s+(.+?)\.(?:\s|$)/i)
+  if (explicitTargetsMatch) {
+    return explicitTargetsMatch[1]
+      .split(/\s+or\s+/i)
+      .map((target) => target.trim())
+      .filter((target) => target.length > 0)
+  }
+
+  const backendHostMatch = message.match(/backend is running on\s+([^\s.]+)(?:\s+and|[.])/i)
+  if (backendHostMatch) {
+    return [backendHostMatch[1]]
+  }
+
+  return []
+}
+
+function summarizeApiReachabilityMessage(message: string): string {
+  const targets = Array.from(
+    new Set(
+      extractApiReachabilityTargets(message).map((target) => {
+        try {
+          return new URL(target).host
+        } catch {
+          return target
+        }
+      }),
+    ),
+  )
+
+  if (targets.length === 0) {
+    return 'API unavailable. Check that the backend is running, or update API Base Override in Settings.'
+  }
+
+  return `API unavailable. Check that the backend is running at ${targets.join(' or ')}, or update API Base Override in Settings.`
+}
+
 export function summarizeWorkspaceIssueMessage(
   message: string,
   group?: AppDataGroup | null,
@@ -71,6 +112,10 @@ export function summarizeWorkspaceIssueMessage(
 
   if (isAuthenticationRequiredMessage(message)) {
     return 'Authentication required'
+  }
+
+  if (isApiReachabilityMessage(message)) {
+    return summarizeApiReachabilityMessage(message)
   }
 
   if (group) {

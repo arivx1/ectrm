@@ -21,6 +21,7 @@ Related docs:
 - [AI Workflow](./ai-workflow.md)
 - [Future-Ready Engineering Work Packages](./future-ready-engineering-work-packages.md)
 - [Human-Agent Authority Matrix](./human-agent-authority-matrix.md)
+- [Agent Hierarchy Contract](./agent-hierarchy-contract.md)
 - [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
 - [Agent Knowledge Base](./agent-knowledge-base.md)
 - [Canonical Work Object Inventory](./canonical-work-object-inventory.md)

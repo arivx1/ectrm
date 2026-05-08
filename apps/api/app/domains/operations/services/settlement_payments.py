@@ -37,6 +37,9 @@ from apps.api.app.domains.operations.services.resource_views import (
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
 )
+from apps.api.app.domains.operations.services.settlement_due_dates import (
+    resolve_settlement_due_at,
+)
 from apps.api.app.domains.operations.services.workflow_items import SYSTEM_WORKFLOW_ACTOR
 from apps.api.app.domains.operations.services.workflow_items import set_trade_workflow_item_projection
 from apps.api.app.models.trade import Trade
@@ -154,11 +157,21 @@ def _normalize_payment_status(value: object | None) -> str:
     return normalized
 
 
-def _normalize_due_at(value: datetime | None, *, invoice: TradeInvoice) -> datetime:
+def _normalize_due_at(
+    db: Session,
+    value: datetime | None,
+    *,
+    invoice: TradeInvoice,
+    due_calendar_code: str | None = None,
+) -> datetime:
     normalized = _coerce_utc(value) or _coerce_utc(invoice.due_at)
     if normalized is None:
         raise ValueError("Payment due timestamp is required.")
-    return normalized
+    return resolve_settlement_due_at(
+        db,
+        due_at=normalized,
+        due_calendar_code=due_calendar_code,
+    ).due_at
 
 
 def _normalize_received_at(value: datetime | None) -> Optional[datetime]:
@@ -765,6 +778,7 @@ def create_trade_payment(
     payment_amount: object | None = None,
     status: object | None = None,
     due_at: datetime | None = None,
+    due_calendar_code: str | None = None,
     received_at: datetime | None = None,
     notes: object | None = None,
     now: Optional[datetime] = None,
@@ -788,7 +802,12 @@ def create_trade_payment(
         .where(TradePayment.invoice_id == invoice_id)
         .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
     ).scalars().all()
-    next_due_at = _normalize_due_at(due_at, invoice=invoice)
+    next_due_at = _normalize_due_at(
+        db,
+        due_at,
+        invoice=invoice,
+        due_calendar_code=due_calendar_code,
+    )
     next_received_at = _normalize_received_at(received_at)
     next_status = _normalize_payment_status(status) if status is not None else _base_due_status(due_at=next_due_at, now=reference_time)
     next_payment_currency_code = _normalize_payment_currency_code(payment_currency_code, invoice=invoice, trade=trade)
@@ -862,6 +881,7 @@ def create_trade_payment(
                         "payment_amount": payment_amount,
                         "status": status,
                         "due_at": due_at,
+                        "due_calendar_code": due_calendar_code,
                         "received_at": received_at,
                         "notes": notes,
                     }.items()
@@ -1010,6 +1030,7 @@ def update_trade_payment(
     next_payment_amount = Decimal(str(payment.payment_amount))
     next_status = payment.status
     next_due_at = _coerce_utc(payment.due_at) or reference_time
+    next_due_calendar_code = None
     next_received_at = _coerce_utc(payment.received_at)
     next_notes = payment.notes
 
@@ -1029,8 +1050,22 @@ def update_trade_payment(
         next_payment_amount = _normalize_payment_amount(changes.get("payment_amount"), invoice=invoice)
     if "status" in changes:
         next_status = _normalize_payment_status(changes.get("status"))
+    if "due_calendar_code" in changes:
+        next_due_calendar_code = str(changes.get("due_calendar_code") or "").strip() or None
     if "due_at" in changes:
-        next_due_at = _normalize_due_at(changes.get("due_at"), invoice=invoice)  # type: ignore[arg-type]
+        next_due_at = _normalize_due_at(
+            db,
+            changes.get("due_at"),  # type: ignore[arg-type]
+            invoice=invoice,
+            due_calendar_code=next_due_calendar_code,
+        )
+    elif next_due_calendar_code is not None:
+        next_due_at = _normalize_due_at(
+            db,
+            next_due_at,
+            invoice=invoice,
+            due_calendar_code=next_due_calendar_code,
+        )
     if "received_at" in changes:
         next_received_at = _normalize_received_at(changes.get("received_at"))  # type: ignore[arg-type]
     if "notes" in changes:

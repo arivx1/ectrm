@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -128,6 +128,10 @@ from apps.api.app.domains.assistant.services.runs import (
     to_assistant_run_out,
     to_assistant_run_summary_out,
 )
+from apps.api.app.domains.assistant.services.voice import (
+    AssistantVoiceTranscriptionError,
+    transcribe_assistant_voice_audio,
+)
 from apps.api.app.domains.assistant.services.role_archetypes import (
     get_role_archetype,
     list_role_archetypes,
@@ -193,6 +197,7 @@ from apps.api.app.schemas.assistant import (
     AssistantRunOut,
     AssistantRunSummaryOut,
     AssistantRuntimeSettingsOut,
+    AssistantVoiceTranscriptionOut,
 )
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
@@ -533,6 +538,26 @@ async def respond_with_assistant(
                 prepared=prepared,
                 detail=exc.detail,
             )
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/voice/transcriptions", response_model=AssistantVoiceTranscriptionOut)
+async def transcribe_current_user_assistant_voice(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> AssistantVoiceTranscriptionOut:
+    try:
+        resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        payload = await file.read()
+        return await transcribe_assistant_voice_audio(
+            filename=file.filename or "voice-note.webm",
+            content_type=file.content_type,
+            payload=payload,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AssistantVoiceTranscriptionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
@@ -1237,9 +1262,14 @@ def create_assistant_agent(
         human_owner_role=payload.human_owner_role,
         authority_ceiling=payload.authority_ceiling,
         activation_notes=payload.activation_notes,
+        orchestration_pattern=payload.orchestration_pattern,
+        parent_agent_id=payload.parent_agent_id,
+        managed_agent_ids=list(payload.managed_agent_ids),
+        delegation_guidance=payload.delegation_guidance,
         profile_request_id=payload.profile_request_id,
         allowed_workspaces=list(payload.allowed_workspaces),
         capabilities=list(payload.capabilities),
+        skills=list(policy_defaults.skills),
         allowed_tools=list(policy_defaults.allowed_tools),
         allowed_action_types=list(policy_defaults.allowed_action_types),
         daily_token_allocation=payload.daily_token_allocation,
@@ -1289,6 +1319,7 @@ def update_assistant_agent(
     record = get_agent_record(db, agent_id.strip().lower())
     if record is None:
         raise HTTPException(status_code=404, detail="Assistant agent not found")
+    _validate_agent_hierarchy_binding(agent_id=record.agent_id, payload=payload)
 
     old_status = record.status
     previous_payload = serialize_agent_revision_payload(record)
@@ -1305,9 +1336,14 @@ def update_assistant_agent(
     record.human_owner_role = payload.human_owner_role
     record.authority_ceiling = payload.authority_ceiling
     record.activation_notes = payload.activation_notes
+    record.orchestration_pattern = payload.orchestration_pattern
+    record.parent_agent_id = payload.parent_agent_id
+    record.managed_agent_ids = list(payload.managed_agent_ids)
+    record.delegation_guidance = payload.delegation_guidance
     record.profile_request_id = payload.profile_request_id
     record.allowed_workspaces = list(payload.allowed_workspaces)
     record.capabilities = list(payload.capabilities)
+    record.skills = list(policy_defaults.skills)
     record.allowed_tools = list(policy_defaults.allowed_tools)
     record.allowed_action_types = list(policy_defaults.allowed_action_types)
     record.daily_token_allocation = payload.daily_token_allocation
@@ -1353,6 +1389,7 @@ def _publish_agent_revision(
     actor_id: str,
 ) -> None:
     payload = AssistantAgentRevisionPayloadOut.model_validate(normalize_agent_revision_payload(revision.payload))
+    _validate_agent_hierarchy_binding(agent_id=record.agent_id, payload=payload)
     old_status = record.status
     policy_defaults = _resolve_agent_profile_defaults(payload)
     record.name = payload.name
@@ -1367,9 +1404,14 @@ def _publish_agent_revision(
     record.human_owner_role = payload.human_owner_role
     record.authority_ceiling = payload.authority_ceiling
     record.activation_notes = payload.activation_notes
+    record.orchestration_pattern = payload.orchestration_pattern
+    record.parent_agent_id = payload.parent_agent_id
+    record.managed_agent_ids = list(payload.managed_agent_ids)
+    record.delegation_guidance = payload.delegation_guidance
     record.profile_request_id = payload.profile_request_id
     record.allowed_workspaces = list(payload.allowed_workspaces)
     record.capabilities = list(payload.capabilities)
+    record.skills = list(policy_defaults.skills)
     record.allowed_tools = list(policy_defaults.allowed_tools)
     record.allowed_action_types = list(policy_defaults.allowed_action_types)
     record.daily_token_allocation = payload.daily_token_allocation
@@ -1432,9 +1474,18 @@ def _build_agent_change_summary(
 
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:
     return AssistantPromptSectionOut(
+        contract_key=section.contract_key,
+        contract_version=section.contract_version,
         key=section.key,
         title=section.title,
         source=section.source,
+        scope=section.scope,
+        kind=section.kind,
+        owner=section.owner,
+        owner_reference=section.owner_reference,
+        freshness=section.freshness,
+        merge_strategy=section.merge_strategy,
+        uses_fallback=section.uses_fallback,
         content=section.content,
     )
 
@@ -1456,20 +1507,26 @@ def _resolve_agent_profile_defaults(
         role_key=payload.role_key,
         profile_kind=payload.profile_kind,
         capabilities=tuple(payload.capabilities),
+        skills=tuple(payload.skills),
         allowed_tools=tuple(payload.allowed_tools),
         allowed_action_types=tuple(payload.allowed_action_types),
     )
     try:
         validate_agent_profile_definition(
             agent_name=payload.name,
+            agent_id=getattr(payload, "agent_id", None),
             role_key=payload.role_key,
             profile_kind=payload.profile_kind,
             scope=payload.scope,
             allowed_workspaces=tuple(payload.allowed_workspaces),
             capabilities=tuple(payload.capabilities),
+            skills=defaults.skills,
             allowed_tools=defaults.allowed_tools,
             allowed_action_types=defaults.allowed_action_types,
             authority_ceiling=payload.authority_ceiling,
+            orchestration_pattern=payload.orchestration_pattern,
+            parent_agent_id=payload.parent_agent_id,
+            managed_agent_ids=tuple(payload.managed_agent_ids),
         )
     except AssistantAgentProfilePolicyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1499,6 +1556,17 @@ def _validate_agent_activation(
         )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+def _validate_agent_hierarchy_binding(
+    *,
+    agent_id: str,
+    payload: AssistantAgentUpdate | AssistantAgentRevisionPayloadOut,
+) -> None:
+    if payload.parent_agent_id == agent_id:
+        raise HTTPException(status_code=400, detail="parent_agent_id cannot match agent_id")
+    if agent_id in set(payload.managed_agent_ids):
+        raise HTTPException(status_code=400, detail="managed_agent_ids cannot include agent_id")
 
 
 def _mark_profile_request_activated_for_agent(
@@ -1578,6 +1646,8 @@ def _record_agent_provenance(
             "profile_kind": record.profile_kind,
             "profile_request_id": record.profile_request_id,
             "workspace_count": len(record.allowed_workspaces or []),
+            "capability_count": len(record.capabilities or []),
+            "skill_count": len(record.skills or []),
             "tool_count": len(record.allowed_tools or []),
             "action_type_count": len(record.allowed_action_types or []),
         },

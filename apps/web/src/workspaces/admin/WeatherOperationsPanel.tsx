@@ -559,8 +559,8 @@ export function WeatherOperationsPanel({
                     </p>
                   </div>
                   <div className="admin-weather-row-detail">
-                    <span>Forecast {formatAgeHours(syncLocation?.forecast_age_hours)}</span>
-                    <span>Observation {formatAgeHours(syncLocation?.observation_age_hours)}</span>
+                    <span>Forecast {formatWeatherAgeHours(syncLocation?.forecast_age_hours)}</span>
+                    <span>Observation {formatWeatherAgeHours(syncLocation?.observation_age_hours)}</span>
                     <span>{location.timezone ?? 'Timezone TBD'}</span>
                   </div>
                 </div>

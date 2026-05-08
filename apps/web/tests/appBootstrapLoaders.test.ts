@@ -10,6 +10,7 @@ import type {
   LocationRecord,
   PortfolioRecord,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureRecord,
   SpatialFeatureStandards,
@@ -37,6 +38,7 @@ vi.mock('../src/shared/config.ts', () => ({
 }))
 
 import {
+  loadAssetMapScopeSummary,
   loadAdminWorkspaceBootstrap,
   loadCoreWorkspaceBootstrap,
   loadDeliveriesWorkspaceBootstrap,
@@ -160,7 +162,23 @@ const bootstrapSpatialFeatureStandards: SpatialFeatureStandards = {
   default_feature_kind: 'REGION',
   feature_kinds: ['PIPELINE', 'REGION', 'ROUTE'],
   geometry_types: ['AREA', 'LINE', 'POINT'],
-  entity_types: ['ASSET', 'LOCATION'],
+  entity_types: ['ASSET', 'LOCATION', 'RAIL_ROUTE'],
+}
+
+const bootstrapRailRoute: RailRouteRecord = {
+  code: 'BNSF_WAHA_TO_HSC',
+  name: 'BNSF Waha to Houston Ship Channel',
+  is_active: true,
+  rail_line_code: 'BNSF_SOUTHERN_TRANSCON',
+  origin_location_code: 'WAHA',
+  destination_location_code: 'HOUSTON_SHIP_CHANNEL',
+  service_calendar_code: 'USGC_PORT',
+  route_direction: 'FORWARD',
+  schedule_timezone: 'America/Chicago',
+  placement_cutoff_time_local: '15:00',
+  release_cutoff_time_local: '11:00',
+  placement_free_time_hours: 48,
+  release_free_time_hours: 24,
 }
 
 const bootstrapPriceIndex: PriceIndexRecord = {
@@ -549,6 +567,42 @@ test('loadCoreWorkspaceBootstrap fetches only the shell-critical datasets', asyn
       'https://example.test/api/operations/resources',
     ],
   )
+})
+
+test('loadAssetMapScopeSummary sends the current Home map filters to the reference API', async () => {
+  fetchJsonMock.mockResolvedValue({
+    total_count: 2523,
+    total_map_ready_count: 2401,
+    filtered_total_count: 612,
+    filtered_map_ready_count: 587,
+  })
+
+  const payload = await loadAssetMapScopeSummary(
+    'https://example.test/api',
+    {
+      hiddenGeographies: ['North America', 'EMEA'],
+      selectedCountryCode: 'US',
+      selectedSubdivisionCode: 'US-TX',
+      hiddenActivities: ['Positions'],
+      hiddenSubtypes: ['Pipeline', 'Storage'],
+    },
+    authenticatedReadOptions,
+  )
+
+  assert.deepEqual(payload, {
+    total_count: 2523,
+    total_map_ready_count: 2401,
+    filtered_total_count: 612,
+    filtered_map_ready_count: 587,
+  })
+  assert.equal(
+    fetchJsonMock.mock.calls[0]?.[0],
+    'https://example.test/api/reference/assets/map-scope-summary?hidden_geography=North+America&hidden_geography=EMEA&selected_country_code=US&selected_subdivision_code=US-TX&hidden_activity=Positions&hidden_subtype=Pipeline&hidden_subtype=Storage',
+  )
+  assert.deepEqual(fetchJsonMock.mock.calls[0]?.[1], {
+    cache: 'no-store',
+    headers: authenticatedReadOptions.readHeaders,
+  })
 })
 
 test('loadTradeMetadata fetches the server-owned trade contract through typed helpers', async () => {
@@ -956,6 +1010,7 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
       ['https://example.test/api/reference/units?limit=2000', [bootstrapUnit]],
       ['https://example.test/api/reference/locations?limit=2000', [bootstrapLocation]],
       ['https://example.test/api/reference/locations/standards', { location_kinds: ['HUB'] }],
+      ['https://example.test/api/reference/rail-routes?limit=2000', [bootstrapRailRoute]],
       ['https://example.test/api/reference/spatial-features?limit=2000', [bootstrapSpatialFeature]],
       ['https://example.test/api/reference/spatial-features/standards', bootstrapSpatialFeatureStandards],
       ['https://example.test/api/reference/assets?limit=2000', [bootstrapAsset]],
@@ -977,6 +1032,7 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.deepEqual(payload.books, [bootstrapBook])
   assert.deepEqual(payload.commodities, [bootstrapCommodity])
   assert.deepEqual(payload.locationStandards, { location_kinds: ['HUB'] })
+  assert.deepEqual(payload.railRoutes, [bootstrapRailRoute])
   assert.deepEqual(payload.spatialFeatures, [bootstrapSpatialFeature])
   assert.deepEqual(payload.spatialFeatureStandards, bootstrapSpatialFeatureStandards)
   assert.deepEqual(payload.assets, [bootstrapAsset])
@@ -990,6 +1046,7 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   const firstCurrency: CurrencyRecord = payload.currencies[0]!
   const firstUnit: UnitRecord = payload.units[0]!
   const firstLocation: LocationRecord = payload.locations[0]!
+  const firstRailRoute: RailRouteRecord = payload.railRoutes[0]!
   const firstSpatialFeature: SpatialFeatureRecord = payload.spatialFeatures[0]!
   const firstAsset: AssetRecord = payload.assets[0]!
   const firstCounterparty: CounterpartyRecord = payload.counterparties[0]!
@@ -1000,6 +1057,7 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.equal(firstCurrency.code, 'USD')
   assert.equal(firstUnit.code, 'MWH')
   assert.equal(firstLocation.code, 'PJM-WEST')
+  assert.equal(firstRailRoute.code, 'BNSF_WAHA_TO_HSC')
   assert.equal(firstSpatialFeature.code, 'GULF_ROUTE')
   assert.equal(firstAsset.code, 'HSC_PIPE')
   assert.equal(firstAsset.asset_reality, 'REAL')

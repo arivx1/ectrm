@@ -1,5 +1,6 @@
 import type { DragEvent, FormEvent, KeyboardEvent, MutableRefObject } from 'react'
 import type {
+  DocumentGmailInboxRuntimeSettingsRecord,
   DocumentProcessorRuntimeSettingsRecord,
   DocumentSchemaRegistryRecord,
 } from '../../shared/models'
@@ -14,6 +15,10 @@ type DocumentIngestionUploadFormProps = {
   schemaRegistry: DocumentSchemaRegistryRecord | null
   uploading: boolean
   uploadError: string
+  gmailInboxSettings: DocumentGmailInboxRuntimeSettingsRecord | null
+  gmailImporting: boolean
+  gmailImportError: string
+  gmailImportSummary: string
   isDragActive: boolean
   fileInputRef: MutableRefObject<HTMLInputElement | null>
   onDisplayNameChange: (value: string) => void
@@ -26,6 +31,7 @@ type DocumentIngestionUploadFormProps = {
   onDropzoneDragLeave: (event: DragEvent<HTMLDivElement>) => void
   onDropzoneDrop: (event: DragEvent<HTMLDivElement>) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onImportGmailInbox: () => Promise<void>
 }
 
 export function DocumentIngestionUploadForm({
@@ -37,6 +43,10 @@ export function DocumentIngestionUploadForm({
   schemaRegistry,
   uploading,
   uploadError,
+  gmailInboxSettings,
+  gmailImporting,
+  gmailImportError,
+  gmailImportSummary,
   isDragActive,
   fileInputRef,
   onDisplayNameChange,
@@ -49,10 +59,13 @@ export function DocumentIngestionUploadForm({
   onDropzoneDragLeave,
   onDropzoneDrop,
   onSubmit,
+  onImportGmailInbox,
 }: DocumentIngestionUploadFormProps) {
   const configuredProviders = processorSettings?.providers.filter((provider) => provider.configured) ?? []
   const selectedProvider = configuredProviders.find((provider) => provider.provider === selectedProcessorProvider) ?? null
   const shouldShowProviderSelector = configuredProviders.length > 0
+  const gmailInboxConfigured = Boolean(gmailInboxSettings?.enabled && gmailInboxSettings?.configured)
+  const gmailInboxQuery = gmailInboxSettings?.query?.trim() ?? ''
 
   return (
     <form className={`document-ingestion-form${compact ? ' document-ingestion-form-compact' : ''}`} onSubmit={onSubmit}>
@@ -130,6 +143,14 @@ export function DocumentIngestionUploadForm({
         <button type="submit" className="button button-primary" disabled={uploading || !selectedFile}>
           {uploading ? 'Uploading…' : 'Upload PDF'}
         </button>
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={() => void onImportGmailInbox()}
+          disabled={uploading || gmailImporting || !gmailInboxConfigured}
+        >
+          {gmailImporting ? 'Importing Gmail…' : 'Import Gmail PDFs'}
+        </button>
         <span className="workflow-editor-note">
           {compact
             ? 'Upload stores the source PDF and queues page analysis.'
@@ -139,10 +160,17 @@ export function DocumentIngestionUploadForm({
             : selectedProvider
             ? ` ${selectedProvider.label} will be used for document processing when the background job runs.`
             : ' No document-processing APIs are configured on this API yet, so the built-in parser will run.'}
+          {gmailInboxSettings?.enabled
+            ? gmailInboxConfigured
+              ? ` Gmail inbox import is ready${gmailInboxSettings.account_email ? ` for ${gmailInboxSettings.account_email}` : ''}${gmailInboxQuery ? ` using query "${gmailInboxQuery}".` : '.'}`
+              : ' Gmail inbox import is enabled but not fully configured on the API yet.'
+            : ''}
           {schemaRegistry ? ` Review contract ${schemaRegistry.version}.` : ''}
         </span>
       </div>
       {uploadError ? <p className="field-error">{uploadError}</p> : null}
+      {gmailImportError ? <p className="field-error">{gmailImportError}</p> : null}
+      {gmailImportSummary ? <p className="form-note">{gmailImportSummary}</p> : null}
     </form>
   )
 }

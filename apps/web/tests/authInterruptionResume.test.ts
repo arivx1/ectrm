@@ -66,6 +66,20 @@ test('auth interruption resume snapshot round-trips supported fields', () => {
   assert.equal(getAuthInterruptionResumeSnapshot(), null)
 })
 
+test('auth interruption resume snapshot keeps a stable reference when storage is unchanged', () => {
+  saveAuthInterruptionResumeSnapshot({
+    reason: 'session_expired',
+    url: '/?view=operations',
+    continueLabel: 'Work Queue',
+    inspectorTab: null,
+  })
+
+  const firstSnapshot = getAuthInterruptionResumeSnapshot()
+  const repeatedSnapshot = getAuthInterruptionResumeSnapshot()
+
+  assert.equal(repeatedSnapshot, firstSnapshot)
+})
+
 test('auth interruption resume snapshot normalization rejects incomplete data', () => {
   assert.equal(
     normalizeAuthInterruptionResumeSnapshot({

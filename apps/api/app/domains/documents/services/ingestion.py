@@ -72,7 +72,13 @@ def list_document_schema_registry() -> DocumentSchemaRegistryOut:
 
 
 def build_document_processor_runtime_settings() -> DocumentProcessorRuntimeSettingsOut:
-    return _build_document_processor_runtime_settings()
+    runtime_settings = _build_document_processor_runtime_settings()
+    from apps.api.app.domains.integrations.services.gmail_inbox import (
+        build_gmail_inbox_runtime_settings,
+    )
+
+    runtime_settings.gmail_inbox = build_gmail_inbox_runtime_settings()
+    return runtime_settings
 
 
 def list_document_ingestions(

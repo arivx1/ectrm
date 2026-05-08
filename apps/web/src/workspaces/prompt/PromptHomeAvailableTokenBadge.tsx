@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { listAssistantAgents } from '../../entities/assistant/api'
+import { listAssistantAgents, loadAssistantRuntimeSettings } from '../../entities/assistant/api'
 import { appConfig } from '../../shared/config'
 import { summarizePromptHomeAvailableTokens } from './promptHomeAvailableTokens'
 
@@ -21,23 +21,46 @@ export function PromptHomeAvailableTokenBadge() {
     let cancelled = false
 
     async function loadAssistantBudgetsForHome() {
-      try {
-        const payload = await listAssistantAgents(appConfig.apiBase)
-        if (cancelled) {
-          return
-        }
-
-        setSummary(summarizePromptHomeAvailableTokens(payload))
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setSummary({
-          value: 'Unavailable',
-          detail: error instanceof Error ? error.message : 'Could not load published assistant budgets.',
-        })
+      const [runtimeSettingsResult, assistantAgentsResult] = await Promise.allSettled([
+        loadAssistantRuntimeSettings(appConfig.apiBase),
+        listAssistantAgents(appConfig.apiBase),
+      ])
+      if (cancelled) {
+        return
       }
+
+      const defaultDailyTokenAllocation =
+        runtimeSettingsResult.status === 'fulfilled'
+          ? runtimeSettingsResult.value.default_daily_token_allocation
+          : undefined
+
+      if (assistantAgentsResult.status === 'fulfilled') {
+        setSummary(
+          summarizePromptHomeAvailableTokens({
+            agents: assistantAgentsResult.value,
+            defaultDailyTokenAllocation,
+          }),
+        )
+        return
+      }
+
+      if (typeof defaultDailyTokenAllocation === 'number') {
+        setSummary(
+          summarizePromptHomeAvailableTokens({
+            agents: [],
+            defaultDailyTokenAllocation,
+          }),
+        )
+        return
+      }
+
+      setSummary({
+        value: 'Unavailable',
+        detail:
+          assistantAgentsResult.reason instanceof Error
+            ? assistantAgentsResult.reason.message
+            : 'Could not load published assistant budgets.',
+      })
     }
 
     void loadAssistantBudgetsForHome()

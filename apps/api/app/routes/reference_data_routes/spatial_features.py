@@ -23,6 +23,7 @@ from apps.api.app.domains.reference_data.services.spatial_geometry import (
 )
 from apps.api.app.models.reference_asset import ReferenceAsset
 from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_rail_route import ReferenceRailRoute
 from apps.api.app.models.reference_spatial_feature import ReferenceSpatialFeature
 from apps.api.app.schemas.reference_data import (
     SpatialFeatureCreate,
@@ -79,6 +80,18 @@ def _normalize_entity_link(
         ).scalars().first()
         if linked_asset is None:
             raise ValueError(f"Linked asset '{normalized_entity_code}' does not exist")
+        return normalized_entity_type, normalized_entity_code
+
+    if normalized_entity_type == "RAIL_ROUTE":
+        linked_route = db.execute(
+            select(ReferenceRailRoute.code).where(
+                ReferenceRailRoute.code == normalized_entity_code
+            )
+        ).scalars().first()
+        if linked_route is None:
+            raise ValueError(
+                f"Linked rail route '{normalized_entity_code}' does not exist"
+            )
         return normalized_entity_type, normalized_entity_code
 
     linked_location = db.execute(

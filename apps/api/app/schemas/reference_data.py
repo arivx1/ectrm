@@ -10,6 +10,12 @@ from apps.api.app.domains.reference_data.services.counterparty_standards import 
     DEFAULT_COUNTERPARTY_CREDIT_BREACH_ACTION,
     DEFAULT_COUNTERPARTY_CREDIT_STATUS,
 )
+from apps.api.app.domains.reference_data.services.pipeline_reference_standards import (
+    DEFAULT_PIPELINE_COMMODITY_FAMILY,
+    DEFAULT_PIPELINE_JURISDICTION_TYPE,
+    DEFAULT_PIPELINE_POINT_ROLE,
+    DEFAULT_PIPELINE_TOPOLOGY_MODEL,
+)
 
 
 class ReferenceDataBase(BaseModel):
@@ -133,6 +139,271 @@ class AssetStandardsOut(BaseModel):
     asset_realities: list[str]
     default_operating_status: str
     operating_statuses: list[str]
+
+
+class AssetMapScopeSummaryOut(BaseModel):
+    total_count: int
+    total_map_ready_count: int
+    filtered_total_count: int
+    filtered_map_ready_count: int
+
+
+class PipelineDetailCreate(BaseModel):
+    pipeline_code: str = Field(..., min_length=1, max_length=100)
+    commodity_family: str = Field(
+        default=DEFAULT_PIPELINE_COMMODITY_FAMILY,
+        min_length=1,
+        max_length=32,
+    )
+    jurisdiction_type: str = Field(
+        default=DEFAULT_PIPELINE_JURISDICTION_TYPE,
+        min_length=1,
+        max_length=32,
+    )
+    topology_model: str = Field(
+        default=DEFAULT_PIPELINE_TOPOLOGY_MODEL,
+        min_length=1,
+        max_length=32,
+    )
+    market_hub_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    in_service_year: Optional[int] = Field(None, ge=1800, le=2200)
+    cross_border: bool = False
+    is_bidirectional: bool = False
+    tariff_url: Optional[str] = Field(None, min_length=1)
+    ebb_url: Optional[str] = Field(None, min_length=1)
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    created_by: str = Field(..., min_length=1, max_length=128)
+
+
+class PipelineDetailUpdate(BaseModel):
+    commodity_family: Optional[str] = Field(None, min_length=1, max_length=32)
+    jurisdiction_type: Optional[str] = Field(None, min_length=1, max_length=32)
+    topology_model: Optional[str] = Field(None, min_length=1, max_length=32)
+    market_hub_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    in_service_year: Optional[int] = Field(None, ge=1800, le=2200)
+    cross_border: Optional[bool] = None
+    is_bidirectional: Optional[bool] = None
+    tariff_url: Optional[str] = Field(None, min_length=1)
+    ebb_url: Optional[str] = Field(None, min_length=1)
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class PipelineDetailStatusUpdate(BaseModel):
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class PipelineDetailOut(BaseModel):
+    pipeline_code: str
+    commodity_family: str
+    jurisdiction_type: str
+    topology_model: str
+    market_hub_location_code: Optional[str]
+    in_service_year: Optional[int]
+    cross_border: bool
+    is_bidirectional: bool
+    tariff_url: Optional[str]
+    ebb_url: Optional[str]
+    is_active: bool
+    effective_from: Optional[datetime]
+    effective_to: Optional[datetime]
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class PipelineDetailStandardsOut(BaseModel):
+    default_commodity_family: str
+    commodity_families: list[str]
+    default_jurisdiction_type: str
+    jurisdiction_types: list[str]
+    default_topology_model: str
+    topology_models: list[str]
+
+
+class PipelinePointCreate(ReferenceDataCreate):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    pipeline_code: str = Field(..., min_length=1, max_length=100)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    point_role: str = Field(
+        default=DEFAULT_PIPELINE_POINT_ROLE,
+        min_length=1,
+        max_length=32,
+    )
+    operator_point_code: Optional[str] = Field(None, min_length=1, max_length=120)
+    operator_zone: Optional[str] = Field(None, min_length=1, max_length=60)
+    connected_pipeline_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    is_tradable: bool = False
+    is_pricing_point: bool = False
+    is_scheduling_point: bool = True
+    sort_order: Optional[int] = Field(None, ge=0)
+
+
+class PipelinePointUpdate(ReferenceDataUpdate):
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+    pipeline_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    point_role: Optional[str] = Field(None, min_length=1, max_length=32)
+    operator_point_code: Optional[str] = Field(None, min_length=1, max_length=120)
+    operator_zone: Optional[str] = Field(None, min_length=1, max_length=60)
+    connected_pipeline_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    is_tradable: Optional[bool] = None
+    is_pricing_point: Optional[bool] = None
+    is_scheduling_point: Optional[bool] = None
+    sort_order: Optional[int] = Field(None, ge=0)
+
+
+class PipelinePointStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class PipelinePointOut(ReferenceDataOut):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    pipeline_code: str
+    location_code: Optional[str]
+    point_role: str
+    operator_point_code: Optional[str]
+    operator_zone: Optional[str]
+    connected_pipeline_code: Optional[str]
+    is_tradable: bool
+    is_pricing_point: bool
+    is_scheduling_point: bool
+    sort_order: Optional[int]
+
+
+class PipelinePointStandardsOut(BaseModel):
+    default_point_role: str
+    point_roles: list[str]
+
+
+class PipelinePathCreate(ReferenceDataCreate):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    pipeline_code: str = Field(..., min_length=1, max_length=100)
+    receipt_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    delivery_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    receipt_point_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    delivery_point_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    path_direction: str = Field(..., min_length=1, max_length=20)
+    cycle_timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class PipelinePathUpdate(ReferenceDataUpdate):
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+    pipeline_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    receipt_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    delivery_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    receipt_point_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    delivery_point_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    path_direction: Optional[str] = Field(None, min_length=1, max_length=20)
+    cycle_timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class PipelinePathStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class PipelinePathOut(ReferenceDataOut):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    pipeline_code: str
+    receipt_location_code: Optional[str]
+    delivery_location_code: Optional[str]
+    receipt_point_code: Optional[str]
+    delivery_point_code: Optional[str]
+    path_direction: str
+    cycle_timezone: Optional[str]
+
+
+class PipelinePathStandardsOut(BaseModel):
+    default_path_direction: str
+    path_directions: list[str]
+
+
+class RailLineCreate(ReferenceDataCreate):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    railroad_code: str = Field(..., min_length=1, max_length=30)
+    operator_name: Optional[str] = Field(None, min_length=1, max_length=120)
+    default_timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class RailLineUpdate(ReferenceDataUpdate):
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+    railroad_code: Optional[str] = Field(None, min_length=1, max_length=30)
+    operator_name: Optional[str] = Field(None, min_length=1, max_length=120)
+    default_timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class RailLineStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class RailLineOut(ReferenceDataOut):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    railroad_code: str
+    operator_name: Optional[str]
+    default_timezone: Optional[str]
+
+
+class RailRouteCreate(ReferenceDataCreate):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    rail_line_code: str = Field(..., min_length=1, max_length=100)
+    origin_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    destination_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    service_calendar_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    route_direction: str = Field(..., min_length=1, max_length=20)
+    schedule_timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+    placement_cutoff_time_local: Optional[str] = Field(None, min_length=1, max_length=8)
+    release_cutoff_time_local: Optional[str] = Field(None, min_length=1, max_length=8)
+    placement_free_time_hours: Optional[int] = Field(None, ge=0)
+    release_free_time_hours: Optional[int] = Field(None, ge=0)
+
+
+class RailRouteUpdate(ReferenceDataUpdate):
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+    rail_line_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    origin_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    destination_location_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    service_calendar_code: Optional[str] = Field(None, min_length=1, max_length=100)
+    route_direction: Optional[str] = Field(None, min_length=1, max_length=20)
+    schedule_timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+    placement_cutoff_time_local: Optional[str] = Field(None, min_length=1, max_length=8)
+    release_cutoff_time_local: Optional[str] = Field(None, min_length=1, max_length=8)
+    placement_free_time_hours: Optional[int] = Field(None, ge=0)
+    release_free_time_hours: Optional[int] = Field(None, ge=0)
+
+
+class RailRouteStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class RailRouteOut(ReferenceDataOut):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=160)
+    rail_line_code: str
+    origin_location_code: Optional[str]
+    destination_location_code: Optional[str]
+    service_calendar_code: Optional[str]
+    route_direction: str
+    schedule_timezone: Optional[str]
+    placement_cutoff_time_local: Optional[str]
+    release_cutoff_time_local: Optional[str]
+    placement_free_time_hours: Optional[int]
+    release_free_time_hours: Optional[int]
+
+
+class RailRouteStandardsOut(BaseModel):
+    default_route_direction: str
+    route_directions: list[str]
 
 
 class SpatialFeatureCreate(ReferenceDataCreate):
@@ -442,6 +713,205 @@ class PortfolioOut(ReferenceDataOut):
     strategy: Optional[str]
     trader_persona: Optional[str]
     risk_archetype: Optional[str]
+
+
+class CalendarCreate(ReferenceDataCreate):
+    name: str = Field(..., min_length=1, max_length=160)
+    calendar_type: str = Field(..., min_length=1, max_length=50)
+    market: Optional[str] = Field(None, min_length=1, max_length=80)
+    timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class CalendarUpdate(ReferenceDataUpdate):
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+    calendar_type: Optional[str] = Field(None, min_length=1, max_length=50)
+    market: Optional[str] = Field(None, min_length=1, max_length=80)
+    timezone: Optional[str] = Field(None, min_length=1, max_length=60)
+
+
+class CalendarStatusUpdate(ReferenceDataStatusUpdate):
+    pass
+
+
+class CalendarOut(ReferenceDataOut):
+    name: str = Field(..., min_length=1, max_length=160)
+    calendar_type: str
+    market: Optional[str]
+    timezone: Optional[str]
+
+
+class CalendarHolidayBase(BaseModel):
+    holiday_date: date
+    name: str = Field(..., min_length=1, max_length=160)
+    closure_type: str = Field(default="FULL_CLOSED", min_length=1, max_length=32)
+    is_provisional: bool = False
+    description: Optional[str] = None
+
+
+class CalendarHolidayCreate(CalendarHolidayBase):
+    created_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarHolidayUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+    closure_type: Optional[str] = Field(None, min_length=1, max_length=32)
+    is_provisional: Optional[bool] = None
+    description: Optional[str] = None
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarHolidayStatusUpdate(BaseModel):
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarHolidayOut(CalendarHolidayBase):
+    calendar_code: str
+    is_active: bool
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class CalendarHolidayImportRequest(BaseModel):
+    csv_text: str = Field(..., min_length=1)
+    requested_by: str = Field(..., min_length=1, max_length=128)
+    replace_existing: bool = True
+    deactivate_missing: bool = False
+
+
+class CalendarHolidayImportSummaryOut(BaseModel):
+    calendar_code: str
+    requested_by: str
+    total_rows: int
+    created_count: int
+    updated_count: int
+    deactivated_count: int
+    skipped_count: int
+
+
+class CalendarRuleBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    rule_type: str = Field(..., min_length=1, max_length=32)
+    closure_type: str = Field(default="FULL_CLOSED", min_length=1, max_length=32)
+    month: Optional[int] = Field(None, ge=1, le=12)
+    day: Optional[int] = Field(None, ge=1, le=31)
+    weekday: Optional[int] = Field(None, ge=0, le=6)
+    occurrence: Optional[int] = Field(None, ge=1, le=5)
+    offset_days: Optional[int] = None
+    observance_shift: Optional[str] = Field(None, min_length=1, max_length=32)
+    is_provisional: bool = False
+    description: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+
+
+class CalendarRuleCreate(CalendarRuleBase):
+    created_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarRuleUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=160)
+    rule_type: Optional[str] = Field(None, min_length=1, max_length=32)
+    closure_type: Optional[str] = Field(None, min_length=1, max_length=32)
+    month: Optional[int] = Field(None, ge=1, le=12)
+    day: Optional[int] = Field(None, ge=1, le=31)
+    weekday: Optional[int] = Field(None, ge=0, le=6)
+    occurrence: Optional[int] = Field(None, ge=1, le=5)
+    offset_days: Optional[int] = None
+    observance_shift: Optional[str] = Field(None, min_length=1, max_length=32)
+    is_provisional: Optional[bool] = None
+    description: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarRuleStatusUpdate(BaseModel):
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarRuleOut(CalendarRuleBase):
+    id: int
+    calendar_code: str
+    is_active: bool
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class CalendarOverlayBase(BaseModel):
+    overlay_calendar_code: str = Field(..., min_length=1, max_length=50)
+    priority: int = Field(default=100, ge=0, le=100000)
+    description: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+
+
+class CalendarOverlayCreate(CalendarOverlayBase):
+    created_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarOverlayUpdate(BaseModel):
+    priority: Optional[int] = Field(None, ge=0, le=100000)
+    description: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarOverlayStatusUpdate(BaseModel):
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+
+class CalendarOverlayOut(CalendarOverlayBase):
+    id: int
+    calendar_code: str
+    overlay_calendar_code: str
+    is_active: bool
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class CalendarBusinessDayMatchOut(BaseModel):
+    calendar_code: str
+    source_kind: str
+    source_key: str
+    name: str
+    closure_type: str
+    is_provisional: bool
+
+
+class CalendarBusinessDayStatusOut(BaseModel):
+    calendar_code: str
+    evaluated_date: date
+    is_business_day: bool
+    closure_type: str
+    source_calendar_codes: list[str]
+    matches: list[CalendarBusinessDayMatchOut] = Field(default_factory=list)
+
+
+class CalendarBusinessDayDateOut(BaseModel):
+    calendar_code: str
+    start_date: date
+    result_date: date
+    include_start: bool
+    business_days: Optional[int] = None
+
+
+class CalendarBusinessDayCountOut(BaseModel):
+    calendar_code: str
+    start_date: date
+    end_date: date
+    include_start: bool
+    include_end: bool
+    business_day_count: int
 
 
 class PriceIndexCreate(ReferenceDataCreate):

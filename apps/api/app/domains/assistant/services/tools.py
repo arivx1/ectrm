@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import inspect
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.request_context import get_request_identity
 from apps.api.app.domains.accruals.services.accruals import (
     build_accrual_reconciliation_report as load_accrual_reconciliation_report,
 )
@@ -22,11 +24,25 @@ from apps.api.app.domains.accruals.services.accruals import (
 from apps.api.app.domains.accounting.services import (
     list_trade_accounting_entries as load_trade_accounting_entries,
 )
+from apps.api.app.domains.assistant.services.app_context_catalog import (
+    APP_CONTEXT_INTROSPECTION_TOOL_NAMES,
+    build_application_catalog,
+    build_data_schema_catalog,
+    read_codebase_file,
+    search_codebase,
+)
 from apps.api.app.domains.documents.services.ingestion import (
     get_document_ingestion as load_document_ingestion,
 )
 from apps.api.app.domains.documents.services.ingestion import (
     list_document_ingestions as load_document_ingestions,
+)
+from apps.api.app.domains.integrations.services.gmail_inbox import (
+    GmailInboxIntegrationError,
+    get_gmail_inbox_message_detail as load_gmail_inbox_message_detail,
+)
+from apps.api.app.domains.integrations.services.gmail_inbox import (
+    list_gmail_inbox_messages as load_gmail_inbox_messages,
 )
 from apps.api.app.domains.operations.services import build_workspace_bootstrap_summary
 from apps.api.app.domains.operations.services.settlement_invoices import (
@@ -40,6 +56,13 @@ from apps.api.app.domains.operations.services.settlement_invoices import (
 )
 from apps.api.app.domains.operations.services.settlement_payments import (
     list_trade_payments as load_trade_payments,
+)
+from apps.api.app.domains.reports.services.settlement import (
+    build_settlement_filter_options,
+)
+from apps.api.app.domains.reports.services.settlement_presets import (
+    list_visible_settlement_presets,
+    to_settlement_preset_out,
 )
 from apps.api.app.domains.operations.services.trade_attention_candidates import (
     TRADE_ATTENTION_CANDIDATE_TYPE_NAMES,
@@ -72,6 +95,7 @@ from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
 from apps.api.app.models.reference_book import ReferenceBook
+from apps.api.app.models.reference_calendar import ReferenceCalendar
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_currency import ReferenceCurrency
@@ -81,8 +105,9 @@ from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
-from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.trade import Trade, trade_recency_order
+from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.assistant import AssistantToolCallOut, AssistantToolDefinitionOut
 from apps.api.app.schemas.pretrade import PreTradeRecommendationDraftAnalysisCreate
 from apps.api.app.shared.enums import (
@@ -103,6 +128,8 @@ REFERENCE_ENTITY_TYPE_ALIASES = {
     "book": "books",
     "commodities": "commodities",
     "commodity": "commodities",
+    "calendars": "calendars",
+    "calendar": "calendars",
     "price_indices": "price_indices",
     "price-index": "price_indices",
     "price-indices": "price_indices",
@@ -118,6 +145,21 @@ REFERENCE_ENTITY_TYPE_ALIASES = {
     "portfolios": "portfolios",
     "portfolio": "portfolios",
 }
+
+MANAGED_AGENT_BUILD_RECIPE = "role + skills + capabilities + workspaces + live tools + governed actions + system prompt"
+MANAGED_AGENT_INTROSPECTION_TOOL_NAMES: tuple[str, ...] = (
+    "list_managed_agents",
+    "get_managed_agent_profile",
+)
+GLOBAL_READ_INTROSPECTION_TOOL_NAMES: tuple[str, ...] = (
+    *MANAGED_AGENT_INTROSPECTION_TOOL_NAMES,
+    *APP_CONTEXT_INTROSPECTION_TOOL_NAMES,
+)
+MANAGED_AGENT_COORDINATION_TOOL_NAMES: tuple[str, ...] = (
+    "consult_managed_agent",
+    "enlist_managed_agent",
+)
+MAX_MANAGED_AGENT_DELEGATION_DEPTH = 2
 
 WORKFLOW_TYPE_TO_QUEUE = {
     TradeWorkflowType.CONFIRMATION.value: "operations",
@@ -172,7 +214,7 @@ class AssistantToolDefinition:
     name: str
     description: str
     parameters: dict[str, Any]
-    executor: Callable[[Session, dict[str, Any]], "AssistantToolExecutionResult"]
+    executor: Callable[[Session, dict[str, Any]], "AssistantToolExecutionResult | Awaitable[AssistantToolExecutionResult]"]
 
 
 @dataclass(frozen=True)
@@ -206,9 +248,22 @@ class AssistantToolServiceError(Exception):
 
 
 class AssistantToolService:
-    def __init__(self, db: Session, *, actor_id: str | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        *,
+        actor_id: str | None = None,
+        caller_agent: Any | None = None,
+        delegation_depth: int = 0,
+    ) -> None:
         self._db = db
+        self._actor_id = actor_id
+        self._caller_agent = caller_agent
+        self._delegation_depth = delegation_depth
         self._tools = {tool.name: tool for tool in build_tool_definitions(actor_id=actor_id)}
+
+    def set_caller_agent(self, caller_agent: Any | None) -> None:
+        self._caller_agent = caller_agent
 
     def list_tools(self) -> list[AssistantToolDefinition]:
         return list(self._tools.values())
@@ -224,7 +279,11 @@ class AssistantToolService:
         if tool is None:
             raise AssistantToolServiceError(f"Unknown assistant tool '{tool_name}'.")
 
-        result = tool.executor(self._db, arguments)
+        result = self._execute_tool_result(tool, arguments)
+        if inspect.isawaitable(result):
+            raise AssistantToolServiceError(
+                f"Assistant tool '{tool_name}' requires async execution and is unavailable in this sync context."
+            )
         trace = AssistantToolCallTrace(
             tool_name=tool.name,
             arguments=arguments,
@@ -232,6 +291,48 @@ class AssistantToolService:
             record_count=result.record_count,
         )
         return result, trace
+
+    async def execute_tool_async(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> tuple[AssistantToolExecutionResult, AssistantToolCallTrace]:
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            raise AssistantToolServiceError(f"Unknown assistant tool '{tool_name}'.")
+
+        result = self._execute_tool_result(tool, arguments)
+        if inspect.isawaitable(result):
+            result = await result
+        trace = AssistantToolCallTrace(
+            tool_name=tool.name,
+            arguments=arguments,
+            summary=result.summary,
+            record_count=result.record_count,
+        )
+        return result, trace
+
+    def _execute_tool_result(
+        self,
+        tool: AssistantToolDefinition,
+        arguments: dict[str, Any],
+    ) -> AssistantToolExecutionResult | Awaitable[AssistantToolExecutionResult]:
+        if tool.name == "consult_managed_agent":
+            return _consult_managed_agent(
+                self._db,
+                arguments,
+                actor_id=self._actor_id,
+                caller_agent=self._caller_agent,
+            )
+        if tool.name == "enlist_managed_agent":
+            return _enlist_managed_agent(
+                self._db,
+                arguments,
+                actor_id=self._actor_id,
+                caller_agent=self._caller_agent,
+                delegation_depth=self._delegation_depth,
+            )
+        return tool.executor(self._db, arguments)
 
 
 def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantToolDefinition]:
@@ -354,7 +455,7 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
         AssistantToolDefinition(
             name="search_reference_data",
             description=(
-                "Search governed reference data across books, commodities, price indices, currencies, units, "
+                "Search governed reference data across books, commodities, calendars, price indices, currencies, units, "
                 "locations, counterparties, or portfolios. Use this when the user asks whether a code exists, "
                 "what the approved values are, or which reference records match a search term."
             ),
@@ -366,6 +467,7 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
                         "enum": [
                             "books",
                             "commodities",
+                            "calendars",
                             "price_indices",
                             "currencies",
                             "units",
@@ -817,6 +919,48 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
             executor=_get_trade_settlement_summary,
         ),
         AssistantToolDefinition(
+            name="get_settlement_report_filter_options",
+            description=(
+                "Load the currently valid settlement report filter options, including books, counterparties, "
+                "currencies, exception types, and severities. Use this before proposing or saving a settlement "
+                "report preset so the chosen filters stay inside the typed catalog."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            executor=_get_settlement_report_filter_options,
+        ),
+        AssistantToolDefinition(
+            name="list_settlement_report_presets",
+            description=(
+                "Load settlement report presets visible to the authenticated user, including personal and shared "
+                "presets plus their saved filters. Use this when the user asks what presets already exist or before "
+                "creating a new preset to avoid duplicate names."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["PERSONAL", "SHARED"],
+                        "description": "Optional preset scope filter.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of presets to return. Defaults to 25 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=lambda db, arguments, actor_id=actor_id: _list_settlement_report_presets(
+                db,
+                arguments,
+                actor_id=actor_id,
+            ),
+        ),
+        AssistantToolDefinition(
             name="list_deliveries",
             description=(
                 "Load delivery obligations with execution and actualization context. Use this when the user "
@@ -1063,6 +1207,275 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
             executor=_get_document_ingestion,
         ),
         AssistantToolDefinition(
+            name="list_gmail_inbox_messages",
+            description=(
+                "Browse recent messages from the configured Gmail inbox integration. Use this when the user "
+                "asks to search email, review recent inbox activity, or inspect attachment/import status "
+                "without leaving the app. This is read-only and does not import or mutate messages."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional Gmail search query override scoped to the configured inbox.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of messages to return. Defaults to 10 and is capped at 25.",
+                    },
+                    "page_token": {
+                        "type": "string",
+                        "description": "Optional continuation token from a previous Gmail inbox browse result.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_list_gmail_inbox_messages,
+        ),
+        AssistantToolDefinition(
+            name="get_gmail_inbox_message",
+            description=(
+                "Load one Gmail inbox message with sender, recipients, snippet, truncated body text, and "
+                "attachment import status. Use this after listing inbox messages when the user wants the "
+                "full read-only detail for a specific message."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Exact Gmail message identifier from list_gmail_inbox_messages.",
+                    }
+                },
+                "required": ["message_id"],
+                "additionalProperties": False,
+            },
+            executor=_get_gmail_inbox_message,
+        ),
+        AssistantToolDefinition(
+            name="list_managed_agents",
+            description=(
+                "List active managed assistant agents, including their role, skills, authority, orchestration "
+                "pattern, build recipe ingredients, and explicit hierarchy links. Use this when the user asks "
+                "which agents exist, how they differ, or how they relate to each other."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional case-insensitive search across agent id, name, description, or role key.",
+                    },
+                    "role_key": {
+                        "type": "string",
+                        "description": "Optional exact role key filter.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_list_managed_agents,
+        ),
+        AssistantToolDefinition(
+            name="get_managed_agent_profile",
+            description=(
+                "Load one active managed assistant agent profile with its build recipe, capabilities, skills, "
+                "allowed tools, governed actions, hierarchy links, and role-archetype guidance. Use this when "
+                "the user asks how a specific agent is constructed or how it fits into the roster."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Exact managed agent identifier.",
+                    }
+                },
+                "required": ["agent_id"],
+                "additionalProperties": False,
+            },
+            executor=(
+                lambda db, arguments, actor_id=actor_id: _get_managed_agent_profile(
+                    db,
+                    arguments,
+                    actor_id=actor_id,
+                )
+            ),
+        ),
+        AssistantToolDefinition(
+            name="get_application_catalog",
+            description=(
+                "Load the app-wide topology catalog, including route groups, workspace names, schema module entry "
+                "points, frontend workspace modules, documentation anchors, published code roots, and the current "
+                "database overview. Use this when the user asks how ECTRM is organized or where something lives."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            executor=_get_application_catalog,
+        ),
+        AssistantToolDefinition(
+            name="get_data_schema_catalog",
+            description=(
+                "Load the governed database schema catalog for ECTRM. Use this when the user asks about tables, "
+                "columns, primary keys, or foreign-key relationships. Optionally focus on one exact table name."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "table_name": {
+                        "type": "string",
+                        "description": "Optional exact table name such as trades, events, assistant_agents, or trade_invoices.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_get_data_schema_catalog,
+        ),
+        AssistantToolDefinition(
+            name="search_codebase",
+            description=(
+                "Search published ECTRM source and documentation text across the API, web, or engineering docs "
+                "trees. Use this when the user asks where logic lives, which file defines a concept, or how the "
+                "codebase references a specific route, model, workspace, or workflow."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Case-insensitive substring to search for.",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["all", "api", "web", "docs"],
+                        "description": "Which published codebase area to search. Defaults to all.",
+                    },
+                    "path_prefix": {
+                        "type": "string",
+                        "description": "Optional repo-relative file or directory prefix such as apps/api/app/routes or docs/engineering/ai-workflow.md.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of matches to return. Defaults to 10 and is capped at 25.",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            executor=_search_codebase,
+        ),
+        AssistantToolDefinition(
+            name="read_codebase_file",
+            description=(
+                "Read a published ECTRM source or documentation file by repo-relative path with stable line "
+                "numbers. Use this after search_codebase or when the user names a specific file and you need the "
+                "authoritative code or docs excerpt."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Repo-relative file path such as apps/api/app/routes/assistant.py or docs/engineering/ai-workflow.md.",
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Optional 1-based starting line number. Defaults to 1.",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Optional inclusive ending line number. When omitted, the tool returns a capped window.",
+                    },
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            executor=_read_codebase_file,
+        ),
+        AssistantToolDefinition(
+            name="enlist_managed_agent",
+            description=(
+                "Delegate a bounded subtask to another active managed agent. Use this when a specialist should "
+                "gather evidence, draft output, or stage/execute a governed action inside its own lane through "
+                "the normal assistant run, tool, policy, and action-request pipeline."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Exact managed agent identifier to enlist.",
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "A clear bounded task for the enlisted managed agent.",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional shared context for the enlisted managed agent.",
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "description": (
+                            "Optional workspace to use. When omitted, assistant is preferred if allowed; "
+                            "otherwise the enlisted agent's first allowed workspace is used."
+                        ),
+                    },
+                    "use_live_tools": {
+                        "type": "boolean",
+                        "description": "Whether the enlisted managed agent may use its allowed live tools.",
+                    },
+                },
+                "required": ["agent_id", "task"],
+                "additionalProperties": False,
+            },
+            executor=lambda _db, _arguments: AssistantToolExecutionResult(
+                output={"ok": False},
+                summary="enlist_managed_agent requires async execution.",
+                is_error=True,
+            ),
+        ),
+        AssistantToolDefinition(
+            name="consult_managed_agent",
+            description=(
+                "Ask another active managed agent for advisory input on a narrow question. Use this when a "
+                "different managed agent has a clearer domain specialty and you want a second view before "
+                "answering the user. This is advisory-only: the consulted agent cannot stage or execute governed "
+                "actions through this path."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": "The managed agent identifier to consult.",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "The specific advisory question for the other agent.",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional supporting context to share with the consulted agent.",
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "description": "Optional workspace to anchor the consultation. Defaults to assistant or the target's first allowed workspace.",
+                    },
+                    "use_live_tools": {
+                        "type": "boolean",
+                        "description": "Whether the consulted agent may use its own live read tools. Defaults to true.",
+                    },
+                },
+                "required": ["agent_id", "question"],
+                "additionalProperties": False,
+            },
+            executor=(lambda db, arguments, actor_id=actor_id: _consult_managed_agent(db, arguments, actor_id=actor_id)),
+        ),
+        AssistantToolDefinition(
             name="get_workspace_summary",
             description=(
                 "Load the operator workspace bootstrap summary across trades, positions, work items, "
@@ -1085,6 +1498,776 @@ def list_tool_names() -> tuple[str, ...]:
 
 def json_dumps(value: Any) -> str:
     return json.dumps(value, default=_json_default, separators=(",", ":"))
+
+
+def augment_managed_agent_introspection_tools(
+    tool_names: tuple[str, ...],
+    *,
+    capabilities: tuple[str, ...],
+) -> tuple[str, ...]:
+    if "READ" not in {str(capability).upper() for capability in capabilities}:
+        return tuple(tool_names)
+    resolved_tools = list(tool_names)
+    seen = set(resolved_tools)
+    for tool_name in GLOBAL_READ_INTROSPECTION_TOOL_NAMES:
+        if tool_name not in seen:
+            resolved_tools.append(tool_name)
+            seen.add(tool_name)
+    return tuple(resolved_tools)
+
+
+def _list_managed_agents(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    query = _optional_text(arguments.get("query"))
+    role_key = _optional_text(arguments.get("role_key"))
+    agent_payloads = _load_managed_agent_payloads(db)
+    filtered_agents = [
+        payload
+        for payload in agent_payloads
+        if _managed_agent_matches_filters(payload["agent"], query=query, role_key=role_key)
+    ]
+    items = [_build_managed_agent_summary_row(payload, agent_payloads) for payload in filtered_agents]
+    summary = f"Loaded {len(items)} active managed agent profile(s)."
+    if query:
+        summary += f" Query '{query}'."
+    if role_key:
+        summary += f" Role '{role_key}'."
+    return AssistantToolExecutionResult(
+        output={"count": len(items), "items": items},
+        summary=summary,
+        record_count=len(items),
+    )
+
+
+def _get_managed_agent_profile(
+    db: Session,
+    arguments: dict[str, Any],
+    *,
+    actor_id: str | None,
+) -> AssistantToolExecutionResult:
+    from apps.api.app.models.user_account import UserAccount
+
+    agent_id = _require_text(arguments.get("agent_id"), field_name="agent_id").lower()
+    actor = db.get(UserAccount, actor_id) if actor_id else None
+    agent_payloads = _load_managed_agent_payloads(db)
+    target_payload = next((payload for payload in agent_payloads if payload["agent"]["agent_id"] == agent_id), None)
+    if target_payload is None:
+        return AssistantToolExecutionResult(
+            output={"found": False, "agent_id": agent_id},
+            summary=f"No active managed agent matched agent_id {agent_id}.",
+            record_count=0,
+        )
+
+    agent = target_payload["agent"]
+    build_recipe = _build_managed_agent_runtime_recipe(
+        agent,
+        system_prompt_visible=bool(actor is not None and actor.role == "OPS_ADMIN"),
+        system_prompt=target_payload["record"].system_prompt,
+    )
+
+    output = {
+        "found": True,
+        "agent": agent,
+        "build_recipe": build_recipe,
+        "relationships": _build_managed_agent_relationships(agent, agent_payloads),
+        "role_archetype": target_payload["role_archetype"],
+    }
+    return AssistantToolExecutionResult(
+        output=output,
+        summary=f"Loaded managed agent profile for {agent['name']}.",
+        record_count=1,
+    )
+
+
+def _get_application_catalog(db: Session, _arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    payload = build_application_catalog(db)
+    summary = (
+        f"Loaded the ECTRM application catalog with {payload['route_group_count']} route group(s), "
+        f"{payload['route_count']} published route(s), and {len(payload['workspace_catalog'])} workspace(s)."
+    )
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=payload["route_count"],
+    )
+
+
+def _get_data_schema_catalog(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    table_name = _optional_text(arguments.get("table_name"))
+    payload = build_data_schema_catalog(db, table_name=table_name)
+    if table_name is not None and not payload.get("found", False):
+        return AssistantToolExecutionResult(
+            output=payload,
+            summary=f"No database table matched {table_name}.",
+            record_count=0,
+        )
+
+    if table_name is not None:
+        table_payload = payload["table"]
+        summary = (
+            f"Loaded schema details for table {table_payload['table_name']} with "
+            f"{table_payload['column_count']} column(s) and {len(table_payload['foreign_keys'])} relationship(s)."
+        )
+        return AssistantToolExecutionResult(output=payload, summary=summary, record_count=1)
+
+    summary = (
+        f"Loaded schema details for {payload['table_count']} table(s) with "
+        f"{payload['relationship_count']} foreign-key relationship(s)."
+    )
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=int(payload["table_count"]),
+    )
+
+
+def _search_codebase(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    del db
+    query = _require_text(arguments.get("query"), field_name="query")
+    scope = _optional_text(arguments.get("scope")) or "all"
+    path_prefix = _optional_text(arguments.get("path_prefix"))
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+    try:
+        payload = search_codebase(
+            query=query,
+            scope=scope,
+            limit=limit,
+            path_prefix=path_prefix,
+        )
+    except ValueError as exc:
+        raise AssistantToolServiceError(str(exc)) from exc
+
+    summary = f"Found {payload['count']} codebase match(es) for '{query}' in scope {payload['scope']}."
+    if payload["truncated"]:
+        summary += " Results were truncated at the tool limit."
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=payload["count"],
+    )
+
+
+def _read_codebase_file(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    del db
+    path = _require_text(arguments.get("path"), field_name="path")
+    start_line = _normalize_optional_int(arguments.get("start_line"), field_name="start_line") or 1
+    end_line = _normalize_optional_int(arguments.get("end_line"), field_name="end_line")
+    try:
+        payload = read_codebase_file(
+            path=path,
+            start_line=start_line,
+            end_line=end_line,
+        )
+    except ValueError as exc:
+        raise AssistantToolServiceError(str(exc)) from exc
+
+    summary = (
+        f"Loaded {payload['path']} lines {payload['start_line']}-{payload['end_line']} "
+        f"out of {payload['total_lines']} total line(s)."
+    )
+    if payload["truncated"]:
+        summary += " The read window was truncated."
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=1)
+
+
+async def _consult_managed_agent(
+    db: Session,
+    arguments: dict[str, Any],
+    *,
+    actor_id: str | None,
+    caller_agent: Any | None = None,
+) -> AssistantToolExecutionResult:
+    from apps.api.app.domains.assistant.services.chat import AssistantService
+    from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptUser, build_prompt_context
+    from apps.api.app.domains.assistant.services.registry import ACTIVE_ASSISTANT_AGENT_STATUS, to_managed_agent
+    from apps.api.app.domains.assistant.services.skills import INTER_AGENT_CONSULTATION_SKILL
+    from apps.api.app.models.assistant_agent import AssistantAgent
+    from apps.api.app.schemas.assistant import AssistantPromptContextRequest, AssistantPromptRequest
+
+    if not actor_id:
+        raise AssistantToolServiceError("consult_managed_agent requires an authenticated actor context.")
+
+    target_agent_id = _require_text(arguments.get("agent_id"), field_name="agent_id").lower()
+    question = _require_text(arguments.get("question"), field_name="question")
+    consultation_context = _optional_text(arguments.get("context"))
+    requested_workspace = _optional_text(arguments.get("workspace"))
+    use_live_tools = _normalize_bool(arguments.get("use_live_tools"), default=True, field_name="use_live_tools")
+
+    actor = db.get(UserAccount, actor_id)
+    if actor is None:
+        raise AssistantToolServiceError("The current user could not be resolved for agent consultation.")
+
+    target_record = db.get(AssistantAgent, target_agent_id)
+    if target_record is None:
+        raise AssistantToolServiceError(f"No managed agent matched agent_id {target_agent_id}.")
+    if target_record.status != ACTIVE_ASSISTANT_AGENT_STATUS:
+        raise AssistantToolServiceError(f"{target_record.name} is not active and cannot be consulted.")
+
+    _enforce_managed_agent_coordination_hierarchy(caller_agent, target_agent_id)
+
+    target_agent = to_managed_agent(target_record)
+    workspace = _resolve_consult_workspace(target_agent.allowed_workspaces, requested_workspace)
+    consultation_agent = replace(
+        target_agent,
+        skills=tuple(skill for skill in target_agent.skills if skill != INTER_AGENT_CONSULTATION_SKILL),
+        allowed_tools=tuple(tool_name for tool_name in target_agent.allowed_tools if tool_name != "consult_managed_agent"),
+    )
+    prompt_user = AssistantPromptUser(
+        user_id=actor.user_id,
+        display_name=actor.display_name,
+        role=actor.role,
+        email=actor.email,
+        session_id=None,
+        session_expires_at=None,
+    )
+    prompt_context = build_prompt_context(
+        payload=AssistantPromptContextRequest(
+            workspace=workspace,
+            context=_build_consultation_context(target_record.name, consultation_context),
+            use_live_tools=use_live_tools,
+        ),
+        user=prompt_user,
+        db=db,
+        agent_definition=consultation_agent,
+    )
+    response = await AssistantService(db, actor_id=actor_id).generate_response(
+        payload=AssistantPromptRequest(
+            workspace=workspace,
+            use_live_tools=use_live_tools,
+            messages=[{"role": "user", "content": question}],
+        ),
+        agent_definition=consultation_agent,
+        prompt_context=prompt_context,
+    )
+    return AssistantToolExecutionResult(
+        output={
+            "ok": True,
+            "advisory_only": True,
+            "agent_id": consultation_agent.agent_id,
+            "agent_name": consultation_agent.name,
+            "workspace": workspace,
+            "answer": response.message.content,
+            "warnings": list(response.warnings),
+            "tool_calls": [call.model_dump(mode="json") for call in response.tool_calls],
+            "build_recipe": _build_managed_agent_runtime_recipe(_managed_agent_to_dict(consultation_agent)),
+        },
+        summary=f"Consulted {consultation_agent.name} for advisory input.",
+        record_count=1,
+    )
+
+
+async def _enlist_managed_agent(
+    db: Session,
+    arguments: dict[str, Any],
+    *,
+    actor_id: str | None,
+    caller_agent: Any | None = None,
+    delegation_depth: int = 0,
+) -> AssistantToolExecutionResult:
+    from apps.api.app.domains.assistant.services.action_requests import create_action_requests, to_action_request_out_list
+    from apps.api.app.domains.assistant.services.chat import AssistantService
+    from apps.api.app.domains.assistant.services.execution import (
+        _to_prompt_section_out,
+        _autonomous_execution_update_message,
+        _autonomously_execute_action_requests,
+        prepare_assistant_execution,
+    )
+    from apps.api.app.domains.assistant.services.policies import authority_allows_execution
+    from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptUser
+    from apps.api.app.domains.assistant.services.registry import ACTIVE_ASSISTANT_AGENT_STATUS, to_managed_agent
+    from apps.api.app.domains.assistant.services.runs import attach_run_metadata, create_assistant_run
+    from apps.api.app.models.assistant_agent import AssistantAgent
+    from apps.api.app.schemas.assistant import AssistantPromptRequest, AssistantPromptResponse
+
+    if not actor_id:
+        raise AssistantToolServiceError("enlist_managed_agent requires an authenticated actor context.")
+
+    _enforce_managed_agent_delegation_depth(delegation_depth)
+
+    target_agent_id = _require_text(arguments.get("agent_id"), field_name="agent_id").lower()
+    task = _require_text(arguments.get("task"), field_name="task")
+    delegated_context = _optional_text(arguments.get("context"))
+    requested_workspace = _optional_text(arguments.get("workspace"))
+    use_live_tools = _normalize_bool(arguments.get("use_live_tools"), default=True, field_name="use_live_tools")
+
+    actor = db.get(UserAccount, actor_id)
+    if actor is None:
+        raise AssistantToolServiceError("The current user could not be resolved for managed-agent delegation.")
+
+    target_record = db.get(AssistantAgent, target_agent_id)
+    if target_record is None:
+        raise AssistantToolServiceError(f"No managed agent matched agent_id {target_agent_id}.")
+    if target_record.status != ACTIVE_ASSISTANT_AGENT_STATUS:
+        raise AssistantToolServiceError(f"{target_record.name} is not active and cannot be enlisted.")
+
+    _enforce_managed_agent_coordination_hierarchy(caller_agent, target_agent_id)
+
+    target_agent = to_managed_agent(target_record)
+    workspace = _resolve_consult_workspace(target_agent.allowed_workspaces, requested_workspace)
+    request_identity = get_request_identity()
+    delegated_session_id = request_identity.session_id or _synthetic_delegated_session_id(
+        actor_id=actor_id,
+        target_agent_id=target_agent.agent_id,
+    )
+    delegated_role = request_identity.role or actor.role
+    delegated_user = AssistantPromptUser(
+        user_id=actor.user_id,
+        display_name=actor.display_name,
+        role=delegated_role,
+        email=actor.email,
+        session_id=delegated_session_id,
+        session_expires_at=None,
+    )
+    delegated_payload = AssistantPromptRequest(
+        agent_id=target_agent.agent_id,
+        workspace=workspace,
+        context=_build_enlistment_context(
+            caller_agent_name=str(getattr(caller_agent, "name", "") or "another managed agent"),
+            target_agent_name=target_agent.name,
+            context=delegated_context,
+        ),
+        use_live_tools=use_live_tools,
+        messages=[{"role": "user", "content": task}],
+    )
+    prepared = prepare_assistant_execution(
+        db=db,
+        payload=delegated_payload,
+        authorization_header=None,
+        user=delegated_user,
+    )
+    _annotate_delegated_action_proposals(
+        prepared.action_runtime_result.proposals,
+        caller_agent=caller_agent,
+        workspace=workspace,
+        task=task,
+    )
+
+    response = await AssistantService(
+        db,
+        actor_id=actor_id,
+        delegation_depth=delegation_depth + 1,
+    ).generate_response(
+        delegated_payload,
+        agent_definition=prepared.agent_definition,
+        prompt_context=prepared.prompt_context,
+    )
+    if not isinstance(response, AssistantPromptResponse):
+        response = AssistantPromptResponse.model_validate(response)
+    if response.agent_role_key is None:
+        response.agent_role_key = prepared.prompt_context.agent_role_key
+    if response.agent_profile_kind is None:
+        response.agent_profile_kind = prepared.prompt_context.agent_profile_kind
+
+    run_record = create_assistant_run(
+        db=db,
+        conversation_id=None,
+        status="COMPLETED",
+        user_id=delegated_user.user_id,
+        session_id=delegated_session_id,
+        user_role=delegated_user.role,
+        workspace=workspace,
+        agent_id=response.agent_id,
+        agent_name=response.agent_name,
+        agent_role_key=response.agent_role_key,
+        agent_profile_kind=response.agent_profile_kind,
+        provider=response.provider,
+        model=response.model,
+        use_live_tools=use_live_tools,
+        request_messages=delegated_payload.messages,
+        application_context=delegated_payload.context,
+        prompt_sections=[_to_prompt_section_out(section) for section in prepared.prompt_context.sections],
+        rendered_system_prompt=prepared.prompt_context.system_prompt,
+        warnings=response.warnings,
+        tool_calls=response.tool_calls,
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+        assistant_message=response.message.content,
+    )
+    action_request_records = create_action_requests(
+        db=db,
+        run_id=run_record.id,
+        user_id=delegated_user.user_id,
+        session_id=delegated_session_id,
+        workspace=workspace,
+        agent_id=response.agent_id,
+        agent_name=response.agent_name,
+        proposals=prepared.action_runtime_result.proposals,
+    )
+    if authority_allows_execution(target_agent.authority_ceiling):
+        action_request_records = _autonomously_execute_action_requests(
+            db=db,
+            records=action_request_records,
+            actor_id=response.agent_id or target_agent.agent_id,
+            actor_role=delegated_user.role,
+        )
+        execution_update = _autonomous_execution_update_message(action_request_records)
+        if execution_update:
+            response.message.content = f"{response.message.content}\n\n{execution_update}"
+            run_record.assistant_message = response.message.content
+            db.commit()
+            db.refresh(run_record)
+
+    response.action_requests = to_action_request_out_list(action_request_records)
+    response = attach_run_metadata(response, run_record)
+    action_request_outputs = [row.model_dump(mode="json") for row in response.action_requests]
+    executed_count = sum(1 for row in action_request_outputs if row["status"] == "EXECUTED")
+    pending_count = sum(1 for row in action_request_outputs if row["status"] == "PENDING")
+    failed_count = sum(1 for row in action_request_outputs if row["status"] == "FAILED")
+
+    return AssistantToolExecutionResult(
+        output={
+            "ok": True,
+            "delegated": True,
+            "advisory_only": False,
+            "agent_id": target_agent.agent_id,
+            "agent_name": target_agent.name,
+            "workspace": workspace,
+            "answer": response.message.content,
+            "warnings": list(response.warnings),
+            "tool_calls": [call.model_dump(mode="json") for call in response.tool_calls],
+            "action_requests": action_request_outputs,
+            "action_request_count": len(action_request_outputs),
+            "executed_action_count": executed_count,
+            "pending_action_count": pending_count,
+            "failed_action_count": failed_count,
+            "run_id": response.run_id,
+            "run_recorded_at": response.run_recorded_at.isoformat() if response.run_recorded_at else None,
+            "build_recipe": _build_managed_agent_runtime_recipe(_managed_agent_to_dict(target_agent)),
+        },
+        summary=_build_enlisted_managed_agent_summary(
+            agent_name=target_agent.name,
+            executed_count=executed_count,
+            pending_count=pending_count,
+            failed_count=failed_count,
+        ),
+        record_count=1,
+    )
+
+
+def _resolve_consult_workspace(
+    allowed_workspaces: tuple[str, ...],
+    requested_workspace: str | None,
+) -> str:
+    if requested_workspace is not None:
+        normalized_workspace = requested_workspace.strip().lower()
+        if normalized_workspace not in set(allowed_workspaces):
+            raise AssistantToolServiceError(
+                f"The consulted agent is not configured for the {normalized_workspace} workspace."
+            )
+        return normalized_workspace
+    if "assistant" in set(allowed_workspaces):
+        return "assistant"
+    if not allowed_workspaces:
+        raise AssistantToolServiceError("The consulted agent has no allowed workspaces.")
+    return allowed_workspaces[0]
+
+
+def _enforce_managed_agent_coordination_hierarchy(caller_agent: Any | None, target_agent_id: str) -> None:
+    if caller_agent is None:
+        return
+
+    managed_agent_ids = tuple(getattr(caller_agent, "managed_agent_ids", ()) or ())
+    if managed_agent_ids:
+        if target_agent_id not in set(managed_agent_ids):
+            raise AssistantToolServiceError(
+                f"{getattr(caller_agent, 'name', 'This agent')} may only consult configured managed agents: "
+                f"{', '.join(managed_agent_ids)}."
+            )
+        return
+
+    orchestration_pattern = str(getattr(caller_agent, "orchestration_pattern", "SINGLE") or "SINGLE").upper()
+    if orchestration_pattern != "SINGLE":
+        raise AssistantToolServiceError(
+            f"{getattr(caller_agent, 'name', 'This agent')} uses {orchestration_pattern} orchestration but has no configured managed_agent_ids."
+        )
+
+
+def _enforce_managed_agent_delegation_depth(delegation_depth: int) -> None:
+    if delegation_depth >= MAX_MANAGED_AGENT_DELEGATION_DEPTH:
+        raise AssistantToolServiceError(
+            "Managed-agent delegation is limited to two nested layers. Stop here and synthesize with the evidence already gathered."
+        )
+
+
+def _build_consultation_context(agent_name: str, context: str | None) -> str:
+    lines = [
+        f"This is an internal advisory consultation for {agent_name}.",
+        "Return analysis only.",
+        "Do not claim that any governed action was staged or executed through this consultation.",
+        "Do not consult any other managed agent from inside this consultation.",
+    ]
+    if context:
+        lines.extend(["Shared context:", context])
+    return "\n".join(lines)
+
+
+def _build_enlistment_context(
+    *,
+    caller_agent_name: str,
+    target_agent_name: str,
+    context: str | None,
+) -> str:
+    lines = [
+        f"This is an internal delegated task from {caller_agent_name} to {target_agent_name}.",
+        "Own the task inside your allowed lane and use your normal live-tool and governed-action scope when justified.",
+        "Any governed mutation must still flow through typed action requests or bounded autonomous execution metadata.",
+        "Be explicit about what you observed, what you drafted, and whether anything was staged or executed.",
+    ]
+    if context:
+        lines.extend(["Shared context:", context])
+    return "\n".join(lines)
+
+
+def _annotate_delegated_action_proposals(
+    proposals: tuple[Any, ...],
+    *,
+    caller_agent: Any | None,
+    workspace: str,
+    task: str,
+) -> None:
+    if caller_agent is None:
+        return
+    delegated_by_agent_id = _optional_text(getattr(caller_agent, "agent_id", None))
+    delegated_by_agent_name = _optional_text(getattr(caller_agent, "name", None))
+    if delegated_by_agent_id is None and delegated_by_agent_name is None:
+        return
+    for proposal in proposals:
+        review_context = proposal.payload.get("review_context")
+        if not isinstance(review_context, dict):
+            continue
+        review_context["delegated_by_agent"] = {
+            "agent_id": delegated_by_agent_id,
+            "name": delegated_by_agent_name,
+        }
+        review_context["delegated_task"] = task
+        review_context["delegated_workspace"] = workspace
+
+
+def _build_enlisted_managed_agent_summary(
+    *,
+    agent_name: str,
+    executed_count: int,
+    pending_count: int,
+    failed_count: int,
+) -> str:
+    parts = [f"Enlisted {agent_name}."]
+    if executed_count:
+        parts.append(f"Executed {executed_count} governed action(s).")
+    if pending_count:
+        parts.append(f"Staged {pending_count} action request(s) for review.")
+    if failed_count:
+        parts.append(f"{failed_count} delegated action(s) failed.")
+    if executed_count == 0 and pending_count == 0 and failed_count == 0:
+        parts.append("No governed actions were staged or executed.")
+    return " ".join(parts)
+
+
+def _synthetic_delegated_session_id(*, actor_id: str, target_agent_id: str) -> str:
+    return f"delegated:{actor_id}:{target_agent_id}"
+
+
+def _managed_agent_to_dict(agent: Any) -> dict[str, Any]:
+    return {
+        "role_key": getattr(agent, "role_key", None),
+        "profile_kind": getattr(agent, "profile_kind", None),
+        "authority_ceiling": getattr(agent, "authority_ceiling", None),
+        "orchestration_pattern": getattr(agent, "orchestration_pattern", "SINGLE"),
+        "parent_agent_id": getattr(agent, "parent_agent_id", None),
+        "managed_agent_ids": list(getattr(agent, "managed_agent_ids", ()) or ()),
+        "delegation_guidance": getattr(agent, "delegation_guidance", None),
+        "skills": list(getattr(agent, "skills", ()) or ()),
+        "capabilities": list(getattr(agent, "capabilities", ()) or ()),
+        "allowed_workspaces": list(getattr(agent, "allowed_workspaces", ()) or ()),
+        "allowed_tools": list(getattr(agent, "allowed_tools", ()) or ()),
+        "allowed_action_types": list(getattr(agent, "allowed_action_types", ()) or ()),
+    }
+
+
+def _build_managed_agent_runtime_recipe(
+    agent: dict[str, Any],
+    *,
+    system_prompt_visible: bool = False,
+    system_prompt: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "expression": MANAGED_AGENT_BUILD_RECIPE,
+        "role_key": agent.get("role_key"),
+        "profile_kind": agent.get("profile_kind"),
+        "authority_ceiling": agent.get("authority_ceiling"),
+        "orchestration_pattern": agent.get("orchestration_pattern"),
+        "parent_agent_id": agent.get("parent_agent_id"),
+        "managed_agent_ids": list(agent.get("managed_agent_ids") or []),
+        "delegation_guidance": agent.get("delegation_guidance"),
+        "skills": list(agent.get("skills") or []),
+        "capabilities": list(agent.get("capabilities") or []),
+        "allowed_workspaces": list(agent.get("allowed_workspaces") or []),
+        "allowed_tools": list(agent.get("allowed_tools") or []),
+        "allowed_action_types": list(agent.get("allowed_action_types") or []),
+        "system_prompt_visible": system_prompt_visible,
+    }
+    if system_prompt_visible:
+        payload["system_prompt"] = system_prompt
+    return payload
+
+
+def _load_managed_agent_payloads(db: Session) -> list[dict[str, Any]]:
+    from apps.api.app.domains.assistant.services.eval_gates import build_agent_eval_gate, build_role_archetype_eval_gate
+    from apps.api.app.domains.assistant.services.registry import (
+        list_public_agent_records,
+        summarize_agent_token_budgets,
+        to_public_agent_out,
+    )
+    from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype, to_role_archetype_out
+
+    records = list_public_agent_records(db)
+    token_budgets = summarize_agent_token_budgets(db, records)
+    payloads: list[dict[str, Any]] = []
+    for record in records:
+        public_agent = to_public_agent_out(
+            record,
+            token_budget=token_budgets.get(record.agent_id),
+            eval_gate=build_agent_eval_gate(db, record),
+        )
+        role = get_role_archetype(record.role_key) if record.role_key else None
+        payloads.append(
+            {
+                "record": record,
+                "agent": _dump_model(public_agent),
+                "role_archetype": (
+                    _dump_model(to_role_archetype_out(role, eval_gate=build_role_archetype_eval_gate(role)))
+                    if role is not None
+                    else None
+                ),
+            }
+        )
+    return payloads
+
+
+def _managed_agent_matches_filters(
+    agent: dict[str, Any],
+    *,
+    query: str | None,
+    role_key: str | None,
+) -> bool:
+    if role_key is not None and str(agent.get("role_key") or "").lower() != role_key.lower():
+        return False
+    if query is None:
+        return True
+    haystack = " ".join(
+        [
+            str(agent.get("agent_id") or ""),
+            str(agent.get("name") or ""),
+            str(agent.get("description") or ""),
+            str(agent.get("role_key") or ""),
+            str(agent.get("specialization_summary") or ""),
+        ]
+    ).lower()
+    return query.lower() in haystack
+
+
+def _build_managed_agent_summary_row(
+    payload: dict[str, Any],
+    agent_payloads: list[dict[str, Any]],
+) -> dict[str, Any]:
+    agent = payload["agent"]
+    relationships = _build_managed_agent_relationships(agent, agent_payloads)
+    return {
+        "agent_id": agent["agent_id"],
+        "name": agent["name"],
+        "description": agent["description"],
+        "role_key": agent["role_key"],
+        "profile_kind": agent["profile_kind"],
+        "authority_ceiling": agent["authority_ceiling"],
+        "human_owner_role": agent["human_owner_role"],
+        "orchestration_pattern": agent["orchestration_pattern"],
+        "parent_agent_id": agent["parent_agent_id"],
+        "managed_agent_ids": list(agent["managed_agent_ids"]),
+        "managed_by_agent_ids": list(relationships["managed_by_agent_ids"]),
+        "skills": list(agent["skills"]),
+        "capabilities": list(agent["capabilities"]),
+        "allowed_workspaces": list(agent["allowed_workspaces"]),
+        "build_recipe": MANAGED_AGENT_BUILD_RECIPE,
+        "specialization_summary": agent["specialization_summary"],
+        "relationship_summary": relationships["summary"],
+        "related_agents": relationships["related_agents"],
+    }
+
+
+def _build_managed_agent_relationships(
+    agent: dict[str, Any],
+    agent_payloads: list[dict[str, Any]],
+) -> dict[str, Any]:
+    agent_by_id = {payload["agent"]["agent_id"]: payload["agent"] for payload in agent_payloads}
+    relationship_types_by_agent_id: dict[str, set[str]] = {}
+
+    def register(related_agent_id: str, relationship_type: str) -> None:
+        if not related_agent_id:
+            return
+        relationship_types_by_agent_id.setdefault(related_agent_id, set()).add(relationship_type)
+
+    parent_agent_id = str(agent.get("parent_agent_id") or "")
+    if parent_agent_id:
+        register(parent_agent_id, "parent")
+
+    for managed_agent_id in list(agent.get("managed_agent_ids") or []):
+        register(str(managed_agent_id), "manages")
+
+    for payload in agent_payloads:
+        other_agent = payload["agent"]
+        other_agent_id = str(other_agent.get("agent_id") or "")
+        if other_agent_id == agent["agent_id"]:
+            continue
+        if agent["agent_id"] == other_agent.get("parent_agent_id"):
+            register(other_agent_id, "parent_of")
+            register(other_agent_id, "manages")
+        if agent["agent_id"] in set(other_agent.get("managed_agent_ids") or []):
+            register(other_agent_id, "managed_by")
+
+    related_agents = []
+    for related_agent_id in sorted(relationship_types_by_agent_id):
+        related_agent = agent_by_id.get(related_agent_id)
+        related_agents.append(
+            {
+                "agent_id": related_agent_id,
+                "name": related_agent["name"] if related_agent is not None else related_agent_id,
+                "role_key": related_agent["role_key"] if related_agent is not None else None,
+                "relationship_types": sorted(relationship_types_by_agent_id[related_agent_id]),
+            }
+        )
+
+    managed_by_agent_ids = sorted(
+        related_agent["agent_id"]
+        for related_agent in related_agents
+        if "managed_by" in set(related_agent["relationship_types"]) or "parent" in set(related_agent["relationship_types"])
+    )
+    return {
+        "parent_agent_id": parent_agent_id or None,
+        "managed_agent_ids": list(agent.get("managed_agent_ids") or []),
+        "managed_by_agent_ids": managed_by_agent_ids,
+        "related_agents": related_agents,
+        "summary": _build_managed_agent_relationship_summary(
+            parent_agent_id=parent_agent_id or None,
+            managed_agent_ids=tuple(agent.get("managed_agent_ids") or ()),
+            managed_by_agent_ids=tuple(managed_by_agent_ids),
+        ),
+    }
+
+
+def _build_managed_agent_relationship_summary(
+    *,
+    parent_agent_id: str | None,
+    managed_agent_ids: tuple[str, ...],
+    managed_by_agent_ids: tuple[str, ...],
+) -> str:
+    summary_parts: list[str] = []
+    if managed_by_agent_ids:
+        summary_parts.append(f"managed by {', '.join(managed_by_agent_ids)}")
+    elif parent_agent_id:
+        summary_parts.append(f"reports to {parent_agent_id}")
+    if managed_agent_ids:
+        summary_parts.append(f"manages {', '.join(managed_agent_ids)}")
+    if not summary_parts:
+        return "No explicit managed-agent links are configured."
+    return "; ".join(summary_parts) + "."
 
 
 def _get_trade_by_id(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
@@ -2034,6 +3217,58 @@ def _get_trade_settlement_summary(db: Session, arguments: dict[str, Any]) -> Ass
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(invoices) + len(payments))
 
 
+def _get_settlement_report_filter_options(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    filter_options = build_settlement_filter_options(db)
+    payload = {
+        "books": list(filter_options["books"]),
+        "counterparties": list(filter_options["counterparties"]),
+        "currencies": list(filter_options["currencies"]),
+        "exception_types": list(filter_options["exception_types"]),
+        "severities": list(filter_options["severities"]),
+    }
+    summary = (
+        "Loaded settlement report filter options with "
+        f"{len(payload['books'])} book(s), "
+        f"{len(payload['counterparties'])} counterparty option(s), and "
+        f"{len(payload['currencies'])} currency option(s)."
+    )
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=sum(len(value) for value in payload.values()),
+    )
+
+
+def _list_settlement_report_presets(
+    db: Session,
+    arguments: dict[str, Any],
+    *,
+    actor_id: str | None,
+) -> AssistantToolExecutionResult:
+    if actor_id is None:
+        raise AssistantToolServiceError("list_settlement_report_presets requires an authenticated actor.")
+
+    scope = _optional_upper(arguments.get("scope"))
+    if scope is not None and scope not in {"PERSONAL", "SHARED"}:
+        raise AssistantToolServiceError("scope must be PERSONAL or SHARED when provided.")
+    limit = _normalize_limit(arguments.get("limit"), default=25)
+
+    records = list_visible_settlement_presets(db, actor_id=actor_id)
+    if scope is not None:
+        records = [record for record in records if record.scope == scope]
+    records = records[:limit]
+
+    items = [
+        to_settlement_preset_out(record, actor_id=actor_id, actor_role=None).model_dump(mode="json")
+        for record in records
+    ]
+    payload = {"count": len(items), "items": items}
+    summary = f"Returned {len(items)} settlement report preset(s)."
+    if scope is not None:
+        summary = f"Returned {len(items)} {scope.lower()} settlement report preset(s)."
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
+
+
 def _list_deliveries(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
     trade_id = _optional_text(arguments.get("trade_id"))
     execution_status = _optional_upper(arguments.get("execution_status"))
@@ -2244,6 +3479,65 @@ def _get_document_ingestion(db: Session, arguments: dict[str, Any]) -> Assistant
         f"Loaded document {document_id} with status {document.status}, review status {document.review_status}, "
         f"and dominant kind {dominant_kind or 'UNKNOWN'}."
     )
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=1)
+
+
+def _list_gmail_inbox_messages(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    query = _optional_text(arguments.get("query"))
+    page_token = _optional_text(arguments.get("page_token"))
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+
+    try:
+        browse_result = load_gmail_inbox_messages(
+            db,
+            query_override=query,
+            page_size=limit,
+            page_token=page_token,
+        )
+    except (LookupError, ValueError, GmailInboxIntegrationError) as exc:
+        raise AssistantToolServiceError(str(exc)) from exc
+
+    payload = _dump_model(browse_result)
+    messages = list(payload.pop("messages", []))
+    payload["count"] = len(messages)
+    payload["items"] = messages
+    summary = f"Loaded {len(messages)} Gmail inbox message(s)."
+    if query:
+        summary += f" Query '{query}'."
+    if browse_result.next_page_token:
+        summary += " More messages are available via next_page_token."
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=len(messages),
+    )
+
+
+def _get_gmail_inbox_message(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    message_id = _require_text(arguments.get("message_id"), field_name="message_id")
+    try:
+        message = load_gmail_inbox_message_detail(db, message_id=message_id)
+    except LookupError:
+        return AssistantToolExecutionResult(
+            output={"found": False, "message_id": message_id},
+            summary=f"Gmail message {message_id} was not found.",
+            record_count=0,
+        )
+    except (ValueError, GmailInboxIntegrationError) as exc:
+        raise AssistantToolServiceError(str(exc)) from exc
+
+    importable_attachment_count = sum(1 for attachment in message.attachments if attachment.importable)
+    sender = (message.sender or "").strip()[:120] or "unknown sender"
+    subject = (message.subject or "").strip()[:160] or "no subject"
+    payload = {"found": True, "message": _dump_model(message)}
+    summary = (
+        f"Loaded Gmail message {message_id} from {sender} with subject {subject} and "
+        f"{len(message.attachments)} attachment(s)."
+    )
+    if importable_attachment_count:
+        summary += f" {importable_attachment_count} importable PDF attachment(s) detected."
+    if message.body_truncated:
+        summary += " Body text was truncated."
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=1)
 
 
@@ -2541,6 +3835,10 @@ def _serialize_reference_record(record: Any) -> dict[str, Any]:
         payload["book_code"] = record.book_code
         payload["owner"] = record.owner
         payload["strategy"] = record.strategy
+    if isinstance(record, ReferenceCalendar):
+        payload["calendar_type"] = record.calendar_type
+        payload["market"] = record.market
+        payload["timezone"] = record.timezone
     if isinstance(record, ReferencePriceIndex):
         payload["commodity_code"] = record.commodity_code
         payload["currency_code"] = record.currency_code
@@ -2557,6 +3855,7 @@ def _reference_model_for_entity_type(entity_type: str) -> Any:
     mapping = {
         "books": ReferenceBook,
         "commodities": ReferenceCommodity,
+        "calendars": ReferenceCalendar,
         "price_indices": ReferencePriceIndex,
         "currencies": ReferenceCurrency,
         "units": ReferenceUnit,
@@ -2575,7 +3874,7 @@ def _normalize_reference_entity_type(value: Any) -> str:
     mapped = REFERENCE_ENTITY_TYPE_ALIASES.get(normalized)
     if mapped is None:
         raise AssistantToolServiceError(
-            "entity_type must be one of books, commodities, price_indices, currencies, units, locations, counterparties, or portfolios."
+            "entity_type must be one of books, commodities, calendars, price_indices, currencies, units, locations, counterparties, or portfolios."
         )
     return mapped
 
@@ -2723,6 +4022,17 @@ def _require_text(value: Any, *, field_name: str) -> str:
 def _optional_text(value: Any) -> Optional[str]:
     normalized = str(value or "").strip()
     return normalized or None
+
+
+def _truncate_text(value: str | None, max_length: int) -> str | None:
+    normalized = _optional_text(value)
+    if normalized is None:
+        return None
+    if len(normalized) <= max_length:
+        return normalized
+    if max_length <= 3:
+        return normalized[:max_length]
+    return f"{normalized[: max_length - 3].rstrip()}..."
 
 
 def _optional_upper(value: Any) -> Optional[str]:

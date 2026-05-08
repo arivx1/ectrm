@@ -585,14 +585,19 @@ def _policy_warning_details(agent: AssistantAgent) -> tuple[str, ...]:
     try:
         validate_agent_profile_definition(
             agent_name=agent.name,
+            agent_id=agent.agent_id,
             role_key=agent.role_key,
             profile_kind=agent.profile_kind,
             scope=agent.scope,
             allowed_workspaces=tuple(agent.allowed_workspaces or []),
             capabilities=tuple(agent.capabilities or []),
+            skills=tuple(agent.skills or []),
             allowed_tools=tuple(agent.allowed_tools or []),
             allowed_action_types=tuple(agent.allowed_action_types or []),
             authority_ceiling=agent.authority_ceiling,
+            orchestration_pattern=agent.orchestration_pattern or "SINGLE",
+            parent_agent_id=agent.parent_agent_id,
+            managed_agent_ids=tuple(agent.managed_agent_ids or []),
         )
     except AssistantAgentProfilePolicyError as exc:
         return _distinct(str(exc).split("; "))

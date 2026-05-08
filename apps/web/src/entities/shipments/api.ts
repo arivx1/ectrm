@@ -77,6 +77,25 @@ export type UpdateDeliveryPipelineDetailInput = {
   >
 }
 
+export type UpdateDeliveryRailDetailInput = {
+  rail_route_code?: string | null
+  origin_station_code?: string | null
+  destination_station_code?: string | null
+  waybill_reference?: string | null
+  release_number?: string | null
+  unit_train_id?: string | null
+  railcar_count?: number | null
+  reset_fields?: Array<
+    | 'rail_route_code'
+    | 'origin_station_code'
+    | 'destination_station_code'
+    | 'waybill_reference'
+    | 'release_number'
+    | 'unit_train_id'
+    | 'railcar_count'
+  >
+}
+
 export type UpdateDeliveryPowerDetailInput = {
   market_operator?: string | null
   pricing_node_code?: string | null
@@ -201,6 +220,20 @@ export async function updateDeliveryPowerDetails(
   const { deliveryId, payload } = args
 
   return patchJson(`${apiBase}/deliveries/${deliveryId}/power-details`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function updateDeliveryRailDetails(
+  apiBase: string,
+  args: {
+    deliveryId: string
+    payload: UpdateDeliveryRailDetailInput
+  },
+): Promise<unknown> {
+  const { deliveryId, payload } = args
+
+  return patchJson(`${apiBase}/deliveries/${deliveryId}/rail-details`, payload, {
     headers: shipmentHeaders(),
   })
 }

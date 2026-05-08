@@ -1,3 +1,4 @@
+import { DocumentGmailInboxBrowser } from '../../features/documents/DocumentGmailInboxBrowser'
 import { DocumentIngestionDocumentCard } from '../../features/documents/DocumentIngestionDocumentCard'
 import { DocumentIngestionUploadForm } from '../../features/documents/DocumentIngestionUploadForm'
 import { useDocumentIngestionController } from '../../features/documents/useDocumentIngestionController'
@@ -32,6 +33,10 @@ export function DocumentIngestionPanel({ authSession, formatDate, compact = fals
         schemaRegistry={controller.schemaRegistry}
         uploading={controller.uploading}
         uploadError={controller.uploadError}
+        gmailInboxSettings={controller.processorSettings?.gmail_inbox ?? null}
+        gmailImporting={controller.gmailImporting}
+        gmailImportError={controller.gmailImportError}
+        gmailImportSummary={controller.gmailImportSummary}
         isDragActive={controller.isDragActive}
         fileInputRef={controller.fileInputRef}
         onDisplayNameChange={controller.setDisplayName}
@@ -44,6 +49,26 @@ export function DocumentIngestionPanel({ authSession, formatDate, compact = fals
         onDropzoneDragLeave={controller.handleDropzoneDragLeave}
         onDropzoneDrop={controller.handleDropzoneDrop}
         onSubmit={controller.handleSubmit}
+        onImportGmailInbox={controller.handleImportGmailInbox}
+      />
+
+      <DocumentGmailInboxBrowser
+        compact={compact}
+        gmailInboxSettings={controller.processorSettings?.gmail_inbox ?? null}
+        gmailMessageQuery={controller.gmailMessageQuery}
+        gmailMessages={controller.gmailMessages}
+        gmailMessagesLoading={controller.gmailMessagesLoading}
+        gmailMessagesError={controller.gmailMessagesError}
+        gmailNextPageToken={controller.gmailNextPageToken}
+        selectedGmailMessageId={controller.selectedGmailMessageId}
+        selectedGmailMessage={controller.selectedGmailMessage}
+        selectedGmailMessageLoading={controller.selectedGmailMessageLoading}
+        selectedGmailMessageError={controller.selectedGmailMessageError}
+        formatDate={formatDate}
+        onGmailMessageQueryChange={controller.setGmailMessageQuery}
+        onRefreshGmailMessages={controller.handleRefreshGmailMessages}
+        onLoadMoreGmailMessages={controller.handleLoadMoreGmailMessages}
+        onSelectGmailMessage={controller.handleSelectGmailMessage}
       />
 
       {controller.loading ? (

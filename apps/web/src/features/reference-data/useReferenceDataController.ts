@@ -14,6 +14,7 @@ import type {
   LocationStandards,
   PortfolioRecord,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureRecord,
   SpatialFeatureStandards,
@@ -60,6 +61,7 @@ type UseReferenceDataControllerArgs = {
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  railRoutes: RailRouteRecord[]
   spatialFeatures: SpatialFeatureRecord[]
   assetStandards: AssetStandards
   spatialFeatureStandards: SpatialFeatureStandards
@@ -90,6 +92,7 @@ export function useReferenceDataController({
   currencies,
   units,
   locations,
+  railRoutes,
   spatialFeatures,
   assetStandards,
   spatialFeatureStandards,
@@ -120,6 +123,7 @@ export function useReferenceDataController({
     currencies,
     units,
     locations,
+    railRoutes,
     spatialFeatures,
     assetStandards,
     spatialFeatureStandards,

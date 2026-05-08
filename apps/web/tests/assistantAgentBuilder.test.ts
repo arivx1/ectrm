@@ -19,6 +19,14 @@ const tradeOpsRole: AssistantAgentRoleArchetype = {
   allowed_workspaces: ['assistant', 'trades', 'operations'],
   work_objects: ['trade', 'workflow item'],
   capability_ceiling: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+  skills: [
+    'trade_operations_coordination',
+    'confirmation_control',
+    'workflow_control',
+    'movement_control',
+    'document_triage',
+    'inter_agent_consultation',
+  ],
   default_tools: ['get_trade_workbench', 'list_workflow_items', 'list_documents'],
   maximum_action_types: [
     'record_delivery_event',
@@ -35,6 +43,14 @@ const tradeOpsRole: AssistantAgentRoleArchetype = {
   success_metrics: ['Higher approval hit rate.'],
   required_eval_coverage: ['Allowed action execution.', 'Denied overreach.'],
   base_prompt_guidance: ['Lead with the blocker.', 'Show evidence before staging.'],
+  recommended_orchestration_pattern: 'MANAGER',
+  recommended_parent_role_keys: ['control-tower-agent'],
+  recommended_managed_role_keys: [
+    'movement-controller-agent',
+    'confirmation-controller-agent',
+    'workflow-controller-agent',
+  ],
+  delegation_guidance: ['Consult specialists, then keep final action ownership with Trade Ops.'],
   current_profile_ids: ['trade-ops-copilot'],
 }
 
@@ -65,6 +81,7 @@ describe('assistant agent builder helpers', () => {
       'reports',
     ])
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT'])
+    expect(draft.skills).toEqual(['market_intelligence', 'inter_agent_consultation'])
     expect(draft.allowed_tools).toEqual([
       'get_market_context',
       'analyze_pretrade_scenario_draft',
@@ -72,6 +89,7 @@ describe('assistant agent builder helpers', () => {
     expect(draft.system_prompt).toContain('Market Research Agent')
     expect(draft.system_prompt).toContain('Guardrails')
     expect(draft.allowed_action_types).toEqual([])
+    expect(draft.orchestration_pattern).toBe('PARALLEL')
     expect(draft.activation_notes).toContain('platform role catalog')
   })
 
@@ -95,6 +113,14 @@ describe('assistant agent builder helpers', () => {
     const draft = buildAgentBuilderDraft('trade-ops-copilot', ['get_trade_workbench', 'list_documents'])
 
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.skills).toEqual([
+      'trade_operations_coordination',
+      'confirmation_control',
+      'workflow_control',
+      'movement_control',
+      'document_triage',
+      'inter_agent_consultation',
+    ])
     expect(draft.role_key).toBe('trade-ops-copilot')
     expect(draft.profile_kind).toBe('ROLE_DERIVED')
     expect(draft.authority_ceiling).toBe('EXECUTE')
@@ -162,6 +188,7 @@ describe('assistant agent builder helpers', () => {
       'get_trade_settlement_summary',
     ])
     expect(draft.allowed_action_types).toEqual([
+      'create_settlement_report_preset',
       'issue_trade_invoice',
       'void_trade_invoice',
       'create_trade_payment',
@@ -251,9 +278,11 @@ describe('assistant agent builder helpers', () => {
 
     expect(draft.role_key).toBe('control-tower-agent')
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT'])
+    expect(draft.skills).toEqual(['agent_supervision', 'reporting_reconciliation', 'inter_agent_consultation'])
     expect(draft.authority_ceiling).toBe('DRAFT')
     expect(draft.allowed_tools).toEqual(['get_workspace_summary'])
     expect(draft.allowed_action_types).toEqual([])
+    expect(draft.orchestration_pattern).toBe('TRIAGE')
   })
 
   it('returns a fresh empty draft each time', () => {
@@ -265,6 +294,7 @@ describe('assistant agent builder helpers', () => {
     expect(second.allowed_workspaces).toEqual(['assistant'])
     expect(second.capabilities).toEqual(['READ', 'EXPLAIN'])
     expect(second.allowed_action_types).toEqual([])
+    expect(second.orchestration_pattern).toBe('SINGLE')
     expect(second.role_key).toBe('')
     expect(second.profile_kind).toBe('CUSTOM')
   })
@@ -281,8 +311,20 @@ describe('assistant agent builder helpers', () => {
     expect(draft.profile_kind).toBe('ROLE_DERIVED')
     expect(draft.human_owner_role).toBe('Operations Lead')
     expect(draft.authority_ceiling).toBe('EXECUTE')
+    expect(draft.orchestration_pattern).toBe('MANAGER')
+    expect(draft.parent_agent_id).toBe('')
+    expect(draft.managed_agent_ids).toEqual([])
+    expect(draft.delegation_guidance).toContain('final action ownership')
     expect(draft.allowed_workspaces).toEqual(['assistant', 'trades', 'operations'])
     expect(draft.capabilities).toEqual(['READ', 'EXPLAIN', 'DRAFT', 'ACTION'])
+    expect(draft.skills).toEqual([
+      'trade_operations_coordination',
+      'confirmation_control',
+      'workflow_control',
+      'movement_control',
+      'document_triage',
+      'inter_agent_consultation',
+    ])
     expect(draft.allowed_tools).toEqual(['get_trade_workbench', 'list_workflow_items'])
     expect(draft.allowed_action_types).toEqual([
       'record_delivery_event',
@@ -313,6 +355,7 @@ describe('assistant agent builder helpers', () => {
     expect(fit.sections.find((section) => section.label === 'Workspaces')?.status).toBe('narrowed')
     expect(fit.sections.find((section) => section.label === 'Live tools')?.status).toBe('narrowed')
     expect(fit.sections.find((section) => section.label === 'Governed actions')?.status).toBe('narrowed')
+    expect(fit.sections.find((section) => section.label === 'Hierarchy')?.status).toBe('inherited')
   })
 
   it('blocks role profile expansion before save', () => {
@@ -340,6 +383,22 @@ describe('assistant agent builder helpers', () => {
 
     expect(fit.errors).toContain('ACTION-capable profiles need at least one explicit governed action.')
     expect(fit.sections.find((section) => section.label === 'Governed actions')?.status).toBe('missing')
+  })
+
+  it('blocks invalid hierarchy wiring before save', () => {
+    const draft = {
+      ...buildAgentBuilderDraftFromRole(tradeOpsRole, tradeOpsRole.default_tools),
+      agent_id: 'trade-ops-copilot-specialization',
+      orchestration_pattern: 'SINGLE' as const,
+      parent_agent_id: 'trade-ops-copilot-specialization',
+      managed_agent_ids: ['trade-ops-copilot-specialization'],
+    }
+
+    const fit = evaluateAgentRoleProfileFit(draft, [tradeOpsRole])
+
+    expect(fit.errors).toContain('Managed subordinates require a non-SINGLE orchestration pattern.')
+    expect(fit.errors).toContain('Parent agent cannot match the current agent id.')
+    expect(fit.errors).toContain('Managed subordinates cannot include the current agent id.')
   })
 
   it('allows custom profiles to stay draft-only before governance is complete', () => {
