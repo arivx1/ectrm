@@ -30,6 +30,7 @@ import {
   useReferenceDataLocationController,
   useReferenceDataPortfolioController,
   useReferenceDataPriceIndexController,
+  useReferenceDataRailRouteController,
   useReferenceDataSpatialFeatureController,
   useReferenceDataUnitController,
 } from './useReferenceDataEntityControllers'
@@ -53,6 +54,7 @@ export type { BookPasteIssue, BookPasteSummary } from './referenceDataHelpers'
 type UseReferenceDataControllerArgs = {
   apiBase: string
   reloadData: () => Promise<void>
+  onOpenRailRouteScheduling: (code: string, label: string | null) => void
   trades: Trade[]
   books: ReferenceRecord[]
   assets: AssetRecord[]
@@ -84,6 +86,7 @@ type UseReferenceDataControllerArgs = {
 export function useReferenceDataController({
   apiBase,
   reloadData,
+  onOpenRailRouteScheduling,
   trades,
   books,
   assets,
@@ -277,6 +280,15 @@ export function useReferenceDataController({
     setReferenceActionSuccess,
   })
 
+  const railRouteController = useReferenceDataRailRouteController({
+    workspace,
+    railRoutes,
+    beginReferenceAction,
+    currentActorId,
+    submitReference,
+    setReferenceActionError,
+  })
+
   const counterpartyController = useReferenceDataCounterpartyController({
     workspace,
     counterpartyStandards,
@@ -304,6 +316,7 @@ export function useReferenceDataController({
 
   return {
     ...workspace,
+    openRailRouteScheduling: onOpenRailRouteScheduling,
     activeBooks,
     activeCommodities,
     activeCurrencies,
@@ -327,6 +340,7 @@ export function useReferenceDataController({
     ...currencyController,
     ...unitController,
     ...locationController,
+    ...railRouteController,
     ...counterpartyController,
     ...portfolioController,
   }

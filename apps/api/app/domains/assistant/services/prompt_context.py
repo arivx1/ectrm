@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
 from apps.api.app.domains.assistant.services.app_context_catalog import build_application_access_summary
+from apps.api.app.domains.assistant.services.organization_context_registry import (
+    list_published_organization_context_prompt_sections,
+)
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -80,6 +83,13 @@ class AssistantPromptEnvelope:
 
 
 @dataclass(frozen=True)
+class AssistantOrganizationPromptSections:
+    organization: AssistantPromptSection
+    business_model: AssistantPromptSection
+    supplemental: tuple[AssistantPromptSection, ...] = ()
+
+
+@dataclass(frozen=True)
 class AssistantPromptSectionContract:
     contract_key: str
     default_title: str
@@ -108,7 +118,7 @@ PROMPT_SECTION_CONTRACTS: dict[str, AssistantPromptSectionContract] = {
         source="organization",
         scope="GLOBAL",
         kind="CONFIGURABLE",
-        owner="organization-config",
+        owner="organization-context-registry",
         freshness="STATIC",
     ),
     "user": AssistantPromptSectionContract(
@@ -126,8 +136,28 @@ PROMPT_SECTION_CONTRACTS: dict[str, AssistantPromptSectionContract] = {
         source="business",
         scope="GLOBAL",
         kind="CONFIGURABLE",
-        owner="organization-config",
+        owner="organization-context-registry",
         freshness="STATIC",
+    ),
+    "organization-glossary": AssistantPromptSectionContract(
+        contract_key="organization-glossary",
+        default_title="Organization Glossary",
+        source="organization",
+        scope="GLOBAL",
+        kind="CONFIGURABLE",
+        owner="organization-context-registry",
+        freshness="STATIC",
+        merge_strategy="APPEND_IF_PRESENT",
+    ),
+    "organization-guardrails": AssistantPromptSectionContract(
+        contract_key="organization-guardrails",
+        default_title="Organization Guardrails",
+        source="organization",
+        scope="GLOBAL",
+        kind="CONFIGURABLE",
+        owner="organization-context-registry",
+        freshness="STATIC",
+        merge_strategy="APPEND_IF_PRESENT",
     ),
     "data-semantics": AssistantPromptSectionContract(
         contract_key="data-semantics",
@@ -272,11 +302,13 @@ def build_prompt_context(
     agent_definition: ManagedAssistantAgent | None = None,
 ) -> AssistantPromptEnvelope:
     generated_at = datetime.now(timezone.utc)
+    organization_sections = _build_organization_context_sections(db)
     sections = [
         _build_system_section(),
-        _build_organization_section(),
+        organization_sections.organization,
         _build_user_section(user),
-        _build_business_section(),
+        organization_sections.business_model,
+        *organization_sections.supplemental,
         _build_data_semantics_section(),
         _build_data_inventory_section(db),
         _build_application_surface_section(),
@@ -326,7 +358,50 @@ def _build_system_section() -> AssistantPromptSection:
     )
 
 
-def _build_organization_section() -> AssistantPromptSection:
+def _build_organization_context_sections(db: Session) -> AssistantOrganizationPromptSections:
+    published_sections = list_published_organization_context_prompt_sections(db)
+    organization_section = _build_organization_section(published_sections.get("organization"))
+    business_model_section = _build_business_section(published_sections.get("business-model"))
+    supplemental: list[AssistantPromptSection] = []
+
+    glossary_section = published_sections.get("organization-glossary")
+    if glossary_section is not None and glossary_section.content.strip():
+        supplemental.append(
+            build_prompt_section(
+                contract_key="organization-glossary",
+                content=glossary_section.content,
+                owner_reference=glossary_section.owner_reference,
+            )
+        )
+
+    guardrail_section = published_sections.get("organization-guardrails")
+    if guardrail_section is not None and guardrail_section.content.strip():
+        supplemental.append(
+            build_prompt_section(
+                contract_key="organization-guardrails",
+                content=guardrail_section.content,
+                owner_reference=guardrail_section.owner_reference,
+            )
+        )
+
+    return AssistantOrganizationPromptSections(
+        organization=organization_section,
+        business_model=business_model_section,
+        supplemental=tuple(supplemental),
+    )
+
+
+def _build_organization_section(published_section: object | None = None) -> AssistantPromptSection:
+    if published_section is not None:
+        content = getattr(published_section, "content", "").strip()
+        owner_reference = getattr(published_section, "owner_reference", None)
+        if content:
+            return build_prompt_section(
+                contract_key="organization",
+                content=content,
+                owner_reference=owner_reference,
+            )
+
     company_name = settings.ASSISTANT_COMPANY_NAME.strip() or "ECTRM"
     company_context = settings.ASSISTANT_COMPANY_CONTEXT.strip()
     return build_prompt_section(
@@ -337,10 +412,8 @@ def _build_organization_section() -> AssistantPromptSection:
             "Primary user personas include trading, operations, risk, reference-data stewardship, "
             "and administrative support."
         ).strip(),
-        uses_fallback=(
-            _uses_setting_default("ASSISTANT_COMPANY_NAME", company_name)
-            or _uses_setting_default("ASSISTANT_COMPANY_CONTEXT", company_context)
-        ),
+        owner_reference="settings:ASSISTANT_COMPANY_NAME,ASSISTANT_COMPANY_CONTEXT",
+        uses_fallback=True,
     )
 
 
@@ -361,7 +434,17 @@ def _build_user_section(user: AssistantPromptUser) -> AssistantPromptSection:
     )
 
 
-def _build_business_section() -> AssistantPromptSection:
+def _build_business_section(published_section: object | None = None) -> AssistantPromptSection:
+    if published_section is not None:
+        content = getattr(published_section, "content", "").strip()
+        owner_reference = getattr(published_section, "owner_reference", None)
+        if content:
+            return build_prompt_section(
+                contract_key="business-model",
+                content=content,
+                owner_reference=owner_reference,
+            )
+
     business_context = settings.ASSISTANT_BUSINESS_CONTEXT.strip()
     return build_prompt_section(
         contract_key="business-model",
@@ -370,7 +453,8 @@ def _build_business_section() -> AssistantPromptSection:
             "Key operator workflows: capture trades, amend or cancel trades through explicit events, "
             "review event timelines, monitor positions, maintain reference data, and oversee data loads."
         ).strip(),
-        uses_fallback=_uses_setting_default("ASSISTANT_BUSINESS_CONTEXT", business_context),
+        owner_reference="settings:ASSISTANT_BUSINESS_CONTEXT",
+        uses_fallback=True,
     )
 
 

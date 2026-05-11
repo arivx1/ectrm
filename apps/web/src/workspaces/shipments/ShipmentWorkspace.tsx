@@ -8,11 +8,17 @@ import type {
   UpdateDeliveryPowerDetailInput,
 } from '../../entities/shipments/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
+import {
+  getAppRouteHandoffFilterValue,
+  normalizeAppRouteHandoff,
+  type AppRouteHandoff,
+} from '../../shared/appRouteHandoff'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type { DeliveryRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalActionPanel } from '../operations/operationalActionPanelRegistry'
@@ -20,6 +26,7 @@ import { resolveOperationalWorkboardDefinition } from '../operations/operational
 
 type DeliveryWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff: AppRouteHandoff | null
   globalFilter: string
   deliveries: DeliveryRecord[]
   operationalResourceDescriptors: OperationalResourceDescriptor[]
@@ -33,6 +40,7 @@ type DeliveryWorkspaceProps = {
   deliverySyncSuccess: string
   deliveriesSyncing: boolean
   onOpenTrade: (tradeId: string) => void
+  onClearHandoff: () => void
   onSyncDeliveriesFromTrades: () => Promise<void>
   onSaveDelivery: (deliveryId: string, payload: UpdateDeliveryInput) => Promise<void>
   onSaveDeliveryLogisticsDetails: (
@@ -167,6 +175,11 @@ function matchesDeliveryScreenFilter(delivery: DeliveryRecord, query: string): b
     delivery.location_code,
     delivery.origin_location_code,
     delivery.destination_location_code,
+    delivery.rail_route_code,
+    delivery.rail_line_code,
+    delivery.railroad_code,
+    delivery.rail_route_direction,
+    delivery.rail_service_calendar_code,
     delivery.receipt_location_code,
     delivery.delivery_location_code,
     delivery.pipeline_system,
@@ -188,6 +201,7 @@ function matchesDeliveryScreenFilter(delivery: DeliveryRecord, query: string): b
 
 export function DeliveryWorkspace({
   authSession,
+  routeHandoff,
   globalFilter,
   deliveries,
   operationalResourceDescriptors,
@@ -201,6 +215,7 @@ export function DeliveryWorkspace({
   deliverySyncSuccess,
   deliveriesSyncing,
   onOpenTrade,
+  onClearHandoff,
   onSyncDeliveriesFromTrades,
   onSaveDelivery,
   onSaveDeliveryLogisticsDetails,
@@ -210,9 +225,17 @@ export function DeliveryWorkspace({
 }: DeliveryWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null)
-  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
-  const visibleDeliveries = deliveries.filter((delivery) =>
-    matchesDeliveryScreenFilter(delivery, effectiveScreenFilter),
+  const normalizedRouteHandoff = normalizeAppRouteHandoff(routeHandoff)
+  const focusedRailRouteCode =
+    normalizedRouteHandoff?.focus.type === 'reference_record'
+      ? normalizedRouteHandoff.focus.id.trim().toUpperCase()
+      : null
+  const handoffScreenFilter = focusedRailRouteCode ? '' : getAppRouteHandoffFilterValue(normalizedRouteHandoff) ?? ''
+  const effectiveScreenFilter = combineTextFilters(globalFilter, handoffScreenFilter, screenFilter)
+  const visibleDeliveries = deliveries.filter(
+    (delivery) =>
+      (!focusedRailRouteCode || delivery.rail_route_code === focusedRailRouteCode) &&
+      matchesDeliveryScreenFilter(delivery, effectiveScreenFilter),
   )
 
   const openDeliveries = visibleDeliveries.filter((delivery) => delivery.status !== 'COMPLETED')
@@ -262,6 +285,10 @@ export function DeliveryWorkspace({
     'deliveryBoard',
     operationalResourceDescriptors,
   )
+  function clearWorkspaceHandoff() {
+    setScreenFilter('')
+    onClearHandoff()
+  }
   const shipmentSummaryCards: TileSectionGridItem[] = [
     {
       id: 'tracked-deliveries',
@@ -326,16 +353,30 @@ export function DeliveryWorkspace({
       workspaceLabel="Deliveries"
       authSession={authSession}
       headerContent={
-        <WorkspaceLocalFilterBar
-          value={screenFilter}
-          onChange={setScreenFilter}
-          placeholder="Delivery ID, trade ID, commodity, book, mode, status, or location"
-          description="Keep delivery filtering local to this execution screen so you can tighten the queue without changing any other workspace."
-          totalCount={deliveries.length}
-          matchedCount={visibleDeliveries.length}
-          resultLabel="deliveries"
-          globalValue={globalFilter}
-        />
+        <>
+          <WorkspaceHandoffFocusBanner
+            handoff={routeHandoff}
+            currentView="shipments"
+            clearLabel="Show Full Board"
+            onClear={clearWorkspaceHandoff}
+          />
+          <WorkspaceLocalFilterBar
+            value={screenFilter}
+            onChange={setScreenFilter}
+            placeholder="Delivery ID, trade ID, commodity, book, mode, status, location, or rail route"
+            description="Keep delivery filtering local to this execution screen so you can tighten the queue without changing any other workspace."
+            totalCount={deliveries.length}
+            matchedCount={visibleDeliveries.length}
+            resultLabel="deliveries"
+            globalValue={globalFilter}
+            hasExternalFilter={focusedRailRouteCode !== null}
+            note={
+              focusedRailRouteCode
+                ? `Rail route ${focusedRailRouteCode} is currently in focus. Clear the route focus when you want to widen back to the full delivery board.`
+                : undefined
+            }
+          />
+        </>
       }
       sections={[
         {

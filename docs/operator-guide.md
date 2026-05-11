@@ -139,6 +139,8 @@ Use Settings for access and runtime setup.
 - bootstrap the first admin account when the API is configured for it
 - review safe runtime settings exposed by the backend
 - change browser-side API and query-limit overrides for local testing
+- connect Google Calendar in the browser to pull the next few scheduled events
+  into the app without storing Google calendar data on the ECTRM API
 
 If you need to make changes and the app is behaving like read-only software,
 this is the first place to check.
@@ -212,6 +214,22 @@ Admin-capable users can:
 - inspect external market-data sync runs
 - trigger seeded trading source refreshes
 - use schema and provenance views to explain how events feed projections
+
+### 7. Connect Google Calendar In Settings
+
+1. Open Settings.
+2. Scroll to the Google Calendar panel.
+3. If the panel says the calendar connection is not configured, ask your
+   implementation team to set `GOOGLE_AUTH_CLIENT_ID` on the API and restart
+   it.
+4. Once enabled, connect your Google account and grant readonly calendar
+   access.
+5. Choose the calendar you want and refresh when you need a newer snapshot.
+
+The current UI only reads upcoming events for the next 7 days. The Google
+token and event content stay browser-side for this feature, persist in this
+browser until you disconnect or clear site data, and are not stored by the
+ECTRM API.
 
 ## Roles And Access
 

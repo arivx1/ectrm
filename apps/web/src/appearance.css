@@ -169,6 +169,25 @@
   background: rgba(15, 27, 40, 0.78);
 }
 
+:root[data-color-mode='dark'] .settings-disclosure-copy h3 {
+  color: #eef5ff;
+}
+
+:root[data-color-mode='dark'] .settings-disclosure-copy strong,
+:root[data-color-mode='dark'] .settings-disclosure-toggle-meta small {
+  color: #b7c7d9;
+}
+
+:root[data-color-mode='dark'] .settings-disclosure-body {
+  border-top-color: rgba(126, 154, 184, 0.16);
+}
+
+:root[data-color-mode='dark'] .settings-disclosure-toggle-indicator {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: rgba(18, 34, 49, 0.88);
+  color: #eef5ff;
+}
+
 :root[data-color-mode='dark'] .settings-rule-title {
   color: #eef5ff;
 }

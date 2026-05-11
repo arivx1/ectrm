@@ -83,6 +83,72 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-10 - Organization Prompt Context Should Come From Published Metadata Before Env Fallback
+
+- Type: lesson
+- Domain: assistant prompt governance and organization context management
+- Applies to: company profile, operating model, glossary, guardrails, and
+  future user-configurable context profiles
+- Status: implemented
+- Source:
+  `apps/api/app/models/assistant_organization_context.py`,
+  `apps/api/app/domains/assistant/services/organization_context_registry.py`,
+  `apps/api/app/domains/assistant/services/prompt_context.py`,
+  `apps/api/app/routes/assistant.py`,
+  `apps/api/tests/test_assistant_api.py`, and
+  `docs/engineering/ai-workflow.md`
+- Lesson: organization-facing prompt sections should not stay as a single
+  env-backed prose block once they start carrying reusable company facts,
+  glossary terms, and guardrails. Publish those inputs as versioned backend
+  metadata first, let prompt assembly prefer the latest published definitions,
+  and keep env-backed strings only as a visible bootstrap fallback.
+- Deterministic opportunity: add admin publish workflows and later
+  user/team/org-scoped context profiles on top of the same versioned metadata
+  seam instead of introducing freeform prompt editing.
+- Agent autonomy impact: this improves prompt explainability and future-safe
+  configurability without widening agent authority, tool access, or mutation
+  rights.
+- Tests or evidence:
+  `PYTHONPATH=. .venv/bin/python -m unittest apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_context_preview_includes_business_user_and_data_sections`
+  and
+  `PYTHONPATH=. .venv/bin/python -m unittest apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_context_preview_prefers_published_organization_registry_sections`
+- Follow-up: add governed admin CRUD and publish/retire controls before
+  exposing organization-wide editing outside developer or database workflows.
+
+### 2026-05-08 - Simple Arbitrage Detection Should Become A Deterministic Pre-Trade Service
+
+- Type: algorithm-candidate
+- Domain: pre-trade arbitrage detection and opportunity ranking
+- Applies to: product or quality arbitrage, time arbitrage, geographic
+  arbitrage, and trader-facing opportunity ranking
+- Status: proposed
+- Source: [Pre-Trade Design](./pre-trade-design.md),
+  [Arbitrage Detection Design](./arbitrage-detection-design.md),
+  [Business Use Case Roadmap](./business-use-case-roadmap.md), and
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
+- Lesson: when traders repeatedly compare `Product A` versus `Product B`,
+  `Time A` versus `Time B`, or `Place A` versus `Place B`, the platform should
+  not leave the economics inside prompt-only reasoning. The repeatable core is
+  a deterministic graph search that normalizes tradable states, applies typed
+  transformation edges, and prices executable opportunities using explicit
+  bridge costs such as conversion price, storage price, or transportation
+  price.
+- Deterministic opportunity: create a typed arbitrage-detection service that
+  generates candidate state pairs, finds the cheapest feasible path, prices
+  buys at ask and sells at bid when available, calculates gross spread plus
+  explicit cost stack, ranks net opportunity, and returns missing-evidence or
+  stop-condition labels whenever the economics cannot be trusted.
+- Agent autonomy impact: agents may explain, summarize, and draft pre-trade
+  scenarios from the deterministic output, but they should not become the
+  system of record for conversion, storage, transportation, or arbitrage
+  ranking values.
+- Tests or evidence: future implementation should add focused service tests for
+  conversion, storage, transport, stale-source, and unsupported-mapping cases,
+  plus assistant evals if managed agents consume the new typed outputs.
+- Follow-up: define the first normalized arbitrage payload contract and decide
+  whether the resulting opportunity remains recommendation output or becomes a
+  first-class `Market opportunity` object.
+
 ### 2026-05-08 - External ChatGPT Access Should Start As A Governed Remote MCP Transport
 
 - Type: lesson
@@ -3136,3 +3202,109 @@ independently"`.
 - Follow-up: if operations wants true track geometry, interchange branches, or
   embargo detours, add higher-fidelity spatial feature sources while keeping
   the route header as the business anchor.
+
+### 2026-05-09 - External MCP Usage Should Reuse Request-Context Source Surface Tags
+
+- Type: lesson
+- Domain: ChatGPT MCP transport, audit logs, and verification workflow
+- Applies to: `/mcp` transport work, MCP OAuth, external tool publication, and
+  any future write-capable MCP bridge
+- Status: implemented
+- Source: `apps/api/app/core/request_context.py`,
+  `apps/api/app/core/logging.py`,
+  `apps/api/app/domains/mcp/services/server.py`, `apps/api/app/main.py`,
+  `apps/api/tests/test_mcp_oauth.py`, and `Makefile`
+- Lesson: external MCP traffic should not invent a parallel audit system just
+  to become visible. The shared request context now carries a `source_surface`
+  tag, normal HTTP requests default to `http`, mounted MCP requests default to
+  `mcp.http`, and tool execution overrides that tag with the concrete MCP tool
+  surface such as `mcp.search`. That keeps existing log enrichment, actor and
+  session identity, and correlation ids useful for ChatGPT-originated traffic
+  without duplicating provenance plumbing.
+- Deterministic opportunity: when future MCP tools graduate from docs-only
+  reads into governed business reads or approval-gated writes, preserve this
+  one tagging vocabulary so request logs, mutation provenance, and audit-event
+  source surfaces stay comparable across internal and external transports.
+- Agent autonomy impact: agents can rely on the explicit MCP verification lane
+  and source-surface logs to prove what external tool was called and under
+  which ECTRM identity, but they should still route durable writes through the
+  existing typed service and action-request seams.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_mcp_api apps.api.tests.test_mcp_oauth apps.api.tests.test_http_router_registry`
+  and `make api-mcp-test`
+- Follow-up: if the hosted MCP surface grows beyond docs retrieval, consider a
+  first-class admin view over these tagged logs or a dedicated persisted audit
+  ledger before broad rollout.
+
+### 2026-05-09 - Surface Assistant Grounding As Structured Evidence, Not Raw Trace Blobs
+
+- Type: lesson
+- Domain: assistant transparency, app introspection, managed-agent hierarchy,
+  and operator review
+- Applies to: assistant chat, prompt preview, run traces, code/schema/app
+  introspection tools, and managed-agent supervision
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/schemas/assistant.py`,
+  `apps/web/src/workspaces/assistant/AssistantWorkspace.tsx`, and
+  `apps/web/src/entities/assistant/AssistantToolCallList.tsx`
+- Lesson: when the assistant inspects code, schema, app topology, or managed
+  agent relationships, the user-facing surface should render structured
+  evidence cards and prompt-section metadata instead of forcing operators to
+  infer context from raw JSON traces. That keeps answers auditable, makes
+  hierarchy and schema access visible inside chat, and turns repeated prompt
+  transparency work into stable product behavior.
+- Deterministic opportunity: keep future source-card generation attached to the
+  typed tool contract so new introspection tools can publish reusable evidence
+  without every frontend surface inventing one-off parsing logic.
+- Agent autonomy impact: agents can inspect broad read-only platform context,
+  but the UI must expose which governed surfaces they used so humans can verify
+  app, schema, and hierarchy claims before acting on them.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_assistant_tooling`
+  and
+  `./node_modules/.bin/vitest run tests/assistantToolCallList.test.tsx tests/assistantPromptSectionList.test.tsx`
+- Follow-up: if we expand broad data exploration beyond curated tools, keep the
+  same evidence contract for row browsing and record-level citations so the
+  assistant never gains opaque “trust me” visibility into governed data.
+
+### 2026-05-09 - Carry Map Corridor Focus As Typed Workspace Handoff, Not Ad Hoc Search Text
+
+- Type: lesson
+- Domain: rail map workflow, cross-workspace navigation, and route-focused
+  operational boards
+- Applies to: map-to-workspace routing, reference-record focus, and any future
+  corridor or region selection that should narrow an operational board
+- Status: implemented
+- Source:
+  `apps/web/src/shared/appRouteHandoff.ts`,
+  `apps/web/src/workspaces/reference-data/tabs/AssetMapPanel.tsx`,
+  `apps/web/src/workspaces/map/MapWorkspace.tsx`,
+  `apps/web/src/workspaces/shipments/ShipmentWorkspace.tsx`,
+  `apps/web/src/workspaces/scheduling/SchedulingWorkspace.tsx`, and
+  `apps/web/src/entities/app/workspaceRendererRegistry.tsx`
+- Lesson: when a user selects a governed rail corridor from the map, the next
+  workspace should receive that selection as a typed handoff plus a
+  deterministic lane filter, not as a best-effort text search. The map now
+  opens Deliveries with a `reference_record` handoff for the selected
+  `rail_route_code`, the Deliveries board applies an explicit
+  `delivery.rail_route_code` filter before any local text filter, the
+  Scheduling board applies the same typed route focus before saved views and
+  mode lenses, the Scheduling board also exposes a governed native route
+  picker for the same deterministic lane filter, and the same route selection
+  can jump directly into the rail-route reference editor or launch Scheduling
+  from that reference record.
+- Deterministic opportunity: reuse this pattern for other governed map
+  entities where the selected geometry should narrow an execution or review
+  board by stable code rather than by fuzzy UI copy.
+- Agent autonomy impact: agents can propose or wire map-driven operational
+  routing when the target board has a stable typed key, but they should avoid
+  shipping cross-workspace search hacks when a deterministic handoff contract
+  is available.
+- Tests or evidence:
+  `./node_modules/.bin/vitest run tests/appRouteHandoff.test.ts tests/workspaceHandoffFocusBanner.test.ts tests/mapWorkspace.test.ts tests/shipmentsWorkspace.test.ts tests/schedulingWorkspaceRender.test.ts tests/referenceDataRailRoutesTab.test.ts`
+- Follow-up: if operations, settlement, or future corridor-aware boards need
+  the same lane focus, extend the same typed handoff contract instead of
+  inventing workspace-specific search conventions, and prefer governed pickers
+  when the workspace should support that focus without a map entrypoint.

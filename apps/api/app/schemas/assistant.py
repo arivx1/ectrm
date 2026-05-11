@@ -10,6 +10,17 @@ from apps.api.app.schemas._validation import normalize_optional_text, normalize_
 
 AssistantProvider = Literal["openai", "anthropic", "google"]
 AssistantMessageRole = Literal["user", "assistant"]
+AssistantToolEvidenceKind = Literal[
+    "application",
+    "route_group",
+    "documentation",
+    "schema",
+    "table",
+    "code_search_hit",
+    "code_file",
+    "agent",
+    "agent_hierarchy",
+]
 AssistantPromptSectionSource = Literal[
     "system",
     "organization",
@@ -281,6 +292,25 @@ class AssistantVoiceTranscriptionOut(BaseModel):
     text: str
 
 
+class AssistantVoiceGenerationSettingsOut(BaseModel):
+    enabled: bool
+    provider: AssistantProvider
+    model: str
+    default_voice: str
+    response_format: str
+    max_input_chars: int
+    requires_authentication: bool = True
+
+
+class AssistantVoiceSpeechRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4096)
+
+    @field_validator("text")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="text")
+
+
 class AssistantRuntimeSettingsOut(BaseModel):
     enabled: bool
     default_provider: AssistantProvider
@@ -289,6 +319,7 @@ class AssistantRuntimeSettingsOut(BaseModel):
     default_daily_token_allocation: int
     providers: list[AssistantProviderStatusOut]
     voice_transcription: AssistantVoiceTranscriptionSettingsOut
+    voice_generation: AssistantVoiceGenerationSettingsOut
     available_skills: list[AssistantAgentSkillDefinitionOut]
     available_tools: list[AssistantToolDefinitionOut]
     available_action_types: list[AssistantActionDefinitionOut]
@@ -355,11 +386,23 @@ class AssistantUsageOut(BaseModel):
     output_tokens: Optional[int] = None
 
 
+class AssistantToolEvidenceOut(BaseModel):
+    kind: AssistantToolEvidenceKind
+    title: str
+    summary: str
+    locator: Optional[str] = None
+    excerpt: Optional[str] = None
+    badges: list[str] = Field(default_factory=list)
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
 class AssistantToolCallOut(BaseModel):
     tool_name: str
     summary: str
     arguments: dict[str, object] = Field(default_factory=dict)
     record_count: Optional[int] = None
+    output_preview: dict[str, object] = Field(default_factory=dict)
+    evidence_items: list[AssistantToolEvidenceOut] = Field(default_factory=list)
 
 
 class AssistantRunFeedbackCreate(BaseModel):

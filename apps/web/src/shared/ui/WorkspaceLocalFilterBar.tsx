@@ -7,6 +7,7 @@ type WorkspaceLocalFilterBarProps = {
   matchedCount: number
   resultLabel: string
   globalValue?: string
+  hasExternalFilter?: boolean
   note?: string
 }
 
@@ -19,12 +20,13 @@ export function WorkspaceLocalFilterBar({
   matchedCount,
   resultLabel,
   globalValue,
+  hasExternalFilter = false,
   note,
 }: WorkspaceLocalFilterBarProps) {
   const hasLocalQuery = value.trim().length > 0
   const normalizedGlobalValue = globalValue?.trim() ?? ''
   const hasGlobalQuery = normalizedGlobalValue.length > 0
-  const statusLabel = hasLocalQuery || hasGlobalQuery
+  const statusLabel = hasLocalQuery || hasGlobalQuery || hasExternalFilter
     ? `${matchedCount.toLocaleString()} of ${totalCount.toLocaleString()} ${resultLabel} match`
     : `All ${totalCount.toLocaleString()} ${resultLabel} in view`
 

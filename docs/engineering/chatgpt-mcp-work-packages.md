@@ -67,14 +67,18 @@ These assumptions were verified against OpenAI docs on 2026-05-08.
 3. WP-03 ChatGPT auth and identity bridge
 4. WP-04 first read-only ECTRM tool slice with `search` and `fetch`
 
-Status on 2026-05-08:
+Status on 2026-05-09:
 The first implementation slice is underway. `apps/api` now has an optional
 read-only MCP scaffold mounted at `/mcp` behind `MCP_ENABLED`, plus a public
 `/mcp-status` route and the starter `search` and `fetch` tools over checked-in
 repo docs only. OAuth-backed ChatGPT identity has now landed for the same
 surface through `/mcp/login`, `/mcp/token`, and `/mcp/whoami`, backed by ECTRM
-user accounts and expiring session records. Governed business-data reads and
-any write-capable tools remain deferred to later Wave 0 and Wave 1 work.
+user accounts and expiring session records. The repo now also has a named
+`make api-mcp-test` verification lane, and MCP request logs carry explicit
+`source_surface` tags so external tool calls can be distinguished from normal
+HTTP traffic by correlation id, actor, session, and tool path. Governed
+business-data reads and any write-capable tools remain deferred to later Wave 0
+and Wave 1 work.
 
 ### Wave 1: governed write access
 

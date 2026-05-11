@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
@@ -8,9 +9,16 @@ import httpx
 
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
-from apps.api.app.schemas.assistant import AssistantVoiceTranscriptionOut, AssistantVoiceTranscriptionSettingsOut
+from apps.api.app.schemas.assistant import (
+    AssistantVoiceGenerationSettingsOut,
+    AssistantVoiceTranscriptionOut,
+    AssistantVoiceTranscriptionSettingsOut,
+)
 
 logger = get_logger(__name__)
+
+VOICE_GENERATION_RESPONSE_FORMAT = "mp3"
+VOICE_GENERATION_RESPONSE_CONTENT_TYPE = "audio/mpeg"
 
 SUPPORTED_VOICE_TRANSCRIPTION_CONTENT_TYPES: tuple[str, ...] = (
     "audio/flac",
@@ -58,6 +66,22 @@ class AssistantVoiceTranscriptionError(Exception):
         self.detail = detail
 
 
+class AssistantVoiceGenerationError(Exception):
+    def __init__(self, *, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class AssistantVoiceGenerationResult:
+    payload: bytes
+    content_type: str
+    provider: str
+    model: str
+    voice: str
+
+
 def build_assistant_voice_transcription_settings() -> AssistantVoiceTranscriptionSettingsOut:
     return AssistantVoiceTranscriptionSettingsOut(
         enabled=bool(
@@ -70,6 +94,23 @@ def build_assistant_voice_transcription_settings() -> AssistantVoiceTranscriptio
         model=settings.OPENAI_AUDIO_TRANSCRIPTION_MODEL.strip(),
         max_upload_bytes=settings.ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES,
         supported_content_types=list(SUPPORTED_VOICE_TRANSCRIPTION_CONTENT_TYPES),
+    )
+
+
+def build_assistant_voice_generation_settings() -> AssistantVoiceGenerationSettingsOut:
+    return AssistantVoiceGenerationSettingsOut(
+        enabled=bool(
+            settings.ASSISTANT_ENABLED
+            and settings.ASSISTANT_VOICE_GENERATION_ENABLED
+            and settings.OPENAI_API_KEY.strip()
+            and settings.OPENAI_AUDIO_SPEECH_MODEL.strip()
+            and settings.OPENAI_AUDIO_SPEECH_VOICE.strip()
+        ),
+        provider="openai",
+        model=settings.OPENAI_AUDIO_SPEECH_MODEL.strip(),
+        default_voice=settings.OPENAI_AUDIO_SPEECH_VOICE.strip(),
+        response_format=VOICE_GENERATION_RESPONSE_FORMAT,
+        max_input_chars=settings.ASSISTANT_VOICE_GENERATION_MAX_INPUT_CHARS,
     )
 
 
@@ -133,6 +174,56 @@ async def transcribe_assistant_voice_audio(
     )
 
 
+async def synthesize_assistant_voice_audio(*, text: str) -> AssistantVoiceGenerationResult:
+    runtime_settings = build_assistant_voice_generation_settings()
+    if not runtime_settings.enabled:
+        raise AssistantVoiceGenerationError(
+            status_code=503,
+            detail="Assistant voice generation is not configured on this API.",
+        )
+
+    normalized_text = text.strip()
+    if not normalized_text:
+        raise AssistantVoiceGenerationError(
+            status_code=422,
+            detail="Voice generation requires non-empty text.",
+        )
+
+    if len(normalized_text) > runtime_settings.max_input_chars:
+        raise AssistantVoiceGenerationError(
+            status_code=422,
+            detail=(
+                "Voice generation accepts up to "
+                f"{runtime_settings.max_input_chars:,} characters per request."
+            ),
+        )
+
+    audio_payload, content_type = await _post_json_bytes(
+        url=f"{settings.OPENAI_BASE_URL.rstrip('/')}/audio/speech",
+        headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY.strip()}"},
+        payload={
+            "model": runtime_settings.model,
+            "voice": runtime_settings.default_voice,
+            "response_format": runtime_settings.response_format,
+            "input": normalized_text,
+        },
+        provider_label="OpenAI Voice Generation",
+    )
+    if not audio_payload:
+        raise AssistantVoiceGenerationError(
+            status_code=502,
+            detail="OpenAI Voice Generation returned no audio payload.",
+        )
+
+    return AssistantVoiceGenerationResult(
+        payload=audio_payload,
+        content_type=content_type,
+        provider="openai",
+        model=runtime_settings.model,
+        voice=runtime_settings.default_voice,
+    )
+
+
 def _normalize_content_type(content_type: str | None) -> str | None:
     normalized = (content_type or "").split(";", 1)[0].strip().lower()
     return normalized or None
@@ -163,6 +254,63 @@ def _extract_transcription_text(response_payload: dict[str, Any]) -> str:
     if not isinstance(text, str):
         return ""
     return text.strip()
+
+
+async def _post_json_bytes(
+    *,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    provider_label: str,
+) -> tuple[bytes, str]:
+    started_at = perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=settings.ASSISTANT_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                url,
+                headers=headers,
+                json=payload,
+            )
+    except httpx.HTTPError as exc:
+        log_outbound_request(
+            logger,
+            provider=provider_label,
+            method="POST",
+            url=url,
+            status_code=getattr(getattr(exc, "response", None), "status_code", None),
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error=exc.__class__.__name__,
+        )
+        raise AssistantVoiceGenerationError(
+            status_code=502,
+            detail=f"{provider_label} request failed: {exc}",
+        ) from exc
+
+    if response.is_error:
+        detail = _extract_provider_error_message(provider_label, response)
+        log_outbound_request(
+            logger,
+            provider=provider_label,
+            method="POST",
+            url=url,
+            status_code=response.status_code,
+            duration_ms=(perf_counter() - started_at) * 1000,
+            error=detail,
+        )
+        raise AssistantVoiceGenerationError(
+            status_code=502 if response.status_code >= 500 else 400,
+            detail=detail,
+        )
+
+    log_outbound_request(
+        logger,
+        provider=provider_label,
+        method="POST",
+        url=url,
+        status_code=response.status_code,
+        duration_ms=(perf_counter() - started_at) * 1000,
+    )
+    return response.content, response.headers.get("content-type", VOICE_GENERATION_RESPONSE_CONTENT_TYPE)
 
 
 async def _post_multipart(

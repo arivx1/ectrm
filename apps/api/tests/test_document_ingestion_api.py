@@ -449,6 +449,59 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertIn("image/png", response.headers["content-type"])
         self.assertTrue(response.content.startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_document_source_endpoint_returns_original_pdf(self) -> None:
+        admin_token = self._bootstrap_admin()
+        payload = self._build_pdf_bytes(page_count=1)
+
+        response = self.client.post(
+            "/documents/uploads",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            files={"file": ("source-packet.pdf", payload, "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 201)
+        document = response.json()
+        self.assertTrue(document["source_available"])
+
+        source_response = self.client.get(
+            f"/documents/{document['document_id']}/source",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(source_response.status_code, 200)
+        self.assertIn("application/pdf", source_response.headers["content-type"])
+        self.assertEqual(
+            source_response.headers["content-disposition"],
+            'attachment; filename="source-packet.pdf"',
+        )
+        self.assertEqual(source_response.content, payload)
+
+    def test_document_marks_missing_source_pdf_as_unavailable(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+        document = self._wait_for_document(admin_token, uploaded["document_id"])
+        self.assertTrue(document["source_available"])
+
+        source_path = settings.DOCUMENT_STORAGE_ROOT / document["storage_key"]
+        source_path.unlink()
+
+        list_response = self.client.get(
+            "/documents",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        listed_document = next(
+            record
+            for record in list_response.json()
+            if record["document_id"] == document["document_id"]
+        )
+        self.assertFalse(listed_document["source_available"])
+
+        get_response = self.client.get(
+            f"/documents/{document['document_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(get_response.status_code, 200)
+        self.assertFalse(get_response.json()["source_available"])
+
     def test_ocr_fallback_is_used_when_native_text_is_missing(self) -> None:
         admin_token = self._bootstrap_admin()
 

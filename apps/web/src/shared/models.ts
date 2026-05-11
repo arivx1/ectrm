@@ -727,6 +727,7 @@ export type DocumentIngestionRecord = {
   sha256: string
   size_bytes: number
   page_count: number
+  source_available: boolean
   status: string
   processor_provider: 'builtin' | 'openai' | 'anthropic' | 'google' | null
   processor_model: string | null
@@ -2535,6 +2536,7 @@ export type AssistantRuntimeSettings = {
   default_daily_token_allocation?: number
   providers: AssistantProviderStatus[]
   voice_transcription: AssistantVoiceTranscriptionSettings
+  voice_generation: AssistantVoiceGenerationSettings
   available_skills: AssistantAgentSkillDefinition[]
   available_tools: AssistantToolDefinition[]
   available_action_types: AssistantActionDefinition[]
@@ -2553,6 +2555,16 @@ export type AssistantVoiceTranscription = {
   provider: AssistantProvider
   model: string
   text: string
+}
+
+export type AssistantVoiceGenerationSettings = {
+  enabled: boolean
+  provider: AssistantProvider
+  model: string
+  default_voice: string
+  response_format: string
+  max_input_chars: number
+  requires_authentication: boolean
 }
 
 export type AssistantMessage = {
@@ -2829,6 +2841,29 @@ export type AssistantToolCall = {
   summary: string
   arguments: Record<string, unknown>
   record_count: number | null
+  output_preview?: Record<string, unknown>
+  evidence_items?: AssistantToolEvidence[]
+}
+
+export type AssistantToolEvidenceKind =
+  | 'application'
+  | 'route_group'
+  | 'documentation'
+  | 'schema'
+  | 'table'
+  | 'code_search_hit'
+  | 'code_file'
+  | 'agent'
+  | 'agent_hierarchy'
+
+export type AssistantToolEvidence = {
+  kind: AssistantToolEvidenceKind
+  title: string
+  summary: string
+  locator?: string | null
+  excerpt?: string | null
+  badges: string[]
+  metadata: Record<string, unknown>
 }
 
 export type AssistantActionReviewObjectRef = {
@@ -3458,9 +3493,18 @@ export type AssistantPromptSectionSource =
   | 'agent'
 
 export type AssistantPromptSection = {
+  contract_key?: string | null
+  contract_version?: number
   key: string
   title: string
   source: AssistantPromptSectionSource
+  scope?: 'SYSTEM' | 'GLOBAL' | 'USER' | 'AGENT' | 'REQUEST' | 'RUNTIME'
+  kind?: 'IMMUTABLE' | 'GENERATED' | 'CONFIGURABLE'
+  owner?: string
+  owner_reference?: string | null
+  freshness?: 'STATIC' | 'SESSION' | 'REQUEST' | 'LIVE'
+  merge_strategy?: 'APPEND' | 'APPEND_IF_PRESENT'
+  uses_fallback?: boolean
   content: string
 }
 
@@ -3622,6 +3666,7 @@ export type ReferenceTab =
   | 'currencies'
   | 'units'
   | 'locations'
+  | 'rail-routes'
   | 'spatial-features'
   | 'assets'
   | 'counterparties'
@@ -3686,6 +3731,22 @@ export type LocationForm = {
   longitude: string
   region: string
   timezone: string
+  description: string
+}
+
+export type RailRouteForm = {
+  code: string
+  name: string
+  rail_line_code: string
+  origin_location_code: string
+  destination_location_code: string
+  service_calendar_code: string
+  route_direction: string
+  schedule_timezone: string
+  placement_cutoff_time_local: string
+  release_cutoff_time_local: string
+  placement_free_time_hours: string
+  release_free_time_hours: string
   description: string
 }
 

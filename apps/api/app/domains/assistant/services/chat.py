@@ -29,6 +29,7 @@ from apps.api.app.domains.assistant.services.tools import (
     json_dumps,
 )
 from apps.api.app.domains.assistant.services.voice import (
+    build_assistant_voice_generation_settings,
     build_assistant_voice_transcription_settings,
 )
 from apps.api.app.schemas.assistant import (
@@ -1004,6 +1005,7 @@ def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
             for config in provider_configs
         ],
         voice_transcription=build_assistant_voice_transcription_settings(),
+        voice_generation=build_assistant_voice_generation_settings(),
         available_skills=[definition.to_out() for definition in available_skills],
         available_tools=[
             {"name": tool.name, "description": tool.description}

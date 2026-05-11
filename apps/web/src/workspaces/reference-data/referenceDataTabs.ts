@@ -26,6 +26,10 @@ import {
   ReferenceDataLocationsEditor,
 } from './tabs/ReferenceDataLocationsTab'
 import {
+  ReferenceDataRailRoutesDirectory,
+  ReferenceDataRailRoutesEditor,
+} from './tabs/ReferenceDataRailRoutesTab'
+import {
   ReferenceDataPortfoliosDirectory,
   ReferenceDataPortfoliosEditor,
 } from './tabs/ReferenceDataPortfoliosTab'
@@ -92,6 +96,13 @@ export const REFERENCE_TAB_DEFINITIONS: Record<ReferenceTab, ReferenceDataTabDef
     editorTitle: 'Location Editor',
     Directory: ReferenceDataLocationsDirectory,
     Editor: ReferenceDataLocationsEditor,
+  },
+  'rail-routes': {
+    label: 'Rail Routes',
+    tooltip: 'Rail routes define governed lanes, service clocks, and reusable scheduling context for rail delivery execution.',
+    editorTitle: 'Rail Route Editor',
+    Directory: ReferenceDataRailRoutesDirectory,
+    Editor: ReferenceDataRailRoutesEditor,
   },
   'spatial-features': {
     label: 'Spatial Features',

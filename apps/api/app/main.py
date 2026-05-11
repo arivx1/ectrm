@@ -84,6 +84,7 @@ AUTHENTICATED_READ_PATH_PREFIXES = (
     "/settlement",
     "/shipments",
     "/trades",
+    "/user-events",
 )
 
 
@@ -99,6 +100,7 @@ def _request_log_extra(request: Request) -> dict[str, Any]:
         "session_id": getattr(request.state, "session_id", None),
         "request_method": request.method.upper(),
         "request_path": request.url.path,
+        "source_surface": getattr(request.state, "source_surface", None),
     }
 
 
@@ -154,6 +156,7 @@ def _auth_error(request: Request, status_code: int, message: str, correlation_id
             "correlation_id": correlation_id,
             "request_method": request.method.upper(),
             "request_path": request.url.path,
+            "source_surface": getattr(request.state, "source_surface", None),
         },
     )
     response = JSONResponse(
@@ -198,12 +201,19 @@ def _is_mcp_transport_path(request_path: str) -> bool:
     return request_path == MCP_MOUNT_PATH or request_path.startswith(f"{MCP_MOUNT_PATH}/")
 
 
+def _source_surface_for_request(request_path: str) -> str:
+    if _is_mcp_transport_path(request_path):
+        return "mcp.http"
+    return "http"
+
+
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     request.state.correlation_id = correlation_id
     request.state.request_started_at = perf_counter()
     request.state.request_completion_logged = False
+    request.state.source_surface = _source_surface_for_request(request.url.path)
 
     if _is_cors_preflight(request):
         response = await call_next(request)
@@ -244,6 +254,7 @@ async def add_correlation_id(request: Request, call_next):
         correlation_id=correlation_id,
         request_method=request.method.upper(),
         request_path=request.url.path,
+        source_surface=request.state.source_surface,
     )
 
     try:

@@ -13,12 +13,16 @@ import {
   previewAssistantPromptContext,
   streamAssistantResponse,
   submitAssistantRunFeedback,
+  synthesizeAssistantVoice,
   transcribeAssistantVoice,
 } from '../../entities/assistant/api'
 import {
   AssistantActionRequestList,
   type AssistantActionDecisionPayload,
 } from '../../entities/assistant/AssistantActionRequestList'
+import { AssistantPromptSectionList } from '../../entities/assistant/AssistantPromptSectionList'
+import { AssistantToolCallList } from '../../entities/assistant/AssistantToolCallList'
+import { AssistantEvidenceList } from '../../entities/assistant/AssistantEvidenceList'
 import {
   assistantBudgetSignalClass,
   assistantBudgetSignalLabel,
@@ -37,6 +41,7 @@ import type {
   AssistantConversation,
   AssistantConversationSummary,
   AssistantPromptContext,
+  AssistantPromptSection,
   AssistantPromptRequest,
   AssistantProvider,
   AssistantRun,
@@ -44,11 +49,17 @@ import type {
   AssistantRunFeedbackRating,
   AssistantRunSummary,
   AssistantRuntimeSettings,
+  AssistantToolCall,
+  AssistantToolEvidence,
   EventRow,
   PositionRow,
   Trade,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  resolveVoicePlaybackButtonLabel,
+  useVoicePlayback,
+} from '../../shared/voicePlayback'
 import { useVoiceComposer } from '../../shared/voiceComposer'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 
@@ -71,6 +82,8 @@ type ChatMessage = {
   content: string
   provider?: AssistantProvider
   model?: string
+  agentId?: string | null
+  agentName?: string | null
   runId?: number | null
   runRecordedAt?: string | null
   usage?: {
@@ -78,12 +91,7 @@ type ChatMessage = {
     output_tokens: number | null
   }
   warnings?: string[]
-  toolCalls?: {
-    tool_name: string
-    summary: string
-    arguments: Record<string, unknown>
-    record_count: number | null
-  }[]
+  toolCalls?: AssistantToolCall[]
   actionRequests?: AssistantActionRequest[]
   feedback?: AssistantRunFeedback | null
 }
@@ -173,11 +181,85 @@ function renderPromptPreview(preview: AssistantPromptContext | null): string {
 
   preview.sections.forEach((section) => {
     lines.push('')
-    lines.push(`[${section.title}]`)
+    const sectionMetadata = [section.source, section.scope, section.owner].filter(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    )
+    lines.push(
+      `[${section.title}${sectionMetadata.length > 0 ? ` · ${sectionMetadata.join(' · ')}` : ''}]`,
+    )
     lines.push(section.content)
   })
 
   return lines.join('\n')
+}
+
+function normalizeAssistantToolEvidence(value: unknown): AssistantToolEvidence | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.kind !== 'string' ||
+    typeof record.title !== 'string' ||
+    typeof record.summary !== 'string'
+  ) {
+    return null
+  }
+
+  return {
+    kind: record.kind as AssistantToolEvidence['kind'],
+    title: record.title,
+    summary: record.summary,
+    locator: typeof record.locator === 'string' ? record.locator : null,
+    excerpt: typeof record.excerpt === 'string' ? record.excerpt : null,
+    badges: Array.isArray(record.badges)
+      ? record.badges.filter((badge): badge is string => typeof badge === 'string' && badge.trim().length > 0)
+      : [],
+    metadata:
+      record.metadata && typeof record.metadata === 'object'
+        ? (record.metadata as Record<string, unknown>)
+        : {},
+  }
+}
+
+function normalizeAssistantToolCall(value: Record<string, unknown>): AssistantToolCall {
+  return {
+    tool_name: typeof value.tool_name === 'string' ? value.tool_name : 'tool',
+    summary: typeof value.summary === 'string' ? value.summary : '',
+    arguments:
+      value.arguments && typeof value.arguments === 'object'
+        ? (value.arguments as Record<string, unknown>)
+        : {},
+    record_count: typeof value.record_count === 'number' ? value.record_count : null,
+    output_preview:
+      value.output_preview && typeof value.output_preview === 'object'
+        ? (value.output_preview as Record<string, unknown>)
+        : {},
+    evidence_items: Array.isArray(value.evidence_items)
+      ? value.evidence_items
+          .map((item) => normalizeAssistantToolEvidence(item))
+          .filter((item): item is AssistantToolEvidence => item !== null)
+      : [],
+  }
+}
+
+function collectAssistantToolEvidence(toolCalls: AssistantToolCall[]): AssistantToolEvidence[] {
+  const seen = new Set<string>()
+  const evidenceItems: AssistantToolEvidence[] = []
+
+  toolCalls.forEach((toolCall) => {
+    ;(toolCall.evidence_items ?? []).forEach((item) => {
+      const key = [item.kind, item.title, item.locator ?? '', item.summary].join('::')
+      if (seen.has(key)) {
+        return
+      }
+      seen.add(key)
+      evidenceItems.push(item)
+    })
+  })
+
+  return evidenceItems
 }
 
 function formatTraceTimestamp(value: string | null | undefined): string {
@@ -199,10 +281,25 @@ function matchesAssistantMessageFilter(message: ChatMessage, query: string): boo
     message.content,
     message.provider,
     message.model,
+    message.agentId,
+    message.agentName,
     message.runId,
     message.runRecordedAt,
     ...(message.warnings ?? []),
-    ...(message.toolCalls?.flatMap((toolCall) => [toolCall.tool_name, toolCall.summary]) ?? []),
+    ...(message.toolCalls?.flatMap((toolCall) => [
+      toolCall.tool_name,
+      toolCall.summary,
+      JSON.stringify(toolCall.arguments),
+      JSON.stringify(toolCall.output_preview ?? {}),
+      ...(toolCall.evidence_items?.flatMap((item) => [
+        item.kind,
+        item.title,
+        item.summary,
+        item.locator,
+        item.excerpt,
+        ...item.badges,
+      ]) ?? []),
+    ]) ?? []),
     message.feedback?.rating,
     message.feedback?.comment,
     ...(message.actionRequests?.flatMap((actionRequest) => [
@@ -307,6 +404,8 @@ function toChatMessagesFromConversation(conversation: AssistantConversation): Ch
     content: message.content,
     provider: message.provider ?? undefined,
     model: message.model ?? undefined,
+    agentId: conversation.agent_id ?? undefined,
+    agentName: conversation.agent_name ?? undefined,
     runId: message.run_id ?? undefined,
     runRecordedAt: message.recorded_at,
     warnings: message.warnings,
@@ -509,6 +608,18 @@ export function AssistantWorkspace({
     },
     [authSession],
   )
+  const synthesizeVoicePlayback = useCallback(
+    async (text: string) => {
+      if (!authSession) {
+        throw new Error('Sign in to use generated voice playback.')
+      }
+
+      return synthesizeAssistantVoice(appConfig.apiBase, text, {
+        accessToken: authSession.accessToken,
+      })
+    },
+    [authSession],
+  )
   const voiceComposer = useVoiceComposer({
     draft,
     onDraftChange: setDraft,
@@ -523,6 +634,12 @@ export function AssistantWorkspace({
             ? ''
             : 'Backend voice transcription is not configured on this API.'
           : 'Checking whether backend voice transcription is available.',
+    },
+  })
+  const voicePlayback = useVoicePlayback({
+    backendSynthesis: {
+      enabled: Boolean(authSession && runtimeSettings?.voice_generation.enabled),
+      synthesizeAudio: synthesizeVoicePlayback,
     },
   })
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
@@ -557,7 +674,20 @@ export function AssistantWorkspace({
     [effectiveScreenFilter, recentRuns],
   )
 
+  useEffect(() => {
+    if (!voicePlayback.activePlaybackId) {
+      return
+    }
+
+    if (visibleMessages.some((message) => message.id === voicePlayback.activePlaybackId)) {
+      return
+    }
+
+    voicePlayback.stopPlayback()
+  }, [voicePlayback, visibleMessages])
+
   function clearConversationSelection() {
+    voicePlayback.stopPlayback()
     setSelectedConversationId(null)
     setSelectedConversation(null)
     setConversationDetailError('')
@@ -944,6 +1074,7 @@ export function AssistantWorkspace({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    voicePlayback.stopPlayback()
     voiceComposer.cancelListening()
     const trimmedDraft = draft.trim()
     if (!trimmedDraft || !selectedProvider || !authSession) {
@@ -1006,6 +1137,8 @@ export function AssistantWorkspace({
                     summary?: unknown
                     arguments?: unknown
                     record_count?: unknown
+                    output_preview?: unknown
+                    evidence_items?: unknown
                   } => typeof toolCall === 'object' && toolCall !== null,
                 )
               : []
@@ -1045,6 +1178,8 @@ export function AssistantWorkspace({
                     ? (metadata.provider as AssistantProvider)
                     : undefined,
                 model: typeof metadata.model === 'string' ? metadata.model : undefined,
+                agentId: typeof metadata.agent_id === 'string' ? metadata.agent_id : undefined,
+                agentName: typeof metadata.agent_name === 'string' ? metadata.agent_name : undefined,
                 runId: runId && Number.isFinite(runId) ? runId : undefined,
                 runRecordedAt:
                   typeof metadata.run_recorded_at === 'string' ? metadata.run_recorded_at : undefined,
@@ -1059,16 +1194,7 @@ export function AssistantWorkspace({
                 warnings: Array.isArray(metadata.warnings)
                   ? metadata.warnings.filter((warning): warning is string => typeof warning === 'string')
                   : [],
-                toolCalls: rawToolCalls.map((toolCall) => ({
-                  tool_name: typeof toolCall.tool_name === 'string' ? toolCall.tool_name : 'tool',
-                  summary: typeof toolCall.summary === 'string' ? toolCall.summary : '',
-                  arguments:
-                    toolCall.arguments && typeof toolCall.arguments === 'object'
-                      ? (toolCall.arguments as Record<string, unknown>)
-                      : {},
-                  record_count:
-                    typeof toolCall.record_count === 'number' ? toolCall.record_count : null,
-                })),
+                toolCalls: rawToolCalls.map((toolCall) => normalizeAssistantToolCall(toolCall)),
                 actionRequests: Array.isArray(metadata.action_requests)
                   ? metadata.action_requests.filter(
                       (actionRequest): actionRequest is AssistantActionRequest =>
@@ -1236,6 +1362,13 @@ export function AssistantWorkspace({
   const selectedConversationSummary =
     recentConversations.find((conversation) => conversation.conversation_id === selectedConversationId) ?? null
   const selectedRunSummary = recentRuns.find((run) => run.run_id === selectedRunId) ?? null
+  const latestAssistantMessage =
+    [...messages].reverse().find((message) => message.role === 'assistant') ?? null
+  const activeGroundingSections: AssistantPromptSection[] =
+    selectedRun?.prompt_sections ?? promptPreview?.sections ?? []
+  const activeToolCalls: AssistantToolCall[] =
+    selectedRun?.tool_calls ?? latestAssistantMessage?.toolCalls ?? []
+  const activeEvidenceItems = collectAssistantToolEvidence(activeToolCalls)
   const assistantArtifactTotalCount =
     messages.length + recentConversations.length + pendingActionRequests.length + recentRuns.length
   const assistantArtifactMatchedCount =
@@ -1511,34 +1644,75 @@ export function AssistantWorkspace({
                 </p>
               </div>
             ) : (
-              visibleMessages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`assistant-message assistant-message-${message.role}`}
-                >
-                  <div className="assistant-message-head">
-                    <strong>{message.role === 'assistant' ? 'Assistant' : 'You'}</strong>
-                    {message.provider && message.model ? (
-                      <span>{message.provider} · {message.model}</span>
+              visibleMessages.map((message) => {
+                const canReadAloud =
+                  message.role === 'assistant' && voicePlayback.canPlay(message.content)
+                const readingMessage = voicePlayback.isPlaying(message.id)
+
+                return (
+                  <article
+                    key={message.id}
+                    className={`assistant-message assistant-message-${message.role}`}
+                  >
+                    <div className="assistant-message-head">
+                      <strong>{message.role === 'assistant' ? message.agentName ?? 'Assistant' : 'You'}</strong>
+                      {message.provider && message.model ? (
+                        <span>{message.provider} · {message.model}</span>
+                      ) : null}
+                    </div>
+                    <p>{message.content}</p>
+                    {canReadAloud ? (
+                      <div className="assistant-message-meta">
+                        <button
+                          type="button"
+                          className={`assistant-run-link ${readingMessage ? 'is-selected' : ''}`}
+                          aria-pressed={readingMessage}
+                          disabled={!voicePlayback.supported}
+                          title={
+                            voicePlayback.supported
+                              ? readingMessage
+                                ? 'Stop reading this assistant response aloud.'
+                                : 'Read this assistant response aloud.'
+                              : 'Read aloud is not supported in this browser.'
+                          }
+                          onClick={() => {
+                            voiceComposer.cancelListening()
+                            voicePlayback.togglePlayback(message.id, message.content)
+                          }}
+                        >
+                          {resolveVoicePlaybackButtonLabel(readingMessage)}
+                        </button>
+                      </div>
                     ) : null}
-                  </div>
-                  <p>{message.content}</p>
-                  {message.usage ? (
-                    <div className="assistant-message-meta">
-                      <span>
-                        Input tokens:{' '}
-                        {message.usage.input_tokens !== null
-                          ? formatTokenCount(message.usage.input_tokens)
-                          : 'n/a'}
-                      </span>
-                      <span>
-                        Output tokens:{' '}
-                        {message.usage.output_tokens !== null
-                          ? formatTokenCount(message.usage.output_tokens)
-                          : 'n/a'}
-                      </span>
-                      {message.runId ? <span>Run #{message.runId}</span> : null}
-                      {message.runId ? (
+                    {message.usage ? (
+                      <div className="assistant-message-meta">
+                        <span>
+                          Input tokens:{' '}
+                          {message.usage.input_tokens !== null
+                            ? formatTokenCount(message.usage.input_tokens)
+                            : 'n/a'}
+                        </span>
+                        <span>
+                          Output tokens:{' '}
+                          {message.usage.output_tokens !== null
+                            ? formatTokenCount(message.usage.output_tokens)
+                            : 'n/a'}
+                        </span>
+                        {message.runId ? <span>Run #{message.runId}</span> : null}
+                        {message.runId ? (
+                          <button
+                            type="button"
+                            className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
+                            onClick={() => setSelectedRunId(message.runId ?? null)}
+                          >
+                            {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {!message.usage && message.runId ? (
+                      <div className="assistant-message-meta">
+                        <span>Run #{message.runId}</span>
                         <button
                           type="button"
                           className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
@@ -1546,72 +1720,45 @@ export function AssistantWorkspace({
                         >
                           {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
                         </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {!message.usage && message.runId ? (
-                    <div className="assistant-message-meta">
-                      <span>Run #{message.runId}</span>
-                      <button
-                        type="button"
-                        className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
-                        onClick={() => setSelectedRunId(message.runId ?? null)}
-                      >
-                        {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
-                      </button>
-                    </div>
-                  ) : null}
-                  <AssistantMessageFeedback
-                    key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
-                    message={message}
-                    disabled={!authSession}
-                    inFlight={
-                      Boolean(message.runId) &&
-                      feedbackRunIdsInFlight.includes(message.runId as number)
-                    }
-                    onSubmit={handleAssistantRunFeedback}
-                  />
-                  {message.toolCalls && message.toolCalls.length > 0 ? (
-                    <div className="assistant-tool-list">
-                      {message.toolCalls.map((toolCall, index) => (
-                        <article
-                          key={`${message.id}-${toolCall.tool_name}-${index}`}
-                          className="assistant-tool-card"
-                        >
-                          <div className="assistant-tool-head">
-                            <strong>{toolCall.tool_name}</strong>
-                            <span>
-                              {toolCall.record_count === null
-                                ? 'Record count: n/a'
-                                : `Record count: ${toolCall.record_count}`}
-                            </span>
-                          </div>
-                          <p>{toolCall.summary}</p>
-                          {Object.keys(toolCall.arguments).length > 0 ? (
-                            <code>{JSON.stringify(toolCall.arguments)}</code>
-                          ) : null}
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
-                  {message.actionRequests && message.actionRequests.length > 0 ? (
-                    <AssistantActionRequestList
-                      actionRequests={message.actionRequests}
-                      actionRequestIdsInFlight={actionRequestIdsInFlight}
-                      formatDate={formatTraceTimestamp}
-                      onDecision={handleActionRequestDecision}
-                      onOpenRun={setSelectedRunId}
+                      </div>
+                    ) : null}
+                    <AssistantMessageFeedback
+                      key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
+                      message={message}
+                      disabled={!authSession}
+                      inFlight={
+                        Boolean(message.runId) &&
+                        feedbackRunIdsInFlight.includes(message.runId as number)
+                      }
+                      onSubmit={handleAssistantRunFeedback}
                     />
-                  ) : null}
-                  {message.warnings && message.warnings.length > 0 ? (
-                    <div className="assistant-message-meta">
-                      {message.warnings.map((warning) => (
-                        <span key={warning}>{warning}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              ))
+                    {message.toolCalls && message.toolCalls.length > 0 ? (
+                      <AssistantToolCallList
+                        toolCalls={message.toolCalls}
+                        callerAgentName={message.agentName}
+                        selectedRunId={selectedRunId}
+                        onOpenRun={setSelectedRunId}
+                      />
+                    ) : null}
+                    {message.actionRequests && message.actionRequests.length > 0 ? (
+                      <AssistantActionRequestList
+                        actionRequests={message.actionRequests}
+                        actionRequestIdsInFlight={actionRequestIdsInFlight}
+                        formatDate={formatTraceTimestamp}
+                        onDecision={handleActionRequestDecision}
+                        onOpenRun={setSelectedRunId}
+                      />
+                    ) : null}
+                    {message.warnings && message.warnings.length > 0 ? (
+                      <div className="assistant-message-meta">
+                        {message.warnings.map((warning) => (
+                          <span key={warning}>{warning}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                )
+              })
             )}
           </div>
 
@@ -1819,6 +1966,42 @@ export function AssistantWorkspace({
 
         <div className="assistant-sidebar-block">
           <div className="assistant-provider-head">
+            <strong>Grounding sections</strong>
+            <span>{activeGroundingSections.length}</span>
+          </div>
+          <p>
+            {selectedRun
+              ? 'Showing the stored prompt sections that grounded the selected run.'
+              : promptPreview
+                ? 'Showing the prompt sections that will ground the next request.'
+                : 'No prompt sections are loaded yet.'}
+          </p>
+          <AssistantPromptSectionList
+            sections={activeGroundingSections}
+            emptyMessage="No prompt sections are available yet."
+          />
+        </div>
+
+        <div className="assistant-sidebar-block">
+          <div className="assistant-provider-head">
+            <strong>Tool evidence</strong>
+            <span>{activeEvidenceItems.length}</span>
+          </div>
+          <p>
+            {selectedRun
+              ? 'Structured source cards captured from the selected run.'
+              : latestAssistantMessage?.toolCalls?.length
+                ? 'Structured source cards from the latest assistant reply in this chat.'
+                : 'Source cards appear here after tool-backed answers inspect the app.'}
+          </p>
+          <AssistantEvidenceList
+            evidenceItems={activeEvidenceItems}
+            emptyMessage="No structured tool evidence has been captured yet."
+          />
+        </div>
+
+        <div className="assistant-sidebar-block">
+          <div className="assistant-provider-head">
             <strong>Chat threads</strong>
             <button
               type="button"
@@ -2008,32 +2191,17 @@ export function AssistantWorkspace({
             ) : null}
 
             {selectedRun.tool_calls.length > 0 ? (
-              <div className="assistant-tool-list">
-                {selectedRun.tool_calls.map((toolCall, index) => (
-                  <article key={`selected-run-tool-${toolCall.tool_name}-${index}`} className="assistant-tool-card">
-                    <div className="assistant-tool-head">
-                      <strong>{toolCall.tool_name}</strong>
-                      <span>
-                        {toolCall.record_count === null ? 'Record count: n/a' : `Record count: ${toolCall.record_count}`}
-                      </span>
-                    </div>
-                    <p>{toolCall.summary}</p>
-                    {Object.keys(toolCall.arguments).length > 0 ? <code>{JSON.stringify(toolCall.arguments)}</code> : null}
-                  </article>
-                ))}
-              </div>
+              <AssistantToolCallList
+                toolCalls={selectedRun.tool_calls}
+                callerAgentName={selectedRun.agent_name}
+                selectedRunId={selectedRunId}
+                onOpenRun={setSelectedRunId}
+              />
             ) : null}
 
             <details className="assistant-trace-details" open>
               <summary>Prompt sections ({selectedRun.prompt_sections.length})</summary>
-              <div className="assistant-trace-section-list">
-                {selectedRun.prompt_sections.map((section) => (
-                  <div key={section.key} className="assistant-context-preview">
-                    <strong>{section.title}</strong>
-                    <pre>{section.content}</pre>
-                  </div>
-                ))}
-              </div>
+              <AssistantPromptSectionList sections={selectedRun.prompt_sections} />
             </details>
 
             <details className="assistant-trace-details">

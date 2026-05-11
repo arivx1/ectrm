@@ -6,6 +6,7 @@ import { test } from "vitest";
 
 import { MapWorkspace } from "../src/workspaces/map/MapWorkspace";
 import {
+  AssetMapPanel,
   syncAssetActivityVisibilityState,
   setAllAssetGeographyVisibilityState,
   setAllAssetSubtypeVisibilityState,
@@ -64,6 +65,24 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
           subdivision_code: "US-TX",
           country_code: "US",
           continent_code: "NA",
+        },
+      ],
+      railRoutes: [
+        {
+          code: "BNSF_WAHA_TO_HSC",
+          name: "BNSF Waha to Houston Ship Channel",
+          description: "Seeded rail corridor",
+          is_active: true,
+          rail_line_code: "BNSF_SOUTHERN_TRANSCON",
+          origin_location_code: "WAHA",
+          destination_location_code: "HOUSTON",
+          service_calendar_code: "US_GAS_DAY",
+          route_direction: "FORWARD",
+          schedule_timezone: "America/Chicago",
+          placement_cutoff_time_local: "15:00",
+          release_cutoff_time_local: "11:00",
+          placement_free_time_hours: 48,
+          release_free_time_hours: 24,
         },
       ],
       spatialFeatures: [
@@ -175,6 +194,9 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
       weatherDataLoaded: true,
       onOpenReferenceData: () => undefined,
       onPrepareReferenceAsset: () => undefined,
+      onOpenReferenceRailRoute: () => undefined,
+      onOpenRailRouteDeliveries: () => undefined,
+      onOpenRailRouteScheduling: () => undefined,
     }),
   );
 
@@ -275,6 +297,93 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
   assert.match(markup, /aria-label="Resize map height"/);
 });
 
+test("asset map panel surfaces selected rail route actions beside the asset summary cards", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AssetMapPanel, {
+      assets: [],
+      locations: [
+        {
+          code: "WAHA",
+          name: "Waha",
+          description: null,
+          is_active: true,
+          location_kind: "POINT",
+          location_type: "HUB",
+        },
+        {
+          code: "HOUSTON",
+          name: "Houston Ship Channel",
+          description: null,
+          is_active: true,
+          location_kind: "POINT",
+          location_type: "HUB",
+        },
+      ],
+      railRoutes: [
+        {
+          code: "BNSF_WAHA_TO_HSC",
+          name: "BNSF Waha to Houston Ship Channel",
+          description: "Seeded rail corridor",
+          is_active: true,
+          rail_line_code: "BNSF_SOUTHERN_TRANSCON",
+          origin_location_code: "WAHA",
+          destination_location_code: "HOUSTON",
+          service_calendar_code: "US_GAS_DAY",
+          route_direction: "FORWARD",
+          schedule_timezone: "America/Chicago",
+          placement_cutoff_time_local: "15:00",
+          release_cutoff_time_local: "11:00",
+          placement_free_time_hours: 48,
+          release_free_time_hours: 24,
+        },
+      ],
+      spatialFeatures: [
+        {
+          code: "BNSF_WAHA_TO_HSC_OVERLAY",
+          name: "BNSF Waha to Houston Ship Channel",
+          description: null,
+          is_active: true,
+          feature_kind: "ROUTE",
+          geometry_type: "LINE",
+          geometry_geojson: {
+            type: "LineString",
+            coordinates: [
+              [-103.6652, 31.9493],
+              [-95.265, 29.7285],
+            ],
+          },
+          entity_type: "RAIL_ROUTE",
+          entity_code: "BNSF_WAHA_TO_HSC",
+          label_latitude: 30.839,
+          label_longitude: -99.4651,
+          is_primary: true,
+        },
+      ],
+      weatherLocations: [],
+      weatherSyncStatus: null,
+      selectedAssetCode: null,
+      selectedRailRouteCode: "BNSF_WAHA_TO_HSC",
+      onSelectAsset: () => undefined,
+      onSelectRailRoute: () => undefined,
+      onOpenRailRouteDeliveries: () => undefined,
+      onOpenRailRouteScheduling: () => undefined,
+      onOpenReferenceRailRoute: () => undefined,
+      onClearRailRouteSelection: () => undefined,
+    }),
+  );
+
+  assert.match(markup, /Selected Rail Route/);
+  assert.match(markup, /BNSF Waha to Houston Ship Channel/);
+  assert.match(markup, /BNSF_SOUTHERN_TRANSCON/);
+  assert.match(markup, /WAHA · Waha/);
+  assert.match(markup, /HOUSTON · Houston Ship Channel/);
+  assert.match(markup, /America\/Chicago/);
+  assert.match(markup, />Open Deliveries</);
+  assert.match(markup, />Open Scheduling</);
+  assert.match(markup, />Open Route Record</);
+  assert.match(markup, />Clear Route Focus</);
+});
+
 test("map workspace keeps the live map canvas available even when no assets are plottable", () => {
   const markup = renderToStaticMarkup(
     createElement(MapWorkspace, {
@@ -296,6 +405,7 @@ test("map workspace keeps the live map canvas available even when no assets are 
         },
       ],
       locations: [],
+      railRoutes: [],
       spatialFeatures: [],
       weatherLocations: [],
       weatherSyncStatus: null,
@@ -303,6 +413,9 @@ test("map workspace keeps the live map canvas available even when no assets are 
       weatherDataLoaded: true,
       onOpenReferenceData: () => undefined,
       onPrepareReferenceAsset: () => undefined,
+      onOpenReferenceRailRoute: () => undefined,
+      onOpenRailRouteDeliveries: () => undefined,
+      onOpenRailRouteScheduling: () => undefined,
     }),
   );
 
@@ -354,6 +467,7 @@ test("map workspace surfaces weather layer load failures in the control row", ()
     createElement(MapWorkspace, {
       assets: [],
       locations: [],
+      railRoutes: [],
       spatialFeatures: [],
       weatherLocations: [],
       weatherSyncStatus: null,
@@ -363,6 +477,8 @@ test("map workspace surfaces weather layer load failures in the control row", ()
       globalFilter: "",
       onOpenReferenceData: () => undefined,
       onPrepareReferenceAsset: () => undefined,
+      onOpenReferenceRailRoute: () => undefined,
+      onOpenRailRouteDeliveries: () => undefined,
     }),
   );
 

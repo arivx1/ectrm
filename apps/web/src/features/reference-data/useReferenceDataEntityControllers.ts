@@ -8,6 +8,7 @@ import type {
   LocationStandards,
   PortfolioRecord,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureRecord,
   SpatialFeatureStandards,
@@ -19,6 +20,7 @@ import {
   buildCommodityFieldErrors,
   buildCurrencyFieldErrors,
   buildLocationFieldErrors,
+  buildRailRouteFieldErrors,
   buildSpatialFeatureFieldErrors,
   parseAssetCoordinatePair,
   parseAssetGeometryInput,
@@ -29,6 +31,7 @@ import {
   isCurrencyFormDirty,
   isLocationFormDirty,
   isPriceIndexFormDirty,
+  isRailRouteFormDirty,
   isSpatialFeatureFormDirty,
   isUnitFormDirty,
 } from './referenceDataFormState'
@@ -333,6 +336,150 @@ export function useReferenceDataSpatialFeatureController({
     startEditSpatialFeature,
     handleSaveSpatialFeature,
     handleToggleSpatialFeature,
+  }
+}
+
+export function useReferenceDataRailRouteController({
+  workspace,
+  railRoutes,
+  beginReferenceAction,
+  currentActorId,
+  submitReference,
+  setReferenceActionError,
+}: {
+  workspace: Pick<
+    ReferenceDataWorkspaceState,
+    | 'railRouteForm'
+    | 'railRouteFormMode'
+    | 'selectedRailRoute'
+    | 'startCreateRailRoute'
+    | 'startEditRailRoute'
+  >
+  railRoutes: RailRouteRecord[]
+} & Pick<
+  EntityControllerActions,
+  'beginReferenceAction' | 'currentActorId' | 'submitReference' | 'setReferenceActionError'
+>) {
+  const {
+    railRouteForm,
+    railRouteFormMode,
+    selectedRailRoute,
+    startCreateRailRoute: startCreateRailRouteBase,
+    startEditRailRoute: startEditRailRouteBase,
+  } = workspace
+
+  const railRouteFieldErrors = useMemo(
+    () => buildRailRouteFieldErrors(railRouteForm, railRouteFormMode, railRoutes),
+    [railRouteForm, railRouteFormMode, railRoutes],
+  )
+
+  const railRouteFormDirty = useMemo(
+    () => isRailRouteFormDirty(railRouteForm, railRouteFormMode, selectedRailRoute),
+    [railRouteForm, railRouteFormMode, selectedRailRoute],
+  )
+
+  function startCreateRailRoute() {
+    beginReferenceAction(startCreateRailRouteBase)
+  }
+
+  function startEditRailRoute(code: string) {
+    beginReferenceAction(() => startEditRailRouteBase(code))
+  }
+
+  async function handleSaveRailRoute(e: React.FormEvent) {
+    e.preventDefault()
+    if (!railRouteForm.code.trim() || !railRouteForm.name.trim() || !railRouteForm.rail_line_code.trim()) {
+      setReferenceActionError('Rail route code, name, and rail line code are required.')
+      return
+    }
+
+    if (!railRouteForm.route_direction.trim()) {
+      setReferenceActionError('Route direction is required.')
+      return
+    }
+
+    if (railRouteFieldErrors.route_direction) {
+      setReferenceActionError(railRouteFieldErrors.route_direction)
+      return
+    }
+
+    if (railRouteForm.placement_cutoff_time_local.trim() && railRouteFieldErrors.placement_cutoff_time_local) {
+      setReferenceActionError(railRouteFieldErrors.placement_cutoff_time_local)
+      return
+    }
+
+    if (railRouteForm.release_cutoff_time_local.trim() && railRouteFieldErrors.release_cutoff_time_local) {
+      setReferenceActionError(railRouteFieldErrors.release_cutoff_time_local)
+      return
+    }
+
+    if (railRouteForm.placement_free_time_hours.trim() && railRouteFieldErrors.placement_free_time_hours) {
+      setReferenceActionError(railRouteFieldErrors.placement_free_time_hours)
+      return
+    }
+
+    if (railRouteForm.release_free_time_hours.trim() && railRouteFieldErrors.release_free_time_hours) {
+      setReferenceActionError(railRouteFieldErrors.release_free_time_hours)
+      return
+    }
+
+    const placementFreeTimeHours = railRouteForm.placement_free_time_hours.trim()
+      ? Number.parseInt(railRouteForm.placement_free_time_hours.trim(), 10)
+      : null
+    const releaseFreeTimeHours = railRouteForm.release_free_time_hours.trim()
+      ? Number.parseInt(railRouteForm.release_free_time_hours.trim(), 10)
+      : null
+
+    const payload = {
+      code: railRouteForm.code.trim().toUpperCase(),
+      name: railRouteForm.name.trim(),
+      rail_line_code: railRouteForm.rail_line_code.trim().toUpperCase(),
+      origin_location_code: railRouteForm.origin_location_code.trim().toUpperCase() || null,
+      destination_location_code: railRouteForm.destination_location_code.trim().toUpperCase() || null,
+      service_calendar_code: railRouteForm.service_calendar_code.trim().toUpperCase() || null,
+      route_direction: railRouteForm.route_direction.trim().toUpperCase(),
+      schedule_timezone: railRouteForm.schedule_timezone.trim() || null,
+      placement_cutoff_time_local: railRouteForm.placement_cutoff_time_local.trim() || null,
+      release_cutoff_time_local: railRouteForm.release_cutoff_time_local.trim() || null,
+      placement_free_time_hours: placementFreeTimeHours,
+      release_free_time_hours: releaseFreeTimeHours,
+      description: railRouteForm.description.trim() || null,
+    }
+
+    if (railRouteFormMode === 'create') {
+      await submitReference(
+        '/reference/rail-routes',
+        'POST',
+        { ...payload, created_by: currentActorId() },
+        `Rail route ${payload.code} created.`,
+      )
+      startEditRailRouteBase(payload.code)
+    } else if (selectedRailRoute) {
+      await submitReference(
+        `/reference/rail-routes/${selectedRailRoute.code}`,
+        'PUT',
+        { ...payload, updated_by: currentActorId() },
+        `Rail route ${selectedRailRoute.code} updated.`,
+      )
+    }
+  }
+
+  async function handleToggleRailRoute(record: RailRouteRecord) {
+    await submitReference(
+      `/reference/rail-routes/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
+      'POST',
+      { updated_by: currentActorId() },
+      `Rail route ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
+    )
+  }
+
+  return {
+    railRouteFieldErrors,
+    railRouteFormDirty,
+    startCreateRailRoute,
+    startEditRailRoute,
+    handleSaveRailRoute,
+    handleToggleRailRoute,
   }
 }
 

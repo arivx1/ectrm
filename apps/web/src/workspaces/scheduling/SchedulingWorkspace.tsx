@@ -2,10 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 
 import type { CreateTradeWorkflowItemInput, UpdateTradeWorkflowItemInput } from '../../entities/operations/api'
 import type { SaveDeliveryActualizationInput } from '../../entities/shipments/api'
-import { matchesTextFilter } from '../../shared/filtering'
-import type { DeliveryRecord, DeliverySchedulingWorkflowItemRecord } from '../../shared/models'
+import {
+  getAppRouteHandoffFilterValue,
+  normalizeAppRouteHandoff,
+  type AppRouteHandoff,
+} from '../../shared/appRouteHandoff'
+import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
+import type { DeliveryRecord, DeliverySchedulingWorkflowItemRecord, RailRouteRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalActionPanel } from '../operations/operationalActionPanelRegistry'
@@ -30,8 +36,10 @@ import {
 
 type SchedulingWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff: AppRouteHandoff | null
   globalFilter: string
   deliveries: DeliveryRecord[]
+  railRoutes: RailRouteRecord[]
   operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
   formatNumber: (value: number | null, digits?: number) => string
@@ -46,6 +54,7 @@ type SchedulingWorkspaceProps = {
     tradeId: string,
     payload: Omit<CreateTradeWorkflowItemInput, 'trade_id'>,
   ) => Promise<void>
+  onClearHandoff: () => void
   onOpenTrade: (tradeId: string) => void
   onSaveActualization: (
     delivery: Pick<DeliveryRecord, 'delivery_id' | 'trade_id' | 'leg_no'>,
@@ -249,6 +258,11 @@ function matchesSchedulingWorkbenchFilter(row: SchedulingWorkbenchRow, query: st
     row.delivery.location_code,
     row.delivery.origin_location_code,
     row.delivery.destination_location_code,
+    row.delivery.rail_route_code,
+    row.delivery.rail_line_code,
+    row.delivery.railroad_code,
+    row.delivery.rail_route_direction,
+    row.delivery.rail_service_calendar_code,
     row.delivery.receipt_location_code,
     row.delivery.delivery_location_code,
     row.delivery.pipeline_system,
@@ -274,8 +288,10 @@ function matchesSchedulingWorkbenchFilter(row: SchedulingWorkbenchRow, query: st
 
 export function SchedulingWorkspace({
   authSession,
+  routeHandoff,
   globalFilter,
   deliveries,
+  railRoutes,
   operationalResourceDescriptors,
   formatCommodityClass,
   formatNumber,
@@ -287,6 +303,7 @@ export function SchedulingWorkspace({
   workflowCreationPendingTradeId,
   workflowMutationPendingId,
   onCreateWorkflowItem,
+  onClearHandoff,
   onOpenTrade,
   onSaveActualization,
   onSaveWorkflowItem,
@@ -294,8 +311,40 @@ export function SchedulingWorkspace({
   const [modeFilter, setModeFilter] = useState<SchedulingModeFilter>('ALL')
   const [viewPreset, setViewPreset] = useState<SchedulingViewPreset>('DESK')
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null)
+  const [selectedRailRouteFilterCode, setSelectedRailRouteFilterCode] = useState('')
   const [now, setNow] = useState<number>(() => currentTimestamp())
+  const normalizedRouteHandoff = normalizeAppRouteHandoff(routeHandoff)
+  const focusedRailRouteCode =
+    normalizedRouteHandoff?.focus.type === 'reference_record'
+      ? normalizedRouteHandoff.focus.id.trim().toUpperCase()
+      : null
+  const localRailRouteCode = selectedRailRouteFilterCode.trim().toUpperCase() || null
+  const appliedRailRouteCode = focusedRailRouteCode ?? localRailRouteCode
+  const handoffGlobalFilter = focusedRailRouteCode ? '' : getAppRouteHandoffFilterValue(normalizedRouteHandoff) ?? ''
+  const effectiveGlobalFilter = combineTextFilters(globalFilter, handoffGlobalFilter)
   const hasGlobalFilter = globalFilter.trim().length > 0
+  const sortedRailRoutes = useMemo(
+    () =>
+      [...railRoutes].sort(
+        (left, right) =>
+          left.name.localeCompare(right.name) ||
+          left.code.localeCompare(right.code),
+      ),
+    [railRoutes],
+  )
+  const railRouteFilterOptions = useMemo(() => {
+    const activeRoutes = sortedRailRoutes.filter((route) => route.is_active)
+    if (!appliedRailRouteCode || activeRoutes.some((route) => route.code === appliedRailRouteCode)) {
+      return activeRoutes
+    }
+
+    const focusedRoute = sortedRailRoutes.find((route) => route.code === appliedRailRouteCode)
+    return focusedRoute ? [...activeRoutes, focusedRoute] : activeRoutes
+  }, [appliedRailRouteCode, sortedRailRoutes])
+  const appliedRailRoute =
+    railRouteFilterOptions.find((route) => route.code === appliedRailRouteCode) ??
+    sortedRailRoutes.find((route) => route.code === appliedRailRouteCode) ??
+    null
 
   useEffect(() => {
     function refreshNow() {
@@ -326,13 +375,16 @@ export function SchedulingWorkspace({
 
   const schedulingWindowMs = SCHEDULING_WINDOW_HOURS * 60 * 60 * 1000
   const openDeliveries = deliveries.filter((delivery) => delivery.status !== 'COMPLETED')
+  const scopedOpenDeliveries = appliedRailRouteCode
+    ? openDeliveries.filter((delivery) => delivery.rail_route_code === appliedRailRouteCode)
+    : openDeliveries
   const workbenchRows = useMemo(
-    () => buildSchedulingWorkbenchRows(openDeliveries, now, schedulingWindowMs),
-    [now, openDeliveries, schedulingWindowMs],
+    () => buildSchedulingWorkbenchRows(scopedOpenDeliveries, now, schedulingWindowMs),
+    [now, scopedOpenDeliveries, schedulingWindowMs],
   )
   const globallyVisibleRows = useMemo(
-    () => workbenchRows.filter((row) => matchesSchedulingWorkbenchFilter(row, globalFilter)),
-    [globalFilter, workbenchRows],
+    () => workbenchRows.filter((row) => matchesSchedulingWorkbenchFilter(row, effectiveGlobalFilter)),
+    [effectiveGlobalFilter, workbenchRows],
   )
   const modeScopedRows = globallyVisibleRows.filter((row) => modeFilter === 'ALL' || row.delivery.mode_family === modeFilter)
   const filteredRows = modeScopedRows.filter((row) => matchesSchedulingView(row, viewPreset))
@@ -355,7 +407,7 @@ export function SchedulingWorkspace({
   const activeViewOption =
     VIEW_PRESET_OPTIONS.find((option) => option.value === viewPreset) ?? VIEW_PRESET_OPTIONS[0]
   const activeModeLabel = MODE_FILTER_OPTIONS.find((option) => option.value === modeFilter)?.label ?? 'All Modes'
-  const matchingRatio = openDeliveries.length > 0 ? Math.round((filteredRows.length / openDeliveries.length) * 100) : 0
+  const matchingRatio = scopedOpenDeliveries.length > 0 ? Math.round((filteredRows.length / scopedOpenDeliveries.length) * 100) : 0
   const dueSoonRows = filteredRows.filter((row) => row.isDueSoon)
   const blockedRows = filteredRows.filter((row) => row.stage === 'BLOCKED')
   const readyRows = filteredRows.filter((row) => row.stage === 'READY')
@@ -438,25 +490,51 @@ export function SchedulingWorkspace({
     setViewPreset('DESK')
   }
 
+  function handleRailRouteFocusChange(nextCode: string) {
+    if (normalizedRouteHandoff) {
+      onClearHandoff()
+    }
+    setSelectedRailRouteFilterCode(nextCode.trim().toUpperCase())
+  }
+
+  function clearRailRouteFocus() {
+    if (normalizedRouteHandoff) {
+      onClearHandoff()
+    }
+    setSelectedRailRouteFilterCode('')
+  }
+
   return (
     <TileLayout
       workspaceId="scheduling"
       workspaceLabel="Scheduling"
       authSession={authSession}
       headerContent={
-        hasGlobalFilter ? (
-          <section className="surface workspace-local-filter">
-            <div className="workspace-local-filter-copy">
-              <div>
-                <span className="eyebrow">Filter</span>
-                <h3>Global Scheduler Filter</h3>
-              </div>
-              <p>
-                Global nav filter “{globalFilter.trim()}” is also narrowing the scheduler queue. Saved views and the
-                mode lens still apply inside this workspace.
-              </p>
-            </div>
-          </section>
+        normalizedRouteHandoff || hasGlobalFilter ? (
+          <>
+            {normalizedRouteHandoff ? (
+              <WorkspaceHandoffFocusBanner
+                currentView="scheduling"
+                handoff={normalizedRouteHandoff}
+                onClear={onClearHandoff}
+                clearLabel="Show Full Board"
+              />
+            ) : null}
+            {hasGlobalFilter ? (
+              <section className="surface workspace-local-filter">
+                <div className="workspace-local-filter-copy">
+                  <div>
+                    <span className="eyebrow">Filter</span>
+                    <h3>Global Scheduler Filter</h3>
+                  </div>
+                  <p>
+                    Global nav filter “{globalFilter.trim()}” is also narrowing the scheduler queue. Saved views and the
+                    mode lens still apply inside this workspace.
+                  </p>
+                </div>
+              </section>
+            ) : null}
+          </>
         ) : undefined
       }
       tiles={[
@@ -474,12 +552,19 @@ export function SchedulingWorkspace({
                 <div className="scheduler-board-head">
                   <div className="scheduler-board-copy">
                     <strong>
-                      Showing {formatNumber(filteredRows.length, 0)} of {formatNumber(openDeliveries.length, 0)} open rows
+                      Showing {formatNumber(filteredRows.length, 0)} of {formatNumber(scopedOpenDeliveries.length, 0)} open rows
                     </strong>
                     <p>
                       Work the mixed-commodity scheduler queue by saved view first, then narrow by mode when you need a
                       commodity-specific slice.
                     </p>
+                    {appliedRailRouteCode ? (
+                      <p>
+                        Rail route {appliedRailRoute?.code ?? appliedRailRouteCode}
+                        {appliedRailRoute ? ` · ${appliedRailRoute.name}` : ''} is currently in focus. Clear the
+                        route focus to return to the full scheduler board.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="scheduler-board-focus">
                     <span>Active View</span>
@@ -524,6 +609,39 @@ export function SchedulingWorkspace({
                     </div>
                     <p className="scheduler-filter-detail">
                       Keep mode family as a secondary lens while the main queue stays organized by work stage.
+                    </p>
+                  </div>
+
+                  <div className="scheduler-filter-group">
+                    <span className="scheduler-filter-label">Rail Route Focus</span>
+                    <div className="scheduler-filter-row">
+                      <label className="field">
+                        <span>Rail Route</span>
+                        <select
+                          className="control control-compact"
+                          value={appliedRailRouteCode ?? ''}
+                          onChange={(event) => handleRailRouteFocusChange(event.target.value)}
+                          disabled={railRouteFilterOptions.length === 0}
+                        >
+                          <option value="">All Rail Routes</option>
+                          {railRouteFilterOptions.map((route) => (
+                            <option key={route.code} value={route.code}>
+                              {route.code} - {route.name}
+                              {route.is_active ? '' : ' (Inactive)'}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {appliedRailRouteCode ? (
+                        <button type="button" className="button button-ghost" onClick={clearRailRouteFocus}>
+                          Clear Route
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="scheduler-filter-detail">
+                      {railRouteFilterOptions.length > 0
+                        ? 'Use a governed rail route to narrow the scheduler board by lane without relying on text search.'
+                        : 'No governed rail routes are loaded yet for native scheduler focus.'}
                     </p>
                   </div>
                 </div>
@@ -665,7 +783,10 @@ export function SchedulingWorkspace({
                           <article className="scheduler-detail-stat">
                             <span>Coverage</span>
                             <strong>{matchingRatio}%</strong>
-                            <p>of the full scheduler queue matches the active view.</p>
+                            <p>
+                              of the {appliedRailRouteCode ? 'focused rail route queue' : 'full scheduler queue'} matches
+                              the active view.
+                            </p>
                           </article>
                         </div>
 

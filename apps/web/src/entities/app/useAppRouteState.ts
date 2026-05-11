@@ -30,6 +30,7 @@ export type AppRouteState = {
 
 type AppRouteNavigationOptions = {
   tradeId?: string | null
+  hash?: string | null
 }
 
 function readAppRouteState(): AppRouteState {
@@ -69,6 +70,19 @@ function currentAppUrl(): string {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`
 }
 
+function normalizeHashFragment(value: string | null | undefined): string {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  const trimmedValue = value.trim()
+  if (!trimmedValue) {
+    return ''
+  }
+
+  return trimmedValue.startsWith('#') ? trimmedValue : `#${trimmedValue}`
+}
+
 function buildAppRouteUrl(route: AppRouteState, hash: string): string {
   const params = new URLSearchParams()
   if (route.section !== null) {
@@ -100,8 +114,11 @@ export function useAppRouteState() {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(initialRoute.tradeId)
   const [routeHandoff, setRouteHandoff] = useState<AppRouteHandoff | null>(initialRoute.handoff)
 
-  function syncRouteState(route: AppRouteState, historyMode: 'push' | 'replace', preserveHash = false) {
-    const nextHash = preserveHash ? window.location.hash : ''
+  function syncRouteState(
+    route: AppRouteState,
+    historyMode: 'push' | 'replace',
+    nextHash = '',
+  ) {
     const nextUrl = buildAppRouteUrl(route, nextHash)
     if (nextUrl === currentAppUrl()) {
       return
@@ -134,6 +151,12 @@ export function useAppRouteState() {
     options: AppRouteNavigationOptions = {},
   ) {
     const nextTradeId = options.tradeId !== undefined ? options.tradeId : selectedTradeId
+    const nextHash =
+      options.hash !== undefined
+        ? normalizeHashFragment(options.hash)
+        : view === 'settings'
+          ? window.location.hash
+          : ''
     syncRouteState(
       {
         section: null,
@@ -143,7 +166,7 @@ export function useAppRouteState() {
         handoff,
       },
       historyMode,
-      view === 'settings',
+      nextHash,
     )
     setActiveNavigationSectionKey(null)
     setCurrentView(view)
@@ -153,7 +176,13 @@ export function useAppRouteState() {
     }
   }
 
-  function hrefForView(view: ViewKey) {
+  function hrefForView(view: ViewKey, hash?: string | null) {
+    const nextHash =
+      hash !== undefined
+        ? normalizeHashFragment(hash)
+        : view === 'settings'
+          ? window.location.hash
+          : ''
     return buildAppRouteUrl(
       {
         section: null,
@@ -162,7 +191,7 @@ export function useAppRouteState() {
         tradeId: selectedTradeId,
         handoff: null,
       },
-      view === 'settings' ? window.location.hash : '',
+      nextHash,
     )
   }
 
@@ -233,7 +262,9 @@ export function useAppRouteState() {
         handoff: null,
       },
       'push',
-      currentView === 'guide' && nextDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
+      currentView === 'guide' && nextDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY
+        ? window.location.hash
+        : '',
     )
     setActiveNavigationSectionKey(null)
     setActiveDocumentationDocumentKey(nextDocumentKey)
@@ -270,7 +301,10 @@ export function useAppRouteState() {
       },
       'replace',
       currentView === 'settings' ||
-        (currentView === 'guide' && activeDocumentationDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY),
+        (currentView === 'guide' &&
+          activeDocumentationDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY)
+        ? window.location.hash
+        : '',
     )
   }, [activeNavigationSectionKey, currentView, activeDocumentationDocumentKey, selectedTradeId, routeHandoff])
 

@@ -36,13 +36,20 @@ envelope with these sections:
 2. `Organization Context`
 3. `Authenticated User`
 4. `Business Operating Model`
-5. `Data Landscape`
-6. `Live Data Inventory`
-7. `Application Access Surface`
-8. `World And Time`
-9. `Managed Agent Profile` when an agent is selected
-10. `Current Workspace` when provided
-11. `Application Context` when provided
+5. `Organization Glossary` when published definitions are active
+6. `Organization Guardrails` when published definitions are active
+7. `Data Landscape`
+8. `Live Data Inventory`
+9. `Application Access Surface`
+10. `World And Time`
+11. `Managed Agent Profile` when an agent is selected
+12. `Current Workspace` when provided
+13. `Application Context` when provided
+
+Organization and operating-model sections now prefer published organization
+context definitions from the backend registry when they exist. Until those
+records are populated, the assistant still falls back to the env-backed
+bootstrap values and marks that fallback explicitly in prompt preview metadata.
 
 The rendered system prompt is then passed to the configured model provider.
 
@@ -165,6 +172,8 @@ message to a model. The response includes:
 
 - resolved provider and model
 - the generated prompt sections
+- section metadata such as source ownership, contract version, owner reference,
+  and fallback usage
 - the final rendered system prompt
 
 This is the main debugging and prompt-review surface for now.

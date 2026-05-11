@@ -9,6 +9,7 @@ import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import type {
   AssetRecord,
   LocationRecord,
+  RailRouteRecord,
   SpatialFeatureRecord,
   WeatherLocationRecord,
   WeatherSyncStatusRecord,
@@ -20,6 +21,7 @@ import { AssetMapPanel } from '../reference-data/tabs/AssetMapPanel'
 type MapWorkspaceProps = {
   assets: AssetRecord[]
   locations: LocationRecord[]
+  railRoutes: RailRouteRecord[]
   spatialFeatures: SpatialFeatureRecord[]
   weatherLocations: WeatherLocationRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
@@ -29,6 +31,9 @@ type MapWorkspaceProps = {
   globalFilter: string
   onOpenReferenceData: () => void
   onPrepareReferenceAsset: (code: string) => void
+  onOpenReferenceRailRoute: (code: string) => void
+  onOpenRailRouteDeliveries: (code: string) => void
+  onOpenRailRouteScheduling: (code: string) => void
 }
 
 function sortedUniqueValues(values: Array<string | null | undefined>): string[] {
@@ -88,6 +93,7 @@ function mapStatusLabel(
 export function MapWorkspace({
   assets,
   locations,
+  railRoutes,
   spatialFeatures,
   weatherLocations,
   weatherSyncStatus,
@@ -97,9 +103,13 @@ export function MapWorkspace({
   globalFilter,
   onOpenReferenceData,
   onPrepareReferenceAsset,
+  onOpenReferenceRailRoute,
+  onOpenRailRouteDeliveries,
+  onOpenRailRouteScheduling,
 }: MapWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
   const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(null)
+  const [selectedRailRouteCode, setSelectedRailRouteCode] = useState<string | null>(null)
   const [assetClassFilter, setAssetClassFilter] = useState('')
   const [assetTypeFilter, setAssetTypeFilter] = useState('')
   const [commodityFilter, setCommodityFilter] = useState('')
@@ -170,6 +180,16 @@ export function MapWorkspace({
     onOpenReferenceData()
   }
 
+  function handleSelectAsset(code: string) {
+    setSelectedRailRouteCode(null)
+    setSelectedAssetCode(code)
+  }
+
+  function handleSelectRailRoute(code: string) {
+    setSelectedAssetCode(null)
+    setSelectedRailRouteCode(code)
+  }
+
   function handleAssetClassChange(nextAssetClass: string) {
     setAssetClassFilter(nextAssetClass)
     if (
@@ -204,6 +224,7 @@ export function MapWorkspace({
       <AssetMapPanel
         assets={filteredAssets}
         locations={locations}
+        railRoutes={railRoutes}
         spatialFeatures={spatialFeatures}
         weatherLocations={weatherLocations}
         weatherSyncStatus={weatherSyncStatus}
@@ -211,7 +232,13 @@ export function MapWorkspace({
         weatherDataLoading={weatherDataLoading}
         weatherLoadError={weatherDataError}
         selectedAssetCode={activeSelectedAssetCode}
-        onSelectAsset={setSelectedAssetCode}
+        selectedRailRouteCode={selectedRailRouteCode}
+        onSelectAsset={handleSelectAsset}
+        onSelectRailRoute={handleSelectRailRoute}
+        onOpenRailRouteDeliveries={onOpenRailRouteDeliveries}
+        onOpenRailRouteScheduling={onOpenRailRouteScheduling}
+        onOpenReferenceRailRoute={onOpenReferenceRailRoute}
+        onClearRailRouteSelection={() => setSelectedRailRouteCode(null)}
         filterControls={(
           <>
             <label className="field">
@@ -358,7 +385,7 @@ export function MapWorkspace({
           getRowId={(asset) => asset.code}
           getRowLabel={(asset) => `${asset.code} ${asset.name}`}
           selectedRowId={activeSelectedAssetCode}
-          onSelectRow={(asset) => setSelectedAssetCode(asset.code)}
+          onSelectRow={(asset) => handleSelectAsset(asset.code)}
           emptyMessage="No assets match the current map filter."
         />
       </section>

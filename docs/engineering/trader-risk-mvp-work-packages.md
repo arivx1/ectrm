@@ -6,6 +6,8 @@ Deliver the first trustworthy trader and risk-manager slice from the business
 use-case roadmap:
 
 - identify opportunity and volatility signals worth reviewing
+- identify simple product or quality, time, and geographic arbitrage signals
+  worth reviewing
 - explain residual exposure and simple long/short offsets
 - draft hedge or book-flattening recommendations
 - enrich pre-trade scenarios with evidence, freshness, and reviewer focus
@@ -19,6 +21,7 @@ This is an MVP for decision support, not autonomous trading.
 
 - [Business Use Case Roadmap](./business-use-case-roadmap.md)
 - [Pre-Trade Design](./pre-trade-design.md)
+- [Arbitrage Detection Design](./arbitrage-detection-design.md)
 - [Trading Source Roadmap](./trading-source-roadmap.md)
 - [Agent Role Catalog](./agent-role-catalog.md)
 - [Human-Agent Authority Matrix](./human-agent-authority-matrix.md)
@@ -106,7 +109,7 @@ The MVP should use or prepare these durable work objects:
 
 ### Wave 1: First Trader/Risk Slice
 
-3. TRMVP-03 opportunity and residual exposure triage
+3. TRMVP-03 opportunity, arbitrage, and residual exposure triage
 4. TRMVP-04 pre-trade scenario enrichment
 5. TRMVP-05 pre-trade workspace integration
 
@@ -235,7 +238,7 @@ across positions, marks, market context, weather, credit, and option exposure.
 - service tests for stale, missing, degraded, and healthy source inputs
 - web tests for freshness labels and missing-evidence display
 
-## TRMVP-03: Opportunity And Residual Exposure Triage
+## TRMVP-03: Opportunity, Arbitrage, And Residual Exposure Triage
 
 ### Priority
 
@@ -248,20 +251,29 @@ M
 ### Outcome
 
 The system can draft a first trader/risk triage result that explains why a
-scenario may be interesting and what residual exposure remains.
+scenario or simple arbitrage candidate may be interesting and what residual
+exposure remains.
 
 ### Scope
 
 - add deterministic triage rules for:
   - target price versus latest mark gap
+  - product or quality spreads net of conversion price
+  - calendar or time spreads net of storage price
+  - geographic spreads net of transportation price
   - current net position impact
   - related active trade count
   - weather or market freshness watch conditions
   - credit readiness
+- model simple buy and sell states plus typed transformation edges for the
+  narrow MVP commodity set
+- use ask prices when buying and bid prices when selling whenever executable
+  quotes are available
 - calculate whether the draft direction appears to reduce or deepen current
   exposure
 - emit a reviewer-facing opportunity category such as:
   - `MARK_GAP`
+  - `ARBITRAGE`
   - `EXPOSURE_OFFSET`
   - `RISK_REDUCTION`
   - `WAIT_FOR_DATA`
@@ -272,11 +284,14 @@ scenario may be interesting and what residual exposure remains.
 - statistical alpha ranking
 - execution routing
 - automated watchlist persistence
+- advanced optimization beyond first-pass cheapest-path search
 
 ### Acceptance Criteria
 
 - a BUY or SELL draft can explain whether it offsets or deepens current
   exposure
+- a simple product, time, or geographic arbitrage candidate can show gross
+  spread, bridge cost, and net opportunity in deterministic fields
 - a material target-versus-mark gap is shown as an opportunity driver
 - missing mark, position, or credit evidence downgrades the recommendation
 - output is deterministic for the same inputs
@@ -285,6 +300,8 @@ scenario may be interesting and what residual exposure remains.
 
 - focused service tests for offsetting, deepening, missing mark, stale source,
   and credit-block scenarios
+- focused service tests for conversion-cost, storage-cost, transport-cost, and
+  unsupported-mapping scenarios
 
 ## TRMVP-04: Pre-Trade Scenario Enrichment
 

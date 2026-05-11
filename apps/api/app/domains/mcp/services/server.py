@@ -9,6 +9,8 @@ from mcp.types import ToolAnnotations
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.core.logging import get_logger
+from apps.api.app.core.request_context import get_request_identity
 from apps.api.app.core.request_context import reset_request_identity
 from apps.api.app.core.request_context import set_request_identity
 from apps.api.app.db.engine import SessionLocal
@@ -24,23 +26,36 @@ from apps.api.app.domains.mcp.services.oauth import mcp_oauth_required_scopes
 
 MCP_MOUNT_PATH = "/mcp"
 MCP_TOOL_NAMES = ("search", "fetch")
+logger = get_logger(__name__)
 
 
 def _json_text_result(payload: dict[str, Any]) -> str:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
 
 
+def _mcp_tool_source_surface(tool_name: str) -> str:
+    return f"mcp.{tool_name}"
+
+
 def _run_with_mcp_identity(tool_name: str, handler: Callable[..., str], *args: object) -> str:
+    request_identity = get_request_identity()
     token = current_mcp_access_token()
     identity_token = set_request_identity(
         actor_id=token.user_id if token is not None else None,
         role=token.role if token is not None else None,
         session_id=token.session_id if token is not None else None,
+        correlation_id=request_identity.correlation_id,
         request_method="POST",
         request_path=f"{MCP_MOUNT_PATH}/tools/{tool_name}",
+        source_surface=_mcp_tool_source_surface(tool_name),
     )
     try:
-        return handler(*args)
+        result = handler(*args)
+        logger.info("MCP tool completed tool_name=%s", tool_name)
+        return result
+    except Exception as exc:
+        logger.warning("MCP tool failed tool_name=%s error=%s", tool_name, exc)
+        raise
     finally:
         reset_request_identity(identity_token)
 

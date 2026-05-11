@@ -5,6 +5,7 @@ import json
 import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import patch
 
@@ -50,6 +51,7 @@ from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
+from apps.api.app.models.assistant_organization_context import AssistantOrganizationContextDefinition
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
@@ -151,6 +153,8 @@ class AssistantApiTests(unittest.TestCase):
         self._previous_settings = {
             "ASSISTANT_ENABLED": settings.ASSISTANT_ENABLED,
             "ASSISTANT_DEFAULT_PROVIDER": settings.ASSISTANT_DEFAULT_PROVIDER,
+            "ASSISTANT_VOICE_GENERATION_ENABLED": settings.ASSISTANT_VOICE_GENERATION_ENABLED,
+            "ASSISTANT_VOICE_GENERATION_MAX_INPUT_CHARS": settings.ASSISTANT_VOICE_GENERATION_MAX_INPUT_CHARS,
             "ASSISTANT_VOICE_TRANSCRIPTION_ENABLED": settings.ASSISTANT_VOICE_TRANSCRIPTION_ENABLED,
             "ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES": settings.ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES,
             "ASSISTANT_COMPANY_NAME": settings.ASSISTANT_COMPANY_NAME,
@@ -160,6 +164,8 @@ class AssistantApiTests(unittest.TestCase):
             "ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION": settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION,
             "OPENAI_API_KEY": settings.OPENAI_API_KEY,
             "OPENAI_MODEL": settings.OPENAI_MODEL,
+            "OPENAI_AUDIO_SPEECH_MODEL": settings.OPENAI_AUDIO_SPEECH_MODEL,
+            "OPENAI_AUDIO_SPEECH_VOICE": settings.OPENAI_AUDIO_SPEECH_VOICE,
             "OPENAI_AUDIO_TRANSCRIPTION_MODEL": settings.OPENAI_AUDIO_TRANSCRIPTION_MODEL,
             "OPENAI_AGENT_BUILDER_MODEL": settings.OPENAI_AGENT_BUILDER_MODEL,
             "OPENAI_BASE_URL": settings.OPENAI_BASE_URL,
@@ -194,6 +200,7 @@ class AssistantApiTests(unittest.TestCase):
             session.query(AssistantRun).delete()
             session.query(AssistantConversation).delete()
             session.query(AssistantAgentEval).delete()
+            session.query(AssistantOrganizationContextDefinition).delete()
             session.query(AssistantAgentRevision).delete()
             session.query(AssistantAgent).delete()
             session.query(AssistantAgentProfileRequest).delete()
@@ -206,6 +213,8 @@ class AssistantApiTests(unittest.TestCase):
 
         settings.ASSISTANT_ENABLED = True
         settings.ASSISTANT_DEFAULT_PROVIDER = "anthropic"
+        settings.ASSISTANT_VOICE_GENERATION_ENABLED = True
+        settings.ASSISTANT_VOICE_GENERATION_MAX_INPUT_CHARS = 4096
         settings.ASSISTANT_VOICE_TRANSCRIPTION_ENABLED = True
         settings.ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
         settings.ASSISTANT_COMPANY_NAME = "Acme Energy"
@@ -215,6 +224,8 @@ class AssistantApiTests(unittest.TestCase):
         settings.ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION = 100_000
         settings.OPENAI_API_KEY = "openai-test-key"
         settings.OPENAI_MODEL = "gpt-5-mini"
+        settings.OPENAI_AUDIO_SPEECH_MODEL = "gpt-4o-mini-tts"
+        settings.OPENAI_AUDIO_SPEECH_VOICE = "alloy"
         settings.OPENAI_AUDIO_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
         settings.OPENAI_AGENT_BUILDER_MODEL = "gpt-5"
         settings.OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -253,6 +264,21 @@ class AssistantApiTests(unittest.TestCase):
             settings.ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES,
         )
         self.assertIn("audio/webm", payload["voice_transcription"]["supported_content_types"])
+        self.assertTrue(payload["voice_generation"]["enabled"])
+        self.assertEqual(payload["voice_generation"]["provider"], "openai")
+        self.assertEqual(
+            payload["voice_generation"]["model"],
+            settings.OPENAI_AUDIO_SPEECH_MODEL,
+        )
+        self.assertEqual(
+            payload["voice_generation"]["default_voice"],
+            settings.OPENAI_AUDIO_SPEECH_VOICE,
+        )
+        self.assertEqual(payload["voice_generation"]["response_format"], "mp3")
+        self.assertEqual(
+            payload["voice_generation"]["max_input_chars"],
+            settings.ASSISTANT_VOICE_GENERATION_MAX_INPUT_CHARS,
+        )
         self.assertGreaterEqual(len(payload["available_tools"]), 1)
         self.assertEqual(payload["available_tools"][0]["name"], "get_trade_by_id")
         self.assertIn("list_managed_agents", {row["name"] for row in payload["available_tools"]})
@@ -317,6 +343,47 @@ class AssistantApiTests(unittest.TestCase):
             filename="voice-note.webm",
             content_type="audio/webm",
             payload=b"fake-audio",
+        )
+
+    def test_assistant_voice_generation_requires_authentication(self) -> None:
+        response = self.client.post(
+            "/assistant/voice/speech",
+            json={"text": "Read back the settlement blockers."},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json()["error"]["message"],
+            "Authentication is required for write operations.",
+        )
+
+    def test_assistant_voice_generation_returns_audio_payload(self) -> None:
+        token = self._create_session_token()
+
+        with patch(
+            "apps.api.app.routes.assistant.synthesize_assistant_voice_audio",
+            return_value=SimpleNamespace(
+                payload=b"voice-audio",
+                content_type="audio/mpeg",
+                provider="openai",
+                model="gpt-4o-mini-tts",
+                voice="alloy",
+            ),
+        ) as synthesize_mock:
+            response = self.client.post(
+                "/assistant/voice/speech",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"text": "Read back the settlement blockers."},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"voice-audio")
+        self.assertEqual(response.headers["content-type"], "audio/mpeg")
+        self.assertEqual(response.headers["x-assistant-voice-provider"], "openai")
+        self.assertEqual(response.headers["x-assistant-voice-model"], "gpt-4o-mini-tts")
+        self.assertEqual(response.headers["x-assistant-voice-voice"], "alloy")
+        synthesize_mock.assert_awaited_once_with(
+            text="Read back the settlement blockers.",
         )
 
     def test_admin_role_archetypes_expose_governed_role_contract(self) -> None:
@@ -1101,8 +1168,13 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(sections_by_key["organization"]["contract_key"], "organization")
         self.assertEqual(sections_by_key["organization"]["scope"], "GLOBAL")
         self.assertEqual(sections_by_key["organization"]["kind"], "CONFIGURABLE")
-        self.assertEqual(sections_by_key["organization"]["owner"], "organization-config")
-        self.assertEqual(sections_by_key["organization"]["uses_fallback"], False)
+        self.assertEqual(sections_by_key["organization"]["owner"], "organization-context-registry")
+        self.assertEqual(
+            sections_by_key["organization"]["owner_reference"],
+            "settings:ASSISTANT_COMPANY_NAME,ASSISTANT_COMPANY_CONTEXT",
+        )
+        self.assertEqual(sections_by_key["organization"]["uses_fallback"], True)
+        self.assertEqual(sections_by_key["business-model"]["uses_fallback"], True)
         self.assertEqual(sections_by_key["user"]["owner_reference"], "assistant_user")
         self.assertEqual(sections_by_key["application-context"]["scope"], "REQUEST")
         self.assertEqual(sections_by_key["application-context"]["kind"], "GENERATED")
@@ -1110,9 +1182,94 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(sections_by_key["application-surface"]["scope"], "GLOBAL")
         self.assertEqual(sections_by_key["application-surface"]["kind"], "GENERATED")
         self.assertIn("get_application_catalog", sections_by_key["application-surface"]["content"])
+        self.assertEqual(
+            payload["warnings"],
+            [
+                "Organization Context is using env-backed fallback values because no published organization profile is active.",
+                "Business Operating Model is using env-backed fallback values because no published operating-model definition is active.",
+            ],
+        )
         self.assertIn("Acme Energy", payload["rendered_system_prompt"])
         self.assertIn("assistant_user", payload["rendered_system_prompt"])
         self.assertIn("Loaded trades: 0.", payload["rendered_system_prompt"])
+
+    def test_assistant_prompt_context_preview_prefers_published_organization_registry_sections(self) -> None:
+        token = self._create_session_token()
+        self._create_organization_context_definition(
+            definition_key="company-profile",
+            section_key="organization",
+            content_kind="COMPANY_PROFILE",
+            title="Company Profile",
+            body="North Ridge Energy is a power and commodities operator headquartered in Houston.",
+            version=1,
+        )
+        self._create_organization_context_definition(
+            definition_key="company-profile",
+            section_key="organization",
+            content_kind="COMPANY_PROFILE",
+            title="Company Profile",
+            body="North Ridge Energy runs cross-functional commodity trading, scheduling, and settlement operations.",
+            version=2,
+        )
+        self._create_organization_context_definition(
+            definition_key="operating-model",
+            section_key="business-model",
+            content_kind="OPERATING_MODEL",
+            title="Operating Model",
+            body="Every business mutation must flow through typed services, event history, and explicit reviewer boundaries.",
+            version=1,
+        )
+        self._create_organization_context_definition(
+            definition_key="core-glossary",
+            section_key="organization-glossary",
+            content_kind="GLOSSARY",
+            title="Core Terms",
+            body="- Deal ticket: the captured trade intent before downstream workflow follow-up.\n- Ops exception: an issue that needs explicit owner triage.",
+            version=1,
+        )
+        self._create_organization_context_definition(
+            definition_key="core-guardrails",
+            section_key="organization-guardrails",
+            content_kind="GUARDRAIL",
+            title="Core Guardrails",
+            body="- Never imply approval was granted unless a typed action request shows it.\n- Escalate stale or conflicting evidence instead of guessing.",
+            version=1,
+        )
+
+        response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workspace": "assistant",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        sections_by_key = {section["key"]: section for section in payload["sections"]}
+        self.assertEqual(payload["warnings"], [])
+        self.assertIn("organization-glossary", sections_by_key)
+        self.assertIn("organization-guardrails", sections_by_key)
+        self.assertEqual(sections_by_key["organization"]["uses_fallback"], False)
+        self.assertEqual(sections_by_key["business-model"]["uses_fallback"], False)
+        self.assertEqual(sections_by_key["organization"]["owner"], "organization-context-registry")
+        self.assertEqual(sections_by_key["organization"]["owner_reference"], "company-profile:v2")
+        self.assertEqual(
+            sections_by_key["business-model"]["owner_reference"],
+            "operating-model:v1",
+        )
+        self.assertEqual(
+            sections_by_key["organization-glossary"]["owner_reference"],
+            "core-glossary:v1",
+        )
+        self.assertEqual(
+            sections_by_key["organization-guardrails"]["owner_reference"],
+            "core-guardrails:v1",
+        )
+        self.assertIn("North Ridge Energy runs cross-functional commodity trading", payload["rendered_system_prompt"])
+        self.assertNotIn("Company name: Acme Energy", payload["rendered_system_prompt"])
+        self.assertIn("Deal ticket", payload["rendered_system_prompt"])
+        self.assertIn("Never imply approval was granted", payload["rendered_system_prompt"])
 
     def test_assistant_prompt_context_preview_stays_pure_grounding_when_live_tools_enabled(self) -> None:
         token = self._create_session_token()
@@ -7530,6 +7687,45 @@ class AssistantApiTests(unittest.TestCase):
             assert user is not None
             _, token = create_user_session(session, user)
             return token
+
+    def _create_organization_context_definition(
+        self,
+        *,
+        definition_key: str,
+        section_key: str,
+        content_kind: str,
+        title: str,
+        body: str,
+        version: int,
+        status: str = "PUBLISHED",
+        display_order: int = 100,
+        created_by: str = "assistant_user",
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                AssistantOrganizationContextDefinition(
+                    definition_key=definition_key,
+                    section_key=section_key,
+                    content_kind=content_kind,
+                    title=title,
+                    summary=None,
+                    body=body,
+                    scope="GLOBAL",
+                    status=status,
+                    version=version,
+                    display_order=display_order,
+                    created_at=now,
+                    created_by=created_by,
+                    updated_at=now,
+                    updated_by=created_by,
+                    published_at=now if status == "PUBLISHED" else None,
+                    published_by=created_by if status == "PUBLISHED" else None,
+                    retired_at=None,
+                    retired_by=None,
+                )
+            )
+            session.commit()
 
     def _seed_repeated_workflow_action_candidates(self, *, now: datetime) -> None:
         with self.SessionLocal() as session:

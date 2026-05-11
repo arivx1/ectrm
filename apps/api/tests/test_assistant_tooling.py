@@ -2313,6 +2313,9 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("settlement-copilot", control_tower["managed_agent_ids"])
         self.assertIn("market-research-agent", control_tower["managed_agent_ids"])
         self.assertIn("manages settlement-copilot, market-research-agent", control_tower["relationship_summary"])
+        self.assertGreaterEqual(len(list_trace.evidence_items), 2)
+        self.assertEqual(list_trace.evidence_items[0].kind, "agent_hierarchy")
+        self.assertEqual(list_trace.evidence_items[0].title, "Managed agent roster")
 
         self.assertEqual(profile_trace.tool_name, "get_managed_agent_profile")
         self.assertTrue(profile_result.output["found"])
@@ -2328,6 +2331,11 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {row["agent_id"] for row in profile_result.output["relationships"]["related_agents"]},
             {"settlement-copilot", "market-research-agent"},
+        )
+        self.assertGreaterEqual(len(profile_trace.evidence_items), 2)
+        self.assertEqual(profile_trace.evidence_items[0].locator, "control-tower-agent")
+        self.assertTrue(
+            any(item.kind == "agent_hierarchy" for item in profile_trace.evidence_items)
         )
 
     async def test_app_introspection_tools_expose_catalog_schema_and_codebase(self) -> None:
@@ -2362,12 +2370,20 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             "docs/engineering/ai-workflow.md",
             set(catalog_result.output["documentation_entry_points"]),
         )
+        self.assertGreaterEqual(len(catalog_trace.evidence_items), 2)
+        self.assertEqual(catalog_trace.evidence_items[0].kind, "application")
+        self.assertTrue(
+            any(item.kind == "route_group" for item in catalog_trace.evidence_items)
+        )
 
         self.assertEqual(schema_trace.tool_name, "get_data_schema_catalog")
         self.assertTrue(schema_result.output["found"])
         self.assertEqual(schema_result.output["table"]["table_name"], "assistant_agents")
         self.assertEqual(schema_result.output["table"]["model_name"], "AssistantAgent")
         self.assertIn("agent_id", schema_result.output["table"]["primary_key"])
+        self.assertEqual(len(schema_trace.evidence_items), 1)
+        self.assertEqual(schema_trace.evidence_items[0].kind, "table")
+        self.assertEqual(schema_trace.evidence_items[0].title, "assistant_agents")
 
         self.assertEqual(search_trace.tool_name, "search_codebase")
         self.assertGreaterEqual(search_result.output["count"], 1)
@@ -2377,6 +2393,12 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                 for row in search_result.output["items"]
             )
         )
+        self.assertGreaterEqual(len(search_trace.evidence_items), 1)
+        self.assertEqual(search_trace.evidence_items[0].kind, "code_search_hit")
+        self.assertIn(
+            "apps/api/app/domains/assistant/services/app_context_catalog.py",
+            search_trace.evidence_items[0].locator or "",
+        )
 
         self.assertEqual(read_trace.tool_name, "read_codebase_file")
         self.assertEqual(
@@ -2384,6 +2406,9 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             "apps/api/app/domains/assistant/services/app_context_catalog.py",
         )
         self.assertIn("APP_CONTEXT_INTROSPECTION_TOOL_NAMES", read_result.output["content"])
+        self.assertEqual(len(read_trace.evidence_items), 1)
+        self.assertEqual(read_trace.evidence_items[0].kind, "code_file")
+        self.assertIn("app_context_catalog.py:1-24", read_trace.evidence_items[0].locator or "")
 
     async def test_consult_managed_agent_limits_manager_to_configured_subordinates(self) -> None:
         now = datetime(2026, 5, 7, 18, 0, tzinfo=timezone.utc)
@@ -2681,6 +2706,9 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.output["action_requests"][0]["action_type"], "cancel_trade")
             self.assertEqual(result.output["action_requests"][0]["status"], "EXECUTED")
             self.assertIn("Executed 1 governed action", trace.summary)
+            self.assertEqual(trace.output_preview["agent_id"], "trade-capture-agent")
+            self.assertEqual(trace.output_preview["executed_action_count"], 1)
+            self.assertIn("delegated trade lifecycle task", str(trace.output_preview["answer"]))
 
             delegated_run = session.query(AssistantRun).order_by(AssistantRun.id.desc()).first()
             delegated_request = session.query(AssistantActionRequest).order_by(AssistantActionRequest.id.desc()).first()

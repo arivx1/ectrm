@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export type VoiceComposerRecognitionAlternativeLike = {
   transcript?: string | null
@@ -335,6 +335,9 @@ export function useVoiceComposer({
   const recorderChunksRef = useRef<BlobPart[]>([])
   const recorderMimeTypeRef = useRef<string | null>(null)
   const draftRef = useRef(draft)
+  const idleStatusMessageRef = useRef(idleStatusMessage)
+  const onDraftChangeRef = useRef(onDraftChange)
+  const backendTranscriptionRef = useRef(backendTranscription)
   const committedTranscriptRef = useRef('')
   const canceledRef = useRef(false)
   const sessionCapturedTranscriptRef = useRef(false)
@@ -344,33 +347,53 @@ export function useVoiceComposer({
   const [statusTone, setStatusTone] = useState<VoiceComposerStatusTone>('default')
   const [statusMessage, setStatusMessage] = useState(idleStatusMessage)
 
-  draftRef.current = draft
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
+
+  useEffect(() => {
+    idleStatusMessageRef.current = idleStatusMessage
+  }, [idleStatusMessage])
+
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange
+  }, [onDraftChange])
+
+  useEffect(() => {
+    backendTranscriptionRef.current = backendTranscription
+  }, [backendTranscription])
 
   useEffect(() => {
     if (listening || statusTone === 'error') {
       return
     }
 
-    setStatusMessage(idleStatusMessage)
+    const timeoutId = window.setTimeout(() => {
+      setStatusMessage(idleStatusMessage)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
   }, [idleStatusMessage, listening, statusTone])
 
-  const resetRecorderSession = useEffectEvent(() => {
+  function resetRecorderSession() {
     recorderChunksRef.current = []
     recorderMimeTypeRef.current = null
     mediaRecorderRef.current = null
     stopVoiceRecorderStream(mediaStreamRef.current)
     mediaStreamRef.current = null
-  })
+  }
 
-  const handleRecognitionStart = useEffectEvent(() => {
+  function handleRecognitionStart() {
     canceledRef.current = false
     sessionFailedRef.current = false
     setListening(true)
     setStatusTone('default')
     setStatusMessage(LISTENING_STATUS_MESSAGE)
-  })
+  }
 
-  const handleRecognitionEnd = useEffectEvent(() => {
+  function handleRecognitionEnd() {
     setListening(false)
     committedTranscriptRef.current = ''
 
@@ -384,7 +407,7 @@ export function useVoiceComposer({
       canceledRef.current = false
       sessionCapturedTranscriptRef.current = false
       setStatusTone('default')
-      setStatusMessage(idleStatusMessage)
+      setStatusMessage(idleStatusMessageRef.current)
       return
     }
 
@@ -395,17 +418,17 @@ export function useVoiceComposer({
         : 'Voice dictation ended without any transcript.',
     )
     sessionCapturedTranscriptRef.current = false
-  })
+  }
 
-  const handleRecognitionError = useEffectEvent((event: VoiceComposerRecognitionErrorEventLike) => {
+  function handleRecognitionError(event: VoiceComposerRecognitionErrorEventLike) {
     sessionFailedRef.current = true
     sessionCapturedTranscriptRef.current = false
     setListening(false)
     setStatusTone('error')
     setStatusMessage(describeVoiceComposerError(event.error))
-  })
+  }
 
-  const handleRecognitionResult = useEffectEvent((event: VoiceComposerRecognitionEventLike) => {
+  function handleRecognitionResult(event: VoiceComposerRecognitionEventLike) {
     const { finalTranscript, interimTranscript } = collectVoiceComposerTranscript(event.results)
     const previousCommittedTranscript = committedTranscriptRef.current
     let appendedTranscript = finalTranscript
@@ -417,7 +440,7 @@ export function useVoiceComposer({
     if (appendedTranscript) {
       const nextDraft = mergeVoiceComposerDraft(draftRef.current, appendedTranscript)
       draftRef.current = nextDraft
-      onDraftChange(nextDraft)
+      onDraftChangeRef.current(nextDraft)
       committedTranscriptRef.current = finalTranscript
       sessionCapturedTranscriptRef.current = true
     }
@@ -426,9 +449,10 @@ export function useVoiceComposer({
     setStatusMessage(
       interimTranscript ? `Listening... ${interimTranscript}` : LISTENING_STATUS_MESSAGE,
     )
-  })
+  }
 
-  const finalizeRecording = useEffectEvent(async () => {
+  async function finalizeRecording() {
+    const currentBackendTranscription = backendTranscriptionRef.current
     const audioChunks = recorderChunksRef.current
     const mimeType = recorderMimeTypeRef.current ?? 'audio/webm'
 
@@ -443,13 +467,13 @@ export function useVoiceComposer({
     if (canceledRef.current) {
       canceledRef.current = false
       setStatusTone('default')
-      setStatusMessage(idleStatusMessage)
+      setStatusMessage(idleStatusMessageRef.current)
       return
     }
 
-    if (!backendTranscription?.enabled) {
+    if (!currentBackendTranscription?.enabled) {
       setStatusTone('error')
-      setStatusMessage(resolveVoiceRecorderUnavailableMessage(backendTranscription))
+      setStatusMessage(resolveVoiceRecorderUnavailableMessage(currentBackendTranscription))
       return
     }
 
@@ -469,10 +493,10 @@ export function useVoiceComposer({
         `voice-note.${resolveVoiceRecordingFileExtension(mimeType)}`,
         { type: mimeType },
       )
-      const transcript = await backendTranscription.transcribeAudio(audioFile)
+      const transcript = await currentBackendTranscription.transcribeAudio(audioFile)
       const nextDraft = mergeVoiceComposerDraft(draftRef.current, transcript)
       draftRef.current = nextDraft
-      onDraftChange(nextDraft)
+      onDraftChangeRef.current(nextDraft)
       setStatusTone('default')
       setStatusMessage('Voice draft captured.')
     } catch (error) {
@@ -481,7 +505,7 @@ export function useVoiceComposer({
         error instanceof Error ? error.message : 'Voice transcription failed. Please try again.',
       )
     }
-  })
+  }
 
   useEffect(() => {
     if (!recognitionRef.current) {
@@ -535,7 +559,7 @@ export function useVoiceComposer({
     return recognition
   }
 
-  const startRecording = useEffectEvent(async () => {
+  async function startRecording() {
     if (!browser?.MediaRecorder || !browser.navigator?.mediaDevices?.getUserMedia) {
       setStatusTone('error')
       setStatusMessage(resolveVoiceRecorderUnavailableMessage(backendTranscription))
@@ -592,9 +616,9 @@ export function useVoiceComposer({
         error instanceof Error ? error.message : 'Could not access your microphone for recording.',
       )
     }
-  })
+  }
 
-  const toggleListening = useEffectEvent(() => {
+  function toggleListening() {
     switch (recordingMode) {
       case 'speech': {
         const recognition = ensureRecognition()
@@ -662,9 +686,9 @@ export function useVoiceComposer({
         setStatusTone('error')
         setStatusMessage(resolveVoiceRecorderUnavailableMessage(backendTranscription))
     }
-  })
+  }
 
-  const cancelListening = useEffectEvent(() => {
+  function cancelListening() {
     canceledRef.current = true
     sessionFailedRef.current = false
     sessionCapturedTranscriptRef.current = false
@@ -689,8 +713,8 @@ export function useVoiceComposer({
 
     setListening(false)
     setStatusTone('default')
-    setStatusMessage(idleStatusMessage)
-  })
+    setStatusMessage(idleStatusMessageRef.current)
+  }
 
   return {
     buttonLabel:

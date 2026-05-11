@@ -20,6 +20,7 @@ import type {
   PortfolioRecord,
   PriceIndexForm,
   PriceIndexRecord,
+  RailRouteForm,
   RailRouteRecord,
   ReferenceRecord,
   ReferenceTab,
@@ -144,6 +145,24 @@ export function emptyLocationForm(locationStandards: LocationStandards = default
   }
 }
 
+export function emptyRailRouteForm(): RailRouteForm {
+  return {
+    code: '',
+    name: '',
+    rail_line_code: '',
+    origin_location_code: '',
+    destination_location_code: '',
+    service_calendar_code: '',
+    route_direction: 'BIDIRECTIONAL',
+    schedule_timezone: '',
+    placement_cutoff_time_local: '',
+    release_cutoff_time_local: '',
+    placement_free_time_hours: '',
+    release_free_time_hours: '',
+    description: '',
+  }
+}
+
 export function emptyCounterpartyForm(
   counterpartyStandards: CounterpartyStandards = defaultCounterpartyStandards,
 ): CounterpartyForm {
@@ -243,6 +262,7 @@ export function useReferenceDataWorkspace({
   const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<string | null>(null)
   const [selectedUnitCode, setSelectedUnitCode] = useState<string | null>(null)
   const [selectedLocationCode, setSelectedLocationCode] = useState<string | null>(null)
+  const [selectedRailRouteCode, setSelectedRailRouteCode] = useState<string | null>(null)
   const [selectedSpatialFeatureCode, setSelectedSpatialFeatureCode] = useState<string | null>(null)
   const [selectedCounterpartyCode, setSelectedCounterpartyCode] = useState<string | null>(null)
   const [selectedPortfolioCode, setSelectedPortfolioCode] = useState<string | null>(null)
@@ -254,6 +274,7 @@ export function useReferenceDataWorkspace({
   const [currencyForm, setCurrencyForm] = useState(emptyCurrencyForm())
   const [unitForm, setUnitForm] = useState(emptyUnitForm(commodityClassOrder[0]))
   const [locationForm, setLocationForm] = useState(emptyLocationForm(locationStandards))
+  const [railRouteForm, setRailRouteForm] = useState(emptyRailRouteForm())
   const [spatialFeatureForm, setSpatialFeatureForm] = useState(emptySpatialFeatureForm(spatialFeatureStandards))
   const [counterpartyForm, setCounterpartyForm] = useState(emptyCounterpartyForm(counterpartyStandards))
   const [portfolioForm, setPortfolioForm] = useState(emptyPortfolioForm())
@@ -265,6 +286,7 @@ export function useReferenceDataWorkspace({
   const [currencyFormMode, setCurrencyFormMode] = useState<'create' | 'edit'>('create')
   const [unitFormMode, setUnitFormMode] = useState<'create' | 'edit'>('create')
   const [locationFormMode, setLocationFormMode] = useState<'create' | 'edit'>('create')
+  const [railRouteFormMode, setRailRouteFormMode] = useState<'create' | 'edit'>('create')
   const [spatialFeatureFormMode, setSpatialFeatureFormMode] = useState<'create' | 'edit'>('create')
   const [counterpartyFormMode, setCounterpartyFormMode] = useState<'create' | 'edit'>('create')
   const [portfolioFormMode, setPortfolioFormMode] = useState<'create' | 'edit'>('create')
@@ -277,6 +299,7 @@ export function useReferenceDataWorkspace({
   const resolvedSelectedCurrencyCode = resolveSelectedCode(selectedCurrencyCode, currencies)
   const resolvedSelectedUnitCode = resolveSelectedCode(selectedUnitCode, units)
   const resolvedSelectedLocationCode = resolveSelectedCode(selectedLocationCode, locations)
+  const resolvedSelectedRailRouteCode = resolveSelectedCode(selectedRailRouteCode, railRoutes)
   const resolvedSelectedSpatialFeatureCode = resolveSelectedCode(selectedSpatialFeatureCode, spatialFeatures)
   const resolvedSelectedCounterpartyCode = resolveSelectedCode(selectedCounterpartyCode, counterparties)
   const resolvedSelectedPortfolioCode = resolveSelectedCode(selectedPortfolioCode, portfolios)
@@ -308,6 +331,10 @@ export function useReferenceDataWorkspace({
   const selectedLocation = useMemo(
     () => locations.find((location) => location.code === resolvedSelectedLocationCode) ?? null,
     [locations, resolvedSelectedLocationCode],
+  )
+  const selectedRailRoute = useMemo(
+    () => railRoutes.find((route) => route.code === resolvedSelectedRailRouteCode) ?? null,
+    [railRoutes, resolvedSelectedRailRouteCode],
   )
   const selectedSpatialFeature = useMemo(
     () => spatialFeatures.find((feature) => feature.code === resolvedSelectedSpatialFeatureCode) ?? null,
@@ -440,6 +467,24 @@ export function useReferenceDataWorkspace({
       )
     })
   }, [effectiveReferenceSearch, locations])
+
+  const filteredRailRoutes = useMemo(() => {
+    const query = effectiveReferenceSearch.trim().toLowerCase()
+    return railRoutes.filter((route) => {
+      if (!query) return true
+      return (
+        route.code.toLowerCase().includes(query) ||
+        route.name.toLowerCase().includes(query) ||
+        route.rail_line_code.toLowerCase().includes(query) ||
+        (route.origin_location_code ?? '').toLowerCase().includes(query) ||
+        (route.destination_location_code ?? '').toLowerCase().includes(query) ||
+        (route.service_calendar_code ?? '').toLowerCase().includes(query) ||
+        route.route_direction.toLowerCase().includes(query) ||
+        (route.schedule_timezone ?? '').toLowerCase().includes(query) ||
+        (route.description ?? '').toLowerCase().includes(query)
+      )
+    })
+  }, [effectiveReferenceSearch, railRoutes])
 
   const filteredSpatialFeatures = useMemo(() => {
     const query = effectiveReferenceSearch.trim().toLowerCase()
@@ -676,6 +721,11 @@ export function useReferenceDataWorkspace({
     setLocationForm(emptyLocationForm(locationStandards))
   }
 
+  function startCreateRailRoute() {
+    setRailRouteFormMode('create')
+    setRailRouteForm(emptyRailRouteForm())
+  }
+
   function startEditLocation(code: string) {
     const record = locations.find((location) => location.code === code)
     if (!record) {
@@ -698,6 +748,30 @@ export function useReferenceDataWorkspace({
       longitude: record.longitude?.toString() ?? '',
       region: record.region ?? '',
       timezone: record.timezone ?? '',
+      description: record.description ?? '',
+    })
+  }
+
+  function startEditRailRoute(code: string) {
+    const record = railRoutes.find((route) => route.code === code)
+    if (!record) {
+      return
+    }
+    setSelectedRailRouteCode(code)
+    setRailRouteFormMode('edit')
+    setRailRouteForm({
+      code: record.code,
+      name: record.name,
+      rail_line_code: record.rail_line_code,
+      origin_location_code: record.origin_location_code ?? '',
+      destination_location_code: record.destination_location_code ?? '',
+      service_calendar_code: record.service_calendar_code ?? '',
+      route_direction: record.route_direction,
+      schedule_timezone: record.schedule_timezone ?? '',
+      placement_cutoff_time_local: record.placement_cutoff_time_local ?? '',
+      release_cutoff_time_local: record.release_cutoff_time_local ?? '',
+      placement_free_time_hours: record.placement_free_time_hours?.toString() ?? '',
+      release_free_time_hours: record.release_free_time_hours?.toString() ?? '',
       description: record.description ?? '',
     })
   }
@@ -800,6 +874,8 @@ export function useReferenceDataWorkspace({
     setSelectedUnitCode,
     selectedLocationCode: resolvedSelectedLocationCode,
     setSelectedLocationCode,
+    selectedRailRouteCode: resolvedSelectedRailRouteCode,
+    setSelectedRailRouteCode,
     selectedSpatialFeatureCode: resolvedSelectedSpatialFeatureCode,
     setSelectedSpatialFeatureCode,
     selectedCounterpartyCode: resolvedSelectedCounterpartyCode,
@@ -820,6 +896,8 @@ export function useReferenceDataWorkspace({
     setUnitForm,
     locationForm,
     setLocationForm,
+    railRouteForm,
+    setRailRouteForm,
     spatialFeatureForm,
     setSpatialFeatureForm,
     counterpartyForm,
@@ -840,6 +918,8 @@ export function useReferenceDataWorkspace({
     setUnitFormMode,
     locationFormMode,
     setLocationFormMode,
+    railRouteFormMode,
+    setRailRouteFormMode,
     spatialFeatureFormMode,
     setSpatialFeatureFormMode,
     counterpartyFormMode,
@@ -853,6 +933,7 @@ export function useReferenceDataWorkspace({
     selectedCurrency,
     selectedUnit,
     selectedLocation,
+    selectedRailRoute,
     selectedSpatialFeature,
     selectedCounterparty,
     selectedPortfolio,
@@ -863,6 +944,7 @@ export function useReferenceDataWorkspace({
     filteredCurrencies,
     filteredUnits,
     filteredLocations,
+    filteredRailRoutes,
     filteredSpatialFeatures,
     filteredCounterparties,
     filteredPortfolios,
@@ -883,6 +965,8 @@ export function useReferenceDataWorkspace({
     startEditUnit,
     startCreateLocation,
     startEditLocation,
+    startCreateRailRoute,
+    startEditRailRoute,
     startCreateSpatialFeature,
     startEditSpatialFeature,
     startCreateCounterparty,

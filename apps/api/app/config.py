@@ -81,6 +81,12 @@ class Settings(BaseSettings):
         ge=1,
         le=25 * 1024 * 1024,
     )
+    ASSISTANT_VOICE_GENERATION_ENABLED: bool = True
+    ASSISTANT_VOICE_GENERATION_MAX_INPUT_CHARS: int = Field(
+        default=4096,
+        ge=1,
+        le=4096,
+    )
     MCP_ENABLED: bool = False
     MCP_AUTH_MODE: Literal["none", "oauth"] = "none"
     MCP_SERVER_NAME: str = "ECTRM MCP"
@@ -115,6 +121,8 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5-mini"
     OPENAI_AUDIO_TRANSCRIPTION_MODEL: str = "gpt-4o-mini-transcribe"
+    OPENAI_AUDIO_SPEECH_MODEL: str = "gpt-4o-mini-tts"
+    OPENAI_AUDIO_SPEECH_VOICE: str = "alloy"
     OPENAI_AGENT_BUILDER_MODEL: str = ""
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"

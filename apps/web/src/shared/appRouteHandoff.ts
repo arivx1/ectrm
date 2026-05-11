@@ -1,6 +1,6 @@
 import type { InspectorTab, ViewKey } from './models'
 
-export type AppRouteHandoffSource = 'events' | 'assistant'
+export type AppRouteHandoffSource = 'events' | 'assistant' | 'map' | 'reference'
 export type AppRouteHandoffFocusType =
   | 'trade'
   | 'workflow_item'
@@ -86,6 +86,8 @@ function normalizeHandoffSource(value: unknown): AppRouteHandoffSource | null {
   switch (value) {
     case 'events':
     case 'assistant':
+    case 'map':
+    case 'reference':
       return value
     default:
       return null
@@ -283,6 +285,42 @@ export function getAppRouteHandoffTradeId(handoff: AppRouteHandoff | null): stri
   return normalizedHandoff?.focus.type === 'trade' ? normalizedHandoff.focus.id : null
 }
 
+type RailRouteWorkspaceHandoffTarget = 'shipments' | 'scheduling'
+type RailRouteWorkspaceHandoffSource = Extract<AppRouteHandoffSource, 'map' | 'reference'>
+
+export function buildRailRouteWorkspaceHandoff(args: {
+  source: RailRouteWorkspaceHandoffSource
+  railRouteCode: string
+  railRouteLabel?: string | null
+  targetView: RailRouteWorkspaceHandoffTarget
+}): AppRouteHandoff {
+  const { source, railRouteCode, railRouteLabel = null, targetView } = args
+  const normalizedRailRouteCode = railRouteCode.trim().toUpperCase()
+  const focusLabel = railRouteLabel?.trim() || normalizedRailRouteCode
+  const workspaceLabel = targetView === 'shipments' ? 'deliveries' : 'scheduling'
+  const rowLabel = targetView === 'shipments' ? 'deliveries' : 'scheduling rows'
+  const sourceDetail = source === 'map' ? 'selected' : 'selected reference-data'
+
+  return {
+    source,
+    tradeId: normalizedRailRouteCode,
+    focus: {
+      type: 'reference_record',
+      id: normalizedRailRouteCode,
+      label: focusLabel,
+    },
+    tradeInspectorTab: null,
+    eventType: null,
+    label: `Open ${workspaceLabel} for ${normalizedRailRouteCode}`,
+    rationale:
+      `This workspace started focused on the ${sourceDetail} rail route so you can review the matching ${rowLabel} before widening back to the full board.`,
+    filter: normalizedRailRouteCode,
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
+  }
+}
+
 export function viewAppliesAppRouteHandoffFilter(view: ViewKey): boolean {
   return view === 'operations' || view === 'settlement' || view === 'shipments' || view === 'scheduling'
 }
@@ -322,6 +360,16 @@ export function describeAppRouteHandoff(
     }
   }
 
+  if (normalizedHandoff.source === 'map' || normalizedHandoff.source === 'reference') {
+    const sourceLabel = normalizedHandoff.source === 'map' ? 'Map' : 'Reference Data'
+    return {
+      title: normalizedHandoff.label ?? `Opened from ${sourceLabel} for ${focusLabel}`,
+      detail:
+        normalizedHandoff.rationale ??
+        `This workspace opened with ${formatFocusType(normalizedHandoff.focus.type)} ${focusLabel} in focus. Clear the focus when you are ready to return to the full workspace.`,
+    }
+  }
+
   const title = `Opened from Activity Feed for ${normalizedHandoff.tradeId}`
   switch (currentView) {
     case 'operations':
@@ -343,6 +391,12 @@ export function describeAppRouteHandoff(
           normalizedHandoff.tradeInspectorTab === 'amend'
             ? 'Trade Capture opened on the amend panel so you can review the latest economics and workflow changes in context.'
             : 'Trade Capture opened directly on the same trade so you can confirm the latest lifecycle state before taking the next step.',
+      }
+    case 'shipments':
+      return {
+        title,
+        detail:
+          'Deliveries opened focused on that trade so you can review the matching physical obligations before widening back to the full board.',
       }
     default:
       return null

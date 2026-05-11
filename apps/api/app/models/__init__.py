@@ -2,6 +2,7 @@ from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval, AssistantAgentEvalRun
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
+from apps.api.app.models.assistant_organization_context import AssistantOrganizationContextDefinition
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.models.assistant_agent_work_package import AssistantAgentWorkPackage
@@ -73,6 +74,7 @@ from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_price_term import TradePriceTerm
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.trading_source import TradingSource
+from apps.api.app.models.user_defined_event import UserDefinedEvent
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.models.weather_forecast_period import WeatherForecastPeriod
@@ -84,6 +86,7 @@ __all__ = [
     "AssistantAgent",
     "AssistantAgentEval",
     "AssistantAgentEvalRun",
+    "AssistantOrganizationContextDefinition",
     "AssistantAgentProfileRequest",
     "AssistantAgentRevision",
     "AssistantAgentWorkPackage",
@@ -154,6 +157,7 @@ __all__ = [
     "TradePriceTerm",
     "TradeWorkflowItem",
     "TradingSource",
+    "UserDefinedEvent",
     "UserAccount",
     "UserSession",
     "WeatherForecastPeriod",

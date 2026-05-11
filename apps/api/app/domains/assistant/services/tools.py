@@ -108,7 +108,11 @@ from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade import Trade, trade_recency_order
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
-from apps.api.app.schemas.assistant import AssistantToolCallOut, AssistantToolDefinitionOut
+from apps.api.app.schemas.assistant import (
+    AssistantToolCallOut,
+    AssistantToolDefinitionOut,
+    AssistantToolEvidenceOut,
+)
 from apps.api.app.schemas.pretrade import PreTradeRecommendationDraftAnalysisCreate
 from apps.api.app.shared.enums import (
     ActualizationStatus,
@@ -223,6 +227,7 @@ class AssistantToolExecutionResult:
     summary: str
     record_count: Optional[int] = None
     is_error: bool = False
+    evidence_items: tuple[AssistantToolEvidenceOut, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -231,6 +236,8 @@ class AssistantToolCallTrace:
     arguments: dict[str, Any]
     summary: str
     record_count: Optional[int] = None
+    output_preview: dict[str, Any] | None = None
+    evidence_items: tuple[AssistantToolEvidenceOut, ...] = ()
 
     def to_out(self) -> AssistantToolCallOut:
         return AssistantToolCallOut(
@@ -238,7 +245,362 @@ class AssistantToolCallTrace:
             arguments=self.arguments,
             summary=self.summary,
             record_count=self.record_count,
+            output_preview=dict(self.output_preview or {}),
+            evidence_items=[
+                evidence_item
+                if isinstance(evidence_item, AssistantToolEvidenceOut)
+                else AssistantToolEvidenceOut.model_validate(evidence_item)
+                for evidence_item in self.evidence_items
+            ],
         )
+
+
+def _trim_tool_output_text(value: Any, *, max_length: int = 480) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split()).strip()
+    if not normalized:
+        return None
+    if len(normalized) <= max_length:
+        return normalized
+    return f"{normalized[: max_length - 3].rstrip()}..."
+
+
+def _normalize_tool_evidence_badges(values: list[str | None]) -> list[str]:
+    badges: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value is None:
+            continue
+        normalized = " ".join(value.split()).strip()
+        if not normalized or normalized in seen:
+            continue
+        badges.append(normalized)
+        seen.add(normalized)
+    return badges
+
+
+def _tool_evidence_locator(path: str, *, start_line: int | None = None, end_line: int | None = None) -> str:
+    if start_line is None:
+        return path
+    if end_line is None or end_line == start_line:
+        return f"{path}:{start_line}"
+    return f"{path}:{start_line}-{end_line}"
+
+
+def _build_tool_evidence_item(
+    *,
+    kind: str,
+    title: str,
+    summary: str,
+    locator: str | None = None,
+    excerpt: str | None = None,
+    badges: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> AssistantToolEvidenceOut:
+    return AssistantToolEvidenceOut(
+        kind=kind,
+        title=title,
+        summary=summary,
+        locator=locator,
+        excerpt=excerpt,
+        badges=list(badges or []),
+        metadata=dict(metadata or {}),
+    )
+
+
+def _build_managed_agent_list_evidence(items: list[dict[str, Any]]) -> tuple[AssistantToolEvidenceOut, ...]:
+    manager_count = sum(1 for item in items if item.get("managed_agent_ids"))
+    parent_link_count = sum(1 for item in items if item.get("parent_agent_id"))
+    evidence_items = [
+        _build_tool_evidence_item(
+            kind="agent_hierarchy",
+            title="Managed agent roster",
+            summary=(
+                f"{len(items)} active managed agent profile(s) are available for assistant coordination."
+            ),
+            badges=_normalize_tool_evidence_badges(
+                [
+                    f"{manager_count} manager(s)",
+                    f"{parent_link_count} child link(s)",
+                ]
+            ),
+            metadata={
+                "agent_count": len(items),
+                "manager_count": manager_count,
+                "parent_link_count": parent_link_count,
+            },
+        )
+    ]
+    for item in items[:4]:
+        evidence_items.append(
+            _build_tool_evidence_item(
+                kind="agent",
+                title=str(item.get("name") or item.get("agent_id") or "Managed agent"),
+                locator=str(item.get("agent_id") or "") or None,
+                summary=str(item.get("relationship_summary") or item.get("description") or "Managed agent profile."),
+                badges=_normalize_tool_evidence_badges(
+                    [
+                        str(item.get("role_key") or "") or None,
+                        str(item.get("profile_kind") or "") or None,
+                        str(item.get("orchestration_pattern") or "") or None,
+                        (
+                            f"{len(item.get('managed_agent_ids') or [])} subordinate(s)"
+                            if item.get("managed_agent_ids")
+                            else None
+                        ),
+                    ]
+                ),
+            )
+        )
+    return tuple(evidence_items)
+
+
+def _build_managed_agent_profile_evidence(output: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    agent = output.get("agent") or {}
+    relationships = output.get("relationships") or {}
+    managed_agent_ids = list(relationships.get("managed_agent_ids") or [])
+    managed_by_agent_ids = list(relationships.get("managed_by_agent_ids") or [])
+    role_archetype = output.get("role_archetype") or {}
+    evidence_items = [
+        _build_tool_evidence_item(
+            kind="agent",
+            title=str(agent.get("name") or agent.get("agent_id") or "Managed agent"),
+            locator=str(agent.get("agent_id") or "") or None,
+            summary=str(agent.get("description") or "Managed agent profile."),
+            badges=_normalize_tool_evidence_badges(
+                [
+                    str(agent.get("role_key") or "") or None,
+                    str(agent.get("profile_kind") or "") or None,
+                    str(agent.get("orchestration_pattern") or "") or None,
+                    str(agent.get("authority_ceiling") or "") or None,
+                ]
+            ),
+        ),
+        _build_tool_evidence_item(
+            kind="agent_hierarchy",
+            title="Hierarchy wiring",
+            locator=str(agent.get("agent_id") or "") or None,
+            summary=str(
+                relationships.get("summary")
+                or f"{agent.get('name') or 'This agent'} has no configured parent or subordinate relationships."
+            ),
+            badges=_normalize_tool_evidence_badges(
+                [
+                    (
+                        f"manages {', '.join(managed_agent_ids)}"
+                        if managed_agent_ids
+                        else None
+                    ),
+                    (
+                        f"managed by {', '.join(managed_by_agent_ids)}"
+                        if managed_by_agent_ids
+                        else None
+                    ),
+                ]
+            ),
+            metadata={
+                "managed_agent_ids": managed_agent_ids,
+                "managed_by_agent_ids": managed_by_agent_ids,
+            },
+        ),
+    ]
+    if role_archetype:
+        evidence_items.append(
+            _build_tool_evidence_item(
+                kind="agent",
+                title=str(role_archetype.get("label") or role_archetype.get("role_key") or "Role archetype"),
+                locator=str(role_archetype.get("role_key") or "") or None,
+                summary=str(role_archetype.get("description") or "Curated managed-agent role archetype."),
+                badges=_normalize_tool_evidence_badges(
+                    [
+                        str(role_archetype.get("catalog_status") or "") or None,
+                        str(role_archetype.get("authority_ceiling") or "") or None,
+                    ]
+                ),
+            )
+        )
+    return tuple(evidence_items)
+
+
+def _build_application_catalog_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    evidence_items = [
+        _build_tool_evidence_item(
+            kind="application",
+            title=str(payload.get("application", {}).get("name") or "ECTRM application catalog"),
+            summary=(
+                f"{payload.get('route_group_count', 0)} route group(s), "
+                f"{payload.get('route_count', 0)} route(s), and "
+                f"{len(payload.get('workspace_catalog') or [])} workspace(s) are published."
+            ),
+            badges=_normalize_tool_evidence_badges(
+                [
+                    f"{len(payload.get('frontend_workspace_modules') or [])} frontend workspace module(s)",
+                    f"{len(payload.get('schema_modules') or [])} schema module(s)",
+                ]
+            ),
+        )
+    ]
+    for route_group in list(payload.get("route_groups") or [])[:3]:
+        evidence_items.append(
+            _build_tool_evidence_item(
+                kind="route_group",
+                title=str(route_group.get("name") or route_group.get("domain") or "Route group"),
+                locator=str(route_group.get("domain") or "") or None,
+                summary=(
+                    f"{route_group.get('route_count', 0)} route(s) are registered under "
+                    f"{route_group.get('domain') or 'this domain'}."
+                ),
+                badges=_normalize_tool_evidence_badges(
+                    [
+                        f"{len(route_group.get('routes') or [])} route definition(s)",
+                    ]
+                ),
+            )
+        )
+    documentation_entry_points = list(payload.get("documentation_entry_points") or [])
+    if documentation_entry_points:
+        evidence_items.append(
+            _build_tool_evidence_item(
+                kind="documentation",
+                title="Documentation entry points",
+                summary=(
+                    f"{len(documentation_entry_points)} documentation file(s) are exposed through the app catalog."
+                ),
+                locator=documentation_entry_points[0],
+                badges=documentation_entry_points[:3],
+            )
+        )
+    return tuple(evidence_items)
+
+
+def _build_schema_catalog_evidence(payload: dict[str, Any], *, table_name: str | None) -> tuple[AssistantToolEvidenceOut, ...]:
+    if table_name is not None:
+        if not payload.get("found", False):
+            return (
+                _build_tool_evidence_item(
+                    kind="schema",
+                    title="Schema lookup",
+                    locator=table_name,
+                    summary=f"No database table matched {table_name}.",
+                ),
+            )
+        table_payload = payload.get("table") or {}
+        return (
+            _build_tool_evidence_item(
+                kind="table",
+                title=str(table_payload.get("table_name") or table_name),
+                locator=str(table_payload.get("model_name") or table_payload.get("table_name") or table_name),
+                summary=(
+                    f"{table_payload.get('column_count', 0)} column(s), "
+                    f"{len(table_payload.get('foreign_keys') or [])} relationship(s), "
+                    f"record count {table_payload.get('record_count', 'n/a')}."
+                ),
+                badges=_normalize_tool_evidence_badges(
+                    [
+                        (
+                            f"pk: {', '.join(table_payload.get('primary_key') or [])}"
+                            if table_payload.get("primary_key")
+                            else None
+                        ),
+                    ]
+                ),
+            ),
+        )
+
+    return (
+        _build_tool_evidence_item(
+            kind="schema",
+            title="Database schema catalog",
+            summary=(
+                f"{payload.get('table_count', 0)} table(s) and "
+                f"{payload.get('relationship_count', 0)} foreign-key relationship(s) are mapped."
+            ),
+        ),
+    )
+
+
+def _build_code_search_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    evidence_items: list[AssistantToolEvidenceOut] = []
+    for item in list(payload.get("items") or [])[:5]:
+        path = str(item.get("path") or "codebase")
+        line_number = item.get("line_number")
+        evidence_items.append(
+            _build_tool_evidence_item(
+                kind="code_search_hit",
+                title=path,
+                locator=_tool_evidence_locator(path, start_line=int(line_number)) if isinstance(line_number, int) else path,
+                summary=str(item.get("snippet") or "Code search match."),
+                badges=_normalize_tool_evidence_badges(
+                    [
+                        str(payload.get("scope") or "") or None,
+                        str(payload.get("query") or "") or None,
+                    ]
+                ),
+            )
+        )
+    return tuple(evidence_items)
+
+
+def _build_code_file_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    path = str(payload.get("path") or "codebase file")
+    start_line = payload.get("start_line")
+    end_line = payload.get("end_line")
+    excerpt = _trim_tool_output_text(payload.get("content"), max_length=420)
+    return (
+        _build_tool_evidence_item(
+            kind="code_file",
+            title=path,
+            locator=(
+                _tool_evidence_locator(path, start_line=start_line, end_line=end_line)
+                if isinstance(start_line, int)
+                else path
+            ),
+            summary=(
+                f"Read lines {payload.get('start_line', 'n/a')}-{payload.get('end_line', 'n/a')} "
+                f"out of {payload.get('total_lines', 'n/a')} total line(s)."
+            ),
+            excerpt=excerpt,
+            badges=_normalize_tool_evidence_badges(
+                [
+                    "truncated" if payload.get("truncated") else None,
+                ]
+            ),
+        ),
+    )
+
+
+def _build_tool_output_preview(tool_name: str, output: dict[str, Any]) -> dict[str, Any] | None:
+    if tool_name == "consult_managed_agent":
+        preview = {
+            "advisory_only": True,
+            "agent_id": output.get("agent_id"),
+            "agent_name": output.get("agent_name"),
+            "workspace": output.get("workspace"),
+            "answer": _trim_tool_output_text(output.get("answer")),
+            "warnings": list(output.get("warnings") or []),
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "enlist_managed_agent":
+        preview = {
+            "delegated": True,
+            "advisory_only": False,
+            "agent_id": output.get("agent_id"),
+            "agent_name": output.get("agent_name"),
+            "workspace": output.get("workspace"),
+            "answer": _trim_tool_output_text(output.get("answer")),
+            "warnings": list(output.get("warnings") or []),
+            "run_id": output.get("run_id"),
+            "run_recorded_at": output.get("run_recorded_at"),
+            "action_request_count": output.get("action_request_count"),
+            "executed_action_count": output.get("executed_action_count"),
+            "pending_action_count": output.get("pending_action_count"),
+            "failed_action_count": output.get("failed_action_count"),
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    return None
 
 
 class AssistantToolServiceError(Exception):
@@ -289,6 +651,8 @@ class AssistantToolService:
             arguments=arguments,
             summary=result.summary,
             record_count=result.record_count,
+            output_preview=_build_tool_output_preview(tool.name, result.output),
+            evidence_items=tuple(result.evidence_items),
         )
         return result, trace
 
@@ -309,6 +673,8 @@ class AssistantToolService:
             arguments=arguments,
             summary=result.summary,
             record_count=result.record_count,
+            output_preview=_build_tool_output_preview(tool.name, result.output),
+            evidence_items=tuple(result.evidence_items),
         )
         return result, trace
 
@@ -1535,6 +1901,7 @@ def _list_managed_agents(db: Session, arguments: dict[str, Any]) -> AssistantToo
         output={"count": len(items), "items": items},
         summary=summary,
         record_count=len(items),
+        evidence_items=_build_managed_agent_list_evidence(items),
     )
 
 
@@ -1575,6 +1942,7 @@ def _get_managed_agent_profile(
         output=output,
         summary=f"Loaded managed agent profile for {agent['name']}.",
         record_count=1,
+        evidence_items=_build_managed_agent_profile_evidence(output),
     )
 
 
@@ -1588,6 +1956,7 @@ def _get_application_catalog(db: Session, _arguments: dict[str, Any]) -> Assista
         output=payload,
         summary=summary,
         record_count=payload["route_count"],
+        evidence_items=_build_application_catalog_evidence(payload),
     )
 
 
@@ -1599,6 +1968,7 @@ def _get_data_schema_catalog(db: Session, arguments: dict[str, Any]) -> Assistan
             output=payload,
             summary=f"No database table matched {table_name}.",
             record_count=0,
+            evidence_items=_build_schema_catalog_evidence(payload, table_name=table_name),
         )
 
     if table_name is not None:
@@ -1607,7 +1977,12 @@ def _get_data_schema_catalog(db: Session, arguments: dict[str, Any]) -> Assistan
             f"Loaded schema details for table {table_payload['table_name']} with "
             f"{table_payload['column_count']} column(s) and {len(table_payload['foreign_keys'])} relationship(s)."
         )
-        return AssistantToolExecutionResult(output=payload, summary=summary, record_count=1)
+        return AssistantToolExecutionResult(
+            output=payload,
+            summary=summary,
+            record_count=1,
+            evidence_items=_build_schema_catalog_evidence(payload, table_name=table_name),
+        )
 
     summary = (
         f"Loaded schema details for {payload['table_count']} table(s) with "
@@ -1617,6 +1992,7 @@ def _get_data_schema_catalog(db: Session, arguments: dict[str, Any]) -> Assistan
         output=payload,
         summary=summary,
         record_count=int(payload["table_count"]),
+        evidence_items=_build_schema_catalog_evidence(payload, table_name=table_name),
     )
 
 
@@ -1643,6 +2019,7 @@ def _search_codebase(db: Session, arguments: dict[str, Any]) -> AssistantToolExe
         output=payload,
         summary=summary,
         record_count=payload["count"],
+        evidence_items=_build_code_search_evidence(payload),
     )
 
 
@@ -1666,7 +2043,12 @@ def _read_codebase_file(db: Session, arguments: dict[str, Any]) -> AssistantTool
     )
     if payload["truncated"]:
         summary += " The read window was truncated."
-    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=1)
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=1,
+        evidence_items=_build_code_file_evidence(payload),
+    )
 
 
 async def _consult_managed_agent(

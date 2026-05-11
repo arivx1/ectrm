@@ -78,6 +78,7 @@ import { usePersistentCollapsibleCardState } from "../../../shared/collapsibleCa
 import type {
   AssetRecord,
   LocationRecord,
+  RailRouteRecord,
   SpatialFeatureRecord,
   WeatherForecastPeriodRecord,
   WeatherLocationRecord,
@@ -88,6 +89,7 @@ import type {
 type AssetMapPanelProps = {
   assets: AssetRecord[];
   locations: LocationRecord[];
+  railRoutes: RailRouteRecord[];
   spatialFeatures: SpatialFeatureRecord[];
   weatherLocations: WeatherLocationRecord[];
   weatherSyncStatus: WeatherSyncStatusRecord | null;
@@ -95,7 +97,13 @@ type AssetMapPanelProps = {
   weatherDataLoading?: boolean;
   weatherLoadError?: string;
   selectedAssetCode: string | null;
+  selectedRailRouteCode?: string | null;
   onSelectAsset: (code: string) => void;
+  onSelectRailRoute?: (code: string) => void;
+  onOpenRailRouteDeliveries?: (code: string) => void;
+  onOpenRailRouteScheduling?: (code: string) => void;
+  onOpenReferenceRailRoute?: (code: string) => void;
+  onClearRailRouteSelection?: () => void;
   filterControls?: ReactNode;
 };
 
@@ -987,6 +995,37 @@ function formatAssetMapFilterList(labels: string[]): string {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+function formatReferenceLocationLabel(
+  locationCode: string | null | undefined,
+  locationByCode: Map<string, LocationRecord>,
+): string {
+  if (!locationCode) {
+    return '—';
+  }
+
+  const location = locationByCode.get(locationCode);
+  return location ? `${location.code} · ${location.name}` : locationCode;
+}
+
+function formatRailRouteServiceClock(route: RailRouteRecord): string {
+  const parts = [
+    route.schedule_timezone ?? null,
+    route.placement_cutoff_time_local ? `Place ${route.placement_cutoff_time_local}` : null,
+    route.release_cutoff_time_local ? `Release ${route.release_cutoff_time_local}` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return parts.join(' · ') || 'No cutoffs set';
+}
+
+function formatRailRouteFreeTime(route: RailRouteRecord): string {
+  const parts = [
+    route.placement_free_time_hours != null ? `Placement ${route.placement_free_time_hours}h` : null,
+    route.release_free_time_hours != null ? `Release ${route.release_free_time_hours}h` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return parts.join(' · ') || 'No free-time defaults set';
+}
+
 export function AssetMapCanvas({
   records,
   spatialFeatures,
@@ -1017,7 +1056,9 @@ export function AssetMapCanvas({
   onToggleAssetSubtype = () => undefined,
   onSetAllAssetSubtypesVisible = () => undefined,
   selectedAssetCode,
+  selectedRailRouteCode = null,
   onSelectAsset,
+  onSelectRailRoute = () => undefined,
   statusTitle,
   statusDetail,
 }: {
@@ -1050,7 +1091,9 @@ export function AssetMapCanvas({
   onToggleAssetSubtype: (assetSubtype: string) => void;
   onSetAllAssetSubtypesVisible?: (visible: boolean) => void;
   selectedAssetCode: string | null;
+  selectedRailRouteCode?: string | null;
   onSelectAsset: (code: string) => void;
+  onSelectRailRoute?: (code: string) => void;
   statusTitle?: string | null;
   statusDetail?: string | null;
 }) {
@@ -1144,6 +1187,10 @@ export function AssetMapCanvas({
   const handleSelectAsset = useEffectEvent((code: string) => {
     setSelectedWeatherLocationCode(null);
     onSelectAsset(code);
+  });
+  const handleSelectRailRoute = useEffectEvent((code: string) => {
+    setSelectedWeatherLocationCode(null);
+    onSelectRailRoute(code);
   });
   const showAssets = controlledShowAssets ?? uncontrolledShowAssets;
   const showRailRoutes =
@@ -2225,8 +2272,10 @@ export function AssetMapCanvas({
         properties: {
           ...(feature.properties ?? {}),
           isLinkedSelection:
-            feature.properties?.entityType === "ASSET" &&
-            feature.properties?.entityCode === selectedAssetCode,
+            (feature.properties?.entityType === "ASSET" &&
+              feature.properties?.entityCode === selectedAssetCode) ||
+            (feature.properties?.entityType === "RAIL_ROUTE" &&
+              feature.properties?.entityCode === selectedRailRouteCode),
         },
       })),
     };
@@ -2479,6 +2528,40 @@ export function AssetMapCanvas({
       }
     }
 
+    const selectedRailRouteCoordinates = showRailRoutes
+      ? buildSpatialFeatureExtentCoordinates(
+          railRouteSpatialFeatures.filter(
+            (feature) => feature.entity_code === selectedRailRouteCode,
+          ),
+        )
+      : [];
+
+    if (selectedRailRouteCoordinates.length === 1) {
+      const [longitude, latitude] = selectedRailRouteCoordinates[0];
+      map.easeTo({
+        center: [longitude, latitude],
+        zoom: Math.max(map.getZoom(), 5.6),
+        duration: 600,
+      });
+      return;
+    }
+
+    if (selectedRailRouteCoordinates.length > 1) {
+      const bounds = new runtime.LngLatBounds(
+        selectedRailRouteCoordinates[0],
+        selectedRailRouteCoordinates[0],
+      );
+      selectedRailRouteCoordinates
+        .slice(1)
+        .forEach((coordinate) => bounds.extend(coordinate));
+      map.fitBounds(bounds, {
+        padding: 72,
+        duration: 600,
+        maxZoom: 7,
+      });
+      return;
+    }
+
     const combinedCoordinates = [
       ...visibleRecords.flatMap((record) => record.extentCoordinates),
       ...spatialFeatureCoordinates,
@@ -2524,9 +2607,68 @@ export function AssetMapCanvas({
     spatialFeatures,
     railRouteSpatialFeatures,
     weatherLocationSignature,
+    selectedRailRouteCode,
     weatherStatusByCode,
     weatherStatusSignature,
   ]);
+
+  useEffect(() => {
+    if (!ready || !mapRef.current) {
+      return;
+    }
+
+    const map = mapRef.current;
+    const layerIds = [
+      SPATIAL_FEATURE_FILL_LAYER_ID,
+      SPATIAL_FEATURE_LINE_LAYER_ID,
+      SPATIAL_FEATURE_POINT_LAYER_ID,
+    ];
+
+    const handleRailRouteClick = (event: {
+      features?: Array<{
+        properties?: {
+          entityType?: unknown;
+          entityCode?: unknown;
+        };
+      }>;
+    }) => {
+      const selectedFeature = event.features?.find(
+        (feature) =>
+          feature.properties?.entityType === "RAIL_ROUTE" &&
+          typeof feature.properties?.entityCode === "string",
+      );
+      const railRouteCode =
+        typeof selectedFeature?.properties?.entityCode === "string"
+          ? selectedFeature.properties.entityCode
+          : null;
+      if (!railRouteCode) {
+        return;
+      }
+      handleSelectRailRoute(railRouteCode);
+    };
+
+    const handleMouseEnter = () => {
+      map.getCanvas().style.cursor = "pointer";
+    };
+    const handleMouseLeave = () => {
+      map.getCanvas().style.cursor = "";
+    };
+
+    layerIds.forEach((layerId) => {
+      map.on("click", layerId, handleRailRouteClick as never);
+      map.on("mouseenter", layerId, handleMouseEnter);
+      map.on("mouseleave", layerId, handleMouseLeave);
+    });
+
+    return () => {
+      layerIds.forEach((layerId) => {
+        map.off("click", layerId, handleRailRouteClick as never);
+        map.off("mouseenter", layerId, handleMouseEnter);
+        map.off("mouseleave", layerId, handleMouseLeave);
+      });
+      map.getCanvas().style.cursor = "";
+    };
+  }, [ready]);
 
   useEffect(() => {
     if (!ready || !mapRef.current) {
@@ -3386,6 +3528,7 @@ export function AssetMapCanvas({
 export function AssetMapPanel({
   assets,
   locations,
+  railRoutes,
   spatialFeatures,
   weatherLocations,
   weatherSyncStatus,
@@ -3393,7 +3536,13 @@ export function AssetMapPanel({
   weatherDataLoading = false,
   weatherLoadError = "",
   selectedAssetCode,
+  selectedRailRouteCode = null,
   onSelectAsset,
+  onSelectRailRoute = () => undefined,
+  onOpenRailRouteDeliveries = () => undefined,
+  onOpenRailRouteScheduling = () => undefined,
+  onOpenReferenceRailRoute = () => undefined,
+  onClearRailRouteSelection = () => undefined,
   filterControls,
 }: AssetMapPanelProps) {
   const mapSummary = useMemo(
@@ -3417,6 +3566,7 @@ export function AssetMapPanel({
     Record<string, boolean>
   >({});
   const [showAssetLayer, setShowAssetLayer] = useState(true);
+  const [showRailRouteLayer, setShowRailRouteLayer] = useState(true);
   const assetSubtypeOptions = useMemo(
     () => sortedUniqueAssetSubtypes(mapSummary.records),
     [mapSummary.records],
@@ -3617,6 +3767,11 @@ export function AssetMapPanel({
     [mapSummary.records, selectedAssetCode],
   );
   const selectedAsset = selectedAssetRecord?.asset ?? null;
+  const selectedRailRoute = useMemo(
+    () =>
+      railRoutes.find((route) => route.code === selectedRailRouteCode) ?? null,
+    [railRoutes, selectedRailRouteCode],
+  );
   const selectedAssetHiddenByGeography = selectedAssetRecord
     ? !assetRecordMatchesVisibleGeography(
         normalizedAssetGeographyVisibility,
@@ -3664,6 +3819,13 @@ export function AssetMapPanel({
         isRailRouteSpatialFeature(feature),
       ),
     [activeSpatialFeatures],
+  );
+  const selectedRailRouteSpatialFeatures = useMemo(
+    () =>
+      activeRailRouteSpatialFeatures.filter(
+        (feature) => feature.entity_code === selectedRailRouteCode,
+      ),
+    [activeRailRouteSpatialFeatures, selectedRailRouteCode],
   );
   const activeSharedSpatialFeatures = useMemo(
     () =>
@@ -3729,6 +3891,8 @@ export function AssetMapPanel({
     activityHiddenCount +
     subtypeHiddenCount;
   const hiddenAssetCount = selectionHiddenCount + unmappedVisibleCount;
+  const selectedRailRouteOverlayHiddenByLayer =
+    selectedRailRouteCode !== null && !showRailRouteLayer;
   const mapStatusTitle =
     visibleMappedRecords.length === 0
       ? geographyVisibleRecordCandidates.length === 0
@@ -3864,6 +4028,7 @@ export function AssetMapPanel({
         weatherLocations={visibleWeatherLocations}
         weatherSyncStatus={weatherSyncStatus}
         showAssets={showAssetLayer}
+        showRailRoutes={showRailRouteLayer}
         filterCardStateKey="map-workspace.map-filters-card"
         assetActivityVisibility={normalizedAssetActivityVisibility}
         assetGeographyVisibility={normalizedAssetGeographyVisibility}
@@ -3877,6 +4042,7 @@ export function AssetMapPanel({
         weatherDataLoading={weatherDataLoading}
         weatherLoadError={weatherLoadError}
         onShowAssetsChange={setShowAssetLayer}
+        onShowRailRoutesChange={setShowRailRouteLayer}
         onToggleAssetActivity={handleToggleAssetActivity}
         onToggleAssetGeography={handleToggleAssetGeography}
         onSelectCountry={handleSelectCountry}
@@ -3885,7 +4051,9 @@ export function AssetMapPanel({
         onToggleAssetSubtype={handleToggleAssetSubtype}
         onSetAllAssetSubtypesVisible={handleSetAllAssetSubtypesVisible}
         selectedAssetCode={selectedAssetCode}
+        selectedRailRouteCode={selectedRailRouteCode}
         onSelectAsset={onSelectAsset}
+        onSelectRailRoute={onSelectRailRoute}
         statusTitle={mapStatusTitle}
         statusDetail={mapStatusDetail}
       />
@@ -3939,6 +4107,83 @@ export function AssetMapPanel({
             <p>
               Pan freely, or select a plotted asset from the map or directory to
               inspect its placement.
+            </p>
+          )}
+        </div>
+
+        <div className="reference-usage-card asset-map-card">
+          <div className="reference-usage-head">
+            <strong>Selected Rail Route</strong>
+            <span className="entity-chip entity-chip-soft">
+              {selectedRailRoute?.code ?? "No selection"}
+            </span>
+          </div>
+          {selectedRailRoute ? (
+            <>
+              <p>
+                {selectedRailRoute.name} · {selectedRailRoute.rail_line_code} ·{" "}
+                {selectedRailRoute.route_direction}
+              </p>
+              <p>
+                {formatReferenceLocationLabel(
+                  selectedRailRoute.origin_location_code,
+                  locationByCode,
+                )}{" "}
+                to{" "}
+                {formatReferenceLocationLabel(
+                  selectedRailRoute.destination_location_code,
+                  locationByCode,
+                )}
+              </p>
+              <p>{formatRailRouteServiceClock(selectedRailRoute)}</p>
+              <p>{formatRailRouteFreeTime(selectedRailRoute)}</p>
+              {selectedRailRouteOverlayHiddenByLayer ? (
+                <p>
+                  The Rail Routes layer is currently hidden. Turn that layer
+                  back on to re-plot this corridor on the map.
+                </p>
+              ) : selectedRailRouteSpatialFeatures.length === 0 ? (
+                <p>
+                  No active rail overlay is linked to this route yet. Add or
+                  reactivate a `RAIL_ROUTE` spatial feature to plot it.
+                </p>
+              ) : null}
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => onOpenRailRouteDeliveries(selectedRailRoute.code)}
+                >
+                  Open Deliveries
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => onOpenRailRouteScheduling(selectedRailRoute.code)}
+                >
+                  Open Scheduling
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={() => onOpenReferenceRailRoute(selectedRailRoute.code)}
+                >
+                  Open Route Record
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={onClearRailRouteSelection}
+                >
+                  Clear Route Focus
+                </button>
+              </div>
+            </>
+          ) : (
+            <p>
+              Select a plotted rail corridor from the map to inspect its lane
+              context, then jump into deliveries, scheduling, or route
+              maintenance from the same focus point.
             </p>
           )}
         </div>

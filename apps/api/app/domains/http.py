@@ -28,6 +28,7 @@ from apps.api.app.routes.roadmap import admin_router as roadmap_admin_router
 from apps.api.app.routes.roadmap import router as roadmap_router
 from apps.api.app.routes.trades import router as trades_router
 from apps.api.app.routes.trading_sources import admin_router as trading_sources_admin_router
+from apps.api.app.routes.user_events import router as user_events_router
 from apps.api.app.routes.users import router as users_router
 from apps.api.app.routes.weather import admin_router as weather_admin_router
 from apps.api.app.routes.weather import router as weather_router
@@ -57,6 +58,7 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="codex", name="codex-admin", router=codex_router),
     HttpRouteRegistration(domain="codex", name="codex-callback", router=codex_callback_router),
     HttpRouteRegistration(domain="trading", name="trades", router=trades_router),
+    HttpRouteRegistration(domain="operations", name="user-events", router=user_events_router),
     HttpRouteRegistration(domain="pretrade", name="pretrade", router=pretrade_router),
     HttpRouteRegistration(domain="risk", name="option-exposures", router=option_exposures_router),
     HttpRouteRegistration(domain="risk", name="positions", router=positions_router),

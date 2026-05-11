@@ -40,6 +40,7 @@ import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import { appConfig } from './shared/config'
 import {
+  buildRailRouteWorkspaceHandoff,
   describeAppRouteHandoff,
   getAppRouteHandoffTradeId,
   type AppRouteHandoff,
@@ -140,7 +141,11 @@ function AuthenticatedWorkspaceShell({
     [currentView, routeHandoff],
   )
   const currentWorkspaceOwnsHandoffBanner =
-    currentView === 'operations' || currentView === 'settlement' || currentView === 'trades'
+    currentView === 'operations' ||
+    currentView === 'settlement' ||
+    currentView === 'trades' ||
+    currentView === 'shipments' ||
+    currentView === 'scheduling'
 
   const summary = useAppWorkspaceSummary({
     authSession: workspaceData.authSession,
@@ -242,6 +247,16 @@ function AuthenticatedWorkspaceShell({
     counterpartyStandards: workspaceData.counterpartyStandards,
     commodityClassOrder,
     externalReferenceSearch: '',
+    onOpenRailRouteScheduling: (code, label) =>
+      route.navigateToView(
+        'scheduling',
+        buildRailRouteWorkspaceHandoff({
+          source: 'reference',
+          railRouteCode: code,
+          railRouteLabel: label,
+          targetView: 'scheduling',
+        }),
+      ),
   })
 
   const {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  buildRailRouteWorkspaceHandoff,
   describeAppRouteHandoff,
   getAppRouteHandoffFilterValue,
   getAppRouteHandoffKey,
@@ -157,6 +158,96 @@ test('assistant route handoffs round-trip focused workspace context', () => {
   assert.deepEqual(describeAppRouteHandoff(handoff, 'operations'), {
     title: 'Open Work Queue',
     detail: 'The assistant found a late confirmation item that needs owner review.',
+  })
+})
+
+test('map route handoffs preserve rail-route focus for the deliveries board', () => {
+  const params = new URLSearchParams()
+  writeAppRouteHandoff(
+    params,
+    buildRailRouteWorkspaceHandoff({
+      source: 'map',
+      railRouteCode: 'BNSF_WAHA_TO_HSC',
+      railRouteLabel: 'BNSF Waha to Houston Ship Channel',
+      targetView: 'shipments',
+    }),
+  )
+
+  assert.equal(
+    params.toString(),
+    'handoff=map&focusType=reference_record&focusId=BNSF_WAHA_TO_HSC&focusLabel=BNSF+Waha+to+Houston+Ship+Channel&handoffLabel=Open+deliveries+for+BNSF_WAHA_TO_HSC&handoffReason=This+workspace+started+focused+on+the+selected+rail+route+so+you+can+review+the+matching+deliveries+before+widening+back+to+the+full+board.&focusFilter=BNSF_WAHA_TO_HSC',
+  )
+
+  const handoff = readAppRouteHandoff(params)
+  assert.deepEqual(handoff, {
+    source: 'map',
+    tradeId: 'BNSF_WAHA_TO_HSC',
+    focus: {
+      type: 'reference_record',
+      id: 'BNSF_WAHA_TO_HSC',
+      label: 'BNSF Waha to Houston Ship Channel',
+    },
+    tradeInspectorTab: null,
+    eventType: null,
+    label: 'Open deliveries for BNSF_WAHA_TO_HSC',
+    rationale:
+      'This workspace started focused on the selected rail route so you can review the matching deliveries before widening back to the full board.',
+    filter: 'BNSF_WAHA_TO_HSC',
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
+  })
+  assert.equal(getAppRouteHandoffFilterValue(handoff), 'BNSF_WAHA_TO_HSC')
+  assert.equal(getAppRouteHandoffTradeId(handoff), null)
+  assert.deepEqual(describeAppRouteHandoff(handoff, 'shipments'), {
+    title: 'Open deliveries for BNSF_WAHA_TO_HSC',
+    detail:
+      'This workspace started focused on the selected rail route so you can review the matching deliveries before widening back to the full board.',
+  })
+})
+
+test('reference route handoffs preserve rail-route focus for the scheduling board', () => {
+  const params = new URLSearchParams()
+  writeAppRouteHandoff(
+    params,
+    buildRailRouteWorkspaceHandoff({
+      source: 'reference',
+      railRouteCode: 'BNSF_WAHA_TO_HSC',
+      railRouteLabel: 'BNSF Waha to Houston Ship Channel',
+      targetView: 'scheduling',
+    }),
+  )
+
+  assert.equal(
+    params.toString(),
+    'handoff=reference&focusType=reference_record&focusId=BNSF_WAHA_TO_HSC&focusLabel=BNSF+Waha+to+Houston+Ship+Channel&handoffLabel=Open+scheduling+for+BNSF_WAHA_TO_HSC&handoffReason=This+workspace+started+focused+on+the+selected+reference-data+rail+route+so+you+can+review+the+matching+scheduling+rows+before+widening+back+to+the+full+board.&focusFilter=BNSF_WAHA_TO_HSC',
+  )
+
+  const handoff = readAppRouteHandoff(params)
+  assert.deepEqual(handoff, {
+    source: 'reference',
+    tradeId: 'BNSF_WAHA_TO_HSC',
+    focus: {
+      type: 'reference_record',
+      id: 'BNSF_WAHA_TO_HSC',
+      label: 'BNSF Waha to Houston Ship Channel',
+    },
+    tradeInspectorTab: null,
+    eventType: null,
+    label: 'Open scheduling for BNSF_WAHA_TO_HSC',
+    rationale:
+      'This workspace started focused on the selected reference-data rail route so you can review the matching scheduling rows before widening back to the full board.',
+    filter: 'BNSF_WAHA_TO_HSC',
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
+  })
+  assert.equal(getAppRouteHandoffFilterValue(handoff), 'BNSF_WAHA_TO_HSC')
+  assert.equal(getAppRouteHandoffTradeId(handoff), null)
+  assert.deepEqual(describeAppRouteHandoff(handoff, 'scheduling'), {
+    title: 'Open scheduling for BNSF_WAHA_TO_HSC',
+    detail:
+      'This workspace started focused on the selected reference-data rail route so you can review the matching scheduling rows before widening back to the full board.',
   })
 })
 

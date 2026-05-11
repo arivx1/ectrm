@@ -273,3 +273,32 @@ If later product work needs higher fidelity, keep the same ownership split:
 Upgrade the geometry quality by replacing or supplementing the seeded
 straight-line overlays instead of pushing GeoJSON directly onto the rail route
 records.
+
+## Rail Map Workflow
+
+The next useful step is to treat a rail overlay selection as an operational
+focus, not just a visual layer toggle.
+
+- Clicking a `RAIL_ROUTE` overlay in the map should select the underlying rail
+  route record, highlight the corridor, and show route context like lane code,
+  origin, destination, service clock, and free-time defaults.
+- The same selected route should be able to jump to the Deliveries workspace
+  with a deterministic `rail_route_code` filter applied, instead of relying on
+  a brittle text search.
+- The same typed route focus should also be able to open the Scheduling
+  workspace with only matching scheduling rows in view, so route-specific
+  blockers and hot-window work stay lane-scoped from the first click.
+- Scheduling should also expose its own governed rail-route picker so users do
+  not have to start from the map just to work a lane-specific board.
+- Opening Scheduling from the rail-route reference record should use the same
+  typed handoff contract as the map, only with a different source label.
+- Opening reference maintenance from that map selection should land on the
+  rail-route record itself, not on the spatial overlay row.
+
+That keeps the workflow split clean:
+
+- the map owns spatial discovery and context
+- the Deliveries board owns movement execution against the selected lane
+- the Scheduling board owns route-specific readiness, blocker clearing, and
+  hot-window follow-through
+- reference data owns the governed lane definition and schedule defaults

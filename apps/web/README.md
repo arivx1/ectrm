@@ -148,6 +148,30 @@ first admin user. The Assistant workspace also requires a signed-in session
 because prompt submission is protected server-side. Most operator-facing
 workspaces now expect an authenticated session before they can load their data.
 
+## Google Calendar In Settings
+
+The Settings workspace includes a browser-side Google Calendar panel for
+pulling the next few events into the app without routing calendar traffic
+through the ECTRM API.
+
+To enable that UI locally:
+
+1. Set `GOOGLE_AUTH_CLIENT_ID` in `apps/api/.env` to a Google OAuth web client
+   ID.
+2. Restart the API so `GET /settings/public` exposes the configured client ID
+   to the web app.
+3. Make sure the Google OAuth client allows the local web origins you use,
+   such as `http://localhost:5173` and `http://127.0.0.1:5173`.
+4. Enable the Google Calendar API in the same Google Cloud project.
+
+Behavior notes:
+
+- `GOOGLE_AUTH_ENABLED=true` is only required when you also want Google-based
+  app sign-in. The calendar panel itself only needs the client ID.
+- The browser requests Google `calendar.readonly` access directly from Google.
+- The Google access token and fetched calendar events stay in browser storage
+  for the local session and are not persisted by the ECTRM API.
+
 ## Key Source Areas
 
 - `src/App.tsx`: top-level state, data loading, and workspace routing

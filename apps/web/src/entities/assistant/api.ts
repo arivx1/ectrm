@@ -548,6 +548,23 @@ export async function transcribeAssistantVoice(
   )
 }
 
+export async function synthesizeAssistantVoice(
+  apiBase: string,
+  text: string,
+  init?: { accessToken?: string },
+): Promise<Blob> {
+  const response = await requestOk(`${apiBase}/assistant/voice/speech`, {
+    method: 'POST',
+    headers: (() => {
+      const headers = assistantReadHeaders(init?.accessToken) ?? new Headers()
+      headers.set('Content-Type', 'application/json')
+      return headers
+    })(),
+    body: JSON.stringify({ text }),
+  })
+  return response.blob()
+}
+
 export async function streamAssistantResponse(
   apiBase: string,
   payload: AssistantPromptRequest,

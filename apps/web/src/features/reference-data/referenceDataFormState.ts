@@ -15,6 +15,8 @@ import type {
   LocationStandards,
   PriceIndexForm,
   PriceIndexRecord,
+  RailRouteForm,
+  RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureForm,
   SpatialFeatureRecord,
@@ -35,6 +37,15 @@ const ASSET_GEOJSON_ALLOWED_TYPES = new Set([
   'Point',
   'Polygon',
 ])
+const RAIL_ROUTE_DIRECTIONS = ['BIDIRECTIONAL', 'FORWARD', 'REVERSE'] as const
+
+function isValidRailLocalTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+}
+
+function isValidNonNegativeInteger(value: string): boolean {
+  return /^\d+$/.test(value)
+}
 
 export function parseAssetCoordinatePair(args: {
   latitudeText: string
@@ -259,6 +270,92 @@ export function buildSpatialFeatureFieldErrors(
     errors.geometry_geojson = parsedGeometry.error
   } else if (parsedGeometry.value === null) {
     errors.geometry_geojson = 'Geometry GeoJSON is required.'
+  }
+
+  return errors
+}
+
+export function buildRailRouteFieldErrors(
+  railRouteForm: RailRouteForm,
+  railRouteFormMode: 'create' | 'edit',
+  railRoutes: RailRouteRecord[],
+): Partial<
+  Record<
+    | 'code'
+    | 'name'
+    | 'rail_line_code'
+    | 'route_direction'
+    | 'placement_cutoff_time_local'
+    | 'release_cutoff_time_local'
+    | 'placement_free_time_hours'
+    | 'release_free_time_hours',
+    string
+  >
+> {
+  const errors: Partial<
+    Record<
+      | 'code'
+      | 'name'
+      | 'rail_line_code'
+      | 'route_direction'
+      | 'placement_cutoff_time_local'
+      | 'release_cutoff_time_local'
+      | 'placement_free_time_hours'
+      | 'release_free_time_hours',
+      string
+    >
+  > = {}
+  const normalizedRouteDirection = railRouteForm.route_direction.trim().toUpperCase()
+
+  if (!railRouteForm.code.trim()) {
+    errors.code = 'Code is required.'
+  } else if (
+    railRouteFormMode === 'create' &&
+    railRoutes.some((route) => route.code === railRouteForm.code.trim().toUpperCase())
+  ) {
+    errors.code = 'Code already exists.'
+  }
+
+  if (!railRouteForm.name.trim()) {
+    errors.name = 'Name is required.'
+  }
+
+  if (!railRouteForm.rail_line_code.trim()) {
+    errors.rail_line_code = 'Rail line code is required.'
+  }
+
+  if (!normalizedRouteDirection) {
+    errors.route_direction = 'Route direction is required.'
+  } else if (!RAIL_ROUTE_DIRECTIONS.includes(normalizedRouteDirection as (typeof RAIL_ROUTE_DIRECTIONS)[number])) {
+    errors.route_direction = `Route direction must be one of ${RAIL_ROUTE_DIRECTIONS.join(', ')}.`
+  }
+
+  if (
+    railRouteForm.placement_cutoff_time_local.trim() &&
+    !isValidRailLocalTime(railRouteForm.placement_cutoff_time_local.trim())
+  ) {
+    errors.placement_cutoff_time_local = 'Placement cutoff must use 24-hour HH:MM format.'
+  }
+
+  if (
+    railRouteForm.release_cutoff_time_local.trim() &&
+    !isValidRailLocalTime(railRouteForm.release_cutoff_time_local.trim())
+  ) {
+    errors.release_cutoff_time_local = 'Release cutoff must use 24-hour HH:MM format.'
+  }
+
+  if (
+    railRouteForm.placement_free_time_hours.trim() &&
+    !isValidNonNegativeInteger(railRouteForm.placement_free_time_hours.trim())
+  ) {
+    errors.placement_free_time_hours = 'Placement free time must be a whole number of hours.'
+  }
+
+  if (
+    railRouteForm.release_free_time_hours.trim() &&
+    !isValidNonNegativeInteger(railRouteForm.release_free_time_hours.trim())
+  ) {
+    errors.release_free_time_hours = 'Release free time must be a whole number of hours.'
   }
 
   return errors
@@ -706,6 +803,62 @@ export function isLocationFormDirty(
     !sameText(locationForm.region, selectedLocation.region) ||
     !sameText(locationForm.timezone, selectedLocation.timezone) ||
     !sameText(locationForm.description, selectedLocation.description)
+  )
+}
+
+export function isRailRouteFormDirty(
+  railRouteForm: RailRouteForm,
+  railRouteFormMode: 'create' | 'edit',
+  selectedRailRoute: RailRouteRecord | null,
+): boolean {
+  if (railRouteFormMode === 'create') {
+    return (
+      !sameText(railRouteForm.code, '') ||
+      !sameText(railRouteForm.name, '') ||
+      !sameText(railRouteForm.rail_line_code, '') ||
+      !sameText(railRouteForm.origin_location_code, '') ||
+      !sameText(railRouteForm.destination_location_code, '') ||
+      !sameText(railRouteForm.service_calendar_code, '') ||
+      !sameText(railRouteForm.route_direction, 'BIDIRECTIONAL') ||
+      !sameText(railRouteForm.schedule_timezone, '') ||
+      !sameText(railRouteForm.placement_cutoff_time_local, '') ||
+      !sameText(railRouteForm.release_cutoff_time_local, '') ||
+      !sameText(railRouteForm.placement_free_time_hours, '') ||
+      !sameText(railRouteForm.release_free_time_hours, '') ||
+      !sameText(railRouteForm.description, '')
+    )
+  }
+
+  if (!selectedRailRoute) {
+    return false
+  }
+
+  return (
+    !sameText(railRouteForm.code, selectedRailRoute.code) ||
+    !sameText(railRouteForm.name, selectedRailRoute.name) ||
+    !sameText(railRouteForm.rail_line_code, selectedRailRoute.rail_line_code) ||
+    !sameText(railRouteForm.origin_location_code, selectedRailRoute.origin_location_code) ||
+    !sameText(railRouteForm.destination_location_code, selectedRailRoute.destination_location_code) ||
+    !sameText(railRouteForm.service_calendar_code, selectedRailRoute.service_calendar_code) ||
+    !sameText(railRouteForm.route_direction, selectedRailRoute.route_direction) ||
+    !sameText(railRouteForm.schedule_timezone, selectedRailRoute.schedule_timezone) ||
+    !sameText(
+      railRouteForm.placement_cutoff_time_local,
+      selectedRailRoute.placement_cutoff_time_local,
+    ) ||
+    !sameText(
+      railRouteForm.release_cutoff_time_local,
+      selectedRailRoute.release_cutoff_time_local,
+    ) ||
+    !sameText(
+      railRouteForm.placement_free_time_hours,
+      selectedRailRoute.placement_free_time_hours?.toString(),
+    ) ||
+    !sameText(
+      railRouteForm.release_free_time_hours,
+      selectedRailRoute.release_free_time_hours?.toString(),
+    ) ||
+    !sameText(railRouteForm.description, selectedRailRoute.description)
   )
 }
 

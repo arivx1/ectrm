@@ -995,6 +995,49 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
   }
 });
 
+test("prompt home add event opens the custom events settings card", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(harness.origin, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const startHereOverlay = page.locator(".start-here-dialog");
+    if (await startHereOverlay.isVisible().catch(() => false)) {
+      await dismissStartHereOverlay(page);
+    }
+
+    const addEventLink = page.getByRole("link", { name: "Add Event" });
+    const customEventsCard = page.locator("#settings-custom-events-card");
+    const customEventsPanel = page.locator(
+      "#settings-custom-events-card-panel",
+    );
+
+    await expect(addEventLink).toHaveAttribute(
+      "href",
+      "/?view=settings#settings-custom-events-card",
+    );
+
+    await addEventLink.click();
+
+    await expect(page).toHaveURL(
+      /\/\?view=settings#settings-custom-events-card$/,
+    );
+    await expect(customEventsCard).toBeVisible();
+    await expect(customEventsPanel).toBeVisible();
+    await expect(page.getByLabel("Event name")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add Event" })).toBeVisible();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("prompt home collapse state survives sign-out and sign-in", async ({
   page,
 }) => {

@@ -65,20 +65,20 @@ beforeEach(() => {
   localStorage.setItem("ectrm.google-calendar.selected-calendar-id", "primary");
   localStorage.setItem("ectrm.google-calendar.scope-granted", "true");
 
-  sessionStorage.setItem(
+  localStorage.setItem(
     "ectrm.google-calendar.selected-calendar-summary",
     "Trading Desk",
   );
-  sessionStorage.setItem("ectrm.google-calendar.access-token", "calendar-token");
-  sessionStorage.setItem(
+  localStorage.setItem("ectrm.google-calendar.access-token", "calendar-token");
+  localStorage.setItem(
     "ectrm.google-calendar.access-token-expires-at",
     String(Date.now() + 3_600_000),
   );
-  sessionStorage.setItem(
+  localStorage.setItem(
     "ectrm.google-calendar.cached-at",
     "2026-05-08T16:00:00.000Z",
   );
-  sessionStorage.setItem(
+  localStorage.setItem(
     "ectrm.google-calendar.cached-events",
     JSON.stringify([
       {
@@ -196,6 +196,46 @@ test("prompt home timeline cards render cached Google Calendar agenda items", ()
   assert.doesNotMatch(
     markup,
     /Connect Google Calendar in Settings to overlay schedule events here\./,
+  );
+});
+
+test("prompt home timeline cards do not duplicate disconnected calendar guidance", () => {
+  globalThis.window?.localStorage.removeItem(
+    "ectrm.google-calendar.selected-calendar-id",
+  );
+  globalThis.window?.localStorage.removeItem(
+    "ectrm.google-calendar.scope-granted",
+  );
+  globalThis.window?.localStorage.removeItem(
+    "ectrm.google-calendar.selected-calendar-summary",
+  );
+  globalThis.window?.localStorage.removeItem(
+    "ectrm.google-calendar.access-token",
+  );
+  globalThis.window?.localStorage.removeItem(
+    "ectrm.google-calendar.access-token-expires-at",
+  );
+  globalThis.window?.localStorage.removeItem("ectrm.google-calendar.cached-at");
+  globalThis.window?.localStorage.removeItem(
+    "ectrm.google-calendar.cached-events",
+  );
+
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      onOpenView: () => undefined,
+    }),
+  );
+
+  assert.equal(
+    (
+      markup.match(
+        /Connect Google Calendar in Settings to overlay schedule events here\./g,
+      ) ?? []
+    ).length,
+    3,
   );
 });
 

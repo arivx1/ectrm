@@ -33,6 +33,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   );
   const deskTimeIndex = markup.indexOf("Desk Time");
   const mapIndex = markup.indexOf("Open Map Workspace");
+  const documentUploadIndex = markup.indexOf("Upload documents");
   const promptCardIndex = markup.indexOf("Ask the desk assistant");
   const operatorPromptIndex = markup.indexOf("Operator prompt");
 
@@ -72,7 +73,8 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Sign in to review/);
   assert.ok(deskTimeIndex >= 0);
   assert.ok(mapIndex > deskTimeIndex);
-  assert.ok(promptCardIndex > mapIndex);
+  assert.ok(documentUploadIndex > mapIndex);
+  assert.ok(promptCardIndex > documentUploadIndex);
   assert.ok(operatorPromptIndex > promptCardIndex);
   assert.match(markup, />Voice Unavailable</);
   assert.match(markup, /Desk Time/);
@@ -162,6 +164,9 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /aria-label="Weather overlay layer"/);
   assert.match(markup, /Map Records/);
   assert.match(markup, /0 map records/);
+  assert.match(markup, /Show up to/);
+  assert.match(markup, /aria-label="Home map record limit"/);
+  assert.match(markup, /Higher limits draw more markers and rows in Home\./);
   assert.match(
     markup,
     /aria-expanded="false" aria-controls="prompt-home-map-records-card-panel"/,
@@ -171,6 +176,16 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /id="prompt-home-map-records-card-panel" class="asset-map-records-card-body" hidden=""/,
   );
   assert.match(markup, /Open Map Workspace/);
+  assert.match(markup, /<strong>Upload documents<\/strong>/);
+  assert.match(markup, /Protected intake card\. Sign in to upload and review PDFs\./);
+  assert.match(
+    markup,
+    /aria-expanded="false" aria-controls="prompt-home-document-upload-panel"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-document-upload-panel" class="prompt-home-document-upload-card-body" hidden=""/,
+  );
   assert.match(markup, /<strong>Ask the desk assistant<\/strong>/);
   assert.match(
     markup,
@@ -192,7 +207,10 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /id="prompt-home-day-panel" class="prompt-home-time-meter-card-body"/,
   );
   assert.match(markup, /Trading opens/);
-  assert.match(markup, /Trading closes/);
+  assert.match(markup, /Desk EOD/);
+  assert.match(markup, /EOD 10:00 PM local/);
+  assert.match(markup, /Add Event/);
+  assert.match(markup, /href="\/\?view=settings#settings-custom-events-card"/);
   assert.match(markup, /Representative trading hours/);
   assert.match(markup, /Show details/);
   assert.match(
@@ -239,9 +257,35 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /prompt-home-review-panel/);
 });
 
-test("prompt home map summarizes filtered records and caps the visible map directory at 50 rows", () => {
-  const assets = Array.from({ length: 60 }, (_, index) => ({
-    code: `HOME_${String(index + 1).padStart(3, "0")}`,
+test("prompt home renders read aloud controls for assistant messages", () => {
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      onOpenView: () => undefined,
+      initialMessages: [
+        {
+          id: "msg-assistant",
+          role: "assistant",
+          content: "Summarize the open operations queue.",
+        },
+        {
+          id: "msg-user",
+          role: "user",
+          content: "What needs attention right now?",
+        },
+      ],
+    }),
+  );
+
+  assert.equal((markup.match(/Read Aloud/g) ?? []).length, 1);
+  assert.match(markup, /Summarize the open operations queue\./);
+});
+
+test("prompt home map summarizes filtered records and caps the visible map directory at 1000 rows", () => {
+  const assets = Array.from({ length: 1050 }, (_, index) => ({
+    code: `HOME_${String(index + 1).padStart(4, "0")}`,
     name: `Home Asset ${index + 1}`,
     description: null,
     is_active: true,
@@ -277,13 +321,14 @@ test("prompt home map summarizes filtered records and caps the visible map direc
     }),
   );
 
-  assert.match(markup, /Showing 50 of 60 records on the map\./);
-  assert.match(markup, /Showing 50 of 60 map records/);
+  assert.match(markup, /Showing 1,000 of 1,050 records on the map\./);
+  assert.match(markup, /Showing 1,000 of 1,050 map records/);
   assert.equal(
-    (markup.match(/aria-label="Focus HOME_\d{3} on map"/g) ?? []).length,
-    50,
+    (markup.match(/aria-label="Focus HOME_\d{4} on map"/g) ?? []).length,
+    1000,
   );
-  assert.doesNotMatch(markup, /HOME_051/);
+  assert.match(markup, /HOME_1000/);
+  assert.doesNotMatch(markup, /HOME_1001/);
 });
 
 test("prompt home map reports zero records when the assets layer starts hidden", () => {

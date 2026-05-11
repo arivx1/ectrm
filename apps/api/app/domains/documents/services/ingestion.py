@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from hashlib import sha256
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -48,6 +49,7 @@ from .document_ingestion_review import normalize_table_blocks
 from .document_ingestion_review import validate_document_review_status_transition
 from .document_ingestion_review import validate_page_review_state
 from .document_ingestion_serialization import get_document_page_preview_path
+from .document_ingestion_serialization import get_document_source_file_details as _get_document_source_file_details
 from .document_ingestion_serialization import load_document_and_pages
 from .document_ingestion_serialization import mark_document_processing_failed
 from .document_ingestion_serialization import serialize_documents
@@ -107,6 +109,14 @@ def get_document_ingestion(db: Session, *, document_id: str) -> DocumentIngestio
     if document is None:
         raise LookupError(f"Document '{document_id}' was not found")
     return serialize_documents(db, [document])[0]
+
+
+def get_document_source_file_details(
+    db: Session,
+    *,
+    document_id: str,
+) -> tuple[Path, str, str]:
+    return _get_document_source_file_details(db, document_id=document_id)
 
 
 def ingest_pdf_document(

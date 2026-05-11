@@ -309,6 +309,7 @@ class DocumentIngestionOut(BaseModel):
     sha256: str
     size_bytes: int
     page_count: int
+    source_available: bool = False
     status: DocumentIngestionStatus
     processor_provider: Optional[DocumentProcessorSelection] = None
     processor_model: Optional[str] = None

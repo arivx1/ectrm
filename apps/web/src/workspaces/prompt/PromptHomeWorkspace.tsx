@@ -17,6 +17,7 @@ import {
   rejectAssistantActionRequest,
   requestAssistantResponse,
   submitAssistantPromptNavigationOutcome,
+  synthesizeAssistantVoice,
   transcribeAssistantVoice,
 } from "../../entities/assistant/api";
 import {
@@ -88,6 +89,10 @@ import {
   type TimeDisplaySettings,
   type TimeDisplayTimeZoneOption,
 } from "../../shared/timeDisplaySettings";
+import {
+  resolveVoicePlaybackButtonLabel,
+  useVoicePlayback,
+} from "../../shared/voicePlayback";
 import { useVoiceComposer } from "../../shared/voiceComposer";
 import {
   assetMapActivityLabelsForAsset,
@@ -113,7 +118,13 @@ import {
   PROMPT_HOME_PROMPT_KITS,
   type PromptHomePromptKit,
 } from "./promptHomePromptKits";
+import { PromptHomeDocumentUploadCard } from "./PromptHomeDocumentUploadCard";
 import { getPromptHomeNextClockTickDelay } from "./promptHomeClock";
+import {
+  getPromptHomeMapRecordLimit,
+  PROMPT_HOME_MAP_RECORD_LIMIT_OPTIONS,
+  savePromptHomeMapRecordLimit,
+} from "./promptHomeMapRecordLimit";
 import { buildPromptHomePromotedRoutes } from "./promptPromotedRoutes";
 import {
   AssetMapCanvas,
@@ -125,6 +136,7 @@ import {
   setAllAssetSubtypeVisibilityState,
   syncAssetSubtypeVisibilityState,
 } from "../reference-data/tabs/AssetMapPanel";
+import { SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID } from "../settings/userEventsPanelShared";
 
 type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null;
@@ -143,6 +155,8 @@ type PromptHomeWorkspaceProps = {
   weatherDataError?: string;
   onEnsureWeatherData?: () => Promise<void>;
   onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void;
+  customEventsHref?: string;
+  onOpenCustomEvents?: () => void;
   onRefreshData?: () => Promise<void>;
   initialMessages?: PromptHomeMessage[];
   initialMapAssetLayerVisible?: boolean;
@@ -174,7 +188,6 @@ const PROMPT_HOME_WEEK_PANEL_ID = "prompt-home-week-panel";
 const PROMPT_HOME_MONTH_PANEL_ID = "prompt-home-month-panel";
 const PROMPT_HOME_MAP_PANEL_ID = "prompt-home-map-panel";
 const PROMPT_HOME_TRADING_HOURS_PANEL_ID = "prompt-home-trading-hours-panel";
-const PROMPT_HOME_MAP_RECORD_LIMIT = 50;
 const PROMPT_HOME_DAY_CALENDAR_MARKER_LIMIT = 3;
 const PROMPT_HOME_WEEK_CALENDAR_MARKER_LIMIT = 7;
 const PROMPT_HOME_MONTH_CALENDAR_MARKER_LIMIT = 6;
@@ -1288,6 +1301,11 @@ function PromptHomeCalendarAgendaSection({
 }) {
   const visibleItems = items.slice(0, PROMPT_HOME_CALENDAR_AGENDA_LIST_LIMIT);
   const hiddenCount = Math.max(0, items.length - visibleItems.length);
+  const normalizedSummary = summary.trim();
+  const normalizedEmptyMessage = emptyMessage.trim();
+  const showEmptyMessage =
+    normalizedEmptyMessage.length > 0 &&
+    normalizedEmptyMessage !== normalizedSummary;
 
   return (
     <section className="prompt-home-calendar-agenda">
@@ -1328,9 +1346,9 @@ function PromptHomeCalendarAgendaSection({
             </p>
           ) : null}
         </>
-      ) : (
+      ) : showEmptyMessage ? (
         <p className="prompt-home-calendar-agenda-note">{emptyMessage}</p>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -1555,6 +1573,9 @@ function PromptHomeMapTile({
   const [assetSubtypeVisibility, setAssetSubtypeVisibility] = useState<
     Record<string, boolean>
   >({});
+  const [mapRecordLimit, setMapRecordLimit] = useState(
+    getPromptHomeMapRecordLimit,
+  );
   const [showAssetLayer, setShowAssetLayer] = useState(
     initialMapAssetLayerVisible,
   );
@@ -1804,8 +1825,8 @@ function PromptHomeMapTile({
     [activityVisibleMappedRecords, normalizedAssetSubtypeVisibility],
   );
   const displayedMappedRecords = useMemo(
-    () => visibleMappedRecords.slice(0, PROMPT_HOME_MAP_RECORD_LIMIT),
-    [visibleMappedRecords],
+    () => visibleMappedRecords.slice(0, mapRecordLimit),
+    [mapRecordLimit, visibleMappedRecords],
   );
   const displayedAssetMapRecords = useMemo(
     () => (showAssetLayer ? displayedMappedRecords : []),
@@ -2004,6 +2025,10 @@ function PromptHomeMapTile({
     );
   }
 
+  function handleMapRecordLimitChange(nextValue: string) {
+    setMapRecordLimit(savePromptHomeMapRecordLimit(nextValue));
+  }
+
   return (
     <article className="prompt-home-map-card">
       <button
@@ -2072,6 +2097,29 @@ function PromptHomeMapTile({
           statusDetail={statusDetail}
         />
 
+        <div className="prompt-home-map-card-settings">
+          <label className="field prompt-home-map-record-limit-field">
+            <span>Show up to</span>
+            <select
+              className="control"
+              aria-label="Home map record limit"
+              value={String(mapRecordLimit)}
+              onChange={(event) =>
+                handleMapRecordLimitChange(event.target.value)
+              }
+            >
+              {PROMPT_HOME_MAP_RECORD_LIMIT_OPTIONS.map((limitOption) => (
+                <option key={limitOption} value={limitOption}>
+                  {`${limitOption.toLocaleString()} map records`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="form-note prompt-home-map-record-limit-note">
+            Higher limits draw more markers and rows in Home.
+          </p>
+        </div>
+
         <AssetMapRecordsCard
           records={displayedAssetMapRecords}
           totalRecordCount={showAssetLayer ? exactFilteredMapReadyCount : 0}
@@ -2108,11 +2156,15 @@ function PromptHomeTimeframePanel({
   timeDisplaySettings,
   timeZoneOptions,
   onTimeZoneChange,
+  customEventsHref,
+  onOpenCustomEvents,
 }: {
   currentTime: Date;
   timeDisplaySettings: TimeDisplaySettings;
   timeZoneOptions: TimeDisplayTimeZoneOption[];
   onTimeZoneChange: (nextTimeZone: string) => void;
+  customEventsHref: string;
+  onOpenCustomEvents?: () => void;
 }) {
   const timeframeExpandedState = usePersistentCollapsibleCardState(
     "prompt-home.timeframe-panel",
@@ -2253,20 +2305,24 @@ function PromptHomeTimeframePanel({
         currentTime,
       ),
   );
+  const tradingWindowStartClockLabel = formatPromptHomeClockMinutes(
+    PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING * 60,
+  );
+  const tradingWindowEndClockLabel = formatPromptHomeClockMinutes(
+    PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING * 60,
+  );
   const tradingMarkers: PromptHomeMeterMarker[] = [
     {
       key: "open",
       label: "Trading opens",
-      detail: formatHourEndingLabel(
-        PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING,
-      ),
+      detail: `${tradingWindowStartClockLabel} local · ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)}`,
       percent: tradingWindowStartPercent,
       align: "start",
     },
     {
       key: "close",
-      label: "Trading closes",
-      detail: formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING),
+      label: "Desk EOD",
+      detail: `${tradingWindowEndClockLabel} local · ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}`,
       percent: tradingWindowEndPercent,
       align: "end",
     },
@@ -2408,7 +2464,7 @@ function PromptHomeTimeframePanel({
           monthCalendarItemsVisible.length,
         )} this month`
       : calendarAgendaSummary;
-  const dayCollapsedSummary = `${`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}`} · ${exchangeSessionLanes.length} venue sessions${dayCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(dayCalendarItemsVisible.length)}` : dayCalendarToggleState.enabled ? "" : " · Google Calendar off"}`;
+  const dayCollapsedSummary = `${`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}`} · EOD ${tradingWindowEndClockLabel} local · ${exchangeSessionLanes.length} venue sessions${dayCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(dayCalendarItemsVisible.length)}` : dayCalendarToggleState.enabled ? "" : " · Google Calendar off"}`;
   const weekCollapsedSummary = `Sunday through Saturday · Week progress ${Math.round(currentWeekPercent)}%${weekCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(weekCalendarItemsVisible.length)}` : weekCalendarToggleState.enabled ? "" : " · Google Calendar off"}`;
   const monthCollapsedSummary = `1 through EOM · ${monthDayTotal} days this month${monthCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(monthCalendarItemsVisible.length)}` : monthCalendarToggleState.enabled ? "" : " · Google Calendar off"}`;
   const dayMeterMarkers = dayCalendarToggleState.enabled
@@ -2437,6 +2493,20 @@ function PromptHomeTimeframePanel({
         </div>
 
         <div className="prompt-home-timeframe-panel-side">
+          <a
+            href={customEventsHref}
+            className="button button-secondary prompt-home-timeframe-panel-link"
+            onClick={(event) => {
+              if (!onOpenCustomEvents) {
+                return;
+              }
+              event.preventDefault();
+              onOpenCustomEvents();
+            }}
+          >
+            Add Event
+          </a>
+
           <button
             type="button"
             className="prompt-home-timeframe-panel-toggle-action"
@@ -2489,9 +2559,9 @@ function PromptHomeTimeframePanel({
             panelId={PROMPT_HOME_DAY_PANEL_ID}
             eyebrow="Day"
             title={`${currentClockLabel} local`}
-            detail="Hour-ending day with the desk window and representative venue sessions marked."
+            detail={`Hour-ending day with the desk window, desk EOD at ${tradingWindowEndClockLabel} local, and representative venue sessions marked.`}
             badge={currentHourEndingLabel}
-            meta={`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)} · ${dayCalendarToggleState.enabled ? dayCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(dayCalendarItemsVisible.length) : "No calendar events scheduled today" : "Google Calendar off for this card"}`}
+            meta={`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)} · EOD ${tradingWindowEndClockLabel} local · ${dayCalendarToggleState.enabled ? dayCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(dayCalendarItemsVisible.length) : "No calendar events scheduled today" : "Google Calendar off for this card"}`}
             collapsedSummary={dayCollapsedSummary}
             ticks={dayTicks}
             markers={dayMeterMarkers}
@@ -2504,7 +2574,7 @@ function PromptHomeTimeframePanel({
               ariaLabel: "Pull Google Calendar into the day timeline card",
               onChange: dayCalendarToggleState.setEnabled,
             }}
-            ariaLabel={`Day meter in ${resolvedTimeZone}. Current local time ${currentClockLabel}, ${currentHourEndingLabel}. Desk trading hours run from ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}. Representative venue sessions for ICE Brent, LMEselect, LME Ring, SGX MSCI, CME WTI, EEX Power, and TOCOM Energy are also shown.`}
+            ariaLabel={`Day meter in ${resolvedTimeZone}. Current local time ${currentClockLabel}, ${currentHourEndingLabel}. Desk trading hours run from ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}, with desk EOD at ${tradingWindowEndClockLabel} local. Representative venue sessions for ICE Brent, LMEselect, LME Ring, SGX MSCI, CME WTI, EEX Power, and TOCOM Energy are also shown.`}
             expanded={dayCardExpandedState.expanded}
             onToggle={() =>
               dayCardExpandedState.setExpanded((current) => !current)
@@ -2697,6 +2767,8 @@ export function PromptHomeWorkspace({
   weatherDataError = "",
   onEnsureWeatherData,
   onOpenView,
+  customEventsHref = `/?view=settings#${SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID}`,
+  onOpenCustomEvents,
   onRefreshData,
   initialMessages = [],
   initialMapAssetLayerVisible = true,
@@ -3022,8 +3094,20 @@ export function PromptHomeWorkspace({
     },
     [authSession, loadRuntimeSettings],
   );
-
   const voiceTranscriptionSettings = runtimeSettings?.voice_transcription;
+  const voiceGenerationSettings = runtimeSettings?.voice_generation;
+  const synthesizeVoicePlayback = useCallback(
+    async (text: string) => {
+      if (!authSession) {
+        throw new Error("Sign in to use generated voice playback.");
+      }
+
+      return synthesizeAssistantVoice(appConfig.apiBase, text, {
+        accessToken: authSession.accessToken,
+      });
+    },
+    [authSession],
+  );
 
   const voiceComposer = useVoiceComposer({
     draft,
@@ -3042,6 +3126,28 @@ export function PromptHomeWorkspace({
           : "Checking whether backend voice transcription is available.",
     },
   });
+  const voicePlayback = useVoicePlayback({
+    backendSynthesis: {
+      enabled: Boolean(authSession && voiceGenerationSettings?.enabled),
+      synthesizeAudio: synthesizeVoicePlayback,
+    },
+  });
+
+  useEffect(() => {
+    if (!voicePlayback.activePlaybackId) {
+      return;
+    }
+
+    if (
+      displayedMessages.some(
+        (message) => message.id === voicePlayback.activePlaybackId,
+      )
+    ) {
+      return;
+    }
+
+    voicePlayback.stopPlayback();
+  }, [displayedMessages, voicePlayback]);
 
   useEffect(() => {
     if (!authSession || runtimeSettings) {
@@ -3195,6 +3301,7 @@ export function PromptHomeWorkspace({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    voicePlayback.stopPlayback();
     voiceComposer.cancelListening();
     if (!authSession) {
       const trimmedDraft = draft.trim();
@@ -3234,6 +3341,7 @@ export function PromptHomeWorkspace({
   }
 
   function loadPromptDraft(nextDraft: string) {
+    voicePlayback.stopPlayback();
     voiceComposer.cancelListening();
     setPromptCardExpanded(true);
     setDraft(nextDraft);
@@ -3420,6 +3528,8 @@ export function PromptHomeWorkspace({
           currentTime={currentTime}
           timeDisplaySettings={timeDisplaySettings}
           timeZoneOptions={timeZoneOptions}
+          customEventsHref={customEventsHref}
+          onOpenCustomEvents={onOpenCustomEvents}
           onTimeZoneChange={(nextTimeZone) => {
             const savedSettings = saveTimeDisplaySettingsSnapshot({
               ...timeDisplaySettings,
@@ -3441,6 +3551,11 @@ export function PromptHomeWorkspace({
           weatherDataError={weatherDataError}
           onOpenMapWorkspace={() => onOpenView("map")}
           initialMapAssetLayerVisible={initialMapAssetLayerVisible}
+        />
+        <PromptHomeDocumentUploadCard
+          authSession={authSession}
+          onOpenOperationsWorkspace={() => onOpenView("operations")}
+          onSignIn={handleSignIn}
         />
 
         <section
@@ -3795,120 +3910,153 @@ export function PromptHomeWorkspace({
                 </p>
               </div>
             ) : (
-              displayedMessages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`assistant-message assistant-message-${message.role}`}
-                >
-                  <div className="assistant-message-head">
-                    <strong>
-                      {message.role === "assistant" ? "Assistant" : "You"}
-                    </strong>
-                    {message.provider && message.model ? (
-                      <span>
-                        {message.provider} · {message.model}
-                      </span>
-                    ) : null}
-                  </div>
-                  {message.content ? <p>{message.content}</p> : null}
-                  {message.runId ? (
-                    <div className="assistant-message-meta">
-                      <span>Run #{message.runId}</span>
-                      <button
-                        type="button"
-                        className="assistant-run-link"
-                        onClick={() => onOpenView("assistant")}
-                      >
-                        Open diagnostics
-                      </button>
-                    </div>
-                  ) : null}
-                  {message.actionRequests &&
-                  message.actionRequests.length > 0 ? (
-                    <div className="prompt-home-action-review">
-                      <div className="feedback-banner prompt-home-action-banner">
-                        <strong>
-                          {message.actionRequests.length.toLocaleString()}{" "}
-                          governed action request
-                          {message.actionRequests.length === 1 ? "" : "s"}{" "}
-                          staged
-                        </strong>
-                        <p>
-                          Nothing changes until the typed review path approves
-                          and executes it.
-                        </p>
-                      </div>
-                      <AssistantActionRequestList
-                        actionRequests={message.actionRequests}
-                        actionRequestIdsInFlight={actionRequestIdsInFlight}
-                        formatDate={formatPromptTimestamp}
-                        onDecision={handleActionRequestDecision}
-                        onOpenRun={() => onOpenView("assistant")}
-                        showUserId
-                      />
-                      <div className="assistant-message-meta prompt-home-action-path">
+              displayedMessages.map((message) => {
+                const canReadAloud =
+                  message.role === "assistant" &&
+                  voicePlayback.canPlay(message.content);
+                const readingMessage = voicePlayback.isPlaying(message.id);
+
+                return (
+                  <article
+                    key={message.id}
+                    className={`assistant-message assistant-message-${message.role}`}
+                  >
+                    <div className="assistant-message-head">
+                      <strong>
+                        {message.role === "assistant" ? "Assistant" : "You"}
+                      </strong>
+                      {message.provider && message.model ? (
                         <span>
-                          Need the old review inbox or full run trace?
+                          {message.provider} · {message.model}
                         </span>
+                      ) : null}
+                    </div>
+                    {message.content ? <p>{message.content}</p> : null}
+                    {canReadAloud ? (
+                      <div className="assistant-message-meta">
                         <button
                           type="button"
-                          className="button button-secondary"
-                          onClick={() => onOpenView("assistant")}
+                          className={`assistant-run-link ${readingMessage ? "is-selected" : ""}`}
+                          aria-pressed={readingMessage}
+                          disabled={!voicePlayback.supported}
+                          title={
+                            voicePlayback.supported
+                              ? readingMessage
+                                ? "Stop reading this assistant response aloud."
+                                : "Read this assistant response aloud."
+                              : "Read aloud is not supported in this browser."
+                          }
+                          onClick={() => {
+                            voiceComposer.cancelListening();
+                            voicePlayback.togglePlayback(
+                              message.id,
+                              message.content,
+                            );
+                          }}
                         >
-                          Open Assistant Console
+                          {resolveVoicePlaybackButtonLabel(readingMessage)}
                         </button>
                       </div>
-                    </div>
-                  ) : null}
-                  {message.navigationIntents &&
-                  message.navigationIntents.length > 0 ? (
-                    <div
-                      className="prompt-home-handoff-list"
-                      aria-label="Assistant workspace handoffs"
-                    >
-                      {message.navigationIntents.map((intent) => (
-                        <div
-                          key={buildPromptNavigationIntentKey(intent)}
-                          className="prompt-home-handoff-item"
+                    ) : null}
+                    {message.runId ? (
+                      <div className="assistant-message-meta">
+                        <span>Run #{message.runId}</span>
+                        <button
+                          type="button"
+                          className="assistant-run-link"
+                          onClick={() => onOpenView("assistant")}
                         >
+                          Open diagnostics
+                        </button>
+                      </div>
+                    ) : null}
+                    {message.actionRequests &&
+                    message.actionRequests.length > 0 ? (
+                      <div className="prompt-home-action-review">
+                        <div className="feedback-banner prompt-home-action-banner">
+                          <strong>
+                            {message.actionRequests.length.toLocaleString()}{" "}
+                            governed action request
+                            {message.actionRequests.length === 1 ? "" : "s"}{" "}
+                            staged
+                          </strong>
+                          <p>
+                            Nothing changes until the typed review path approves
+                            and executes it.
+                          </p>
+                        </div>
+                        <AssistantActionRequestList
+                          actionRequests={message.actionRequests}
+                          actionRequestIdsInFlight={actionRequestIdsInFlight}
+                          formatDate={formatPromptTimestamp}
+                          onDecision={handleActionRequestDecision}
+                          onOpenRun={() => onOpenView("assistant")}
+                          showUserId
+                        />
+                        <div className="assistant-message-meta prompt-home-action-path">
+                          <span>
+                            Need the old review inbox or full run trace?
+                          </span>
                           <button
                             type="button"
-                            className="prompt-home-handoff"
-                            onClick={() =>
-                              openNavigationIntent(intent, {
-                                includeHandoff: true,
-                                recordOutcome: true,
-                              })
-                            }
+                            className="button button-secondary"
+                            onClick={() => onOpenView("assistant")}
                           >
-                            <strong>
-                              {promptNavigationIntentLabel(intent)}
-                            </strong>
-                            <span>{promptNavigationIntentDetail(intent)}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="button button-ghost prompt-home-handoff-dismiss"
-                            aria-label={`Dismiss ${promptNavigationIntentLabel(intent)}`}
-                            onClick={() =>
-                              handleDismissNavigationIntent(message.id, intent)
-                            }
-                          >
-                            Dismiss
+                            Open Assistant Console
                           </button>
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {message.warnings && message.warnings.length > 0 ? (
-                    <div className="assistant-message-meta">
-                      {message.warnings.map((warning) => (
-                        <span key={warning}>{warning}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              ))
+                      </div>
+                    ) : null}
+                    {message.navigationIntents &&
+                    message.navigationIntents.length > 0 ? (
+                      <div
+                        className="prompt-home-handoff-list"
+                        aria-label="Assistant workspace handoffs"
+                      >
+                        {message.navigationIntents.map((intent) => (
+                          <div
+                            key={buildPromptNavigationIntentKey(intent)}
+                            className="prompt-home-handoff-item"
+                          >
+                            <button
+                              type="button"
+                              className="prompt-home-handoff"
+                              onClick={() =>
+                                openNavigationIntent(intent, {
+                                  includeHandoff: true,
+                                  recordOutcome: true,
+                                })
+                              }
+                            >
+                              <strong>
+                                {promptNavigationIntentLabel(intent)}
+                              </strong>
+                              <span>{promptNavigationIntentDetail(intent)}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-ghost prompt-home-handoff-dismiss"
+                              aria-label={`Dismiss ${promptNavigationIntentLabel(intent)}`}
+                              onClick={() =>
+                                handleDismissNavigationIntent(message.id, intent)
+                              }
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {message.warnings && message.warnings.length > 0 ? (
+                      <div className="assistant-message-meta">
+                        {message.warnings.map((warning) => (
+                          <span key={warning}>{warning}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })
             )}
           </div>
         </article>

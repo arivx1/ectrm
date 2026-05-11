@@ -129,6 +129,7 @@ Run these commands from the repo root:
 
 ```bash
 make api-contract-check
+make api-mcp-test
 make api-assistant-evals
 make api-test
 make web-build
@@ -160,6 +161,13 @@ If assistant or automation behavior changes, run the explicit eval lane too:
 make api-assistant-evals
 ```
 
+If a change touches the ChatGPT MCP surface, run the dedicated transport and
+auth lane too:
+
+```bash
+make api-mcp-test
+```
+
 For the seeded browser smoke harness, install Chromium once and run:
 
 ```bash
@@ -186,6 +194,7 @@ dependencies.
 ## Additional Docs
 
 - [Business use case roadmap](docs/engineering/business-use-case-roadmap.md)
+- [Arbitrage detection design](docs/engineering/arbitrage-detection-design.md)
 - [Governed core platform roadmap](docs/engineering/core-platform-roadmap.md)
 - [Governed core platform slice lock](docs/engineering/core-platform-slice-lock.md)
 - [Governed core platform boundary reset](docs/engineering/core-platform-boundary-reset.md)

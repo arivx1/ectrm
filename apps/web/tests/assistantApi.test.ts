@@ -71,6 +71,7 @@ import {
   simulateAssistantAgentPolicy,
   streamAssistantResponse,
   submitAssistantPromptNavigationOutcome,
+  synthesizeAssistantVoice,
   transcribeAssistantVoice,
   updateAdminAssistantAgentWorkPackage,
   updateAssistantAgent,
@@ -162,6 +163,35 @@ test('transcribeAssistantVoice uploads form data and auth headers to the voice e
   assert.equal(uploadedFile.type, 'audio/webm')
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer voice-token')
+})
+
+test('synthesizeAssistantVoice posts json and returns the generated audio blob', async () => {
+  requestOkMock.mockResolvedValueOnce(
+    new Response(new Blob(['audio'], { type: 'audio/mpeg' }), {
+      status: 200,
+      headers: { 'Content-Type': 'audio/mpeg' },
+    }),
+  )
+
+  const payload = await synthesizeAssistantVoice(
+    'http://api.test',
+    'Read back the settlement blockers.',
+    {
+      accessToken: 'speech-token',
+    },
+  )
+
+  assert.ok(payload instanceof Blob)
+  assert.equal(payload.type, 'audio/mpeg')
+  assert.equal(await payload.text(), 'audio')
+  const [url, init] = requestOkMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/voice/speech')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer speech-token')
+  assert.equal(headers.get('Content-Type'), 'application/json')
+  assert.deepEqual(JSON.parse(String((init as RequestInit | undefined)?.body)), {
+    text: 'Read back the settlement blockers.',
+  })
 })
 
 test('listAdminAssistantActionRequests includes history filters and returns the page payload', async () => {

@@ -6,6 +6,94 @@
   flex-wrap: wrap;
 }
 
+.settings-disclosure-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-disclosure-card.is-collapsed {
+  gap: 0;
+}
+
+.settings-disclosure-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem 0.9rem;
+  align-items: start;
+  width: 100%;
+  padding: 1.15rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-disclosure-toggle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
+  outline-offset: -2px;
+}
+
+.settings-disclosure-copy {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.settings-disclosure-copy h3,
+.settings-disclosure-copy p {
+  margin: 0;
+}
+
+.settings-disclosure-copy h3 {
+  color: #13293d;
+}
+
+.settings-disclosure-copy strong {
+  color: #30404d;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.settings-disclosure-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  justify-self: end;
+}
+
+.settings-disclosure-toggle-meta small {
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-disclosure-toggle-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #30404d;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.settings-disclosure-body {
+  display: grid;
+  gap: 1rem;
+  padding: 0 1.15rem 1.15rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.settings-disclosure-body[hidden] {
+  display: none;
+}
+
 .google-sign-in-button {
   min-height: 44px;
 }
@@ -96,6 +184,46 @@
   gap: 1rem;
 }
 
+.settings-custom-events-panel,
+.settings-custom-events-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-custom-events-form-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-custom-events-form-field {
+  min-width: 0;
+}
+
+.settings-custom-events-form-field-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-custom-events-form-field-checkbox {
+  align-content: start;
+}
+
+.settings-custom-events-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.75rem;
+}
+
+.settings-custom-events-textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.form-note-success {
+  color: #127c6c;
+}
+
 .google-calendar-toolbar {
   align-items: center;
 }
@@ -145,7 +273,19 @@
 }
 
 @media (max-width: 720px) {
+  .settings-disclosure-toggle {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-disclosure-toggle-meta {
+    justify-self: start;
+  }
+
   .google-calendar-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-custom-events-form-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

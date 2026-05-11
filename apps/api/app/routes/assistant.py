@@ -129,6 +129,8 @@ from apps.api.app.domains.assistant.services.runs import (
     to_assistant_run_summary_out,
 )
 from apps.api.app.domains.assistant.services.voice import (
+    AssistantVoiceGenerationError,
+    synthesize_assistant_voice_audio,
     AssistantVoiceTranscriptionError,
     transcribe_assistant_voice_audio,
 )
@@ -197,6 +199,7 @@ from apps.api.app.schemas.assistant import (
     AssistantRunOut,
     AssistantRunSummaryOut,
     AssistantRuntimeSettingsOut,
+    AssistantVoiceSpeechRequest,
     AssistantVoiceTranscriptionOut,
 )
 
@@ -213,6 +216,22 @@ def _action_decision_from_payload(payload: AssistantActionDecisionRequest | None
         correction_summary=payload.correction_summary,
         correction_fields=tuple(payload.correction_fields),
     )
+
+
+def _build_prompt_context_preview_warnings(sections: list[AssistantPromptSection]) -> list[str]:
+    warnings: list[str] = []
+    for section in sections:
+        if not section.uses_fallback:
+            continue
+        if section.contract_key == "organization":
+            warnings.append(
+                "Organization Context is using env-backed fallback values because no published organization profile is active."
+            )
+        elif section.contract_key == "business-model":
+            warnings.append(
+                "Business Operating Model is using env-backed fallback values because no published operating-model definition is active."
+            )
+    return warnings
 
 
 def get_assistant_service(db: Session, *, actor_id: str | None = None) -> AssistantService:
@@ -504,7 +523,11 @@ def preview_assistant_prompt_context(
         provider=provider.provider,
         model=model,
         generated_at=prompt_context.generated_at,
-        warnings=[*warnings, *prompt_context.warnings],
+        warnings=[
+            *warnings,
+            *prompt_context.warnings,
+            *_build_prompt_context_preview_warnings(list(prompt_context.sections)),
+        ],
         sections=[_to_prompt_section_out(section) for section in prompt_context.sections],
         rendered_system_prompt=prompt_context.system_prompt,
     )
@@ -558,6 +581,30 @@ async def transcribe_current_user_assistant_voice(
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     except AssistantVoiceTranscriptionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/voice/speech")
+async def synthesize_current_user_assistant_voice(
+    payload: AssistantVoiceSpeechRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        result = await synthesize_assistant_voice_audio(text=payload.text)
+        return Response(
+            content=result.payload,
+            media_type=result.content_type,
+            headers={
+                "x-assistant-voice-provider": result.provider,
+                "x-assistant-voice-model": result.model,
+                "x-assistant-voice-voice": result.voice,
+            },
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AssistantVoiceGenerationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 

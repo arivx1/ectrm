@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import unittest
 from concurrent.futures import CancelledError
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
+from apps.api.app.core.logging import configure_logging
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
@@ -75,8 +77,6 @@ class McpOAuthTests(unittest.TestCase):
 
         clear_mcp_server_cache()
         mount_mcp_http_app(app)
-        cls.client_context = TestClient(app, base_url="http://127.0.0.1")
-        cls.client = cls.client_context.__enter__()
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -91,10 +91,6 @@ class McpOAuthTests(unittest.TestCase):
         settings.MCP_OAUTH_AUTHORIZATION_CODE_TTL_SECONDS = cls._previous_settings["MCP_OAUTH_AUTHORIZATION_CODE_TTL_SECONDS"]
         settings.SINGLE_USER_AUTH_ENABLED = cls._previous_settings["SINGLE_USER_AUTH_ENABLED"]
 
-        try:
-            cls.client_context.__exit__(None, None, None)
-        except CancelledError:
-            pass
         app.state.session_factory = cls.original_session_factory
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=cls.engine)
@@ -121,6 +117,25 @@ class McpOAuthTests(unittest.TestCase):
                 )
             )
             session.commit()
+        self.client_context = TestClient(app, base_url="http://127.0.0.1")
+        self.client = self.client_context.__enter__()
+
+    def tearDown(self) -> None:
+        try:
+            self.client_context.__exit__(None, None, None)
+        except CancelledError:
+            pass
+
+    def _swap_log_stream(self) -> tuple[io.StringIO, object, object]:
+        logger = configure_logging()
+        handler = next(
+            handler
+            for handler in logger.handlers
+            if getattr(handler, "_ectrm_handler", False)
+        )
+        stream = io.StringIO()
+        original_stream = handler.setStream(stream)
+        return stream, handler, original_stream
 
     def test_status_route_reports_oauth_runtime(self) -> None:
         response = self.client.get("/mcp-status")
@@ -155,6 +170,98 @@ class McpOAuthTests(unittest.TestCase):
         self.assertEqual(payload["token_endpoint_auth_method"], "none")
 
     def test_oauth_flow_can_list_tools_over_http(self) -> None:
+        access_token = self._issue_access_token()
+
+        whoami_response = self.client.get(
+            "/mcp/whoami",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self.assertEqual(whoami_response.status_code, 200)
+        whoami_payload = whoami_response.json()
+        self.assertEqual(whoami_payload["user_id"], "mcp_admin")
+        self.assertEqual(whoami_payload["role"], "OPS_ADMIN")
+        self.assertEqual(whoami_payload["scopes"], ["mcp:tools"])
+
+        async def _run() -> None:
+            def _httpx_client_factory(headers=None, timeout=None, auth=None):
+                return httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://127.0.0.1",
+                    follow_redirects=True,
+                    headers=headers,
+                    timeout=timeout or httpx.Timeout(30.0),
+                    auth=auth,
+                )
+
+            async with streamablehttp_client(
+                "http://127.0.0.1/mcp/",
+                headers={"Authorization": f"Bearer {access_token}"},
+                httpx_client_factory=_httpx_client_factory,
+            ) as (read_stream, write_stream, _get_session_id):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools_result = await session.list_tools()
+                    self.assertEqual({tool.name for tool in tools_result.tools}, {"search", "fetch"})
+
+        anyio.run(_run)
+
+    def test_mcp_tool_calls_emit_auditable_logs(self) -> None:
+        stream, handler, original_stream = self._swap_log_stream()
+        try:
+            access_token = self._issue_access_token()
+
+            async def _run() -> None:
+                def _httpx_client_factory(headers=None, timeout=None, auth=None):
+                    return httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app=app),
+                        base_url="http://127.0.0.1",
+                        follow_redirects=True,
+                        headers=headers,
+                        timeout=timeout or httpx.Timeout(30.0),
+                        auth=auth,
+                    )
+
+                async with streamablehttp_client(
+                    "http://127.0.0.1/mcp/",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "x-correlation-id": "mcp-log-123",
+                    },
+                    httpx_client_factory=_httpx_client_factory,
+                ) as (read_stream, write_stream, _get_session_id):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        result = await session.call_tool("search", {"query": "AI Workflow"})
+                        self.assertFalse(result.isError)
+
+            anyio.run(_run)
+            handler.flush()
+        finally:
+            handler.setStream(original_stream)
+
+        output = stream.getvalue()
+        self.assertIn("MCP tool completed tool_name=search", output)
+        self.assertIn("correlation_id=mcp-log-123", output)
+        self.assertIn("actor_id=mcp_admin", output)
+        self.assertIn("role=OPS_ADMIN", output)
+        self.assertIn("session_id=", output)
+        self.assertIn("request_path=/mcp/tools/search", output)
+        self.assertIn("source_surface=mcp.search", output)
+
+    def _register_client(self) -> str:
+        response = self.client.post(
+            "/mcp/register",
+            json={
+                "redirect_uris": ["http://127.0.0.1/callback"],
+                "token_endpoint_auth_method": "none",
+                "scope": "mcp:tools",
+                "client_name": "ChatGPT Dev Test",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        return response.json()["client_id"]
+
+    def _issue_access_token(self) -> str:
         client_id = self._register_client()
         verifier = "test-verifier-1234567890"
         challenge = self._pkce_challenge(verifier)
@@ -209,55 +316,9 @@ class McpOAuthTests(unittest.TestCase):
         )
         self.assertEqual(token_response.status_code, 200)
         token_payload = token_response.json()
-        access_token = token_payload["access_token"]
         self.assertTrue(token_payload["refresh_token"])
         self.assertEqual(token_payload["scope"], "mcp:tools")
-
-        whoami_response = self.client.get(
-            "/mcp/whoami",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        self.assertEqual(whoami_response.status_code, 200)
-        whoami_payload = whoami_response.json()
-        self.assertEqual(whoami_payload["user_id"], "mcp_admin")
-        self.assertEqual(whoami_payload["role"], "OPS_ADMIN")
-        self.assertEqual(whoami_payload["scopes"], ["mcp:tools"])
-
-        async def _run() -> None:
-            def _httpx_client_factory(headers=None, timeout=None, auth=None):
-                return httpx.AsyncClient(
-                    transport=httpx.ASGITransport(app=app),
-                    base_url="http://127.0.0.1",
-                    follow_redirects=True,
-                    headers=headers,
-                    timeout=timeout or httpx.Timeout(30.0),
-                    auth=auth,
-                )
-
-            async with streamablehttp_client(
-                "http://127.0.0.1/mcp/",
-                headers={"Authorization": f"Bearer {access_token}"},
-                httpx_client_factory=_httpx_client_factory,
-            ) as (read_stream, write_stream, _get_session_id):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
-                    tools_result = await session.list_tools()
-                    self.assertEqual({tool.name for tool in tools_result.tools}, {"search", "fetch"})
-
-        anyio.run(_run)
-
-    def _register_client(self) -> str:
-        response = self.client.post(
-            "/mcp/register",
-            json={
-                "redirect_uris": ["http://127.0.0.1/callback"],
-                "token_endpoint_auth_method": "none",
-                "scope": "mcp:tools",
-                "client_name": "ChatGPT Dev Test",
-            },
-        )
-        self.assertEqual(response.status_code, 201)
-        return response.json()["client_id"]
+        return token_payload["access_token"]
 
     def _pkce_challenge(self, verifier: str) -> str:
         digest = hashlib.sha256(verifier.encode("utf-8")).digest()

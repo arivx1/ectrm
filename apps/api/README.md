@@ -116,6 +116,7 @@ From the repo root, the canonical backend verification wrapper is:
 
 ```bash
 make api-contract-check
+make api-mcp-test
 make api-assistant-evals
 make api-test
 ```
@@ -140,6 +141,9 @@ make api-test
 It currently runs on Python `3.12` and does not provision PostgreSQL, because
 the checked-in backend test suite uses self-contained test database fixtures
 for the default CI path.
+
+`make api-mcp-test` is the narrow MCP transport lane. Use it whenever changes
+touch `/mcp`, MCP auth, or the published `search` and `fetch` tools.
 
 `make api-assistant-evals` is the explicit assistant-governance eval gate. Use
 it whenever changes affect prompt behavior, provider fallback, tool access, or
@@ -310,14 +314,43 @@ a visible failure to the backend request log quickly.
 The Settings workspace can show upcoming Google Calendar events without routing
 calendar traffic through the API. To enable that panel:
 
-- set `GOOGLE_AUTH_CLIENT_ID` to a Google OAuth web client ID
-- add the web app origin, such as `http://localhost:5173`, to the client ID's
-  authorized JavaScript origins
-- enable the Google Calendar API in the same Google Cloud project
+1. In Google Cloud, create or select the project that will own the browser-side
+   calendar access.
+2. Enable the Google Calendar API in that project.
+3. If Google prompts for it, complete the OAuth consent setup for the project.
+4. Create an OAuth client ID with application type `Web application`.
+5. Under authorized JavaScript origins, add the local web origins you use for
+   ECTRM, such as:
+   - `http://localhost:5173`
+   - `http://127.0.0.1:5173`
+   - any alternate local Vite origin you actually run, such as
+     `http://localhost:5174`
+6. Copy the client ID value. It should look similar to:
+
+   ```text
+   1234567890-abc123def456.apps.googleusercontent.com
+   ```
+
+7. Add it to `apps/api/.env`:
+
+   ```text
+   GOOGLE_AUTH_CLIENT_ID=1234567890-abc123def456.apps.googleusercontent.com
+   ```
+
+8. Restart the API and reload the Settings workspace.
 
 `GOOGLE_AUTH_ENABLED=true` is only required when you also want Google-based app
 sign-in. The calendar panel itself only needs the exposed client ID because the
 browser requests `calendar.readonly` access directly from Google.
+
+Implementation notes:
+
+- Set the client ID, not the client secret.
+- The API exposes `GOOGLE_AUTH_CLIENT_ID` through `GET /settings/public`, and
+  the browser uses that value to request Google Calendar readonly access
+  directly from Google.
+- The Google access token stays in the browser session for this panel and is
+  not persisted by the ECTRM API.
 
 ## Gmail Inbox Delivery
 

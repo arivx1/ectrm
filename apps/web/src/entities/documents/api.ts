@@ -247,3 +247,15 @@ export async function fetchDocumentPagePreview(
   })
   return response.blob()
 }
+
+export async function fetchDocumentSource(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+): Promise<Blob> {
+  const response = await requestOk(`${apiBase}/documents/${documentId}/source`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
+  return response.blob()
+}

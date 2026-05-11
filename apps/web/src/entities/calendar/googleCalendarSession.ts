@@ -79,6 +79,28 @@ function readSessionStorageRaw(key: string): string {
   return window.sessionStorage.getItem(key) ?? "";
 }
 
+function readPersistentStorageString(key: string): string {
+  const localValue = readLocalStorageString(key);
+  if (localValue) {
+    return localValue;
+  }
+
+  return readSessionStorageString(key);
+}
+
+function readPersistentStorageRaw(key: string): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const localValue = window.localStorage.getItem(key);
+  if (localValue !== null) {
+    return localValue;
+  }
+
+  return readSessionStorageRaw(key);
+}
+
 function writeLocalStorageString(key: string, value: string): void {
   if (typeof window === "undefined") {
     return;
@@ -93,18 +115,17 @@ function writeLocalStorageString(key: string, value: string): void {
   window.localStorage.setItem(key, normalizedValue);
 }
 
-function writeSessionStorageString(key: string, value: string): void {
+function clearSessionStorageKey(key: string): void {
   if (typeof window === "undefined") {
     return;
   }
 
-  const normalizedValue = value.trim();
-  if (!normalizedValue) {
-    window.sessionStorage.removeItem(key);
-    return;
-  }
+  window.sessionStorage.removeItem(key);
+}
 
-  window.sessionStorage.setItem(key, normalizedValue);
+function writePersistentStorageString(key: string, value: string): void {
+  writeLocalStorageString(key, value);
+  clearSessionStorageKey(key);
 }
 
 function readLocalStorageBoolean(key: string): boolean {
@@ -151,6 +172,7 @@ function parseCachedEvents(rawValue: string): GoogleCalendarEvent[] {
       : EMPTY_GOOGLE_CALENDAR_EVENTS;
   } catch {
     if (typeof window !== "undefined") {
+      window.localStorage.removeItem(GOOGLE_CALENDAR_CACHED_EVENTS_STORAGE_KEY);
       window.sessionStorage.removeItem(
         GOOGLE_CALENDAR_CACHED_EVENTS_STORAGE_KEY,
       );
@@ -165,14 +187,16 @@ function writeCachedEvents(events: GoogleCalendarEvent[]): void {
   }
 
   if (events.length === 0) {
+    window.localStorage.removeItem(GOOGLE_CALENDAR_CACHED_EVENTS_STORAGE_KEY);
     window.sessionStorage.removeItem(GOOGLE_CALENDAR_CACHED_EVENTS_STORAGE_KEY);
     return;
   }
 
-  window.sessionStorage.setItem(
+  window.localStorage.setItem(
     GOOGLE_CALENDAR_CACHED_EVENTS_STORAGE_KEY,
     JSON.stringify(events),
   );
+  window.sessionStorage.removeItem(GOOGLE_CALENDAR_CACHED_EVENTS_STORAGE_KEY);
 }
 
 function emitGoogleCalendarSessionChange(): void {
@@ -185,23 +209,23 @@ function emitGoogleCalendarSessionChange(): void {
 
 function readGoogleCalendarSessionRawSnapshot(): GoogleCalendarSessionRawSnapshot {
   return {
-    accessToken: readSessionStorageString(GOOGLE_CALENDAR_ACCESS_TOKEN_STORAGE_KEY),
-    accessTokenExpiresAt: readSessionStorageString(
+    accessToken: readPersistentStorageString(GOOGLE_CALENDAR_ACCESS_TOKEN_STORAGE_KEY),
+    accessTokenExpiresAt: readPersistentStorageString(
       GOOGLE_CALENDAR_ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY,
     ),
     selectedCalendarId: readLocalStorageString(
       GOOGLE_CALENDAR_SELECTED_ID_STORAGE_KEY,
     ),
-    selectedCalendarSummary: readSessionStorageString(
+    selectedCalendarSummary: readPersistentStorageString(
       GOOGLE_CALENDAR_SELECTED_SUMMARY_STORAGE_KEY,
     ),
     scopeGranted: readLocalStorageBoolean(
       GOOGLE_CALENDAR_SCOPE_GRANTED_STORAGE_KEY,
     ),
-    cachedEvents: readSessionStorageRaw(
+    cachedEvents: readPersistentStorageRaw(
       GOOGLE_CALENDAR_CACHED_EVENTS_STORAGE_KEY,
     ),
-    cachedAt: readSessionStorageString(GOOGLE_CALENDAR_CACHED_AT_STORAGE_KEY),
+    cachedAt: readPersistentStorageString(GOOGLE_CALENDAR_CACHED_AT_STORAGE_KEY),
   };
 }
 
@@ -293,7 +317,7 @@ export function saveGoogleCalendarSelection(
     GOOGLE_CALENDAR_SELECTED_ID_STORAGE_KEY,
     selection.selectedCalendarId,
   );
-  writeSessionStorageString(
+  writePersistentStorageString(
     GOOGLE_CALENDAR_SELECTED_SUMMARY_STORAGE_KEY,
     selection.selectedCalendarSummary?.trim() ?? "",
   );
@@ -314,11 +338,11 @@ export function saveGoogleCalendarAccessToken(
     accessTokenExpiresAt: number | null;
   },
 ): void {
-  writeSessionStorageString(
+  writePersistentStorageString(
     GOOGLE_CALENDAR_ACCESS_TOKEN_STORAGE_KEY,
     access.accessToken,
   );
-  writeSessionStorageString(
+  writePersistentStorageString(
     GOOGLE_CALENDAR_ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY,
     access.accessTokenExpiresAt === null
       ? ""
@@ -334,12 +358,12 @@ export function saveGoogleCalendarEventCache(
     cachedAt: string;
   },
 ): void {
-  writeSessionStorageString(
+  writePersistentStorageString(
     GOOGLE_CALENDAR_SELECTED_SUMMARY_STORAGE_KEY,
     cache.selectedCalendarSummary?.trim() ?? "",
   );
   writeCachedEvents(cache.events);
-  writeSessionStorageString(
+  writePersistentStorageString(
     GOOGLE_CALENDAR_CACHED_AT_STORAGE_KEY,
     cache.cachedAt,
   );
@@ -349,13 +373,13 @@ export function saveGoogleCalendarEventCache(
 export function clearGoogleCalendarSession(): void {
   writeLocalStorageString(GOOGLE_CALENDAR_SELECTED_ID_STORAGE_KEY, "");
   writeLocalStorageBoolean(GOOGLE_CALENDAR_SCOPE_GRANTED_STORAGE_KEY, false);
-  writeSessionStorageString(GOOGLE_CALENDAR_SELECTED_SUMMARY_STORAGE_KEY, "");
-  writeSessionStorageString(GOOGLE_CALENDAR_ACCESS_TOKEN_STORAGE_KEY, "");
-  writeSessionStorageString(
+  writePersistentStorageString(GOOGLE_CALENDAR_SELECTED_SUMMARY_STORAGE_KEY, "");
+  writePersistentStorageString(GOOGLE_CALENDAR_ACCESS_TOKEN_STORAGE_KEY, "");
+  writePersistentStorageString(
     GOOGLE_CALENDAR_ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY,
     "",
   );
   writeCachedEvents([]);
-  writeSessionStorageString(GOOGLE_CALENDAR_CACHED_AT_STORAGE_KEY, "");
+  writePersistentStorageString(GOOGLE_CALENDAR_CACHED_AT_STORAGE_KEY, "");
   emitGoogleCalendarSessionChange();
 }

@@ -139,6 +139,8 @@ function projectedStatusForEventType(
     default:
       return 'PLANNED'
   }
+
+  return 'PLANNED'
 }
 
 function executionStatusTone(status: DeliveryExecutionStatus): 'active' | 'blocked' | 'in-progress' | 'planned' | 'shipped' {

@@ -43,6 +43,14 @@ function sourceLabel(handoff: AppRouteHandoff): string {
     return 'Assistant'
   }
 
+  if (handoff.source === 'map') {
+    return 'Map'
+  }
+
+  if (handoff.source === 'reference') {
+    return 'Reference Data'
+  }
+
   return 'Activity Feed'
 }
 

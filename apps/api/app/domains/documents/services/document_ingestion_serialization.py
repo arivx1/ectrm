@@ -33,6 +33,7 @@ from .document_ingestion_review import build_document_summary
 from .document_ingestion_review import page_text_source
 from .document_ingestion_storage import document_page_preview_absolute_path
 from .document_ingestion_storage import document_page_preview_exists
+from .document_ingestion_storage import stored_pdf_absolute_path
 
 VALID_DOCUMENT_PROCESSOR_PROVIDERS = {"openai", "anthropic", "google"}
 
@@ -73,6 +74,22 @@ def get_document_page_preview_path(
     return preview_path
 
 
+def get_document_source_file_details(
+    db: Session,
+    *,
+    document_id: str,
+) -> tuple[Path, str, str]:
+    document = db.get(DocumentIngestion, document_id)
+    if document is None:
+        raise LookupError(f"Document '{document_id}' was not found")
+
+    source_path = stored_pdf_absolute_path(document.storage_key)
+    if not source_path.exists():
+        raise LookupError(f"Stored source PDF is not available for document '{document_id}'")
+
+    return source_path, document.content_type, document.original_filename
+
+
 def serialize_documents(
     db: Session,
     documents: list[DocumentIngestion],
@@ -101,6 +118,7 @@ def serialize_documents(
     for document in documents:
         document_pages = pages_by_document.get(document.document_id, [])
         document_record_links = record_links_by_document.get(document.document_id, [])
+        source_available = stored_pdf_absolute_path(document.storage_key).exists()
         document_summary = build_document_summary(document_pages, review_status=document.review_status)
         document_routing_payload = document_summary.get("routing_assessment")
         document_routing_assessment = (
@@ -197,6 +215,7 @@ def serialize_documents(
                 sha256=document.sha256,
                 size_bytes=document.size_bytes,
                 page_count=document.page_count,
+                source_available=source_available,
                 status=document.status,
                 processor_provider=document.processor_provider,
                 processor_model=document.processor_model,

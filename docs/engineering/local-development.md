@@ -86,6 +86,7 @@ Run these from the repo root:
 
 ```bash
 make api-contract-check
+make api-mcp-test
 make api-assistant-evals
 make api-test
 make web-build
@@ -130,6 +131,10 @@ verification targets instead of redefining parallel command sets.
 Use `make api-assistant-evals` explicitly whenever changes affect assistant or
 automation behavior. That lane is also part of the repo-level `make verify`
 contract now.
+
+Use `make api-mcp-test` explicitly whenever changes affect the ChatGPT MCP
+surface, including `/mcp` transport behavior, MCP OAuth, or the published
+`search` and `fetch` tools.
 
 The first backend CI lane runs on Python `3.12`, checks the committed trade
 metadata contract artifact with `make api-contract-check`, and currently does

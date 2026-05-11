@@ -20,11 +20,15 @@ import {
   formatNumber,
   statusTone,
 } from '../../shared/format'
-import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
+import {
+  buildRailRouteWorkspaceHandoff,
+  type AppRouteHandoff,
+} from '../../shared/appRouteHandoff'
 import type { ViewKey } from '../../shared/models'
 import { resolveTradeFormMetadata } from '../../shared/tradeMetadata'
 import type { DocumentationDocumentKey } from '../../workspaces/docs/DocumentationWorkspace'
 import { resolveTradeInspectorTabForEvent } from '../../workspaces/events/eventHelpers'
+import { SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID } from '../../workspaces/settings/userEventsPanelShared'
 
 const DocumentationWorkspace = lazy(() =>
   import('../../workspaces/docs/DocumentationWorkspace').then((module) => ({
@@ -110,6 +114,7 @@ function buildActivityFeedHandoff(
     sourceActionRequestId: null,
   }
 }
+
 const ReportsWorkspace = lazy(() =>
   import('../../workspaces/reports/ReportsWorkspace').then((module) => ({
     default: module.ReportsWorkspace,
@@ -808,7 +813,7 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     heroTitle: 'Scheduler board and delivery window readiness',
     heroBody:
       'Give commodity schedulers a dedicated screen for open windows, nomination readiness, and blocker clearing instead of burying that work in generalized delivery queues.',
-    dataGroups: ['deliveries'],
+    dataGroups: ['deliveries', 'reference'],
     blockingGroups: ['deliveries'],
     mutationRefreshPlans: {
       actualization: {
@@ -986,6 +991,7 @@ export const WORKSPACE_RENDERERS: Record<
         weatherDataLoaded={context.workspaceData.groupLoaded.weather}
         weatherDataLoading={context.workspaceData.groupLoading.weather}
         weatherDataError={context.workspaceData.groupErrors.weather}
+        customEventsHref={context.hrefForView('settings', SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID)}
         onEnsureWeatherData={() =>
           context.workspaceData.loadData({
             groups: ['weather'],
@@ -993,6 +999,11 @@ export const WORKSPACE_RENDERERS: Record<
           })
         }
         onOpenView={context.navigateToView}
+        onOpenCustomEvents={() =>
+          context.navigateToView('settings', null, {
+            hash: SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID,
+          })
+        }
         onRefreshData={context.workspaceData.loadData}
       />
     ),
@@ -1297,6 +1308,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DeliveryWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
         globalFilter={GLOBAL_FILTER_DISABLED}
         deliveries={context.workspaceData.deliveries}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
@@ -1310,6 +1322,7 @@ export const WORKSPACE_RENDERERS: Record<
         deliverySyncSuccess={context.workspaceData.deliverySyncSuccess}
         deliveriesSyncing={context.workspaceData.deliveriesSyncing}
         onOpenTrade={context.navigateToTrade}
+        onClearHandoff={() => context.replaceView('shipments')}
         onSyncDeliveriesFromTrades={context.workspaceData.handleSyncDeliveriesFromTrades}
         onSaveDelivery={context.workspaceData.handleUpdateDelivery}
         onSaveDeliveryLogisticsDetails={context.workspaceData.handleUpdateDeliveryLogisticsDetails}
@@ -1324,8 +1337,10 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <SchedulingWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
         globalFilter={GLOBAL_FILTER_DISABLED}
         deliveries={context.workspaceData.deliveries}
+        railRoutes={context.workspaceData.railRoutes}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
         formatNumber={formatNumber}
@@ -1337,6 +1352,7 @@ export const WORKSPACE_RENDERERS: Record<
         workflowCreationPendingTradeId={context.workspaceData.workflowCreationPendingTradeId}
         workflowMutationPendingId={context.workspaceData.workflowMutationPendingId}
         onCreateWorkflowItem={context.workspaceData.handleCreateWorkflowItem}
+        onClearHandoff={() => context.replaceView('scheduling')}
         onOpenTrade={context.navigateToTrade}
         onSaveActualization={context.workspaceData.handleSaveDeliveryActualization}
         onSaveWorkflowItem={context.workspaceData.handleSaveWorkflowItem}
@@ -1438,6 +1454,7 @@ export const WORKSPACE_RENDERERS: Record<
       <MapWorkspace
         assets={context.workspaceData.assets}
         locations={context.workspaceData.locations}
+        railRoutes={context.workspaceData.railRoutes}
         spatialFeatures={context.workspaceData.spatialFeatures}
         weatherLocations={context.workspaceData.weatherLocations}
         weatherSyncStatus={context.workspaceData.weatherSyncStatus}
@@ -1446,7 +1463,39 @@ export const WORKSPACE_RENDERERS: Record<
         weatherDataError={context.workspaceData.groupErrors.weather}
         globalFilter={GLOBAL_FILTER_DISABLED}
         onOpenReferenceData={() => context.navigateToView('reference')}
-        onPrepareReferenceAsset={context.referenceState.startEditAsset}
+        onPrepareReferenceAsset={(code) => {
+          context.referenceState.setReferenceTab('assets')
+          context.referenceState.startEditAsset(code)
+        }}
+        onOpenReferenceRailRoute={(code) => {
+          context.referenceState.setReferenceTab('rail-routes')
+          context.referenceState.startEditRailRoute(code)
+          context.navigateToView('reference')
+        }}
+        onOpenRailRouteDeliveries={(code) => {
+          const railRoute = context.workspaceData.railRoutes.find((record) => record.code === code) ?? null
+          context.navigateToView(
+            'shipments',
+            buildRailRouteWorkspaceHandoff({
+              source: 'map',
+              railRouteCode: code,
+              railRouteLabel: railRoute?.name ?? null,
+              targetView: 'shipments',
+            }),
+          )
+        }}
+        onOpenRailRouteScheduling={(code) => {
+          const railRoute = context.workspaceData.railRoutes.find((record) => record.code === code) ?? null
+          context.navigateToView(
+            'scheduling',
+            buildRailRouteWorkspaceHandoff({
+              source: 'map',
+              railRouteCode: code,
+              railRouteLabel: railRoute?.name ?? null,
+              targetView: 'scheduling',
+            }),
+          )
+        }}
       />
     ),
   },

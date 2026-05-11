@@ -11,6 +11,7 @@ Related docs:
 
 - [Platform Blueprint](./platform-blueprint.md)
 - [Pre-Trade Design](./pre-trade-design.md)
+- [Arbitrage Detection Design](./arbitrage-detection-design.md)
 - [Trading Source Roadmap](./trading-source-roadmap.md)
 - [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
 - [Accruals Functionality Redesign](./accruals-functionality-redesign.md)
@@ -75,6 +76,8 @@ The trader needs the platform to answer:
 Target capabilities:
 
 - market opportunity workbench
+- product, time, and geographic arbitrage detection with conversion, storage,
+  and transportation economics
 - pre-trade scenario structuring and handoff into trade capture
 - freight, tariff, fee, and movement-cost stack
 - long/short matching and book-flattening recommendations
@@ -145,6 +148,7 @@ Target capabilities:
 | Capability | Primary persona | Product owner domain | Durable work object | Deterministic core | Agent role |
 | --- | --- | --- | --- | --- | --- |
 | Market opportunity detection | Trader | Trading / Research | Market opportunity | signal freshness, source weighting, opportunity classification | Market Research Agent |
+| Arbitrage detection | Trader | Trading / Research | Market opportunity, pre-trade scenario | state graph, path-cost economics, opportunity ranking | Market Research Agent |
 | Pre-trade structuring | Trader | Trading | Pre-trade scenario, pre-trade review item | scenario validation, credit checks, reference-data checks | Pre-Trade Structuring Agent |
 | Freight and fee economics | Trader, Accountant | Trading / Settlement | Movement cost estimate, fee item | cost stack, tariff rules, fee accrual rules | Fee and Accrual Agent |
 | Long/short matching | Trader, Risk Manager | Trading / Risk | Netting set | position matching, constraints, optimization objective | Risk Sentinel |
@@ -192,6 +196,47 @@ Stop conditions:
 - conflicting sources
 - unsupported commodity, tenor, or location mapping
 - opportunity would require external commitment without human review
+
+### Simple Arbitrage Detection And Ranking
+
+Question:
+
+- Is there a reviewable product or quality, time, or geographic arbitrage once
+  the required bridge cost is applied across a feasible transformation path?
+
+Inputs:
+
+- `Product A` mark, `Product B` mark, quality or conversion relationship, and
+  conversion price
+- `Time A` mark, `Time B` mark, calendar or tenor mapping, and storage price
+- `Place A` mark, `Place B` mark, route or logistics mapping, and
+  transportation price
+- units, currencies, FX rates, delivery terms, and fee adjustments where
+  relevant
+- source freshness, tradability, and policy constraints
+- feasible transformation edges between tradable states
+
+Outputs:
+
+- arbitrage family
+- candidate comparison pair
+- cheapest feasible path
+- gross spread
+- explicit cost stack
+- net opportunity value
+- confidence and freshness status
+- missing evidence and stop reasons
+- suggested next action: watch, create pre-trade scenario, escalate, or ignore
+
+Stop conditions:
+
+- stale or missing marks on either side of the comparison
+- unsupported product or quality conversion
+- missing storage or transportation cost evidence
+- no feasible graph path between buy state and sell state
+- unit or currency mismatch without approved normalization
+- blocked route, capacity, credit, compliance, or tradability constraint
+- positive economics that depend on assumptions the system cannot evidence
 
 ### Physical Movement Cost Stack
 
@@ -319,6 +364,8 @@ Detailed execution breakdown for the first trader/risk slice:
 ### Wave 1: Make Trader And Risk Answers Trustworthy
 
 - Extend pre-trade scenarios with richer physical economics and hedge context.
+- Add read-only arbitrage detection drafts for product or quality, time, and
+  geographic spreads.
 - Add read-only opportunity, netting, and hedge recommendation drafts.
 - Add source freshness and missing-evidence labels to all recommendation
   surfaces.

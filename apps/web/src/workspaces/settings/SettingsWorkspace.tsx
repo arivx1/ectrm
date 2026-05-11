@@ -52,6 +52,8 @@ import {
   summarizeProjectionMonitoringEmail,
 } from './projectionMonitoringEmailRuntime'
 import { GoogleCalendarPanel } from './GoogleCalendarPanel'
+import { SettingsDisclosureCard } from './SettingsDisclosureCard'
+import { UserEventsPanel } from './UserEventsPanel'
 
 type SettingsWorkspaceProps = {
   health: string
@@ -498,19 +500,41 @@ export function SettingsWorkspace({
     (rule) => rule.visibility.optionDetails !== 'inherit' || rule.visibility.priceIndex !== 'inherit',
   ).length
   const availableCommodityClassOptions = commodityClassOptions.length > 0 ? commodityClassOptions : [...commodityClassOrder]
+  const appearancePreviewMode = appearanceForm.colorMode === 'system' ? resolvedColorMode : appearanceForm.colorMode
+  const appearancePreviewPalette = resolveAppearancePalette(appearanceForm, appearancePreviewMode)
+  const activeSessionSummary = authSession
+    ? `${authSession.user.role} session for ${authSession.user.user_id}`
+    : 'Signed out in this browser'
+  const appearanceSummary = `${formatModeLabel(appearanceForm.colorMode)} preference · ${formatModeLabel(appearancePreviewMode)} preview`
+  const timeDisplaySummary = `${timeZonePreferenceLabel} saved · ${resolvedTimeZoneLabel} in effect`
+  const tradeDefaultsSummary =
+    `${enabledTradeCaptureRuleCount} of ${tradeCaptureForm.rules.length} rules enabled · ${tradeCaptureForm.defaults.instrumentType} baseline`
+  const runtimeOverrideSummary =
+    runtimeOverrideCount > 0
+      ? `${runtimeOverrideCount} browser override${runtimeOverrideCount === 1 ? '' : 's'} active`
+      : 'No browser overrides are active'
+  const clientSettingsSummary = `${health === 'ok' ? 'API reachable' : 'API attention'} · ${appConfig.apiBase}`
+  const serverSettingsSummary = serverSettingsLoading
+    ? 'Loading public API settings'
+    : serverSettings
+      ? `${serverSettings.app_version} · ${serverSettings.assistant.effective_default_provider ?? 'No assistant provider'} · ${formatProjectionMonitoringEmailStatusLabel(serverSettings.projection_monitoring_email)} email`
+      : serverSettingsError || 'Public API settings are unavailable'
+  const quickReadSummary =
+    health === 'ok'
+      ? runtimeOverrideCount > 0
+        ? `API reachable · ${runtimeOverrideCount} override${runtimeOverrideCount === 1 ? '' : 's'} active`
+        : 'API reachable · checked-in defaults'
+      : 'API needs attention before protected operations'
 
   return (
     <div className="workspace-grid settings-grid">
       <section className="stack">
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Active Session</h3>
-            </div>
-            <p>The browser stores only the active session token locally. Protected writes derive actor identity from the signed-in session.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.active-session-card"
+          eyebrow="Browser Settings"
+          title="Active Session"
+          summary={activeSessionSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>Session status</span>
@@ -565,17 +589,14 @@ export function SettingsWorkspace({
                   : 'Sign in happens on the dedicated entry screen before the console opens.')}
             </p>
           </div>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Appearance</h3>
-            </div>
-            <p>Pick how the console chooses light or dark mode, then tune the accent and highlight colors for each mode independently.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.appearance-card"
+          eyebrow="Browser Settings"
+          title="Appearance"
+          summary={`${appearanceSummary} · ${appearancePreviewPalette.accent.toUpperCase()} accent`}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>Mode preference</span>
@@ -718,17 +739,14 @@ export function SettingsWorkspace({
                 'Appearance settings are stored in this browser today. That gives us a solid first slice while we prepare user-profile persistence on the API.'}
             </p>
           </form>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Time Display</h3>
-            </div>
-            <p>Choose the timezone the Home workspace should use, then keep the day, week, and month meters aligned to that desk calendar.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.time-display-card"
+          eyebrow="Browser Settings"
+          title="Time Display"
+          summary={timeDisplaySummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>Saved preference</span>
@@ -775,17 +793,14 @@ export function SettingsWorkspace({
                 'This timezone setting is stored in this browser today so each user can keep Home aligned to their own desk clock.'}
             </p>
           </form>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Trade Ticket Defaults</h3>
-            </div>
-            <p>Set the baseline ticket here, then build an ordered rule stack that can react to instrument, structure, pricing, commodity class, and book.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.trade-ticket-defaults-card"
+          eyebrow="Browser Settings"
+          title="Trade Ticket Defaults"
+          summary={tradeDefaultsSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>New ticket baseline</span>
@@ -1586,17 +1601,14 @@ export function SettingsWorkspace({
                 'Trade ticket defaults are browser-local today. The form now reads baseline values, evaluates the ordered rule stack, and explains active matches directly in Trade Entry.'}
             </p>
           </form>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Client Overrides</h3>
-            </div>
-            <p>Leave fields blank to fall back to the checked-in defaults. Changes apply after a page reload.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.client-overrides-card"
+          eyebrow="Browser Settings"
+          title="Client Overrides"
+          summary={runtimeOverrideSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>Effective API Base</span>
@@ -1717,19 +1729,16 @@ export function SettingsWorkspace({
               {runtimeFlash?.message ?? 'These overrides are browser-local and reload the page when applied.'}
             </p>
           </form>
-        </article>
+        </SettingsDisclosureCard>
       </section>
 
       <section className="stack">
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Effective Runtime</span>
-              <h3>Current Client Settings</h3>
-            </div>
-            <p>This is the configuration the running UI is currently using after env resolution and browser overrides.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.current-client-settings-card"
+          eyebrow="Effective Runtime"
+          title="Current Client Settings"
+          summary={clientSettingsSummary}
+        >
           <div className="settings-kv">
             <SettingsValueRow label="API health" value={health} detail="From the currently loaded `/health` response." />
             <SettingsValueRow label="API base" value={appConfig.apiBase} />
@@ -1748,17 +1757,14 @@ export function SettingsWorkspace({
               value={String(bootstrapQueryLimits.tradingSources)}
             />
           </div>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Server Runtime</span>
-              <h3>Public API Settings</h3>
-            </div>
-            <p>Safe server-owned settings surfaced through a read-only endpoint. Secrets are intentionally excluded.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.public-api-settings-card"
+          eyebrow="Server Runtime"
+          title="Public API Settings"
+          summary={serverSettingsSummary}
+        >
           {serverSettingsLoading ? (
             <div className="skeleton-stack">
               <div className="skeleton-block" />
@@ -1939,7 +1945,7 @@ export function SettingsWorkspace({
               <p>{serverSettingsError || 'The running API did not return public runtime settings.'}</p>
             </div>
           )}
-        </article>
+        </SettingsDisclosureCard>
 
         <GoogleCalendarPanel
           googleClientId={serverSettings?.google_auth.client_id ?? null}
@@ -1948,15 +1954,14 @@ export function SettingsWorkspace({
           runtimeSettingsError={serverSettingsError}
         />
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Status</span>
-              <h3>Quick Read</h3>
-            </div>
-            <p>A fast signal for whether the browser and API configuration look usable before you try protected operations.</p>
-          </div>
+        <UserEventsPanel authSession={authSession} />
 
+        <SettingsDisclosureCard
+          cardKey="settings.quick-read-card"
+          eyebrow="Status"
+          title="Quick Read"
+          summary={quickReadSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>API</span>
@@ -1969,7 +1974,7 @@ export function SettingsWorkspace({
               <p>{runtimeOverrideCount > 0 ? `${runtimeOverrideCount} override values stored locally.` : 'No local runtime overrides are stored.'}</p>
             </article>
           </div>
-        </article>
+        </SettingsDisclosureCard>
       </section>
     </div>
   )

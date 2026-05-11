@@ -24,6 +24,7 @@ import {
   saveGoogleCalendarScopeGranted,
   saveGoogleCalendarSelection,
 } from '../../entities/calendar/googleCalendarSession'
+import { SettingsDisclosureCard } from './SettingsDisclosureCard'
 
 type GoogleCalendarPanelProps = {
   googleClientId: string | null
@@ -318,17 +319,29 @@ export function GoogleCalendarPanel({
   const runtimeDetail = googleAuthEnabled
     ? 'The same Google client configuration that powers browser sign-in can also request readonly calendar access.'
     : 'Google app sign-in is disabled, but the exposed client ID can still power readonly browser calendar access.'
+  const calendarSummary = runtimeSettingsLoading
+    ? 'Loading runtime settings for browser-side calendar access.'
+    : runtimeSettingsError
+      ? 'Calendar runtime settings are unavailable right now.'
+      : !calendarConfigured
+        ? 'No Google client ID is configured for browser-side calendar access.'
+        : oauthError
+          ? 'Google identity failed to load in this browser.'
+          : calendarConnected
+            ? currentCalendar
+              ? `Connected to ${currentCalendar.summary} · ${formatLastLoadedAt(lastLoadedAt)}`
+              : `Connected · ${formatLastLoadedAt(lastLoadedAt)}`
+            : scopeGranted
+              ? 'Reconnect needed to refresh readonly access.'
+              : 'Readonly access is available, but no calendar is connected yet.'
 
   return (
-    <article className="surface">
-      <div className="section-head">
-        <div>
-          <span className="eyebrow">Calendar</span>
-          <h3>Google Calendar</h3>
-        </div>
-        <p>Pull the next few events from your Google Calendar into the app without storing calendar data on the ECTRM API.</p>
-      </div>
-
+    <SettingsDisclosureCard
+      cardKey="settings.google-calendar-card"
+      eyebrow="Calendar"
+      title="Google Calendar"
+      summary={calendarSummary}
+    >
       {runtimeSettingsLoading ? (
         <div className="skeleton-stack">
           <div className="skeleton-block" />
@@ -370,7 +383,11 @@ export function GoogleCalendarPanel({
             <article className="settings-summary-card">
               <span>Access</span>
               <strong>Readonly</strong>
-              <p>The panel only asks Google for calendar read access and keeps access tokens in the browser session.</p>
+              <p>
+                The panel only asks Google for calendar read access and keeps
+                tokens plus cached events in this browser until you disconnect
+                or clear site data.
+              </p>
             </article>
             <article className="settings-summary-card">
               <span>Last synced</span>
@@ -490,11 +507,15 @@ export function GoogleCalendarPanel({
           ) : (
             <div className="empty-state">
               <strong>Connect your Google Calendar</strong>
-              <p>Authorize readonly access to load upcoming events into this workspace. The connection stays browser-side so the API never stores your Google token.</p>
+              <p>
+                Authorize readonly access to load upcoming events into this
+                workspace. The connection stays browser-side so the API never
+                stores your Google token.
+              </p>
             </div>
           )}
         </div>
       )}
-    </article>
+    </SettingsDisclosureCard>
   )
 }

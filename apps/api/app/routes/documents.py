@@ -22,6 +22,7 @@ from apps.api.app.domains.integrations.services.gmail_inbox import (
 from apps.api.app.domains.documents.services.document_action_execution import execute_document_action_plan
 from apps.api.app.domains.documents.services.ingestion import get_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import get_document_page_preview_path
+from apps.api.app.domains.documents.services.ingestion import get_document_source_file_details
 from apps.api.app.domains.documents.services.ingestion import ingest_pdf_document
 from apps.api.app.domains.documents.services.ingestion import list_document_ingestions
 from apps.api.app.domains.documents.services.ingestion import build_document_processor_runtime_settings
@@ -219,6 +220,33 @@ def get_document_page_preview(
         preview_path,
         media_type="image/png",
         filename=f"document-{document_id}-page-{page_id}.png",
+    )
+
+
+@router.get("/{document_id}/source")
+def get_document_source(
+    document_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    require_authenticated_actor(request)
+
+    def load_source_file() -> tuple[str, str, str]:
+        source_path, media_type, filename = get_document_source_file_details(
+            db,
+            document_id=document_id,
+        )
+        return str(source_path), media_type, filename
+
+    source_path, media_type, filename = execute_http_action(
+        db,
+        load_source_file,
+        handled_exceptions=NOT_FOUND_ERROR_STATUS_CODES,
+    )
+    return FileResponse(
+        source_path,
+        media_type=media_type or "application/pdf",
+        filename=filename,
     )
 
 

@@ -496,7 +496,7 @@ export function AuthGate({
               <button
                 type="button"
                 className="auth-gate-bootstrap-toggle"
-                onClick={() => setBootstrapExpanded((current) => !current)}
+                onClick={() => setBootstrapExpanded(!bootstrapExpanded)}
                 aria-expanded={bootstrapExpanded}
                 aria-controls="auth-gate-bootstrap-form"
               >
