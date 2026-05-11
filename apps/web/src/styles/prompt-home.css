@@ -249,6 +249,86 @@
   justify-content: flex-end;
 }
 
+.prompt-home-prompt-card {
+  display: grid;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0.85rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.16);
+  border-radius: 0.95rem;
+  background:
+    radial-gradient(circle at top left, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.1), transparent 38%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.prompt-home-prompt-card.is-collapsed {
+  gap: 0.55rem;
+}
+
+.prompt-home-prompt-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.85rem 1rem;
+  align-items: start;
+}
+
+.prompt-home-prompt-card-copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.prompt-home-prompt-card-copy strong {
+  font-size: 1rem;
+  line-height: 1.12;
+}
+
+.prompt-home-prompt-card-copy p,
+.prompt-home-prompt-card-toggle-meta small {
+  margin: 0;
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.5;
+}
+
+.prompt-home-prompt-card-side {
+  display: grid;
+  justify-items: end;
+  align-content: start;
+}
+
+.prompt-home-prompt-card-toggle {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.prompt-home-prompt-card-toggle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
+  outline-offset: 3px;
+}
+
+.prompt-home-prompt-card-toggle-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prompt-home-prompt-card-body {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.prompt-home-prompt-card-body[hidden] {
+  display: none;
+}
+
 .prompt-home-time-meter-card {
   display: grid;
   gap: 0.65rem;
@@ -970,20 +1050,14 @@
 
 .prompt-home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.78fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
 
-.prompt-home-chat,
-.prompt-home-sidecar,
-.prompt-home-destinations {
+.prompt-home-chat {
   display: grid;
   gap: 0.85rem;
-}
-
-.prompt-home-sidecar {
-  gap: 0.75rem;
 }
 
 .prompt-home-chat-log,
@@ -1022,54 +1096,6 @@
   min-width: 0;
 }
 
-.prompt-home-support-panel {
-  gap: 0.75rem;
-  padding: 0.85rem 0.9rem;
-}
-
-.prompt-home-support-toggle {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.85rem;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.prompt-home-support-toggle:focus-visible {
-  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
-  outline-offset: 3px;
-}
-
-.prompt-home-support-toggle-copy {
-  display: grid;
-  gap: 0.18rem;
-  min-width: 0;
-}
-
-.prompt-home-support-toggle-copy h3 {
-  margin: 0;
-  font-size: 1rem;
-  line-height: 1.2;
-}
-
-.prompt-home-support-toggle-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-shrink: 0;
-}
-
-.prompt-home-support-toggle-meta small {
-  color: var(--color-copy-muted, #66717c);
-  line-height: 1.4;
-}
-
 .prompt-home-support-toggle-indicator {
   display: inline-flex;
   align-items: center;
@@ -1081,26 +1107,6 @@
   background: rgba(255, 255, 255, 0.04);
   font-size: 1rem;
   line-height: 1;
-}
-
-.prompt-home-support-body {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.prompt-home-support-body[hidden] {
-  display: none;
-}
-
-.prompt-home-support-body-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-}
-
-.prompt-home-support-body-head .form-note {
-  margin: 0;
 }
 
 .prompt-home-handoff,
@@ -1175,7 +1181,8 @@
     rgba(255, 255, 255, 0.78);
 }
 
-:root[data-color-mode='light'] .prompt-home-map-card {
+:root[data-color-mode='light'] .prompt-home-map-card,
+:root[data-color-mode='light'] .prompt-home-prompt-card {
   background: rgba(255, 255, 255, 0.78);
 }
 
@@ -1237,7 +1244,6 @@
 :root[data-color-mode='dark'] .prompt-home-session-lane-copy span,
 :root[data-color-mode='dark'] .prompt-home-session-lane-copy small,
 :root[data-color-mode='dark'] .prompt-home-starter p,
-:root[data-color-mode='dark'] .prompt-home-support-toggle-meta small,
 :root[data-color-mode='dark'] .prompt-home-handoff span,
 :root[data-color-mode='dark'] .prompt-home-destination span,
 :root[data-color-mode='dark'] .prompt-home-destination small {
@@ -1365,11 +1371,6 @@
     gap: 0.18rem;
   }
 
-  .prompt-home-support-toggle,
-  .prompt-home-support-body-head {
-    display: grid;
-  }
-
   .prompt-home-heading-actions {
     width: 100%;
   }
@@ -1383,7 +1384,4 @@
     justify-content: flex-start;
   }
 
-  .prompt-home-support-toggle-meta {
-    justify-content: space-between;
-  }
 }

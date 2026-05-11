@@ -33,6 +33,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   );
   const deskTimeIndex = markup.indexOf("Desk Time");
   const mapIndex = markup.indexOf("Open Map Workspace");
+  const promptCardIndex = markup.indexOf("Ask the desk assistant");
   const operatorPromptIndex = markup.indexOf("Operator prompt");
 
   assert.doesNotMatch(markup, /Show live context/);
@@ -40,6 +41,16 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Contextual starting points/);
   assert.doesNotMatch(markup, /Clear operations blockers/);
   assert.doesNotMatch(markup, /Recent prompt threads/);
+  assert.doesNotMatch(markup, /Old Console/);
+  assert.doesNotMatch(markup, /Go direct/);
+  assert.doesNotMatch(markup, /Open Live Desk/);
+  assert.doesNotMatch(markup, /Open Trade Capture/);
+  assert.doesNotMatch(markup, /Open Work Queue/);
+  assert.doesNotMatch(markup, /Open Settlement/);
+  assert.doesNotMatch(
+    markup,
+    /The traditional screens are still here when you already know where the work belongs\./,
+  );
   assert.match(markup, /What are you trying to do\?/);
   assert.match(
     markup,
@@ -61,7 +72,8 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Sign in to review/);
   assert.ok(deskTimeIndex >= 0);
   assert.ok(mapIndex > deskTimeIndex);
-  assert.ok(operatorPromptIndex > mapIndex);
+  assert.ok(promptCardIndex > mapIndex);
+  assert.ok(operatorPromptIndex > promptCardIndex);
   assert.match(markup, />Voice Unavailable</);
   assert.match(markup, /Desk Time/);
   assert.match(
@@ -159,6 +171,15 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /id="prompt-home-map-records-card-panel" class="asset-map-records-card-body" hidden=""/,
   );
   assert.match(markup, /Open Map Workspace/);
+  assert.match(markup, /<strong>Ask the desk assistant<\/strong>/);
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="prompt-home-prompt-card-panel"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-prompt-card-panel" class="prompt-home-prompt-card-body"/,
+  );
   assert.match(markup, /aria-label="Resize map height"/);
   assert.match(markup, /Time zone/);
   assert.match(markup, /Preferred time zone/);

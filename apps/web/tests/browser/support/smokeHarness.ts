@@ -2241,6 +2241,21 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/reference/rail-routes' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/reference/assets/map-scope-summary' && method === 'GET') {
+      writeJson(response, {
+        total_count: assets.length,
+        total_map_ready_count: assets.length,
+        filtered_total_count: assets.length,
+        filtered_map_ready_count: assets.length,
+      })
+      return
+    }
+
     if (url.pathname === '/reference/assets' && method === 'GET') {
       writeJson(response, assets)
       return

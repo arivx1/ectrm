@@ -167,38 +167,7 @@ const QUICK_PROMPTS = [
   "Help me decide which workspace to use for a trade issue.",
 ];
 
-const NAVIGATION_INTENTS: PromptNavigationIntent[] = [
-  {
-    kind: "open_workspace",
-    targetView: "dashboard",
-    label: "Open Live Desk",
-    rationale:
-      "Use the old dashboard for market pulse, desk health, and high-level exposure.",
-  },
-  {
-    kind: "open_workspace",
-    targetView: "trades",
-    label: "Open Trade Capture",
-    rationale:
-      "Use the ticket and blotter workflow when you need to book, inspect, amend, or cancel a trade.",
-  },
-  {
-    kind: "open_workspace",
-    targetView: "operations",
-    label: "Open Work Queue",
-    rationale:
-      "Use the post-trade queue for confirmations, delivery blockers, approvals, and handoffs.",
-  },
-  {
-    kind: "open_workspace",
-    targetView: "settlement",
-    label: "Open Settlement",
-    rationale:
-      "Use settlement for invoices, payments, aging, and cash exceptions.",
-  },
-];
-
-const PROMPT_HOME_DIRECT_PANEL_ID = "prompt-home-direct-panel";
+const PROMPT_HOME_PROMPT_CARD_PANEL_ID = "prompt-home-prompt-card-panel";
 const PROMPT_HOME_TIMEFRAME_PANEL_ID = "prompt-home-timeframe-panel";
 const PROMPT_HOME_DAY_PANEL_ID = "prompt-home-day-panel";
 const PROMPT_HOME_WEEK_PANEL_ID = "prompt-home-week-panel";
@@ -2770,10 +2739,11 @@ export function PromptHomeWorkspace({
   const [selectedPromptKitKey, setSelectedPromptKitKey] = useState<
     PromptHomePromptKit["key"] | null
   >(null);
-  const directPanelExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.support.direct",
-    false,
+  const promptCardExpandedState = usePersistentCollapsibleCardState(
+    "prompt-home.prompt-card",
+    true,
   );
+  const setPromptCardExpanded = promptCardExpandedState.setExpanded;
   const promptResumeIntent = useSyncExternalStore(
     subscribePromptResumeIntent,
     getPromptResumeIntent,
@@ -3040,7 +3010,7 @@ export function PromptHomeWorkspace({
       }
 
       const runtime = await loadRuntimeSettings();
-      if (!runtime.voice_transcription.enabled) {
+      if (!runtime.voice_transcription?.enabled) {
         throw new Error("Backend voice transcription is not configured on this API.");
       }
 
@@ -3053,17 +3023,20 @@ export function PromptHomeWorkspace({
     [authSession, loadRuntimeSettings],
   );
 
+  const voiceTranscriptionSettings = runtimeSettings?.voice_transcription;
+
   const voiceComposer = useVoiceComposer({
     draft,
     onDraftChange: setDraft,
     backendTranscription: {
-      enabled: Boolean(authSession && runtimeSettings?.voice_transcription.enabled),
-      supportedContentTypes: runtimeSettings?.voice_transcription.supported_content_types ?? [],
+      enabled: Boolean(authSession && voiceTranscriptionSettings?.enabled),
+      supportedContentTypes:
+        voiceTranscriptionSettings?.supported_content_types ?? [],
       transcribeAudio: transcribeVoiceNote,
       unavailableMessage: !authSession
         ? "Sign in to use recorded voice transcription when browser dictation is unavailable."
         : runtimeSettings
-          ? runtimeSettings.voice_transcription.enabled
+          ? voiceTranscriptionSettings?.enabled
             ? ""
             : "Backend voice transcription is not configured on this API."
           : "Checking whether backend voice transcription is available.",
@@ -3205,6 +3178,7 @@ export function PromptHomeWorkspace({
 
     consumedPromptResumeKeyRef.current = resumeKey;
     clearPromptResumeIntent();
+    setPromptCardExpanded(true);
     setDraft(promptResumeIntent.draft);
     setDraftApplicationContext(promptResumeIntent.applicationContext ?? "");
     setDraftSummaryTargets(promptResumeIntent.summaryTargets ?? []);
@@ -3217,7 +3191,7 @@ export function PromptHomeWorkspace({
         promptResumeIntent.applicationContext,
       );
     }
-  }, [authSession, promptResumeIntent]);
+  }, [authSession, promptResumeIntent, setPromptCardExpanded]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3261,6 +3235,7 @@ export function PromptHomeWorkspace({
 
   function loadPromptDraft(nextDraft: string) {
     voiceComposer.cancelListening();
+    setPromptCardExpanded(true);
     setDraft(nextDraft);
     setDraftApplicationContext("");
     setDraftSummaryTargets([]);
@@ -3338,18 +3313,6 @@ export function PromptHomeWorkspace({
     });
   }
 
-  const supportPanels = {
-    direct: directPanelExpandedState.expanded,
-  };
-
-  function toggleSupportPanel(panel: keyof typeof supportPanels) {
-    switch (panel) {
-      case "direct":
-        directPanelExpandedState.setExpanded((current) => !current);
-        break;
-    }
-  }
-
   const handleActionRequestDecision = useCallback(
     async (
       actionRequestId: number,
@@ -3408,7 +3371,23 @@ export function PromptHomeWorkspace({
     : runtimeSettings
       ? `Using ${runtimeSettings.effective_default_provider ?? "the first enabled provider"} when you send.`
       : "Assistant runtime will be checked when you send the first prompt.";
-  const directPanelSummary = `${NAVIGATION_INTENTS.length} shortcuts`;
+  const promptCardCollapsedSummary = (() => {
+    const trimmedDraft = draft.trim();
+    if (submitting) {
+      return "Sending the current prompt.";
+    }
+    if (trimmedDraft) {
+      return trimmedDraft.length > 120
+        ? `${trimmedDraft.slice(0, 117).trimEnd()}...`
+        : trimmedDraft;
+    }
+    return authSession
+      ? "Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
+      : "Draft a request here, then sign in when you're ready to send it.";
+  })();
+  const promptCardDescription = promptCardExpandedState.expanded
+    ? "Route work from intent, start from a suggested prompt, and keep the governed assistant flow close at hand."
+    : promptCardCollapsedSummary;
   const promptRouteRecommendationNote = !authSession
     ? "Sign in to load promoted routes from accepted Home handoffs."
     : promptRouteRecommendationsLoading
@@ -3464,258 +3443,332 @@ export function PromptHomeWorkspace({
           initialMapAssetLayerVisible={initialMapAssetLayerVisible}
         />
 
-        <form className="prompt-home-composer" onSubmit={handleSubmit}>
-          <label className="field prompt-home-composer-field">
-            <span>Operator prompt</span>
-            <textarea
-              ref={composerTextareaRef}
-              className="control prompt-home-textarea"
-              value={draft}
-              onChange={(event) => {
-                voiceComposer.cancelListening();
-                setDraft(event.target.value);
-                setSubmitError("");
-              }}
-              placeholder="Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
-            />
-          </label>
-
-          <div className="toolbar settings-actions prompt-home-actions">
-            <button
-              type="button"
-              className="button button-ghost"
-              onClick={() => {
-                setSubmitError("");
-                voiceComposer.toggleListening();
-              }}
-              disabled={!voiceComposer.canToggle || submitting}
-              aria-pressed={voiceComposer.listening}
-            >
-              {voiceComposer.buttonLabel}
-            </button>
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={!draft.trim() || submitting || voiceComposer.listening}
-            >
-              {submitting
-                ? "Sending..."
-                : authSession
-                  ? "Send Prompt"
-                  : "Sign In to Send Prompt"}
-            </button>
-          </div>
-
-          <p className={`form-note ${submitError ? "form-note-error" : ""}`}>
-            {submitError ||
-              (!authSession
-                ? "You can draft the prompt here. We will only send it after you sign in."
-                : runtimeNote)}
-          </p>
-          <p
-            className={`form-note ${
-              voiceComposer.statusTone === "error" ? "form-note-error" : ""
-            }`}
-          >
-            {voiceComposer.statusMessage}
-          </p>
-        </form>
-
-        <div className="prompt-home-quick-prompts" aria-label="Quick prompts">
-          {QUICK_PROMPTS.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              className="entity-chip entity-chip-soft"
-              onClick={() => loadPromptDraft(prompt)}
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-
-        <section className="prompt-home-prompt-kits" aria-label="Prompt kits">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Guided Prompts</span>
-              <h3>What are you trying to do?</h3>
+        <section
+          className={`prompt-home-prompt-card ${promptCardExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
+        >
+          <div className="prompt-home-prompt-card-head">
+            <div className="prompt-home-prompt-card-copy">
+              <span className="eyebrow">Prompt</span>
+              <strong>Ask the desk assistant</strong>
+              <p>{promptCardDescription}</p>
             </div>
-            <p>
-              Pick a lane, then load a suggested prompt or jump straight to the
-              right workspace.
-            </p>
+
+            <div className="prompt-home-prompt-card-side">
+              <button
+                type="button"
+                className="prompt-home-prompt-card-toggle"
+                aria-expanded={promptCardExpandedState.expanded}
+                aria-controls={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
+                onClick={() =>
+                  promptCardExpandedState.setExpanded((current) => !current)
+                }
+              >
+                <div className="prompt-home-prompt-card-toggle-meta">
+                  <small>
+                    {promptCardExpandedState.expanded
+                      ? "Hide card"
+                      : "Show card"}
+                  </small>
+                  <span
+                    className="prompt-home-support-toggle-indicator"
+                    aria-hidden="true"
+                  >
+                    {promptCardExpandedState.expanded ? "−" : "+"}
+                  </span>
+                </div>
+              </button>
+            </div>
           </div>
 
           <div
-            className="prompt-home-prompt-kit-picker"
-            aria-label="Prompt kit categories"
+            id={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
+            className="prompt-home-prompt-card-body"
+            hidden={!promptCardExpandedState.expanded}
           >
-            {PROMPT_HOME_PROMPT_KITS.map((promptKit) => {
-              const isSelected = promptKit.key === selectedPromptKitKey;
+            {promptCardExpandedState.expanded ? (
+              <>
+                <form className="prompt-home-composer" onSubmit={handleSubmit}>
+                  <label className="field prompt-home-composer-field">
+                    <span>Operator prompt</span>
+                    <textarea
+                      ref={composerTextareaRef}
+                      className="control prompt-home-textarea"
+                      value={draft}
+                      onChange={(event) => {
+                        voiceComposer.cancelListening();
+                        setDraft(event.target.value);
+                        setSubmitError("");
+                      }}
+                      placeholder="Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
+                    />
+                  </label>
 
-              return (
-                <button
-                  key={promptKit.key}
-                  type="button"
-                  className={`prompt-home-prompt-kit-choice ${isSelected ? "is-active" : ""}`}
-                  aria-pressed={isSelected}
-                  onClick={() =>
-                    setSelectedPromptKitKey((current) =>
-                      current === promptKit.key ? null : promptKit.key,
-                    )
-                  }
-                >
-                  {promptKit.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {selectedPromptKit ? (
-            <article className="prompt-home-starter prompt-home-prompt-kit-panel">
-              <div className="prompt-home-prompt-kit-panel-head">
-                <h4>{selectedPromptKit.label}</h4>
-                <p>{selectedPromptKit.detail}</p>
-              </div>
-
-              <div className="prompt-home-prompt-kit-section">
-                <span className="eyebrow">Suggested prompts</span>
-                <div
-                  className="prompt-home-kit-examples"
-                  aria-label={`${selectedPromptKit.label} suggested prompts`}
-                >
-                  {selectedPromptKit.suggestedPrompts.map((suggestion) => (
+                  <div className="toolbar settings-actions prompt-home-actions">
                     <button
-                      key={`${selectedPromptKit.key}-${suggestion.prompt}`}
                       type="button"
-                      className="prompt-home-kit-example"
-                      onClick={() => loadPromptDraft(suggestion.prompt)}
+                      className="button button-ghost"
+                      onClick={() => {
+                        setSubmitError("");
+                        voiceComposer.toggleListening();
+                      }}
+                      disabled={!voiceComposer.canToggle || submitting}
+                      aria-pressed={voiceComposer.listening}
                     >
-                      {suggestion.label}
+                      {voiceComposer.buttonLabel}
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="prompt-home-prompt-kit-section">
-                <span className="eyebrow">Workspace links</span>
-                <div className="prompt-home-starter-actions">
-                  {selectedPromptKit.workspaceLinks.map((link) => (
                     <button
-                      key={`${selectedPromptKit.key}-${link.view}`}
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => onOpenView(link.view)}
-                    >
-                      {link.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </article>
-          ) : (
-            <p className="form-note prompt-home-prompt-kits-empty">
-              Choose one to reveal a few suggested prompts and direct workspace
-              links.
-            </p>
-          )}
-        </section>
-
-        <section
-          className="prompt-home-promoted-routes"
-          aria-label="Promoted routes"
-        >
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Promoted Routes</span>
-              <h3>Go straight to proven destinations</h3>
-            </div>
-            <button
-              type="button"
-              className="button button-ghost"
-              onClick={() => void refreshPromptRouteRecommendations()}
-              disabled={!authSession || promptRouteRecommendationsLoading}
-            >
-              Refresh
-            </button>
-          </div>
-          <p
-            className={`form-note ${promptRouteRecommendationsError ? "form-note-error" : ""}`}
-          >
-            {promptRouteRecommendationNote}
-          </p>
-          {promotedRoutes.length > 0 ? (
-            <div className="prompt-home-destination-list">
-              {promotedRoutes.map((route) => {
-                if (route.readiness === "ready") {
-                  return (
-                    <button
-                      key={route.key}
-                      type="button"
-                      className="prompt-home-destination prompt-home-promoted-route"
-                      onClick={() =>
-                        openNavigationIntent(route.intent, {
-                          includeHandoff: route.hasFocusedHandoff,
-                          recordOutcome: route.recordOutcomeOnOpen,
-                        })
+                      type="submit"
+                      className="button button-primary"
+                      disabled={
+                        !draft.trim() || submitting || voiceComposer.listening
                       }
                     >
-                      <div className="prompt-home-destination-head">
-                        <strong>{route.displayLabel}</strong>
-                        <span
-                          className={`status-pill status-pill-${route.readinessTone}`}
-                        >
-                          {route.readinessLabel}
-                        </span>
-                      </div>
-                      <span>{route.displayDetail}</span>
-                      {route.displayFocusLabel ? (
-                        <small>{route.displayFocusLabel}</small>
-                      ) : null}
-                      {route.ageLabel ? <small>{route.ageLabel}</small> : null}
-                      <small>
-                        {formatPromotedRouteEvidence(route.recommendation)}
-                      </small>
+                      {submitting
+                        ? "Sending..."
+                        : authSession
+                          ? "Send Prompt"
+                          : "Sign In to Send Prompt"}
                     </button>
-                  );
-                }
+                  </div>
 
-                return (
-                  <article
-                    key={route.key}
-                    className="prompt-home-destination prompt-home-promoted-route is-unavailable"
+                  <p
+                    className={`form-note ${submitError ? "form-note-error" : ""}`}
                   >
-                    <div className="prompt-home-destination-head">
-                      <strong>{route.displayLabel}</strong>
-                      <span
-                        className={`status-pill status-pill-${route.readinessTone}`}
-                      >
-                        {route.readinessLabel}
-                      </span>
+                    {submitError ||
+                      (!authSession
+                        ? "You can draft the prompt here. We will only send it after you sign in."
+                        : runtimeNote)}
+                  </p>
+                  <p
+                    className={`form-note ${
+                      voiceComposer.statusTone === "error"
+                        ? "form-note-error"
+                        : ""
+                    }`}
+                  >
+                    {voiceComposer.statusMessage}
+                  </p>
+                </form>
+
+                <div
+                  className="prompt-home-quick-prompts"
+                  aria-label="Quick prompts"
+                >
+                  {QUICK_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="entity-chip entity-chip-soft"
+                      onClick={() => loadPromptDraft(prompt)}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+
+                <section
+                  className="prompt-home-prompt-kits"
+                  aria-label="Prompt kits"
+                >
+                  <div className="section-head">
+                    <div>
+                      <span className="eyebrow">Guided Prompts</span>
+                      <h3>What are you trying to do?</h3>
                     </div>
-                    <span>{route.displayDetail}</span>
-                    {route.ageLabel ? <small>{route.ageLabel}</small> : null}
-                    <div className="prompt-home-destination-actions">
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() =>
-                          openNavigationIntent(route.intent, {
-                            includeHandoff: false,
-                          })
+                    <p>
+                      Pick a lane, then load a suggested prompt or jump
+                      straight to the right workspace.
+                    </p>
+                  </div>
+
+                  <div
+                    className="prompt-home-prompt-kit-picker"
+                    aria-label="Prompt kit categories"
+                  >
+                    {PROMPT_HOME_PROMPT_KITS.map((promptKit) => {
+                      const isSelected = promptKit.key === selectedPromptKitKey;
+
+                      return (
+                        <button
+                          key={promptKit.key}
+                          type="button"
+                          className={`prompt-home-prompt-kit-choice ${isSelected ? "is-active" : ""}`}
+                          aria-pressed={isSelected}
+                          onClick={() =>
+                            setSelectedPromptKitKey((current) =>
+                              current === promptKit.key ? null : promptKit.key,
+                            )
+                          }
+                        >
+                          {promptKit.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedPromptKit ? (
+                    <article className="prompt-home-starter prompt-home-prompt-kit-panel">
+                      <div className="prompt-home-prompt-kit-panel-head">
+                        <h4>{selectedPromptKit.label}</h4>
+                        <p>{selectedPromptKit.detail}</p>
+                      </div>
+
+                      <div className="prompt-home-prompt-kit-section">
+                        <span className="eyebrow">Suggested prompts</span>
+                        <div
+                          className="prompt-home-kit-examples"
+                          aria-label={`${selectedPromptKit.label} suggested prompts`}
+                        >
+                          {selectedPromptKit.suggestedPrompts.map(
+                            (suggestion) => (
+                              <button
+                                key={`${selectedPromptKit.key}-${suggestion.prompt}`}
+                                type="button"
+                                className="prompt-home-kit-example"
+                                onClick={() =>
+                                  loadPromptDraft(suggestion.prompt)
+                                }
+                              >
+                                {suggestion.label}
+                              </button>
+                            ),
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="prompt-home-prompt-kit-section">
+                        <span className="eyebrow">Workspace links</span>
+                        <div className="prompt-home-starter-actions">
+                          {selectedPromptKit.workspaceLinks.map((link) => (
+                            <button
+                              key={`${selectedPromptKit.key}-${link.view}`}
+                              type="button"
+                              className="button button-secondary"
+                              onClick={() => onOpenView(link.view)}
+                            >
+                              {link.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </article>
+                  ) : (
+                    <p className="form-note prompt-home-prompt-kits-empty">
+                      Choose one to reveal a few suggested prompts and direct
+                      workspace links.
+                    </p>
+                  )}
+                </section>
+
+                <section
+                  className="prompt-home-promoted-routes"
+                  aria-label="Promoted routes"
+                >
+                  <div className="section-head">
+                    <div>
+                      <span className="eyebrow">Promoted Routes</span>
+                      <h3>Go straight to proven destinations</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => void refreshPromptRouteRecommendations()}
+                      disabled={
+                        !authSession || promptRouteRecommendationsLoading
+                      }
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <p
+                    className={`form-note ${promptRouteRecommendationsError ? "form-note-error" : ""}`}
+                  >
+                    {promptRouteRecommendationNote}
+                  </p>
+                  {promotedRoutes.length > 0 ? (
+                    <div className="prompt-home-destination-list">
+                      {promotedRoutes.map((route) => {
+                        if (route.readiness === "ready") {
+                          return (
+                            <button
+                              key={route.key}
+                              type="button"
+                              className="prompt-home-destination prompt-home-promoted-route"
+                              onClick={() =>
+                                openNavigationIntent(route.intent, {
+                                  includeHandoff: route.hasFocusedHandoff,
+                                  recordOutcome: route.recordOutcomeOnOpen,
+                                })
+                              }
+                            >
+                              <div className="prompt-home-destination-head">
+                                <strong>{route.displayLabel}</strong>
+                                <span
+                                  className={`status-pill status-pill-${route.readinessTone}`}
+                                >
+                                  {route.readinessLabel}
+                                </span>
+                              </div>
+                              <span>{route.displayDetail}</span>
+                              {route.displayFocusLabel ? (
+                                <small>{route.displayFocusLabel}</small>
+                              ) : null}
+                              {route.ageLabel ? (
+                                <small>{route.ageLabel}</small>
+                              ) : null}
+                              <small>
+                                {formatPromotedRouteEvidence(
+                                  route.recommendation,
+                                )}
+                              </small>
+                            </button>
+                          );
                         }
-                      >
-                        {promptNavigationIntentLabel(route.intent)}
-                      </button>
+
+                        return (
+                          <article
+                            key={route.key}
+                            className="prompt-home-destination prompt-home-promoted-route is-unavailable"
+                          >
+                            <div className="prompt-home-destination-head">
+                              <strong>{route.displayLabel}</strong>
+                              <span
+                                className={`status-pill status-pill-${route.readinessTone}`}
+                              >
+                                {route.readinessLabel}
+                              </span>
+                            </div>
+                            <span>{route.displayDetail}</span>
+                            {route.ageLabel ? (
+                              <small>{route.ageLabel}</small>
+                            ) : null}
+                            <div className="prompt-home-destination-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={() =>
+                                  openNavigationIntent(route.intent, {
+                                    includeHandoff: false,
+                                  })
+                                }
+                              >
+                                {promptNavigationIntentLabel(route.intent)}
+                              </button>
+                            </div>
+                            <small>
+                              {formatPromotedRouteEvidence(
+                                route.recommendation,
+                              )}
+                            </small>
+                          </article>
+                        );
+                      })}
                     </div>
-                    <small>
-                      {formatPromotedRouteEvidence(route.recommendation)}
-                    </small>
-                  </article>
-                );
-              })}
-            </div>
-          ) : null}
+                  ) : null}
+                </section>
+              </>
+            ) : null}
+          </div>
         </section>
       </section>
 
@@ -3860,58 +3913,6 @@ export function PromptHomeWorkspace({
           </div>
         </article>
 
-        <aside className="prompt-home-sidecar">
-          <section className="surface prompt-home-support-panel prompt-home-destinations">
-            <button
-              type="button"
-              className="prompt-home-support-toggle"
-              aria-expanded={supportPanels.direct}
-              aria-controls={PROMPT_HOME_DIRECT_PANEL_ID}
-              onClick={() => toggleSupportPanel("direct")}
-            >
-              <div className="prompt-home-support-toggle-copy">
-                <span className="eyebrow">Old Console</span>
-                <h3>Go direct</h3>
-              </div>
-              <div className="prompt-home-support-toggle-meta">
-                <small>{directPanelSummary}</small>
-                <span
-                  className="prompt-home-support-toggle-indicator"
-                  aria-hidden="true"
-                >
-                  {supportPanels.direct ? "−" : "+"}
-                </span>
-              </div>
-            </button>
-
-            <div
-              id={PROMPT_HOME_DIRECT_PANEL_ID}
-              className="prompt-home-support-body"
-              hidden={!supportPanels.direct}
-            >
-              <p className="form-note">
-                The traditional screens are still here when you already know
-                where the work belongs.
-              </p>
-
-              <div className="prompt-home-destination-list">
-                {NAVIGATION_INTENTS.map((intent) => (
-                  <button
-                    key={intent.targetView}
-                    type="button"
-                    className="prompt-home-destination"
-                    onClick={() =>
-                      openNavigationIntent(intent, { includeHandoff: false })
-                    }
-                  >
-                    <strong>{promptNavigationIntentLabel(intent)}</strong>
-                    <span>{promptNavigationIntentDetail(intent)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-        </aside>
       </section>
     </div>
   );

@@ -484,6 +484,52 @@ test("prompt home prompt kits load guided prompts into the composer", async ({
   }
 });
 
+test("prompt home prompt card expands and collapses independently", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(harness.origin, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const promptCard = page.locator(".prompt-home-prompt-card");
+    const promptCardBody = page.locator("#prompt-home-prompt-card-panel");
+    const promptCardToggle = promptCard.locator(
+      ".prompt-home-prompt-card-toggle",
+    );
+    const operatorPrompt = page.getByLabel("Operator prompt");
+    const quickPrompts = page.locator(".prompt-home-quick-prompts");
+
+    await expect(promptCard).toContainText("Ask the desk assistant");
+    await expect(promptCardToggle).toContainText("Hide card");
+    await expect(promptCardBody).toBeVisible();
+    await expect(operatorPrompt).toBeVisible();
+    await expect(quickPrompts).toBeVisible();
+
+    await promptCardToggle.click();
+    await expect(promptCardToggle).toContainText("Show card");
+    await expect(promptCardBody).toBeHidden();
+    await expect(operatorPrompt).toBeHidden();
+    await expect(quickPrompts).toBeHidden();
+    await expect(promptCard).toContainText(
+      "Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question.",
+    );
+
+    await promptCardToggle.click();
+    await expect(promptCardToggle).toContainText("Hide card");
+    await expect(promptCardBody).toBeVisible();
+    await expect(operatorPrompt).toBeVisible();
+    await expect(quickPrompts).toBeVisible();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("prompt home keeps the simplified map visible while desk time cards collapse independently", async ({
   page,
 }) => {
